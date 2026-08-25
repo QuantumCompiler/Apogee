@@ -50,10 +50,11 @@ Items are numbered in the **suggested order of implementation**. The rule stays 
 
 Items 1–6 build strictly in order (each gates on the one before it — the skeleton proves config → harness → backend → terminal on exactly one provider before anything widens). After 6, the three branches **7, 8, 9 are independent** — take them in any order (or in parallel sessions). Item 10 is the release closer and assumes 1–9 are complete.
 
+*Item 1, the C++ project skeleton, shipped 2026-08-25 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestone A. The numbering below is unchanged so the gate references in each document still read true.*
+
 | # | Document | Build after | What |
 |---|---|---|---|
-| 1 | [cpp-project-skeleton.md](cpp-project-skeleton.md) | — | C++ project skeleton: CMake toolchain, test harness, CI baseline, CLI scaffold |
-| 2 | [config-engine.md](config-engine.md) | 1 | Config engine: typed loader, template, and comment-preserving mutation |
+| 2 | [config-engine.md](config-engine.md) | ✅ 1 (shipped) | Config engine: typed loader, template, and comment-preserving mutation |
 | 3 | [harness-core.md](harness-core.md) | 2 | Harness core: LLMProvider interface, canonical message IR, router |
 | 4 | [anthropic-backend.md](anthropic-backend.md) | 3 | Anthropic Messages API backend (direct HTTPS + SSE streaming) |
 | 5 | [complete-cli.md](complete-cli.md) | 4 | `apogee complete` — one-shot CLI (the walking-skeleton milestone) |

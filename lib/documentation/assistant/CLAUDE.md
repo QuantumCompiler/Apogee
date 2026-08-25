@@ -25,16 +25,35 @@ Apogee is an AI harness: one system for running LLM workloads against the Anthro
 
 ## Stack & environment
 
-- **Language:** C++ (primarily — decided 2026-08-24). The C++ standard, build system (CMake presumed), dependency strategy, and test framework are open calls on the `cpp-project-skeleton` backlog item; satellite scripts (training drivers, MCP servers) may stay Python, as in Ommi.
-- **Key dependencies:** the Anthropic, OpenAI, and Google LLM APIs (cloud backends, called directly over HTTPS); llama.cpp (local inference, planned in-process — likely a pinned submodule as in Ommi). HTTP client/server, JSON, and YAML libraries are open calls on the foundation items.
-- **Platforms:** decided 2026-08-24 — Linux, macOS, and Windows, both ARM and x86: six targets (`linux-x64/arm64`, `macos-x64/arm64`, `windows-x64/arm64`), a wider matrix than Ommi's (which shipped no Windows and no Intel-Mac binaries). Each target builds natively on its own CI runner via `lib/scripts/cicd.sh --platform <target>`. Windows membership means the POSIX mechanisms named in backlog docs (forkpty PTY tests, tcflush, lsof assertions, 0600 modes, getpeername) need Windows equivalents or recorded per-item skips — the portability seam is owned by the `cpp-project-skeleton` item. Primary dev host is macOS.
+- **Language:** **C++20** (decided 2026-08-25 — the only standard uniformly supported across all six targets; promotion to C++23 would be a deliberate one-line change in `lib/src/cli/CMakeLists.txt`, not a drift). Satellite scripts (training drivers, MCP servers) may stay Python, as in Ommi.
+- **Build & tooling:** **CMake ≥ 3.25** with **FetchContent** for dependencies (pinned tags, `FIND_PACKAGE_ARGS`, `SYSTEM`), **Catch2 v3** for tests via ctest, clang-format + clang-tidy for style and the ownership gate. Each application under `lib/src/<app>/` is a self-contained CMake project owning its own build; `lib/scripts/cicd.sh` drives them all.
+- **Key dependencies:** the Anthropic, OpenAI, and Google LLM APIs (cloud backends, called directly over HTTPS); llama.cpp (local inference, in-process, pinned at `549b9d84` under `lib/src/cli/third_party/`, off by default until the backend item lands). Standardized library picks, decided once for the whole project: **nlohmann/json** (JSON), **CLI11** (CLI parsing + completions), **libcurl** (HTTP client — the standing pick, wired when `anthropic-backend` needs it). Downstream items consume these rather than reopening them. The YAML/TOML config-format call remains open on `config-engine`.
+- **Platforms:** decided 2026-08-24 — Linux, macOS, and Windows, both ARM and x86: six targets (`linux-x64/arm64`, `macos-x64/arm64`, `windows-x64/arm64`), a wider matrix than Ommi's (which shipped no Windows and no Intel-Mac binaries). Each target builds natively on its own CI runner via `lib/scripts/cicd.sh --platform <target>`. Windows membership means the POSIX mechanisms named in backlog docs (forkpty PTY tests, tcflush, lsof assertions, 0600 modes, getpeername) need Windows equivalents or recorded per-item skips. **The portability seam exists** at `lib/src/cli/source/platform/` (shipped 2026-08-25) — that is the one place platform `#ifdef`s belong; everything else asks it. Primary dev host is macOS. CI gates on `macos-arm64` only for v0.1.0; the other five targets run informationally until they stabilize.
 - **Repository:** https://github.com/QuantumCompiler/Apogee (GitHub — making GitHub Releases the presumed distribution host; see the install-check-lifecycle backlog item).
 
 ---
 
 ## Invariants
 
-No test-locked invariants exist yet — there is no code. But Apogee starts with **adopted design-time constraints** from Ommi (each earned there by a real bug or reversal; see [SPEC.md](SPEC.md) → Principles and Non-goals): interactive turns never open a listening socket — and local front-ends are pipes too: the GUI powers the CLI over stdin/stdout, while `serve` exists solely for server deployments answering remote REST clients; all install paths produce an identical layout; every capability reaches every surface through one shared core; secrets are `0600`, never logged, never returned over HTTP. Each is pinned as a **Core constraint** on the backlog items that own it, and earns a full `## ⚠` section here — rule, rationale, sub-rules, enforcement test — as the enforcing code and tests land.
+Apogee starts with **adopted design-time constraints** from Ommi (each earned there by a real bug or reversal; see [SPEC.md](SPEC.md) → Principles and Non-goals): interactive turns never open a listening socket — and local front-ends are pipes too: the GUI powers the CLI over stdin/stdout, while `serve` exists solely for server deployments answering remote REST clients; all install paths produce an identical layout; every capability reaches every surface through one shared core; secrets are `0600`, never logged, never returned over HTTP. Each is pinned as a **Core constraint** on the backlog items that own it, and earns a full `## ⚠` section here — rule, rationale, sub-rules, enforcement — as the enforcing code and tests land.
+
+The first of them is now enforced in code:
+
+### ⚠ Nothing links the CLI executable
+
+**Rule.** `apogee_core` holds every capability. The `apogee` executable is a thin face over it — argv in, exit code out — and **no target may link `apogee`**: not tests, not the future HTTP server, not a helper library.
+
+**Why.** "Parity is the product" only holds if it is structural. If a capability can live in the executable, then a second surface either cannot reach it or has to reimplement it — and that is exactly how parity bugs are born. Keeping the executable empty means every capability is, by construction, reachable from anywhere that links the library.
+
+**Sub-rules.**
+- Shared code goes in a package under `lib/src/cli/source/`, never in `main.cpp`.
+- Tests link `apogee_core`. Running the built binary as a subprocess is fine — that is not linking, and the `cli.*` ctest cases do exactly that to cover the user-facing contract.
+
+**Enforcement.** `apogee_assert_link_policy()` (`lib/src/cli/cmake/ApogeeLinkPolicy.cmake`), called at the end of `lib/src/cli/CMakeLists.txt`, walks every target in the project and **fails the configure step** naming any that links `apogee`.
+
+### ⚠ Smart pointers, never owning raw pointers
+
+The Code Style rule below is lint-enforced, not aspirational: `make -C lib/src/cli lint` fails on a raw `new`/`delete`, an owning raw pointer, or `malloc` anywhere in the CLI's `source/` or `tests/` (`cppcoreguidelines-owning-memory`, `cppcoreguidelines-no-malloc`, `modernize-make-unique`/`make-shared`, promoted to errors in `.clang-tidy`). `third_party/` is out of scope by construction. CI runs it on every push.
 
 ---
 
@@ -42,20 +61,27 @@ No test-locked invariants exist yet — there is no code. But Apogee starts with
 
 | File / package | Contents |
 |------|----------|
-| `CLAUDE.md` (repo root) | Pointer to this docs system — the first thing an agent lands on. |
-| `lib/documentation/assistant/` | These contributor docs (CLAUDE, SPEC, ROADMAP, MILESTONES, DEVELOPER). |
+| `lib/documentation/assistant/` | These contributor docs (CLAUDE, SPEC, ROADMAP, MILESTONES, DEVELOPER) — **this file is the entry point**; there is no repo-root pointer. |
 | `lib/documentation/backlog/` | The work queue — one document per pending item; priority-ordered index in its README. |
 | `.claude/skills/` | Repo-local agent skills. `apogee-backlog-item` — take the next (or a named) backlog item: load these assistant docs, pick by the index's gate rules, resolve `[user]`/`[default]` open calls, build, then run the Documentation and Status flow. `apogee-create-backlog-item` — spec a new item: read the format/SPEC/roadmap first, check the Ommi analog, write the document to the quality bar, place it in the index, update ROADMAP (and SPEC only on shape changes). `apogee-document-update` — the pre-MR docs pass: audit every document against the branch diff, enforce the Documentation and Status flow, validate links/index/tags mechanically, report what needs the user. `apogee-pull-request` — draft the MR description from the branch's evidence (deleted backlog docs + MILESTONES entries = shipped items; dated decisions; verification), run after the docs pass. Skills point at the docs rather than duplicating them — the docs stay the single source of truth. |
-| `lib/scripts/` | Repo scripts. `cicd.sh` — the CI/CD entry point: builds the currently checked-out branch for any of the six release targets (`--platform linux-x64 … windows-arm64 | all`; builds what the host can natively, defers the rest to the CI matrix), with `--fresh` for a CI-style clean-room clone-and-build, `--test`, `--clean`, `--jobs`; the GitHub Actions matrix must invoke this same script per native runner so local and CI builds share one path. `cicd-completion.bash` — tab completion for its flags (source it from your shell rc). |
+| `lib/scripts/` | Repo scripts. `cicd.sh` — the CI/CD entry point: builds every application for any of the six release targets (`--platform linux-x64 … windows-arm64 \| all`; builds what the host can natively, defers the rest to the CI matrix), with `--fresh` for a CI-style clean-room clone-and-build, `--test`, `--clean`, `--jobs`; the GitHub Actions matrix invokes this same script per native runner so local and CI builds share one path. `cicd-completion.bash` — tab completion for its flags (source it from your shell rc). |
+| `.github/workflows/ci.yml` | CI: the six-target build matrix (only `macos-arm64` is merge-blocking in v0.1.0; the rest are informational until they stabilize), plus format+lint, the non-blocking llama.cpp compile proof, and the clean-room build. A thin caller into `cicd.sh` — it lives outside `lib/src/cli/` only because GitHub requires workflows at `.github/workflows/`. |
+| `lib/src/cli/` | **The CLI application — a self-contained CMake project.** Build root (`CMakeLists.txt`), presets, `Makefile`, `cmake/` helpers, `third_party/`, `.clang-format`, `.clang-tidy`, and `build/` output all live here beside the code. Targets: `apogee_core` (static library — every capability) and `apogee` (a thin argv→exit-code face). `source/` holds `main.cpp` plus one package directory per concern; `tests/` mirrors them. See [DEVELOPER.md](DEVELOPER.md) for the package-by-package breakdown. |
 
-_TODO:_ no source code exists yet — add each source file/package here as it lands, dense enough that a contributor knows where things live before editing.
+**Where new source code goes (decided 2026-08-24; app-owned builds confirmed 2026-08-25):** `lib/src/<app>/` — one directory per application, each a **self-contained CMake project** owning its own build, presets, dependencies, third-party pins, and style config, with `source/` and `tests/` as its first level. Nothing above `lib/src/<app>/` needs to know how that application compiles.
 
-**Where new source code goes (decided 2026-08-24):** `lib/src/<app>/` — one directory per application, each with `source/` and `tests/` as its first level.
-
-- **`lib/src/cli/`** — the CLI application (all of v0.1.0): `source/` holds `main.cpp` and one package directory per concern (`harness/`, `backends/`, `agentloop/`, `commands/`, `embedstore/`, `httpserver/`, `mcp/`, `platform/`, …, mirroring Ommi's package map); `tests/` mirrors the package directories.
-- **`lib/src/darwin/` · `lib/src/linux/` · `lib/src/windows/`** — the GUI applications, one per platform (future — down the road, not yet planned; they will drive the CLI over the stdio machine mode).
+- **`lib/src/cli/`** — the CLI application (all of v0.1.0). Packages under `source/`: `commands/`, `platform/`, `version/` (built), and `harness/`, `backends/`, `agentloop/`, `embedstore/`, `httpserver/`, `mcp/` (reserved header stubs, mirroring Ommi's package map — each names the backlog item that fills it).
+- **`lib/src/darwin/` · `lib/src/linux/` · `lib/src/windows/`** — the GUI applications, one per platform (future — down the road, not yet planned; they will drive the CLI over the stdio machine mode). Each joins the `APPS` list in `cicd.sh` when it lands.
 
 The per-item file breakdown is in the [`backlog/`](../backlog/README.md) documents' **Seam + files** sections, which are written against this layout.
+
+**Build and test:**
+
+```bash
+lib/scripts/cicd.sh --test        # every app, host-native target — what CI runs
+make -C lib/src/cli test          # the CLI alone
+make -C lib/src/cli lint          # the ownership gate (see Code Style)
+```
 
 ---
 
@@ -86,14 +112,17 @@ Feature releases are `v0.x.0`; patch releases are `v0.x.y`. Development happens 
 
 Every change should satisfy this before merge:
 
-- [ ] Tests for the new behavior pass, and existing tests stay green (`lib/scripts/cicd.sh --test` once the skeleton lands).
+- [ ] Tests for the new behavior pass, and existing tests stay green: `lib/scripts/cicd.sh --test`.
+- [ ] Formatting and lint are clean: `make -C lib/src/cli format-check` and `make -C lib/src/cli lint`.
+- [ ] New tests are **hermetic** — no network, no models, no writes outside the test's own temp directory. A test that needs a live provider is not a unit test; go through the injectable seam instead.
+- [ ] New source files are `.h`/`.cpp` pairs, added to the target's source list in `lib/src/cli/source/CMakeLists.txt`, and the test tree mirrors the package.
 - [ ] The affected docs are updated in the same change (see **Documentation and Status**) — run the `apogee-document-update` skill before opening the MR; it audits every document against the branch diff and validates the system mechanically.
 
-_TODO:_ project-specific checklist items accrete here as invariants and conventions are established.
+_TODO:_ further project-specific checklist items accrete here as invariants and conventions are established.
 
 ## Code Style
 
-*(The two rules below are user decisions, 2026-08-24 — they apply from the first line of code and are lint-enforced via the `cpp-project-skeleton` backlog item.)*
+*(The two rules below are user decisions, 2026-08-24. They applied from the first line of code and are lint-enforced as of 2026-08-25 — see [⚠ Smart pointers, never owning raw pointers](#-smart-pointers-never-owning-raw-pointers) above. Formatting is settled in `.clang-format` and is never a review topic: run `make -C lib/src/cli format`.)*
 
 - **Header/implementation split.** Every class/module ships as a `.h`/`.cpp` pair when applicable — declarations in the header, definitions in the `.cpp`. Header-only is the recorded exception, reserved for templates and trivial data-only structs. The backlog documents' **Seam + files** sections already name files as `foo.h/.cpp` pairs; follow them.
 - **Smart pointers, never traditional pointers.** No raw `new`/`delete` and no owning raw pointers anywhere. `std::unique_ptr` is the default ownership type; `std::shared_ptr` only where ownership is genuinely shared (`std::weak_ptr` to break cycles); construct via `std::make_unique`/`std::make_shared`. For non-owning access, prefer references (or `std::string_view`/`std::span`) over pointers. C APIs (llama.cpp, SQLite, libcurl) hand out raw handles — wrap each in a `std::unique_ptr` with a custom deleter at the boundary class, and never let the raw handle escape it.

@@ -1,1 +1,13 @@
-*DS_Store
+# Build output. One directory per preset/target (build/macos-arm64, build/lint, …).
+build/
+
+# CMake / tooling byproducts
+compile_commands.json
+CMakeUserPresets.json
+.cache/
+
+# Editor and OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp

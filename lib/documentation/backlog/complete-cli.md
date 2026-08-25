@@ -7,7 +7,7 @@
 - Command files are thin: flag parsing + rendering over library calls only — the split that makes HTTP parity and exec-style testing possible
 - Piped/non-TTY runs print the answer only, no decoration
 
-**Seam + files.** lib/src/cli/source/main.cpp (registers into the root-command scaffold built in cpp-project-skeleton), lib/src/cli/source/commands/complete.cpp, lib/src/cli/source/commands/helpers.cpp (initializeBackends analog: backend construction from config, resolveSystemPrompt/Temperature/MaxTokens), lib/src/cli/tests/commands/complete_test.cpp (exec-style: run the binary with a mock-backend config; lsof assertion).
+**Seam + files.** lib/src/cli/source/commands/registry.cpp (one `registry.add(...)` line in `default_registry()` — `main.cpp` does not change), lib/src/cli/source/commands/complete.cpp, lib/src/cli/source/commands/helpers.cpp (initializeBackends analog: backend construction from config, resolveSystemPrompt/Temperature/MaxTokens), lib/src/cli/tests/commands/complete_test.cpp (exec-style: run the binary with a mock-backend config; lsof assertion).
 
 **Reference (Ommi).** cmd/ommi complete.go + helpers.go. Divergence: one streaming HTTPS request per turn instead of a `claude -p` or ommi-completion spawn; the stateless nature that made complete Ommi's natural first slice (its own cpp_notes call it 'the natural first vertical slice') applies identically here.
 
@@ -15,7 +15,7 @@
 - 2026-08-24 — Planned from Ommi's documentation (parallel digest → two planning lenses → merge → adversarial verify). Position in the queue: A's walking-skeleton closer: the shortest end-to-end path proves config→harness→backend→terminal before the loop's complexity, exactly where a falsified architecture bet is cheapest to fix.
 
 **Open calls:**
-- (consumed decision) CLI framework and the dynamic-completion protocol are standardized in cpp-project-skeleton; this item exercises the subcommand pattern end to end — completions stubs themselves land in install-check-lifecycle
+- (consumed decision) CLI framework is **CLI11**, standardized 2026-08-25; the scaffold exists at `lib/src/cli/source/commands/` (`Command` interface + `CommandRegistry` + `RootCommand`, with `version_command.h/.cpp` as the worked example). Register by adding one `registry.add(...)` line to `default_registry()`. This item exercises the subcommand pattern end to end — completions stubs themselves land in install-check-lifecycle
 
 **Guardrail(s).** Exec-style CLI tests with a mock-backend config (fake providers, no network) — the pattern all later CLI tests reuse; the lsof no-LISTEN assertion runs in CI.
 

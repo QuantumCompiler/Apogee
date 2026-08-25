@@ -12,6 +12,11 @@
 # the GitHub Actions matrix runs one native runner per target, and each runner
 # invokes THIS script with its native --platform — one build path, everywhere.
 #
+# Each application under lib/src/<app>/ is a self-contained CMake project that
+# owns its presets, cmake helpers, pinned third-party code, and style config.
+# This script builds each one into lib/src/<app>/build/<target>/. Today that is
+# just the CLI; the GUI applications join the APPS list when they land.
+#
 # With --fresh it performs a CI-style clean-room build: clone the repo at the
 # current branch into a temp directory and build there.
 #
@@ -20,6 +25,11 @@ set -euo pipefail
 
 REPO_URL="https://github.com/QuantumCompiler/Apogee"
 ALL_TARGETS=(linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64 windows-arm64)
+
+# Each application under lib/src/<app>/ owns its own self-contained CMake build
+# (presets, cmake helpers, third_party, style config). This script drives them;
+# the GUI applications join this list when they land.
+APPS=(cli)
 
 CLEAN=0
 RUN_TESTS=0
@@ -111,25 +121,24 @@ done
 HOST="$(host_target)"
 [[ ${#PLATFORMS[@]} -gt 0 ]] || PLATFORMS=("$HOST")
 
-# Builds one target in the checkout at $1. Succeeds with a notice while the
-# repo is docs-only; becomes a real CMake build once the C++ skeleton lands.
+# Builds one application for one target, in the checkout at $1.
+# $3 is the app name; its build root is <root>/lib/src/<app>.
 build_target() {
-    local root="$1" target="$2"
+    local root="$1" target="$2" app="$3"
+    local app_dir="${root}/lib/src/${app}"
     local build_dir="build/${target}"
-    cd "$root"
+    cd "$app_dir"
 
     if [[ ! -f CMakeLists.txt ]]; then
-        log "NOTICE: no CMakeLists.txt at ${root}."
-        log "Nothing to build yet — the C++ skeleton (backlog: cpp-project-skeleton) hasn't landed."
-        log "This script is the standing CI/CD entry point and will build via CMake once it does."
+        log "NOTICE: no CMakeLists.txt at ${app_dir} — skipping app '${app}'."
         return 0
     fi
 
-    [[ $CLEAN -eq 1 ]] && { log "cleaning ${build_dir}/"; rm -rf "${build_dir}"; }
+    [[ $CLEAN -eq 1 ]] && { log "cleaning ${app_dir}/${build_dir}/"; rm -rf "${build_dir}"; }
 
-    # The skeleton item defines one CMake preset per target, named after it.
+    # Each app ships one CMake preset per target, named exactly after it.
     if [[ -f CMakePresets.json ]] && cmake --list-presets 2>/dev/null | grep -q "\"${target}\""; then
-        log "[${target}] configuring (cmake --preset ${target})"
+        log "[${app}/${target}] configuring (cmake --preset ${target})"
         cmake --preset "${target}"
     else
         local extra=()
@@ -137,30 +146,32 @@ build_target() {
             [[ "${target#macos-}" == "arm64" ]] && extra+=(-DCMAKE_OSX_ARCHITECTURES=arm64) \
                                                 || extra+=(-DCMAKE_OSX_ARCHITECTURES=x86_64)
         fi
-        log "[${target}] configuring (cmake -S . -B ${build_dir})"
+        log "[${app}/${target}] configuring (cmake -S . -B ${build_dir})"
         cmake -S . -B "${build_dir}" "${extra[@]}"
     fi
 
-    log "[${target}] building with ${JOBS} jobs"
+    log "[${app}/${target}] building with ${JOBS} jobs"
     cmake --build "${build_dir}" -j "${JOBS}"
 
     if [[ $RUN_TESTS -eq 1 ]]; then
         if [[ "$target" == "$HOST" ]]; then
-            log "[${target}] running tests"
+            log "[${app}/${target}] running tests"
             ctest --test-dir "${build_dir}" --output-on-failure
         else
-            log "[${target}] skipping tests: cross-built binaries can't run on ${HOST}"
+            log "[${app}/${target}] skipping tests: cross-built binaries can't run on ${HOST}"
         fi
     fi
 
-    log "[${target}] done (branch '$(git -C "$root" rev-parse --abbrev-ref HEAD)')"
+    log "[${app}/${target}] done (branch '$(git -C "$root" rev-parse --abbrev-ref HEAD)')"
 }
 
 build_all_requested() {
-    local root="$1" target deferred=()
+    local root="$1" target app deferred=()
     for target in "${PLATFORMS[@]}"; do
         if buildable_here "$HOST" "$target"; then
-            build_target "$root" "$target"
+            for app in "${APPS[@]}"; do
+                build_target "$root" "$target" "$app"
+            done
         else
             deferred+=("$target")
         fi

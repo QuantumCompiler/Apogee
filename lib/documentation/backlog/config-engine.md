@@ -35,4 +35,4 @@
 - [ ] Every helper's output re-parses cleanly through the loader; `apogee config get <dotted.key>` and `config init` work end to end
 - [ ] set-default-extraction writes the models.default_extraction key and validates the target backend exists; the written form is the one the future shared role resolver (model-profiles-and-management) is specified to read
 
-**Scope note.** earmarked for v0.1.0 (build after [cpp-project-skeleton.md](cpp-project-skeleton.md)).
+**Scope note.** earmarked for v0.1.0. Gate satisfied: the C++ project skeleton shipped 2026-08-25 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone A) — this is now the topmost claimable item.

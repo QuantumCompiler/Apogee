@@ -29,7 +29,7 @@ Work through the system in this order (read [`CLAUDE.md`](../../../lib/documenta
 4. **[CLAUDE.md](../../../lib/documentation/assistant/CLAUDE.md)** — the Codebase Map covers every file/package the branch added, moved, or deleted; Stack & environment still true; new hard rules earned on this branch promoted into Invariants (`## ⚠` once test-locked); Code Style additions recorded.
 5. **[DEVELOPER.md](../../../lib/documentation/assistant/DEVELOPER.md)** — directory tree current; package sections exist for new packages; build/test command sections match reality (including `lib/scripts/cicd.sh` behavior); "Adding a new X" recipes added when the branch created an extension point.
 6. **[SPEC.md](../../../lib/documentation/assistant/SPEC.md)** — only if scope, non-goals, principles, or surfaces actually changed; revisions carry a date, per house style.
-7. **Root [`CLAUDE.md`](../../../../CLAUDE.md) and `README.md`** — the root pointer still resolves; if a root README exists and the branch changed how the project builds/installs, it says so.
+7. **Root `README.md`** — if one exists and the branch changed how the project builds or installs, it says so. (There is deliberately **no** repo-root `CLAUDE.md` pointer — `lib/documentation/assistant/CLAUDE.md` is the entry point.)
 8. **Skills** (`.claude/skills/*/SKILL.md`) — any paths or process steps they reference that this branch moved or renamed.
 
 ## 3. Mechanical validation

@@ -18,7 +18,7 @@ How we work: features get discussed in chat, written up here (and in [SPEC.md](S
 
 The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](SPEC.md) → Background for the lineage and divergences): a single self-contained C++ binary shipping `apogee complete` and `apogee chat` over all four backends — Anthropic, OpenAI, and Google called directly with streaming, native tool use, and typed thinking display, plus in-process llama.cpp — on top of the config engine, harness core, and shared agent loop, with persistent resumable sessions, a single-status-line terminal UX, and a clean install contract (`apogee check` passes on a fresh keyless, modelless install). Ten backlog items, in build order:
 
-- [ ] C++ project skeleton (CMake, tests, CI, CLI scaffold)
+- [x] C++ project skeleton (CMake, tests, CI, CLI scaffold) — *shipped 2026-08-25, [Milestone A](MILESTONES.md#milestone-a--project-foundation)*
 - [ ] Config engine (typed loader + comment-preserving mutation)
 - [ ] Harness core (LLMProvider, message IR, router)
 - [ ] Anthropic backend (direct Messages API + SSE)
@@ -31,7 +31,9 @@ The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](S
 
 See the [`backlog/`](../backlog/README.md) index for the full queue (priority-ordered; topmost claimable item = next to build).
 
-**Decisions needed before building starts** (the `[user]` open calls on the first items): config format (YAML vs TOML), data-dir name (`~/.apogee/`), in-process llama.cpp confirmation, and the web-search strategy. *(Answered 2026-08-24: the platform matrix — Linux/macOS/Windows on both ARM and x86, six targets; the repo host — GitHub, making GitHub Releases/Actions the default.)* The self-update timing question blocks only the release closer.
+**Decisions needed before building continues** (the `[user]` open calls on the remaining items): config format (YAML vs TOML), data-dir name (`~/.apogee/`), in-process llama.cpp confirmation, and the web-search strategy. The self-update timing question blocks only the release closer.
+
+*Answered so far — 2026-08-24: the platform matrix (Linux/macOS/Windows on both ARM and x86, six targets) and the repo host (GitHub, making GitHub Releases/Actions the default). 2026-08-25, with the skeleton: **C++20** as the language baseline, **CMake + FetchContent** for build and dependencies, **Catch2 v3** for tests, **nlohmann/json + CLI11 + libcurl** as the standardized library picks, and **macos-arm64 as the only merge-blocking CI target** for v0.1.0.*
 
 ---
 

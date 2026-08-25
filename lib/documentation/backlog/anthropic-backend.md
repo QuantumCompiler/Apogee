@@ -16,7 +16,7 @@
 - 2026-08-24 — Planned from Ommi's documentation (parallel digest → two planning lenses → merge → adversarial verify). Position in the queue: Proves the hardest new C++ ground (streaming HTTPS, SSE, provider dialect mapping) on exactly one provider before tripling the surface; its infra is the template for openai-google-backends and the gate for the loop's first end-to-end run.
 
 **Open calls:**
-- (consumed decision) HTTP client is standardized in cpp-project-skeleton — this item builds the shared streaming wrapper over it; do not reopen the pick here
+- (consumed decision) HTTP client is **libcurl**, standardized project-wide 2026-08-25 — do not reopen the pick. It is deliberately **not wired yet**: this item owns adding `find_package(CURL)` to `lib/src/cli/cmake/ApogeeDependencies.cmake` and the platform TLS backends, then builds the shared streaming wrapper over it
 - [default: system certs] TLS/cert strategy per platform (system certs vs bundled)
 - [default: compiled-in with config override] Context-window rows for Anthropic models — the table lives in harness-core; this item populates its Anthropic rows
 

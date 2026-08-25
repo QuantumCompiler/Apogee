@@ -1,0 +1,104 @@
+# Apogee CI.
+#
+# Every build job shells out to lib/scripts/cicd.sh — the same script a
+# developer runs locally. That is deliberate: the moment CI grows its own build
+# steps, "works on my machine" becomes a real answer. If a step belongs in CI,
+# it belongs in that script.
+#
+# This workflow must live at .github/workflows/ (GitHub's requirement), which is
+# why it is the one build-related file not under lib/src/cli/. It stays a thin
+# caller for exactly that reason: the CLI's build lives with the CLI.
+#
+# Gating policy (user decision, 2026-08-24): macos-arm64 is the only
+# merge-blocking target for v0.1.0. The other five run informationally while
+# portability catches up, and get promoted to blocking as they stabilize —
+# promote one by deleting its `continue-on-error` line.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.blocking != true }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            runner: macos-14
+            blocking: true
+          - target: macos-x64
+            runner: macos-13
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: windows-x64
+            runner: windows-2022
+          - target: windows-arm64
+            runner: windows-11-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test
+        shell: bash
+        run: lib/scripts/cicd.sh --platform ${{ matrix.target }} --test
+
+  lint:
+    name: format + clang-tidy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM tooling
+        run: sudo apt-get update && sudo apt-get install -y clang clang-format clang-tidy
+
+      - name: Check formatting
+        run: make -C lib/src/cli format-check
+
+      # The ownership gate: this fails on a raw new/delete or an owning raw
+      # pointer anywhere in the CLI's source/ or tests/ (CLAUDE.md -> Code
+      # Style). third_party/ is out of scope by construction.
+      - name: Lint
+        run: make -C lib/src/cli lint
+
+  llama:
+    # Compile-proof only — no API use until the llamacpp-backend item lands.
+    # Non-blocking and off the per-push hot path because the Metal/CUDA kernel
+    # build is slow; its job is to catch a pin that stops compiling, not to
+    # gate every change.
+    name: llama.cpp compile proof (non-blocking)
+    runs-on: macos-14
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure and build with llama.cpp enabled
+        working-directory: lib/src/cli
+        run: |
+          cmake --preset macos-arm64 -DAPOGEE_ENABLE_LLAMA=ON
+          cmake --build build/macos-arm64 -j 3
+
+  fresh-clone:
+    # The scripted clean-room check, so the skeleton cannot silently rot: it
+    # clones the pushed branch from scratch and builds it with nothing cached.
+    # Skipped on pull_request, where the head branch may live on a fork.
+    name: clean-room build (non-blocking)
+    if: github.event_name == 'push'
+    runs-on: macos-14
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fresh clone-and-build
+        run: lib/scripts/cicd.sh --fresh --branch "${GITHUB_REF_NAME}" --test
