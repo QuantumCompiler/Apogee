@@ -10,7 +10,7 @@
 - Open-time migrations commit in one transaction; triggers self-heal with IF NOT EXISTS
 - Mutating embed CLI actions landing before the admin plane exist go into the parity table's documented-skip list; this feature area owns the embeddings-data-plane admin backfill
 
-**Seam + files.** lib/src/embedstore/store.h/.cpp (open-time migrations in single transactions, chunk CRUD, ChunkText rune chunker, store_meta), lib/src/embedstore/fts.cpp (ensureFTS, ftsMatchQuery term-quoting, BM25 normalization), lib/src/embedstore/ingest.cpp (file collection, PDF, binary sniff), lib/src/cli/embed.cpp, lib/src/agentloop/rag.cpp (BuildRAGPrefix, transient injection), vendored SQLite amalgamation w/ FTS5, lib/test/embedstore/ (score-contract fixtures + FTS injection corpus).
+**Seam + files.** lib/src/cli/source/embedstore/store.h/.cpp (open-time migrations in single transactions, chunk CRUD, ChunkText rune chunker, store_meta), lib/src/cli/source/embedstore/fts.cpp (ensureFTS, ftsMatchQuery term-quoting, BM25 normalization), lib/src/cli/source/embedstore/ingest.cpp (file collection, PDF, binary sniff), lib/src/cli/source/commands/embed.cpp, lib/src/cli/source/agentloop/rag.cpp (BuildRAGPrefix, transient injection), vendored SQLite amalgamation w/ FTS5, lib/src/cli/tests/embedstore/ (score-contract fixtures + FTS injection corpus).
 
 **Reference (Ommi).** src/embedstore (external-content FTS5 index, ftsMatchQuery quoting, s/(1+s) normalization, ChunkText, dim=0 sentinel groundwork, single-transaction Open migrations), src/agentloop rag.go, cmd/ommi embed.go, OMMI-5 lexical-first history. Divergence: none by design — even though Apogee has cloud embedders, the lexical floor is kept as the permanent offline/keyless guarantee.
 

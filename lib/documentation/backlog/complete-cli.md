@@ -7,7 +7,7 @@
 - Command files are thin: flag parsing + rendering over library calls only — the split that makes HTTP parity and exec-style testing possible
 - Piped/non-TTY runs print the answer only, no decoration
 
-**Seam + files.** lib/src/cli/main.cpp (registers into the root-command scaffold built in cpp-project-skeleton), lib/src/cli/complete.cpp, lib/src/cli/helpers.cpp (initializeBackends analog: backend construction from config, resolveSystemPrompt/Temperature/MaxTokens), lib/test/cli/complete_test.cpp (exec-style: run the binary with a mock-backend config; lsof assertion).
+**Seam + files.** lib/src/cli/source/main.cpp (registers into the root-command scaffold built in cpp-project-skeleton), lib/src/cli/source/commands/complete.cpp, lib/src/cli/source/commands/helpers.cpp (initializeBackends analog: backend construction from config, resolveSystemPrompt/Temperature/MaxTokens), lib/src/cli/tests/commands/complete_test.cpp (exec-style: run the binary with a mock-backend config; lsof assertion).
 
 **Reference (Ommi).** cmd/ommi complete.go + helpers.go. Divergence: one streaming HTTPS request per turn instead of a `claude -p` or ommi-completion spawn; the stateless nature that made complete Ommi's natural first slice (its own cpp_notes call it 'the natural first vertical slice') applies identically here.
 

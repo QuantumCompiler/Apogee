@@ -10,7 +10,7 @@
 - Per-install secrets (future key store) are parity-exempt but presence+mode checked
 - Distributed binaries are verified by RUNNING them post-install, not by file presence
 
-**Seam + files.** CMake install target, scripts/install.sh, lib/src/cli/check.cpp, lib/src/cli/version.cpp, completions/ (bash/zsh/fish stubs + the hidden __complete verb in lib/src/cli/main.cpp), lib/documentation/assistant/CLAUDE.md (parity rule + ~/.apogee layout contract recorded), lib/test/cli/check_test.cpp + a scripted install-parity diff check in CI.
+**Seam + files.** CMake install target, scripts/install.sh, lib/src/cli/source/commands/check.cpp, lib/src/cli/source/commands/version.cpp, completions/ (bash/zsh/fish stubs + the hidden __complete verb in lib/src/cli/source/main.cpp), lib/documentation/assistant/CLAUDE.md (parity rule + ~/.apogee layout contract recorded), lib/src/cli/tests/commands/check_test.cpp + a scripted install-parity diff check in CI.
 
 **Reference (Ommi).** lib/cli/Makefile ↔ install.sh ↔ update.go ↔ check.go four-way parity (the v0.1.5 foundation; every early install bug was silent drift), check --fix discipline, completion machinery, Milestone Q. Divergence: no cpp-tool sidecars or rpath staging to install (in-process llama.cpp), so the parity surface shrinks; C++ needs per-platform native builders instead of Go cross-compilation; self-update joins later as the third parity file.
 

@@ -8,7 +8,7 @@
 - Failing candidates never reach inference; log sources gated on explicit log_consent
 - Python env guards (platform hard-exits, env vars set before ML imports) carried verbatim if the same drivers ship
 
-**Seam + files.** lib/src/training/ (orchestrator: subprocess driving, JSONL progress parsing, manifests, version ledger, pipeline/cycle state machines), lib/src/cli/train.cpp + datasets.cpp, tools/scripts/train_mlx.py + train_peft.py (Python, shipped assets with env guards), training-kit/ YAML assets re-authored for Apogee's local tool-call convention, read-only /v1/training/* routes on serve.
+**Seam + files.** lib/src/cli/source/training/ (orchestrator: subprocess driving, JSONL progress parsing, manifests, version ledger, pipeline/cycle state machines), lib/src/cli/source/commands/train.cpp + datasets.cpp, tools/scripts/train_mlx.py + train_peft.py (Python, shipped assets with env guards), training-kit/ YAML assets re-authored for Apogee's local tool-call convention, read-only /v1/training/* routes on serve.
 
 **Reference (Ommi).** src/training (Synthesize, RunPipeline, TrainingStore, cycle.go), cmd/ommi train.go/datasets.go/synth.go/train_regime.go, tools/scripts train_mlx.py/train_peft.py, training-kit/ (Milestone K). Divergences: teachers/judges are direct cloud API calls; everything else keeps the same C++-orchestrator-over-Python-subprocess shape Ommi already proved; the tool-use/web-search kits must be re-authored for Apogee's tool-call convention.
 

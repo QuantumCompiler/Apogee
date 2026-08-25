@@ -9,7 +9,7 @@
 - Transient (RAG) content must never contaminate the reusable KV prefix
 - third_party/llama.cpp is never edited; pin updates are deliberate events caught by CI
 
-**Seam + files.** CMake integration for llama.cpp (third_party/, GGML_METAL, static-link decision), lib/src/backends/llamacpp.h/.cpp (LlamaCppProvider: model/context lifecycle, per-session sequence ownership, sampling, streaming, side-request isolation, idle unload), lib/src/backends/llamacpp_tokens.cpp (exact counting), lib/src/backends/chat_template.cpp (llama_chat_apply_template + fallback registry, extended later by profiles), lib/test/backends/llamacpp_test.cpp (tiny GGUF fixture or mocked llama shim).
+**Seam + files.** CMake integration for llama.cpp (third_party/, GGML_METAL, static-link decision), lib/src/cli/source/backends/llamacpp.h/.cpp (LlamaCppProvider: model/context lifecycle, per-session sequence ownership, sampling, streaming, side-request isolation, idle unload), lib/src/cli/source/backends/llamacpp_tokens.cpp (exact counting), lib/src/cli/source/backends/chat_template.cpp (llama_chat_apply_template + fallback registry, extended later by profiles), lib/src/cli/tests/backends/llamacpp_test.cpp (tiny GGUF fixture or mocked llama shim).
 
 **Reference (Ommi).** src/backends direct_llamacpp.go / lazy_llamacpp.go / direct_embed.go and OMMI-11 process routing. Deliberate divergence: in-process linking (a C++ advantage Go lacked) deletes the spawn-per-turn machinery, embedded-tool staging, rpath/dylib relocatability apparatus, on-disk prompt caches, and the __embed exec handle — while keeping every invariant those mechanisms enforced. Crash isolation is consciously re-decided (an in-process llama.cpp crash now kills the binary).
 

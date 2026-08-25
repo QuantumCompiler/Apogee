@@ -50,7 +50,7 @@ The gated ring — specced with their own backlog documents, sequenced after v0.
 
 ## Unspecced ideas
 
-- **GUI sibling project** *(committed direction 2026-08-24)* — a graphical front-end shipped alongside the harness, powering the CLI directly over stdin/stdout via the structured JSONL machine mode (never a localhost port; mutations shell out to the same CLI commands). Needs its own planning pass once stdio-machine-mode exists. No TUI, ever.
+- **GUI sibling applications** *(committed direction 2026-08-24; planned home `lib/src/darwin|linux|windows`, one app per platform)* — graphical front-ends shipped alongside the harness, powering the CLI directly over stdin/stdout via the structured JSONL machine mode (never a localhost port; mutations shell out to the same CLI commands). Needs its own planning pass once stdio-machine-mode exists. No TUI, ever.
 
 ## Ideas / candidate features
 

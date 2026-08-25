@@ -45,9 +45,17 @@ No test-locked invariants exist yet — there is no code. But Apogee starts with
 | `CLAUDE.md` (repo root) | Pointer to this docs system — the first thing an agent lands on. |
 | `lib/documentation/assistant/` | These contributor docs (CLAUDE, SPEC, ROADMAP, MILESTONES, DEVELOPER). |
 | `lib/documentation/backlog/` | The work queue — one document per pending item; priority-ordered index in its README. |
+| `.claude/skills/` | Repo-local agent skills. `apogee-backlog-item` — take the next (or a named) backlog item: load these assistant docs, pick by the index's gate rules, resolve `[user]`/`[default]` open calls, build, then run the Documentation and Status flow. `apogee-create-backlog-item` — spec a new item: read the format/SPEC/roadmap first, check the Ommi analog, write the document to the quality bar, place it in the index, update ROADMAP (and SPEC only on shape changes). `apogee-document-update` — the pre-MR docs pass: audit every document against the branch diff, enforce the Documentation and Status flow, validate links/index/tags mechanically, report what needs the user. `apogee-pull-request` — draft the MR description from the branch's evidence (deleted backlog docs + MILESTONES entries = shipped items; dated decisions; verification), run after the docs pass. Skills point at the docs rather than duplicating them — the docs stay the single source of truth. |
 | `lib/scripts/` | Repo scripts. `cicd.sh` — the CI/CD entry point: builds the currently checked-out branch for any of the six release targets (`--platform linux-x64 … windows-arm64 | all`; builds what the host can natively, defers the rest to the CI matrix), with `--fresh` for a CI-style clean-room clone-and-build, `--test`, `--clean`, `--jobs`; the GitHub Actions matrix must invoke this same script per native runner so local and CI builds share one path. `cicd-completion.bash` — tab completion for its flags (source it from your shell rc). |
 
-_TODO:_ no source code exists yet — add each source file/package here as it lands, dense enough that a contributor knows where things live before editing. The planned layout (C++ sources under `lib/src/`, tests under `lib/test/`, one package per concern mirroring Ommi's `config`/`harness`/`backends`/`agentloop`/`cli`/`httpserver` split) is sketched per item in the [`backlog/`](../backlog/README.md) documents' **Seam + files** sections.
+_TODO:_ no source code exists yet — add each source file/package here as it lands, dense enough that a contributor knows where things live before editing.
+
+**Where new source code goes (decided 2026-08-24):** `lib/src/<app>/` — one directory per application, each with `source/` and `tests/` as its first level.
+
+- **`lib/src/cli/`** — the CLI application (all of v0.1.0): `source/` holds `main.cpp` and one package directory per concern (`harness/`, `backends/`, `agentloop/`, `commands/`, `embedstore/`, `httpserver/`, `mcp/`, `platform/`, …, mirroring Ommi's package map); `tests/` mirrors the package directories.
+- **`lib/src/darwin/` · `lib/src/linux/` · `lib/src/windows/`** — the GUI applications, one per platform (future — down the road, not yet planned; they will drive the CLI over the stdio machine mode).
+
+The per-item file breakdown is in the [`backlog/`](../backlog/README.md) documents' **Seam + files** sections, which are written against this layout.
 
 ---
 
@@ -78,8 +86,8 @@ Feature releases are `v0.x.0`; patch releases are `v0.x.y`. Development happens 
 
 Every change should satisfy this before merge:
 
-- [ ] Tests for the new behavior pass, and existing tests stay green. (_TODO:_ record the test command once a test harness exists.)
-- [ ] The affected docs are updated in the same change (see **Documentation and Status**).
+- [ ] Tests for the new behavior pass, and existing tests stay green (`lib/scripts/cicd.sh --test` once the skeleton lands).
+- [ ] The affected docs are updated in the same change (see **Documentation and Status**) — run the `apogee-document-update` skill before opening the MR; it audits every document against the branch diff and validates the system mechanically.
 
 _TODO:_ project-specific checklist items accrete here as invariants and conventions are established.
 

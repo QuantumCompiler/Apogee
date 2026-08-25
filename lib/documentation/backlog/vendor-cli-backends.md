@@ -10,7 +10,7 @@
 - Per-CLI behavior is characterized against a real pinned CLI build before adapter code is written; the characterization (version, dumped fixtures) lands in the split doc and the fixture directory
 - A persistent child is not a listening socket — the interactive-never-listens invariant stays covered
 
-**Seam + files.** Shared: whatever claude-cli-backend extracts as reusable child-process/reader machinery (spawn + pipes + raw-fd reader + carry buffer) generalizes here rather than being rewritten per vendor. Per split doc: lib/src/backends/codex_cli.h/.cpp, gemini_cli.h/.cpp, ollama_cloud.h/.cpp with per-vendor wire→event mapping units, config schema/template additions per type, lib/test/backends/ per-CLI fixture-replay suites (adversarial chunk sizes, per the claude-cli guardrail pattern).
+**Seam + files.** Shared: whatever claude-cli-backend extracts as reusable child-process/reader machinery (spawn + pipes + raw-fd reader + carry buffer) generalizes here rather than being rewritten per vendor. Per split doc: lib/src/cli/source/backends/codex_cli.h/.cpp, gemini_cli.h/.cpp, ollama_cloud.h/.cpp with per-vendor wire→event mapping units, config schema/template additions per type, lib/src/cli/tests/backends/ per-CLI fixture-replay suites (adversarial chunk sizes, per the claude-cli guardrail pattern).
 
 **Reference (Ommi).** None — Ommi never carried these vendors; this is pure Apogee divergence. The in-repo reference is [claude-cli-backend.md](claude-cli-backend.md) and the adopted design notes ([`../assistant/claude-cli-streaming-backend.md`](../assistant/claude-cli-streaming-backend.md)), whose process model, reader discipline, and testing shape are the template.
 

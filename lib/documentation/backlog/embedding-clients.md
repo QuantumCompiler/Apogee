@@ -7,7 +7,7 @@
 - Batch-first API shape — per-chunk calls are the graph item's recorded cost trap
 - Same key-hygiene and no-listening-socket rules as every backend
 
-**Seam + files.** lib/src/backends/openai_embed.cpp, lib/src/backends/google_embed.cpp, lib/src/backends/llamacpp_embed.cpp, per-backend can_embed/dimension implementations against the harness capability interface, lib/test/backends/ embedding fixtures (recorded traces for cloud; tiny-model or shim for llama.cpp).
+**Seam + files.** lib/src/cli/source/backends/openai_embed.cpp, lib/src/cli/source/backends/google_embed.cpp, lib/src/cli/source/backends/llamacpp_embed.cpp, per-backend can_embed/dimension implementations against the harness capability interface, lib/src/cli/tests/backends/ embedding fixtures (recorded traces for cloud; tiny-model or shim for llama.cpp).
 
 **Reference (Ommi).** src/backends direct_embed.go and the embedding half of OMMI-11 (llamacpp path). The cloud embedding clients are Apogee divergence: Ommi's cloud could not embed (Anthropic has no embeddings endpoint), which is exactly why its type-allowlist gate doesn't transfer — OpenAI and Google DO embed over the API.
 

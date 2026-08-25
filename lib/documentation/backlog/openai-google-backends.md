@@ -8,7 +8,7 @@
 - Embedding capability is a per-backend flag, not a type allowlist — implemented later in embedding-clients; nothing in this item may hard-code who can embed
 - Same key-hygiene and no-listening-socket rules as the Anthropic backend
 
-**Seam + files.** lib/src/backends/openai.h/.cpp, lib/src/backends/google.h/.cpp, per-provider IR translators, extensions to lib/src/backends/sse_parser.cpp for each streaming dialect, lib/test/backends/openai_test.cpp + google_test.cpp (recorded-trace fixtures), conformance-suite registration in lib/test/agentloop/.
+**Seam + files.** lib/src/cli/source/backends/openai.h/.cpp, lib/src/cli/source/backends/google.h/.cpp, per-provider IR translators, extensions to lib/src/cli/source/backends/sse_parser.cpp for each streaming dialect, lib/src/cli/tests/backends/openai_test.cpp + google_test.cpp (recorded-trace fixtures), conformance-suite registration in lib/src/cli/tests/agentloop/.
 
 **Reference (Ommi).** No direct Ommi analog — this is Apogee's stated divergence. Ommi's cloud set was Anthropic API + claude CLI; the backends it deliberately removed for network-surface reduction were the Ollama and HuggingFace-Hub INFERENCE backends (local-model serving channels) — Ommi never carried other cloud LLM vendors. Slots into the exact seam Ommi's DEVELOPER.md 'new LLM backend' recipe defines; capability flags replace Ommi's agentloop.EmbeddingCapableType allowlist, whose Anthropic-only rationale doesn't transfer.
 
