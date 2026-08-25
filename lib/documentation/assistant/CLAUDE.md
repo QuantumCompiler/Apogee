@@ -21,19 +21,20 @@ Project context for coding agents. Read this before making changes. The root [`R
 
 ## What this is
 
-Apogee is an AI harness: one system for running LLM workloads against the Anthropic, OpenAI, and Google cloud APIs as well as local models served through llama.cpp. The repo is brand-new — these docs are the source of truth from which the first code will be built. See [SPEC.md](SPEC.md) for scope and principles and [MILESTONES.md](MILESTONES.md) for the shipped-feature record.
+Apogee is an AI harness: one system for running LLM workloads against the Anthropic, OpenAI, and Google cloud APIs as well as local models served through llama.cpp. It is a from-scratch, primarily-C++ re-implementation of **Ommi** (`~/Data/Development/Projects/Ommi`, a mature Go harness) — same product shape and docs-first process, with deliberate divergences recorded in [SPEC.md](SPEC.md) → Background. The repo is brand-new — these docs are the source of truth from which the first code will be built. See [SPEC.md](SPEC.md) for scope and principles and [MILESTONES.md](MILESTONES.md) for the shipped-feature record.
 
 ## Stack & environment
 
-- **Language:** _TODO:_ not yet chosen. This is the first decision to make — it gates the codebase map, DEVELOPER.md, and every backlog item.
-- **Key dependencies:** the Anthropic, OpenAI, and Google LLM APIs (cloud backends); llama.cpp (local inference). _TODO:_ pin the concrete SDKs/bindings once the language is chosen.
-- **Platforms:** _TODO:_ undecided. Primary dev host is macOS.
+- **Language:** C++ (primarily — decided 2026-08-24). The C++ standard, build system (CMake presumed), dependency strategy, and test framework are open calls on the `cpp-project-skeleton` backlog item; satellite scripts (training drivers, MCP servers) may stay Python, as in Ommi.
+- **Key dependencies:** the Anthropic, OpenAI, and Google LLM APIs (cloud backends, called directly over HTTPS); llama.cpp (local inference, planned in-process — likely a pinned submodule as in Ommi). HTTP client/server, JSON, and YAML libraries are open calls on the foundation items.
+- **Platforms:** decided 2026-08-24 — Linux, macOS, and Windows, both ARM and x86: six targets (`linux-x64/arm64`, `macos-x64/arm64`, `windows-x64/arm64`), a wider matrix than Ommi's (which shipped no Windows and no Intel-Mac binaries). Each target builds natively on its own CI runner via `lib/scripts/cicd.sh --platform <target>`. Windows membership means the POSIX mechanisms named in backlog docs (forkpty PTY tests, tcflush, lsof assertions, 0600 modes, getpeername) need Windows equivalents or recorded per-item skips — the portability seam is owned by the `cpp-project-skeleton` item. Primary dev host is macOS.
+- **Repository:** https://github.com/QuantumCompiler/Apogee (GitHub — making GitHub Releases the presumed distribution host; see the install-check-lifecycle backlog item).
 
 ---
 
 ## Invariants
 
-None recorded yet. Hard, project-specific rules — the kind that break subtly when violated — earn their own `## ⚠` section here (rule, rationale, concrete sub-rules, and how it's enforced, ideally test-locked) as they're discovered.
+No test-locked invariants exist yet — there is no code. But Apogee starts with **adopted design-time constraints** from Ommi (each earned there by a real bug or reversal; see [SPEC.md](SPEC.md) → Principles and Non-goals): interactive turns never open a listening socket — and local front-ends are pipes too: the GUI powers the CLI over stdin/stdout, while `serve` exists solely for server deployments answering remote REST clients; all install paths produce an identical layout; every capability reaches every surface through one shared core; secrets are `0600`, never logged, never returned over HTTP. Each is pinned as a **Core constraint** on the backlog items that own it, and earns a full `## ⚠` section here — rule, rationale, sub-rules, enforcement test — as the enforcing code and tests land.
 
 ---
 
@@ -44,8 +45,9 @@ None recorded yet. Hard, project-specific rules — the kind that break subtly w
 | `CLAUDE.md` (repo root) | Pointer to this docs system — the first thing an agent lands on. |
 | `lib/documentation/assistant/` | These contributor docs (CLAUDE, SPEC, ROADMAP, MILESTONES, DEVELOPER). |
 | `lib/documentation/backlog/` | The work queue — one document per pending item; priority-ordered index in its README. |
+| `lib/scripts/` | Repo scripts. `cicd.sh` — the CI/CD entry point: builds the currently checked-out branch for any of the six release targets (`--platform linux-x64 … windows-arm64 | all`; builds what the host can natively, defers the rest to the CI matrix), with `--fresh` for a CI-style clean-room clone-and-build, `--test`, `--clean`, `--jobs`; the GitHub Actions matrix must invoke this same script per native runner so local and CI builds share one path. `cicd-completion.bash` — tab completion for its flags (source it from your shell rc). |
 
-_TODO:_ no source code exists yet — add each source file/package here as it lands, dense enough that a contributor knows where things live before editing.
+_TODO:_ no source code exists yet — add each source file/package here as it lands, dense enough that a contributor knows where things live before editing. The planned layout (C++ sources under `lib/src/`, tests under `lib/test/`, one package per concern mirroring Ommi's `config`/`harness`/`backends`/`agentloop`/`cli`/`httpserver` split) is sketched per item in the [`backlog/`](../backlog/README.md) documents' **Seam + files** sections.
 
 ---
 
@@ -83,7 +85,11 @@ _TODO:_ project-specific checklist items accrete here as invariants and conventi
 
 ## Code Style
 
-- _TODO:_ no code exists yet — record naming conventions, error-handling idioms, and where shared helpers live as the first modules land.
+*(The two rules below are user decisions, 2026-08-24 — they apply from the first line of code and are lint-enforced via the `cpp-project-skeleton` backlog item.)*
+
+- **Header/implementation split.** Every class/module ships as a `.h`/`.cpp` pair when applicable — declarations in the header, definitions in the `.cpp`. Header-only is the recorded exception, reserved for templates and trivial data-only structs. The backlog documents' **Seam + files** sections already name files as `foo.h/.cpp` pairs; follow them.
+- **Smart pointers, never traditional pointers.** No raw `new`/`delete` and no owning raw pointers anywhere. `std::unique_ptr` is the default ownership type; `std::shared_ptr` only where ownership is genuinely shared (`std::weak_ptr` to break cycles); construct via `std::make_unique`/`std::make_shared`. For non-owning access, prefer references (or `std::string_view`/`std::span`) over pointers. C APIs (llama.cpp, SQLite, libcurl) hand out raw handles — wrap each in a `std::unique_ptr` with a custom deleter at the boundary class, and never let the raw handle escape it.
+- _TODO:_ further naming conventions, error-handling idioms, and shared-helper locations accrete here as the first modules land.
 - Match the surrounding code's conventions; when in doubt, find the closest existing analogue and follow it.
 
 ## Documentation and Status

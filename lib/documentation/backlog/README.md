@@ -24,11 +24,13 @@ Every item document follows this shape (sections in order; omit one only when it
 
 **Seam + files.** <Where the change plugs into the codebase: the interfaces/functions it extends and the files it touches.>
 
+**Reference (Ommi).** <Optional — the Ommi packages/features this item ports, and any deliberate divergence from them. Apogee is a re-implementation of Ommi (see SPEC.md → Background), so most items carry this; the implementing agent should read the named Ommi source/docs before building.>
+
 **Decisions made** (dated):
 - <YYYY-MM-DD> — <a design decision and its rationale>
 
 **Open calls:**
-- <a question the implementing agent must put to the user before building>
+- <a question to resolve before building — tagged [user] (a genuinely user-owned decision: BLOCKS the build until answered) or [default: …] (the agent takes the stated default, records it as a dated decision, and the user may veto)>
 
 **Guardrail(s).** <What must be tested or checked so the change can't regress silently.>
 
@@ -40,9 +42,47 @@ Every item document follows this shape (sections in order; omit one only when it
 
 ## Index
 
-Priority-ordered: the topmost item whose gate is satisfied is the next one to build.
+Items are numbered in the **suggested order of implementation**. The rule stays the same: the topmost unbuilt item whose gate is satisfied is the next one to build.
 
-| Document | Status | What |
-|---|---|---|
+**Gate convention:** a v0.1.0 item is buildable from its transitive gate chain alone. A gated-ring or unscheduled item *additionally assumes the complete v0.1.0 set has shipped* — its "build after" names only the ring-internal ordering. Items marked **split first** must be groomed into their listed sub-documents before an agent takes them; do not build from the guard document directly.
 
-*(The queue is empty — new items enter via ROADMAP.md → a document here.)*
+### Phase 1 — v0.1.0: walking skeleton, then breadth
+
+Items 1–6 build strictly in order (each gates on the one before it — the skeleton proves config → harness → backend → terminal on exactly one provider before anything widens). After 6, the three branches **7, 8, 9 are independent** — take them in any order (or in parallel sessions). Item 10 is the release closer and assumes 1–9 are complete.
+
+| # | Document | Build after | What |
+|---|---|---|---|
+| 1 | [cpp-project-skeleton.md](cpp-project-skeleton.md) | — | C++ project skeleton: CMake toolchain, test harness, CI baseline, CLI scaffold |
+| 2 | [config-engine.md](config-engine.md) | 1 | Config engine: typed loader, template, and comment-preserving mutation |
+| 3 | [harness-core.md](harness-core.md) | 2 | Harness core: LLMProvider interface, canonical message IR, router |
+| 4 | [anthropic-backend.md](anthropic-backend.md) | 3 | Anthropic Messages API backend (direct HTTPS + SSE streaming) |
+| 5 | [complete-cli.md](complete-cli.md) | 4 | `apogee complete` — one-shot CLI (the walking-skeleton milestone) |
+| 6 | [agentloop-core.md](agentloop-core.md) | 5 | Shared agentic loop: model→tool→model behind a Reporter interface, with ask_user |
+| 7 | [chat-cli.md](chat-cli.md) | 6 · **split first** (UX layer / chat) | `apogee chat` + the shared terminal UX layer |
+| 8 | [openai-google-backends.md](openai-google-backends.md) | 6 | OpenAI and Google Gemini backends over the shared client/IR |
+| 9 | [llamacpp-backend.md](llamacpp-backend.md) | 5 | Local inference: llama.cpp linked in-process (generation, KV sessions) |
+| 10 | [install-check-lifecycle.md](install-check-lifecycle.md) | 1–9 (all of v0.1.0) | Install contract, `apogee check` doctor, completions (release closer) |
+
+### Phase 2 — the gated ring (after v0.1.0 ships)
+
+Six semi-independent tracks that can interleave: the **vendor-CLI family** (11 → 12), the **front-end contract** (13 — the GUI project gates on it), **local-model depth** (14), **RAG** (15 → 16 → 17), **serving** (18 → 19 — server deployments only), and **tools/agents** (20); item 21 needs the RAG track complete. The numbering is the suggested serial order when working alone.
+
+| # | Document | Build after | What |
+|---|---|---|---|
+| 11 | [claude-cli-backend.md](claude-cli-backend.md) | — | Claude CLI backend: persistent child process with token-level streaming (subscription-plan path; family template) |
+| 12 | [vendor-cli-backends.md](vendor-cli-backends.md) | 11 · **split first** (one doc per CLI) | Vendor CLI backends: codex (OpenAI), gemini (Google), ollama (Ollama cloud) |
+| 13 | [stdio-machine-mode.md](stdio-machine-mode.md) | — | Stdio machine mode: structured JSONL event stream for front-end drivers (GUI ↔ CLI over pipes, never localhost) |
+| 14 | [model-profiles-and-management.md](model-profiles-and-management.md) | — · **split first** (profiles / management+sources) | Local-model depth: per-family profiles, filters, tool dialects + roles, models suite, open model sources (HF + Ollama) |
+| 15 | [embedstore-lexical-rag.md](embedstore-lexical-rag.md) | — | SQLite chunk store with FTS5/BM25 lexical retrieval + basic --rag injection |
+| 16 | [embedding-clients.md](embedding-clients.md) | 15 | Embedding clients: OpenAI/Google endpoints + in-process llama.cpp, behind can_embed |
+| 17 | [vector-hybrid-rerank.md](vector-hybrid-rerank.md) | 16 | Vector + hybrid retrieval, per-turn resolver, and LLM rerank with a capability-driven gate |
+| 18 | [serve-public-plane.md](serve-public-plane.md) | — | `apogee serve` — OpenAI-compatible HTTP server with server-side sessions (server deployments only: remote REST clients) |
+| 19 | [admin-plane-foundation.md](admin-plane-foundation.md) | 18 · **split first** (plane / credstore) | /v1/admin foundation: bearer auth, events bus, jobs, first CRUD, parity test + provider credential store |
+| 20 | [mcp-client-tools-agents.md](mcp-client-tools-agents.md) | — · **split first** (native tools / MCP client / analyze+agents) | MCP client, in-process native tools + analyze/agents runner |
+| 21 | [knowledge-graph-stack.md](knowledge-graph-stack.md) | 17 · **split first** (four docs) | Knowledge layer + knowledge graph (placeholder) |
+
+### Phase 3 — unscheduled
+
+| # | Document | Build after | What |
+|---|---|---|---|
+| 22 | [training-distillation.md](training-distillation.md) | 14, if scheduled at all · **split first** | Training and distillation stack (placeholder — Python boundary; direction confirmed 2026-08-24) |

@@ -14,32 +14,55 @@ How we work: features get discussed in chat, written up here (and in [SPEC.md](S
 
 ## In progress
 
-### v0.1.0 — Initial harness
+### v0.1.0 — The C++ harness (walking skeleton → four backends → install contract)
 
-The first working version of Apogee: the stated backend set behind one harness. The product surfaces (library / CLI / server) are still an open call — see [SPEC.md](SPEC.md) → Core surfaces — and none of these items is specced into the backlog yet.
+The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](SPEC.md) → Background for the lineage and divergences): a single self-contained C++ binary shipping `apogee complete` and `apogee chat` over all four backends — Anthropic, OpenAI, and Google called directly with streaming, native tool use, and typed thinking display, plus in-process llama.cpp — on top of the config engine, harness core, and shared agent loop, with persistent resumable sessions, a single-status-line terminal UX, and a clean install contract (`apogee check` passes on a fresh keyless, modelless install). Ten backlog items, in build order:
 
-- [ ] Anthropic cloud backend
-- [ ] OpenAI cloud backend
-- [ ] Google cloud backend
-- [ ] Local model inference via llama.cpp
-- See the [`backlog/`](../backlog/README.md) index for the work queue (priority-ordered; topmost claimable item = next to build).
+- [ ] C++ project skeleton (CMake, tests, CI, CLI scaffold)
+- [ ] Config engine (typed loader + comment-preserving mutation)
+- [ ] Harness core (LLMProvider, message IR, router)
+- [ ] Anthropic backend (direct Messages API + SSE)
+- [ ] `apogee complete` — the walking-skeleton closer
+- [ ] Shared agent loop (Reporter seam, tools, ask_user)
+- [ ] `apogee chat` + terminal UX layer (split at grooming: UX / chat)
+- [ ] OpenAI + Google backends
+- [ ] llama.cpp in-process backend
+- [ ] Install contract + `apogee check` + completions (release closer)
+
+See the [`backlog/`](../backlog/README.md) index for the full queue (priority-ordered; topmost claimable item = next to build).
+
+**Decisions needed before building starts** (the `[user]` open calls on the first items): config format (YAML vs TOML), data-dir name (`~/.apogee/`), in-process llama.cpp confirmation, and the web-search strategy. *(Answered 2026-08-24: the platform matrix — Linux/macOS/Windows on both ARM and x86, six targets; the repo host — GitHub, making GitHub Releases/Actions the default.)* The self-update timing question blocks only the release closer.
 
 ---
 
 ## Fast follow
 
-*(empty)*
+The gated ring — specced with their own backlog documents, sequenced after v0.1.0 ships (gate convention: each also assumes the full v0.1.0 set):
+
+- Claude-CLI backend: persistent child, token-level streaming — the subscription-plan path (design notes adopted 2026-08-24; earmarking into v0.1.0 is an open `[user]` call)
+- Stdio machine mode: the CLI's JSONL event stream over stdin/stdout, so the GUI can power the executable directly — never over localhost (the GUI project gates on this)
+- Vendor CLI backends: codex (OpenAI), gemini (Google), ollama (Ollama cloud) — completing the subscription-plan path for the four-vendor cloud set (split per CLI before build; each starts with an empirical characterization)
+- Local-model depth: per-family profiles + open model management — no forbidden models, sources = Hugging Face direct + Ollama pulls (split before build)
+- RAG: lexical floor → embedding clients → vector/hybrid/rerank
+- `apogee serve` (OpenAI-compatible) → `/v1/admin` foundation + provider credential store (split before build) — **server deployments only**: remote clients (mobile/desktop) making REST calls to the executable on a server; never a localhost backend for a local front-end (decided 2026-08-24)
+- MCP client + native toolsets + analyze/agents (split into three before build)
+- Knowledge layer + knowledge graphs (placeholder — split into four before build)
 
 ## Unspecced ideas
 
-*(none yet)*
+- **GUI sibling project** *(committed direction 2026-08-24)* — a graphical front-end shipped alongside the harness, powering the CLI directly over stdin/stdout via the structured JSONL machine mode (never a localhost port; mutations shell out to the same CLI commands). Needs its own planning pass once stdio-machine-mode exists. No TUI, ever.
 
 ## Ideas / candidate features
 
-*(none yet)*
+- Plugin system (`plugin.yaml` overlay — deliberately left out of the initial plan; separable later on top of the config engine)
+- Self-update (`apogee update`) — rides the distribution-host decision on the install item
+- Remote MCP transports + OAuth connectors (and the connector-driven review agents that ride them)
 
 ## Explicit non-goals
 
 Ruled out on purpose (see [SPEC.md](SPEC.md) → Non-goals for the rationale):
 
-*(none recorded yet — see SPEC.md)*
+- **Mandatory cloud dependency**
+- **Bundled models**
+- **TUI front-end** (the GUI is a committed sibling project over the HTTP planes — never in-binary)
+- **Silent install drift**

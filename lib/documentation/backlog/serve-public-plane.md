@@ -1,0 +1,34 @@
+# apogee serve — OpenAI-compatible HTTP server with server-side sessions
+
+**What / why.** The third surface: POST /v1/chat/completions and /v1/completions (standard OpenAI fields plus extensions: system shorthand, tool_mode, effort mapping to provider thinking budgets, opt-in apogee_events meta-frames, session_id), GET /v1/models, /v1/model/status, /health, faithful SSE streaming with correct chunk framing and [DONE], the server-side agentic loop via agentloop through an sseReporter adapter (clients never implement tool calling; meta-frames — model_loading/thinking/rag_search/rag_result/tool_call/token_count/context_warning — ride chunks with empty delta.content so spec-compliant clients render cleanly), and the server-side session plane — more central for Apogee than Ommi since ALL its cloud providers are stateless: mint id → X-Apogee-Session-Id header, server-owned history with auto-compaction near the context window, TTL eviction with a sweeper, session CRUD routes, transcripts resumable via chat --resume. The genuinely new work is bidirectional protocol translation: inbound OpenAI-format requests mapped through the IR to each provider's dialect and streamed back as OpenAI chunks — the proxy-shaped layer Ommi never needed for its claude path. Serve is the only surface allowed to hold a resident local model; --bind defaults loopback with fail-closed semantics. **Deployment model (decided 2026-08-24): serve exists ONLY for server deployments** — the executable runs on a server and clients (mobile or desktop apps) make REST calls (POST/GET) to it over the network. A local front-end never uses serve: the GUI powers the CLI directly over stdin/stdout (see [stdio-machine-mode.md](stdio-machine-mode.md)). Non-loopback binding is therefore serve's *normal* production posture — still fail-closed behind the explicit bind flag — rather than an edge case. Conditional scope: the RAG flags (--rag/--retriever/--rerank, ?retriever=/?rerank=) and the think/markup streaming filters belong to embedstore-lexical-rag / vector-hybrid-rerank / model-profiles-and-management — they land with or after their owning items and are excluded from this item's acceptance when serve is built first.
+
+**Core constraint(s).**
+- Interactive = pipes, serving = server: serve/harness-mode are the only listeners, ever
+- CLI-type backends (claude-cli, the vendor family) are excluded from serve by default — a documented skip, not an oversight: re-serving a personal subscription login to remote REST clients is exactly the "third-party product routes subscription credentials" line the adopted design notes warn about, and likely vendor-ToS-hostile. serve dispatches to API-billing and local backends only; revisit only with explicit user sign-off
+- The public inference plane stays unauthenticated for OpenAI-client compatibility; everything mutating waits for the admin plane; the loopback-default fail-closed bind is the guard, so its semantics are non-negotiable
+- Meta-frames must ride chunks with empty delta.content
+- Session logs match what the client received; transcripts resumable by chat --resume
+- RAG is fixed at startup (server-wide); per-request retriever arrives only on future admin data routes (parity with Ommi's documented skips)
+
+**Seam + files.** lib/src/httpserver/serve.cpp (mux, listener, bind policy; NewServeMux listener-free test constructor), lib/src/httpserver/handler.cpp (four chat dispatch paths over agentloop), lib/src/httpserver/session.cpp (TTL store + sweeper + auto-compaction), lib/src/httpserver/sse_writer.cpp, lib/src/httpserver/sse_reporter.cpp (Reporter→meta-frames), lib/src/cli/serve.cpp (flags: -m, --all-backends, --rag/--retriever/--rerank, tool modes, --bind, --preload, --ignore-timeout), lib/test/httpserver/ (listener-free mux tests, streaming conformance, SSE chunk-boundary tests).
+
+**Reference (Ommi).** src/httpserver serve.go/handler.go/session.go/sseReporter, milestone L, v0.1.9 HTTP conformance + ommi_events + server-side sessions. Divergences: the OpenAI-inbound → Anthropic/OpenAI/Gemini-outbound translation layer is genuinely new work; sessions apply to every cloud backend, not just one; the session log matches what the client received under the same reasoning-stripping rules as the CLI.
+
+**Decisions made** (dated):
+- 2026-08-24 — Planned from Ommi's documentation (parallel digest → two planning lenses → merge → adversarial verify). Position in the queue: Ommi built serve on the shared loop and it stayed cheap because the loop was already I/O-agnostic; serve must precede the admin plane and is the remote-client contract (server deployments — the local GUI's contract is stdio-machine-mode instead).
+
+**Open calls:**
+- [default: cpp-httplib — simplest, SSE via chunked content providers; revisit if the admin plane outgrows it] HTTP server library: cpp-httplib vs Drogon vs Boost.Beast — shapes the whole HTTP layer including the admin plane
+- [default: ship with the training item] Whether read-only /v1/training/* stubs ship now or later
+- [default: later flag] harness-style bare mode (all backends, no tool injection)
+
+**Guardrail(s).** Conformance tests driving the listener-free mux with a real OpenAI-client fixture set; a session-TTL/compaction integration test; SSE chunk-boundary and [DONE] framing tests.
+
+**Acceptance criteria:**
+- [ ] A stock OpenAI client library completes streamed and non-streamed chats against serve on all configured backend types
+- [ ] Tool-using requests run the loop server-side and return only final text; meta-frames appear only when opted in and don't break spec-compliant clients
+- [ ] Session handshake works: header minted, history accumulated server-side, auto-compaction fires near the window, TTL eviction observable, transcript resumable from `apogee chat --resume`
+- [ ] serve is the only command that opens a listening socket (the lsof test extends to assert this boundary); --bind defaults loopback with fail-closed behavior for non-loopback
+- [ ] (conditional — applies once model-profiles-and-management lands) Streaming think/format filtering on server paths uses continue-not-break semantics (an empty filtered chunk ≠ end of stream)
+
+**Scope note.** gated on [agentloop-core.md](agentloop-core.md) shipping.

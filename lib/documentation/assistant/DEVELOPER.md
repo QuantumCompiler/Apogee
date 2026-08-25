@@ -11,9 +11,15 @@ Apogee/
 ├── CLAUDE.md                — Pointer to the contributor docs system
 ├── .gitignore
 └── lib/
-    └── documentation/       — Project documentation
-        ├── assistant/       — Contributor docs (CLAUDE, SPEC, ROADMAP, MILESTONES, this file)
-        └── backlog/         — The work queue: pending work, one document per item (see its README)
+    ├── documentation/       — Project documentation
+    │   ├── assistant/       — Contributor docs (CLAUDE, SPEC, ROADMAP, MILESTONES, this file)
+    │   └── backlog/         — The work queue: pending work, one document per item (see its README)
+    └── scripts/             — Repo scripts
+        ├── cicd.sh          — CI/CD entry point: builds the current branch for any of the six
+        │                      release targets (--platform linux|macos|windows × x64|arm64, or all;
+        │                      non-native targets defer to the CI matrix), --fresh = clean-room
+        │                      clone of github.com/QuantumCompiler/Apogee at that branch; --test, --clean
+        └── cicd-completion.bash — Tab completion for cicd.sh's flags (source from your shell rc)
 ```
 
 _TODO:_ no source code exists yet — extend this tree, and add a `## <path> — <role>` section per package below, as the first modules land.
