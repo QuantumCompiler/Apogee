@@ -33,9 +33,26 @@ using TokenSink = std::function<void(std::string_view)>;
 /// Receives progress events. Optional -- an empty sink is valid and common.
 using StatusSink = std::function<void(const StatusEvent&)>;
 
+/// Receives extended-thinking text as it arrives.
+///
+/// **A separate sink from TokenSink, deliberately.** The alternative -- wrapping
+/// reasoning in in-band markers like `<thinking>…</thinking>` and demuxing
+/// downstream -- is what a channel-typed harness is forced into, and it costs a
+/// filter that must tolerate markers split across reads plus a permanent
+/// ambiguity: a *literal* `<thinking>` in the model's answer is now
+/// indistinguishable from the real thing. A typed sink gets this for free.
+///
+/// Whatever a surface does with thinking, it is **display and loop metadata
+/// only**: never persisted to history, never in the text returned to a
+/// programmatic caller, never in a served API response. It bloats every later
+/// prompt if it re-enters history, and an OpenAI-format client does not expect
+/// reasoning in its content field.
+using ThinkingSink = std::function<void(std::string_view)>;
+
 /// Options common to a streamed call.
 struct StreamOptions {
     TokenSink on_token;
+    ThinkingSink on_thinking;
     StatusSink on_status;
     CancellationToken cancellation;
 };

@@ -64,6 +64,14 @@ add_library(apogee_core STATIC
     backends/backends.h
     backends/mock.h
     backends/mock.cpp
+    backends/http_client.h
+    backends/http_client.cpp
+    backends/sse_parser.h
+    backends/sse_parser.cpp
+    backends/anthropic_wire.h
+    backends/anthropic_wire.cpp
+    backends/anthropic.h
+    backends/anthropic.cpp
 
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and
@@ -82,7 +90,8 @@ target_compile_definitions(apogee_core PRIVATE
     APOGEE_BUILD_DATE="${APOGEE_BUILD_DATE}"
 )
 
-target_link_libraries(apogee_core PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp)
+target_link_libraries(apogee_core PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp
+                      PRIVATE CURL::libcurl)
 
 apogee_set_target_options(apogee_core)
 

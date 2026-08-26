@@ -26,4 +26,4 @@
 - [ ] Zero listening sockets during a turn (lsof assertion in the exec test — the invariant's first test-lock)
 - [ ] `apogee complete --image photo.png "describe"` sends an image part to a vision-capable cloud backend; a local backend rejects it with a clear message
 
-**Scope note.** earmarked for v0.1.0 (build after [anthropic-backend.md](anthropic-backend.md)).
+**Scope note.** earmarked for v0.1.0. Gate satisfied: the Anthropic backend shipped 2026-08-26 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone D) — this is now the topmost claimable item. Construct providers via `AnthropicProvider::from_config` (`lib/src/cli/source/backends/anthropic.h`), register them on a `harness::Harness`, and stream through `harness.stream_chat` with a `TokenSink`. A `ThinkingSink` also exists on `StreamOptions`; thinking must never reach stdout on a pipe.

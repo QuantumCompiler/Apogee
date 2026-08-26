@@ -22,16 +22,53 @@
 #                                  harness/config_edit.h. See config-engine.
 #   CLI parsing CLI11           -- wired below
 #   Tests       Catch2 v3       -- wired below (only when APOGEE_BUILD_TESTS)
-#   HTTP client libcurl         -- the standing pick, NOT wired yet. It arrives
-#                                  with the anthropic-backend item, which owns
-#                                  find_package(CURL) and the platform TLS
-#                                  backends. Wiring it now would make the
-#                                  skeleton unbuildable on hosts with no curl
-#                                  development package, for no present gain.
+#   HTTP client libcurl         -- wired below (arrived with anthropic-backend).
+#                                  Found, never fetched: curl is a system
+#                                  library everywhere Apogee ships, and it is
+#                                  built against the platform's own TLS stack
+#                                  (Secure Transport / OpenSSL / Schannel),
+#                                  which is what makes the system trust store
+#                                  work without a bundled CA list.
 
 include(FetchContent)
 
 set(FETCHCONTENT_QUIET OFF)
+
+# libcurl: found on the system, never fetched.
+#
+# Building curl from source would mean choosing and building a TLS stack too,
+# and the whole point of the platform-trust-store decision (2026-08-25) is to
+# use the one the OS already manages -- an administrator's cert policy applies,
+# and revocations arrive without an Apogee release. Every target ships curl:
+# macOS and Linux have it, and Windows has had it in-box since 1803.
+find_package(CURL REQUIRED)
+
+# Drop a redundant system include directory from curl's imported target.
+#
+# On macOS, CURL_INCLUDE_DIRS is the SDK's own /usr/include -- already searched
+# implicitly. Propagating it as an explicit -isystem is not merely redundant: it
+# places the SDK's C headers AHEAD of the compiler's own, so a toolchain whose
+# stddef.h lives elsewhere (Homebrew LLVM, which is what `make lint` runs) never
+# defines size_t, and every system header that uses it fails to parse. The
+# symptom is bizarre -- hundreds of "unknown type name 'size_t'" errors inside
+# Apple's _stdio.h -- and it points nowhere near the actual cause.
+#
+# Compiling is unaffected because the build uses Apple clang, whose own headers
+# are in that same SDK. Only the mixed-toolchain case breaks, which is exactly
+# the lint job.
+if(TARGET CURL::libcurl)
+    get_target_property(_apogee_curl_includes CURL::libcurl INTERFACE_INCLUDE_DIRECTORIES)
+    if(_apogee_curl_includes)
+        set(_apogee_curl_kept "")
+        foreach(dir IN LISTS _apogee_curl_includes)
+            if(NOT dir MATCHES "/usr/include$")
+                list(APPEND _apogee_curl_kept "${dir}")
+            endif()
+        endforeach()
+        set_target_properties(CURL::libcurl PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${_apogee_curl_kept}")
+    endif()
+endif()
 
 # SYSTEM on every declaration: third-party headers are included by our
 # translation units, and Apogee's warning bar (-Wconversion, -Wold-style-cast,

@@ -50,12 +50,11 @@ Items are numbered in the **suggested order of implementation**. The rule stays 
 
 Items 1–6 build strictly in order (each gates on the one before it — the skeleton proves config → harness → backend → terminal on exactly one provider before anything widens). After 6, the three branches **7, 8, 9 are independent** — take them in any order (or in parallel sessions). Item 10 is the release closer and assumes 1–9 are complete.
 
-*Items 1 (C++ project skeleton), 2 (config engine), and 3 (harness core) shipped 2026-08-25 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestones A, B, and C. The numbering below is unchanged so the gate references in each document still read true.*
+*Items 1 (C++ project skeleton), 2 (config engine), 3 (harness core), and 4 (Anthropic backend) shipped 2026-08-25/26 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestones A–D. The numbering below is unchanged so the gate references in each document still read true.*
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 4 | [anthropic-backend.md](anthropic-backend.md) | ✅ 3 (shipped) | Anthropic Messages API backend (direct HTTPS + SSE streaming) |
-| 5 | [complete-cli.md](complete-cli.md) | 4 | `apogee complete` — one-shot CLI (the walking-skeleton milestone) |
+| 5 | [complete-cli.md](complete-cli.md) | ✅ 4 (shipped) | `apogee complete` — one-shot CLI (the walking-skeleton milestone) |
 | 6 | [agentloop-core.md](agentloop-core.md) | 5 | Shared agentic loop: model→tool→model behind a Reporter interface, with ask_user |
 | 7 | [chat-cli.md](chat-cli.md) | 6 · **split first** (UX layer / chat) | `apogee chat` + the shared terminal UX layer |
 | 8 | [openai-google-backends.md](openai-google-backends.md) | 6 | OpenAI and Google Gemini backends over the shared client/IR |

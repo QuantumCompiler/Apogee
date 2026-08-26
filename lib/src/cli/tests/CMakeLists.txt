@@ -22,10 +22,15 @@ add_executable(apogee_tests
     harness/types_test.cpp
     harness/harness_test.cpp
     backends/mock_test.cpp
+    backends/sse_parser_test.cpp
+    backends/http_client_test.cpp
+    backends/anthropic_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h
     support/env_guard.cpp
+    support/fake_transport.h
+    support/fake_transport.cpp
 )
 
 # The template-drift test reads the checked-in sample and compares it byte for

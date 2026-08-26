@@ -21,7 +21,7 @@ The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](S
 - [x] C++ project skeleton (CMake, tests, CI, CLI scaffold) — *shipped 2026-08-25, [Milestone A](MILESTONES.md#milestone-a--project-foundation)*
 - [x] Config engine (typed loader + comment-preserving mutation)
 - [x] Harness core (LLMProvider, message IR, router)
-- [ ] Anthropic backend (direct Messages API + SSE)
+- [x] Anthropic backend (direct Messages API + SSE)
 - [ ] `apogee complete` — the walking-skeleton closer
 - [ ] Shared agent loop (Reporter seam, tools, ask_user)
 - [ ] `apogee chat` + terminal UX layer (split at grooming: UX / chat)

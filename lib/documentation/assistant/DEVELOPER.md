@@ -92,7 +92,7 @@ That split is what makes surface parity structural rather than something a revie
 | `platform/` | **The portability seam.** The one place platform `#ifdef`s are expected; everything else asks this header. `platform.h/.cpp` |
 | `commands/` | The CLI scaffold: the `Command` interface, the registry, the root command, and the built-in commands. |
 | `harness/` | **The core.** The config engine (typed loader, `${ENV}` expansion, template, comment-preserving edits, on-disk paths) **and** the provider interface, canonical message IR, router, and context-window table. Includes nothing from `backends/` — enforced. |
-| `backends/` | Provider implementations. `mock` so far — the offline provider every downstream item tests against. The cloud and local backends land here with their own items. |
+| `backends/` | Provider implementations plus the shared cloud infrastructure: `mock`, `anthropic`, the HTTP client, and the SSE parser. The remaining cloud and local backends land here with their own items. |
 | `agentloop/` | *Reserved* — the shared model→tool→model loop and its Reporter seam (`agentloop-core` item). |
 | `embedstore/` | *Reserved* — chunk storage and retrieval (`embedstore-lexical-rag` item). |
 | `httpserver/` | *Reserved* — `apogee serve` (`serve-public-plane` item). Server deployments only. |
@@ -161,6 +161,28 @@ Mechanisms that land here as later items need them: process spawning (vendor-CLI
 
 **Adding a backend.** Implement `harness::LLMProvider` in `backends/`, translating to and from the IR. Inherit a capability interface only if you have that capability — the Harness discovers it. Add a row to `kBackendTypeNames` in `harness/config.cpp` for the config `type:`. Model the shape on `backends/mock.h`, and honour cancellation *between chunks*, not just at entry.
 
+### `backends/` — provider implementations
+
+| File | Purpose |
+|---|---|
+| `mock.h/.cpp` | `MockProvider` (scripted turns, configurable chunk size, recorded requests) and `MockEmbeddingProvider`. No network, no model. |
+| `http_client.h/.cpp` | `HttpTransport` (one request; `CurlTransport` is the real one) and `HttpClient` (retry/backoff over a transport). Shared by every cloud backend. |
+| `sse_parser.h/.cpp` | A byte-fed Server-Sent Events state machine. Shared by every streaming cloud backend. |
+| `anthropic_wire.h/.cpp` | IR ↔ Anthropic Messages API translation, and the extended-thinking replay cache. |
+| `anthropic.h/.cpp` | The Anthropic provider: streaming and non-streaming chat, `list_models`, `count_tokens`. |
+
+**The transport is injected**, which is what makes every cloud-backend test hermetic: no network, no API key, no charges — and failure modes a live endpoint will not produce on demand (a 529, a body delivered one byte at a time, a connection dropping mid-frame). `tests/support/fake_transport.h` is the scripted implementation.
+
+**Two contracts that are easy to get wrong:**
+
+*An error response is never streamed to the sink.* `HttpTransport` accumulates a non-2xx body into `HttpResponse::body` instead. Beyond the obvious (an error body is not what the sink was written to parse), delivering it makes the request look partly answered to `HttpClient`, which then refuses to retry a perfectly retryable 429. `FakeTransport` honours the same rule, or the fake would hide the bug.
+
+*A stream is not retried once bytes have reached the caller.* Replaying would deliver the first half of an answer twice, with no way for the caller to tell.
+
+**SSE never arrives one-event-per-read.** Chunk boundaries land mid-frame, mid-line, and mid-UTF-8-sequence. `SseParser` is a state machine with a carry buffer for exactly that reason, and its test replays a recorded stream at *every* chunk size from one byte up — a parser that assumes one-read-one-event passes every test written on a fast local connection and drops tokens on a slow one.
+
+**Adding a cloud backend.** Reuse `HttpClient` and `SseParser`; put the dialect in its own `*_wire.h/.cpp` so it is testable with no transport at all. Take an injected `HttpClient` in the constructor. Honour cancellation between chunks. Keep the API key in a header and out of every error message — `tests/backends/anthropic_test.cpp` → `[backends][anthropic][secrets]` is the pattern for pinning that.
+
 ---
 
 ## `lib/src/cli/tests/` — tests
@@ -180,6 +202,10 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `harness/types_test.cpp` | The IR: both content shapes round-tripping, tool calls, typed errors on bad input, and the transient-exclusion contract. |
 | `harness/harness_test.cpp` | Router precedence table-tested across all three rungs, cancellation mid-stream, capability probes, `ModelBehavior`, and the context-window table. |
 | `backends/mock_test.cpp` | MockProvider contract tests — they pin the `LLMProvider` interface itself, so a later item changing it breaks them. |
+| `backends/sse_parser_test.cpp` | The SSE state machine, replayed at every chunk size from one byte up. |
+| `backends/http_client_test.cpp` | Retry/backoff, `retry-after`, the no-retry-after-delivery guard, and the error-bodies-are-not-streamed contract. |
+| `backends/anthropic_test.cpp` | Fixture-replayed streams (seven chunk sizes), the wire mapping, thinking replay, error shapes, and the API-key secrets guardrail. |
+| `support/fake_transport.h/.cpp` | The scripted `HttpTransport` — the seam that makes cloud-backend tests hermetic. |
 | `support/fake_command.h/.cpp` | A `Command` defined in test code — the injectable seam, exercised. |
 | `support/env_guard.h/.cpp` | RAII environment-variable and temp-directory guards. Config resolution reads the environment, so exercising it means mutating the environment — and a leaked change would steer every test after it. |
 
@@ -247,7 +273,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 | YAML | yaml-cpp `0.8.0` | Wired — **read path only.** The config engine never serializes through it (see `harness/`). Its CMakeLists predates a CMake policy removal, so `CMAKE_POLICY_VERSION_MINIMUM` is raised around its `FetchContent_MakeAvailable` and restored immediately; revisit when it cuts a release past 0.8.0. |
 | CLI parsing + completions | CLI11 `v2.4.2` | Wired |
 | Tests | Catch2 `v3.7.1` | Wired (only when `APOGEE_BUILD_TESTS`) |
-| HTTP client | **libcurl** | Standing pick, **not wired yet** — it arrives with `anthropic-backend`, which owns `find_package(CURL)` and the platform TLS backends. Wiring it now would break the build on hosts with no curl development package, for no present gain. |
+| HTTP client | libcurl (system) | Wired 2026-08-26. **Found, never fetched** — building it from source would mean choosing a TLS stack too, and the point of the platform-trust-store decision is to use the one the OS already manages. Note the trap recorded in `ApogeeDependencies.cmake`: `CURL_INCLUDE_DIRS` is the macOS SDK's own `/usr/include`, and propagating it as `-isystem` breaks any mixed-toolchain build (i.e. `make lint`); the redundant entry is stripped from the imported target. |
 | Local inference | llama.cpp, pinned to `549b9d84` | `third_party/`, off by default |
 
 These picks were standardized once, project-wide. **Downstream work consumes them rather than reopening them** — a second JSON library or a second CLI parser is a bug, not a preference.
