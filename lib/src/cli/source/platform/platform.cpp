@@ -2,6 +2,12 @@
 
 #include <cstdlib>
 
+#if defined(_WIN32)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 // The only place in Apogee where a platform `#ifdef` is expected. Everything
 // else asks this header instead. An unrecognized platform is a hard compile
 // error on purpose: silently degrading to "Unknown" would let an unsupported
@@ -70,6 +76,38 @@ std::optional<std::string> home_directory() {
         return std::string{home};
     }
     return std::nullopt;
+#endif
+}
+
+bool is_terminal(StandardStream stream) noexcept {
+#if defined(_WIN32)
+    int descriptor = 0;
+    switch (stream) {
+        case StandardStream::In:
+            descriptor = 0;
+            break;
+        case StandardStream::Out:
+            descriptor = 1;
+            break;
+        case StandardStream::Err:
+            descriptor = 2;
+            break;
+    }
+    return _isatty(descriptor) != 0;
+#else
+    int descriptor = STDIN_FILENO;
+    switch (stream) {
+        case StandardStream::In:
+            descriptor = STDIN_FILENO;
+            break;
+        case StandardStream::Out:
+            descriptor = STDOUT_FILENO;
+            break;
+        case StandardStream::Err:
+            descriptor = STDERR_FILENO;
+            break;
+    }
+    return ::isatty(descriptor) != 0;
 #endif
 }
 

@@ -55,12 +55,14 @@ public:
     TempDir(TempDir&&) = delete;
     TempDir& operator=(TempDir&&) = delete;
 
-    [[nodiscard]] const std::string& path() const noexcept {
+    [[nodiscard]] const std::filesystem::path& path() const noexcept {
         return path_;
     }
 
 private:
-    std::string path_;
+    /// Stored as a path, not a string: ~TempDir must not construct one, and
+    /// building a std::filesystem::path allocates -- a throwing destructor.
+    std::filesystem::path path_;
 };
 
 }  // namespace apogee::testing

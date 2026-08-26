@@ -31,4 +31,4 @@
 - [ ] Exact token counts are exposed through the provider counting API, flagged exact (the 80/90 threshold policy itself is tested in chat-cli)
 - [ ] lsof test: zero listening sockets during local interactive turns; model unloads on idle when configured; a load failure yields a clear error naming the file, never a crash
 
-**Scope note.** earmarked for v0.1.0 (build after [complete-cli.md](complete-cli.md)).
+**Scope note.** earmarked for v0.1.0. Gate satisfied: `apogee complete` shipped 2026-08-26 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone E). This item also owns the `VisionCapable` capability that `commands/complete.cpp` currently stands in for with a config-type check — see the stopgap comment on `backend_accepts_images`.

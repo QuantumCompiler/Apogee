@@ -38,6 +38,10 @@ add_library(apogee_core STATIC
     commands/version_command.cpp
     commands/config_cmd.h
     commands/config_cmd.cpp
+    commands/complete.h
+    commands/complete.cpp
+    commands/helpers.h
+    commands/helpers.cpp
 
     harness/paths.h
     harness/paths.cpp
@@ -72,6 +76,8 @@ add_library(apogee_core STATIC
     backends/anthropic_wire.cpp
     backends/anthropic.h
     backends/anthropic.cpp
+    backends/factory.h
+    backends/factory.cpp
 
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and

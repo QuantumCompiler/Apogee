@@ -25,6 +25,8 @@ add_executable(apogee_tests
     backends/sse_parser_test.cpp
     backends/http_client_test.cpp
     backends/anthropic_test.cpp
+    backends/factory_test.cpp
+    commands/helpers_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h
@@ -81,6 +83,36 @@ add_test(NAME harness.layering
         -DAPOGEE_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
         -P "${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake"
 )
+
+# `apogee complete` end to end -- the walking skeleton, fully offline against
+# the mock backend. The pattern every later CLI test reuses.
+add_test(NAME cli.complete_lifecycle
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE_BIN=$<TARGET_FILE:apogee>
+        -DAPOGEE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/complete-e2e-home
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/complete_e2e.cmake"
+)
+
+# The interactive-never-listens invariant (SPEC.md -> Principles), test-locked
+# the day the first interactive command exists. TWO checks, because neither is
+# sufficient on its own -- see the header comments in each for why.
+#
+#   symbols: deterministic; catches our own code calling listen/accept.
+#   runtime: catches a spawned child process holding a port.
+add_test(NAME cli.no_listen_symbols
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE_CORE_LIB=$<TARGET_FILE:apogee_core>
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_symbols.cmake"
+)
+
+if(UNIX)
+    add_test(NAME cli.complete_opens_no_listening_socket
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_check.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/no-listen-home
+    )
+    set_tests_properties(cli.complete_opens_no_listening_socket PROPERTIES TIMEOUT 60)
+endif()
 
 # `apogee config` end to end against the real binary, under a throwaway
 # APOGEE_HOME. Driven by cmake -P so it runs on every target, Windows included.

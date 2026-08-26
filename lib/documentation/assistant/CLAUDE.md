@@ -89,6 +89,22 @@ The first of them is now enforced in code:
 
 **Enforcement.** `tests/harness/harness_test.cpp` → the `[harness][capability]` and `[harness][behavior]` cases.
 
+### ⚠ Interactive turns never open a listening socket
+
+**Rule.** Only `apogee serve` may own a port. No interactive command, and no backend serving one, opens a listening socket — cloud backends make outbound HTTPS calls and llama.cpp runs in-process.
+
+**Why.** A backend that quietly starts a local server still answers correctly, so nothing looks wrong until someone notices an open port on a shared machine. It is also the structural half of "interactive = pipes, serving = server": once one interactive path listens, "local front-ends are pipes too" stops being true and the GUI's stdio contract loses its justification.
+
+**Sub-rules.**
+- A persistent child process is not a listening socket — the vendor-CLI backends stay compliant by construction.
+- When `serve` lands it needs an explicit, reviewed exclusion from the symbol check below. That exclusion being deliberate is the point.
+
+**Enforcement — two checks, and neither is sufficient alone.**
+- `cli.no_listen_symbols` (`tests/no_listen_symbols.cmake`) — `nm -u` on `apogee_core` must show no `listen`/`accept`. Deterministic, no timing; catches our own code however brief the window. Blind to a child process.
+- `cli.complete_opens_no_listening_socket` (`tests/no_listen_check.sh`) — polls `lsof` across a real turn. Catches a *spawned* server holding a port. Blind to a sub-millisecond window. POSIX only; Windows is a recorded skip.
+
+Both were verified against a build that deliberately calls `listen()`: the symbol check failed it, the runtime check did not. That asymmetry is exactly why the pair exists — see MILESTONES.md → Milestone E.
+
 ### ⚠ Smart pointers, never owning raw pointers
 
 The Code Style rule below is lint-enforced, not aspirational: `make -C lib/src/cli lint` fails on a raw `new`/`delete`, an owning raw pointer, or `malloc` anywhere in the CLI's `source/` or `tests/` (`cppcoreguidelines-owning-memory`, `cppcoreguidelines-no-malloc`, `modernize-make-unique`/`make-shared`, promoted to errors in `.clang-tidy`). `third_party/` is out of scope by construction. CI runs it on every push.
@@ -108,7 +124,7 @@ The Code Style rule below is lint-enforced, not aspirational: `make -C lib/src/c
 
 **Where new source code goes (decided 2026-08-24; app-owned builds confirmed 2026-08-25):** `lib/src/<app>/` — one directory per application, each a **self-contained CMake project** owning its own build, presets, dependencies, third-party pins, and style config, with `source/` and `tests/` as its first level. Nothing above `lib/src/<app>/` needs to know how that application compiles.
 
-- **`lib/src/cli/`** — the CLI application (all of v0.1.0). Packages under `source/`: `commands/`, `harness/` (config engine + the provider interface, IR, and router), `backends/` (provider implementations — `mock` and `anthropic`, plus the shared HTTP client and SSE parser), `platform/`, `version/` (built), and `agentloop/`, `embedstore/`, `httpserver/`, `mcp/` (reserved header stubs, mirroring Ommi's package map — each names the backlog item that fills it). `assets/` holds the starter `config.yaml`, which a test keeps byte-identical to the template compiled into the binary.
+- **`lib/src/cli/`** — the CLI application (all of v0.1.0). Packages under `source/`: `commands/`, `harness/` (config engine + the provider interface, IR, and router), `backends/` (provider implementations — `mock` and `anthropic` — plus the shared HTTP client, SSE parser, and the config→provider factory), `platform/`, `version/` (built), and `agentloop/`, `embedstore/`, `httpserver/`, `mcp/` (reserved header stubs, mirroring Ommi's package map — each names the backlog item that fills it). `assets/` holds the starter `config.yaml`, which a test keeps byte-identical to the template compiled into the binary.
 - **`lib/src/darwin/` · `lib/src/linux/` · `lib/src/windows/`** — the GUI applications, one per platform (future — down the road, not yet planned; they will drive the CLI over the stdio machine mode). Each joins the `APPS` list in `cicd.sh` when it lands.
 
 The per-item file breakdown is in the [`backlog/`](../backlog/README.md) documents' **Seam + files** sections, which are written against this layout.

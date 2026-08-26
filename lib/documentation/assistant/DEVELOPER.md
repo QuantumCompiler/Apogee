@@ -108,6 +108,8 @@ Reserved packages carry a documented header and no code. They exist so every lat
 | `registry.h/.cpp` | `CommandRegistry` — owns commands, rejects duplicate names, binds them all to an app. `default_registry()` is the built-in set. |
 | `root.h/.cpp` | `RootCommand` — persistent flags (`--config`), the version flag, and `run(argc, argv)` → exit code. |
 | `version_command.h/.cpp` | `apogee version`. The first real subcommand, proving the path end to end. |
+| `complete.h/.cpp` | `apogee complete` — one-shot prompt in, answer out. The walking skeleton. |
+| `helpers.h/.cpp` | Shared command plumbing: flag/config resolution, stdin, base64, image parts, message assembly, and the exit codes. |
 | `config_cmd.h/.cpp` | `apogee config` and its nine subcommands. A thin caller — it formats no YAML of its own; every mutation goes through `harness/config_edit.h`. |
 
 **Adding a subcommand** touches exactly two places: the command's own `.h`/`.cpp` pair, and one `registry.add(...)` line in `default_registry()`. It then appears in `apogee --help` with no other edit — `main.cpp` never grows.
@@ -170,6 +172,7 @@ Mechanisms that land here as later items need them: process spawning (vendor-CLI
 | `sse_parser.h/.cpp` | A byte-fed Server-Sent Events state machine. Shared by every streaming cloud backend. |
 | `anthropic_wire.h/.cpp` | IR ↔ Anthropic Messages API translation, and the extended-thinking replay cache. |
 | `anthropic.h/.cpp` | The Anthropic provider: streaming and non-streaming chat, `list_models`, `count_tokens`. |
+| `factory.h/.cpp` | Config `type:` → provider, and `build_providers()` which registers every entry on a Harness and installs the router. Lives here, not in a command, because every surface needs it. |
 
 **The transport is injected**, which is what makes every cloud-backend test hermetic: no network, no API key, no charges — and failure modes a live endpoint will not produce on demand (a 529, a body delivered one byte at a time, a connection dropping mid-frame). `tests/support/fake_transport.h` is the scripted implementation.
 
@@ -205,6 +208,8 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `backends/sse_parser_test.cpp` | The SSE state machine, replayed at every chunk size from one byte up. |
 | `backends/http_client_test.cpp` | Retry/backoff, `retry-after`, the no-retry-after-delivery guard, and the error-bodies-are-not-streamed contract. |
 | `backends/anthropic_test.cpp` | Fixture-replayed streams (seven chunk sizes), the wire mapping, thinking replay, error shapes, and the API-key secrets guardrail. |
+| `backends/factory_test.cpp` | Construction per type, and that one unbuildable backend does not stop the others. |
+| `commands/helpers_test.cpp` | Flag/config resolution order, base64 padding, image parts, message assembly. |
 | `support/fake_transport.h/.cpp` | The scripted `HttpTransport` — the seam that makes cloud-backend tests hermetic. |
 | `support/fake_command.h/.cpp` | A `Command` defined in test code — the injectable seam, exercised. |
 | `support/env_guard.h/.cpp` | RAII environment-variable and temp-directory guards. Config resolution reads the environment, so exercising it means mutating the environment — and a leaked change would steer every test after it. |
@@ -212,6 +217,10 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 Beyond those, `tests/CMakeLists.txt` registers `cli.*` ctest cases that run the built `apogee` binary as a subprocess, covering the contract as a user meets it (bare invocation prints help and exits 0; `--version`; unknown subcommand fails). Running a target is not linking it, so the link policy still holds.
 
 `harness.layering` is a `cmake -P` check that no file under `source/harness/` includes `backends/`. C++ cannot enforce this the way Go's import cycles do — the include would compile fine and the layering would be silently gone — so it is checked mechanically, and it refuses to run against an empty source list so it cannot pass vacuously.
+
+`cli.complete_lifecycle` ([`tests/complete_e2e.cmake`](../../src/cli/tests/complete_e2e.cmake)) runs the walking skeleton end to end against the mock backend — prompts, stdin, flags, images, `--all-backends`, and every exit code — fully offline. **Every invocation gets an explicit stdin**: without one the child inherits ctest's, which may be a pipe that never delivers EOF, and a command falling through to reading stdin hangs the whole suite instead of failing.
+
+The interactive-never-listens invariant has two locks, `cli.no_listen_symbols` and `cli.complete_opens_no_listening_socket`. Read [CLAUDE.md](CLAUDE.md) → *⚠ Interactive turns never open a listening socket* before touching either — the reason there are two is not obvious, and removing one leaves a real gap.
 
 The largest of those is `cli.config_lifecycle`, driven by [`tests/config_e2e.cmake`](../../src/cli/tests/config_e2e.cmake): it runs the real binary through init → add-backend → roles → get → delete and asserts the file came back byte-identical, all under a throwaway `APOGEE_HOME`. It is a `cmake -P` script rather than a shell script so it runs on all six targets — a `.sh` would silently skip on the Windows runners, which is exactly where a path or line-ending bug would surface.
 

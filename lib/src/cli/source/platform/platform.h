@@ -56,4 +56,17 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 /// override on top of this.
 [[nodiscard]] std::optional<std::string> home_directory();
 
+/// The three standard streams, for terminal detection.
+enum class StandardStream : std::uint8_t { In, Out, Err };
+
+/// Whether `stream` is attached to a terminal.
+///
+/// This is the gate for ALL decoration. A piped or redirected run must emit
+/// exactly the answer -- no spinner frames, no colour, no status lines -- or
+/// `apogee complete ... | jq` produces garbage and the CLI stops being
+/// composable. Checking the stream rather than a global flag matters because
+/// they differ routinely: stdout redirected to a file while stderr is still a
+/// terminal is the normal shape of `apogee complete x > out.txt`.
+[[nodiscard]] bool is_terminal(StandardStream stream) noexcept;
+
 }  // namespace apogee::platform

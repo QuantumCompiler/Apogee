@@ -31,4 +31,4 @@
 - [ ] A registered mock write-tool triggers the ask path on a TTY; allow and deny outcomes are honored; non-interactive ask resolves to deny (scripted test)
 - [ ] fetch_url executes offline through an injected HTTP seam and its result round-trips as a ToolResult
 
-**Scope note.** earmarked for v0.1.0 (build after [complete-cli.md](complete-cli.md)).
+**Scope note.** earmarked for v0.1.0. Gate satisfied: `apogee complete` shipped 2026-08-26 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone E) — this is now the topmost claimable item. The loop consumes `harness::Harness` and the IR; `commands/complete.cpp` is the worked example of assembling one, and `backends/factory.h` builds the providers.

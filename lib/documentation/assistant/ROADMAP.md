@@ -22,7 +22,7 @@ The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](S
 - [x] Config engine (typed loader + comment-preserving mutation)
 - [x] Harness core (LLMProvider, message IR, router)
 - [x] Anthropic backend (direct Messages API + SSE)
-- [ ] `apogee complete` — the walking-skeleton closer
+- [x] `apogee complete` — the walking-skeleton closer
 - [ ] Shared agent loop (Reporter seam, tools, ask_user)
 - [ ] `apogee chat` + terminal UX layer (split at grooming: UX / chat)
 - [ ] OpenAI + Google backends
