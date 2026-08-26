@@ -29,4 +29,4 @@
 - [ ] 429/5xx retry with backoff is fixture-tested; absent API key yields a clear actionable error; exact usage counts surfaced, estimates flagged estimated
 - [ ] Server-side web_search tool can be enabled per backend from config
 
-**Scope note.** earmarked for v0.1.0 (build after [harness-core.md](harness-core.md)).
+**Scope note.** earmarked for v0.1.0. Gate satisfied: the harness core shipped 2026-08-25 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone C) — this is now the topmost claimable item. Implement `harness::LLMProvider` (`lib/src/cli/source/harness/provider.h`), translate to and from the IR in `harness/types.h`, and model the shape on `lib/src/cli/source/backends/mock.h`. This item also owns wiring **libcurl** — `find_package(CURL)` in `lib/src/cli/cmake/ApogeeDependencies.cmake` plus the platform TLS backends — since it is the first item that needs an HTTP client.

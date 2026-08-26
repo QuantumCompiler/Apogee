@@ -19,6 +19,9 @@ add_executable(apogee_tests
     harness/config_test.cpp
     harness/config_edit_test.cpp
     harness/paths_test.cpp
+    harness/types_test.cpp
+    harness/harness_test.cpp
+    backends/mock_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h
@@ -65,6 +68,14 @@ set_tests_properties(cli.unknown_subcommand_fails PROPERTIES WILL_FAIL TRUE)
 
 add_test(NAME cli.help_lists_config COMMAND apogee --help)
 set_tests_properties(cli.help_lists_config PROPERTIES PASS_REGULAR_EXPRESSION "config")
+
+# The layering constraint: harness must never include backends. C++ cannot
+# enforce this the way Go's import cycles do, so it is checked mechanically.
+add_test(NAME harness.layering
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake"
+)
 
 # `apogee config` end to end against the real binary, under a throwaway
 # APOGEE_HOME. Driven by cmake -P so it runs on every target, Windows included.

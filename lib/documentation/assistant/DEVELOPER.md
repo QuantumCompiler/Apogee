@@ -91,8 +91,8 @@ That split is what makes surface parity structural rather than something a revie
 | `version/` | Build identity — semantic version, git commit, build date, target — stamped in at configure time. `version.h/.cpp` |
 | `platform/` | **The portability seam.** The one place platform `#ifdef`s are expected; everything else asks this header. `platform.h/.cpp` |
 | `commands/` | The CLI scaffold: the `Command` interface, the registry, the root command, and the built-in commands. |
-| `harness/` | **The config engine** — typed loader, `${ENV}` expansion, the starter template, the comment-preserving edit helpers, and Apogee's on-disk paths. Still to land here: the LLMProvider interface, message IR, and router (`harness-core` item). |
-| `backends/` | *Reserved* — one provider implementation per model source (`anthropic-backend` onward). |
+| `harness/` | **The core.** The config engine (typed loader, `${ENV}` expansion, template, comment-preserving edits, on-disk paths) **and** the provider interface, canonical message IR, router, and context-window table. Includes nothing from `backends/` — enforced. |
+| `backends/` | Provider implementations. `mock` so far — the offline provider every downstream item tests against. The cloud and local backends land here with their own items. |
 | `agentloop/` | *Reserved* — the shared model→tool→model loop and its Reporter seam (`agentloop-core` item). |
 | `embedstore/` | *Reserved* — chunk storage and retrieval (`embedstore-lexical-rag` item). |
 | `httpserver/` | *Reserved* — `apogee serve` (`serve-public-plane` item). Server deployments only. |
@@ -139,6 +139,28 @@ Mechanisms that land here as later items need them: process spawning (vendor-CLI
 
 **Widening the backend type set.** Add a row to `kBackendTypeNames` in `config.cpp` and an enumerator in `config.h`. The loader dispatches through that table, so nothing else changes — and `every backend type round-trips through its name` fails if the two ever disagree. Each widening is a recorded decision in the item that makes it, never a silent edit.
 
+### `harness/` — the provider interface, IR, and router
+
+| File | Purpose |
+|---|---|
+| `types.h/.cpp` | The canonical IR: `ChatMessage`, dual-mode `MessageContent`, `Tool`/`ToolCall`/`ToolResult`, `ChatRequest`/`ChatResponse`, `Usage`, `ModelInfo`, `RAGMeta`, `StatusEvent`, and their JSON conversions. |
+| `provider.h/.cpp` | `LLMProvider` (four methods), `TokenSink`/`StreamOptions`, and the optional capability interfaces. |
+| `harness.h/.cpp` | `Harness` (registry + capability probes) and `SimpleRouter` (the three-rung precedence). |
+| `behavior.h/.cpp` | `ModelBehavior` — plain data, the layering seam. |
+| `cancellation.h/.cpp` | `CancellationToken` — a shared atomic flag, cancellable from any thread. |
+| `context_windows.h/.cpp` | The compiled model → window fallback table. Single owner. |
+| `errors.h/.cpp` | Typed errors: `NoAvailableBackendError`, `ProviderNotRegisteredError`, `ProviderError`, `CancelledError`, `InvalidRequestError`. |
+
+**Two rules govern this package**, both in [CLAUDE.md](CLAUDE.md) → Invariants: *⚠ The harness never includes backends* and *⚠ Capability probes never leak a cast*.
+
+**The IR never grows provider-specific fields.** When a provider needs something nothing else has, it belongs in that backend's config entry or its adapter. The moment one vendor's concept appears in `types.h`, every other backend has to decide what to do about it.
+
+**The transient region.** `ChatRequest::Transient` carries per-turn state that must never reach the wire or a session file — a RAG span, the side-request flag, a response schema. It is a nested struct with **no `to_json` anywhere**, so serializing it does not compile. Use `durable_messages()` for the history view. If a RAG blob reaches persisted history it is re-sent on every later turn, growing the prompt without bound — silent, and expensive.
+
+**Routing** resolves in three rungs, each trying the literal name then the normalized form (lowercased, `.`/`:` → `-`): exact backend key, then a backend entry's `model:` field, then `models.default`. A backend key beats another entry's model field, or `-m <key>` would be ambiguous.
+
+**Adding a backend.** Implement `harness::LLMProvider` in `backends/`, translating to and from the IR. Inherit a capability interface only if you have that capability — the Harness discovers it. Add a row to `kBackendTypeNames` in `harness/config.cpp` for the config `type:`. Model the shape on `backends/mock.h`, and honour cancellation *between chunks*, not just at entry.
+
 ---
 
 ## `lib/src/cli/tests/` — tests
@@ -155,10 +177,15 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `harness/config_test.cpp` | The loader: typed parsing, `${ENV}` expansion, case-collision rejection, the template byte-match, and a garbage-input battery asserting a message rather than a crash. |
 | `harness/config_edit_test.cpp` | The golden-file suite: byte-identical round trips over a comment-dense fixture, comment ownership on delete, CRLF and final-newline handling, and the atomic-failure paths. |
 | `harness/paths_test.cpp` | `APOGEE_HOME` resolution, the `~/.apogee` default, and the no-home error. |
+| `harness/types_test.cpp` | The IR: both content shapes round-tripping, tool calls, typed errors on bad input, and the transient-exclusion contract. |
+| `harness/harness_test.cpp` | Router precedence table-tested across all three rungs, cancellation mid-stream, capability probes, `ModelBehavior`, and the context-window table. |
+| `backends/mock_test.cpp` | MockProvider contract tests — they pin the `LLMProvider` interface itself, so a later item changing it breaks them. |
 | `support/fake_command.h/.cpp` | A `Command` defined in test code — the injectable seam, exercised. |
 | `support/env_guard.h/.cpp` | RAII environment-variable and temp-directory guards. Config resolution reads the environment, so exercising it means mutating the environment — and a leaked change would steer every test after it. |
 
 Beyond those, `tests/CMakeLists.txt` registers `cli.*` ctest cases that run the built `apogee` binary as a subprocess, covering the contract as a user meets it (bare invocation prints help and exits 0; `--version`; unknown subcommand fails). Running a target is not linking it, so the link policy still holds.
+
+`harness.layering` is a `cmake -P` check that no file under `source/harness/` includes `backends/`. C++ cannot enforce this the way Go's import cycles do — the include would compile fine and the layering would be silently gone — so it is checked mechanically, and it refuses to run against an empty source list so it cannot pass vacuously.
 
 The largest of those is `cli.config_lifecycle`, driven by [`tests/config_e2e.cmake`](../../src/cli/tests/config_e2e.cmake): it runs the real binary through init → add-backend → roles → get → delete and asserts the file came back byte-identical, all under a throwaway `APOGEE_HOME`. It is a `cmake -P` script rather than a shell script so it runs on all six targets — a `.sh` would silently skip on the Windows runners, which is exactly where a path or line-ending bug would surface.
 

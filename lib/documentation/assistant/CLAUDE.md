@@ -64,6 +64,31 @@ The first of them is now enforced in code:
 
 **Enforcement.** The golden-file suite in `tests/harness/config_edit_test.cpp` asserts byte-identical round trips over a comment-dense fixture, plus CRLF preservation and the atomic-failure paths. `apogee config` is a thin caller — it formats no YAML of its own.
 
+### ⚠ The harness never includes backends
+
+**Rule.** The dependency runs one way: `backends/` includes `harness/`, never the reverse. When the harness needs something only a backend knows, it crosses as **plain data** — that is what `harness::ModelBehavior` is.
+
+**Why.** In Go this is free: the reverse edge is an import cycle and the build fails, which is why Ommi has the same seam. C++ gives you nothing — a `#include "backends/anthropic.h"` in the harness compiles perfectly and the layering is silently gone. Once it is gone, the harness knows about vendors, and "backend-agnostic core" stops being true in the one place it has to be.
+
+**Sub-rules.**
+- A capability a backend has and the harness needs to ask about becomes a **capability interface** in `provider.h`, discovered by the Harness (see below) — not an include.
+- Model-family knowledge crosses as `ModelBehavior`, plain strings and bools.
+- The same rule will apply to `agentloop/`: it consumes the IR and the Harness, not backends.
+
+**Enforcement.** The `harness.layering` ctest case (`tests/layering.cmake`) greps every harness source for the forbidden include and fails naming the file. It refuses to run against an empty source list, so it cannot pass vacuously.
+
+### ⚠ Capability probes never leak a cast
+
+**Rule.** Optional provider capabilities (`EmbeddingCapable`, `StatusReporting`, `InTextToolCalling`, `ModelBehaviorReporting`) are **discovered by the Harness**. Callers ask a plain typed question — `harness.can_embed(model)`, `harness.model_behavior_for(model)` — and never write a `dynamic_cast` of their own.
+
+**Why.** Ommi gated embedding behind a hardcoded allowlist of backend types on the reasoning that its only cloud vendor could not embed; that rationale did not survive OpenAI and Google, both of which embed over their APIs. A capability question answered by testing a type turns into a switch over vendors that has to be edited every time one is added. Asking the object is the version that keeps working.
+
+**Sub-rules.**
+- A probe on an unroutable model answers "no" rather than throwing — a caller asking about a capability should not have to handle a routing failure too.
+- `ModelBehavior`'s zero value means *unknown*, and **unknown must be treated as permissive**: failing to recognise a tool call means nothing dispatches AND the raw markup is printed to the user as if it were the answer.
+
+**Enforcement.** `tests/harness/harness_test.cpp` → the `[harness][capability]` and `[harness][behavior]` cases.
+
 ### ⚠ Smart pointers, never owning raw pointers
 
 The Code Style rule below is lint-enforced, not aspirational: `make -C lib/src/cli lint` fails on a raw `new`/`delete`, an owning raw pointer, or `malloc` anywhere in the CLI's `source/` or `tests/` (`cppcoreguidelines-owning-memory`, `cppcoreguidelines-no-malloc`, `modernize-make-unique`/`make-shared`, promoted to errors in `.clang-tidy`). `third_party/` is out of scope by construction. CI runs it on every push.
@@ -83,7 +108,7 @@ The Code Style rule below is lint-enforced, not aspirational: `make -C lib/src/c
 
 **Where new source code goes (decided 2026-08-24; app-owned builds confirmed 2026-08-25):** `lib/src/<app>/` — one directory per application, each a **self-contained CMake project** owning its own build, presets, dependencies, third-party pins, and style config, with `source/` and `tests/` as its first level. Nothing above `lib/src/<app>/` needs to know how that application compiles.
 
-- **`lib/src/cli/`** — the CLI application (all of v0.1.0). Packages under `source/`: `commands/`, `harness/`, `platform/`, `version/` (built), and `backends/`, `agentloop/`, `embedstore/`, `httpserver/`, `mcp/` (reserved header stubs, mirroring Ommi's package map — each names the backlog item that fills it). `assets/` holds the starter `config.yaml`, which a test keeps byte-identical to the template compiled into the binary.
+- **`lib/src/cli/`** — the CLI application (all of v0.1.0). Packages under `source/`: `commands/`, `harness/` (config engine + the provider interface, IR, and router), `backends/` (provider implementations — `mock` so far), `platform/`, `version/` (built), and `agentloop/`, `embedstore/`, `httpserver/`, `mcp/` (reserved header stubs, mirroring Ommi's package map — each names the backlog item that fills it). `assets/` holds the starter `config.yaml`, which a test keeps byte-identical to the template compiled into the binary.
 - **`lib/src/darwin/` · `lib/src/linux/` · `lib/src/windows/`** — the GUI applications, one per platform (future — down the road, not yet planned; they will drive the CLI over the stdio machine mode). Each joins the `APPS` list in `cicd.sh` when it lands.
 
 The per-item file breakdown is in the [`backlog/`](../backlog/README.md) documents' **Seam + files** sections, which are written against this layout.

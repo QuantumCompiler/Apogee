@@ -46,12 +46,28 @@ add_library(apogee_core STATIC
     harness/config_template.cpp
     harness/config_edit.h
     harness/config_edit.cpp
+    harness/errors.h
+    harness/errors.cpp
+    harness/cancellation.h
+    harness/cancellation.cpp
+    harness/types.h
+    harness/types.cpp
+    harness/behavior.h
+    harness/behavior.cpp
+    harness/provider.h
+    harness/provider.cpp
+    harness/context_windows.h
+    harness/context_windows.cpp
+    harness/harness.h
+    harness/harness.cpp
+
+    backends/backends.h
+    backends/mock.h
+    backends/mock.cpp
 
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and
-    # so `#include "backends/backends.h"` compiles from the first day.
-    harness/harness.h
-    backends/backends.h
+    # so `#include "agentloop/agentloop.h"` compiles from the first day.
     agentloop/agentloop.h
     embedstore/embedstore.h
     httpserver/httpserver.h
