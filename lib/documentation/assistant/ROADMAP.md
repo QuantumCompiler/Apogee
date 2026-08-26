@@ -19,7 +19,7 @@ How we work: features get discussed in chat, written up here (and in [SPEC.md](S
 The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](SPEC.md) → Background for the lineage and divergences): a single self-contained C++ binary shipping `apogee complete` and `apogee chat` over all four backends — Anthropic, OpenAI, and Google called directly with streaming, native tool use, and typed thinking display, plus in-process llama.cpp — on top of the config engine, harness core, and shared agent loop, with persistent resumable sessions, a single-status-line terminal UX, and a clean install contract (`apogee check` passes on a fresh keyless, modelless install). Ten backlog items, in build order:
 
 - [x] C++ project skeleton (CMake, tests, CI, CLI scaffold) — *shipped 2026-08-25, [Milestone A](MILESTONES.md#milestone-a--project-foundation)*
-- [ ] Config engine (typed loader + comment-preserving mutation)
+- [x] Config engine (typed loader + comment-preserving mutation)
 - [ ] Harness core (LLMProvider, message IR, router)
 - [ ] Anthropic backend (direct Messages API + SSE)
 - [ ] `apogee complete` — the walking-skeleton closer

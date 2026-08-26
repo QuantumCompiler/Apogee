@@ -14,6 +14,12 @@
 # The standardized picks (decided once, project-wide -- downstream work consumes
 # these rather than reopening them):
 #   JSON        nlohmann/json   -- wired below
+#   YAML        yaml-cpp        -- wired below. READ PATH ONLY: the config
+#                                  engine never serializes through it, because
+#                                  marshaling a struct back to YAML strips
+#                                  comments and reorders keys. Writes go
+#                                  through the text-surgery helpers in
+#                                  harness/config_edit.h. See config-engine.
 #   CLI parsing CLI11           -- wired below
 #   Tests       Catch2 v3       -- wired below (only when APOGEE_BUILD_TESTS)
 #   HTTP client libcurl         -- the standing pick, NOT wired yet. It arrives
@@ -46,7 +52,32 @@ FetchContent_Declare(CLI11
     FIND_PACKAGE_ARGS NAMES CLI11
 )
 
+FetchContent_Declare(yaml-cpp
+    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+    GIT_TAG        0.8.0
+    GIT_SHALLOW    TRUE
+    SYSTEM
+    FIND_PACKAGE_ARGS NAMES yaml-cpp
+)
+set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_FORMAT_SOURCE OFF CACHE BOOL "" FORCE)
+
 FetchContent_MakeAvailable(nlohmann_json CLI11)
+
+# yaml-cpp 0.8.0 (the newest release; tagged 2023) opens with
+# cmake_minimum_required(VERSION 3.4), and CMake >= 4.0 refuses to configure a
+# project asking for < 3.5 compatibility. This raises the floor for that
+# subproject only, then restores the previous value so Apogee's own targets and
+# every other dependency keep the project's real policy settings.
+#
+# Revisit when yaml-cpp cuts a release past 0.8.0 -- the fix is already on its
+# master branch. Pinning a master SHA instead was rejected: a pinned release
+# with a two-line shim is easier to reason about than an unreleased commit.
+set(APOGEE_SAVED_POLICY_MINIMUM "${CMAKE_POLICY_VERSION_MINIMUM}")
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+FetchContent_MakeAvailable(yaml-cpp)
+set(CMAKE_POLICY_VERSION_MINIMUM "${APOGEE_SAVED_POLICY_MINIMUM}")
 
 if(APOGEE_BUILD_TESTS)
     FetchContent_Declare(Catch2

@@ -28,4 +28,4 @@
 - [ ] A capability probe (can_embed) is queryable without dynamic_cast leaking into callers; unknown backend is a typed error
 - [ ] Zero-value ModelBehavior is defined and documented as 'unknown = permissive'
 
-**Scope note.** earmarked for v0.1.0 (build after [config-engine.md](config-engine.md)).
+**Scope note.** earmarked for v0.1.0. Gate satisfied: the config engine shipped 2026-08-25 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone B) — this is now the topmost claimable item. Config types live in `lib/src/cli/source/harness/config.h`; consume `BackendConfig`/`Config` rather than re-reading the file.

@@ -1,5 +1,7 @@
 #include "platform/platform.h"
 
+#include <cstdlib>
+
 // The only place in Apogee where a platform `#ifdef` is expected. Everything
 // else asks this header instead. An unrecognized platform is a hard compile
 // error on purpose: silently degrading to "Unknown" would let an unsupported
@@ -50,6 +52,25 @@ std::string_view to_string(Architecture arch) noexcept {
             return "arm64";
     }
     return "unknown";
+}
+
+std::optional<std::string> home_directory() {
+#if defined(_WIN32)
+    if (const char* profile = std::getenv("USERPROFILE"); profile != nullptr && *profile != '\0') {
+        return std::string{profile};
+    }
+    const char* drive = std::getenv("HOMEDRIVE");
+    const char* path = std::getenv("HOMEPATH");
+    if (drive != nullptr && *drive != '\0' && path != nullptr && *path != '\0') {
+        return std::string{drive} + path;
+    }
+    return std::nullopt;
+#else
+    if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+        return std::string{home};
+    }
+    return std::nullopt;
+#endif
 }
 
 std::string host_target() {

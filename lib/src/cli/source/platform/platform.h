@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -42,5 +43,17 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 /// "windows-arm64". One vocabulary across the build system and the binary, so
 /// a target name never means two slightly different things.
 [[nodiscard]] std::string host_target();
+
+/// The current user's home directory, or nullopt when it cannot be determined.
+///
+/// POSIX reads $HOME; Windows prefers %USERPROFILE% and falls back to
+/// %HOMEDRIVE%%HOMEPATH%. Returning nullopt rather than a guess is deliberate:
+/// every caller here resolves a path it is about to WRITE to, and writing to a
+/// wrong-but-plausible directory is worse than a clear error.
+///
+/// Callers wanting Apogee's data directory should ask
+/// `apogee::harness::apogee_home()` instead -- it layers the APOGEE_HOME
+/// override on top of this.
+[[nodiscard]] std::optional<std::string> home_directory();
 
 }  // namespace apogee::platform

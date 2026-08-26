@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include "commands/config_cmd.h"
 #include "commands/version_command.h"
 
 namespace apogee::commands {
@@ -51,6 +52,7 @@ void CommandRegistry::bind_all(CLI::App& root, const RootContext& context) {
 
 CommandRegistry default_registry() {
     CommandRegistry registry;
+    registry.add(std::make_unique<ConfigCommand>());
     registry.add(std::make_unique<VersionCommand>());
     return registry;
 }

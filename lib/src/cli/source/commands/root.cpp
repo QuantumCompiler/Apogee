@@ -23,10 +23,13 @@ RootCommand::RootCommand(CommandRegistry registry)
     : registry_{std::move(registry)}, app_{std::make_unique<CLI::App>(kDescription, "apogee")} {
     app_->set_version_flag("-V,--version", version::full(), "Print version information and exit");
 
+    // Deliberately NOT ->check(CLI::ExistingFile): `apogee config init --config
+    // <new path>` has to name a file that does not exist yet. A missing config
+    // is reported by the config engine, whose message names the fix ("run
+    // 'apogee config init'") rather than CLI11's generic one.
     app_->add_option("--config", context_.config_path,
-                     "Path to the config file (default: the standard per-user location)")
-        ->envname("APOGEE_CONFIG")
-        ->check(CLI::ExistingFile);
+                     "Path to the config file (default: ~/.apogee/config/config.yaml)")
+        ->envname("APOGEE_CONFIG");
 
     // At most one subcommand per invocation; zero is legal and prints help
     // (handled in run(), so that `apogee` with no arguments is a success, not

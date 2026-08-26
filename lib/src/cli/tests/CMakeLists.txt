@@ -16,8 +16,20 @@ add_executable(apogee_tests
     platform/platform_test.cpp
     commands/registry_test.cpp
     commands/root_test.cpp
+    harness/config_test.cpp
+    harness/config_edit_test.cpp
+    harness/paths_test.cpp
     support/fake_command.h
     support/fake_command.cpp
+    support/env_guard.h
+    support/env_guard.cpp
+)
+
+# The template-drift test reads the checked-in sample and compares it byte for
+# byte with the template compiled into the binary. It needs to find the asset
+# without depending on the working directory ctest happens to use.
+target_compile_definitions(apogee_tests PRIVATE
+    APOGEE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../assets"
 )
 
 # So tests can `#include "support/fake_command.h"` the same way source files
@@ -50,3 +62,15 @@ set_tests_properties(cli.help_lists_subcommands PROPERTIES
 
 add_test(NAME cli.unknown_subcommand_fails COMMAND apogee no-such-command)
 set_tests_properties(cli.unknown_subcommand_fails PROPERTIES WILL_FAIL TRUE)
+
+add_test(NAME cli.help_lists_config COMMAND apogee --help)
+set_tests_properties(cli.help_lists_config PROPERTIES PASS_REGULAR_EXPRESSION "config")
+
+# `apogee config` end to end against the real binary, under a throwaway
+# APOGEE_HOME. Driven by cmake -P so it runs on every target, Windows included.
+add_test(NAME cli.config_lifecycle
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE_BIN=$<TARGET_FILE:apogee>
+        -DAPOGEE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/config-e2e-home
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/config_e2e.cmake"
+)

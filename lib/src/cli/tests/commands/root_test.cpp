@@ -131,10 +131,16 @@ TEST_CASE("the config flag reaches the command at callback time", "[commands][ro
     std::filesystem::remove(config);
 }
 
-TEST_CASE("a config flag pointing at a missing file is rejected", "[commands][root]") {
+TEST_CASE("a config flag may name a file that does not exist yet", "[commands][root]") {
+    // Deliberately NOT rejected at parse time. `apogee config init --config
+    // <new path>` has to name a file it is about to create, and a command that
+    // needs an existing config reports the miss itself -- with a message that
+    // names the fix ("run 'apogee config init'") rather than CLI11's generic
+    // "does not exist".
     RootCommand root;
 
-    REQUIRE(run_with(root, {"--config", "/definitely/not/a/real/apogee.yaml", "version"}) != 0);
+    REQUIRE(run_with(root, {"--config", "/definitely/not/a/real/apogee.yaml", "version"}) == 0);
+    CHECK(root.context().config_path == "/definitely/not/a/real/apogee.yaml");
 }
 
 TEST_CASE("an absent config flag leaves the context empty for default resolution",

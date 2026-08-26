@@ -36,10 +36,20 @@ add_library(apogee_core STATIC
     commands/root.cpp
     commands/version_command.h
     commands/version_command.cpp
+    commands/config_cmd.h
+    commands/config_cmd.cpp
+
+    harness/paths.h
+    harness/paths.cpp
+    harness/config.h
+    harness/config.cpp
+    harness/config_template.cpp
+    harness/config_edit.h
+    harness/config_edit.cpp
 
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and
-    # so `#include "harness/harness.h"` compiles from the first day.
+    # so `#include "backends/backends.h"` compiles from the first day.
     harness/harness.h
     backends/backends.h
     agentloop/agentloop.h
@@ -56,7 +66,7 @@ target_compile_definitions(apogee_core PRIVATE
     APOGEE_BUILD_DATE="${APOGEE_BUILD_DATE}"
 )
 
-target_link_libraries(apogee_core PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json)
+target_link_libraries(apogee_core PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp)
 
 apogee_set_target_options(apogee_core)
 

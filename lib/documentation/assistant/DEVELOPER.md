@@ -61,6 +61,8 @@ Apogee/
         │   │   ├── ApogeeDependencies.cmake — FetchContent declarations + how to add a dependency
         │   │   ├── ApogeeLinkPolicy.cmake   — Configure-time assertion that nothing links the CLI executable
         │   │   └── ApogeeWarnings.cmake     — Shared warning flags for first-party targets
+        │   ├── assets/          — Shipped data files: config.yaml (the starter config, held
+        │   │                      byte-identical to the embedded template by a test)
         │   ├── third_party/     — Vendored/pinned code, never edited in-tree (see its README)
         │   ├── build/           — Build output, one dir per preset (git-ignored)
         │   ├── source/          — main.cpp + one package dir per concern
@@ -89,7 +91,7 @@ That split is what makes surface parity structural rather than something a revie
 | `version/` | Build identity — semantic version, git commit, build date, target — stamped in at configure time. `version.h/.cpp` |
 | `platform/` | **The portability seam.** The one place platform `#ifdef`s are expected; everything else asks this header. `platform.h/.cpp` |
 | `commands/` | The CLI scaffold: the `Command` interface, the registry, the root command, and the built-in commands. |
-| `harness/` | *Reserved* — LLMProvider interface, message IR, router (`harness-core` item). |
+| `harness/` | **The config engine** — typed loader, `${ENV}` expansion, the starter template, the comment-preserving edit helpers, and Apogee's on-disk paths. Still to land here: the LLMProvider interface, message IR, and router (`harness-core` item). |
 | `backends/` | *Reserved* — one provider implementation per model source (`anthropic-backend` onward). |
 | `agentloop/` | *Reserved* — the shared model→tool→model loop and its Reporter seam (`agentloop-core` item). |
 | `embedstore/` | *Reserved* — chunk storage and retrieval (`embedstore-lexical-rag` item). |
@@ -106,6 +108,7 @@ Reserved packages carry a documented header and no code. They exist so every lat
 | `registry.h/.cpp` | `CommandRegistry` — owns commands, rejects duplicate names, binds them all to an app. `default_registry()` is the built-in set. |
 | `root.h/.cpp` | `RootCommand` — persistent flags (`--config`), the version flag, and `run(argc, argv)` → exit code. |
 | `version_command.h/.cpp` | `apogee version`. The first real subcommand, proving the path end to end. |
+| `config_cmd.h/.cpp` | `apogee config` and its nine subcommands. A thin caller — it formats no YAML of its own; every mutation goes through `harness/config_edit.h`. |
 
 **Adding a subcommand** touches exactly two places: the command's own `.h`/`.cpp` pair, and one `registry.add(...)` line in `default_registry()`. It then appears in `apogee --help` with no other edit — `main.cpp` never grows.
 
@@ -116,6 +119,25 @@ A command signals failure by throwing `CLI::RuntimeError(code)`; `RootCommand::r
 `platform/` exposes the build's OS, architecture, and release-target name. The target name is one of the exact six strings shared by `cicd.sh --platform`, the CMake presets, the CI matrix, and the binary itself; `tests/platform/platform_test.cpp` is what keeps them one vocabulary.
 
 Mechanisms that land here as later items need them: process spawning (vendor-CLI backends), PTY and terminal control (the chat UX layer), file-mode enforcement (the `0600` secrets rule), and socket peer checks (the admin plane). Each arrives as a declaration in `platform.h` with one definition per platform. **Where a mechanism has no Windows equivalent, the owning item records the skip** rather than leaving the gap silent.
+
+---
+
+### `harness/` — the config engine
+
+| File | Purpose |
+|---|---|
+| `paths.h/.cpp` | Apogee's on-disk layout, rooted at `~/.apogee` and relocatable with `APOGEE_HOME`. `default_config_path()` is what a command uses when `--config` is absent. |
+| `config.h/.cpp` | The **read path**: `Config`/`BackendConfig` structs, `parse_config`, `load_config`, `expand_env`, and the backend-type table. The only code that uses yaml-cpp. |
+| `config_template.cpp` | The starter config, embedded as a raw string literal **generated from `assets/config.yaml`**. A test holds the two byte-identical. |
+| `config_edit.h/.cpp` | The **write path**: pure text-surgery transforms plus `edit_config_file`, the only thing in Apogee that writes a config. |
+
+**The rule that governs this package** is in [CLAUDE.md](CLAUDE.md) → *⚠ One config mutation path*: every config change goes through `config_edit.h`, and nothing ever serializes a `Config` back to disk. Reading is `load_config`; writing is text surgery. They are separate paths on purpose.
+
+**Why text surgery.** yaml-cpp — like every mainstream YAML library — discards comments on parse and reorders keys on emit. A config file's comments are most of its documentation, so load-modify-save would silently delete the user's content. The helpers instead locate the affected lines and splice them, leaving every other byte alone: CRLF stays CRLF, a missing final newline stays missing, and a comment block documenting the *next* entry survives deleting this one.
+
+**Adding an edit helper.** Write it as a pure `std::string(std::string_view, …)` transform in `config_edit.cpp`, next to its siblings. Give it a golden-file test in `tests/harness/config_edit_test.cpp` that asserts a byte-identical round trip against the comment-dense fixture, and route the command layer through `edit_config_file` so it inherits re-parse validation and the atomic write for free. Do not add a second function that opens the file itself.
+
+**Widening the backend type set.** Add a row to `kBackendTypeNames` in `config.cpp` and an enumerator in `config.h`. The loader dispatches through that table, so nothing else changes — and `every backend type round-trips through its name` fails if the two ever disagree. Each widening is a recorded decision in the item that makes it, never a silent edit.
 
 ---
 
@@ -130,9 +152,15 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `platform/platform_test.cpp` | Host detection and the six-target name vocabulary. |
 | `commands/registry_test.cpp` | Registration, lookup, ordering, duplicate and null rejection. |
 | `commands/root_test.cpp` | The real parsing path: help, subcommand dispatch, `--config`, unknown commands. |
+| `harness/config_test.cpp` | The loader: typed parsing, `${ENV}` expansion, case-collision rejection, the template byte-match, and a garbage-input battery asserting a message rather than a crash. |
+| `harness/config_edit_test.cpp` | The golden-file suite: byte-identical round trips over a comment-dense fixture, comment ownership on delete, CRLF and final-newline handling, and the atomic-failure paths. |
+| `harness/paths_test.cpp` | `APOGEE_HOME` resolution, the `~/.apogee` default, and the no-home error. |
 | `support/fake_command.h/.cpp` | A `Command` defined in test code — the injectable seam, exercised. |
+| `support/env_guard.h/.cpp` | RAII environment-variable and temp-directory guards. Config resolution reads the environment, so exercising it means mutating the environment — and a leaked change would steer every test after it. |
 
 Beyond those, `tests/CMakeLists.txt` registers `cli.*` ctest cases that run the built `apogee` binary as a subprocess, covering the contract as a user meets it (bare invocation prints help and exits 0; `--version`; unknown subcommand fails). Running a target is not linking it, so the link policy still holds.
+
+The largest of those is `cli.config_lifecycle`, driven by [`tests/config_e2e.cmake`](../../src/cli/tests/config_e2e.cmake): it runs the real binary through init → add-backend → roles → get → delete and asserts the file came back byte-identical, all under a throwaway `APOGEE_HOME`. It is a `cmake -P` script rather than a shell script so it runs on all six targets — a `.sh` would silently skip on the Windows runners, which is exactly where a path or line-ending bug would surface.
 
 **Tests must stay hermetic:** no network, no models, no writes outside the test's own temp directory. A test that needs a live provider is not a unit test. Fixtures go through the injectable seams — that discipline starts at the first interface because retrofitting it in C++ is far more painful than in Go.
 
@@ -189,6 +217,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 | Concern | Pick | Status |
 |---|---|---|
 | JSON | nlohmann/json `v3.11.3` | Wired |
+| YAML | yaml-cpp `0.8.0` | Wired — **read path only.** The config engine never serializes through it (see `harness/`). Its CMakeLists predates a CMake policy removal, so `CMAKE_POLICY_VERSION_MINIMUM` is raised around its `FetchContent_MakeAvailable` and restored immediately; revisit when it cuts a release past 0.8.0. |
 | CLI parsing + completions | CLI11 `v2.4.2` | Wired |
 | Tests | Catch2 `v3.7.1` | Wired (only when `APOGEE_BUILD_TESTS`) |
 | HTTP client | **libcurl** | Standing pick, **not wired yet** — it arrives with `anthropic-backend`, which owns `find_package(CURL)` and the platform TLS backends. Wiring it now would break the build on hosts with no curl development package, for no present gain. |
