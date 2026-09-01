@@ -28,6 +28,8 @@ add_executable(apogee_tests
     backends/factory_test.cpp
     backends/openai_test.cpp
     backends/google_test.cpp
+    backends/llamacpp_test.cpp
+    backends/chat_template_test.cpp
     agentloop/conformance_test.cpp
     commands/helpers_test.cpp
     commands/thinking_view_test.cpp
@@ -47,6 +49,7 @@ add_executable(apogee_tests
     support/env_guard.h
     support/env_guard.cpp
     support/fake_transport.h
+    support/fake_llama.h
     support/fake_transport.cpp
 )
 
@@ -117,6 +120,7 @@ add_test(NAME cli.complete_lifecycle
 add_test(NAME cli.no_listen_symbols
     COMMAND "${CMAKE_COMMAND}"
         -DAPOGEE_CORE_LIB=$<TARGET_FILE:apogee_core>
+        -DAPOGEE_BINARY=$<TARGET_FILE:apogee>
         -P "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_symbols.cmake"
 )
 

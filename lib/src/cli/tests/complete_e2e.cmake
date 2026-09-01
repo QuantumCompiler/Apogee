@@ -35,7 +35,18 @@ function(apogee_run expected_code)
         ERROR_VARIABLE err
         ${extra}
     )
-    if(NOT code EQUAL expected_code)
+    # `any-failure` is for a case whose exit code legitimately differs by build
+    # configuration -- the only one so far is a local backend, which fails at
+    # CONSTRUCTION (a user error) without llama.cpp compiled in and at REQUEST
+    # time (a backend error) with it. Pinning either number would make this
+    # suite pass in one configuration and fail in the other.
+    if(expected_code STREQUAL "any-failure")
+        if(code EQUAL 0)
+            message(FATAL_ERROR
+                "apogee ${RUN_UNPARSED_ARGUMENTS}\n  expected a failure, got exit 0\n"
+                "  stdout: ${out}\n  stderr: ${err}")
+        endif()
+    elseif(NOT code EQUAL expected_code)
         message(FATAL_ERROR
             "apogee ${RUN_UNPARSED_ARGUMENTS}\n  expected exit ${expected_code}, got ${code}\n"
             "  stdout: ${out}\n  stderr: ${err}")
@@ -48,6 +59,13 @@ function(expect_contains haystack needle what)
     string(FIND "${haystack}" "${needle}" found)
     if(found EQUAL -1)
         message(FATAL_ERROR "${what}: expected to find '${needle}' in:\n${haystack}")
+    endif()
+endfunction()
+
+function(expect_not_contains haystack needle what)
+    string(FIND "${haystack}" "${needle}" found)
+    if(NOT found EQUAL -1)
+        message(FATAL_ERROR "${what}: expected NOT to find '${needle}' in:\n${haystack}")
     endif()
 endfunction()
 
@@ -113,10 +131,19 @@ expect_contains("${APOGEE_OUT}" "mock response" "an image attachment reaches the
 apogee_run(0 complete --image "${APOGEE_WORK_DIR}/pixel.png" --image "${APOGEE_WORK_DIR}/pixel.png" "two images")
 expect_contains("${APOGEE_OUT}" "mock response" "--image is repeatable")
 
-# --- a local backend refuses images, with a clear message -------------------
+# --- an explicitly named backend that cannot build says so ------------------
+# The default build has no llama.cpp in it, so a llamacpp backend is configured
+# but unavailable. The point of these two assertions is the SECOND one: before
+# the capability probe landed, `-m local` fell through to the default backend
+# and answered from the mock, which is the worst possible response -- a real
+# answer from a model the user did not choose, with nothing to indicate it.
+# Two configurations, two legitimate failure points: without llama.cpp compiled
+# in the backend cannot be CONSTRUCTED, and with it the GGUF cannot be LOADED.
+# Both must fail, both must name the backend, and neither may answer.
 apogee_run(0 config add-backend local --type llamacpp --model-path /nonexistent.gguf)
-apogee_run(1 complete -m local --image "${APOGEE_WORK_DIR}/pixel.png" "describe")
-expect_contains("${APOGEE_ERR}" "cannot accept images" "the local backend refuses images")
+apogee_run(any-failure complete -m local "describe")
+expect_contains("${APOGEE_ERR}" "local" "the failing backend is named")
+expect_not_contains("${APOGEE_OUT}" "mock response" "it never falls through to another backend")
 apogee_run(0 config delete-backend local)
 
 # --- --all-backends ---------------------------------------------------------

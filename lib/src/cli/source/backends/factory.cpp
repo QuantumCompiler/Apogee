@@ -4,6 +4,7 @@
 
 #include "backends/anthropic.h"
 #include "backends/google.h"
+#include "backends/llamacpp.h"
 #include "backends/mock.h"
 #include "backends/openai.h"
 #include "harness/errors.h"
@@ -73,9 +74,14 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
                 return nullptr;
             }
         }
-        case harness::BackendType::LlamaCpp:
-            reason = "the local llama.cpp backend has not landed yet";
-            return nullptr;
+        case harness::BackendType::LlamaCpp: {
+            try {
+                return LlamaCppProvider::from_config(name, config);
+            } catch (const harness::ProviderError& e) {
+                reason = e.what();
+                return nullptr;
+            }
+        }
     }
     reason = "unknown backend type";
     return nullptr;

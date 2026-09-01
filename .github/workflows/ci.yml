@@ -16,10 +16,43 @@
 
 name: CI
 
+# Trigger policy (user decision, 2026-08-31): a run starts on a PROPOSED merge,
+# on a COMPLETED merge, or ON REQUEST -- and never on an ordinary push, so
+# work-in-progress commits on a branch with no PR open cost nothing:
+#
+#   pull_request       reviewing a merge before it happens (the gating one)
+#   push: [stable]     the merge itself, plus any direct push to stable
+#   workflow_dispatch  gh workflow run CI --ref <branch>
+#
+# The two branch lists are the same list on purpose: they name the integration
+# branches. Adding one means adding it BOTH places -- a PR into `v0.1.0`, or a
+# merge into it, triggers nothing while only `stable` is listed.
+#
+# These two do not double up. `pull_request` fires for the topic branch's PR;
+# `push` fires only for `stable`, which no topic branch is. (The combination
+# that double-fires is `push: ["**"]` with `pull_request`, which is what this
+# file used to have.)
+#
+# On `pull_request`, note what the ref is: GitHub checks out the PR's synthetic
+# merge ref and sets GITHUB_REF_NAME to `<number>/merge`. That is not a branch
+# on the remote, which is why the fresh-clone job below opts out of PR runs
+# rather than trying to clone it. It is also why the completed-merge half is a
+# push trigger and not `pull_request: [closed]`.
+#
+# Fork PRs run with a read-only token and no secrets. Nothing here needs a
+# secret, so they work -- keep it that way.
+#
+# Note the GitHub constraint the dispatch half depends on: workflow_dispatch is
+# only offered for a workflow that exists on the repository's DEFAULT branch
+# (`stable`). Deleting this file from `stable`, or renaming it there, removes
+# the on-request half entirely. The dispatch reads the trigger list from
+# `stable` but RUNS the workflow file from the ref you select, so per-branch job
+# changes still apply.
 on:
-  push:
-    branches: ["**"]
   pull_request:
+    branches: [stable]
+  push:
+    branches: [stable]
   workflow_dispatch:
 
 concurrency:
@@ -75,11 +108,13 @@ jobs:
         run: make -C lib/src/cli lint
 
   llama:
-    # Compile-proof only — no API use until the llamacpp-backend item lands.
-    # Non-blocking and off the per-push hot path because the Metal/CUDA kernel
-    # build is slow; its job is to catch a pin that stops compiling, not to
-    # gate every change.
-    name: llama.cpp compile proof (non-blocking)
+    # The local-inference configuration. Non-blocking because the Metal/CUDA
+    # kernel build is slow; it catches a pin that stops compiling, and — since
+    # llamacpp-backend shipped 2026-08-31 — that the real LlamaRuntime still
+    # matches llama.cpp's API at the pinned commit.
+    # The default build compiles the "not built in" half of that file, so this
+    # job is the ONLY place the vendor calls are checked at all.
+    name: llama.cpp integration (non-blocking)
     runs-on: macos-14
     continue-on-error: true
     steps:
@@ -89,13 +124,30 @@ jobs:
         run: |
           cmake --preset macos-arm64 -DAPOGEE_ENABLE_LLAMA=ON
           cmake --build build/macos-arm64 -j 3
+      - name: Test, including the no-listen invariant with llama.cpp linked
+        working-directory: lib/src/cli
+        # The invariant this configuration puts at risk: llama.cpp's code now
+        # runs INSIDE the binary that serves an interactive turn, so the symbol
+        # scan of the linked executable is the check that matters most here.
+        run: ctest --test-dir build/macos-arm64 --output-on-failure
 
   fresh-clone:
     # The scripted clean-room check, so the skeleton cannot silently rot: it
-    # clones the pushed branch from scratch and builds it with nothing cached.
-    # Skipped on pull_request, where the head branch may live on a fork.
+    # clones the branch from scratch and builds it with nothing cached.
+    #
+    # It clones from the REMOTE, so it proves what is pushed, not what a runner
+    # checked out -- dispatching a branch with unpushed commits tests the older
+    # state, silently and successfully.
+    #
+    # Excluded from PR runs, and the exclusion is load-bearing rather than a
+    # cost saving: on `pull_request` GITHUB_REF_NAME is `<number>/merge`, and
+    # `cicd.sh --fresh --branch` hands that to `git clone --branch`, which
+    # resolves refs/heads and refs/tags only -- never refs/pull. Every PR run
+    # would fail here. A fork's head branch is not on this remote at all, which
+    # is the second reason. Written as != 'pull_request' so a dispatch still
+    # runs it; `== 'push'` would silently disable it for dispatches.
     name: clean-room build (non-blocking)
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: macos-14
     continue-on-error: true
     steps:

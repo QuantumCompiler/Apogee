@@ -79,6 +79,15 @@ struct BackendConfig {
 
     std::optional<std::int64_t> max_tokens;
     std::optional<double> temperature;
+
+    /// Seconds of inactivity after which a local backend releases its model.
+    ///
+    /// Local only, and unset means "stay resident" -- a loaded model is the
+    /// point of in-process inference, so giving it back has to be asked for.
+    /// It exists because that model is the largest thing the process holds:
+    /// a long-lived `apogee chat` that has switched to a cloud backend should
+    /// not keep 16GB pinned for a conversation it is no longer having.
+    std::optional<std::int64_t> idle_unload_seconds;
 };
 
 /// The `models:` role pointers.

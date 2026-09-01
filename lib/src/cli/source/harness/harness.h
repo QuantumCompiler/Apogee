@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -164,6 +165,22 @@ public:
 
     /// Whether the backend serving `model` puts tool calls in the text stream.
     [[nodiscard]] bool uses_in_text_tool_calls(std::string_view model) const noexcept;
+
+    /// Exact prompt-token count for `request` on `model`, when the backend
+    /// owns a tokenizer and can answer cheaply. `std::nullopt` means "use the
+    /// estimate" -- an unroutable model, a backend with no tokenizer, or a
+    /// provider that declined this particular request.
+    [[nodiscard]] std::optional<std::int64_t> count_prompt_tokens(
+        std::string_view model, const ChatRequest& request) const noexcept;
+
+    /// Whether the backend serving `model` accepts image parts.
+    ///
+    /// **True for an unknown or unroutable model.** A provider that does not
+    /// declare the capability is assumed capable: every cloud vendor accepts
+    /// images, so pre-refusing an attachment on a backend we cannot ask would
+    /// be the expensive direction of a wrong guess -- the provider itself will
+    /// give a better error than we can invent.
+    [[nodiscard]] bool accepts_images(std::string_view model) const noexcept;
 
     /// The behavior profile for `model`, or the permissive zero value.
     [[nodiscard]] ModelBehavior model_behavior_for(std::string_view model) const;

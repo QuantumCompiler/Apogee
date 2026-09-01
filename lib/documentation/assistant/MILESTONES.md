@@ -369,3 +369,46 @@ One stale test surfaced rather than one bug: `an unimplemented backend type name
 The `/model`-carries-history claim was verified rather than assumed. `/model` only assigns `session.backend` — the claim rests entirely on every translator rendering a history it did not produce, which is exactly where the three dialects diverge most. `a mid-session /model switch carries the whole history` builds one transcript containing a tool call and its result and requires all three translators to render every turn of it. Mutation-tested: dropping the `function_call_output` branch from the OpenAI translator turns it red. The first draft of that test did *not* bite — it asserted on the tool result `"42"`, which also matched the assistant's "The answer is 42". The result value is now a token that appears nowhere else.
 
 **Standing caveat, unchanged.** The live-API half of these acceptance criteria is unverified for all three vendors — every test here runs against recorded fixtures through `FakeTransport`. Confirming real traffic needs the user's keys.
+
+## Milestone J — Local inference
+
+**Goal.** Link llama.cpp into the process and let the KV cache simply *stay alive* between turns. This is the largest single simplification Apogee takes over Ommi: an entire on-disk prompt-cache apparatus — cache files, fingerprinting, an M-RoPE replay self-heal, rules about what may never be written into a cache — existed only to move KV state between processes that could not share memory. In-process, all of it collapses into arithmetic over a token prefix.
+
+### 2026-08-31 — `LlamaCppProvider`, KV sessions, and the capability probes
+
+**What was built**
+
+- [x] **The runtime seam** (`source/backends/llama_runtime.h`, `llama_real.cpp`) — the slice of llama.cpp the provider needs, behind an interface. `llama_real.cpp` is one `#if`: the real C-API implementation when `APOGEE_ENABLE_LLAMA=ON`, and a "not built in" answer otherwise. Every raw handle is wrapped in a `unique_ptr` with a custom deleter at that boundary and never escapes it.
+- [x] **`LlamaCppProvider`** (`source/backends/llamacpp.h/.cpp`) — model lifecycle, one live context per conversation, a throwaway context per side request, streaming with cancellation between tokens, exact usage on both sides, and configurable idle unload.
+- [x] **KV reuse as prefix arithmetic** (`source/backends/llamacpp_tokens.h/.cpp`) — the cache's entire decision is the longest common token prefix between what is decoded and what the next turn sends. That is also what makes it **self-correcting**: a compaction, a `/model` switch, or a resumed session each simply yield a shorter prefix, with no special case anywhere.
+- [x] **Chat templates** (`source/backends/chat_template.h/.cpp`) — ChatML, Llama 3, and Mistral, with a deliberately narrow name-matching registry and ChatML as the documented fallback. **A GGUF's own template always wins**, applied through llama.cpp.
+- [x] **Two capabilities the harness was missing** (`harness/provider.h`) — `TokenCounting` and `VisionCapable`, both discovered by the Harness. `commands/complete.cpp`'s backend-type switch for image support is **gone**, and `commands/chat.cpp` now shows exact context usage instead of "(estimated)" whenever the backend owns a tokenizer.
+- [x] **`idle_unload_seconds`** on a backend entry, and a rewritten local-inference block in the config template — the old one claimed nothing stays resident between turns, which in-process linking makes exactly wrong.
+- [x] **34 new tests** (434 total), plus the no-listen symbol scan widened to the linked executable.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Crash model | **In-process only**, no spawn-isolation mode *(user call)* | A second generation path would re-introduce the apparatus the divergence exists to delete, and would have to be kept at parity forever. The exposure is narrower than "a crash kills the binary": a load failure returns a clear error, so it is an abort *during generation*, bounded to one in-flight turn by per-turn session save. |
+| Local vision | **Deferred to model-profiles-and-management** *(user call)* | An mmproj path is a per-family model property, which that item already owns. `VisionCapable` still landed here, so the type switch died now rather than later. |
+| Linking / GPU | Static, Metal on macOS; llama.cpp stays behind `APOGEE_ENABLE_LLAMA` | The stated default. The merge-blocking target must not pay for kernel compilation. |
+| KV across restarts | Not persisted; a resumed session re-ingests | The stated default. `llama_state_save_file` is the recorded later upgrade. |
+| Pin cadence | Manual, deliberate bumps | The stated default. |
+| In-text tool calls | **Capability deliberately not declared** | A local model does put tool calls in its text — but nothing parses them yet, and the dialects belong to item 14. Claiming the capability would advertise a parser that does not exist. |
+
+**Notes — the seam earned itself twice, and then real hardware earned its keep.**
+
+The provider is tested against a *scripted* runtime, because the merge-blocking target has no llama.cpp in it: a test needing the real thing would not run where it matters, and the acceptance criteria here are counting claims ("turn two decoded only the new tokens") that a fake answers exactly and hermetically. Every guardrail was mutation-tested — disabling KV reuse turns the reuse test red with the exact `8 < 8` signature its comment predicts, and running a side request on the session context fails the isolation test.
+
+**One guardrail was removed for failing that bar.** An explicit "forget the transient region" step was written to satisfy the constraint that RAG content must never contaminate the reusable prefix — and it passed with the code disabled. It was redundant: the prefix match is token-for-token, so a turn can only reuse a cached token its own prompt contains, and the moment the injected block stops being sent the prefix ends there. The code came out and the test was rewritten to assert the real mechanism, which does bite. Belt-and-braces code with a test that cannot fail is worse than neither.
+
+**Then a real GGUF found two bugs the fake could not.** Running an actual model (a 260K TinyStories GGUF) through `apogee chat` crashed on turn two: `decode: failed to find a memory slot for batch of size 1`. The cause was `chat`'s background title request, which carries no `max_tokens` of its own — it ran to the provider default against a model that never emits end-of-generation, filled the KV cache, and **threw**, taking the turn down. Generation now stops at the context wall and reports truncation. The same session exposed the second: submitting a whole prompt in one `llama_decode` works right up until someone pastes a long file, so prompts are now chunked to the context's own batch limit. A first attempt at that — setting `n_batch = n_ctx` — was itself wrong, because llama.cpp reserves batch-sized headroom inside the cache and leaves no slot for the first generated token. **No scripted runtime models an allocator**; only real hardware was going to say so.
+
+Two smaller corrections came from the same run: llama.cpp's own logging is now routed through `llama_log_set` and silenced below WARN, because ~20 lines of Metal device capabilities were burying the error message the acceptance criteria ask to be clear; and a context now defaults to the model's own trained length rather than a fixed 4096, which was wrong in both directions.
+
+**A routing hole closed on the way past.** `-m local` on a configured-but-unbuildable backend fell through to the default and answered from it — a real answer from a model the user did not choose. The typo guard from Milestone I only covered names that were not configured at all. `complete` now reports that backend's own reason.
+
+**Verified end to end against a real model:** load, chat-template rendering, tokenization, KV reuse across turns, side-request isolation on its own context, graceful truncation, and session save — plus both no-listen checks passing with llama.cpp linked into the binary, which is the configuration the invariant is actually about.
+
+**Not verified:** performance. The KV cache is asserted by token counts, never by wall-clock, and no large model was run.

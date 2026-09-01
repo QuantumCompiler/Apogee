@@ -48,13 +48,12 @@ Items are numbered in the **suggested order of implementation**. The rule stays 
 
 ### Phase 1 — v0.1.0: walking skeleton, then breadth
 
-Items 1–6 build strictly in order (each gates on the one before it — the skeleton proves config → harness → backend → terminal on exactly one provider before anything widens). After 6, the three branches **7, 8, 9 are independent** — take them in any order (or in parallel sessions). Item 7 was split at grooming (2026-08-26) into 7a and 7b; both have since shipped. Item 10 is the release closer and assumes 1–9 are complete.
+Items 1–6 built strictly in order (each gating on the one before it — the skeleton proved config → harness → backend → terminal on exactly one provider before anything widened). After 6, the three branches **7, 8, 9** were independent. Item 7 was split at grooming (2026-08-26) into 7a and 7b. Item 10 is the release closer and assumes 1–9 are complete, **which they now are**.
 
-*Items 1 (C++ project skeleton), 2 (config engine), 3 (harness core), 4 (Anthropic backend), 5 (`apogee complete`), 6 (the shared agent loop), 7a (the terminal UX layer), 7b (`apogee chat`), and 7c (line editing) shipped 2026-08-25/26 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestones A–H. **The walking skeleton is closed**, the loop is extracted, and both surfaces are complete; only the two remaining backends and the release closer are left. The numbering below is unchanged so the gate references in each document still read true.*
+*Items 1 (C++ project skeleton), 2 (config engine), 3 (harness core), 4 (Anthropic backend), 5 (`apogee complete`), 6 (the shared agent loop), 7a (the terminal UX layer), 7b (`apogee chat`), 7c (line editing), 8 (OpenAI + Google backends), and 9 (the llama.cpp backend) shipped 2026-08-25/26/31 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestones A–J. **Every capability item in v0.1.0 is complete**: both surfaces, the shared loop, and all four backends. Only the release closer is left. The numbering below is unchanged so the gate references in each document still read true.*
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 9 | [llamacpp-backend.md](llamacpp-backend.md) | ✅ 5 (shipped) | Local inference: llama.cpp linked in-process (generation, KV sessions) |
 | 10 | [install-check-lifecycle.md](install-check-lifecycle.md) | 1–9 (all of v0.1.0) | Install contract, `apogee check` doctor, completions (release closer) |
 
 ### Phase 2 — the gated ring (after v0.1.0 ships)

@@ -122,6 +122,8 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     backend.context_size = integer(node["context_size"], origin, where + ".context_size");
     backend.max_tokens = integer(node["max_tokens"], origin, where + ".max_tokens");
     backend.temperature = number(node["temperature"], origin, where + ".temperature");
+    backend.idle_unload_seconds =
+        integer(node["idle_unload_seconds"], origin, where + ".idle_unload_seconds");
 
     return backend;
 }

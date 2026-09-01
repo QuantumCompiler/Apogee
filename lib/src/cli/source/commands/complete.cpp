@@ -118,22 +118,6 @@ bool names_a_configured_backend(const harness::Config& config, std::string_view 
     return false;
 }
 
-/// Whether the backend serving `model` can accept image parts.
-///
-/// Answered from the config entry's type rather than a capability probe. That
-/// is a deliberate stopgap: the only image-incapable type is `llamacpp`, which
-/// has no implementation yet, so there is no object to ask. When that backend
-/// lands it should carry a `VisionCapable` capability and this function should
-/// become a Harness probe like every other capability question -- a type switch
-/// is exactly the shape the capability rule exists to avoid.
-bool backend_accepts_images(const harness::Config& config, std::string_view model) {
-    const harness::BackendConfig* entry = config.find_backend(model);
-    if (entry == nullptr) {
-        return true;  // unknown: let the provider decide rather than pre-refusing
-    }
-    return entry->type != harness::BackendType::LlamaCpp;
-}
-
 /// The built-in tool set for `--tools`.
 ///
 /// `fetch_url` only, for now. Web search comes from the provider's own
@@ -170,7 +154,10 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                               const CompleteFlags& flags, const std::string& model,
                               const std::string& prompt,
                               const std::vector<harness::ContentPart>& attachments, bool decorate) {
-    if (!attachments.empty() && !backend_accepts_images(config, model)) {
+    // A capability probe, not a type switch: the Harness asks the provider
+    // itself, so this stays correct when a local backend gains vision without
+    // this file learning that llamacpp exists.
+    if (!attachments.empty() && !harness.accepts_images(model)) {
         fail_user("backend '" + model +
                   "' cannot accept images yet -- local (llamacpp) vision support has not "
                   "landed. Use a cloud backend for --image, or drop the flag");
@@ -332,6 +319,18 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                 fail_user("no backend named '" + flags->model + "'" +
                           (known.empty() ? "" : " (configured: " + known + ")"));
             }
+            // A backend that IS configured but failed to construct is the same
+            // hazard as a typo, one step later: without this, `-m local` on an
+            // unbuildable local backend falls through to the default and the
+            // user gets a real answer from a model they did not choose. Name
+            // the backend's own reason instead.
+            for (const backends::BackendStatus& status : built.statuses) {
+                if (!status.constructed && status.name == flags->model) {
+                    fail_user("backend '" + flags->model + "' is configured but unavailable -- " +
+                              status.reason);
+                }
+            }
+
             const std::string model =
                 flags->model.empty() ? config.models.default_backend : flags->model;
             (void)run_one(harness, config, *flags, model, prompt, attachments, decorate);

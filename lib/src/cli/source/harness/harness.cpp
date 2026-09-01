@@ -241,6 +241,40 @@ bool Harness::uses_in_text_tool_calls(std::string_view model) const noexcept {
     }
 }
 
+std::optional<std::int64_t> Harness::count_prompt_tokens(
+    std::string_view model, const ChatRequest& request) const noexcept {
+    try {
+        auto* counter = dynamic_cast<TokenCounting*>(&route(model));
+        if (counter == nullptr) {
+            return std::nullopt;
+        }
+        const std::int64_t tokens = counter->count_prompt_tokens(request);
+        // A provider signals "not right now" with a negative count rather than
+        // by throwing: an unloaded model is an ordinary state, not an error,
+        // and the caller's fallback is an estimate either way.
+        if (tokens < 0) {
+            return std::nullopt;
+        }
+        return tokens;
+    } catch (const HarnessError&) {
+        return std::nullopt;
+    } catch (const std::exception&) {
+        // Counting is a measurement, never the point of the call. A tokenizer
+        // that throws must not take down the turn it was measuring.
+        return std::nullopt;
+    }
+}
+
+bool Harness::accepts_images(std::string_view model) const noexcept {
+    try {
+        const auto* vision = dynamic_cast<const VisionCapable*>(&route(model));
+        // Not declaring the capability means "yes" -- see the header.
+        return vision == nullptr || vision->accepts_images();
+    } catch (const HarnessError&) {
+        return true;
+    }
+}
+
 ModelBehavior Harness::model_behavior_for(std::string_view model) const {
     try {
         const auto* reporter = dynamic_cast<const ModelBehaviorReporting*>(&route(model));

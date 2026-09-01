@@ -46,12 +46,28 @@ TEST_CASE("an Anthropic entry with no key is skipped with a reason", "[backends]
 TEST_CASE("an unimplemented backend type names itself in the reason", "[backends][factory]") {
     // The message a user sees when they configure a backend that has not
     // landed. "could not be constructed" would send them to check their key.
-    // Only llamacpp remains; OpenAI and Google shipped 2026-08-26.
+    // Every backend type in v0.1.0 has now landed, so nothing reaches this
+    // message any more -- it survives for the NEXT unimplemented type, and this
+    // case pins that the phrase is not accidentally reachable today.
+    for (const auto type : {BackendType::Mock, BackendType::Anthropic, BackendType::OpenAI,
+                            BackendType::Google, BackendType::LlamaCpp}) {
+        BackendConfig config;
+        config.type = type;
+        std::string reason;
+        (void)make_provider("x", config, reason);
+        CHECK(reason.find("has not landed yet") == std::string::npos);
+    }
+}
+
+TEST_CASE("a local backend with no model_path says which key to set", "[backends][factory]") {
+    // The llamacpp equivalent of the missing-key message: name the setting, not
+    // the failure. "could not be constructed" sends the user nowhere.
     BackendConfig config;
     config.type = BackendType::LlamaCpp;
+
     std::string reason;
-    CHECK(make_provider("x", config, reason) == nullptr);
-    CHECK(reason.find("has not landed yet") != std::string::npos);
+    CHECK(make_provider("local", config, reason) == nullptr);
+    CHECK(reason.find("model_path") != std::string::npos);
 }
 
 TEST_CASE("every cloud type builds when it has a key", "[backends][factory]") {

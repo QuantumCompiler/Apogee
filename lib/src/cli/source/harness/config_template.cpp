@@ -82,13 +82,22 @@ backends:
   #   context_size: 1048576
 
   # ── Local inference via llama.cpp ───────────────────────────────────────────
-  # Runs in-process: no server, no listening socket, nothing resident between
-  # turns. model_path is any GGUF you supply -- Apogee ships none and curates
-  # none, so any model you point it at will run.
+  # Runs in-process: no server and no listening socket. The model STAYS LOADED
+  # between turns, which is what keeps a multi-turn chat warm -- each turn adds
+  # only its new tokens to the KV cache instead of re-reading the conversation.
+  # model_path is any GGUF you supply -- Apogee ships none and curates none, so
+  # any model you point it at will run.
+  #
+  # context_size unset means "whatever this model was trained for", which is
+  # usually what you want; set it to trade memory against conversation length.
+  # idle_unload_seconds releases the weights after a quiet spell -- worth
+  # setting if you switch between a local and a cloud backend in one session,
+  # since the model is the largest thing the process holds.
   # local:
   #   type: llamacpp
   #   model_path: "${HOME}/.cache/llms/my-model.gguf"
-  #   context_size: 8192
+  #   # context_size: 8192
+  #   # idle_unload_seconds: 900
 
   # ── User-supplied embedding backend (vector RAG) ────────────────────────────
   # No embedding model ships with Apogee. To enable vector retrieval, point

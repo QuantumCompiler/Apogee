@@ -29,14 +29,6 @@ nlohmann::json content_parts(const harness::MessageContent& content, bool is_ass
     return parts;
 }
 
-nlohmann::json parse_arguments(const std::string& arguments) {
-    nlohmann::json parsed = nlohmann::json::parse(arguments, nullptr, false);
-    if (parsed.is_discarded() || !parsed.is_object()) {
-        return nlohmann::json::object();
-    }
-    return parsed;
-}
-
 }  // namespace
 
 std::string effort_for_budget(std::int64_t budget_tokens) {

@@ -121,6 +121,59 @@ public:
     [[nodiscard]] virtual bool uses_in_text_tool_calls() const noexcept = 0;
 };
 
+/// Implemented by a provider that can count tokens exactly, with its model's
+/// own tokenizer.
+///
+/// The estimate every caller falls back to is characters/4 -- honest, and wrong
+/// by a model-dependent margin. That margin is the whole problem for context
+/// monitoring: a warning that fires at the wrong point is worse than no warning,
+/// because the user learns to ignore it. A provider that owns a real tokenizer
+/// (a local model does; a cloud vendor may expose a counting endpoint) says so
+/// here, and `agentloop::TokenCount::estimated` stops being a hardcoded true.
+///
+/// **Counting must be cheap enough for the hot path.** A local tokenizer is;
+/// an HTTP round-trip per keystroke-adjacent measurement is not, which is why
+/// this is a capability a provider opts into rather than a method on
+/// LLMProvider that every backend would have to answer somehow.
+class TokenCounting {
+public:
+    TokenCounting() = default;
+    virtual ~TokenCounting() = default;
+    TokenCounting(const TokenCounting&) = delete;
+    TokenCounting& operator=(const TokenCounting&) = delete;
+    TokenCounting(TokenCounting&&) = delete;
+    TokenCounting& operator=(TokenCounting&&) = delete;
+
+    /// Exact prompt-token count for `request`, or a negative value if this
+    /// provider cannot count it after all (an unloaded model, say). A caller
+    /// that gets a negative value falls back to the estimate.
+    [[nodiscard]] virtual std::int64_t count_prompt_tokens(const ChatRequest& request) = 0;
+};
+
+/// Implemented by a provider that can accept image content parts.
+///
+/// Exists so no surface has to ask "what type is this backend?" before
+/// attaching an image. `commands/complete.cpp` did exactly that as a recorded
+/// stopgap while llamacpp had no implementation to ask; a type switch is the
+/// shape the capability rule exists to prevent, and this retires it.
+///
+/// A provider that does not inherit this is assumed to accept images: the
+/// cloud vendors all do, and pre-refusing on an unknown backend would be the
+/// expensive direction of a wrong guess.
+class VisionCapable {
+public:
+    VisionCapable() = default;
+    virtual ~VisionCapable() = default;
+    VisionCapable(const VisionCapable&) = delete;
+    VisionCapable& operator=(const VisionCapable&) = delete;
+    VisionCapable(VisionCapable&&) = delete;
+    VisionCapable& operator=(VisionCapable&&) = delete;
+
+    /// Whether this provider accepts image parts right now. A local backend
+    /// answers false until an mmproj model is configured for it.
+    [[nodiscard]] virtual bool accepts_images() const noexcept = 0;
+};
+
 /// Implemented by a provider that knows its model family's quirks.
 /// A provider that does not leaves callers with the permissive zero value.
 class ModelBehaviorReporting {

@@ -94,7 +94,7 @@ That split is what makes surface parity structural rather than something a revie
 | `logger/` | Persisted chat sessions and the daily operational log. A session records *what was said*; the log records *what the program did*. |
 | `commands/` | The CLI scaffold: the `Command` interface, the registry, the root command, and the built-in commands. |
 | `harness/` | **The core.** The config engine (typed loader, `${ENV}` expansion, template, comment-preserving edits, on-disk paths) **and** the provider interface, canonical message IR, router, and context-window table. Includes nothing from `backends/` — enforced. |
-| `backends/` | Provider implementations plus the shared cloud infrastructure: `mock`, `anthropic`, `openai`, `google`, the HTTP client, and the SSE parser. The local (llama.cpp) backend lands here with its own item. |
+| `backends/` | Every provider plus the infrastructure they share: `mock`, `anthropic`, `openai`, `google`, and `llamacpp`; the HTTP client and SSE parser for the cloud ones; the `llama_runtime` seam, chat templates, and token arithmetic for the local one. |
 | `agentloop/` | **The shared loop.** `run()` drives model→tool→model behind a Reporter, plus `ask_user`, history compaction, and transient splicing. Includes nothing from `backends/` — enforced. |
 | `agent/` | Tools: the registry, dispatch with the permission gate, and `fetch_url`. Separate from the loop because a registry needs no loop; MCP and native toolsets register here later. |
 | `embedstore/` | *Reserved* — chunk storage and retrieval (`embedstore-lexical-rag` item). |
@@ -188,6 +188,11 @@ Mechanisms that land here as later items need them: process spawning (vendor-CLI
 | `openai.h/.cpp` | The OpenAI provider: POST `/v1/responses` with a bearer token; maps `response.*` semantic events onto the sinks. |
 | `google_wire.h/.cpp` | IR ↔ Gemini `generateContent` translation. The assistant role is `model`; a tool result is a `functionResponse` part in a **user** turn, matched by name. |
 | `google.h/.cpp` | The Gemini provider: model in the URL path, key in the `x-goog-api-key` header. Re-parses a whole response per chunk, since Gemini streams full objects rather than typed deltas. |
+| `llama_runtime.h` | The slice of llama.cpp the local backend needs, behind an interface — model load, tokenize, decode-at-position, sample, trim, capacity, batch limit. |
+| `llama_real.cpp` | The real runtime over llama.cpp's C API, compiled only under `APOGEE_ENABLE_LLAMA`; otherwise the "not built in" answer. Wraps every raw handle in a `unique_ptr` with a custom deleter. |
+| `chat_template.h/.cpp` | Prompt framing for local models: ChatML, Llama 3, Mistral, a narrow name-matching registry, and ChatML as the documented fallback. A GGUF's own template always wins over this. |
+| `llamacpp_tokens.h/.cpp` | Exact prompt counting and `common_prefix_length` — the KV cache's entire decision. |
+| `llamacpp.h/.cpp` | The local provider: model lifecycle, one live context per conversation, a throwaway context per side request, streaming, idle unload. Also `TokenCounting`, `VisionCapable`, and `StatusReporting`. |
 | `factory.h/.cpp` | Config `type:` → provider, and `build_providers()` which registers every entry on a Harness and installs the router. Lives here, not in a command, because every surface needs it. |
 
 **The transport is injected**, which is what makes every cloud-backend test hermetic: no network, no API key, no charges — and failure modes a live endpoint will not produce on demand (a 529, a body delivered one byte at a time, a connection dropping mid-frame). `tests/support/fake_transport.h` is the scripted implementation.
@@ -199,6 +204,8 @@ Mechanisms that land here as later items need them: process spawning (vendor-CLI
 *A stream is not retried once bytes have reached the caller.* Replaying would deliver the first half of an answer twice, with no way for the caller to tell.
 
 **SSE never arrives one-event-per-read.** Chunk boundaries land mid-frame, mid-line, and mid-UTF-8-sequence. `SseParser` is a state machine with a carry buffer for exactly that reason, and its test replays a recorded stream at *every* chunk size from one byte up — a parser that assumes one-read-one-event passes every test written on a fast local connection and drops tokens on a slow one.
+
+**Adding a local-inference capability.** Extend `LlamaRuntime`/`LlamaModel`/`LlamaContext` in `llama_runtime.h`, implement it in `llama_real.cpp` under the `APOGEE_ENABLE_LLAMA` guard, and add it to `tests/support/fake_llama.h`. The merge-blocking target has no llama.cpp in it, so the fake is not a convenience — it is the only place these behaviours are tested at all. Be aware of what it cannot model: it has no allocator, so batch and context limits are honoured by asking the seam for them rather than by assuming, and both of those rules exist because a real GGUF broke a build the fake called green.
 
 **Adding a cloud backend.** Reuse `HttpClient` and `SseParser`; put the dialect in its own `*_wire.h/.cpp` so it is testable with no transport at all. Take an injected `HttpClient` in the constructor. Honour cancellation between chunks. Keep the API key in a header and out of every error message — `tests/backends/anthropic_test.cpp` → `[backends][anthropic][secrets]` is the pattern for pinning that. Then add a row to `providers()` in `tests/agentloop/conformance_test.cpp`: a backend is not done until it drives the shared loop identically to every other.
 
@@ -296,6 +303,8 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `backends/http_client_test.cpp` | Retry/backoff, `retry-after`, the no-retry-after-delivery guard, and the error-bodies-are-not-streamed contract. |
 | `backends/anthropic_test.cpp` | Fixture-replayed streams (seven chunk sizes), the wire mapping, thinking replay, error shapes, and the API-key secrets guardrail. |
 | `backends/factory_test.cpp` | Construction per type, that a keyless cloud type names **its own** environment variable, and that one unbuildable backend does not stop the others. |
+| `backends/llamacpp_test.cpp` | The local backend against a scripted runtime: KV reuse as an exact token count, side-request isolation, batch chunking, the context wall, idle unload, load failure, and the vision capability. |
+| `backends/chat_template_test.cpp` | Local prompt framing, the conservative name-matching registry, and that a model's own template wins. |
 | `backends/openai_test.cpp` | The Responses dialect, split-boundary streaming, tool-call reassembly from item + argument deltas, effort banding, error shapes, and the API-key secrets guardrail. |
 | `backends/google_test.cpp` | The Gemini dialect, thought-vs-answer separation, split-boundary streaming, `functionResponse` round-trip, and the API-key secrets guardrail. |
 | `agentloop/conformance_test.cpp` | **The cross-provider table.** The same two scripted turns in four dialects driving the same loop: identical answer, iterations, history shape, tool linkage, and usage. Also pins that a mid-session `/model` switch carries a full history — tool call and result included — across every translator. |
@@ -379,7 +388,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 | Option | Default | Meaning |
 |---|---|---|
 | `APOGEE_BUILD_TESTS` | `ON` | Build the Catch2 suite. |
-| `APOGEE_ENABLE_LLAMA` | `OFF` | Configure and build the pinned llama.cpp target. Heavy; a dedicated non-blocking CI job carries it until `llamacpp-backend` lands. |
+| `APOGEE_ENABLE_LLAMA` | `OFF` | Build the pinned llama.cpp and the real `LlamaRuntime` behind it. Heavy (GPU kernels), so it stays off the merge-blocking path and a dedicated non-blocking CI job builds and tests it. With it OFF, `backends/llama_real.cpp` compiles to the "not built in" answer and the llamacpp backend refuses construction with a message saying how to enable it — everything else about the provider is still built and tested. |
 
 ---
 

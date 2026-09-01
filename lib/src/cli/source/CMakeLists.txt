@@ -111,6 +111,14 @@ add_library(apogee_core STATIC
     backends/google_wire.cpp
     backends/google.h
     backends/google.cpp
+    backends/llama_runtime.h
+    backends/llama_real.cpp
+    backends/chat_template.h
+    backends/chat_template.cpp
+    backends/llamacpp_tokens.h
+    backends/llamacpp_tokens.cpp
+    backends/llamacpp.h
+    backends/llamacpp.cpp
     backends/factory.h
     backends/factory.cpp
 
@@ -146,6 +154,15 @@ target_compile_definitions(apogee_core PRIVATE
 
 target_link_libraries(apogee_core PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp
                       PRIVATE CURL::libcurl replxx::replxx)
+
+# Local inference is opt-in at build time. When it is off, backends/llama_real.cpp
+# compiles to the "not built in" answer and never includes llama.h -- so the
+# provider, its tokenizer arithmetic, and every test over them build and run on
+# the merge-blocking target, which has no llama.cpp in it.
+if(APOGEE_ENABLE_LLAMA)
+    target_link_libraries(apogee_core PRIVATE llama)
+    target_compile_definitions(apogee_core PRIVATE APOGEE_ENABLE_LLAMA=1)
+endif()
 
 apogee_set_target_options(apogee_core)
 

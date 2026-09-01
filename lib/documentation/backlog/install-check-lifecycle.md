@@ -34,4 +34,4 @@
 - [ ] Installer downloads no models and executes no remote code; `apogee version` works
 - [ ] `apogee uninstall` removes binary + data dir + completions, prompts before user data, honors --yes; a fresh install after uninstall passes check
 
-**Scope note.** earmarked for v0.1.0. The release closer: it assumes the complete v0.1.0 set, which after the 2026-08-26 grooming split means items 1–6 and 7a/7b/7c (all shipped), plus **8** (openai-google-backends, shipped) and **9** ([llamacpp-backend.md](llamacpp-backend.md)).
+**Scope note.** earmarked for v0.1.0. The release closer: it assumes the complete v0.1.0 set, which after the 2026-08-26 grooming split means items 1–6 and 7a/7b/7c (all shipped), plus **8** (openai-google-backends) and **9** (llamacpp-backend) — both shipped. **Every v0.1.0 item this closer gates on is now complete.**
