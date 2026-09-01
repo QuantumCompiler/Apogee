@@ -90,6 +90,8 @@ That split is what makes surface parity structural rather than something a revie
 | `main.cpp` | Entry point. Constructs a `RootCommand` and returns its exit code. |
 | `version/` | Build identity — semantic version, git commit, build date, target — stamped in at configure time. `version.h/.cpp` |
 | `platform/` | **The portability seam.** The one place platform `#ifdef`s are expected; everything else asks this header. `platform.h/.cpp` |
+| `ansi/` | Colour and styling, and the one function that decides whether to emit any (`resolve_color`). `ansi.h/.cpp` |
+| `logger/` | Persisted chat sessions and the daily operational log. A session records *what was said*; the log records *what the program did*. |
 | `commands/` | The CLI scaffold: the `Command` interface, the registry, the root command, and the built-in commands. |
 | `harness/` | **The core.** The config engine (typed loader, `${ENV}` expansion, template, comment-preserving edits, on-disk paths) **and** the provider interface, canonical message IR, router, and context-window table. Includes nothing from `backends/` — enforced. |
 | `backends/` | Provider implementations plus the shared cloud infrastructure: `mock`, `anthropic`, the HTTP client, and the SSE parser. The remaining cloud and local backends land here with their own items. |
@@ -110,7 +112,15 @@ Reserved packages carry a documented header and no code. They exist so every lat
 | `root.h/.cpp` | `RootCommand` — persistent flags (`--config`), the version flag, and `run(argc, argv)` → exit code. |
 | `version_command.h/.cpp` | `apogee version`. The first real subcommand, proving the path end to end. |
 | `complete.h/.cpp` | `apogee complete` — one-shot prompt in, answer out. The walking skeleton, and the first consumer of the agent loop (`--tools`). |
-| `ask_prompt.h/.cpp` | The terminal `ask_user` implementation. Prompts on stderr, reads stdin, and returns a **null** AskFn when there is no terminal — which is what stops the tool being advertised. Deliberately minimal; chat-cli replaces it. |
+| `ask_prompt.h/.cpp` | The terminal `ask_user` implementation. Prompts through the status line, reads stdin, and returns a **null** AskFn when there is no terminal — which is what stops the tool being advertised. |
+| `terminal.h/.cpp` | `TerminalWriter` — the single mutex every terminal write goes through. |
+| `status_line.h/.cpp` | The self-overwriting status line and the spinner, with the generation counter that invalidates an in-flight repaint. |
+| `thinking_view.h/.cpp` | The rolling reasoning window and its collapse-to-summary. |
+| `cli_reporter.h/.cpp` | **The** `agentloop::Reporter` adapter. One implementation, shared by every interactive surface. |
+| `chat.h/.cpp` | `apogee chat` — the REPL, slash dispatch, and context monitoring. |
+| `chat_history.h/.cpp` | `apogee chats` — list, info, title, delete — and the auto-title prompt. |
+| `input_gate.h/.cpp` | The startup typeahead flush. Called once, immediately before the first prompt. |
+| `line_reader.h/.cpp` | `LineReader` and its two implementations — `PlainLineReader` (getline, for a pipe) and `EditingLineReader` (replxx, for a terminal). |
 | `helpers.h/.cpp` | Shared command plumbing: flag/config resolution, stdin, base64, image parts, message assembly, and the exit codes. |
 | `config_cmd.h/.cpp` | `apogee config` and its nine subcommands. A thin caller — it formats no YAML of its own; every mutation goes through `harness/config_edit.h`. |
 
@@ -220,6 +230,45 @@ Mechanisms that land here as later items need them: process spawning (vendor-CLI
 
 **There is no local web-search tool, by decision** (2026-08-26). Search comes from the providers' own server-side tools; Ommi's DuckDuckGo scraper is not ported because a results-page parser breaks silently and returns nothing rather than erroring. `fetch_url` — reading a URL you were *given* — carries none of that fragility.
 
+### The terminal UX layer
+
+`CliReporter` is the only `agentloop::Reporter` implementation in the tree, and it should stay that way — a second one drifts from the first, and a capability that reaches one surface but not another is the parity bug the interface exists to prevent. A new interactive surface constructs one; it does not write its own.
+
+**Answer to stdout, progress to stderr.** They are separate streams and separate objects on `CliReporter::Options` for that reason. Conflating them puts spinner frames into `apogee complete "…" | jq`.
+
+**Everything transient goes through `StatusLine`,** including startup notices — "startup speaks on one line" is an invariant Ommi retrofitted (OMMI-14) and this project designs in. Do not reach for `std::cerr` on an interactive path; call `reporter.status().print_line()`. A permanent print bumps a generation counter so an in-flight spinner repaint drops its frame instead of landing on top of the text.
+
+**The thinking view's erase arithmetic is exact only because nothing painted may wrap.** `repaint()` leaves the cursor on the last painted row with no trailing newline, and `erase()`'s row count depends on that. Pre-wrap to `width - indent` by codepoint. If you change one, a test asserting the exact count of `\033[A\033[2K` pairs will tell you.
+
+**Colour is decided once,** in `ansi::resolve_color()`, across three independent inputs: `NO_COLOR` (by presence, whatever its value), an explicit `--no-color`, and whether stdout is a terminal. A disabled `Style` returns its input unchanged so no caller branches on it.
+
+### `logger/` — sessions and the operational log
+
+| File | Purpose |
+|---|---|
+| `session.h/.cpp` | `Session`, serialize/deserialize with resume warnings, and the save/load/list filesystem layer. |
+| `operational.h/.cpp` | The daily append-only log. One greppable line per event. |
+
+**The session file is rewritten after every completed turn.** Crash safety is the requirement — a `kill -9` mid-conversation must leave every finished turn on disk — and that is a property of *when* the write happens, which is why persistence was specced with the REPL rather than added afterwards. The write goes through `harness::write_file_atomically`, so an interrupted write leaves the previous session intact.
+
+**Resume degrades, never fails.** A legacy schema, a vanished backend, a field of the wrong shape, an unreadable message — each produces a `ResumeWarning` and a working session. A conversation that cannot be reopened because one config key moved is worse than one that reopens with a note. `deserialize` throws for exactly one thing: JSON that will not parse at all.
+
+**`chat_id` is immutable.** Renaming sets `custom_name`. An id that changed would break every reference to the session that already exists.
+
+**The operational log never throws.** A full disk degrades to a missing log line, never to a failed conversation.
+
+### `commands/chat.cpp` — the REPL
+
+**Context is measured against the request about to be sent** — the saved history *plus* the incoming turn — and compaction folds only the prior history. Measuring the saved history alone means the first turn always reads as empty and a single large prompt never trips the threshold; that bug shipped once and `context is measured against the message about to be sent` now pins it.
+
+**Every configured backend is constructed at startup.** That is what makes `/model` an instant switch with history carried over, and it only works because history is neutral IR rather than a vendor transcript.
+
+**Input is read through `LineReader`,** which has two implementations rather than one reader with a conditional: `make_line_reader` builds the replxx editor only when **both** stdin and stdout are terminals. Both, because replxx draws on stdout — a terminal stdin with a redirected stdout would write escape sequences into the redirect, and that redirect is the answer the user asked for. A piped conversation is a first-class way to use `apogee chat` and gets `std::getline`, tested on its own.
+
+**Beware when writing a PTY test against the REPL: replxx puts the terminal in raw mode, where Enter is `\r`, not `\n`.** The kernel performs no translation, so a bare `\n` lands in the edit buffer as literal text rather than submitting the line. Both PTY harnesses send `\r`, and both were briefly wrong about this when line editing landed.
+
+**The typeahead flush runs exactly once, before the first prompt.** Never between turns — typing a follow-up while the model generates is legitimate typeahead, and eating it would be worse than the problem the gate fixes.
+
 ---
 
 ## `lib/src/cli/tests/` — tests
@@ -249,6 +298,13 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `agentloop/content_test.cpp` | Token estimation, splicing, compaction (including that a failed compaction returns history unchanged). |
 | `agentloop/question_test.cpp` | `ask_user` schema, validation messages written for the model, answer encoding. |
 | `agent/tool_test.cpp` | Registry, permission resolution, dispatch, and `fetch_url` including its HTML stripper. |
+| `ansi/ansi_test.cpp` | The colour mode matrix, table-tested across all eight combinations. |
+| `commands/thinking_view_test.cpp` | Byte-level: wrapping, the rolling window, the erase arithmetic, and that nothing but the summary survives `finish()`. |
+| `commands/status_line_test.cpp` | Overwrite, clear, the generation counter, verbosity modes, and the spinner frame format. |
+| `commands/cli_reporter_test.cpp` | The stdout/stderr split and that thinking never reaches the answer stream. |
+| `commands/chat_test.cpp` | Slash parsing, the 80/90 thresholds and what they are measured against, title sanitising, and the log line format. |
+| `logger/session_test.cpp` | Round trips, every resume-warning path, tool-call survival, and that no thinking is persisted. |
+| `commands/line_reader_test.cpp` | The non-TTY reader: CRLF, a final line with no newline, blanks vs EOF, and that a piped run never constructs the editor. |
 | `support/fake_transport.h/.cpp` | The scripted `HttpTransport` — the seam that makes cloud-backend tests hermetic. |
 | `support/fake_command.h/.cpp` | A `Command` defined in test code — the injectable seam, exercised. |
 | `support/env_guard.h/.cpp` | RAII environment-variable and temp-directory guards. Config resolution reads the environment, so exercising it means mutating the environment — and a leaked change would steer every test after it. |
@@ -258,6 +314,12 @@ Beyond those, `tests/CMakeLists.txt` registers `cli.*` ctest cases that run the 
 `harness.layering` is a `cmake -P` check that no file under `source/harness/` includes `backends/`. C++ cannot enforce this the way Go's import cycles do — the include would compile fine and the layering would be silently gone — so it is checked mechanically, and it refuses to run against an empty source list so it cannot pass vacuously.
 
 `cli.complete_lifecycle` ([`tests/complete_e2e.cmake`](../../src/cli/tests/complete_e2e.cmake)) runs the walking skeleton end to end against the mock backend — prompts, stdin, flags, images, `--all-backends`, and every exit code — fully offline. **Every invocation gets an explicit stdin**: without one the child inherits ctest's, which may be a pipe that never delivers EOF, and a command falling through to reading stdin hangs the whole suite instead of failing.
+
+`cli.startup_speaks_on_one_line` ([`tests/pty_startup_check.py`](../../src/cli/tests/pty_startup_check.py)) drives the real binary under a **pseudo-terminal**. A pipe-based test proves nothing about the interactive path — `apogee` asks whether stdout is a terminal before rendering anything, so piping exercises the branch that deliberately emits nothing, and would pass on a build that rendered garbage interactively. The script replays the escape codes to reconstruct the final screen, then asserts the startup notice appears exactly once on one row and that no spinner frame survived. POSIX only.
+
+`cli.chat_line_editing` ([`tests/pty_lineedit_check.py`](../../src/cli/tests/pty_lineedit_check.py)) drives the editor under a PTY: an arrow key must RECALL previous input rather than arrive as a literal escape sequence in the message, and the history file must persist. None of it reproduces on a pipe, which is the point.
+
+`cli.chat_typeahead_and_crash_safety` ([`tests/pty_chat_check.py`](../../src/cli/tests/pty_chat_check.py)) covers the two chat behaviours no unit test can reach: text typed **before** the first prompt is discarded (needs a real terminal — `tcflush` applies to a terminal input queue, and on a pipe the code deliberately does nothing), and a `kill -9` mid-conversation leaves every completed turn on disk (needs a real SIGKILL). Both were verified against the mutation each exists to catch.
 
 The interactive-never-listens invariant has two locks, `cli.no_listen_symbols` and `cli.complete_opens_no_listening_socket`. Read [CLAUDE.md](CLAUDE.md) → *⚠ Interactive turns never open a listening socket* before touching either — the reason there are two is not obvious, and removing one leaves a real gap.
 
@@ -323,6 +385,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 | JSON | nlohmann/json `v3.11.3` | Wired |
 | YAML | yaml-cpp `0.8.0` | Wired — **read path only.** The config engine never serializes through it (see `harness/`). Its CMakeLists predates a CMake policy removal, so `CMAKE_POLICY_VERSION_MINIMUM` is raised around its `FetchContent_MakeAvailable` and restored immediately; revisit when it cuts a release past 0.8.0. |
 | CLI parsing + completions | CLI11 `v2.4.2` | Wired |
+| Chat line editing | replxx `release-0.0.4` | Wired. Used only by the chat REPL's interactive path; a piped run never constructs it. GNU readline was ruled out on licence grounds (GPL). |
 | Tests | Catch2 `v3.7.1` | Wired (only when `APOGEE_BUILD_TESTS`) |
 | HTTP client | libcurl (system) | Wired 2026-08-26. **Found, never fetched** — building it from source would mean choosing a TLS stack too, and the point of the platform-trust-store decision is to use the one the OS already manages. Note the trap recorded in `ApogeeDependencies.cmake`: `CURL_INCLUDE_DIRS` is the macOS SDK's own `/usr/include`, and propagating it as `-isystem` breaks any mixed-toolchain build (i.e. `make lint`); the redundant entry is stripped from the imported target. |
 | Local inference | llama.cpp, pinned to `549b9d84` | `third_party/`, off by default |

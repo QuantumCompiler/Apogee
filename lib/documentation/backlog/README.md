@@ -48,13 +48,12 @@ Items are numbered in the **suggested order of implementation**. The rule stays 
 
 ### Phase 1 — v0.1.0: walking skeleton, then breadth
 
-Items 1–6 build strictly in order (each gates on the one before it — the skeleton proves config → harness → backend → terminal on exactly one provider before anything widens). After 6, the three branches **7, 8, 9 are independent** — take them in any order (or in parallel sessions). Item 10 is the release closer and assumes 1–9 are complete.
+Items 1–6 build strictly in order (each gates on the one before it — the skeleton proves config → harness → backend → terminal on exactly one provider before anything widens). After 6, the three branches **7, 8, 9 are independent** — take them in any order (or in parallel sessions). Item 7 was split at grooming (2026-08-26) into 7a and 7b; both have since shipped. Item 10 is the release closer and assumes 1–9 are complete.
 
-*Items 1 (C++ project skeleton), 2 (config engine), 3 (harness core), 4 (Anthropic backend), 5 (`apogee complete`), and 6 (the shared agent loop) shipped 2026-08-25/26 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestones A–F. **The walking skeleton is closed** and the loop is extracted; items 7, 8, and 9 are now independent and may be taken in any order. The numbering below is unchanged so the gate references in each document still read true.*
+*Items 1 (C++ project skeleton), 2 (config engine), 3 (harness core), 4 (Anthropic backend), 5 (`apogee complete`), 6 (the shared agent loop), 7a (the terminal UX layer), 7b (`apogee chat`), and 7c (line editing) shipped 2026-08-25/26 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestones A–H. **The walking skeleton is closed**, the loop is extracted, and both surfaces are complete; only the two remaining backends and the release closer are left. The numbering below is unchanged so the gate references in each document still read true.*
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 7 | [chat-cli.md](chat-cli.md) | ✅ 6 (shipped) · **split first** (UX layer / chat) | `apogee chat` + the shared terminal UX layer |
 | 8 | [openai-google-backends.md](openai-google-backends.md) | ✅ 6 (shipped) | OpenAI and Google Gemini backends over the shared client/IR |
 | 9 | [llamacpp-backend.md](llamacpp-backend.md) | ✅ 5 (shipped) | Local inference: llama.cpp linked in-process (generation, KV sessions) |
 | 10 | [install-check-lifecycle.md](install-check-lifecycle.md) | 1–9 (all of v0.1.0) | Install contract, `apogee check` doctor, completions (release closer) |

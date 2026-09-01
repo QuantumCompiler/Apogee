@@ -4,7 +4,10 @@
 
 #if defined(_WIN32)
 #include <io.h>
+#include <windows.h>
 #else
+#include <sys/ioctl.h>
+#include <termios.h>
 #include <unistd.h>
 #endif
 
@@ -108,6 +111,36 @@ bool is_terminal(StandardStream stream) noexcept {
             break;
     }
     return ::isatty(descriptor) != 0;
+#endif
+}
+
+std::optional<int> terminal_width() noexcept {
+#if defined(_WIN32)
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info) != 0) {
+        const int width = info.srWindow.Right - info.srWindow.Left + 1;
+        return width > 0 ? std::optional<int>{width} : std::nullopt;
+    }
+    return std::nullopt;
+#else
+    ::winsize size{};
+    if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
+        return static_cast<int>(size.ws_col);
+    }
+    return std::nullopt;
+#endif
+}
+
+void discard_pending_input() noexcept {
+    if (!is_terminal(StandardStream::In)) {
+        // A pipe or a heredoc: those bytes are the input, not typeahead.
+        return;
+    }
+#if defined(_WIN32)
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+#else
+    // Ignored on failure: this is an ergonomic nicety, not a precondition.
+    static_cast<void>(::tcflush(STDIN_FILENO, TCIFLUSH));
 #endif
 }
 

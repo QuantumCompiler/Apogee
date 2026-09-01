@@ -239,3 +239,99 @@ One bug, caught by the tests: `strip_html` ran words together across a skipped `
 The layering check was **extended to cover `agentloop/` and `agent/`**, which CLAUDE.md said it would when the loop landed. A loop that includes a backend starts special-casing one vendor's tool dialect, and "one shared loop for all surfaces" quietly becomes "one loop with an Anthropic branch". `commands/` is deliberately not checked — it is the composition root and assembling providers is its job. Verified against a synthetic tree with a violating `agentloop` source.
 
 **Not done: the live-API half** of the Anthropic acceptance criterion. The fixture-automated half is covered by `agentloop/anthropic_loop_test.cpp`, which drives the real provider through the real loop on recorded SSE. Running it against the live API needs a key and a human — worth doing once before the release closes.
+
+---
+
+## Milestone G — The terminal UX layer
+
+**Goal.** Build the presentation layer once, so every interactive surface renders identically and the loop stays I/O-free. `apogee complete` is retrofitted onto it in the same change — two Reporter implementations that drift is precisely the parity bug the interface exists to prevent, and the retrofit is what makes "one shared loop, thin adapters" true rather than aspirational.
+
+### 2026-08-26 — Status line, thinking view, ansi modes, and `cliReporter`
+
+**What was built**
+
+- [x] **The ansi layer** (`source/ansi/ansi.h/.cpp`) — `Style`, `Role` tags, and `resolve_color()`, which is the single place the three independent colour switches (`NO_COLOR`, `--no-color`, non-TTY) are honoured. A disabled `Style` returns its input unchanged, so no caller branches on colour.
+- [x] **`TerminalWriter`** (`source/commands/terminal.h/.cpp`) — the one serialization point. A spinner repainting at 120 ms and a token stream from the provider's reader thread otherwise interleave mid-escape-sequence and tear the line.
+- [x] **The thinking view** (`source/commands/thinking_view.h/.cpp`) — the rolling two-line window and collapse-to-summary, per the item's appendix. `wrap_tail` wraps **by codepoint**, drops blank rows, and keeps the last N; the retained tail is bounded and trimmed on a codepoint boundary.
+- [x] **The status line** (`source/commands/status_line.h/.cpp`) — self-overwriting transient line, the animated spinner with its elapsed/token frame, and the **generation counter** that invalidates an in-flight repaint when something prints permanently.
+- [x] **`CliReporter`** (`source/commands/cli_reporter.h/.cpp`) — the `agentloop::Reporter` adapter. **Answer to stdout, progress to stderr**, which is what keeps `apogee complete "…" | jq` working.
+- [x] **The retrofit** — `complete.cpp`'s inline `CompleteReporter` is gone; there is exactly one `Reporter` implementation in the tree. `complete` gained `--no-color`, and its verbose notice now goes through the status line rather than raw stderr.
+- [x] **`ask_prompt` routed through the status line** — the prompt is a permanent print that bumps the generation counter, so it cannot land on top of a spinner frame.
+- [x] **`platform::terminal_width()`** added to the portability seam.
+- [x] **45 new tests** (313 total) — byte-level assertions over an injected stream, plus a PTY check driving the real binary.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Thinking window height | **Fixed at 2 lines** | The stated default. Two is the Claude CLI's shape and needs no explanation; a setting invites someone to set it to 40 and recreate the scrollback problem the view exists to solve. `kTailLines` is a compile-time constant, so changing it is a deliberate edit. |
+| `complete` retrofit | **In this item, not deferred** | Leaving the inline adapter would have meant two Reporter implementations drifting. The whole point of the interface is that a capability reaches every surface. |
+| Answer vs progress | Separate streams, separate objects | Conflating them is how decoration ends up in a pipe. `CliReporter` takes the status writer and the answer stream as distinct things. |
+| Colour resolution | One function, three inputs | Scattering the logic is how one output path eventually forgets a case and writes escape codes into a pipe. `resolve_color()` is table-tested across all eight combinations. |
+| Quiet | Suppresses status, **not** warnings | Suppressing those would make a failed run look like a successful silent one. |
+
+**Notes.** The appendix's central claim held up: **the erase arithmetic only works because nothing painted is ever allowed to wrap.** `repaint()` deliberately leaves the cursor on the last painted row with no trailing newline, because `erase()`'s row count depends on it — that coupling is now pinned by a test asserting the exact number of `\033[A\033[2K` pairs a repaint emits.
+
+The assertion worth keeping is *after `finish()`, the bytes past the last erase are exactly the collapsed summary*. It is what proves no reasoning survived into scrollback, and nothing weaker does — the reasoning text is present in the byte stream either way; what matters is that it has been erased from the screen.
+
+Two test-side bugs of my own, both caught by running them. A UTF-8 assertion I wrote as `CHECK(cond ? true : true)` asserted nothing; it is now a real completeness check, with its own test proving the checker rejects a split sequence rather than passing vacuously. And the summary assertion searched for the last `\r\033[2K`, but an erase sequence *ends* with cursor-up-and-erase pairs which also end in `\033[2K` — the product was right, the test's premise was not.
+
+The PTY check (`tests/pty_startup_check.py`) is the only test here that sees what the user sees. `apogee` asks whether stdout is a terminal before rendering anything, so a pipe-based test exercises the branch that deliberately emits nothing — it would pass on a build that rendered garbage interactively. The script replays the escape codes to reconstruct the final screen, then asserts the startup notice appears exactly once on one row and that **no spinner frame survived**. Verified against a build that also wrote the notice raw to stderr, in the way OMMI-14 forbade: the check failed it, naming both rows.
+
+---
+
+## Milestone H — `apogee chat`
+
+**Goal.** The richest v0.1.0 surface, and the one that proves the harness holds together over a conversation rather than a single turn: a persistent, resumable REPL where switching models mid-session is a lookup, not a reconstruction.
+
+### 2026-08-26 — The REPL, sessions, and the logging subsystem
+
+**What was built**
+
+- [x] **The REPL** (`source/commands/chat.h/.cpp`) — slash commands (`/help /model /models /system /temperature /max-tokens /compact /title /exit`), `--tools`/`--search`, `--image` attachments, `--resume`/`--continue`. Every configured backend is constructed up front, so `/model` switches instantly with history carried over — uniform across providers because history is neutral IR, not a vendor transcript.
+- [x] **Session persistence** (`source/logger/session.h/.cpp`) — a versioned JSON file per conversation, **rewritten after every completed turn** through the config engine's temp-file-then-rename path. `chat_id` is immutable; renaming sets `custom_name`.
+- [x] **Resume that degrades, never fails** — a legacy schema, a vanished backend, a field of the wrong shape, an unreadable message: each produces a `[resume]` warning and a working session.
+- [x] **`apogee chats`** (`source/commands/chat_history.h/.cpp`) — `list`, `info`, `title`, `delete`, plus background auto-titling after the first exchange as a **side request** so it never enters the conversation's own history.
+- [x] **Context monitoring** — warn at 80%, auto-compact at 90%, `/compact` on demand. Covers every backend, because Apogee owns the transcript everywhere.
+- [x] **The operational log** (`source/logger/operational.h/.cpp`) — one file per day, append-only, one greppable line per event. A session records *what was said*; this records *what the program did*.
+- [x] **The typeahead gate** (`source/commands/input_gate.h/.cpp` over `platform::discard_pending_input()`) — flushed once immediately before the first prompt, never between turns.
+- [x] **33 new tests** (346 total), including a PTY + SIGKILL harness for the two behaviours no unit test can reach.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Line editing | **replxx** (recorded) | The stated default. *Not yet wired* — see Notes. |
+| Session format | A single JSON file rewritten per turn | The stated default, Ommi's proven crash-safety shape. Append-only JSONL survives a crash equally well but turns "read the session" and "rewrite after compaction" into a replay. |
+| Typeahead | **Discard, never toggle ECHO** | Suppressing echo needs restorable terminal state across a stretch of code with many exit paths, and an exit that skips the restore strands the user's shell with echo off. Discarding needs no state to restore. |
+| Auto-titling | A side request | It must never enter the conversation it is titling, and a failed title is cosmetic — it never costs a turn. |
+| Corrupt session files | Skipped in listings, not fatal | One bad file must not make `apogee chats list` unusable. |
+
+**Notes.** One real bug, and it is the kind a unit test would not have found because the unit was correct: **context was measured against the saved history alone, before the incoming message was appended.** Every first turn therefore read as empty, and a single large prompt never tripped the threshold it should. It surfaced in the manual acceptance sweep, not the suite. The fix measures the *prospective* request — history plus this turn — and compacts only the prior history, since folding the message the user just typed into a summary of the conversation would summarise away the question being asked. `context is measured against the message about to be sent` now pins it.
+
+Both PTY-only guardrails were verified against the mutation each exists to catch. Removing `discard_startup_typeahead()` made the pre-prompt keystroke become the session's first message; removing the per-turn `save()` left only one turn on disk after a `kill -9`. Neither reproduces without a real terminal and a real SIGKILL — `tcflush` applies to a terminal input queue, and on a pipe the code deliberately does nothing.
+
+**`replxx` was not wired when this shipped** — the REPL read with `std::getline`, so arrow keys arrived as escape sequences. Filed as its own item and completed the same day; see the subsection below.
+
+### 2026-08-26 — Line editing
+
+- [x] **replxx pinned** (`release-0.0.4`, FetchContent with `FIND_PACKAGE_ARGS`) and linked privately into `apogee_core`.
+- [x] **`LineReader`** (`source/commands/line_reader.h/.cpp`) — an interface with two implementations: `PlainLineReader` (`std::getline`) and `EditingLineReader` (replxx). `make_line_reader` picks by whether **both** stdin and stdout are terminals.
+- [x] **Input history** at `<APOGEE_HOME>/chat_history`, capped at 1000 entries, loaded at start and synced at exit. Per-user, not per-session.
+- [x] **Tab completion** over the slash commands and the configured backend names, completing only the last token so `/model cla<Tab>` completes the model rather than the whole line.
+- [x] **One vocabulary for `/help` and completion** — `slash_commands()`, so a command cannot be offered on Tab and then rejected.
+- [x] **8 unit tests + a PTY check** (355 total).
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Input history | `<APOGEE_HOME>/chat_history`, 1000 entries | The stated default. Per-user because recall across sessions is the point; never in the session file, which records the conversation rather than the keystrokes. |
+| Reader selection | **Both** stdin and stdout must be terminals | replxx draws on stdout. A terminal stdin with a redirected stdout would write escape sequences into the redirect — and that redirect is the answer the user asked for. |
+| Two implementations, one interface | Rather than a conditional inside one reader | The non-TTY path is a *deliberate implementation* with its own tests, not an untested fallback branch. A piped conversation is how the crash-safety suite drives chat. |
+
+**Notes.** The interesting part was in the tests, not the code. replxx puts the terminal in **raw mode, where Enter is `\r`, not `\n`** — the kernel performs no translation, so a bare `\n` lands in the edit buffer as literal text instead of submitting the line. Both PTY harnesses were sending `\n`, which had been correct while the REPL used `std::getline` in canonical mode. The line-editing check failed on it, and so did the *existing* `cli.chat_typeahead_and_crash_safety` — a real regression in the harness, caught only because the new check forced the question. Both now send `\r` at an interactive prompt, with the reason recorded where the bytes are written.
+
+The typeahead check also needed restructuring to drain the PTY **while** waiting rather than only at the end: the buffer is small, and a child blocked writing into a full one never gets round to reading the next line typed at it.
+
+Verified against a build forced to always use the plain reader: the check failed with `an arrow key reached the message as text: ['remember this line', '\x1b[A']` — exactly the symptom this item existed to fix.

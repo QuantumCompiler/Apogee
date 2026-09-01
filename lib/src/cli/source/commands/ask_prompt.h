@@ -1,6 +1,8 @@
 #pragma once
 
 #include "agentloop/question.h"
+#include "ansi/ansi.h"
+#include "commands/status_line.h"
 
 /// The terminal implementation of `ask_user`.
 ///
@@ -20,6 +22,10 @@ namespace apogee::commands {
 /// Returning null is the point: a null AskFn means the loop never advertises
 /// `ask_user` at all. A model told it may ask questions with nobody attached
 /// will eventually ask one, and then either hang or invent the answer.
-[[nodiscard]] agentloop::AskFn terminal_ask_fn();
+///
+/// The prompt is written through `status` rather than raw stderr, so it obeys
+/// the same single-line discipline as every other interactive output and cannot
+/// land on top of a spinner frame.
+[[nodiscard]] agentloop::AskFn terminal_ask_fn(StatusLine& status, ansi::Style style);
 
 }  // namespace apogee::commands

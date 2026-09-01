@@ -16,7 +16,7 @@ How we work: features get discussed in chat, written up here (and in [SPEC.md](S
 
 ### v0.1.0 — The C++ harness (walking skeleton → four backends → install contract)
 
-The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](SPEC.md) → Background for the lineage and divergences): a single self-contained C++ binary shipping `apogee complete` and `apogee chat` over all four backends — Anthropic, OpenAI, and Google called directly with streaming, native tool use, and typed thinking display, plus in-process llama.cpp — on top of the config engine, harness core, and shared agent loop, with persistent resumable sessions, a single-status-line terminal UX, and a clean install contract (`apogee check` passes on a fresh keyless, modelless install). Ten backlog items, in build order:
+The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](SPEC.md) → Background for the lineage and divergences): a single self-contained C++ binary shipping `apogee complete` and `apogee chat` over all four backends — Anthropic, OpenAI, and Google called directly with streaming, native tool use, and typed thinking display, plus in-process llama.cpp — on top of the config engine, harness core, and shared agent loop, with persistent resumable sessions, a single-status-line terminal UX, and a clean install contract (`apogee check` passes on a fresh keyless, modelless install). Twelve backlog items, in build order:
 
 - [x] C++ project skeleton (CMake, tests, CI, CLI scaffold) — *shipped 2026-08-25, [Milestone A](MILESTONES.md#milestone-a--project-foundation)*
 - [x] Config engine (typed loader + comment-preserving mutation)
@@ -24,7 +24,9 @@ The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](S
 - [x] Anthropic backend (direct Messages API + SSE)
 - [x] `apogee complete` — the walking-skeleton closer
 - [x] Shared agent loop (Reporter seam, tools, ask_user)
-- [ ] `apogee chat` + terminal UX layer (split at grooming: UX / chat)
+- [x] Terminal UX layer (status line, thinking view, cliReporter)
+- [x] `apogee chat` (REPL, sessions, context monitoring, logging)
+- [x] Chat line editing (replxx: arrow keys, history, completion)
 - [ ] OpenAI + Google backends
 - [ ] llama.cpp in-process backend
 - [ ] Install contract + `apogee check` + completions (release closer)

@@ -13,10 +13,13 @@
 #include "agent/tool.h"
 #include "agentloop/loop.h"
 #include "agentloop/reporter.h"
+#include "ansi/ansi.h"
 #include "backends/factory.h"
 #include "backends/http_client.h"
 #include "commands/ask_prompt.h"
+#include "commands/cli_reporter.h"
 #include "commands/helpers.h"
+#include "commands/terminal.h"
 #include "harness/config.h"
 #include "harness/errors.h"
 #include "harness/harness.h"
@@ -40,6 +43,7 @@ struct CompleteFlags {
     bool all_backends = false;
     bool tools = false;
     bool search = false;
+    bool no_color = false;
 
     CLI::Option* temperature_option = nullptr;
     CLI::Option* max_tokens_option = nullptr;
@@ -130,47 +134,6 @@ bool backend_accepts_images(const harness::Config& config, std::string_view mode
     return entry->type != harness::BackendType::LlamaCpp;
 }
 
-/// Adapts the loop's Reporter to a terminal.
-///
-/// The whole surface layer for `complete`: the answer goes to stdout, progress
-/// goes to stderr and only on a terminal. That split is what keeps
-/// `apogee complete --tools "..." | jq` working -- tool-status lines would
-/// otherwise land in the piped output.
-class CompleteReporter final : public agentloop::Reporter {
-public:
-    CompleteReporter(bool decorate, bool verbose) : decorate_{decorate}, verbose_{verbose} {}
-
-    void on_tool_status(std::string_view detail) override {
-        if (decorate_ || verbose_) {
-            std::cerr << detail << "\n";
-        }
-    }
-
-    void on_answer_token(std::string_view chunk) override {
-        std::cout << chunk << std::flush;
-        emitted_ = true;
-    }
-
-    void on_answer_end() override {
-        if (emitted_) {
-            std::cout << "\n";
-        }
-    }
-
-    // Thinking is dropped: it is display metadata, `complete` has no display
-    // layer yet, and it must never reach stdout -- a pipe receives exactly the
-    // answer. The rich rendering arrives with chat-cli and retrofits here.
-
-    [[nodiscard]] bool emitted() const noexcept {
-        return emitted_;
-    }
-
-private:
-    bool decorate_;
-    bool verbose_;
-    bool emitted_ = false;
-};
-
 /// The built-in tool set for `--tools`.
 ///
 /// `fetch_url` only, for now. Web search comes from the provider's own
@@ -227,14 +190,28 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     request.temperature = temperature;
     request.max_tokens = max_tokens;
 
-    if (decorate && flags.verbose) {
-        std::cerr << "[apogee] " << model << "\n";
-    }
+    // One Reporter implementation for every surface. `complete` was retrofitted
+    // onto it when the terminal UX layer landed, replacing an inline adapter --
+    // two implementations would have drifted, which is the parity failure the
+    // Reporter interface exists to prevent.
+    TerminalWriter status_writer{std::cerr};
 
-    // With --tools the run goes through the shared agent loop; without it,
-    // straight to the provider. Both paths are one call because the loop is
-    // I/O-agnostic -- the surface is this adapter and nothing else.
-    CompleteReporter reporter{decorate, flags.verbose};
+    CliReporter::Options reporter_options;
+    reporter_options.answer_stream = &std::cout;
+    reporter_options.decorate = decorate;
+    reporter_options.verbosity = flags.verbose ? ansi::Verbosity::Verbose
+                                 : flags.quiet ? ansi::Verbosity::Quiet
+                                               : ansi::Verbosity::Line;
+    reporter_options.style =
+        ansi::Style::detect(flags.no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
+    reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
+
+    CliReporter reporter{status_writer, reporter_options};
+
+    if (flags.verbose) {
+        // Startup speaks through the status line, never raw stderr.
+        reporter.status().print_line(reporter_options.style.tag(ansi::Role::Apogee) + " " + model);
+    }
 
     agentloop::Options loop_options;
     loop_options.model = model;
@@ -248,7 +225,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         loop_options.tools = &registry;
         // Advertised only when there is a terminal to answer on. A null AskFn
         // means the tool never appears in the request at all.
-        loop_options.ask = terminal_ask_fn();
+        loop_options.ask = terminal_ask_fn(reporter.status(), reporter_options.style);
     }
 
     std::vector<harness::ChatMessage> history = request.messages;
@@ -256,8 +233,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     try {
         const agentloop::RunResult result =
             agentloop::run(harness, history, loop_options, reporter);
-        if (result.hit_iteration_limit && (decorate || flags.verbose)) {
-            std::cerr << "[apogee] tool-call limit reached; answered without tools\n";
+        if (result.hit_iteration_limit) {
+            reporter.status().print_line(reporter_options.style.tag(ansi::Role::Warning) +
+                                         " tool-call limit reached; answered without tools");
         }
 
         harness::ChatResponse response;
@@ -308,6 +286,7 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                   "Run the prompt against every configured backend");
     cmd->add_flag("--tools", flags->tools,
                   "Let the model call tools (fetch_url; ask_user on a terminal)");
+    cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
     cmd->add_flag("--search", flags->search,
                   "Enable the provider's own server-side web search, where it has one");
 

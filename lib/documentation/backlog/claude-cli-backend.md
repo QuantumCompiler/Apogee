@@ -7,7 +7,7 @@
 - **Never modify or bundle the binary:** resolve `claude` from PATH (or explicit config path); the user installs and logs in themselves; no built-in auth method is suppressed.
 - **Environment inherited wholesale** — never inject `ANTHROPIC_API_KEY` from harness config unless the user explicitly set it there, and document loudly that it overrides subscription auth (the stale-key-redirects-a-Max-plan-to-per-token-billing support trap; surface the variable by name in auth-related error messages).
 - **Adapter boundary is total:** the rest of the harness never sees a `stream_event` — wire JSON maps to the typed event union at the adapter and nowhere else. Unknown wire `type`s are allowlist-ignored (log-and-drop), never errors: an unknown-type crash turns a CLI upgrade into an outage.
-- **stderr never merges into stdout** (diagnostics interleaved into JSONL break the parser); separate reader, bounded ~8 KiB tail surfaced on non-zero exit — the same rule chat-cli's OnNotice startup discipline enforces.
+- **stderr never merges into stdout** (diagnostics interleaved into JSONL break the parser); separate reader, bounded ~8 KiB tail surfaced on non-zero exit — the same rule the terminal UX layer's OnNotice startup discipline enforces (the terminal UX layer (shipped 2026-08-26; `lib/src/cli/source/commands/thinking_view.h`)).
 - **Thinking is display-only** (already a harness-wide rule): never persisted, never in programmatic returns, never in served responses.
 - A persistent child process is not a listening socket — the interactive-never-listens invariant holds and stays covered by the existing lsof test.
 
@@ -17,7 +17,7 @@
 
 **Decisions made** (dated):
 - 2026-08-24 — Backend re-added by user decision, adopting the design notes (proven against another harness, wire schema verified on CLI 2.1.233) as the spec. Persistent-child-per-session, not per-turn spawns; typed events at the adapter boundary; transcript-authoritative resume.
-- 2026-08-25 — The design notes, previously a standalone `lib/documentation/assistant/claude-cli-streaming-backend.md`, were **folded into this document** (appendix below) by user decision: they are item spec, not a standing contributor doc, and `assistant/` holds only the five standing docs. The rendering half (notes §8) went to [chat-cli.md](chat-cli.md), which owns the terminal UX layer; the two credential/binary policy rules were promoted to [SPEC.md](../assistant/SPEC.md) → Principles, where they bind every vendor-CLI backend rather than just this one.
+- 2026-08-25 — The design notes, previously a standalone `lib/documentation/assistant/claude-cli-streaming-backend.md`, were **folded into this document** (appendix below) by user decision: they are item spec, not a standing contributor doc, and `assistant/` holds only the five standing docs. The rendering half (notes §8) went to the terminal UX layer (shipped 2026-08-26; `lib/src/cli/source/commands/thinking_view.h`), which owns the terminal UX layer; the two credential/binary policy rules were promoted to [SPEC.md](../assistant/SPEC.md) → Principles, where they bind every vendor-CLI backend rather than just this one.
 - 2026-08-24 — Placed at the top of the gated ring rather than v0.1.0 (the release already carries four backends; this slots into the same seams with no new infrastructure debt).
 - 2026-08-24 — This item is the template for the whole vendor-CLI family ([vendor-cli-backends.md](vendor-cli-backends.md): codex, gemini, ollama) — extract the child-process/reader machinery reusably rather than claude-specifically.
 
@@ -39,7 +39,7 @@
 - [ ] Mid-session system-prompt/effort changes restart the child with `--resume` transparently; shutdown drains queued output (≥30s budget) rather than truncating
 - [ ] The adversarial chunk-size replay suite passes byte-for-byte identically at every chunk size
 
-**Scope note.** gated ring, first position (ring convention: assumes the complete v0.1.0 set; no ring-internal gate). Out of scope here: the thinking *renderer* itself (rolling window + collapse) — that is the terminal UX layer's job, and [chat-cli.md](chat-cli.md) now carries those notes; this backend only feeds it typed events.
+**Scope note.** gated ring, first position (ring convention: assumes the complete v0.1.0 set; no ring-internal gate). Out of scope here: the thinking *renderer* itself (rolling window + collapse) — that is the terminal UX layer's job, and the terminal UX layer (shipped 2026-08-26; `lib/src/cli/source/commands/thinking_view.h`) now carries those notes; this backend only feeds it typed events.
 
 **⚠ On ship, preserve the appendix.** The usual flow deletes this document when the item ships. Do not simply drop the appendix with it: [vendor-cli-backends.md](vendor-cli-backends.md) (codex / gemini / ollama) templates off the process model, reader discipline, and testing shape, and [stdio-machine-mode.md](stdio-machine-mode.md) reuses the event vocabulary. Carry the appendix into the MILESTONES.md entry for this work — MILESTONES is the permanent record and explicitly welcomes this level of detail — and repoint those two documents at it in the same change.
 
@@ -75,7 +75,7 @@ Two independent causes, both fixable:
 
 If you only change one thing, change the second.
 
-A third cause is not the CLI's fault: even with perfect token streaming, dumping everything the model emits — including extended thinking — into the terminal produces output that *feels* worse than choppy. It feels like noise. That is the renderer's problem, and it lives in [chat-cli.md](chat-cli.md).
+A third cause is not the CLI's fault: even with perfect token streaming, dumping everything the model emits — including extended thinking — into the terminal produces output that *feels* worse than choppy. It feels like noise. That is the renderer's problem, and it lives in the terminal UX layer (shipped 2026-08-26; `lib/src/cli/source/commands/thinking_view.h`).
 
 ## 3. Invocation
 
@@ -268,7 +268,7 @@ The `carry` buffer is the part that gets skipped and then causes intermittent pa
 
 ## 8. Rendering thinking
 
-Moved to [chat-cli.md](chat-cli.md) — the terminal UX layer owns it. This backend only emits typed events. Two facts from that section matter here, because they are wire behavior rather than rendering:
+Moved to the terminal UX layer (shipped 2026-08-26; `lib/src/cli/source/commands/thinking_view.h`) — the terminal UX layer owns it. This backend only emits typed events. Two facts from that section matter here, because they are wire behavior rather than rendering:
 
 **[verified 2.1.233]** Thinking arrives in two distinct forms, and the adapter must handle both:
 
@@ -343,18 +343,18 @@ tests/fixtures/
 
 The replay harness feeds bytes in adversarial chunk sizes — 1 byte, 3 bytes, 4096 bytes, whole file — and asserts the emitted `Event` sequence is identical in every case. This catches the entire class of framing bugs with no network call and no API charge, and it is the suite that will actually save you when the CLI's schema shifts.
 
-The renderer half of this section moved to [chat-cli.md](chat-cli.md) with §8.
+The renderer half of this section moved to the terminal UX layer (shipped 2026-08-26; `lib/src/cli/source/commands/thinking_view.h`) with §8.
 
 ## 12. Open items
 
-Resolved since the first draft: `--json-schema` is characterised (§9 — a post-answer forced tool call, composes with streaming, costs an extra generation), and the thinking-render question is settled (rolling window plus collapse, made safe by pre-wrapping — now in [chat-cli.md](chat-cli.md)).
+Resolved since the first draft: `--json-schema` is characterised (§9 — a post-answer forced tool call, composes with streaming, costs an extra generation), and the thinking-render question is settled (rolling window plus collapse, made safe by pre-wrapping — now in the terminal UX layer (shipped 2026-08-26; `lib/src/cli/source/commands/thinking_view.h`)).
 
 Still open — each carried into **Open calls** above with a default:
 
 - Whether `complete_structured()` should also accept a streaming sink, or stay synchronous.
 - Prompt-cache interaction and whether `TurnComplete.cost_usd` is meaningful for local models or always zero.
 - Session persistence across harness restarts.
-- Whether the thinking window's height should be user-configurable — carried to [chat-cli.md](chat-cli.md), which owns the renderer.
+- Whether the thinking window's height should be user-configurable — carried to the terminal UX layer (shipped 2026-08-26; `lib/src/cli/source/commands/thinking_view.h`), which owns the renderer.
 
 ## References
 

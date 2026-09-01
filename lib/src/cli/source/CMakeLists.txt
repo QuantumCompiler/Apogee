@@ -44,6 +44,31 @@ add_library(apogee_core STATIC
     commands/helpers.cpp
     commands/ask_prompt.h
     commands/ask_prompt.cpp
+    commands/terminal.h
+    commands/terminal.cpp
+    commands/status_line.h
+    commands/status_line.cpp
+    commands/thinking_view.h
+    commands/thinking_view.cpp
+    commands/cli_reporter.h
+    commands/cli_reporter.cpp
+
+    commands/chat.h
+    commands/chat.cpp
+    commands/chat_history.h
+    commands/chat_history.cpp
+    commands/input_gate.h
+    commands/input_gate.cpp
+    commands/line_reader.h
+    commands/line_reader.cpp
+
+    ansi/ansi.h
+    ansi/ansi.cpp
+
+    logger/session.h
+    logger/session.cpp
+    logger/operational.h
+    logger/operational.cpp
 
     harness/paths.h
     harness/paths.cpp
@@ -112,7 +137,7 @@ target_compile_definitions(apogee_core PRIVATE
 )
 
 target_link_libraries(apogee_core PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp
-                      PRIVATE CURL::libcurl)
+                      PRIVATE CURL::libcurl replxx::replxx)
 
 apogee_set_target_options(apogee_core)
 

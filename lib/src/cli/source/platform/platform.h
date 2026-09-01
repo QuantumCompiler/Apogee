@@ -69,4 +69,31 @@ enum class StandardStream : std::uint8_t { In, Out, Err };
 /// terminal is the normal shape of `apogee complete x > out.txt`.
 [[nodiscard]] bool is_terminal(StandardStream stream) noexcept;
 
+/// The terminal's width in columns, or nullopt when it cannot be determined
+/// (not a terminal, or the query failed).
+///
+/// The thinking view needs this to pre-wrap every painted row: painted rows
+/// must equal screen rows or the cursor arithmetic that erases them is wrong,
+/// and a wrong erase eats the user's prompt. A caller with no answer should
+/// assume a conservative default rather than skip wrapping.
+[[nodiscard]] std::optional<int> terminal_width() noexcept;
+
+/// Discards anything already typed at the terminal but not yet read.
+///
+/// Chat startup is not instant — every backend is constructed before the first
+/// prompt — and the terminal buffers whatever the user types meanwhile. Without
+/// this, an impatient keystroke becomes the session's opening message the
+/// instant the prompt appears.
+///
+/// **Discards rather than suppressing echo.** Turning ECHO off for the duration
+/// of startup would need restorable terminal state held across a stretch of
+/// code with many exit paths, and an exit that skips the restore strands the
+/// user's shell with echo off. Discarding needs no state to restore and cannot
+/// leave the terminal worse than it found it.
+///
+/// A no-op when stdin is not a terminal: there the buffered bytes ARE the
+/// input, not typeahead. Failures are ignored — a session must never fail to
+/// start because a flush was refused.
+void discard_pending_input() noexcept;
+
 }  // namespace apogee::platform

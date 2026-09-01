@@ -21,6 +21,10 @@
 #                                  through the text-surgery helpers in
 #                                  harness/config_edit.h. See config-engine.
 #   CLI parsing CLI11           -- wired below
+#   Line editing replxx         -- wired below. Used ONLY by the chat REPL's
+#                                  interactive path; a non-TTY run never
+#                                  constructs it. GNU readline was ruled out on
+#                                  licence grounds (GPL).
 #   Tests       Catch2 v3       -- wired below (only when APOGEE_BUILD_TESTS)
 #   HTTP client libcurl         -- wired below (arrived with anthropic-backend).
 #                                  Found, never fetched: curl is a system
@@ -100,7 +104,17 @@ set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_FORMAT_SOURCE OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(nlohmann_json CLI11)
+FetchContent_Declare(replxx
+    GIT_REPOSITORY https://github.com/AmokHuginnsson/replxx.git
+    GIT_TAG        release-0.0.4
+    GIT_SHALLOW    TRUE
+    SYSTEM
+    FIND_PACKAGE_ARGS NAMES replxx
+)
+set(REPLXX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(REPLXX_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(nlohmann_json CLI11 replxx)
 
 # yaml-cpp 0.8.0 (the newest release; tagged 2023) opens with
 # cmake_minimum_required(VERSION 3.4), and CMake >= 4.0 refuses to configure a

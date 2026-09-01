@@ -27,6 +27,13 @@ add_executable(apogee_tests
     backends/anthropic_test.cpp
     backends/factory_test.cpp
     commands/helpers_test.cpp
+    commands/thinking_view_test.cpp
+    commands/status_line_test.cpp
+    commands/cli_reporter_test.cpp
+    ansi/ansi_test.cpp
+    commands/chat_test.cpp
+    commands/line_reader_test.cpp
+    logger/session_test.cpp
     agent/tool_test.cpp
     agentloop/loop_test.cpp
     agentloop/anthropic_loop_test.cpp
@@ -117,6 +124,46 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/no-listen-home
     )
     set_tests_properties(cli.complete_opens_no_listening_socket PROPERTIES TIMEOUT 60)
+endif()
+
+# Startup output discipline, under a real pseudo-terminal.
+#
+# A pipe-based test proves nothing here: `apogee` asks whether stdout is a
+# terminal before rendering anything, so piping exercises the branch that
+# deliberately emits nothing. The PTY is the only way to see what the user sees.
+# POSIX only -- `pty` has no Windows equivalent (a recorded per-item skip).
+if(UNIX)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME cli.startup_speaks_on_one_line
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/pty_startup_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.startup_speaks_on_one_line PROPERTIES TIMEOUT 60)
+
+        # Typeahead and crash-safety. The first needs a real terminal (tcflush
+        # applies to a terminal input queue, and on a pipe the buffered bytes
+        # ARE the input); the second needs a real SIGKILL. Neither reproduces
+        # in a unit test.
+        add_test(NAME cli.chat_typeahead_and_crash_safety
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/pty_chat_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.chat_typeahead_and_crash_safety PROPERTIES TIMEOUT 120)
+
+        # Line editing. replxx engages only when stdin AND stdout are both
+        # terminals, so none of this reproduces on a pipe -- which is the point:
+        # before it was wired, an arrow key arrived in the message as a literal
+        # escape sequence.
+        add_test(NAME cli.chat_line_editing
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/pty_lineedit_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.chat_line_editing PROPERTIES TIMEOUT 120)
+    endif()
 endif()
 
 # `apogee config` end to end against the real binary, under a throwaway

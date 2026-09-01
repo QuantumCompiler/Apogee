@@ -28,24 +28,28 @@ std::string trim(std::string_view text) {
 }
 
 /// Presents one question and returns the answer.
-std::string ask_one(const agentloop::Question& question, std::size_t index, std::size_t total) {
-    std::cerr << "\n";
+std::string ask_one(StatusLine& status, const ansi::Style& style,
+                    const agentloop::Question& question, std::size_t index, std::size_t total) {
+    // Through the status line, not raw stderr: the spinner may be mid-frame,
+    // and print_line bumps the generation counter so an in-flight repaint
+    // cannot land on top of the question.
+    std::string header = style.tag(ansi::Role::Permission) + " ";
     if (total > 1) {
-        std::cerr << "(" << index + 1 << "/" << total << ") ";
+        header += "(" + std::to_string(index + 1) + "/" + std::to_string(total) + ") ";
     }
-    std::cerr << question.question << "\n";
+    status.print_line(header + question.question);
 
     for (std::size_t i = 0; i < question.options.size(); ++i) {
-        std::cerr << "  " << i + 1 << ") " << question.options[i].label;
+        std::string line = "  " + std::to_string(i + 1) + ") " + question.options[i].label;
         if (!question.options[i].description.empty()) {
-            std::cerr << " -- " << question.options[i].description;
+            line += style.dim(" -- " + question.options[i].description);
         }
-        std::cerr << "\n";
+        status.print_line(line);
     }
     // Free text is ALWAYS accepted. The model's options are a convenience, not
     // a constraint on what the user is allowed to say -- and the right answer
     // is often none of the four.
-    std::cerr << "Choose a number, or type your own answer: " << std::flush;
+    std::cerr << style.dim("Choose a number, or type your own answer: ") << std::flush;
 
     std::string line;
     if (!read_line(line)) {
@@ -69,7 +73,7 @@ std::string ask_one(const agentloop::Question& question, std::size_t index, std:
 
 }  // namespace
 
-agentloop::AskFn terminal_ask_fn() {
+agentloop::AskFn terminal_ask_fn(StatusLine& status, ansi::Style style) {
     // Both ends must be a terminal: stdin because the answer is read from it,
     // stderr because the question is written there. A run reading its prompt
     // from a pipe has no interactive stdin left, and gets no ask_user.
@@ -78,11 +82,12 @@ agentloop::AskFn terminal_ask_fn() {
         return nullptr;
     }
 
-    return [](const agentloop::QuestionRequest& request) {
+    return [&status, style](const agentloop::QuestionRequest& request) {
         agentloop::Answers answers;
         answers.values.reserve(request.questions.size());
         for (std::size_t i = 0; i < request.questions.size(); ++i) {
-            answers.values.push_back(ask_one(request.questions[i], i, request.questions.size()));
+            answers.values.push_back(
+                ask_one(status, style, request.questions[i], i, request.questions.size()));
         }
         std::cerr << "\n";
         return answers;

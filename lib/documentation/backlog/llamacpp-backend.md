@@ -28,7 +28,7 @@
 **Acceptance criteria:**
 - [ ] Two successive StreamChat calls against one session object process only new prompt tokens — KV reuse asserted via llama eval-count (provider-level test; the chat surface arrives in a parallel branch)
 - [ ] A request flagged SideRequest runs on a separate context/sequence, and a subsequent session turn's eval-count proves the session KV was untouched
-- [ ] Exact token counts are exposed through the provider counting API, flagged exact (the 80/90 threshold policy itself is tested in chat-cli)
+- [ ] Exact token counts are exposed through the provider counting API, flagged exact (the 80/90 threshold policy itself shipped with `apogee chat` and is tested in `tests/commands/chat_test.cpp`)
 - [ ] lsof test: zero listening sockets during local interactive turns; model unloads on idle when configured; a load failure yields a clear error naming the file, never a crash
 
 **Scope note.** earmarked for v0.1.0. Gate satisfied: `apogee complete` shipped 2026-08-26 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone E). This item also owns the `VisionCapable` capability that `commands/complete.cpp` currently stands in for with a config-type check — see the stopgap comment on `backend_accepts_images`.
