@@ -50,13 +50,12 @@ Items are numbered in the **suggested order of implementation**. The rule stays 
 
 Items 1–6 build strictly in order (each gates on the one before it — the skeleton proves config → harness → backend → terminal on exactly one provider before anything widens). After 6, the three branches **7, 8, 9 are independent** — take them in any order (or in parallel sessions). Item 10 is the release closer and assumes 1–9 are complete.
 
-*Items 1 (C++ project skeleton), 2 (config engine), 3 (harness core), 4 (Anthropic backend), and 5 (`apogee complete`) shipped 2026-08-25/26 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestones A–E. **The walking skeleton is closed:** config → harness → backend → terminal runs end to end. The numbering below is unchanged so the gate references in each document still read true.*
+*Items 1 (C++ project skeleton), 2 (config engine), 3 (harness core), 4 (Anthropic backend), 5 (`apogee complete`), and 6 (the shared agent loop) shipped 2026-08-25/26 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestones A–F. **The walking skeleton is closed** and the loop is extracted; items 7, 8, and 9 are now independent and may be taken in any order. The numbering below is unchanged so the gate references in each document still read true.*
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 6 | [agentloop-core.md](agentloop-core.md) | ✅ 5 (shipped) | Shared agentic loop: model→tool→model behind a Reporter interface, with ask_user |
-| 7 | [chat-cli.md](chat-cli.md) | 6 · **split first** (UX layer / chat) | `apogee chat` + the shared terminal UX layer |
-| 8 | [openai-google-backends.md](openai-google-backends.md) | 6 | OpenAI and Google Gemini backends over the shared client/IR |
+| 7 | [chat-cli.md](chat-cli.md) | ✅ 6 (shipped) · **split first** (UX layer / chat) | `apogee chat` + the shared terminal UX layer |
+| 8 | [openai-google-backends.md](openai-google-backends.md) | ✅ 6 (shipped) | OpenAI and Google Gemini backends over the shared client/IR |
 | 9 | [llamacpp-backend.md](llamacpp-backend.md) | ✅ 5 (shipped) | Local inference: llama.cpp linked in-process (generation, KV sessions) |
 | 10 | [install-check-lifecycle.md](install-check-lifecycle.md) | 1–9 (all of v0.1.0) | Install contract, `apogee check` doctor, completions (release closer) |
 

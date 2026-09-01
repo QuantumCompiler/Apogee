@@ -31,4 +31,4 @@
 - [ ] Interrupted first-open migration rolls back and retries whole (single-transaction test); FTS validation uses the content-comparing `integrity-check 1` form; re-ingesting a source replaces its chunks
 - [ ] Auto-registration writes the embeddings: config entry through the comment-preserving helpers (byte-diff verified)
 
-**Scope note.** gated on [agentloop-core.md](agentloop-core.md) shipping.
+**Scope note.** gated ring. Its prerequisite — the shared agent loop — shipped 2026-08-26 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone F). The RAG injection seam already exists: `agentloop::Options::transient_prefix` / `transient_at`, spliced into the outgoing request by `splice_transient` and test-locked as never reaching persisted history.

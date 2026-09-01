@@ -28,4 +28,4 @@
 - [ ] Both providers pass the identical loop-conformance suite the mock and Anthropic backends pass; one IR-level behavioral table runs identically across all three
 - [ ] Streaming, exact usage counts, and thinking/reasoning display work on both; retry/backoff and key hygiene match the Anthropic backend
 
-**Scope note.** earmarked for v0.1.0 (build after [agentloop-core.md](agentloop-core.md)).
+**Scope note.** earmarked for v0.1.0. Gate satisfied: the shared agent loop shipped 2026-08-26 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone F). Reuse `backends/http_client.h` and `backends/sse_parser.h`; put each dialect in its own `*_wire.h/.cpp` as `anthropic_wire` does. The loop's conformance suite (`tests/agentloop/loop_test.cpp`) is what these backends must pass.

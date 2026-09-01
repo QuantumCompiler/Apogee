@@ -1,12 +1,14 @@
 #pragma once
 
-/// Agent loop -- the shared model -> tool -> model cycle.
+/// The agentic loop -- Apogee's I/O-agnostic heart.
 ///
-/// Reserved by the project skeleton; filled by the `agentloop-core` backlog
-/// item with the loop itself, the Reporter seam that lets each surface render
-/// progress its own way, and the ask_user tool.
+/// | Header | Contents |
+/// |---|---|
+/// | `loop.h` | `run()`, `Options`, `RunResult` -- the model→tool→model cycle. |
+/// | `reporter.h` | The observer every surface adapts. |
+/// | `content.h` | Token estimation, compaction, transient splicing. |
+/// | `question.h` | The `ask_user` tool: schema, validation, encoding. |
 ///
-/// There is exactly ONE loop, and every surface drives it (SPEC.md ->
-/// Principles: "one source of truth per concern"). A second loop written for a
-/// second surface is how parity bugs are born.
+/// Tools themselves live one package over, in `agent/` -- the loop needs a
+/// registry, but a registry needs no loop.
 namespace apogee::agentloop {}

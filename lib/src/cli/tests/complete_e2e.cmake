@@ -126,6 +126,21 @@ expect_contains("${APOGEE_OUT}" "=== mock ===" "each backend is labelled")
 expect_contains("${APOGEE_OUT}" "=== second ===" "every backend runs")
 apogee_run(0 config delete-backend second)
 
+# --- the agent loop ---------------------------------------------------------
+# --tools routes the run through the shared loop. The mock answers without
+# calling anything, so this asserts the loop path produces the same clean output
+# as the direct path -- no status lines leaking into a piped answer.
+apogee_run(0 complete --tools "hi")
+string(STRIP "${APOGEE_OUT}" stripped_tools)
+if(NOT stripped_tools STREQUAL "mock response")
+    message(FATAL_ERROR "--tools leaked decoration into piped output: '${stripped_tools}'")
+endif()
+
+# --search enables the provider's own server-side tool where it has one; the
+# mock has none and must simply ignore it rather than failing.
+apogee_run(0 complete --search "hi")
+apogee_run(0 complete --tools --search "hi")
+
 # --- no usable backend ------------------------------------------------------
 apogee_run(0 config delete-backend mock)
 apogee_run(1 complete "x")

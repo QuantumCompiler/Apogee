@@ -31,4 +31,4 @@
 - [ ] serve is the only command that opens a listening socket (the lsof test extends to assert this boundary); --bind defaults loopback with fail-closed behavior for non-loopback
 - [ ] (conditional — applies once model-profiles-and-management lands) Streaming think/format filtering on server paths uses continue-not-break semantics (an empty filtered chunk ≠ end of stream)
 
-**Scope note.** gated on [agentloop-core.md](agentloop-core.md) shipping.
+**Scope note.** gated ring. Its prerequisite — the shared agent loop — shipped 2026-08-26 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone F), so `serve` becomes another Reporter adapter over the same `agentloop::run` rather than a second loop. **Note for this item:** `serve` is the one component permitted to listen, so it needs an explicit, reviewed exclusion from the `cli.no_listen_symbols` check (CLAUDE.md → *⚠ Interactive turns never open a listening socket*).

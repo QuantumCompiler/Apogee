@@ -15,6 +15,7 @@
 **Reference (Ommi).** lib/cli/Makefile ↔ install.sh ↔ update.go ↔ check.go four-way parity (the v0.1.5 foundation; every early install bug was silent drift), check --fix discipline, completion machinery, Milestone Q. Divergence: no cpp-tool sidecars or rpath staging to install (in-process llama.cpp), so the parity surface shrinks; C++ needs per-platform native builders instead of Go cross-compilation; self-update joins later as the third parity file.
 
 **Decisions made** (dated):
+- 2026-08-31 — The **developer half of `make install` landed early**, ahead of this item: `install(TARGETS apogee RUNTIME …)` in `lib/src/cli/source/CMakeLists.txt` plus an `install` target in `lib/src/cli/Makefile` (`PREFIX ?= $HOME/.local`, so no sudo). It installs the binary and nothing else — **no `~/.apogee/` asset is seeded**, precisely so the parity rule is not half-satisfied before `check` exists to verify it. This item still owns the whole contract: the data-directory layout, the config template, completions, `install.sh`, `uninstall`, and the directory-diff gate. When they land they *extend* that existing rule; they do not introduce the install path.
 - 2026-08-24 — Planned from Ommi's documentation (parallel digest → two planning lenses → merge → adversarial verify). Position in the queue: The release closer: it assumes every other earmarked item is complete (its gate names only the longest chain). Ommi v0.1.5–v0.1.7 were exactly this foundation; shipping v0.1.0 without the parity discipline reproduces Ommi's entire early bug class.
 
 **Open calls:**
@@ -26,7 +27,7 @@
 **Guardrail(s).** Automated install-parity directory-diff in CI on every release candidate; check exercised against a matrix of deliberately broken installs; completion protocol smoke test (`apogee __complete complete --model ""`).
 
 **Acceptance criteria:**
-- [ ] Fresh `make install` and fresh script install produce directory listings whose sorted diff is empty (Ommi's pre-tag gate, automated in CI)
+- [ ] Fresh `make install` and fresh script install produce directory listings whose sorted diff is empty (Ommi's pre-tag gate, automated in CI) — `make install` exists as of 2026-08-31 and installs the binary only; this criterion is about the layout both paths must produce once the data-directory assets are defined here
 - [ ] `apogee check` reports zero failures on a fresh install with no models and no keys (degraded-but-valid), and correctly flags a dangling model_path, a missing key on a configured cloud backend, an unloadable GGUF, and wrong file modes
 - [ ] check never modifies config — it prints the exact remediation command; --fix-class remediations act only on the local install
 - [ ] Dynamic shell completion returns live backend names via the __complete protocol after rebuild

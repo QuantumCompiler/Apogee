@@ -57,8 +57,12 @@ public:
 
     /// Builds one from a config entry, resolving the key and model.
     /// Throws harness::ProviderError when the entry has no usable API key.
+    /// `web_search` enables Anthropic's server-side search tool for this
+    /// provider. A per-run flag rather than a config key -- see
+    /// backends::BuildOptions.
     [[nodiscard]] static std::unique_ptr<AnthropicProvider> from_config(
-        const std::string& backend_name, const harness::BackendConfig& config);
+        const std::string& backend_name, const harness::BackendConfig& config,
+        bool web_search = false);
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;
 

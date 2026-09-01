@@ -41,6 +41,10 @@ option(APOGEE_BUILD_TESTS  "Build the test suite" ON)
 # dedicated non-blocking CI job until llamacpp-backend lands. See third_party/.
 option(APOGEE_ENABLE_LLAMA "Configure and build the pinned llama.cpp target" OFF)
 
+# Standard bin/lib/share destinations for the install rule in source/. This one
+# ships with CMake; the three below it are ours.
+include(GNUInstallDirs)
+
 include(ApogeeWarnings)
 include(ApogeeDependencies)
 include(ApogeeLinkPolicy)

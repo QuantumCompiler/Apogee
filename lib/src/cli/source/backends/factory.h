@@ -35,6 +35,18 @@ struct BuildResult {
     [[nodiscard]] std::string skipped_summary() const;
 };
 
+/// Per-run overrides that shape construction.
+///
+/// These are flags, not config: `--search` applies to one invocation, so it
+/// belongs here rather than as a `web_search:` key someone has to remember to
+/// turn off again.
+struct BuildOptions {
+    /// Enables the provider's own server-side web search where it has one.
+    /// Providers without one ignore it -- there is no local search tool, by
+    /// decision (2026-08-26): scraping a search results page breaks silently.
+    bool web_search = false;
+};
+
 /// Constructs a provider for every backend in `config` and registers it on
 /// `harness`, then installs the default router.
 ///
@@ -43,13 +55,15 @@ struct BuildResult {
 /// the local one run — otherwise one unconfigured backend takes down every
 /// other. The reason is recorded per entry so a caller can explain the gap
 /// when the model the user actually asked for is the one that was skipped.
-[[nodiscard]] BuildResult build_providers(harness::Harness& harness);
+[[nodiscard]] BuildResult build_providers(harness::Harness& harness,
+                                          const BuildOptions& options = {});
 
 /// Constructs one provider from a single entry, or nullptr with `reason` set.
 ///
 /// Adding a backend type is a case here plus a row in `kBackendTypeNames`
 /// (`harness/config.cpp`). Nothing else changes.
 [[nodiscard]] std::shared_ptr<harness::LLMProvider> make_provider(
-    const std::string& name, const harness::BackendConfig& config, std::string& reason);
+    const std::string& name, const harness::BackendConfig& config, std::string& reason,
+    const BuildOptions& options = {});
 
 }  // namespace apogee::backends

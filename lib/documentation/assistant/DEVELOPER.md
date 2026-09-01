@@ -54,7 +54,7 @@ Apogee/
         ├── cli/             — The CLI application
         │   ├── CMakeLists.txt   — Build root: standard, options, target wiring, link-policy assertion
         │   ├── CMakePresets.json— One preset per release target + `default` (host native)
-        │   ├── Makefile         — Thin wrapper (build/test/lint/format/clean/fresh)
+        │   ├── Makefile         — Thin wrapper (build/install/test/lint/format/clean/fresh)
         │   ├── .clang-format    — Formatting rules (make format / make format-check)
         │   ├── .clang-tidy      — Static analysis, incl. the smart-pointer ownership gate
         │   ├── cmake/
@@ -93,7 +93,8 @@ That split is what makes surface parity structural rather than something a revie
 | `commands/` | The CLI scaffold: the `Command` interface, the registry, the root command, and the built-in commands. |
 | `harness/` | **The core.** The config engine (typed loader, `${ENV}` expansion, template, comment-preserving edits, on-disk paths) **and** the provider interface, canonical message IR, router, and context-window table. Includes nothing from `backends/` — enforced. |
 | `backends/` | Provider implementations plus the shared cloud infrastructure: `mock`, `anthropic`, the HTTP client, and the SSE parser. The remaining cloud and local backends land here with their own items. |
-| `agentloop/` | *Reserved* — the shared model→tool→model loop and its Reporter seam (`agentloop-core` item). |
+| `agentloop/` | **The shared loop.** `run()` drives model→tool→model behind a Reporter, plus `ask_user`, history compaction, and transient splicing. Includes nothing from `backends/` — enforced. |
+| `agent/` | Tools: the registry, dispatch with the permission gate, and `fetch_url`. Separate from the loop because a registry needs no loop; MCP and native toolsets register here later. |
 | `embedstore/` | *Reserved* — chunk storage and retrieval (`embedstore-lexical-rag` item). |
 | `httpserver/` | *Reserved* — `apogee serve` (`serve-public-plane` item). Server deployments only. |
 | `mcp/` | *Reserved* — MCP client and tool plumbing (`mcp-client-tools-agents` item). |
@@ -108,7 +109,8 @@ Reserved packages carry a documented header and no code. They exist so every lat
 | `registry.h/.cpp` | `CommandRegistry` — owns commands, rejects duplicate names, binds them all to an app. `default_registry()` is the built-in set. |
 | `root.h/.cpp` | `RootCommand` — persistent flags (`--config`), the version flag, and `run(argc, argv)` → exit code. |
 | `version_command.h/.cpp` | `apogee version`. The first real subcommand, proving the path end to end. |
-| `complete.h/.cpp` | `apogee complete` — one-shot prompt in, answer out. The walking skeleton. |
+| `complete.h/.cpp` | `apogee complete` — one-shot prompt in, answer out. The walking skeleton, and the first consumer of the agent loop (`--tools`). |
+| `ask_prompt.h/.cpp` | The terminal `ask_user` implementation. Prompts on stderr, reads stdin, and returns a **null** AskFn when there is no terminal — which is what stops the tool being advertised. Deliberately minimal; chat-cli replaces it. |
 | `helpers.h/.cpp` | Shared command plumbing: flag/config resolution, stdin, base64, image parts, message assembly, and the exit codes. |
 | `config_cmd.h/.cpp` | `apogee config` and its nine subcommands. A thin caller — it formats no YAML of its own; every mutation goes through `harness/config_edit.h`. |
 
@@ -186,6 +188,38 @@ Mechanisms that land here as later items need them: process spawning (vendor-CLI
 
 **Adding a cloud backend.** Reuse `HttpClient` and `SseParser`; put the dialect in its own `*_wire.h/.cpp` so it is testable with no transport at all. Take an injected `HttpClient` in the constructor. Honour cancellation between chunks. Keep the API key in a header and out of every error message — `tests/backends/anthropic_test.cpp` → `[backends][anthropic][secrets]` is the pattern for pinning that.
 
+### `agentloop/` — the shared loop
+
+| File | Purpose |
+|---|---|
+| `loop.h/.cpp` | `run()`, `Options`, `RunResult`. The model→tool→model cycle. |
+| `reporter.h` | The observer every surface adapts. `NullReporter` discards everything. |
+| `content.h/.cpp` | `TokenCount`, `splice_transient`, `compact_history`. |
+| `question.h/.cpp` | `ask_user`: schema, validation, answer encoding. |
+
+**Why it exists before the surfaces.** Extracting the loop behind an observer *before* front-ends multiply is Ommi's most load-bearing sequencing lesson — it is what kept four surfaces consistent there and made deleting one a local change. A surface is a thin adapter over `Reporter`; the loop knows nothing about terminals or HTTP.
+
+**Three contracts worth knowing before you touch it:**
+
+*`ask_user` is advertised if and only if there is someone to answer it.* A null `AskFn` means the tool is **absent from the request**, not advertised-and-refused. A model told it may ask questions on a surface with nobody attached will ask one, then hang or invent the answer. `advertised_tools()` is public so the rule is testable as a contract.
+
+*Tool problems are results, never exceptions.* An unknown tool, a bad argument, a tool that threw — all come back as error results the model reads and reacts to. Aborting the turn would throw away the conversation over a hallucinated name.
+
+*An aborted tool phase rolls back.* History resizes to the mark taken before the phase, because an assistant message whose tool calls were never answered is rejected outright by several providers.
+
+**Transient content** rides `splice_transient` into the outgoing request and never into history. If it landed there it would be re-sent every later turn, growing the prompt without bound and feeding the model material it was told applied to one question.
+
+### `agent/` — tools
+
+| File | Purpose |
+|---|---|
+| `tool.h/.cpp` | `Tool`, `ToolRegistry`, `dispatch()`, and the ask/allow/deny permission gate. |
+| `fetch_url.h/.cpp` | The `fetch_url` tool and its HTML-to-text stripper, behind an injected `UrlFetcher`. |
+
+**Adding a tool.** Construct a `Tool`, set `writes` if it is destructive, and register it. A `writes` tool goes through the permission gate; a read-only one does not, because prompting for every read trains the user to approve without looking. `Ask` with no confirm function resolves to **deny** — a pipe or a cron job has nobody to ask, and allowing because no one objected is the wrong direction to fail.
+
+**There is no local web-search tool, by decision** (2026-08-26). Search comes from the providers' own server-side tools; Ommi's DuckDuckGo scraper is not ported because a results-page parser breaks silently and returns nothing rather than erroring. `fetch_url` — reading a URL you were *given* — carries none of that fragility.
+
 ---
 
 ## `lib/src/cli/tests/` — tests
@@ -210,6 +244,11 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `backends/anthropic_test.cpp` | Fixture-replayed streams (seven chunk sizes), the wire mapping, thinking replay, error shapes, and the API-key secrets guardrail. |
 | `backends/factory_test.cpp` | Construction per type, and that one unbuildable backend does not stop the others. |
 | `commands/helpers_test.cpp` | Flag/config resolution order, base64 padding, image parts, message assembly. |
+| `agentloop/loop_test.cpp` | **The conformance suite** — multi-tool turns, tool errors, unknown tools, the iteration bound, `ask_user` advertisement and rollback, the permission gate, transient exclusion, and the Reporter sequence. Every later provider must pass it. |
+| `agentloop/anthropic_loop_test.cpp` | The real Anthropic provider driven through the real loop on recorded SSE — the join the unit suites do not cover. |
+| `agentloop/content_test.cpp` | Token estimation, splicing, compaction (including that a failed compaction returns history unchanged). |
+| `agentloop/question_test.cpp` | `ask_user` schema, validation messages written for the model, answer encoding. |
+| `agent/tool_test.cpp` | Registry, permission resolution, dispatch, and `fetch_url` including its HTML stripper. |
 | `support/fake_transport.h/.cpp` | The scripted `HttpTransport` — the seam that makes cloud-backend tests hermetic. |
 | `support/fake_command.h/.cpp` | A `Command` defined in test code — the injectable seam, exercised. |
 | `support/env_guard.h/.cpp` | RAII environment-variable and temp-directory guards. Config resolution reads the environment, so exercising it means mutating the environment — and a leaked change would steer every test after it. |
@@ -256,10 +295,13 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 | `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — what CI runs. `--platform`, `--fresh`, `--clean`, `--jobs` too. |
 | `make test` | The same thing for the CLI alone (it calls `cicd.sh`). |
 | `make build [PRESET=…]` | Configure and build one preset. |
+| `make install [PREFIX=…]` | Build, then install the binary to `$PREFIX/bin` (default `~/.local`, so no sudo). |
 | `make format` / `make format-check` | Apply / verify formatting across `source/` and `tests/`. |
 | `make lint` | clang-tidy over `source/` and `tests/`, including the ownership gate. |
 | `make llama` | Build with the pinned llama.cpp target enabled (slow). |
 | `make clean` / `make fresh` | Drop a build dir / clean-room clone-and-build. |
+
+`make install` is a thin caller into the `install()` rule in `source/CMakeLists.txt` — `cmake --install build/<preset> --prefix <dir>` does the same thing. It installs **the executable and nothing else**: `apogee_core` is an implementation detail of the binary, and no `~/.apogee/` asset is seeded. That last part is deliberate — SPEC.md's *no silent install drift* requires anything landing in the data directory to join every install path in the same change, so the data-directory contract, the config template, completions, and the `install.sh` parity gate all arrive together with [install-check-lifecycle](../backlog/install-check-lifecycle.md) rather than half-landing here.
 
 `make lint` configures its own `build/lint` directory using the compiler from clang-tidy's own directory. That is not incidental: on macOS the normal build uses Apple clang, whose libc++ headers Homebrew's clang-tidy cannot find, and every file fails to parse with a misleading `'cstddef' file not found`.
 

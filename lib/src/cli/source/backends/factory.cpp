@@ -34,11 +34,14 @@ std::string BuildResult::skipped_summary() const {
 
 std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
                                                     const harness::BackendConfig& config,
-                                                    std::string& reason) {
+                                                    std::string& reason,
+                                                    const BuildOptions& options) {
     switch (config.type) {
         case harness::BackendType::Anthropic: {
             try {
-                return AnthropicProvider::from_config(name, config);
+                std::unique_ptr<AnthropicProvider> provider =
+                    AnthropicProvider::from_config(name, config, options.web_search);
+                return provider;
             } catch (const harness::ProviderError& e) {
                 reason = e.what();
                 return nullptr;
@@ -66,7 +69,7 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
     return nullptr;
 }
 
-BuildResult build_providers(harness::Harness& harness) {
+BuildResult build_providers(harness::Harness& harness, const BuildOptions& options) {
     BuildResult result;
 
     for (const auto& [name, config] : harness.config().backends) {
@@ -74,7 +77,8 @@ BuildResult build_providers(harness::Harness& harness) {
         status.name = name;
 
         std::string reason;
-        std::shared_ptr<harness::LLMProvider> provider = make_provider(name, config, reason);
+        std::shared_ptr<harness::LLMProvider> provider =
+            make_provider(name, config, reason, options);
         if (provider == nullptr) {
             status.reason = reason.empty() ? "could not be constructed" : reason;
             result.statuses.push_back(std::move(status));

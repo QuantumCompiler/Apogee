@@ -9,7 +9,13 @@
 #include <string>
 #include <vector>
 
+#include "agent/fetch_url.h"
+#include "agent/tool.h"
+#include "agentloop/loop.h"
+#include "agentloop/reporter.h"
 #include "backends/factory.h"
+#include "backends/http_client.h"
+#include "commands/ask_prompt.h"
 #include "commands/helpers.h"
 #include "harness/config.h"
 #include "harness/errors.h"
@@ -32,6 +38,8 @@ struct CompleteFlags {
     bool quiet = false;
     bool verbose = false;
     bool all_backends = false;
+    bool tools = false;
+    bool search = false;
 
     CLI::Option* temperature_option = nullptr;
     CLI::Option* max_tokens_option = nullptr;
@@ -122,6 +130,77 @@ bool backend_accepts_images(const harness::Config& config, std::string_view mode
     return entry->type != harness::BackendType::LlamaCpp;
 }
 
+/// Adapts the loop's Reporter to a terminal.
+///
+/// The whole surface layer for `complete`: the answer goes to stdout, progress
+/// goes to stderr and only on a terminal. That split is what keeps
+/// `apogee complete --tools "..." | jq` working -- tool-status lines would
+/// otherwise land in the piped output.
+class CompleteReporter final : public agentloop::Reporter {
+public:
+    CompleteReporter(bool decorate, bool verbose) : decorate_{decorate}, verbose_{verbose} {}
+
+    void on_tool_status(std::string_view detail) override {
+        if (decorate_ || verbose_) {
+            std::cerr << detail << "\n";
+        }
+    }
+
+    void on_answer_token(std::string_view chunk) override {
+        std::cout << chunk << std::flush;
+        emitted_ = true;
+    }
+
+    void on_answer_end() override {
+        if (emitted_) {
+            std::cout << "\n";
+        }
+    }
+
+    // Thinking is dropped: it is display metadata, `complete` has no display
+    // layer yet, and it must never reach stdout -- a pipe receives exactly the
+    // answer. The rich rendering arrives with chat-cli and retrofits here.
+
+    [[nodiscard]] bool emitted() const noexcept {
+        return emitted_;
+    }
+
+private:
+    bool decorate_;
+    bool verbose_;
+    bool emitted_ = false;
+};
+
+/// The built-in tool set for `--tools`.
+///
+/// `fetch_url` only, for now. Web search comes from the provider's own
+/// server-side tool (`--search`), not a local one -- see the decision recorded
+/// on this item. Native filesystem toolsets and MCP register here later.
+agent::ToolRegistry built_in_tools() {
+    agent::ToolRegistry registry;
+
+    auto client =
+        std::make_shared<backends::HttpClient>(std::make_unique<backends::CurlTransport>());
+
+    registry.add(agent::make_fetch_url_tool([client](std::string_view url) {
+        agent::FetchResult result;
+        backends::HttpRequest request;
+        request.method = "GET";
+        request.url = std::string{url};
+        request.timeout = std::chrono::seconds{30};
+        try {
+            const backends::HttpResponse response = client->send(request, {}, {});
+            result.status = response.status;
+            result.body = response.body;
+        } catch (const std::exception& e) {
+            result.error = e.what();
+        }
+        return result;
+    }));
+
+    return registry;
+}
+
 /// Runs one prompt against one backend, streaming to stdout.
 /// Returns the finish reason so a caller can note truncation.
 harness::ChatResponse run_one(const harness::Harness& harness, const harness::Config& config,
@@ -148,34 +227,42 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     request.temperature = temperature;
     request.max_tokens = max_tokens;
 
-    harness::StreamOptions options;
-    bool emitted = false;
-    options.on_token = [&emitted](std::string_view chunk) {
-        if (chunk.empty()) {
-            return;
-        }
-        std::cout << chunk << std::flush;
-        emitted = true;
-    };
-    // Thinking is deliberately dropped here. It is display metadata, and
-    // `complete` has no display layer yet -- the rich terminal UX arrives with
-    // chat-cli and retrofits onto this command. Critically, it must never
-    // reach stdout: a pipe has to receive exactly the answer.
-    options.on_thinking = nullptr;
-
     if (decorate && flags.verbose) {
         std::cerr << "[apogee] " << model << "\n";
     }
 
+    // With --tools the run goes through the shared agent loop; without it,
+    // straight to the provider. Both paths are one call because the loop is
+    // I/O-agnostic -- the surface is this adapter and nothing else.
+    CompleteReporter reporter{decorate, flags.verbose};
+
+    agentloop::Options loop_options;
+    loop_options.model = model;
+    loop_options.temperature = temperature;
+    loop_options.max_tokens = max_tokens;
+    loop_options.stream_answer = true;
+
+    agent::ToolRegistry registry;
+    if (flags.tools) {
+        registry = built_in_tools();
+        loop_options.tools = &registry;
+        // Advertised only when there is a terminal to answer on. A null AskFn
+        // means the tool never appears in the request at all.
+        loop_options.ask = terminal_ask_fn();
+    }
+
+    std::vector<harness::ChatMessage> history = request.messages;
+
     try {
-        harness::ChatResponse response = harness.stream_chat(request, options);
-        if (emitted) {
-            std::cout << "\n";
-        } else if (!response.message.content.plain_text().empty()) {
-            // A provider that answered without streaming (a non-streaming path,
-            // or a response that arrived whole). The answer must not be lost.
-            std::cout << response.message.content.plain_text() << "\n";
+        const agentloop::RunResult result =
+            agentloop::run(harness, history, loop_options, reporter);
+        if (result.hit_iteration_limit && (decorate || flags.verbose)) {
+            std::cerr << "[apogee] tool-call limit reached; answered without tools\n";
         }
+
+        harness::ChatResponse response;
+        response.message = harness::ChatMessage::assistant(result.answer);
+        response.model = model;
         return response;
     } catch (const harness::CancelledError&) {
         throw CLI::RuntimeError(kCancelled);
@@ -219,6 +306,10 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("-v,--verbose", flags->verbose, "Print progress notes to stderr");
     cmd->add_flag("--all-backends", flags->all_backends,
                   "Run the prompt against every configured backend");
+    cmd->add_flag("--tools", flags->tools,
+                  "Let the model call tools (fetch_url; ask_user on a terminal)");
+    cmd->add_flag("--search", flags->search,
+                  "Enable the provider's own server-side web search, where it has one");
 
     cmd->callback([&context, flags]() {
         // Decoration is gated on stdout being a terminal, never on a global
@@ -235,7 +326,9 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
         }
 
         harness::Harness harness{config};
-        const backends::BuildResult built = backends::build_providers(harness);
+        backends::BuildOptions build_options;
+        build_options.web_search = flags->search;
+        const backends::BuildResult built = backends::build_providers(harness, build_options);
 
         if (built.constructed_count() == 0) {
             std::string message = "no usable backend is configured";

@@ -222,9 +222,10 @@ std::unique_ptr<AnthropicProvider> AnthropicProvider::create(Options options) {
 }
 
 std::unique_ptr<AnthropicProvider> AnthropicProvider::from_config(
-    const std::string& backend_name, const harness::BackendConfig& config) {
+    const std::string& backend_name, const harness::BackendConfig& config, bool web_search) {
     Options options;
     options.backend_name = backend_name;
+    options.web_search = web_search;
     options.api_key = config.api_key;  // already ${ENV}-expanded by the loader
     if (!config.model.empty()) {
         options.model = config.model;

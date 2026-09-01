@@ -34,4 +34,4 @@
 - [ ] Branch review of an un-checked-out ref produces the correct three-dot diff deterministically from flags; security-review and release-notes run fully local; merge-request runs on any cloud provider
 - [ ] 'Nothing found' is a valid complete agent result
 
-**Scope note.** gated on [agentloop-core.md](agentloop-core.md) shipping.
+**Scope note.** gated ring, **split first**. Its prerequisite — the shared agent loop — shipped 2026-08-26 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone F). MCP servers and native toolsets register into the existing `agent::ToolRegistry` (`lib/src/cli/source/agent/tool.h`); the loop needs no change, and the permission gate is already in dispatch awaiting its first real consumer — the fs write tools this item brings, which also own the permissions config-schema keys.

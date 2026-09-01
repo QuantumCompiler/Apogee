@@ -30,7 +30,7 @@
 - [ ] Keystrokes typed during startup are discarded once, mid-session typeahead preserved (PTY test); NO_COLOR, --no-color, and non-TTY each disable color; quiet mode still shows warnings
 - [ ] Titles generate in the background after the first exchange; chat list/info/title work
 
-**Scope note.** earmarked for v0.1.0 (build after [agentloop-core.md](agentloop-core.md)). **Split first** — the appendix below belongs to doc A (the terminal UX layer).
+**Scope note.** earmarked for v0.1.0. Gate satisfied: the shared agent loop shipped 2026-08-26 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone F). The terminal UX layer is the Reporter adapter — `commands/complete.cpp`'s `CompleteReporter` is the minimal worked example, and `commands/ask_prompt.cpp` is the placeholder terminal `ask_user` this item should replace. **Split first** — the appendix below belongs to doc A (the terminal UX layer).
 
 ---
 

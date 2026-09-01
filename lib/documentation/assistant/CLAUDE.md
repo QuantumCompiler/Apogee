@@ -66,16 +66,17 @@ The first of them is now enforced in code:
 
 ### ⚠ The harness never includes backends
 
-**Rule.** The dependency runs one way: `backends/` includes `harness/`, never the reverse. When the harness needs something only a backend knows, it crosses as **plain data** — that is what `harness::ModelBehavior` is.
+**Rule.** The dependency runs one way: `backends/` includes `harness/`, never the reverse. **The same applies to `agentloop/` and `agent/`** — the loop consumes the IR and the Harness, not backends. When a guarded layer needs something only a backend knows, it crosses as **plain data** (that is what `harness::ModelBehavior` is) or as a capability interface.
 
 **Why.** In Go this is free: the reverse edge is an import cycle and the build fails, which is why Ommi has the same seam. C++ gives you nothing — a `#include "backends/anthropic.h"` in the harness compiles perfectly and the layering is silently gone. Once it is gone, the harness knows about vendors, and "backend-agnostic core" stops being true in the one place it has to be.
 
 **Sub-rules.**
 - A capability a backend has and the harness needs to ask about becomes a **capability interface** in `provider.h`, discovered by the Harness (see below) — not an include.
 - Model-family knowledge crosses as `ModelBehavior`, plain strings and bools.
-- The same rule will apply to `agentloop/`: it consumes the IR and the Harness, not backends.
+- `agentloop/` and `agent/` are guarded too, as of Milestone F. A loop that includes a backend starts special-casing one vendor's tool dialect, and "one shared loop for all surfaces" quietly becomes "one loop with an Anthropic branch".
+- `commands/` is deliberately NOT guarded: it is the composition root, and assembling providers is its job.
 
-**Enforcement.** The `harness.layering` ctest case (`tests/layering.cmake`) greps every harness source for the forbidden include and fails naming the file. It refuses to run against an empty source list, so it cannot pass vacuously.
+**Enforcement.** The `harness.layering` ctest case (`tests/layering.cmake`) greps every source in `harness/`, `agentloop/`, and `agent/` for the forbidden include and fails naming the file. It refuses to run against an empty source list for any guarded package, so it cannot pass vacuously.
 
 ### ⚠ Capability probes never leak a cast
 
@@ -124,7 +125,7 @@ The Code Style rule below is lint-enforced, not aspirational: `make -C lib/src/c
 
 **Where new source code goes (decided 2026-08-24; app-owned builds confirmed 2026-08-25):** `lib/src/<app>/` — one directory per application, each a **self-contained CMake project** owning its own build, presets, dependencies, third-party pins, and style config, with `source/` and `tests/` as its first level. Nothing above `lib/src/<app>/` needs to know how that application compiles.
 
-- **`lib/src/cli/`** — the CLI application (all of v0.1.0). Packages under `source/`: `commands/`, `harness/` (config engine + the provider interface, IR, and router), `backends/` (provider implementations — `mock` and `anthropic` — plus the shared HTTP client, SSE parser, and the config→provider factory), `platform/`, `version/` (built), and `agentloop/`, `embedstore/`, `httpserver/`, `mcp/` (reserved header stubs, mirroring Ommi's package map — each names the backlog item that fills it). `assets/` holds the starter `config.yaml`, which a test keeps byte-identical to the template compiled into the binary.
+- **`lib/src/cli/`** — the CLI application (all of v0.1.0). Packages under `source/`: `commands/`, `harness/` (config engine + the provider interface, IR, and router), `backends/` (provider implementations — `mock` and `anthropic` — plus the shared HTTP client, SSE parser, and the config→provider factory), `agentloop/` (the shared model→tool→model loop and its Reporter), `agent/` (the tool registry, dispatch, and `fetch_url`), `platform/`, `version/` (built), and `embedstore/`, `httpserver/`, `mcp/` (reserved header stubs, mirroring Ommi's package map — each names the backlog item that fills it). `assets/` holds the starter `config.yaml`, which a test keeps byte-identical to the template compiled into the binary.
 - **`lib/src/darwin/` · `lib/src/linux/` · `lib/src/windows/`** — the GUI applications, one per platform (future — down the road, not yet planned; they will drive the CLI over the stdio machine mode). Each joins the `APPS` list in `cicd.sh` when it lands.
 
 The per-item file breakdown is in the [`backlog/`](../backlog/README.md) documents' **Seam + files** sections, which are written against this layout.

@@ -42,6 +42,8 @@ add_library(apogee_core STATIC
     commands/complete.cpp
     commands/helpers.h
     commands/helpers.cpp
+    commands/ask_prompt.h
+    commands/ask_prompt.cpp
 
     harness/paths.h
     harness/paths.cpp
@@ -79,10 +81,23 @@ add_library(apogee_core STATIC
     backends/factory.h
     backends/factory.cpp
 
+    agent/tool.h
+    agent/tool.cpp
+    agent/fetch_url.h
+    agent/fetch_url.cpp
+
+    agentloop/agentloop.h
+    agentloop/reporter.h
+    agentloop/loop.h
+    agentloop/loop.cpp
+    agentloop/content.h
+    agentloop/content.cpp
+    agentloop/question.h
+    agentloop/question.cpp
+
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and
-    # so `#include "agentloop/agentloop.h"` compiles from the first day.
-    agentloop/agentloop.h
+    # so `#include "embedstore/embedstore.h"` compiles from the first day.
     embedstore/embedstore.h
     httpserver/httpserver.h
     mcp/mcp.h
@@ -104,3 +119,20 @@ apogee_set_target_options(apogee_core)
 add_executable(apogee main.cpp)
 target_link_libraries(apogee PRIVATE apogee_core)
 apogee_set_target_options(apogee)
+
+# The install path: the binary, and nothing else. `make install` is a thin
+# caller into this, so there is exactly one install path -- the same shape as
+# the build (one CMake definition, a Makefile wrapper that adds no steps).
+#
+# apogee_core is deliberately NOT installed: it is a static library and an
+# implementation detail of the executable, and installing it would invite
+# something outside this project to link the whole product.
+#
+# This rule seeds no ~/.apogee/ assets on purpose. The full install contract --
+# the data-directory layout, the config template, shell completions, and the
+# byte-identical parity between this path and scripts/install.sh validated by
+# `apogee check` -- is owned by the install-check-lifecycle backlog item.
+# SPEC.md -> "No silent install drift" requires any asset landing under
+# ~/.apogee/ to join EVERY install path in the same commit, so this one starts
+# empty rather than shipping half a contract that check cannot yet verify.
+install(TARGETS apogee RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

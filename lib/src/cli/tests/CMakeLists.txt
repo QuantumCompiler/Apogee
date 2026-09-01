@@ -27,6 +27,11 @@ add_executable(apogee_tests
     backends/anthropic_test.cpp
     backends/factory_test.cpp
     commands/helpers_test.cpp
+    agent/tool_test.cpp
+    agentloop/loop_test.cpp
+    agentloop/anthropic_loop_test.cpp
+    agentloop/content_test.cpp
+    agentloop/question_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h

@@ -11,6 +11,11 @@ SHELL := /bin/bash
 
 PRESET ?= default
 BUILD_DIR := build/$(PRESET)
+
+# Where `make install` puts the binary. A user-level prefix by default: it needs
+# no sudo, so the everyday developer install never runs a build as root. The
+# system-wide install is `make install PREFIX=/usr/local`.
+PREFIX ?= $(HOME)/.local
 JOBS ?= $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 
 # Repo root is three levels up from lib/src/cli.
@@ -29,16 +34,17 @@ LINT_CXX     ?= $(dir $(CLANG_TIDY))clang++
 # formatted or linted.
 SOURCES := $(shell find source tests \( -name '*.cpp' -o -name '*.h' \) 2>/dev/null)
 
-.PHONY: help build test clean fresh format format-check lint llama all
+.PHONY: help build install test clean fresh format format-check lint llama all
 
 help:
 	@echo "Apogee CLI — build wrapper (repo-wide entry point: lib/scripts/cicd.sh)"
 	@echo ""
-	@echo "Usage: make [target] [PRESET=<name>] [JOBS=N]"
+	@echo "Usage: make [target] [PRESET=<name>] [JOBS=N] [PREFIX=<dir>]"
 	@echo "       make -C lib/src/cli [target]   (from the repo root)"
 	@echo ""
 	@echo "Targets:"
 	@echo "  build         Configure + build (preset: $(PRESET))"
+	@echo "  install       Build, then install the binary to $(PREFIX)/bin"
 	@echo "  test          Build, then run the full ctest suite"
 	@echo "  lint          clang-tidy over source/ and tests/"
 	@echo "  format        Rewrite source/ and tests/ in the project style"
@@ -57,6 +63,20 @@ all: build
 build:
 	cmake --preset $(PRESET)
 	cmake --build $(BUILD_DIR) -j $(JOBS)
+
+# Builds first so `make install` on a clean checkout is one command, and so an
+# install can never quietly ship a stale binary from an earlier edit. The copy
+# itself is CMake's -- this recipe adds no steps of its own, only the PATH note,
+# because an installed binary the shell cannot find is the one failure mode a
+# user-level prefix introduces.
+install: build
+	@cmake --install $(BUILD_DIR) --prefix "$(PREFIX)"
+	@case ":$$PATH:" in \
+		*":$(PREFIX)/bin:"*) ;; \
+		*) echo ""; \
+		   echo "note: $(PREFIX)/bin is not on your PATH -- add it to run 'apogee' by name:"; \
+		   echo "      export PATH=\"$(PREFIX)/bin:\$$PATH\"" ;; \
+	esac
 
 test:
 	@$(CICD) --platform $$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')-$$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/;s/amd64/x64/') --test --jobs $(JOBS)
