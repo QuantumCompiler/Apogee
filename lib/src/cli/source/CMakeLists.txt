@@ -103,6 +103,14 @@ add_library(apogee_core STATIC
     backends/anthropic_wire.cpp
     backends/anthropic.h
     backends/anthropic.cpp
+    backends/openai_wire.h
+    backends/openai_wire.cpp
+    backends/openai.h
+    backends/openai.cpp
+    backends/google_wire.h
+    backends/google_wire.cpp
+    backends/google.h
+    backends/google.cpp
     backends/factory.h
     backends/factory.cpp
 

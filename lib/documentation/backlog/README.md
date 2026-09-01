@@ -54,7 +54,6 @@ Items 1–6 build strictly in order (each gates on the one before it — the ske
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 8 | [openai-google-backends.md](openai-google-backends.md) | ✅ 6 (shipped) | OpenAI and Google Gemini backends over the shared client/IR |
 | 9 | [llamacpp-backend.md](llamacpp-backend.md) | ✅ 5 (shipped) | Local inference: llama.cpp linked in-process (generation, KV sessions) |
 | 10 | [install-check-lifecycle.md](install-check-lifecycle.md) | 1–9 (all of v0.1.0) | Install contract, `apogee check` doctor, completions (release closer) |
 

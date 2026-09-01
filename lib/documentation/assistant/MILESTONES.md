@@ -335,3 +335,37 @@ Both PTY-only guardrails were verified against the mutation each exists to catch
 The typeahead check also needed restructuring to drain the PTY **while** waiting rather than only at the end: the buffer is small, and a child blocked writing into a full one never gets round to reading the next line typed at it.
 
 Verified against a build forced to always use the plain reader: the check failed with `an arrow key reached the message as text: ['remember this line', '\x1b[A']` — exactly the symptom this item existed to fix.
+
+## Milestone I — The full cloud set
+
+**Goal.** Widen cloud coverage from one vendor to three, and in doing so settle the question the `LLMProvider` seam was built to answer: is a backend really just a translator? The answer is a cross-provider conformance table in which the loop, the tools, and the assertions are shared and only the wire fixture differs.
+
+### 2026-08-26 — OpenAI and Google Gemini backends
+
+**What was built**
+
+- [x] **OpenAI over the Responses API** (`source/backends/openai_wire.h/.cpp`, `source/backends/openai.h/.cpp`) — POST `/v1/responses` with a bearer token. `input_items()` returns an *array* per IR message, because an assistant turn with tool calls becomes a message item plus one top-level `function_call` item per call, and a tool result is a `function_call_output` item rather than a message with a role. The system prompt becomes `instructions`, and tools are flat (`{type, name, description, parameters}`), not nested under a `function` key.
+- [x] **Google Gemini over `generateContent`** (`source/backends/google_wire.h/.cpp`, `source/backends/google.h/.cpp`) — the model rides the URL path (`/v1beta/models/<model>:streamGenerateContent?alt=sse`) and the key rides the `x-goog-api-key` header, never the query string. The assistant role is `model`; a tool result is a `functionResponse` part inside a **user** turn, matched by name rather than by id.
+- [x] **Both registered as ordinary config types** (`source/backends/factory.cpp`) — `apogee config add-backend <name> --type openai|google` and `-m <name>` are all it takes. No surface, command, or loop path knows a vendor by name.
+- [x] **Thinking through the existing seam** — OpenAI's `response.reasoning_summary_text.delta` and Gemini's `thought`-flagged parts both reach `ThinkingSink`, so the thinking display works identically across all three without learning a third dialect.
+- [x] **The cross-provider conformance table** (`tests/agentloop/conformance_test.cpp`) — the regression net the item names as its guardrail. The *same* two scripted turns, recorded in four dialects (mock/anthropic/openai/google), drive the same loop against the same tool registry: identical answer, identical iteration count, identical history shape, identical tool-call linkage, exact usage from the three real providers, estimate fallback for the mock, uniform `ask_user` advertisement.
+- [x] **43 new tests** (398 total).
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Split per provider? | **No** | The item offered the split. Every shared component it would have duplicated already existed (HTTP client, SSE parser, retry, the IR); each provider reduces to a wire translator plus a thin provider class. The conformance table is also far easier to write with both dialects in hand than to write once and extend. |
+| OpenAI surface | **Responses API**, confirmed at build time | The stated default, and the item asked for confirmation rather than assumption. Reasoning summaries and the server-side `web_search` tool exist *only* there — Chat Completions exposes no reasoning summary at all. |
+| Gemini auth | **API key only** for v0.1.0 | The stated default. Vertex-style credentials are a separate auth story and nothing in v0.1.0 needs them. |
+| Thinking knob | One `thinking_budget_tokens` per provider's options | The stated default. It maps to Anthropic `budget_tokens`, OpenAI `reasoning.effort` (via a token→band mapping), Gemini `thinkingConfig.thinkingBudget`. The **IR carries no thinking field**, so the loop and the surfaces never learn that vendors spell it three ways. |
+
+**Notes.** Gemini's translator has one check that carries more weight than its size suggests: `part.value("thought", false)`. Unlike the other two vendors, Gemini streams reasoning in the *same* `parts[]` array as the answer, so the flag is the only thing separating the model's private thinking from the text the user is shown. Dropping it does not fail loudly — it silently prints the reasoning as the answer. `a thought part never reaches the answer` pins it.
+
+The retry contract from Milestone D pays off here for free: both providers issue through the shared `HttpClient`, so a 429 is retried without either translator containing the word "retry". `a 429 is retried` is asserted per provider anyway, because "it's shared" is a claim about today's wiring.
+
+One stale test surfaced rather than one bug: `an unimplemented backend type names itself in the reason` still asserted that OpenAI and Google return "has not landed yet". They now land, so the assertion narrowed to llamacpp and grew two companions — every cloud type builds when it has a key, and a keyless one names **its own** environment variable (telling an OpenAI user to set `ANTHROPIC_API_KEY` would be worse than saying nothing).
+
+The `/model`-carries-history claim was verified rather than assumed. `/model` only assigns `session.backend` — the claim rests entirely on every translator rendering a history it did not produce, which is exactly where the three dialects diverge most. `a mid-session /model switch carries the whole history` builds one transcript containing a tool call and its result and requires all three translators to render every turn of it. Mutation-tested: dropping the `function_call_output` branch from the OpenAI translator turns it red. The first draft of that test did *not* bite — it asserted on the tool result `"42"`, which also matched the assistant's "The answer is 42". The result value is now a token that appears nowhere else.
+
+**Standing caveat, unchanged.** The live-API half of these acceptance criteria is unverified for all three vendors — every test here runs against recorded fixtures through `FakeTransport`. Confirming real traffic needs the user's keys.

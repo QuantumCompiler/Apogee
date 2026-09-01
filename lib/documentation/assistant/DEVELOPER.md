@@ -94,7 +94,7 @@ That split is what makes surface parity structural rather than something a revie
 | `logger/` | Persisted chat sessions and the daily operational log. A session records *what was said*; the log records *what the program did*. |
 | `commands/` | The CLI scaffold: the `Command` interface, the registry, the root command, and the built-in commands. |
 | `harness/` | **The core.** The config engine (typed loader, `${ENV}` expansion, template, comment-preserving edits, on-disk paths) **and** the provider interface, canonical message IR, router, and context-window table. Includes nothing from `backends/` — enforced. |
-| `backends/` | Provider implementations plus the shared cloud infrastructure: `mock`, `anthropic`, the HTTP client, and the SSE parser. The remaining cloud and local backends land here with their own items. |
+| `backends/` | Provider implementations plus the shared cloud infrastructure: `mock`, `anthropic`, `openai`, `google`, the HTTP client, and the SSE parser. The local (llama.cpp) backend lands here with its own item. |
 | `agentloop/` | **The shared loop.** `run()` drives model→tool→model behind a Reporter, plus `ask_user`, history compaction, and transient splicing. Includes nothing from `backends/` — enforced. |
 | `agent/` | Tools: the registry, dispatch with the permission gate, and `fetch_url`. Separate from the loop because a registry needs no loop; MCP and native toolsets register here later. |
 | `embedstore/` | *Reserved* — chunk storage and retrieval (`embedstore-lexical-rag` item). |
@@ -184,6 +184,10 @@ Mechanisms that land here as later items need them: process spawning (vendor-CLI
 | `sse_parser.h/.cpp` | A byte-fed Server-Sent Events state machine. Shared by every streaming cloud backend. |
 | `anthropic_wire.h/.cpp` | IR ↔ Anthropic Messages API translation, and the extended-thinking replay cache. |
 | `anthropic.h/.cpp` | The Anthropic provider: streaming and non-streaming chat, `list_models`, `count_tokens`. |
+| `openai_wire.h/.cpp` | IR ↔ OpenAI **Responses API** translation. `input_items()` returns an array: one IR assistant turn with tool calls becomes a message item plus a top-level `function_call` item per call. |
+| `openai.h/.cpp` | The OpenAI provider: POST `/v1/responses` with a bearer token; maps `response.*` semantic events onto the sinks. |
+| `google_wire.h/.cpp` | IR ↔ Gemini `generateContent` translation. The assistant role is `model`; a tool result is a `functionResponse` part in a **user** turn, matched by name. |
+| `google.h/.cpp` | The Gemini provider: model in the URL path, key in the `x-goog-api-key` header. Re-parses a whole response per chunk, since Gemini streams full objects rather than typed deltas. |
 | `factory.h/.cpp` | Config `type:` → provider, and `build_providers()` which registers every entry on a Harness and installs the router. Lives here, not in a command, because every surface needs it. |
 
 **The transport is injected**, which is what makes every cloud-backend test hermetic: no network, no API key, no charges — and failure modes a live endpoint will not produce on demand (a 529, a body delivered one byte at a time, a connection dropping mid-frame). `tests/support/fake_transport.h` is the scripted implementation.
@@ -196,7 +200,7 @@ Mechanisms that land here as later items need them: process spawning (vendor-CLI
 
 **SSE never arrives one-event-per-read.** Chunk boundaries land mid-frame, mid-line, and mid-UTF-8-sequence. `SseParser` is a state machine with a carry buffer for exactly that reason, and its test replays a recorded stream at *every* chunk size from one byte up — a parser that assumes one-read-one-event passes every test written on a fast local connection and drops tokens on a slow one.
 
-**Adding a cloud backend.** Reuse `HttpClient` and `SseParser`; put the dialect in its own `*_wire.h/.cpp` so it is testable with no transport at all. Take an injected `HttpClient` in the constructor. Honour cancellation between chunks. Keep the API key in a header and out of every error message — `tests/backends/anthropic_test.cpp` → `[backends][anthropic][secrets]` is the pattern for pinning that.
+**Adding a cloud backend.** Reuse `HttpClient` and `SseParser`; put the dialect in its own `*_wire.h/.cpp` so it is testable with no transport at all. Take an injected `HttpClient` in the constructor. Honour cancellation between chunks. Keep the API key in a header and out of every error message — `tests/backends/anthropic_test.cpp` → `[backends][anthropic][secrets]` is the pattern for pinning that. Then add a row to `providers()` in `tests/agentloop/conformance_test.cpp`: a backend is not done until it drives the shared loop identically to every other.
 
 ### `agentloop/` — the shared loop
 
@@ -291,7 +295,10 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `backends/sse_parser_test.cpp` | The SSE state machine, replayed at every chunk size from one byte up. |
 | `backends/http_client_test.cpp` | Retry/backoff, `retry-after`, the no-retry-after-delivery guard, and the error-bodies-are-not-streamed contract. |
 | `backends/anthropic_test.cpp` | Fixture-replayed streams (seven chunk sizes), the wire mapping, thinking replay, error shapes, and the API-key secrets guardrail. |
-| `backends/factory_test.cpp` | Construction per type, and that one unbuildable backend does not stop the others. |
+| `backends/factory_test.cpp` | Construction per type, that a keyless cloud type names **its own** environment variable, and that one unbuildable backend does not stop the others. |
+| `backends/openai_test.cpp` | The Responses dialect, split-boundary streaming, tool-call reassembly from item + argument deltas, effort banding, error shapes, and the API-key secrets guardrail. |
+| `backends/google_test.cpp` | The Gemini dialect, thought-vs-answer separation, split-boundary streaming, `functionResponse` round-trip, and the API-key secrets guardrail. |
+| `agentloop/conformance_test.cpp` | **The cross-provider table.** The same two scripted turns in four dialects driving the same loop: identical answer, iterations, history shape, tool linkage, and usage. Also pins that a mid-session `/model` switch carries a full history — tool call and result included — across every translator. |
 | `commands/helpers_test.cpp` | Flag/config resolution order, base64 padding, image parts, message assembly. |
 | `agentloop/loop_test.cpp` | **The conformance suite** — multi-tool turns, tool errors, unknown tools, the iteration bound, `ask_user` advertisement and rollback, the permission gate, transient exclusion, and the Reporter sequence. Every later provider must pass it. |
 | `agentloop/anthropic_loop_test.cpp` | The real Anthropic provider driven through the real loop on recorded SSE — the join the unit suites do not cover. |

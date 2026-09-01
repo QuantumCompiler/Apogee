@@ -46,12 +46,56 @@ TEST_CASE("an Anthropic entry with no key is skipped with a reason", "[backends]
 TEST_CASE("an unimplemented backend type names itself in the reason", "[backends][factory]") {
     // The message a user sees when they configure a backend that has not
     // landed. "could not be constructed" would send them to check their key.
-    for (const auto type : {BackendType::OpenAI, BackendType::Google, BackendType::LlamaCpp}) {
+    // Only llamacpp remains; OpenAI and Google shipped 2026-08-26.
+    BackendConfig config;
+    config.type = BackendType::LlamaCpp;
+    std::string reason;
+    CHECK(make_provider("x", config, reason) == nullptr);
+    CHECK(reason.find("has not landed yet") != std::string::npos);
+}
+
+TEST_CASE("every cloud type builds when it has a key", "[backends][factory]") {
+    // The three API-billing backends are ordinary config types with no special
+    // casing anywhere -- the payoff of the LLMProvider seam.
+    struct Case {
+        BackendType type;
+        const char* name;
+    };
+
+    for (const Case& c :
+         {Case{BackendType::Anthropic, "anthropic"}, Case{BackendType::OpenAI, "openai"},
+          Case{BackendType::Google, "google"}}) {
+        INFO(c.name);
         BackendConfig config;
-        config.type = type;
+        config.type = c.type;
+        config.api_key = "a-key";
+
+        std::string reason;
+        const auto provider = make_provider(c.name, config, reason);
+        REQUIRE(provider != nullptr);
+        CHECK(provider->backend_name() == c.name);
+        CHECK(reason.empty());
+    }
+}
+
+TEST_CASE("a cloud type with no key names ITS OWN environment variable", "[backends][factory]") {
+    // Telling an OpenAI user to set ANTHROPIC_API_KEY would be worse than
+    // saying nothing at all.
+    struct Case {
+        BackendType type;
+        const char* expected;
+    };
+
+    for (const Case& c : {Case{BackendType::Anthropic, "ANTHROPIC_API_KEY"},
+                          Case{BackendType::OpenAI, "OPENAI_API_KEY"},
+                          Case{BackendType::Google, "GEMINI_API_KEY"}}) {
+        INFO(c.expected);
+        BackendConfig config;
+        config.type = c.type;
+
         std::string reason;
         CHECK(make_provider("x", config, reason) == nullptr);
-        CHECK(reason.find("has not landed yet") != std::string::npos);
+        CHECK(reason.find(c.expected) != std::string::npos);
     }
 }
 

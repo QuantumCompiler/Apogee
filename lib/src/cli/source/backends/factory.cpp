@@ -3,7 +3,9 @@
 #include <utility>
 
 #include "backends/anthropic.h"
+#include "backends/google.h"
 #include "backends/mock.h"
+#include "backends/openai.h"
 #include "harness/errors.h"
 
 namespace apogee::backends {
@@ -55,12 +57,22 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
             }
             return std::make_shared<MockProvider>(std::move(options));
         }
-        case harness::BackendType::OpenAI:
-            reason = "the OpenAI backend has not landed yet";
-            return nullptr;
-        case harness::BackendType::Google:
-            reason = "the Google backend has not landed yet";
-            return nullptr;
+        case harness::BackendType::OpenAI: {
+            try {
+                return OpenAIProvider::from_config(name, config, options.web_search);
+            } catch (const harness::ProviderError& e) {
+                reason = e.what();
+                return nullptr;
+            }
+        }
+        case harness::BackendType::Google: {
+            try {
+                return GoogleProvider::from_config(name, config, options.web_search);
+            } catch (const harness::ProviderError& e) {
+                reason = e.what();
+                return nullptr;
+            }
+        }
         case harness::BackendType::LlamaCpp:
             reason = "the local llama.cpp backend has not landed yet";
             return nullptr;

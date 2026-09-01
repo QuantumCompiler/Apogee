@@ -27,13 +27,13 @@ The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](S
 - [x] Terminal UX layer (status line, thinking view, cliReporter)
 - [x] `apogee chat` (REPL, sessions, context monitoring, logging)
 - [x] Chat line editing (replxx: arrow keys, history, completion)
-- [ ] OpenAI + Google backends
+- [x] OpenAI + Google backends — *[Milestone I](MILESTONES.md#milestone-i--the-full-cloud-set)*
 - [ ] llama.cpp in-process backend
 - [ ] Install contract + `apogee check` + completions (release closer)
 
 See the [`backlog/`](../backlog/README.md) index for the full queue (priority-ordered; topmost claimable item = next to build).
 
-**Decisions needed before building continues** (the `[user]` open calls on the remaining items): config format (YAML vs TOML), data-dir name (`~/.apogee/`), in-process llama.cpp confirmation, and the web-search strategy. The self-update timing question blocks only the release closer.
+**Decisions needed before building continues** (the `[user]` open calls on the remaining items): in-process llama.cpp confirmation. The self-update timing question blocks only the release closer. *(Config format, data-dir name, and web-search strategy were all decided 2026-08-25/26 — see the milestones that consumed them.)*
 
 *Answered so far — 2026-08-24: the platform matrix (Linux/macOS/Windows on both ARM and x86, six targets) and the repo host (GitHub, making GitHub Releases/Actions the default). 2026-08-25, with the skeleton: **C++20** as the language baseline, **CMake + FetchContent** for build and dependencies, **Catch2 v3** for tests, **nlohmann/json + CLI11 + libcurl** as the standardized library picks, and **macos-arm64 as the only merge-blocking CI target** for v0.1.0.*
 

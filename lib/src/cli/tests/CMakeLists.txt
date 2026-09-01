@@ -26,6 +26,9 @@ add_executable(apogee_tests
     backends/http_client_test.cpp
     backends/anthropic_test.cpp
     backends/factory_test.cpp
+    backends/openai_test.cpp
+    backends/google_test.cpp
+    agentloop/conformance_test.cpp
     commands/helpers_test.cpp
     commands/thinking_view_test.cpp
     commands/status_line_test.cpp
