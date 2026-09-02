@@ -46,15 +46,12 @@ Items are numbered in the **suggested order of implementation**. The rule stays 
 
 **Gate convention:** a v0.1.0 item is buildable from its transitive gate chain alone. A gated-ring or unscheduled item *additionally assumes the complete v0.1.0 set has shipped* — its "build after" names only the ring-internal ordering. Items marked **split first** must be groomed into their listed sub-documents before an agent takes them; do not build from the guard document directly.
 
-### Phase 1 — v0.1.0: walking skeleton, then breadth
+### Phase 1 — v0.1.0: complete
 
-Items 1–6 built strictly in order (each gating on the one before it — the skeleton proved config → harness → backend → terminal on exactly one provider before anything widened). After 6, the three branches **7, 8, 9** were independent. Item 7 was split at grooming (2026-08-26) into 7a and 7b. Item 10 is the release closer and assumes 1–9 are complete, **which they now are**.
+**Every v0.1.0 item has shipped.** Items 1–6 built strictly in order (each gating on the one before it — the skeleton proved config → harness → backend → terminal on exactly one provider before anything widened); after 6 the three branches **7, 8, 9** were independent; item 7 was split at grooming (2026-08-26) into 7a/7b/7c; and item 10, the release closer, landed 2026-09-01.
 
-*Items 1 (C++ project skeleton), 2 (config engine), 3 (harness core), 4 (Anthropic backend), 5 (`apogee complete`), 6 (the shared agent loop), 7a (the terminal UX layer), 7b (`apogee chat`), 7c (line editing), 8 (OpenAI + Google backends), and 9 (the llama.cpp backend) shipped 2026-08-25/26/31 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestones A–J. **Every capability item in v0.1.0 is complete**: both surfaces, the shared loop, and all four backends. Only the release closer is left. The numbering below is unchanged so the gate references in each document still read true.*
+*Items 1 (C++ project skeleton), 2 (config engine), 3 (harness core), 4 (Anthropic backend), 5 (`apogee complete`), 6 (the shared agent loop), 7a (the terminal UX layer), 7b (`apogee chat`), 7c (line editing), 8 (OpenAI + Google backends), 9 (the llama.cpp backend), and 10 (the install contract, `apogee check`, and completions) shipped 2026-08-25 through 2026-09-01 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestones A–K. Nothing in Phase 1 is pending; the numbering is preserved here because the gate references in the Phase-2 documents still read against it.*
 
-| # | Document | Build after | What |
-|---|---|---|---|
-| 10 | [install-check-lifecycle.md](install-check-lifecycle.md) | 1–9 (all of v0.1.0) | Install contract, `apogee check` doctor, completions (release closer) |
 
 ### Phase 2 — the gated ring (after v0.1.0 ships)
 

@@ -29,11 +29,13 @@ The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](S
 - [x] Chat line editing (replxx: arrow keys, history, completion)
 - [x] OpenAI + Google backends — *[Milestone I](MILESTONES.md#milestone-i--the-full-cloud-set)*
 - [x] llama.cpp in-process backend — *[Milestone J](MILESTONES.md#milestone-j--local-inference)*
-- [ ] Install contract + `apogee check` + completions (release closer)
+- [x] Install contract + `apogee check` + completions — *[Milestone K](MILESTONES.md#milestone-k--the-install-contract)*
 
 See the [`backlog/`](../backlog/README.md) index for the full queue (priority-ordered; topmost claimable item = next to build).
 
-**Decisions needed before building continues:** none. The self-update timing question blocks only the release closer, which is the one item left. *(Config format, data-dir name, web-search strategy, the in-process llama.cpp confirmation, and local vision's home were all decided 2026-08-25/26/31 — see the milestones that consumed them.)*
+**Every v0.1.0 item has shipped** (Milestones A–K). What remains before the release is cutting it: the tag → build → publish pipeline exists and is syntactically valid, but **no tag has been pushed**, so the first release is also the first run of that pipeline.
+
+*Decisions taken along the way: config format, data-dir name, web-search strategy, in-process llama.cpp, local vision's home, and — 2026-09-01 — GitHub Releases as the distribution host, self-update deferred, macOS unsigned, and all six targets shipping from the first tag. See the milestones that consumed each.*
 
 *Answered so far — 2026-08-24: the platform matrix (Linux/macOS/Windows on both ARM and x86, six targets) and the repo host (GitHub, making GitHub Releases/Actions the default). 2026-08-25, with the skeleton: **C++20** as the language baseline, **CMake + FetchContent** for build and dependencies, **Catch2 v3** for tests, **nlohmann/json + CLI11 + libcurl** as the standardized library picks, and **macos-arm64 as the only merge-blocking CI target** for v0.1.0.*
 
@@ -59,7 +61,7 @@ The gated ring — specced with their own backlog documents, sequenced after v0.
 ## Ideas / candidate features
 
 - Plugin system (`plugin.yaml` overlay — deliberately left out of the initial plan; separable later on top of the config engine)
-- Self-update (`apogee update`) — rides the distribution-host decision on the install item
+- **Self-update (`apogee update`)** — deliberately deferred out of v0.1.0 *(decided 2026-09-01)*, and now unblocked: the distribution host is settled and the release pipeline exists. It becomes the **third parity path** alongside the two installers, so it must go through `apogee check --fix` like they do rather than seeding anything itself. Needs its own backlog item; the background update notifier (TTY-only, 24h cache, subcommand skip-list) rides with it.
 - Remote MCP transports + OAuth connectors (and the connector-driven review agents that ride them)
 
 ## Explicit non-goals

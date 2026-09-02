@@ -2,6 +2,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace CLI {
 class App;
@@ -18,6 +19,14 @@ struct RootContext {
     /// Value of the persistent `--config` flag; empty when the user did not
     /// pass one, in which case the config engine's default resolution applies.
     std::string config_path;
+
+    /// Every registered subcommand name, in registration order.
+    ///
+    /// Here so the completion protocol can offer the real command set rather
+    /// than a list it maintains separately -- a second list would go stale the
+    /// first time a command is added, and the symptom (tab-completion quietly
+    /// missing a command) is one nobody files a bug about.
+    std::vector<std::string> command_names;
 };
 
 /// One `apogee <name>` subcommand.

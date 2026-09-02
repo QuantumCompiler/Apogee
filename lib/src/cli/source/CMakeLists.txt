@@ -38,6 +38,12 @@ add_library(apogee_core STATIC
     commands/version_command.cpp
     commands/config_cmd.h
     commands/config_cmd.cpp
+    commands/check.h
+    commands/complete_protocol.h
+    commands/complete_protocol.cpp
+    commands/uninstall.h
+    commands/uninstall.cpp
+    commands/check.cpp
     commands/complete.h
     commands/complete.cpp
     commands/helpers.h
@@ -70,6 +76,8 @@ add_library(apogee_core STATIC
     logger/operational.h
     logger/operational.cpp
 
+    harness/layout.h
+    harness/layout.cpp
     harness/paths.h
     harness/paths.cpp
     harness/config.h

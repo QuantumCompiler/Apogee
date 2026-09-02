@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -55,6 +56,16 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 /// `apogee::harness::apogee_home()` instead -- it layers the APOGEE_HOME
 /// override on top of this.
 [[nodiscard]] std::optional<std::string> home_directory();
+
+/// Absolute path of the running executable, or empty when the platform will
+/// not say.
+///
+/// argv[0] is not a substitute: it is whatever the caller passed, so it is
+/// bare on a PATH invocation and relative after a `cd`. `apogee check` reports
+/// on the binary itself (its writability, and on macOS its quarantine
+/// attribute), and `apogee uninstall` has to delete it -- both need the real
+/// path, and a wrong one there means uninstall removes the wrong file.
+[[nodiscard]] std::filesystem::path executable_path();
 
 /// The three standard streams, for terminal detection.
 enum class StandardStream : std::uint8_t { In, Out, Err };

@@ -93,7 +93,7 @@ That split is what makes surface parity structural rather than something a revie
 | `ansi/` | Colour and styling, and the one function that decides whether to emit any (`resolve_color`). `ansi.h/.cpp` |
 | `logger/` | Persisted chat sessions and the daily operational log. A session records *what was said*; the log records *what the program did*. |
 | `commands/` | The CLI scaffold: the `Command` interface, the registry, the root command, and the built-in commands. |
-| `harness/` | **The core.** The config engine (typed loader, `${ENV}` expansion, template, comment-preserving edits, on-disk paths) **and** the provider interface, canonical message IR, router, and context-window table. Includes nothing from `backends/` — enforced. |
+| `harness/` | **The core.** The config engine (typed loader, `${ENV}` expansion, template, comment-preserving edits, on-disk paths), the **layout contract** (`layout.h` — the single declaration of what `~/.apogee/` contains), and the provider interface, canonical message IR, router, and context-window table. Includes nothing from `backends/` — enforced. |
 | `backends/` | Every provider plus the infrastructure they share: `mock`, `anthropic`, `openai`, `google`, and `llamacpp`; the HTTP client and SSE parser for the cloud ones; the `llama_runtime` seam, chat templates, and token arithmetic for the local one. |
 | `agentloop/` | **The shared loop.** `run()` drives model→tool→model behind a Reporter, plus `ask_user`, history compaction, and transient splicing. Includes nothing from `backends/` — enforced. |
 | `agent/` | Tools: the registry, dispatch with the permission gate, and `fetch_url`. Separate from the loop because a registry needs no loop; MCP and native toolsets register here later. |
@@ -321,11 +321,17 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `commands/chat_test.cpp` | Slash parsing, the 80/90 thresholds and what they are measured against, title sanitising, and the log line format. |
 | `logger/session_test.cpp` | Round trips, every resume-warning path, tool-call survival, and that no thinking is persisted. |
 | `commands/line_reader_test.cpp` | The non-TTY reader: CRLF, a final line with no newline, blanks vs EOF, and that a piped run never constructs the editor. |
+| `commands/check_test.cpp` | The doctor against a matrix of deliberately broken installs — and the **severity** each gets, which is the whole product: a keyless, modelless install must PASS. Plus that `--fix` never rewrites config, and that the key itself never reaches the output. |
+| `commands/lifecycle_test.cpp` | The completion protocol (live backend names, prefix-not-substring matching, surviving a broken config) and uninstall's plan (which user data it names, `--keep-data`, an already-removed install). |
 | `support/fake_transport.h/.cpp` | The scripted `HttpTransport` — the seam that makes cloud-backend tests hermetic. |
 | `support/fake_command.h/.cpp` | A `Command` defined in test code — the injectable seam, exercised. |
 | `support/env_guard.h/.cpp` | RAII environment-variable and temp-directory guards. Config resolution reads the environment, so exercising it means mutating the environment — and a leaked change would steer every test after it. |
 
 Beyond those, `tests/CMakeLists.txt` registers `cli.*` ctest cases that run the built `apogee` binary as a subprocess, covering the contract as a user meets it (bare invocation prints help and exits 0; `--version`; unknown subcommand fails). Running a target is not linking it, so the link policy still holds.
+
+`cli.install_parity` (`tests/install_parity.sh`) installs twice into throwaway roots and requires identical trees *and modes*, refuses to pass on fewer than five directories, and requires a freshly seeded install to pass `apogee check`. It is the enforcement behind CLAUDE.md → *One layout declaration*.
+
+`cli.test_names` (`tests/test_names.cmake`) refuses a `TEST_CASE` name beginning with a dash. ctest hands each test's name to Catch2 as its filter argument, so such a name is parsed as an option: the test passes alone and fails under ctest with "Unrecognised token", which reads like a broken test rather than a broken name. It cost time twice before this existed.
 
 `harness.layering` is a `cmake -P` check that no file under `source/harness/` includes `backends/`. C++ cannot enforce this the way Go's import cycles do — the include would compile fine and the layering would be silently gone — so it is checked mechanically, and it refuses to run against an empty source list so it cannot pass vacuously.
 
@@ -379,7 +385,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 | `make llama` | Build with the pinned llama.cpp target enabled (slow). |
 | `make clean` / `make fresh` | Drop a build dir / clean-room clone-and-build. |
 
-`make install` is a thin caller into the `install()` rule in `source/CMakeLists.txt` — `cmake --install build/<preset> --prefix <dir>` does the same thing. It installs **the executable and nothing else**: `apogee_core` is an implementation detail of the binary, and no `~/.apogee/` asset is seeded. That last part is deliberate — SPEC.md's *no silent install drift* requires anything landing in the data directory to join every install path in the same change, so the data-directory contract, the config template, completions, and the `install.sh` parity gate all arrive together with [install-check-lifecycle](../backlog/install-check-lifecycle.md) rather than half-landing here.
+`make install` is a thin caller into the `install()` rule in `source/CMakeLists.txt`. It installs the executable (`apogee_core` is an implementation detail and is deliberately not installed), then the shell completions, and then runs **`apogee check --fix`** so the binary creates and verifies its own data directory. That last step is the parity rule in one line: the Makefile does not know what `~/.apogee/` contains, and neither installer does — all three reach the single declaration in `source/harness/layout.h`. See CLAUDE.md → *One layout declaration, and every install path reads it*.
 
 `make lint` configures its own `build/lint` directory using the compiler from clang-tidy's own directory. That is not incidental: on macOS the normal build uses Apple clang, whose libc++ headers Homebrew's clang-tidy cannot find, and every file fails to parse with a misleading `'cstddef' file not found`.
 

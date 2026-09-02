@@ -7,8 +7,11 @@
 
 #include "commands/chat.h"
 #include "commands/chat_history.h"
+#include "commands/check.h"
 #include "commands/complete.h"
+#include "commands/complete_protocol.h"
 #include "commands/config_cmd.h"
+#include "commands/uninstall.h"
 #include "commands/version_command.h"
 
 namespace apogee::commands {
@@ -56,10 +59,14 @@ void CommandRegistry::bind_all(CLI::App& root, const RootContext& context) {
 CommandRegistry default_registry() {
     CommandRegistry registry;
     registry.add(std::make_unique<ChatCommand>());
+    registry.add(std::make_unique<CheckCommand>());
     registry.add(std::make_unique<ChatsCommand>());
     registry.add(std::make_unique<CompleteCommand>());
     registry.add(std::make_unique<ConfigCommand>());
+    registry.add(std::make_unique<UninstallCommand>());
     registry.add(std::make_unique<VersionCommand>());
+    // Hidden: the shell-completion protocol, not a user-facing command.
+    registry.add(std::make_unique<CompleteProtocolCommand>());
     return registry;
 }
 

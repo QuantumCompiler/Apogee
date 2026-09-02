@@ -36,6 +36,12 @@ RootCommand::RootCommand(CommandRegistry registry)
     // a usage error).
     app_->require_subcommand(0, 1);
 
+    // Populated BEFORE binding: the completion protocol reads it from the
+    // context it is handed, so it has to be complete by then.
+    for (const std::string_view name : registry_.names()) {
+        context_.command_names.emplace_back(name);
+    }
+
     registry_.bind_all(*app_, context_);
 }
 

@@ -412,3 +412,43 @@ Two smaller corrections came from the same run: llama.cpp's own logging is now r
 **Verified end to end against a real model:** load, chat-template rendering, tokenization, KV reuse across turns, side-request isolation on its own context, graceful truncation, and session save — plus both no-listen checks passing with llama.cpp linked into the binary, which is the configuration the invariant is actually about.
 
 **Not verified:** performance. The KV cache is asserted by token counts, never by wall-clock, and no large model was run.
+
+## Milestone K — The install contract
+
+**Goal.** Make v0.1.0 shippable, and do it by closing Ommi's dominant early bug class rather than by documenting it. Ommi lost real time to *silent install drift*: `make install` seeded one tree, `install.sh` another, the updater a third, and `check` validated a fourth — each list correct when written, diverging one commit at a time, and never failing loudly. The fix adopted here is structural: one layout declaration, and every install path reads it.
+
+### 2026-09-01 — Layout, doctor, installers, completions, release pipeline
+
+**What was built**
+
+- [x] **The on-disk contract** (`source/harness/layout.h/.cpp`) — one declaration of what `~/.apogee/` contains, with each row carrying its purpose, whether it may hold secrets, and whether it holds the user's own work. `logs/`, `sessions/`, `models/`, `embeddings/`, `cache/`, and `config/`. The scattered `logs_dir()` / `sessions_dir()` definitions in `logger/` now forward to it.
+- [x] **`apogee check`** (`source/commands/check.h/.cpp`) — the doctor. Version and macOS quarantine, config parse, per-backend validation (a dangling `model_path`, an unloadable GGUF, a missing API key), role pointers, the directory contract, file modes, and installed models. `--fix` repairs the local install and **never touches config**.
+- [x] **`apogee uninstall`** (`source/commands/uninstall.h/.cpp`) — plans first, names the user data it would destroy, prompts, and refuses rather than guessing when there is no terminal and no `--yes`. `--keep-data` reinstalls without losing conversations.
+- [x] **Dynamic shell completion** — a hidden `apogee __complete` verb plus four small stubs (bash, zsh, fish, PowerShell) that do nothing but call back into the binary. `apogee complete -m <TAB>` offers the backends this user actually has.
+- [x] **Two installers** (`lib/scripts/install.sh`, `install.ps1`) — download the archive for the host, install the binary and completions, then ask the binary to create and verify its own data directory.
+- [x] **The release pipeline** (`.github/workflows/release.yml`) — a pushed tag builds all six targets on native runners *through `lib/scripts/cicd.sh`*, tests before packaging, verifies the staged binary **runs**, and publishes archives to a GitHub Release.
+- [x] **`executable_path()`** on the platform seam — three genuinely different mechanisms (`GetModuleFileNameW`, `_NSGetExecutablePath`, `/proc/self/exe`), which is why it belongs behind the seam rather than in a caller.
+- [x] **14 new tests** (462 total), plus `cli.install_parity` and `cli.test_names`.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Distribution | **GitHub Releases + Actions** *(user call)* | Confirms the strong default; the repo already lives there. The release matrix invokes `cicd.sh`, so a release binary is built the same way a local one is. |
+| Self-update | **Deferred to its own item** *(user call)* | It would be the third parity path, and widening the parity surface before this item has pinned it once is backwards. It also needs a release pipeline that has been proven before it can trust what it downloads. |
+| macOS signing | **Unsigned** *(user call)* | A curl-driven install sets no quarantine attribute. For the browser-download case, `check` detects the attribute and prints the exact `xattr -d` command. Notarization joins when there is a Developer ID. |
+| Windows | **Ships from the first tag, with `install.ps1`** *(user call, overriding the recommendation)* | See the caveat below — this is the one decision taken against advice, and the risk is recorded rather than hidden. |
+
+**Notes — the guardrail failed its first mutation test, and that was the useful part.**
+
+The parity gate is the whole point of this milestone, so it was mutation-tested by deleting one directory from the seeding loop. **It passed.** The reason: there were *two* implementations that could build the tree — `seed_data_directory()` and a copy inside the doctor's `--fix` — and the mutation hit the one the installers never reached. The copy they did reach was still correct, so nothing broke.
+
+That is precisely the bug this milestone exists to prevent, reproduced inside the work meant to prevent it. `apply_fixes` now delegates to the single implementation, and the same mutation turns the gate red. The lesson is recorded in `CLAUDE.md` as an invariant: **two implementations of the layout is the bug, even when both are correct.**
+
+A smaller version of the same thing happened earlier: `config/` was seeded as a special case outside the row list, so `check --fix` (which enumerated rows) produced a tree one directory smaller than seeding did. It is a row now.
+
+**Two test-infrastructure bugs, both found by the full run rather than in isolation.** ctest executes cases as parallel *processes*, so a per-process counter generated the same temp directory name in several at once and they deleted each other's fixtures — the directories are claimed by atomic `create_directory` now. And a test whose **name** begins with `--` is handed to Catch2 by ctest as an option, failing with "Unrecognised token" while passing when run alone. That cost time twice, so `cli.test_names` now refuses it mechanically; it was verified against a deliberately dashed name.
+
+**The recorded Windows caveat.** All six targets ship binaries from the first tag, which was chosen over the recommendation that Windows join a later release. The reason for the recommendation stands and is not resolved by this item: Apogee's Windows portability work is incomplete — the PTY tests, the `tcflush` typeahead flush, the `lsof` no-listen poll, and `0600` file modes have no Windows equivalent, and only `macos-arm64` is merge-blocking. `apogee check` reports the mode rows as **skipped** on Windows rather than passing them, and the Windows parity job is non-blocking, so a Windows install is verified more weakly than a POSIX one. That gap is visible in the tool's own output instead of being implied.
+
+**Not verified:** no release has been cut. The workflow is syntactically valid and every step it runs is exercised locally, but the tag → build → publish path itself has never executed, and neither installer has downloaded a real archive — there is nothing published to download yet. The first tag is also the first test of that pipeline.

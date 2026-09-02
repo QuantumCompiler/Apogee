@@ -34,7 +34,7 @@ LINT_CXX     ?= $(dir $(CLANG_TIDY))clang++
 # formatted or linted.
 SOURCES := $(shell find source tests \( -name '*.cpp' -o -name '*.h' \) 2>/dev/null)
 
-.PHONY: help build install test clean fresh format format-check lint llama all
+.PHONY: help build install install-completions test clean fresh format format-check lint llama all
 
 help:
 	@echo "Apogee CLI — build wrapper (repo-wide entry point: lib/scripts/cicd.sh)"
@@ -69,14 +69,38 @@ build:
 # itself is CMake's -- this recipe adds no steps of its own, only the PATH note,
 # because an installed binary the shell cannot find is the one failure mode a
 # user-level prefix introduces.
+# Installs the binary, its completions, and then asks the binary to create its
+# own data directory and verify it.
+#
+# That last step is the parity rule in one line: this target does NOT know what
+# `~/.apogee/` contains. `apogee check --fix` creates it from the single
+# declaration in source/harness/layout.h, and install.sh / install.ps1 end with
+# the same call -- so no install path holds a list of directories that could go
+# stale against the others. Ommi's dominant early bug class was exactly that
+# drift; the CI parity gate diffs two installs to keep it closed.
 install: build
 	@cmake --install $(BUILD_DIR) --prefix "$(PREFIX)"
+	@$(MAKE) --no-print-directory install-completions PREFIX="$(PREFIX)"
+	@echo ""
+	@"$(PREFIX)/bin/apogee" check --fix
 	@case ":$$PATH:" in \
 		*":$(PREFIX)/bin:"*) ;; \
 		*) echo ""; \
 		   echo "note: $(PREFIX)/bin is not on your PATH -- add it to run 'apogee' by name:"; \
 		   echo "      export PATH=\"$(PREFIX)/bin:\$$PATH\"" ;; \
 	esac
+
+# Completions go where each shell already looks. A shell the user does not run
+# gets nothing -- creating its config directory would be litter that `apogee
+# uninstall` then has to guess the ownership of.
+install-completions:
+	@mkdir -p "$(HOME)/.local/share/bash-completion/completions"
+	@install -m 0644 completions/apogee.bash "$(HOME)/.local/share/bash-completion/completions/apogee"
+	@mkdir -p "$(HOME)/.local/share/zsh/site-functions"
+	@install -m 0644 completions/_apogee "$(HOME)/.local/share/zsh/site-functions/_apogee"
+	@mkdir -p "$(HOME)/.config/fish/completions"
+	@install -m 0644 completions/apogee.fish "$(HOME)/.config/fish/completions/apogee.fish"
+	@echo "installed shell completions (bash, zsh, fish)"
 
 test:
 	@$(CICD) --platform $$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')-$$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/;s/amd64/x64/') --test --jobs $(JOBS)

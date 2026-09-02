@@ -11,6 +11,7 @@
 #include <stdexcept>
 
 #include "harness/config_edit.h"
+#include "harness/layout.h"
 #include "harness/paths.h"
 
 namespace apogee::logger {
@@ -72,7 +73,8 @@ std::string Session::display_name() const {
 }
 
 std::filesystem::path sessions_dir() {
-    return harness::apogee_home() / "sessions";
+    // Forwards to harness/layout.h -- the single declaration of the layout.
+    return harness::sessions_dir();
 }
 
 std::filesystem::path session_path(const std::string& chat_id) {

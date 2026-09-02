@@ -131,6 +131,84 @@ jobs:
         # scan of the linked executable is the check that matters most here.
         run: ctest --test-dir build/macos-arm64 --output-on-failure
 
+  install-parity:
+    # The install-parity gate on the platform whose installer is bash.
+    #
+    # Ommi's dominant early bug class was silent install drift: each install
+    # path seeded a slightly different tree and nothing failed loudly. The
+    # structural fix is one layout declaration (source/harness/layout.h); this
+    # job is what keeps it honest, and `tests/install_parity.sh` explains why
+    # every exception is where the next drift hides.
+    name: install parity (posix)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: lib/scripts/cicd.sh --platform linux-x64
+      - name: Two installs, identical trees
+        run: |
+          lib/src/cli/tests/install_parity.sh \
+            lib/src/cli/build/linux-x64/source/apogee \
+            "$RUNNER_TEMP/install-parity"
+      - name: make install produces the same tree
+        # The developer path, end to end, against a throwaway prefix and home.
+        # `make install` finishes with `apogee check --fix`, so this asserts the
+        # whole chain rather than just the binary landing.
+        run: |
+          export APOGEE_HOME="$RUNNER_TEMP/make-home"
+          make -C lib/src/cli install PREFIX="$RUNNER_TEMP/prefix"
+          "$RUNNER_TEMP/prefix/bin/apogee" check
+          diff \
+            <(cd "$RUNNER_TEMP/make-home" && find . -type d | LC_ALL=C sort) \
+            <(cd "$RUNNER_TEMP/install-parity/a" && find . -type d | LC_ALL=C sort)
+
+  install-parity-windows:
+    # Windows ships binaries from the first tagged release (user decision,
+    # 2026-09-01), so its installer is a parity path like any other and gets the
+    # same comparison expressed in PowerShell.
+    #
+    # Non-blocking, and honestly so: Apogee's Windows portability work is
+    # incomplete -- the PTY tests, tcflush typeahead flush, lsof no-listen poll,
+    # and 0600 modes have no Windows equivalent yet, and `apogee check` reports
+    # the mode rows as SKIPPED there rather than passing them. A Windows install
+    # is therefore verified more weakly than a POSIX one, and that is visible in
+    # the check output rather than implied.
+    name: install parity (windows, non-blocking)
+    runs-on: windows-2022
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: bash
+        run: lib/scripts/cicd.sh --platform windows-x64
+      - name: Two installs, identical trees
+        shell: pwsh
+        run: |
+          $exe = "lib/src/cli/build/windows-x64/source/apogee.exe"
+          if (-not (Test-Path $exe)) { $exe = "lib/src/cli/build/windows-x64/source/Release/apogee.exe" }
+          foreach ($root in @("$env:RUNNER_TEMP\pa", "$env:RUNNER_TEMP\pb")) {
+            Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+            $env:APOGEE_HOME = $root
+            & $exe check --fix | Out-Null
+          }
+          $a = Get-ChildItem "$env:RUNNER_TEMP\pa" -Recurse -Directory |
+               ForEach-Object { $_.FullName.Replace("$env:RUNNER_TEMP\pa", '') } | Sort-Object
+          $b = Get-ChildItem "$env:RUNNER_TEMP\pb" -Recurse -Directory |
+               ForEach-Object { $_.FullName.Replace("$env:RUNNER_TEMP\pb", '') } | Sort-Object
+          if (Compare-Object $a $b) {
+            Write-Error "INSTALL PARITY VIOLATED: the two install paths produce different trees"
+            exit 1
+          }
+          if ($a.Count -lt 5) {
+            Write-Error "INSTALL PARITY: only $($a.Count) directories seeded -- would pass vacuously"
+            exit 1
+          }
+          # A freshly seeded install must pass its own doctor.
+          $env:APOGEE_HOME = "$env:RUNNER_TEMP\pa"
+          & $exe check
+          if ($LASTEXITCODE -ne 0) { Write-Error "a fresh install does not pass 'apogee check'"; exit 1 }
+          Write-Host "install parity: $($a.Count) directories, identical - OK"
+
   fresh-clone:
     # The scripted clean-room check, so the skeleton cannot silently rot: it
     # clones the branch from scratch and builds it with nothing cached.

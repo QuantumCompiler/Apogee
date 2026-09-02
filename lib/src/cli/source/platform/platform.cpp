@@ -1,10 +1,17 @@
 #include "platform/platform.h"
 
 #include <cstdlib>
+#include <cstring>
+#include <system_error>
 
 #if defined(_WIN32)
 #include <io.h>
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
 #else
 #include <sys/ioctl.h>
 #include <termios.h>
@@ -61,6 +68,46 @@ std::string_view to_string(Architecture arch) noexcept {
             return "arm64";
     }
     return "unknown";
+}
+
+std::filesystem::path executable_path() {
+    // Three genuinely different mechanisms, which is why this lives behind the
+    // seam rather than in the one caller that wants it.
+#if defined(_WIN32)
+    std::wstring buffer(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD written =
+            GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (written == 0) {
+            return {};
+        }
+        if (written < buffer.size()) {
+            buffer.resize(written);
+            return std::filesystem::path{buffer};
+        }
+        buffer.resize(buffer.size() * 2);  // truncated: ask again with more room
+    }
+#elif defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);  // returns -1 and sets the size needed
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+        return {};
+    }
+    buffer.resize(std::strlen(buffer.c_str()));
+    std::error_code code;
+    // Resolve symlinks: a Homebrew-style install is a link into a cellar, and
+    // `apogee uninstall` must act on what it is really deleting.
+    const std::filesystem::path resolved = std::filesystem::weakly_canonical(buffer, code);
+    return code ? std::filesystem::path{buffer} : resolved;
+#else
+    std::error_code code;
+    const std::filesystem::path resolved = std::filesystem::read_symlink("/proc/self/exe", code);
+    if (code) {
+        return {};
+    }
+    return resolved;
+#endif
 }
 
 std::optional<std::string> home_directory() {

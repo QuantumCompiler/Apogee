@@ -7,6 +7,7 @@
 #include <mutex>
 #include <sstream>
 
+#include "harness/layout.h"
 #include "harness/paths.h"
 
 namespace apogee::logger {
@@ -42,7 +43,10 @@ std::string_view to_string(Level level) noexcept {
 }
 
 std::filesystem::path logs_dir() {
-    return harness::apogee_home() / "logs";
+    // Forwards to the one declaration of the on-disk contract. This used to
+    // spell the directory name itself, which is how three files came to own
+    // the layout between them -- see harness/layout.h.
+    return harness::logs_dir();
 }
 
 std::filesystem::path today_log_path() {

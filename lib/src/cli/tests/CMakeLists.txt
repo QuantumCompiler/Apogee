@@ -37,6 +37,8 @@ add_executable(apogee_tests
     commands/cli_reporter_test.cpp
     ansi/ansi_test.cpp
     commands/chat_test.cpp
+    commands/check_test.cpp
+    commands/lifecycle_test.cpp
     commands/line_reader_test.cpp
     logger/session_test.cpp
     agent/tool_test.cpp
@@ -124,7 +126,22 @@ add_test(NAME cli.no_listen_symbols
         -P "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_symbols.cmake"
 )
 
+add_test(NAME cli.test_names
+    COMMAND "${CMAKE_COMMAND}"
+        -DTEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/test_names.cmake"
+)
+
 if(UNIX)
+    # The install-parity gate. See tests/install_parity.sh for why an exception
+    # here is where the next drift hides.
+    add_test(NAME cli.install_parity
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/install_parity.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/install-parity
+    )
+    set_tests_properties(cli.install_parity PROPERTIES TIMEOUT 60)
+
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_check.sh"
             $<TARGET_FILE:apogee>
