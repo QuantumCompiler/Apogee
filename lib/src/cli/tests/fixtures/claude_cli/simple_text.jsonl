@@ -1,0 +1,11 @@
+{"type":"system","subtype":"init","session_id":"11111111-2222-3333-4444-555555555555","model":"claude-sonnet-5","tools":[],"cwd":"/tmp"}
+{"type":"stream_event","event":{"type":"message_start","message":{"role":"assistant"}}}
+{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", world"}}}
+{"type":"stream_event","event":{"type":"content_block_stop","index":0}}
+{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"}}}
+{"type":"stream_event","event":{"type":"message_stop"}}
+{"type":"system","subtype":"post_turn_summary","turns":1}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello, world"}]}}
+{"type":"result","subtype":"success","is_error":false,"session_id":"11111111-2222-3333-4444-555555555555","result":"Hello, world","num_turns":1,"total_cost_usd":0.0021,"usage":{"input_tokens":12,"output_tokens":4}}

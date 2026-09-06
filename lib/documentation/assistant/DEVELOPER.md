@@ -94,7 +94,7 @@ That split is what makes surface parity structural rather than something a revie
 | `logger/` | Persisted chat sessions and the daily operational log. A session records *what was said*; the log records *what the program did*. |
 | `commands/` | The CLI scaffold: the `Command` interface, the registry, the root command, and the built-in commands. |
 | `harness/` | **The core.** The config engine (typed loader, `${ENV}` expansion, template, comment-preserving edits, on-disk paths), the **layout contract** (`layout.h` — the single declaration of what `~/.apogee/` contains), and the provider interface, canonical message IR, router, and context-window table. Includes nothing from `backends/` — enforced. |
-| `backends/` | Every provider plus the infrastructure they share: `mock`, `anthropic`, `openai`, `google`, and `llamacpp`; the HTTP client and SSE parser for the cloud ones; the `llama_runtime` seam, chat templates, and token arithmetic for the local one. |
+| `backends/` | Every provider plus the infrastructure they share: `mock`, `anthropic`, `openai`, `google`, `llamacpp`, and `claude_cli`; the HTTP client and SSE parser for the direct-API ones; the `llama_runtime` seam, chat templates and token arithmetic for the local one; the JSONL framer and typed event union for the vendor-CLI ones. |
 | `agentloop/` | **The shared loop.** `run()` drives model→tool→model behind a Reporter, plus `ask_user`, history compaction, and transient splicing. Includes nothing from `backends/` — enforced. |
 | `agent/` | Tools: the registry, dispatch with the permission gate, and `fetch_url`. Separate from the loop because a registry needs no loop; MCP and native toolsets register here later. |
 | `embedstore/` | *Reserved* — chunk storage and retrieval (`embedstore-lexical-rag` item). |
@@ -193,6 +193,10 @@ Mechanisms that land here as later items need them: process spawning (vendor-CLI
 | `chat_template.h/.cpp` | Prompt framing for local models: ChatML, Llama 3, Mistral, a narrow name-matching registry, and ChatML as the documented fallback. A GGUF's own template always wins over this. |
 | `llamacpp_tokens.h/.cpp` | Exact prompt counting and `common_prefix_length` — the KV cache's entire decision. |
 | `llamacpp.h/.cpp` | The local provider: model lifecycle, one live context per conversation, a throwaway context per side request, streaming, idle unload. Also `TokenCounting`, `VisionCapable`, and `StatusReporting`. |
+| `jsonl_framer.h/.cpp` | Bytes → complete JSONL lines, with a carry buffer across reads. Pure, no I/O — which is what makes the adversarial chunk-size replay possible. The vendor-CLI family's worst bug class lives here. |
+| `cli_event.h` | The typed event union a vendor-CLI child produces. In `backends/` deliberately: the harness already has typed sinks, and a CLI-shaped union in `harness/` would put vendor knowledge in the one layer forbidden to have it. |
+| `claude_cli_events.h/.cpp` | Wire JSON → typed events for the `claude` CLI's `stream-json` output. Unknown types and malformed lines are dropped, never fatal. |
+| `claude_cli.h/.cpp` | The Claude-CLI provider: one child per session, resume-then-replay recovery, side requests on their own child, and `complete_structured()` over `--json-schema`. |
 | `factory.h/.cpp` | Config `type:` → provider, and `build_providers()` which registers every entry on a Harness and installs the router. Lives here, not in a command, because every surface needs it. |
 
 **The transport is injected**, which is what makes every cloud-backend test hermetic: no network, no API key, no charges — and failure modes a live endpoint will not produce on demand (a 529, a body delivered one byte at a time, a connection dropping mid-frame). `tests/support/fake_transport.h` is the scripted implementation.
@@ -305,6 +309,10 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `backends/factory_test.cpp` | Construction per type, that a keyless cloud type names **its own** environment variable, and that one unbuildable backend does not stop the others. |
 | `backends/llamacpp_test.cpp` | The local backend against a scripted runtime: KV reuse as an exact token count, side-request isolation, batch chunking, the context wall, idle unload, load failure, and the vision capability. |
 | `backends/chat_template_test.cpp` | Local prompt framing, the conservative name-matching registry, and that a model's own template wins. |
+| `backends/jsonl_framer_test.cpp` | The line framer directly: every chunk boundary, a newline landing exactly on one, CRLF, a bounded buffer, and a 100 KB line (a real `init` event exceeds 64 KiB with MCP servers configured). |
+| `backends/claude_cli_events_test.cpp` | The fixture-replay suite: every fixture at 1/2/3/7/64/4096-byte chunks must produce an identical event sequence. Fixtures are **transcribed** from the verified wire table, not recorded — see Milestone L. |
+| `backends/claude_cli_test.cpp` | The provider against a scripted child: one child across turns, only-what-is-new delivery, resume-then-replay, side-request isolation, schema suppression and its prose fallback. |
+| `platform/child_process_test.cpp` | The process seam against real `sh`/`cat`: stdin round-trip, stdout/stderr separation, read timeouts, exit status, and that writing to a dead child returns false rather than killing us. |
 | `backends/openai_test.cpp` | The Responses dialect, split-boundary streaming, tool-call reassembly from item + argument deltas, effort banding, error shapes, and the API-key secrets guardrail. |
 | `backends/google_test.cpp` | The Gemini dialect, thought-vs-answer separation, split-boundary streaming, `functionResponse` round-trip, and the API-key secrets guardrail. |
 | `agentloop/conformance_test.cpp` | **The cross-provider table.** The same two scripted turns in four dialects driving the same loop: identical answer, iterations, history shape, tool linkage, and usage. Also pins that a mid-session `/model` switch carries a full history — tool call and result included — across every translator. |
@@ -332,6 +340,8 @@ Beyond those, `tests/CMakeLists.txt` registers `cli.*` ctest cases that run the 
 `cli.install_parity` (`tests/install_parity.sh`) installs twice into throwaway roots and requires identical trees *and modes*, refuses to pass on fewer than five directories, and requires a freshly seeded install to pass `apogee check`. It is the enforcement behind CLAUDE.md → *One layout declaration*.
 
 `cli.test_names` (`tests/test_names.cmake`) refuses a `TEST_CASE` name beginning with a dash. ctest hands each test's name to Catch2 as its filter argument, so such a name is parsed as an option: the test passes alone and fails under ctest with "Unrecognised token", which reads like a broken test rather than a broken name. It cost time twice before this existed.
+
+`cli.no_vendor_credentials` (`tests/no_vendor_credentials.cmake`) greps every source for signs of reading a vendor CLI's credential store — its dot-directory, `credentials.json`, `apiKeyHelper`, OAuth, the keychain. It enforces the SPEC principle *a vendor CLI is spawned, never opened*, and it is mechanical rather than reviewed because the shortcut it forbids is genuinely tempting: when a `--resume` fails, reading the vendor's session file *would* recover the conversation. Documentation lines are exempt so the rule can be explained where it is enforced.
 
 `harness.layering` is a `cmake -P` check that no file under `source/harness/` includes `backends/`. C++ cannot enforce this the way Go's import cycles do — the include would compile fine and the layering would be silently gone — so it is checked mechanically, and it refuses to run against an empty source list so it cannot pass vacuously.
 

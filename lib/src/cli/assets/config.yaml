@@ -59,6 +59,25 @@ backends:
   #   model: gemini-2.5-pro
   #   context_size: 1048576
 
+  # ── Claude through the official CLI (subscription plan) ────────────────────
+  # The subscription-auth path: Apogee spawns the `claude` binary you already
+  # installed and logged into, as a long-lived child process. It never reads
+  # your credentials -- not ~/.claude, not a keychain, not a session file.
+  #
+  # binary: resolved from PATH when unset.
+  # mode:   subscription (default) uses whatever your CLI is logged into.
+  #         bare passes --bare, which skips hook/MCP/CLAUDE.md discovery AND
+  #         disables subscription auth -- the child then needs an API key.
+  #         Right for CI; wrong on your own machine.
+  #
+  # Watch out for ANTHROPIC_API_KEY: if it is set in your environment, the CLI
+  # prefers it over your subscription login, which quietly bills per token.
+  # claude-sub:
+  #   type: claude-cli
+  #   mode: subscription
+  #   # binary: /usr/local/bin/claude
+  #   # model: claude-sonnet-5
+
   # ── Local inference via llama.cpp ───────────────────────────────────────────
   # Runs in-process: no server and no listening socket. The model STAYS LOADED
   # between turns, which is what keeps a multi-turn chat warm -- each turn adds

@@ -45,7 +45,7 @@ See the [`backlog/`](../backlog/README.md) index for the full queue (priority-or
 
 The gated ring — specced with their own backlog documents, sequenced after v0.1.0 ships (gate convention: each also assumes the full v0.1.0 set):
 
-- Claude-CLI backend: persistent child, token-level streaming — the subscription-plan path (design notes adopted 2026-08-24; earmarking into v0.1.0 is an open `[user]` call)
+- [x] **Claude-CLI backend** — persistent child, token-level streaming; the subscription-plan path *(shipped 2026-09-02, [Milestone L](MILESTONES.md#milestone-l--the-vendor-cli-family))*. It also builds the family's shared machinery: the child-process seam, the JSONL framer, and the typed event union that codex/gemini/ollama reuse.
 - Stdio machine mode: the CLI's JSONL event stream over stdin/stdout, so the GUI can power the executable directly — never over localhost (the GUI project gates on this)
 - Vendor CLI backends: codex (OpenAI), gemini (Google), ollama (Ollama cloud) — completing the subscription-plan path for the four-vendor cloud set (split per CLI before build; each starts with an empirical characterization)
 - Local-model depth: per-family profiles + open model management — no forbidden models, sources = Hugging Face direct + Ollama pulls (split before build)

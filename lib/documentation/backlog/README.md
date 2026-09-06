@@ -55,12 +55,11 @@ Items are numbered in the **suggested order of implementation**. The rule stays 
 
 ### Phase 2 — the gated ring (after v0.1.0 ships)
 
-Six semi-independent tracks that can interleave: the **vendor-CLI family** (11 → 12), the **front-end contract** (13 — the GUI project gates on it), **local-model depth** (14), **RAG** (15 → 16 → 17), **serving** (18 → 19 — server deployments only), and **tools/agents** (20); item 21 needs the RAG track complete. The numbering is the suggested serial order when working alone.
+Six semi-independent tracks that can interleave: the **vendor-CLI family** (11 shipped 2026-09-02 → 12), the **front-end contract** (13 — the GUI project gates on it), **local-model depth** (14), **RAG** (15 → 16 → 17), **serving** (18 → 19 — server deployments only), and **tools/agents** (20); item 21 needs the RAG track complete. The numbering is the suggested serial order when working alone.
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 11 | [claude-cli-backend.md](claude-cli-backend.md) | — | Claude CLI backend: persistent child process with token-level streaming (subscription-plan path; family template) |
-| 12 | [vendor-cli-backends.md](vendor-cli-backends.md) | 11 · **split first** (one doc per CLI) | Vendor CLI backends: codex (OpenAI), gemini (Google), ollama (Ollama cloud) |
+| 12 | [vendor-cli-backends.md](vendor-cli-backends.md) | ✅ 11 (shipped) · **split first** (one doc per CLI) | Vendor CLI backends: codex (OpenAI), gemini (Google), ollama (Ollama cloud) |
 | 13 | [stdio-machine-mode.md](stdio-machine-mode.md) | — | Stdio machine mode: structured JSONL event stream for front-end drivers (GUI ↔ CLI over pipes, never localhost) |
 | 14 | [model-profiles-and-management.md](model-profiles-and-management.md) | — · **split first** (profiles / management+sources) | Local-model depth: per-family profiles, filters, tool dialects + roles, models suite, open model sources (HF + Ollama) |
 | 15 | [embedstore-lexical-rag.md](embedstore-lexical-rag.md) | — | SQLite chunk store with FTS5/BM25 lexical retrieval + basic --rag injection |

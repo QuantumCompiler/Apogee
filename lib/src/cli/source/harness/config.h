@@ -39,7 +39,7 @@ public:
 /// is a recorded event in that item's document, never a silent edit. Adding one
 /// means adding a row to kBackendTypeNames in config.cpp and a case here; the
 /// loader dispatches through that table, so nothing else changes.
-enum class BackendType : std::uint8_t { Anthropic, OpenAI, Google, LlamaCpp, Mock };
+enum class BackendType : std::uint8_t { Anthropic, OpenAI, Google, LlamaCpp, ClaudeCli, Mock };
 
 /// The spelling of `type:` for `value`, e.g. "anthropic".
 [[nodiscard]] std::string_view to_string(BackendType value) noexcept;
@@ -79,6 +79,19 @@ struct BackendConfig {
 
     std::optional<std::int64_t> max_tokens;
     std::optional<double> temperature;
+
+    /// Vendor-CLI backends: the binary to spawn, resolved from PATH when it
+    /// has no separator. Apogee never installs, bundles, or modifies it -- the
+    /// user installs and logs in themselves (SPEC.md -> Principles).
+    std::string binary;
+
+    /// Vendor-CLI backends: which credentials the child may use.
+    ///
+    /// `subscription` (default) uses whatever the user's CLI is logged into.
+    /// `bare` passes `--bare`, which skips hook/MCP/CLAUDE.md discovery **and
+    /// disables subscription auth** -- the child then needs an API key. Right
+    /// for CI; wrong for someone on their own machine.
+    std::string mode;
 
     /// Seconds of inactivity after which a local backend releases its model.
     ///

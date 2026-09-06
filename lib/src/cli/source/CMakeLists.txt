@@ -27,6 +27,8 @@ string(TIMESTAMP APOGEE_BUILD_DATE "%Y-%m-%d" UTC)
 add_library(apogee_core STATIC
     version/version.h
     version/version.cpp
+    platform/child_process.h
+    platform/child_process.cpp
     platform/platform.h
     platform/platform.cpp
     commands/command.h
@@ -119,6 +121,13 @@ add_library(apogee_core STATIC
     backends/google_wire.cpp
     backends/google.h
     backends/google.cpp
+    backends/cli_event.h
+    backends/claude_cli.h
+    backends/claude_cli.cpp
+    backends/jsonl_framer.h
+    backends/jsonl_framer.cpp
+    backends/claude_cli_events.h
+    backends/claude_cli_events.cpp
     backends/llama_runtime.h
     backends/llama_real.cpp
     backends/chat_template.h

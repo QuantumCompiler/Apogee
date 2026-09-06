@@ -1,0 +1,6 @@
+Warning: something on stdout that is not JSON
+{"type":"system","subtype":"init","session_id":"noise-session","model":"claude-sonnet-5"}
+
+   
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Fine."}}}
+{"type":"result","subtype":"success","is_error":false,"session_id":"noise-session","result":"Fine.","num_turns":1,"total_cost_usd":0.001}

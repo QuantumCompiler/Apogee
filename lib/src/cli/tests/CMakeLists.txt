@@ -14,6 +14,7 @@ add_executable(apogee_tests
     smoke_test.cpp
     packages_test.cpp
     platform/platform_test.cpp
+    platform/child_process_test.cpp
     commands/registry_test.cpp
     commands/root_test.cpp
     harness/config_test.cpp
@@ -29,6 +30,9 @@ add_executable(apogee_tests
     backends/openai_test.cpp
     backends/google_test.cpp
     backends/llamacpp_test.cpp
+    backends/claude_cli_events_test.cpp
+    backends/claude_cli_test.cpp
+    backends/jsonl_framer_test.cpp
     backends/chat_template_test.cpp
     agentloop/conformance_test.cpp
     commands/helpers_test.cpp
@@ -52,6 +56,7 @@ add_executable(apogee_tests
     support/env_guard.cpp
     support/fake_transport.h
     support/fake_llama.h
+    support/fake_child.h
     support/fake_transport.cpp
 )
 
@@ -60,6 +65,9 @@ add_executable(apogee_tests
 # without depending on the working directory ctest happens to use.
 target_compile_definitions(apogee_tests PRIVATE
     APOGEE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../assets"
+    # Recorded vendor-CLI JSONL, replayed by the framing suite. Same reason as
+    # above: found by absolute path, not by whatever directory ctest ran in.
+    APOGEE_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
 )
 
 # So tests can `#include "support/fake_command.h"` the same way source files
@@ -124,6 +132,12 @@ add_test(NAME cli.no_listen_symbols
         -DAPOGEE_CORE_LIB=$<TARGET_FILE:apogee_core>
         -DAPOGEE_BINARY=$<TARGET_FILE:apogee>
         -P "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_symbols.cmake"
+)
+
+add_test(NAME cli.no_vendor_credentials
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/no_vendor_credentials.cmake"
 )
 
 add_test(NAME cli.test_names
