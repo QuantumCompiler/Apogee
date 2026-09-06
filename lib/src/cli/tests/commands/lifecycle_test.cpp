@@ -31,9 +31,20 @@ backends:
                                          "test");
 }
 
-[[nodiscard]] const std::vector<std::string>& commands() {
-    static const std::vector<std::string> kCommands{"chat",   "check",     "chats",  "complete",
-                                                    "config", "uninstall", "version"};
+[[nodiscard]] const std::vector<apogee::commands::CommandSpec>& commands() {
+    using apogee::commands::CommandSpec;
+    static const std::vector<CommandSpec> kCommands{
+        // The root's own flags live under an empty name, so `apogee --<TAB>`
+        // needs no special case at the call site.
+        CommandSpec{"", {"--config", "--help", "--version", "-V", "-h"}},
+        CommandSpec{"chat", {"--help", "--model", "--search", "--tools", "-h", "-m"}},
+        CommandSpec{"check", {"--fix", "--help", "--no-color", "-h"}},
+        CommandSpec{"chats", {"--help", "-h"}},
+        CommandSpec{"complete", {"--help", "--image", "--model", "--tools", "-h", "-m"}},
+        CommandSpec{"config", {"--help", "-h"}},
+        CommandSpec{"uninstall", {"--help", "--keep-data", "--yes", "-h", "-y"}},
+        CommandSpec{"version", {"--help", "-h"}},
+    };
     return kCommands;
 }
 
@@ -262,4 +273,72 @@ TEST_CASE("every user-data directory in the contract is one uninstall warns abou
         INFO(entry.relative_path);
         CHECK(contains(plan.user_data, entry.relative_path));
     }
+}
+
+TEST_CASE("a dash completes the flags of the command in play", "[commands][completion][flags]") {
+    // The gap a user reported: subcommands and backend names completed, but
+    // typing `--` after a command offered nothing at all. Flags are the most
+    // common thing anyone tab-completes.
+    CompletionRequest request;
+    request.words = {"complete"};
+    request.current = "--";
+
+    const std::vector<std::string> candidates =
+        completion_candidates(request, two_backends(), commands());
+
+    CHECK(contains(candidates, "--model"));
+    CHECK(contains(candidates, "--image"));
+    CHECK(contains(candidates, "--tools"));
+    // Another command's flags must not leak in.
+    CHECK_FALSE(contains(candidates, "--keep-data"));
+    // Nor may a short flag answer a long-flag prefix.
+    CHECK_FALSE(contains(candidates, "-m"));
+}
+
+TEST_CASE("a partial flag filters", "[commands][completion][flags]") {
+    CompletionRequest request;
+    request.words = {"uninstall"};
+    request.current = "--k";
+
+    const std::vector<std::string> candidates =
+        completion_candidates(request, two_backends(), commands());
+    REQUIRE(candidates.size() == 1);
+    CHECK(candidates.front() == "--keep-data");
+}
+
+TEST_CASE("a single dash offers short flags too", "[commands][completion][flags]") {
+    CompletionRequest request;
+    request.words = {"complete"};
+    request.current = "-";
+
+    const std::vector<std::string> candidates =
+        completion_candidates(request, two_backends(), commands());
+    CHECK(contains(candidates, "-m"));
+    CHECK(contains(candidates, "--model"));
+}
+
+TEST_CASE("the root's own flags complete before any subcommand", "[commands][completion][flags]") {
+    CompletionRequest request;
+    request.current = "--";
+
+    const std::vector<std::string> candidates =
+        completion_candidates(request, two_backends(), commands());
+    CHECK(contains(candidates, "--config"));
+    CHECK(contains(candidates, "--version"));
+    // A subcommand's flag must not appear at the root.
+    CHECK_FALSE(contains(candidates, "--keep-data"));
+}
+
+TEST_CASE("a flag expecting a value still wins over flag completion",
+          "[commands][completion][flags]") {
+    // `-m <TAB>` wants backend names, not more flags -- the word before the
+    // cursor decides.
+    CompletionRequest request;
+    request.words = {"complete", "-m"};
+    request.current = "";
+
+    const std::vector<std::string> candidates =
+        completion_candidates(request, two_backends(), commands());
+    CHECK(contains(candidates, "claude"));
+    CHECK_FALSE(contains(candidates, "--tools"));
 }

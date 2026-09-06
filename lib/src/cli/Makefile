@@ -34,7 +34,7 @@ LINT_CXX     ?= $(dir $(CLANG_TIDY))clang++
 # formatted or linted.
 SOURCES := $(shell find source tests \( -name '*.cpp' -o -name '*.h' \) 2>/dev/null)
 
-.PHONY: help build install install-completions test clean fresh format format-check lint llama all
+.PHONY: help build install install-completions install-zsh-completion test clean fresh format format-check lint llama all
 
 help:
 	@echo "Apogee CLI — build wrapper (repo-wide entry point: lib/scripts/cicd.sh)"
@@ -79,7 +79,7 @@ build:
 # stale against the others. Ommi's dominant early bug class was exactly that
 # drift; the CI parity gate diffs two installs to keep it closed.
 install: build
-	@cmake --install $(BUILD_DIR) --prefix "$(PREFIX)"
+	@cmake --install $(BUILD_DIR) --prefix "$(PREFIX)" --component apogee
 	@$(MAKE) --no-print-directory install-completions PREFIX="$(PREFIX)"
 	@echo ""
 	@"$(PREFIX)/bin/apogee" check --fix
@@ -96,11 +96,41 @@ install: build
 install-completions:
 	@mkdir -p "$(HOME)/.local/share/bash-completion/completions"
 	@install -m 0644 completions/apogee.bash "$(HOME)/.local/share/bash-completion/completions/apogee"
-	@mkdir -p "$(HOME)/.local/share/zsh/site-functions"
-	@install -m 0644 completions/_apogee "$(HOME)/.local/share/zsh/site-functions/_apogee"
 	@mkdir -p "$(HOME)/.config/fish/completions"
 	@install -m 0644 completions/apogee.fish "$(HOME)/.config/fish/completions/apogee.fish"
+	@$(MAKE) --no-print-directory install-zsh-completion
 	@echo "installed shell completions (bash, zsh, fish)"
+
+# zsh only loads completions from a directory on its `fpath`, which is a
+# per-user setting -- so ask zsh where it looks, and cross that against
+# directories that are conventionally OURS to write into.
+#
+# Both halves are needed, and each was learned the hard way on the same machine
+# (2026-09-06). Installing to a fixed ~/.local/share/zsh/site-functions wrote a
+# file zsh never reads, so completion silently did nothing. Then taking the
+# first writable fpath entry under $HOME put our file inside
+# ~/.oh-my-zsh/plugins/vscode -- a directory a framework owns and rewrites.
+# A completion file belongs in a user completion directory or nowhere.
+install-zsh-completion:
+	@fpath_dirs="$$(command -v zsh >/dev/null 2>&1 && zsh -i -c 'print -l $$fpath' 2>/dev/null)"; \
+	target=""; \
+	for dir in "$(HOME)/.zfunc" "$(HOME)/.oh-my-zsh/completions" "$(HOME)/.local/share/zsh/site-functions"; do \
+	    if printf '%s\n' "$$fpath_dirs" | grep -qx "$$dir" && [ -d "$$dir" ] && [ -w "$$dir" ]; then \
+	        target="$$dir"; break; \
+	    fi; \
+	done; \
+	if [ -n "$$target" ]; then \
+	    install -m 0644 completions/_apogee "$$target/_apogee"; \
+	else \
+	    target="$(HOME)/.local/share/zsh/site-functions"; \
+	    mkdir -p "$$target"; \
+	    install -m 0644 completions/_apogee "$$target/_apogee"; \
+	    echo ""; \
+	    echo "note: no writable directory on zsh's fpath was found, so the zsh"; \
+	    echo "      completion went to $$target, which zsh will NOT read until"; \
+	    echo "      you add it. In ~/.zshrc, before compinit:"; \
+	    echo "        fpath+=$$target"; \
+	fi
 
 test:
 	@$(CICD) --platform $$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')-$$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/;s/amd64/x64/') --test --jobs $(JOBS)

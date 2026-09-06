@@ -113,6 +113,10 @@ add_library(apogee_core STATIC
     backends/anthropic_wire.cpp
     backends/anthropic.h
     backends/anthropic.cpp
+    backends/ollama_cli_output.h
+    backends/ollama_cli_output.cpp
+    backends/ollama_cli.h
+    backends/ollama_cli.cpp
     backends/openai_wire.h
     backends/openai_wire.cpp
     backends/openai.h
@@ -202,4 +206,16 @@ apogee_set_target_options(apogee)
 # SPEC.md -> "No silent install drift" requires any asset landing under
 # ~/.apogee/ to join EVERY install path in the same commit, so this one starts
 # empty rather than shipping half a contract that check cannot yet verify.
-install(TARGETS apogee RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+# COMPONENT is load-bearing, not decoration.
+#
+# `FetchContent_MakeAvailable` adds each dependency's own `install()` rules to
+# THIS project, so a plain `cmake --install` installs replxx's headers, static
+# library, and CMake package config alongside our binary. That is not merely
+# untidy: the installed replxx config declares `Threads::Threads` without a
+# `find_package(Threads)`, and our `FIND_PACKAGE_ARGS` then PREFERS that
+# installed copy on the next configure -- so `make install` broke every
+# subsequent build of the project. Found in the wild, 2026-09-06.
+#
+# Naming a component and installing only that component makes the install
+# exactly what we declare, whatever a dependency declares for itself.
+install(TARGETS apogee RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT apogee)

@@ -46,9 +46,35 @@ std::vector<std::string> filter_prefix(const std::vector<std::string>& candidate
     return matched;
 }
 
+std::vector<CommandSpec> specs_from_app(const CLI::App& app) {
+    std::vector<CommandSpec> specs;
+
+    // Root flags live under an empty name, so a bare `apogee --<TAB>` finds
+    // them without a special case at the call site.
+    const auto collect = [](const CLI::App& source) {
+        std::vector<std::string> flags;
+        for (const CLI::Option* option : source.get_options()) {
+            for (const std::string& name : option->get_snames()) {
+                flags.push_back("-" + name);
+            }
+            for (const std::string& name : option->get_lnames()) {
+                flags.push_back("--" + name);
+            }
+        }
+        std::sort(flags.begin(), flags.end());
+        return flags;
+    };
+
+    specs.push_back({"", collect(app)});
+    for (const CLI::App* sub : app.get_subcommands({})) {
+        specs.push_back({sub->get_name(), collect(*sub)});
+    }
+    return specs;
+}
+
 std::vector<std::string> completion_candidates(const CompletionRequest& request,
                                                const harness::Config& config,
-                                               const std::vector<std::string>& commands) {
+                                               const std::vector<CommandSpec>& commands) {
     // A flag expecting a backend wins over everything: the word before the
     // cursor decides, not the subcommand.
     if (!request.words.empty() && takes_a_backend(request.words.back())) {
@@ -59,9 +85,39 @@ std::vector<std::string> completion_candidates(const CompletionRequest& request,
         return filter_prefix(config.backend_names(), request.current);
     }
 
+    // The subcommand in play, if any -- the first word that names one.
+    std::string active;
+    for (const std::string& word : request.words) {
+        const auto found = std::find_if(
+            commands.begin(), commands.end(),
+            [&word](const CommandSpec& spec) { return !spec.name.empty() && spec.name == word; });
+        if (found != commands.end()) {
+            active = found->name;
+            break;
+        }
+    }
+
+    // A word starting with a dash is a flag being typed. Offer the flags of
+    // whichever command is in play -- the root's when none is.
+    if (request.current.rfind('-', 0) == 0) {
+        const auto spec = std::find_if(
+            commands.begin(), commands.end(),
+            [&active](const CommandSpec& candidate) { return candidate.name == active; });
+        if (spec != commands.end()) {
+            return filter_prefix(spec->flags, request.current);
+        }
+        return {};
+    }
+
     // Nothing typed yet, or a partial subcommand: offer the subcommands.
     if (request.words.empty()) {
-        return filter_prefix(commands, request.current);
+        std::vector<std::string> names;
+        for (const CommandSpec& spec : commands) {
+            if (!spec.name.empty()) {
+                names.push_back(spec.name);
+            }
+        }
+        return filter_prefix(names, request.current);
     }
 
     // A `config` subcommand's own verbs.
@@ -96,7 +152,7 @@ void CompleteProtocolCommand::bind(CLI::App& root, const RootContext& context) {
     // hands the rest over verbatim.
     cmd->prefix_command();
 
-    cmd->callback([&context, cmd]() {
+    cmd->callback([&context, cmd, &root]() {
         const std::vector<std::string> raw = cmd->remaining(true);
 
         CompletionRequest request;
@@ -118,13 +174,15 @@ void CompleteProtocolCommand::bind(CLI::App& root, const RootContext& context) {
             // must never print a diagnostic into the user's command line.
         }
 
-        std::vector<std::string> commands;
-        for (const std::string& name : context.command_names) {
-            if (name.rfind("__", 0) == 0) {
-                continue;  // never offer the protocol verb itself
-            }
-            commands.push_back(name);
-        }
+        // Read out of the live parser, so a flag or command added anywhere
+        // completes without this file being told about it.
+        std::vector<CommandSpec> commands = specs_from_app(root);
+        commands.erase(std::remove_if(commands.begin(), commands.end(),
+                                      [](const CommandSpec& spec) {
+                                          // Never offer the protocol verb itself.
+                                          return spec.name.rfind("__", 0) == 0;
+                                      }),
+                       commands.end());
 
         for (const std::string& candidate : completion_candidates(request, config, commands)) {
             std::cout << candidate << "\n";

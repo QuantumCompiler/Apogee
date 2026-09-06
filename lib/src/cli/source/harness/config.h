@@ -39,7 +39,15 @@ public:
 /// is a recorded event in that item's document, never a silent edit. Adding one
 /// means adding a row to kBackendTypeNames in config.cpp and a case here; the
 /// loader dispatches through that table, so nothing else changes.
-enum class BackendType : std::uint8_t { Anthropic, OpenAI, Google, LlamaCpp, ClaudeCli, Mock };
+enum class BackendType : std::uint8_t {
+    Anthropic,
+    OpenAI,
+    Google,
+    LlamaCpp,
+    ClaudeCli,
+    OllamaCli,
+    Mock
+};
 
 /// The spelling of `type:` for `value`, e.g. "anthropic".
 [[nodiscard]] std::string_view to_string(BackendType value) noexcept;
@@ -84,6 +92,14 @@ struct BackendConfig {
     /// has no separator. Apogee never installs, bundles, or modifies it -- the
     /// user installs and logs in themselves (SPEC.md -> Principles).
     std::string binary;
+
+    /// Where a vendor CLI's own server lives, when it has one.
+    ///
+    /// Only the Ollama backend uses this today: its CLI is a client of a local
+    /// HTTP server, and Apogee checks that the server is already running before
+    /// spawning anything -- because the CLI would otherwise START one, making
+    /// Apogee the cause of a listening socket.
+    std::string host;
 
     /// Vendor-CLI backends: which credentials the child may use.
     ///

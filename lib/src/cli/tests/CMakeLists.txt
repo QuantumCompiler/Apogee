@@ -32,6 +32,7 @@ add_executable(apogee_tests
     backends/llamacpp_test.cpp
     backends/claude_cli_events_test.cpp
     backends/claude_cli_test.cpp
+    backends/ollama_cli_test.cpp
     backends/jsonl_framer_test.cpp
     backends/chat_template_test.cpp
     agentloop/conformance_test.cpp
@@ -132,6 +133,14 @@ add_test(NAME cli.no_listen_symbols
         -DAPOGEE_CORE_LIB=$<TARGET_FILE:apogee_core>
         -DAPOGEE_BINARY=$<TARGET_FILE:apogee>
         -P "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_symbols.cmake"
+)
+
+add_test(NAME cli.install_is_ours_only
+    COMMAND "${CMAKE_COMMAND}"
+        -DBUILD_DIR=${CMAKE_BINARY_DIR}
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/install-only
+        -DMAKEFILE=${CMAKE_CURRENT_SOURCE_DIR}/../Makefile
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/install_is_ours_only.cmake"
 )
 
 add_test(NAME cli.no_vendor_credentials

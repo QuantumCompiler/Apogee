@@ -32,13 +32,28 @@ struct CompletionRequest {
     std::string current;
 };
 
-/// Candidates for `request`, given `config`.
+/// What the parser knows about one subcommand: its name and its flags.
 ///
-/// Pure: takes the config rather than reading it, so the whole protocol is
-/// testable without a config file on disk.
+/// Gathered from the live `CLI::App` tree rather than restated here. A hand-kept
+/// flag list is the same drift the layout contract exists to prevent, one level
+/// down: a flag added to a command would silently stop completing, and nobody
+/// files a bug about tab-completion being slightly less helpful.
+struct CommandSpec {
+    std::string name;
+    /// Every accepted spelling, `-m` and `--model` alike, dashes included.
+    std::vector<std::string> flags;
+};
+
+/// Candidates for `request`, given `config` and what the parser knows.
+///
+/// Pure: takes the config and the command specs rather than reading either, so
+/// the whole protocol is testable without a config file or a parser.
 [[nodiscard]] std::vector<std::string> completion_candidates(
     const CompletionRequest& request, const harness::Config& config,
-    const std::vector<std::string>& commands);
+    const std::vector<CommandSpec>& commands);
+
+/// Reads the command tree out of a parser.
+[[nodiscard]] std::vector<CommandSpec> specs_from_app(const CLI::App& app);
 
 /// Filters `candidates` to those starting with `prefix`.
 [[nodiscard]] std::vector<std::string> filter_prefix(const std::vector<std::string>& candidates,

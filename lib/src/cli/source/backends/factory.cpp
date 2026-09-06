@@ -7,6 +7,7 @@
 #include "backends/google.h"
 #include "backends/llamacpp.h"
 #include "backends/mock.h"
+#include "backends/ollama_cli.h"
 #include "backends/openai.h"
 #include "harness/errors.h"
 
@@ -78,6 +79,14 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
         case harness::BackendType::ClaudeCli: {
             try {
                 return ClaudeCliProvider::from_config(name, config);
+            } catch (const harness::ProviderError& e) {
+                reason = e.what();
+                return nullptr;
+            }
+        }
+        case harness::BackendType::OllamaCli: {
+            try {
+                return OllamaCliProvider::from_config(name, config);
             } catch (const harness::ProviderError& e) {
                 reason = e.what();
                 return nullptr;

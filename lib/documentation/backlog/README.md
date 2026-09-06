@@ -55,11 +55,12 @@ Items are numbered in the **suggested order of implementation**. The rule stays 
 
 ### Phase 2 — the gated ring (after v0.1.0 ships)
 
-Six semi-independent tracks that can interleave: the **vendor-CLI family** (11 shipped 2026-09-02 → 12), the **front-end contract** (13 — the GUI project gates on it), **local-model depth** (14), **RAG** (15 → 16 → 17), **serving** (18 → 19 — server deployments only), and **tools/agents** (20); item 21 needs the RAG track complete. The numbering is the suggested serial order when working alone.
+Six semi-independent tracks that can interleave: the **vendor-CLI family** (11 shipped 2026-09-02; 12 split at grooming 2026-09-06 into 12a/12b/12c, one per CLI; 12c shipped 2026-09-06), the **front-end contract** (13 — the GUI project gates on it), **local-model depth** (14), **RAG** (15 → 16 → 17), **serving** (18 → 19 — server deployments only), and **tools/agents** (20); item 21 needs the RAG track complete. The numbering is the suggested serial order when working alone.
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 12 | [vendor-cli-backends.md](vendor-cli-backends.md) | ✅ 11 (shipped) · **split first** (one doc per CLI) | Vendor CLI backends: codex (OpenAI), gemini (Google), ollama (Ollama cloud) |
+| 12a | [codex-cli-backend.md](codex-cli-backend.md) | ✅ 11 (shipped) · needs the `codex` CLI installed | Codex CLI backend: OpenAI's subscription path as a spawned child |
+| 12b | [gemini-cli-backend.md](gemini-cli-backend.md) | ✅ 11 (shipped) · needs the `gemini` CLI installed | Gemini CLI backend: Google's subscription path as a spawned child |
 | 13 | [stdio-machine-mode.md](stdio-machine-mode.md) | — | Stdio machine mode: structured JSONL event stream for front-end drivers (GUI ↔ CLI over pipes, never localhost) |
 | 14 | [model-profiles-and-management.md](model-profiles-and-management.md) | — · **split first** (profiles / management+sources) | Local-model depth: per-family profiles, filters, tool dialects + roles, models suite, open model sources (HF + Ollama) |
 | 15 | [embedstore-lexical-rag.md](embedstore-lexical-rag.md) | — | SQLite chunk store with FTS5/BM25 lexical retrieval + basic --rag injection |

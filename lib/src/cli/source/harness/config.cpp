@@ -27,12 +27,13 @@ char fold(char c) noexcept {
 ///
 /// Widening the enum is a row here plus a case in the switch below -- the
 /// loader dispatches through this table, so no other file learns the new name.
-constexpr std::array<std::pair<std::string_view, BackendType>, 6> kBackendTypeNames{{
+constexpr std::array<std::pair<std::string_view, BackendType>, 7> kBackendTypeNames{{
     {"anthropic", BackendType::Anthropic},
     {"openai", BackendType::OpenAI},
     {"google", BackendType::Google},
     {"llamacpp", BackendType::LlamaCpp},
     {"claude-cli", BackendType::ClaudeCli},
+    {"ollama-cli", BackendType::OllamaCli},
     {"mock", BackendType::Mock},
 }};
 
@@ -125,6 +126,7 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     backend.temperature = number(node["temperature"], origin, where + ".temperature");
     backend.binary = scalar(node["binary"], origin, where + ".binary");
     backend.mode = scalar(node["mode"], origin, where + ".mode");
+    backend.host = scalar(node["host"], origin, where + ".host");
     backend.idle_unload_seconds =
         integer(node["idle_unload_seconds"], origin, where + ".idle_unload_seconds");
 

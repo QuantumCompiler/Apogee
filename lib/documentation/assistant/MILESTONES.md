@@ -451,6 +451,23 @@ A smaller version of the same thing happened earlier: `config/` was seeded as a 
 
 **The recorded Windows caveat.** All six targets ship binaries from the first tag, which was chosen over the recommendation that Windows join a later release. The reason for the recommendation stands and is not resolved by this item: Apogee's Windows portability work is incomplete — the PTY tests, the `tcflush` typeahead flush, the `lsof` no-listen poll, and `0600` file modes have no Windows equivalent, and only `macos-arm64` is merge-blocking. `apogee check` reports the mode rows as **skipped** on Windows rather than passing them, and the Windows parity job is non-blocking, so a Windows install is verified more weakly than a POSIX one. That gap is visible in the tool's own output instead of being implied.
 
+### 2026-09-06 — Three install and completion bugs, found in use
+
+Reported from a real machine: tab completion did nothing. Pulling that thread found one cosmetic gap and two genuine defects, the worst of which had nothing to do with completion.
+
+- [x] **`make install` broke every subsequent build of the project.** `FetchContent_MakeAvailable` adds each dependency's own `install()` rules to this project, so `cmake --install` also wrote replxx's headers, static library, and **CMake package config** into `~/.local`. Our `FIND_PACKAGE_ARGS` then *preferred* that installed copy on the next configure — and its config declares `Threads::Threads` with no `find_package(Threads)` behind it, so the generate step failed. Running the install once poisoned the source tree, with an error naming replxx rather than the install that caused it. Fixed with `COMPONENT apogee` on the rule and `--component apogee` on the invocation.
+- [x] **The completion protocol never completed flags.** It handled subcommands, backend names, and `config` verbs, and returned nothing for `--`. Flags now come from the **live `CLI::App` tree** (`specs_from_app`), so a flag added to any command completes without this file being told.
+- [x] **The zsh completion was installed where zsh does not look.** `~/.local/share/zsh/site-functions` is on nobody's default `fpath`, so the file was written and never loaded — `whence -w _apogee` returned `none`. The installer now cross-references zsh's real `fpath` against directories that are conventionally ours.
+- [x] **`cli.install_is_ours_only`** — a guard asserting the install puts exactly `bin/apogee` in the prefix, and that the Makefile passes `--component`.
+
+**Two lessons, both about checks that do not check.**
+
+The install guard's first version called `cmake --install --component apogee` *itself*, and so passed while the Makefile was installing without the component and leaking replxx. **A guard that supplies the argument it is verifying tests nothing.** It now reads the Makefile's actual command, and was mutation-tested by removing the flag.
+
+And my own verification loop had the same shape of hole: I checked builds with `grep -E "error:"`, which does not match CMake's *"Generate step failed"*. So I ran a stale binary through several rounds of "fixed?" — the configure had been broken the whole time.
+
+**One near-miss worth recording.** The first fix for the zsh path took the first writable `fpath` entry under `$HOME`, which on an oh-my-zsh machine is `~/.oh-my-zsh/plugins/vscode` — a directory a framework owns and rewrites. It was caught before shipping, and the rule is now: a completion file belongs in a user completion directory (`~/.zfunc`, `~/.oh-my-zsh/completions`, `~/.local/share/zsh/site-functions`) or nowhere.
+
 **Not verified:** no release has been cut. The workflow is syntactically valid and every step it runs is exercised locally, but the tag → build → publish path itself has never executed, and neither installer has downloaded a real archive — there is nothing published to download yet. The first tag is also the first test of that pipeline.
 
 ## Milestone L — The vendor-CLI family
@@ -493,7 +510,7 @@ The first run of the child-process suite failed on *writing to a dead child*: th
 
 ## Appendix — vendor-CLI design notes (carried forward from the claude-cli-backend item)
 
-These are the design notes the `claude-cli` backend was built from, verified against **CLI 2.1.233**. They are kept here, rather than deleted with the backlog document, because [`backlog/vendor-cli-backends.md`](../backlog/vendor-cli-backends.md) names them as the template for the rest of the family (codex, gemini, ollama) and points at this file for them.
+These are the design notes the `claude-cli` backend was built from, verified against **CLI 2.1.233**. They are kept here, rather than deleted with the backlog document, because the rest of the family names them as its template and points at this file: [`codex-cli-backend.md`](../backlog/codex-cli-backend.md) and [`gemini-cli-backend.md`](../backlog/gemini-cli-backend.md) — two of the three items the `vendor-cli-backends` guard document was split into at grooming on 2026-09-06. The third, `ollama-cli`, shipped the same day; read its milestone entry above for the case where these notes deliberately did **not** transfer, since that CLI emits no typed events at all.
 
 Two parts have already moved on and are **not** authoritative here: the thinking *renderer* (notes §8) belongs to the terminal UX layer (`source/commands/thinking_view.h`, Milestone G), and the two credential/binary policy rules were promoted to [SPEC.md](SPEC.md) → Principles, where they bind every vendor-CLI backend rather than just this one. Where these notes and the shipped code disagree, the code and Milestone L's write-up are current — see in particular the event union's home (`backends/`, not `harness/`) and the event-queue change that a persistent child turned out to require.
 
@@ -807,3 +824,38 @@ Still open — each carried into **Open calls** above with a default:
 - Headless mode and stream formats — https://code.claude.com/docs/en/headless
 - Authentication — https://code.claude.com/docs/en/authentication
 - Legal and compliance — https://code.claude.com/docs/en/legal-and-compliance
+
+### 2026-09-06 — `ollama-cli`: the vendor-CLI family's awkward case
+
+The fourth cloud vendor's subscription path, and the one that does not fit the family template. Built as a spawned CLI backend by user decision, over a recommendation to make it a direct HTTP backend — the characterization that recommendation rested on is kept here, because it is also what the design had to work around.
+
+**Characterization — `ollama` 0.33.2, signed-in cloud session (`gpt-oss:20b-cloud`)**
+
+Everything below was observed, not inferred:
+
+| Question | Finding |
+|---|---|
+| Self-contained? | **No.** The CLI is a client of a local HTTP server (`OLLAMA_HOST`, default `127.0.0.1:11434`), which also answers an OpenAI-compatible API (`/v1/models` → 200). |
+| Event stream? | **None.** No `--output-format stream-json`, no stdin-fed turns. So **no persistent child**: each turn is its own invocation and the whole conversation is re-sent every time. |
+| Control bytes when piped? | **Yes** — the default run writes `ESC[nD ESC[K` *into stdout* to re-wrap words, even when stdout is a pipe. `--nowordwrap` removes them entirely (measured: zero ESC bytes), and is therefore **mandatory**. |
+| Thinking? | In-band on stdout, between the literal markers `Thinking...` and `...done thinking.` |
+| No server? | **`ollama run` tries to START one**: `Error: timed out waiting for server to start`. |
+
+**What was built**
+
+- [x] **`source/backends/ollama_cli_output.h/.cpp`** — the thinking demultiplexer. In-band markers are exactly what the design notes warn against, and Apogee avoids them everywhere else; here there was no alternative, so the cost is paid in one small pure state machine. Two bounds keep the unavoidable ambiguity contained: a marker counts **only on its own line**, and the opener **only before any answer text**, so a model writing "Thinking..." in its reply is never mistaken for framing.
+- [x] **`source/backends/ollama_cli.h/.cpp`** — the provider, over the existing `platform::child_process` seam.
+- [x] **`ollama-cli` config type** with a `host` field; **recorded** fixtures from the real session.
+- [x] **13 new tests** (535 total).
+
+**The last characterization row changed the design, and it is the important part.**
+
+The item's original rule was "never run `ollama serve`". That turned out to be insufficient: the CLI starts a server *itself* whenever it cannot reach one. Spawning `ollama run` on a machine with no server would therefore have made Apogee the cause of a listening socket — one process removed, but ours, and a breach of a `## ⚠` invariant that every other backend satisfies by construction.
+
+So the provider **pre-flights**: it asks whether a server is already reachable and refuses the turn if not, *before* spawning anything. Connecting outward to check is invariant-safe — the rule forbids listening, not connecting. The refusal names the fix and says why Apogee will not apply it. Both halves are mutation-tested: removing the pre-flight, or the mandatory flag, turns the relevant test red.
+
+A second, smaller correction came out of timing that refusal end to end: it took **3.5 seconds**, because the shared `HttpClient` retries with backoff. That policy is right for a real request over a flaky network and wrong for a localhost probe, where a refused connection is an immediate and certain answer — retrying only makes the refusal take four times as long. The probe now makes a single attempt: **3.5s → 0.23s**.
+
+**Verified live**, against the user's own signed-in CLI: `apogee complete -m oll "Say exactly: hello"` prints exactly `hello` — thinking demuxed away, piped output clean — and the dead-host backend refuses in 0.23s without spawning anything.
+
+**Recorded honestly, per the family rule that a template is a shape to aim at rather than a promise to fake:** this backend is the weakest in Apogee. There is no persistent child, so every turn pays process startup; there is no turn protocol, so the entire conversation is re-sent as one flattened prompt each time and the CLI remembers nothing; streaming granularity is whatever falls out of reading stdout; and the CLI reports no token accounting, so the loop's estimator fills the gap. The direct-HTTP alternative remains recorded in case the trade is ever revisited.
