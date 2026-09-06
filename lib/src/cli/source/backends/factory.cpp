@@ -4,6 +4,7 @@
 
 #include "backends/anthropic.h"
 #include "backends/claude_cli.h"
+#include "backends/codex_cli.h"
 #include "backends/google.h"
 #include "backends/llamacpp.h"
 #include "backends/mock.h"
@@ -79,6 +80,14 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
         case harness::BackendType::ClaudeCli: {
             try {
                 return ClaudeCliProvider::from_config(name, config);
+            } catch (const harness::ProviderError& e) {
+                reason = e.what();
+                return nullptr;
+            }
+        }
+        case harness::BackendType::CodexCli: {
+            try {
+                return CodexCliProvider::from_config(name, config);
             } catch (const harness::ProviderError& e) {
                 reason = e.what();
                 return nullptr;

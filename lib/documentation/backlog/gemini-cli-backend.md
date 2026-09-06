@@ -14,12 +14,12 @@
 
 **Seam + files.** Reuse the family machinery — `source/platform/child_process.h/.cpp`, `source/backends/jsonl_framer.h/.cpp`, `source/backends/cli_event.h` — rather than rewriting it. New: `lib/src/cli/source/backends/gemini_cli.h/.cpp` plus a `gemini_cli_events.h/.cpp` mapping unit, a `gemini-cli` config type with `binary`/`mode`, `lib/src/cli/tests/backends/gemini_cli_test.cpp`, and `lib/src/cli/tests/fixtures/gemini_cli/*.jsonl` from the characterization.
 
-**Reference (Ommi).** None — Ommi never carried this vendor. The in-repo reference is the **vendor-CLI design notes** in [MILESTONES.md](../assistant/MILESTONES.md#appendix--vendor-cli-design-notes-carried-forward-from-the-claude-cli-backend-item) plus **Milestone L** for the shipped divergences. If `codex-cli` has already landed by the time this is built, read its characterization too: two vendors' worth of observed behaviour is a much better guide to what varies than one.
+**Reference (Ommi).** None — Ommi never carried this vendor. The in-repo reference is the **vendor-CLI design notes** in [MILESTONES.md](../assistant/MILESTONES.md#appendix--vendor-cli-design-notes-carried-forward-from-the-claude-cli-backend-item) plus **Milestone L** for the shipped divergences. **`codex-cli` has landed** (2026-09-06), so read its characterization in Milestone L too — three vendors' worth of observed behaviour is a far better guide to what varies than one, and the spread is already wide: token-level deltas and inline schemas on Claude, message-level events with a schema *file* and a pinned sandbox on codex, and no event stream at all on ollama. Assume nothing about gemini from any of them.
 
 **Decisions made** (dated):
 - 2026-08-24 — Cloud set widened to four vendors, each dual-path, by user decision. The claude-cli persistent-child pattern is the family template; per-CLI characterization is mandatory before building.
 - 2026-09-06 — **Split from the `vendor-cli-backends` guard document** into one item per CLI, and placed **second in the family, after `codex-cli`** *(user call)*.
-- 2026-09-06 — **The `gemini` CLI is not installed on the primary dev host.** A gate on building this item, not on specifying it.
+- 2026-09-06 — The `gemini` CLI **is now installed** on the dev host, so this item's practical gate is satisfied; building it needs a logged-in session for the characterization.
 
 **Open calls:**
 - [user] Nothing blocking the *specification*. Building requires `gemini` installed and logged in on the machine doing the work.

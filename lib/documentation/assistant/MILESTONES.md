@@ -510,7 +510,7 @@ The first run of the child-process suite failed on *writing to a dead child*: th
 
 ## Appendix — vendor-CLI design notes (carried forward from the claude-cli-backend item)
 
-These are the design notes the `claude-cli` backend was built from, verified against **CLI 2.1.233**. They are kept here, rather than deleted with the backlog document, because the rest of the family names them as its template and points at this file: [`codex-cli-backend.md`](../backlog/codex-cli-backend.md) and [`gemini-cli-backend.md`](../backlog/gemini-cli-backend.md) — two of the three items the `vendor-cli-backends` guard document was split into at grooming on 2026-09-06. The third, `ollama-cli`, shipped the same day; read its milestone entry above for the case where these notes deliberately did **not** transfer, since that CLI emits no typed events at all.
+These are the design notes the `claude-cli` backend was built from, verified against **CLI 2.1.233**. They are kept here, rather than deleted with the backlog document, because the rest of the family names them as its template and points at this file: [`gemini-cli-backend.md`](../backlog/gemini-cli-backend.md) — the one item still pending of the three the `vendor-cli-backends` guard document was split into at grooming on 2026-09-06. The other two, `codex-cli` and `ollama-cli`, shipped the same day; read their milestone entries above before trusting these notes too far, because between them they show how wide the spread is — codex emits typed events but no deltas and needs a pinned sandbox, and ollama emits no typed events at all.
 
 Two parts have already moved on and are **not** authoritative here: the thinking *renderer* (notes §8) belongs to the terminal UX layer (`source/commands/thinking_view.h`, Milestone G), and the two credential/binary policy rules were promoted to [SPEC.md](SPEC.md) → Principles, where they bind every vendor-CLI backend rather than just this one. Where these notes and the shipped code disagree, the code and Milestone L's write-up are current — see in particular the event union's home (`backends/`, not `harness/`) and the event-queue change that a persistent child turned out to require.
 
@@ -859,3 +859,36 @@ A second, smaller correction came out of timing that refusal end to end: it took
 **Verified live**, against the user's own signed-in CLI: `apogee complete -m oll "Say exactly: hello"` prints exactly `hello` — thinking demuxed away, piped output clean — and the dead-host backend refuses in 0.23s without spawning anything.
 
 **Recorded honestly, per the family rule that a template is a shape to aim at rather than a promise to fake:** this backend is the weakest in Apogee. There is no persistent child, so every turn pays process startup; there is no turn protocol, so the entire conversation is re-sent as one flattened prompt each time and the CLI remembers nothing; streaming granularity is whatever falls out of reading stdout; and the CLI reports no token accounting, so the loop's estimator fills the gap. The direct-HTTP alternative remains recorded in case the trade is ever revisited.
+
+### 2026-09-06 — `codex-cli`: OpenAI's subscription path, and a safety pin
+
+The second vendor CLI, and the one that sits between the other two in what the vendor gives you. Characterized against `codex-cli` 0.153.4 under a real ChatGPT login before any adapter code, per the family rule.
+
+**Characterization**
+
+| Question | Finding |
+|---|---|
+| Event stream? | **Yes** — `codex exec --json` emits typed JSONL (`thread.started`, `turn.started`, `item.completed`, `turn.completed`), so the shared `jsonl_framer` applies directly. |
+| Streaming granularity? | **Message-level.** A twelve-line answer arrived in a *single* `item.completed`; there are no delta events in this mode at all. Less than Claude's token stream, and recorded rather than implied. |
+| Usage? | **Real**, on `turn.completed` — unlike Ollama's, which reports none. |
+| Session / resume? | **Yes, verified end to end.** `thread.started` carries a `thread_id`; `codex exec resume <id>` continued a thread and correctly recalled the earlier turn's subject. |
+| Thinking? | **Counted, never surfaced** — `reasoning_output_tokens` appears in usage, but no reasoning item is emitted. Nothing to feed the thinking view. |
+| Structured output? | `--output-schema <FILE>` — a **file path**, the opposite of Claude's inline `--json-schema`; the conforming JSON arrives as the `agent_message.text` itself. |
+| Auth modes? | None. No `--bare` analogue, so the family's `mode` field is **not** invented here for symmetry — a config carrying one is refused with an explanation. |
+
+**What was built**
+
+- [x] **`source/backends/codex_cli_events.h/.cpp`** — wire→typed-event mapping over the shared framer.
+- [x] **`source/backends/codex_cli.h/.cpp`** — the provider. No persistent child (the CLI has no stdin turn stream), but no re-sending of history either: turn one spawns `exec`, every later turn spawns `exec resume <thread_id>`, and only the new user message goes out.
+- [x] **`codex-cli` config type**, and **recorded** fixtures from the real session.
+- [x] **13 new tests** (548 total).
+
+**Two findings from the characterization shaped the code, and one of them is a safety decision.**
+
+**`codex exec` is an agent, not a chat endpoint.** Its `-s/--sandbox` flag selects a policy for *model-generated shell commands it will execute on the user's machine*. Every other backend Apogee drives only produces text. So the sandbox is pinned to `read-only` as a literal in the argv builder and is deliberately **not** configurable: a config key able to widen it would turn an ordinary chat turn into arbitrary local execution, which is not a trade a chat backend gets to offer. The test asserts the pin and that none of `workspace-write`, `danger-full-access`, `--dangerously-bypass-approvals-and-sandbox`, or `--yolo` can appear.
+
+**`codex exec resume` does not accept `codex exec`'s flags.** Passing `--color` to the subcommand fails with "unexpected argument" — found by trying it. A single shared argv builder would therefore have worked on turn one and broken on turn two, which is the worst place to discover it, so `build_arguments` takes the invocation form explicitly. Both rules are mutation-tested: widening the sandbox or sharing the builder turns the relevant test red.
+
+**Verified live** against the user's own ChatGPT login: `apogee complete -m cdx "Say exactly: hello"` prints exactly `hello`. A first attempt with `model: gpt-5-codex` failed, and usefully — the backend surfaced the CLI's own message verbatim ("not supported when using Codex with a ChatGPT account"), which is exactly what the error path is for. With no model pinned, the CLI's default is used and the turn succeeds.
+
+**Where this backend stands in the family:** better than `ollama-cli` (typed events, real usage, real session continuity) and worse than `claude-cli` (no token-level streaming, no thinking to display). Recorded plainly rather than averaged into a claim of parity.

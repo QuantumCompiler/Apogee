@@ -45,6 +45,7 @@ enum class BackendType : std::uint8_t {
     Google,
     LlamaCpp,
     ClaudeCli,
+    CodexCli,
     OllamaCli,
     Mock
 };

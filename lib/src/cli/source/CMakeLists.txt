@@ -113,6 +113,10 @@ add_library(apogee_core STATIC
     backends/anthropic_wire.cpp
     backends/anthropic.h
     backends/anthropic.cpp
+    backends/codex_cli_events.h
+    backends/codex_cli_events.cpp
+    backends/codex_cli.h
+    backends/codex_cli.cpp
     backends/ollama_cli_output.h
     backends/ollama_cli_output.cpp
     backends/ollama_cli.h

@@ -216,11 +216,12 @@ TEST_CASE("every backend type round-trips through its name", "[config]") {
     // Keeps the enum, the name table, and the parser honest as later items
     // widen the type set -- a new enumerator with no table row fails here.
     const auto names = apogee::harness::backend_type_names();
-    REQUIRE(names.size() == 7);
+    REQUIRE(names.size() == 8);
     // Named rather than only counted: a miscount is obvious, but a row
     // silently RENAMED would keep the count and break every config using it.
     CHECK(std::find(names.begin(), names.end(), "claude-cli") != names.end());
     CHECK(std::find(names.begin(), names.end(), "ollama-cli") != names.end());
+    CHECK(std::find(names.begin(), names.end(), "codex-cli") != names.end());
     for (const std::string_view name : names) {
         const auto type = apogee::harness::backend_type_from_string(name);
         REQUIRE(type.has_value());
