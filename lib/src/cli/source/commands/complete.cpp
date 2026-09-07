@@ -19,6 +19,7 @@
 #include "commands/ask_prompt.h"
 #include "commands/cli_reporter.h"
 #include "commands/helpers.h"
+#include "commands/json_reporter.h"
 #include "commands/terminal.h"
 #include "harness/config.h"
 #include "harness/errors.h"
@@ -44,6 +45,7 @@ struct CompleteFlags {
     bool tools = false;
     bool search = false;
     bool no_color = false;
+    OutputFormat output_format = OutputFormat::Text;
 
     CLI::Option* temperature_option = nullptr;
     CLI::Option* max_tokens_option = nullptr;
@@ -177,6 +179,50 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     request.temperature = temperature;
     request.max_tokens = max_tokens;
 
+    // Machine mode: the SAME loop, a different Reporter. Nothing below this
+    // point knows which one is in use, which is the Reporter seam's whole
+    // claim -- a GUI driving this over pipes sees every event a terminal user
+    // sees, because there is one loop and it can only speak through one seam.
+    if (flags.output_format == OutputFormat::StreamJson) {
+        JsonReporter reporter{std::cout};
+        reporter.begin_session(model);
+
+        agentloop::Options machine_options;
+        machine_options.model = model;
+        machine_options.temperature = temperature;
+        machine_options.max_tokens = max_tokens;
+        machine_options.stream_answer = true;
+
+        agent::ToolRegistry machine_registry;
+        if (flags.tools) {
+            machine_registry = built_in_tools();
+            machine_options.tools = &machine_registry;
+            // No AskFn: a one-shot driver has no way to answer a question
+            // mid-turn. The loop's rule then applies unchanged -- ask_user is
+            // never advertised, rather than advertised and unanswerable.
+        }
+
+        std::vector<harness::ChatMessage> machine_history = request.messages;
+        try {
+            const agentloop::RunResult result =
+                agentloop::run(harness, machine_history, machine_options, reporter);
+
+            harness::ChatResponse response;
+            response.message = harness::ChatMessage::assistant(result.answer);
+            response.model = model;
+            reporter.emit_result(response);
+            return response;
+        } catch (const harness::CancelledError&) {
+            reporter.emit_error("cancelled");
+            throw CLI::RuntimeError(kCancelled);
+        } catch (const harness::HarnessError& e) {
+            // Both channels: the event so a driver need not scrape prose, and
+            // stderr so a human tailing the log sees it too.
+            reporter.emit_error(e.what());
+            fail_backend(e.what());
+        }
+    }
+
     // One Reporter implementation for every surface. `complete` was retrofitted
     // onto it when the terminal UX layer landed, replacing an inline adapter --
     // two implementations would have drifted, which is the parity failure the
@@ -274,6 +320,18 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("--tools", flags->tools,
                   "Let the model call tools (fetch_url; ask_user on a terminal)");
     cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
+    cmd->add_option_function<std::string>(
+           "--output-format",
+           [flags](const std::string& value) {
+               const std::optional<OutputFormat> parsed = output_format_from_string(value);
+               if (!parsed.has_value()) {
+                   throw CLI::ValidationError("--output-format",
+                                              "expected 'text' or 'stream-json'");
+               }
+               flags->output_format = *parsed;
+           },
+           "Output format: text (default) or stream-json for a machine driver")
+        ->type_name("FORMAT");
     cmd->add_flag("--search", flags->search,
                   "Enable the provider's own server-side web search, where it has one");
 

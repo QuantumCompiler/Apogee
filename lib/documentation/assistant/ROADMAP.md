@@ -46,7 +46,7 @@ See the [`backlog/`](../backlog/README.md) index for the full queue (priority-or
 The gated ring — specced with their own backlog documents, sequenced after v0.1.0 ships (gate convention: each also assumes the full v0.1.0 set):
 
 - [x] **Claude-CLI backend** — persistent child, token-level streaming; the subscription-plan path *(shipped 2026-09-02, [Milestone L](MILESTONES.md#milestone-l--the-vendor-cli-family))*. It also builds the family's shared machinery: the child-process seam, the JSONL framer, and the typed event union that codex/gemini/ollama reuse.
-- Stdio machine mode: the CLI's JSONL event stream over stdin/stdout, so the GUI can power the executable directly — never over localhost (the GUI project gates on this)
+- [x] **Stdio machine mode** — the CLI's JSONL event stream over stdin/stdout, so the GUI can power the executable directly, never over localhost *(shipped 2026-09-06, [Milestone M](MILESTONES.md#milestone-m--the-front-end-contract))*. The protocol is documented for front-end authors in [machine-mode.md](../reference/machine-mode.md).
 - Vendor CLI backends — completing the subscription-plan path for the four-vendor cloud set. **Split per CLI at grooming (2026-09-06)** into three items. **codex and ollama shipped 2026-09-06** *([Milestone L](MILESTONES.md#milestone-l--the-vendor-cli-family) → the `ollama-cli` entry)* — the odd one out, and the weakest backend in Apogee: no event stream, no persistent child, and a pre-flight that refuses rather than let the CLI start a server. **gemini** (Google) is the one that remains; its CLI is now installed, so what it needs is a logged-in session for the characterization every item in this family opens with.
 - Local-model depth: per-family profiles + open model management — no forbidden models, sources = Hugging Face direct + Ollama pulls (split before build)
 - RAG: lexical floor → embedding clients → vector/hybrid/rerank
@@ -56,7 +56,7 @@ The gated ring — specced with their own backlog documents, sequenced after v0.
 
 ## Unspecced ideas
 
-- **GUI sibling applications** *(committed direction 2026-08-24; planned home `lib/src/darwin|linux|windows`, one app per platform)* — graphical front-ends shipped alongside the harness, powering the CLI directly over stdin/stdout via the structured JSONL machine mode (never a localhost port; mutations shell out to the same CLI commands). Needs its own planning pass once stdio-machine-mode exists. No TUI, ever.
+- **GUI sibling applications** *(committed direction 2026-08-24; planned home `lib/src/darwin|linux|windows`, one app per platform)* — graphical front-ends shipped alongside the harness, powering the CLI directly over stdin/stdout via the structured JSONL machine mode (never a localhost port; mutations shell out to the same CLI commands). Its contract now exists — see the [machine-mode protocol](../reference/machine-mode.md) (shipped 2026-09-06); the GUI itself still needs its own planning pass. No TUI, ever.
 
 ## Ideas / candidate features
 

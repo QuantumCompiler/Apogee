@@ -892,3 +892,46 @@ The second vendor CLI, and the one that sits between the other two in what the v
 **Verified live** against the user's own ChatGPT login: `apogee complete -m cdx "Say exactly: hello"` prints exactly `hello`. A first attempt with `model: gpt-5-codex` failed, and usefully — the backend surfaced the CLI's own message verbatim ("not supported when using Codex with a ChatGPT account"), which is exactly what the error path is for. With no model pinned, the CLI's default is used and the turn succeeds.
 
 **Where this backend stands in the family:** better than `ollama-cli` (typed events, real usage, real session continuity) and worse than `claude-cli` (no token-level streaming, no thinking to display). Recorded plainly rather than averaged into a claim of parity.
+
+---
+
+## Milestone M — The front-end contract
+
+**Goal.** The protocol a GUI drives Apogee over: `--output-format stream-json` and `--input-format stream-json`, emitting the typed event stream the Reporter seam already carries as JSONL on stdout, and accepting user turns and answers as JSONL on stdin. The GUI sibling project gates on this.
+
+### 2026-09-06 — `stdio-machine-mode`: Apogee on the other side of the protocol
+
+**The framing that made this cheap.** Apogee already consumes exactly this kind of protocol from four vendor CLIs. Building the emitter was mostly a matter of *owing its own consumers every discipline it demands of them* — framing-safe lines, diagnostics off stdout, tolerance of unknown event types, no listening socket. Where a design question came up, the answer was usually "what did we wish that CLI had done", and the vendor-CLI work had already produced the answer.
+
+**What was built**
+
+- [x] **`source/commands/json_reporter.h/.cpp`** — the `Reporter`→JSONL adapter, sibling of `CliReporter` over the same seam. Ten event types, each one a `Reporter` method: `session`, `thinking`, `thinking_delta`, `tool_status`, `answer_start`, `answer_delta`, `answer_end`, `result`, `question`, `error`. Nothing invented, aggregated, or renamed — a second vocabulary would be a second thing to keep in sync, and the first time it drifted a driver would see an event the terminal never shows.
+- [x] **`--output-format` on `complete` and `chat`**, and **`--input-format` on `chat`** — the latter is what makes one child serve a whole conversation.
+- [x] **A shared `run_chat_turn()`** extracted from `chat.cpp` so the terminal REPL and the driven loop are literally the same turn, not two implementations that agree today.
+- [x] **`ask_user` over the protocol** — a `question` event answered by an `answer` line, so a driving GUI renders a native dialog instead of the tool being silently unavailable on the one surface built for a real UI.
+- [x] **[`documentation/reference/machine-mode.md`](../reference/machine-mode.md)** — the protocol reference, and the repo's first document written for *external consumers* rather than contributors.
+- [x] **24 new tests** (572 total).
+
+**Three decisions worth recording.**
+
+**`on_clear_status()` deliberately emits nothing.** Erasing a transient indicator is a terminal concern; there is nothing to erase in a stream of records. An event for it would put a rendering detail into the protocol, which is how a second vocabulary starts growing out of the first.
+
+**Absent usage is not zero usage.** A turn where the provider reported no token counts omits the `usage` field rather than sending zeros. A driver displaying `0` would be stating a measurement nobody made.
+
+**Contradictory format flags are refused, not half-honoured.** `--input-format stream-json --output-format text` is an error. A JSONL-emitting REPL has no coherent meaning — slash commands print through the terminal reporter and have no protocol event — and a driven session rendering prose gives its driver nothing to parse. The alternative was accepting the flag and ignoring it, which is how a driver ends up debugging output it never asked for. **This was a real bug found by running all four combinations by hand:** both mixed cases silently dropped a flag the user had passed, and the comment in the source claimed they were supported.
+
+**The guardrails, all mutation-tested.**
+
+| Guardrail | The mutation that proves it bites |
+|---|---|
+| `cli.machine_mode` — every stdout line opens with `{` | One `std::cout << "apogee: warming up\n"` in the machine branch → caught |
+| `cli.machine_mode` — one child, many turns | `while` → one-shot in the driven loop → "expected 2 result events, got 1" |
+| Thinking distinctly typed | `thinking_delta` → `answer_delta` → two tests red |
+| `cli.reference_driver` — the deltas rebuild the result | `result.text` + `" [truncated]"` → caught on both turns |
+| `cli.machine_schema_conformance` | Removing an event from the doc, and adding one the code cannot emit → caught in both directions |
+
+**The reference driver is documentation and test at once.** [`tests/reference_driver.py`](../../src/cli/tests/reference_driver.py) is the worked example a GUI author reads, and it checks that three independent paths agree: the concatenated `answer_delta` chunks, the `result` event's text, and what `apogee complete` printed in text mode. If they ever disagree, one surface has grown a behaviour the other lacks — the failure the shared Reporter seam exists to prevent.
+
+**The schema document is pinned to the code.** A protocol document that drifts is worse than none: a GUI author trusts it, builds against it, and debugs Apogee for a fault that is in the prose. `cli.machine_schema_conformance` checks the vocabulary in both directions, so an event added without documentation, or documented without an implementation, fails the build.
+
+**What this deliberately does not do.** No push channel (a driving GUI performs its own mutations by shelling out to `apogee config …`, so it already knows when to re-read); no socket, ever (`lsof`, sampled continuously while the child lives); no protocol representation of slash commands, which are terminal-REPL affordances a driver replaces with its own UI.

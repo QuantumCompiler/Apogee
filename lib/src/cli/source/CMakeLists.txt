@@ -58,6 +58,8 @@ add_library(apogee_core STATIC
     commands/status_line.cpp
     commands/thinking_view.h
     commands/thinking_view.cpp
+    commands/json_reporter.h
+    commands/json_reporter.cpp
     commands/cli_reporter.h
     commands/cli_reporter.cpp
 

@@ -31,7 +31,7 @@ Apogee presents the same harness through three front-ends, in rough order of int
 
 Around those sit capability and lifecycle commands (models, config, check, …) as the capability areas land — the full map is the [`backlog/`](../backlog/README.md).
 
-A **GUI ships as a sibling application** *(committed direction 2026-08-24; planned home `lib/src/darwin|linux|windows`, one app per platform — down the road)*, and it powers the CLI directly: the GUI runs the executable as a child process and speaks to it over **stdin/stdout** — a structured JSONL event mode (the backlog's stdio-machine-mode item), never a localhost port. Mutations go through the same CLI commands, which is why the CLI-is-the-contract principle carries the GUI for free. There is **no TUI**, and there never will be one (Ommi's build-then-delete lesson, adopted as policy).
+A **GUI ships as a sibling application** *(committed direction 2026-08-24; planned home `lib/src/darwin|linux|windows`, one app per platform — down the road)*, and it powers the CLI directly: the GUI runs the executable as a child process and speaks to it over **stdin/stdout** — a structured JSONL event mode ([machine-mode.md](../reference/machine-mode.md), shipped 2026-09-06), never a localhost port. Mutations go through the same CLI commands, which is why the CLI-is-the-contract principle carries the GUI for free. There is **no TUI**, and there never will be one (Ommi's build-then-delete lesson, adopted as policy).
 
 ## Scope (in)
 

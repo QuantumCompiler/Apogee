@@ -45,6 +45,7 @@ add_executable(apogee_tests
     commands/chat_test.cpp
     commands/check_test.cpp
     commands/lifecycle_test.cpp
+    commands/machine_mode_test.cpp
     commands/line_reader_test.cpp
     logger/session_test.cpp
     agent/tool_test.cpp
@@ -166,6 +167,13 @@ if(UNIX)
     )
     set_tests_properties(cli.install_parity PROPERTIES TIMEOUT 60)
 
+    add_test(NAME cli.machine_mode
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/machine_mode_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/machine-mode
+    )
+    set_tests_properties(cli.machine_mode PROPERTIES TIMEOUT 120)
+
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_check.sh"
             $<TARGET_FILE:apogee>
@@ -211,6 +219,29 @@ if(UNIX)
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.chat_line_editing PROPERTIES TIMEOUT 120)
+
+        # The reference driver: machine mode's worked example AND its
+        # test-lock. It reconstructs the conversation from the JSONL and
+        # checks it against what the terminal renderer printed, so the two
+        # surfaces cannot drift apart unnoticed.
+        add_test(NAME cli.reference_driver
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/reference_driver.py"
+                $<TARGET_FILE:apogee>
+                ${CMAKE_CURRENT_BINARY_DIR}/reference-driver-home
+        )
+        set_tests_properties(cli.reference_driver PROPERTIES TIMEOUT 120)
+
+        # The protocol document, pinned to the code that implements it. A GUI
+        # author trusts that document and debugs Apogee for faults that are
+        # actually in the prose, so it is not allowed to drift.
+        add_test(NAME cli.machine_schema_conformance
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/schema_conformance.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../source/commands/json_reporter.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/machine-mode.md"
+        )
+        set_tests_properties(cli.machine_schema_conformance PROPERTIES TIMEOUT 60)
     endif()
 endif()
 

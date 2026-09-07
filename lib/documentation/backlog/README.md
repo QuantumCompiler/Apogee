@@ -59,8 +59,7 @@ Six semi-independent tracks that can interleave: the **vendor-CLI family** (11 s
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 12b | [gemini-cli-backend.md](gemini-cli-backend.md) | ✅ 11 (shipped) · ✅ `gemini` CLI installed | Gemini CLI backend: Google's subscription path as a spawned child |
-| 13 | [stdio-machine-mode.md](stdio-machine-mode.md) | — | Stdio machine mode: structured JSONL event stream for front-end drivers (GUI ↔ CLI over pipes, never localhost) |
+| 12b | [gemini-cli-backend.md](gemini-cli-backend.md) | ✅ 11 (shipped) · ⛔ **blocked**: the `gemini` CLI is set to `gemini-api-key` auth, not the Google login this backend needs | Gemini CLI backend: Google's subscription path as a spawned child |
 | 14 | [model-profiles-and-management.md](model-profiles-and-management.md) | — · **split first** (profiles / management+sources) | Local-model depth: per-family profiles, filters, tool dialects + roles, models suite, open model sources (HF + Ollama) |
 | 15 | [embedstore-lexical-rag.md](embedstore-lexical-rag.md) | — | SQLite chunk store with FTS5/BM25 lexical retrieval + basic --rag injection |
 | 16 | [embedding-clients.md](embedding-clients.md) | 15 | Embedding clients: OpenAI/Google endpoints + in-process llama.cpp, behind can_embed |

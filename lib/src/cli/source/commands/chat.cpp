@@ -18,6 +18,7 @@
 #include "commands/cli_reporter.h"
 #include "commands/helpers.h"
 #include "commands/input_gate.h"
+#include "commands/json_reporter.h"
 #include "commands/line_reader.h"
 #include "commands/terminal.h"
 #include "harness/config.h"
@@ -67,6 +68,8 @@ struct ChatFlags {
     bool tools = false;
     bool search = false;
     bool no_color = false;
+    OutputFormat output_format = OutputFormat::Text;
+    std::optional<InputFormat> input_format;
     bool verbose = false;
     std::string resume;
     bool cont = false;
@@ -127,6 +130,111 @@ ContextUsage measure_context(const harness::Harness& harness,
     return usage;
 }
 
+namespace {
+
+/// Everything one chat turn does, for every surface that drives one.
+///
+/// Extracted when machine mode landed. The terminal REPL and a JSONL-driven
+/// child differ entirely in how they READ input -- a line editor with slash
+/// commands versus one JSON object per line -- and not at all in what a turn
+/// *is*: measure the context, compact or warn, append, run the loop, persist,
+/// and title the conversation once.
+///
+/// Duplicating that for the driver would have been the parity failure the
+/// Reporter seam exists to prevent, one level up: context monitoring or the
+/// per-turn save would have reached one surface and not the other, and nobody
+/// would notice until a GUI user lost a conversation.
+///
+/// `notice` is the one genuinely surface-specific part. The terminal prints
+/// warnings to its status line; machine mode sends them to **stderr**, because
+/// stdout carries only protocol events and a context warning is a diagnostic
+/// rather than a Reporter event. Inventing an event type for it would grow a
+/// second vocabulary out of the first.
+void run_chat_turn(const harness::Harness& harness, logger::Session& session,
+                   const std::string& input, std::vector<harness::ContentPart>& attachments,
+                   agent::ToolRegistry* tools, const agentloop::AskFn& ask,
+                   agentloop::Reporter& reporter,
+                   const std::function<void(const std::string&)>& notice) {
+    std::vector<harness::ContentPart> turn_attachments;
+    turn_attachments.swap(attachments);  // first message only
+
+    const std::vector<harness::ChatMessage> incoming =
+        build_messages({}, {}, input, turn_attachments);
+
+    // Context is measured against what is ABOUT TO BE SENT -- the saved history
+    // plus this turn -- not the history alone. Measuring before appending means
+    // the first turn always reads as empty, and a single large prompt never
+    // trips the threshold it should.
+    std::vector<harness::ChatMessage> prospective = session.messages;
+    prospective.insert(prospective.end(), incoming.begin(), incoming.end());
+    const ContextUsage usage = measure_context(harness, prospective, session.backend);
+
+    if (usage.should_compact()) {
+        notice("context " + std::to_string(static_cast<int>(usage.fraction() * 100)) +
+               "% full -- compacting");
+        // Compacts the PRIOR history only: folding the message the user just
+        // typed into a summary of the conversation so far would summarise away
+        // the question being asked.
+        session.messages = agentloop::compact_history(harness, session.messages, session.backend);
+        ++session.compactions;
+    } else if (usage.should_warn()) {
+        notice("context " + std::to_string(static_cast<int>(usage.fraction() * 100)) + "% full" +
+               (usage.exact ? "" : " (estimated)"));
+    }
+
+    for (const harness::ChatMessage& message : incoming) {
+        session.messages.push_back(message);
+    }
+
+    agentloop::Options loop_options;
+    loop_options.model = session.backend;
+    loop_options.temperature = session.params.temperature;
+    loop_options.max_tokens = session.params.max_tokens;
+    loop_options.stream_answer = true;
+    if (tools != nullptr) {
+        loop_options.tools = tools;
+        loop_options.ask = ask;
+    }
+
+    try {
+        const agentloop::RunResult result =
+            agentloop::run(harness, session.messages, loop_options, reporter);
+        ++session.turns;
+        if (result.hit_iteration_limit) {
+            notice("tool-call limit reached");
+        }
+    } catch (const harness::CancelledError&) {
+        notice("cancelled");
+    } catch (const harness::HarnessError& e) {
+        logger::log(logger::Level::Error, "chat", e.what());
+        notice(e.what());
+    }
+
+    // Persist after EVERY turn. A kill -9 mid-conversation must leave every
+    // completed turn on disk, and that is a property of writing here rather
+    // than at exit.
+    logger::save(session);
+
+    // Auto-titling rides the first completed exchange. A side request so it
+    // never enters the conversation's own history.
+    if (session.title.empty() && session.custom_name.empty() && session.turns >= 1) {
+        harness::ChatRequest title_request;
+        title_request.model = session.backend;
+        title_request.messages = session.messages;
+        title_request.messages.push_back(harness::ChatMessage::user(title_prompt()));
+        title_request.transient.side_request = true;
+        try {
+            session.title =
+                sanitize_title(harness.chat(title_request).message.content.plain_text());
+            logger::save(session);
+        } catch (const harness::HarnessError&) {
+            // A failed title is cosmetic. It must never cost a turn.
+        }
+    }
+}
+
+}  // namespace
+
 std::string_view ChatCommand::name() const noexcept {
     return "chat";
 }
@@ -150,6 +258,29 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("--tools", flags->tools, "Let the model call tools");
     cmd->add_flag("--search", flags->search, "Enable the provider's server-side web search");
     cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
+    cmd->add_option_function<std::string>(
+           "--output-format",
+           [flags](const std::string& value) {
+               const std::optional<OutputFormat> parsed = output_format_from_string(value);
+               if (!parsed.has_value()) {
+                   throw CLI::ValidationError("--output-format",
+                                              "expected 'text' or 'stream-json'");
+               }
+               flags->output_format = *parsed;
+           },
+           "Output format: text (default) or stream-json for a machine driver")
+        ->type_name("FORMAT");
+    cmd->add_option_function<std::string>(
+           "--input-format",
+           [flags](const std::string& value) {
+               const std::optional<InputFormat> parsed = input_format_from_string(value);
+               if (!parsed.has_value()) {
+                   throw CLI::ValidationError("--input-format", "expected 'text' or 'stream-json'");
+               }
+               flags->input_format = *parsed;
+           },
+           "Input format: text (default) or stream-json; follows --output-format if unset")
+        ->type_name("FORMAT");
     cmd->add_flag("-v,--verbose", flags->verbose, "Print progress notes");
     cmd->add_option("--resume", flags->resume, "Resume a saved conversation by id or name");
     cmd->add_flag("-c,--continue", flags->cont, "Resume the most recent conversation");
@@ -287,6 +418,82 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                          "  ·  /help for commands");
         }
 
+        // --- machine mode ----------------------------------------------------
+        //
+        // A driven child: one JSON object per line in, the same typed event
+        // stream out, many turns on one process. It shares `run_chat_turn` with
+        // the REPL below, so context monitoring, compaction, the per-turn save
+        // and auto-titling all reach a GUI-driven session too -- they were
+        // never surface concerns, only the input was.
+        //
+        // No line editor, no slash commands, no typeahead flush: those are all
+        // terminal affordances, and a driver has its own UI for every one of
+        // them.
+        // Unset follows --output-format: a driver asking for machine output is
+        // a machine, and a human asking for text is a human, so the two
+        // ordinary cases need one flag rather than two.
+        const InputFormat input_format = flags->input_format.value_or(
+            flags->output_format == OutputFormat::StreamJson ? InputFormat::StreamJson
+                                                             : InputFormat::Text);
+
+        // On `chat` the two directions must agree. A JSONL-emitting REPL has no
+        // coherent meaning -- slash commands print through the terminal
+        // reporter and have no protocol event -- and a driven session that
+        // renders prose gives its driver nothing to parse. Saying so is the
+        // point: the alternative is accepting the flag and quietly ignoring it,
+        // which is how a driver ends up debugging output it never asked for.
+        const bool machine_in = input_format == InputFormat::StreamJson;
+        const bool machine_out = flags->output_format == OutputFormat::StreamJson;
+        if (machine_in != machine_out) {
+            fail_user(std::string{"--input-format "} + std::string{to_string(input_format)} +
+                      " cannot be combined with --output-format " +
+                      std::string{to_string(flags->output_format)} +
+                      "; a driven chat session speaks the protocol in both directions");
+        }
+
+        if (input_format == InputFormat::StreamJson) {
+            JsonReporter machine_reporter{std::cout};
+            machine_reporter.begin_session(session.backend);
+
+            const auto machine_notice = [](const std::string& message) {
+                // stdout carries ONLY protocol events, so a diagnostic goes to
+                // stderr -- the same discipline Apogee demands of the vendor
+                // CLIs it drives, having been the consumer on the other side.
+                std::cerr << "apogee: " << message << "\n";
+            };
+
+            const agentloop::AskFn driver_ask =
+                flags->tools ? make_driver_ask_fn(machine_reporter, std::cin) : agentloop::AskFn{};
+
+            std::string line;
+            while (std::getline(std::cin, line)) {
+                const DriverMessage message = parse_driver_line(line);
+                if (message.kind != DriverMessage::Kind::User || message.text.empty()) {
+                    // Unknown types are ignored rather than fatal: the same
+                    // tolerance this protocol asks of its own drivers.
+                    continue;
+                }
+
+                // The driver reads structured input, so there IS someone to
+                // answer a question -- the loop's "nil AskFn <=> never
+                // advertised" rule is satisfied rather than sidestepped.
+                run_chat_turn(harness, session, message.text, attachments,
+                              flags->tools ? &registry : nullptr, driver_ask, machine_reporter,
+                              machine_notice);
+
+                harness::ChatResponse response;
+                response.message = session.messages.empty() ? harness::ChatMessage::assistant("")
+                                                            : session.messages.back();
+                response.model = session.backend;
+                machine_reporter.emit_result(response);
+            }
+
+            // stdin closed: the driver is done. Everything is already persisted
+            // by the per-turn save, so exiting is clean by construction.
+            logger::save(session);
+            return;
+        }
+
         // Once, immediately before the first prompt -- never between turns.
         discard_startup_typeahead();
 
@@ -396,88 +603,12 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             }
 
             // --- the turn ------------------------------------------------------
-            std::vector<harness::ContentPart> turn_attachments;
-            turn_attachments.swap(attachments);  // first message only
-
-            const std::vector<harness::ChatMessage> incoming =
-                build_messages({}, {}, input, turn_attachments);
-
-            // Context is measured against what is ABOUT TO BE SENT -- the saved
-            // history plus this turn -- not the history alone. Measuring before
-            // appending means the first turn always reads as empty, and a
-            // single large prompt never trips the threshold it should.
-            std::vector<harness::ChatMessage> prospective = session.messages;
-            prospective.insert(prospective.end(), incoming.begin(), incoming.end());
-            const ContextUsage usage = measure_context(harness, prospective, session.backend);
-
-            if (usage.should_compact()) {
-                reporter.status().print_line(
-                    style.tag(ansi::Role::Warning) + " context " +
-                    std::to_string(static_cast<int>(usage.fraction() * 100)) +
-                    "% full -- compacting");
-                // Compacts the PRIOR history only: folding the message the user
-                // just typed into a summary of the conversation so far would
-                // summarise away the question being asked.
-                session.messages =
-                    agentloop::compact_history(harness, session.messages, session.backend);
-                ++session.compactions;
-            } else if (usage.should_warn()) {
-                reporter.status().print_line(
-                    style.tag(ansi::Role::Warning) + " context " +
-                    std::to_string(static_cast<int>(usage.fraction() * 100)) + "% full" +
-                    (usage.exact ? "" : " (estimated)"));
-            }
-
-            for (const harness::ChatMessage& message : incoming) {
-                session.messages.push_back(message);
-            }
-
-            agentloop::Options loop_options;
-            loop_options.model = session.backend;
-            loop_options.temperature = session.params.temperature;
-            loop_options.max_tokens = session.params.max_tokens;
-            loop_options.stream_answer = true;
-            if (flags->tools) {
-                loop_options.tools = &registry;
-                loop_options.ask = terminal_ask_fn(reporter.status(), style);
-            }
-
-            try {
-                const agentloop::RunResult result =
-                    agentloop::run(harness, session.messages, loop_options, reporter);
-                ++session.turns;
-                if (result.hit_iteration_limit) {
-                    reporter.status().print_line(style.tag(ansi::Role::Warning) +
-                                                 " tool-call limit reached");
-                }
-            } catch (const harness::CancelledError&) {
-                reporter.status().print_line(style.tag(ansi::Role::Warning) + " cancelled");
-            } catch (const harness::HarnessError& e) {
-                logger::log(logger::Level::Error, "chat", e.what());
-                reporter.status().print_line(style.tag(ansi::Role::Error) + " " + e.what());
-            }
-
-            // Persist after EVERY turn. A kill -9 mid-conversation must leave
-            // every completed turn on disk, and that is a property of writing
-            // here rather than at exit.
-            logger::save(session);
-
-            // Auto-titling rides the first completed exchange. A side request
-            // so it never enters the conversation's own history.
-            if (session.title.empty() && session.custom_name.empty() && session.turns >= 1) {
-                harness::ChatRequest title_request;
-                title_request.model = session.backend;
-                title_request.messages = session.messages;
-                title_request.messages.push_back(harness::ChatMessage::user(title_prompt()));
-                title_request.transient.side_request = true;
-                try {
-                    session.title =
-                        sanitize_title(harness.chat(title_request).message.content.plain_text());
-                    logger::save(session);
-                } catch (const harness::HarnessError&) {
-                    // A failed title is cosmetic. It must never cost a turn.
-                }
-            }
+            run_chat_turn(
+                harness, session, input, attachments, flags->tools ? &registry : nullptr,
+                flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
+                reporter, [&reporter, &style](const std::string& message) {
+                    reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + message);
+                });
         }
 
         logger::save(session);

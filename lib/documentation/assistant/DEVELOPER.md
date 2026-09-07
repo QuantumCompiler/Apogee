@@ -116,7 +116,8 @@ Reserved packages carry a documented header and no code. They exist so every lat
 | `terminal.h/.cpp` | `TerminalWriter` — the single mutex every terminal write goes through. |
 | `status_line.h/.cpp` | The self-overwriting status line and the spinner, with the generation counter that invalidates an in-flight repaint. |
 | `thinking_view.h/.cpp` | The rolling reasoning window and its collapse-to-summary. |
-| `cli_reporter.h/.cpp` | **The** `agentloop::Reporter` adapter. One implementation, shared by every interactive surface. |
+| `cli_reporter.h/.cpp` | The terminal `agentloop::Reporter` adapter. One implementation, shared by every interactive surface. |
+| `json_reporter.h/.cpp` | The **machine-mode** `Reporter` adapter: the same loop events as one JSON object per line. Sibling of `cli_reporter` over one seam, which is why a capability reaches both surfaces at once. Also owns `OutputFormat`/`InputFormat`, `parse_driver_line()` for stdin, and `make_driver_ask_fn()` — `ask_user` over the protocol, offered only to a driver that reads structured input. Documented for front-end authors in [machine-mode.md](../reference/machine-mode.md). |
 | `chat.h/.cpp` | `apogee chat` — the REPL, slash dispatch, and context monitoring. |
 | `chat_history.h/.cpp` | `apogee chats` — list, info, title, delete — and the auto-title prompt. |
 | `input_gate.h/.cpp` | The startup typeahead flush. Called once, immediately before the first prompt. |
@@ -288,6 +289,10 @@ Mechanisms that land here as later items need them: process spawning (vendor-CLI
 
 **The typeahead flush runs exactly once, before the first prompt.** Never between turns — typing a follow-up while the model generates is legitimate typeahead, and eating it would be worse than the problem the gate fixes.
 
+**The REPL and the machine-mode loop share `run_chat_turn()`.** One function, called from both — not two loops that agree today. The two differ only in how a turn *arrives* (a `LineReader` line versus a JSONL `user` message) and how it is *rendered* (`CliReporter` versus `JsonReporter`); everything between is identical by construction, which is what makes "a driver sees what a terminal user saw" a structural fact rather than a promise. `cli.reference_driver` checks it anyway.
+
+**The two format flags must agree, and disagreeing is an error.** `--input-format` defaults to whatever `--output-format` is, so the ordinary cases need one flag. Mixing them is refused: a JSONL-emitting REPL has no coherent meaning — slash commands print through the terminal reporter and have no protocol event — and a driven session rendering prose gives its driver nothing to parse. Both mixed cases silently ignored a flag before the check existed.
+
 ---
 
 ## `lib/src/cli/tests/` — tests
@@ -332,6 +337,7 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `commands/thinking_view_test.cpp` | Byte-level: wrapping, the rolling window, the erase arithmetic, and that nothing but the summary survives `finish()`. |
 | `commands/status_line_test.cpp` | Overwrite, clear, the generation counter, verbosity modes, and the spinner frame format. |
 | `commands/cli_reporter_test.cpp` | The stdout/stderr split and that thinking never reaches the answer stream. |
+| `commands/machine_mode_test.cpp` | The JSONL protocol: the event vocabulary, that every line is an object with a `type`, that absent usage is omitted rather than zeroed, the driver-side **adversarial-chunk replay** (1/2/3/7/4096-byte reads yield identical events — the discipline Apogee demands of the CLIs it drives, owed to its own consumers), and `ask_user` over the wire including the hang-up case. |
 | `commands/chat_test.cpp` | Slash parsing, the 80/90 thresholds and what they are measured against, title sanitising, and the log line format. |
 | `logger/session_test.cpp` | Round trips, every resume-warning path, tool-call survival, and that no thinking is persisted. |
 | `commands/line_reader_test.cpp` | The non-TTY reader: CRLF, a final line with no newline, blanks vs EOF, and that a piped run never constructs the editor. |
@@ -348,6 +354,12 @@ Beyond those, `tests/CMakeLists.txt` registers `cli.*` ctest cases that run the 
 `cli.test_names` (`tests/test_names.cmake`) refuses a `TEST_CASE` name beginning with a dash. ctest hands each test's name to Catch2 as its filter argument, so such a name is parsed as an option: the test passes alone and fails under ctest with "Unrecognised token", which reads like a broken test rather than a broken name. It cost time twice before this existed.
 
 `cli.no_vendor_credentials` (`tests/no_vendor_credentials.cmake`) greps every source for signs of reading a vendor CLI's credential store — its dot-directory, `credentials.json`, `apiKeyHelper`, OAuth, the keychain. It enforces the SPEC principle *a vendor CLI is spawned, never opened*, and it is mechanical rather than reviewed because the shortcut it forbids is genuinely tempting: when a `--resume` fails, reading the vendor's session file *would* recover the conversation. Documentation lines are exempt so the rule can be explained where it is enforced.
+
+`cli.machine_mode` (`tests/machine_mode_e2e.sh`) drives the real binary over real pipes: every stdout line must open with `{`, one child must serve two turns without respawning, a contradictory `--input-format`/`--output-format` pair must be refused rather than half-honoured, and `lsof` is sampled continuously while the child lives to prove machine mode opens no listening socket. Those are properties of the *process*, not of a class, so no unit test can reach them.
+
+`cli.reference_driver` (`tests/reference_driver.py`) is the worked example a GUI author reads *and* its test-lock. It reconstructs the conversation from the JSONL and requires three independent paths to agree: the concatenated `answer_delta` chunks, the `result` event's text, and what `apogee complete` printed in text mode. Disagreement means one surface grew a behaviour the other lacks — the failure the shared Reporter seam exists to prevent.
+
+`cli.machine_schema_conformance` (`tests/schema_conformance.py`) pins [`machine-mode.md`](../reference/machine-mode.md) to `json_reporter.cpp` in both directions: an event the emitter produces but the document never describes, or one the document promises but nothing emits, fails the build. A protocol document that drifts is worse than none — a front-end author trusts it, builds against it, and debugs Apogee for a fault that is in the prose.
 
 `harness.layering` is a `cmake -P` check that no file under `source/harness/` includes `backends/`. C++ cannot enforce this the way Go's import cycles do — the include would compile fine and the layering would be silently gone — so it is checked mechanically, and it refuses to run against an empty source list so it cannot pass vacuously.
 

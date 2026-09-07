@@ -4,6 +4,40 @@
 
 **This item begins with characterization, not code.** Nothing about the `gemini` CLI may be assumed from the `claude` CLI's shape, or from `codex`'s. Streaming-JSON support, session and resume semantics, the flag surface, auth modes, and structured-output support all differ per vendor and some may not exist. The first commit pins a `gemini` version, dumps real sessions to fixtures, and writes down what was observed — including where the CLI offers less than the family template assumes. Adapter code is written against that dump, not against this document's guesses.
 
+## Partial characterization — `gemini` 0.46.0, 2026-09-06
+
+The flag surface was characterized in full; **the event schema was not**, because the CLI on this host is not authenticated for the subscription path. Both halves are recorded so the next session starts from here rather than repeating the work.
+
+### Flag surface (free, complete)
+
+| Question | Finding |
+|---|---|
+| Non-interactive entry | `-p/--prompt`. Positional `query` defaults to *interactive*, so `-p` is mandatory for a backend. |
+| Event stream? | **`-o/--output-format` accepts `text`, `json`, and `stream-json`** — the only CLI in the family besides Claude's to advertise a streaming JSON mode. Whether it carries real deltas is **unverified**. |
+| Session control | Better than the others: **`--session-id <uuid>` starts a session with an id Apogee chooses**, so no id needs capturing from the stream. `--resume` takes `latest` or an **index number** (not a uuid), plus `--list-sessions` / `--delete-session` / `--session-file`. |
+| Model | `-m/--model`. |
+| Output safety | `--raw-output` disables sanitisation of model output and the CLI itself warns it is a security risk. A backend must **never** pass it: sanitised output is the default and the right one. |
+
+### It is an agent, and its safety pin can be silently overridden
+
+Like `codex`, this CLI runs tools. `--approval-mode` takes `default` (prompt), `auto_edit`, `yolo`, and **`plan` (read-only)**; `-y/--yolo` auto-approves everything.
+
+**The finding that matters:** invoking with `--approval-mode plan` in an untrusted folder printed
+
+> `Approval mode overridden to "default" because the current folder is not trusted.`
+
+So **the read-only pin is not guaranteed to be honoured** — the CLI may substitute its own mode based on workspace trust. `--skip-trust` suppresses the override. A backend that passes `plan` and assumes read-only would be trusting a setting the CLI has already shown it will silently replace, so this needs an explicit assertion once the schema is known, not an assumption.
+
+### Why the schema is unverified — and what unblocks it
+
+`gemini` here has `security.auth.selectedType = "gemini-api-key"` and no `GEMINI_API_KEY` in the environment, so every invocation fails with:
+
+> `When using Gemini API, you must specify the GEMINI_API_KEY environment variable.`
+
+`~/.gemini/google_accounts.json` exists, so a Google login has happened at some point, but it is not the selected method. **This item is blocked until the CLI is switched to the Google-login (subscription) auth type** — which is the whole point of this backend, the API-key path being the already-shipped `google` backend.
+
+Deliberately not done: setting a key (that is the other path, and injecting one is forbidden by the Core constraints below) and editing `~/.gemini/settings.json` (Apogee does not reconfigure a user's vendor CLI — the user installs and authenticates it themselves). Run `gemini` and choose the Google login; then the four probes are `-o stream-json` on a short prompt, a long answer to test for deltas, `--approval-mode plan --skip-trust`, and `--session-id` + `--resume`.
+
 **Core constraint(s).**
 - **Never read the CLI's credentials.** Not its config directory, not a keychain entry, not a session file — and note that a Google CLI is more likely than most to hold an OAuth refresh token, which makes the rule matter more, not less. The CLI authenticates; Apogee only spawns it. Mechanically enforced by `cli.no_vendor_credentials`.
 - **Never modify or bundle the vendor binary.** Resolve from `PATH` or an explicit `binary` config path; the user installs and logs in themselves; no built-in auth method is suppressed.
