@@ -125,6 +125,11 @@ public:
 
     std::size_t chunk_size = 0;
 
+    /// Bytes every child emits on stderr. Vendor CLIs write warnings and
+    /// startup noise there on every run; a backend that let those reach the
+    /// framer would see non-JSON in front of its first event.
+    std::string stderr_script;
+
     [[nodiscard]] std::unique_ptr<platform::ChildProcess> operator()(
         const platform::ChildCommand& command, std::string& error) {
         const int index = static_cast<int>(commands.size());
@@ -143,6 +148,7 @@ public:
             state->stdout_script = stdout_scripts[which];
         }
         state->chunk_size = chunk_size;
+        state->stderr_script = stderr_script;
         children.push_back(state);
         return std::make_unique<Handle>(state);
     }

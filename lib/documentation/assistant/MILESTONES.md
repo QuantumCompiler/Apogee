@@ -224,7 +224,7 @@ Both were verified against a build that deliberately calls `listen()`. The symbo
 | Decision | Choice | Why |
 |---|---|---|
 | Web search | **Provider server-side tools only** | User decision. Ommi's local search meant scraping DuckDuckGo's HTML results page with regexes; the markup changes and the tool returns *nothing* rather than erroring. `fetch_url` — the durable half — is ported; searching is the vendors' job. Local models get `fetch_url` but no search in v0.1.0, and the registry seam stays open for a pluggable one. |
-| GBNF grammar sampling | Deferred | The stated default. Cloud tool calls arrive structured, so nothing here depends on it; `model-profiles-and-management` decides. |
+| GBNF grammar sampling | Deferred | The stated default. Cloud tool calls arrive structured, so nothing here depends on it; `model-profiles` decides. |
 | `agent/` as its own package | Split from `agentloop/` | The loop needs a registry; a registry needs no loop. MCP and native toolsets land in a third package and register into the same place. |
 | Iteration bound | 12, then answer with tools withdrawn | A model can call the same tool forever, and the only symptom is a request that never returns while spending money. Withdrawing the tools forces a text answer, so the user gets something usable rather than an error. |
 | `--search` | A per-run flag, not a config key | It applies to one invocation. A `web_search:` key is something you have to remember to turn off again. Threaded through `backends::BuildOptions`. |
@@ -391,7 +391,7 @@ The `/model`-carries-history claim was verified rather than assumed. `/model` on
 | Decision | Choice | Why |
 |---|---|---|
 | Crash model | **In-process only**, no spawn-isolation mode *(user call)* | A second generation path would re-introduce the apparatus the divergence exists to delete, and would have to be kept at parity forever. The exposure is narrower than "a crash kills the binary": a load failure returns a clear error, so it is an abort *during generation*, bounded to one in-flight turn by per-turn session save. |
-| Local vision | **Deferred to model-profiles-and-management** *(user call)* | An mmproj path is a per-family model property, which that item already owns. `VisionCapable` still landed here, so the type switch died now rather than later. |
+| Local vision | **Deferred to multimodal-vision** *(user call)* | An mmproj path is a per-family model property. That item was split four ways on 2026-09-06; local vision is now its own document. `VisionCapable` still landed here, so the type switch died now rather than later. |
 | Linking / GPU | Static, Metal on macOS; llama.cpp stays behind `APOGEE_ENABLE_LLAMA` | The stated default. The merge-blocking target must not pay for kernel compilation. |
 | KV across restarts | Not persisted; a resumed session re-ingests | The stated default. `llama_state_save_file` is the recorded later upgrade. |
 | Pin cadence | Manual, deliberate bumps | The stated default. |
@@ -510,7 +510,7 @@ The first run of the child-process suite failed on *writing to a dead child*: th
 
 ## Appendix — vendor-CLI design notes (carried forward from the claude-cli-backend item)
 
-These are the design notes the `claude-cli` backend was built from, verified against **CLI 2.1.233**. They are kept here, rather than deleted with the backlog document, because the rest of the family names them as its template and points at this file: [`gemini-cli-backend.md`](../backlog/gemini-cli-backend.md) — the one item still pending of the three the `vendor-cli-backends` guard document was split into at grooming on 2026-09-06. The other two, `codex-cli` and `ollama-cli`, shipped the same day; read their milestone entries above before trusting these notes too far, because between them they show how wide the spread is — codex emits typed events but no deltas and needs a pinned sandbox, and ollama emits no typed events at all.
+These are the design notes the `claude-cli` backend was built from, verified against **CLI 2.1.233**. They are kept here, rather than deleted with the backlog document, because every later member of the family was built against them. **The family is now complete** — `codex-cli` and `ollama-cli` shipped 2026-09-06, `gemini-cli` the same day — so read all four milestone entries above before trusting these notes too far. Between them they show how wide the spread turned out to be: Claude streams tokens with inline schemas, codex emits typed events but no deltas and needs a pinned sandbox, gemini streams real deltas and needs *two* flags to pin its sandbox, and ollama emits no typed events at all.
 
 Two parts have already moved on and are **not** authoritative here: the thinking *renderer* (notes §8) belongs to the terminal UX layer (`source/commands/thinking_view.h`, Milestone G), and the two credential/binary policy rules were promoted to [SPEC.md](SPEC.md) → Principles, where they bind every vendor-CLI backend rather than just this one. Where these notes and the shipped code disagree, the code and Milestone L's write-up are current — see in particular the event union's home (`backends/`, not `harness/`) and the event-queue change that a persistent child turned out to require.
 
@@ -892,6 +892,63 @@ The second vendor CLI, and the one that sits between the other two in what the v
 **Verified live** against the user's own ChatGPT login: `apogee complete -m cdx "Say exactly: hello"` prints exactly `hello`. A first attempt with `model: gpt-5-codex` failed, and usefully — the backend surfaced the CLI's own message verbatim ("not supported when using Codex with a ChatGPT account"), which is exactly what the error path is for. With no model pinned, the CLI's default is used and the turn succeeds.
 
 **Where this backend stands in the family:** better than `ollama-cli` (typed events, real usage, real session continuity) and worse than `claude-cli` (no token-level streaming, no thinking to display). Recorded plainly rather than averaged into a claim of parity.
+
+---
+
+### 2026-09-06 — `gemini-cli`: Google's subscription path, and a test that never ran
+
+The fourth and last vendor CLI, completing SPEC's dual-path claim: every cloud vendor now works under both a subscription plan and an API billing plan, chosen per backend entry. Characterized against `gemini` 0.46.0 under a real Google login before any adapter code, per the family rule — and the recording **corrected three things** the item document had written down when no login was available.
+
+**Characterization**
+
+| Question | Finding |
+|---|---|
+| Event stream? | **Yes** — `-o stream-json` emits typed JSONL (`init`, `message`, `tool_use`, `tool_result`, `result`), so the shared `jsonl_framer` applies. |
+| Streaming granularity? | **Token-level, and genuinely so.** A twenty-line answer arrived in three assistant deltas, and one boundary fell *inside* the number 13 (`…12\n1` then `3\n14…`). Best in the family after Claude. |
+| Usage? | **Real**, on `result.stats` — and broken down per model. |
+| Session / resume? | **Yes, and better than the others.** `--session-id <uuid>` lets Apogee *choose* the id, so there is nothing to capture from the stream and no session file to read. Verified end to end. |
+| Which model answers? | **`auto`, and more than one per turn.** `init` reports `"model":"auto"`; `result.stats.models` named two models in every recording. The adapter reports the one with the most output tokens. |
+| stdout hygiene? | **Clean.** The 256-color warning and `[STARTUP]` lines go to stderr unprompted; nothing had to be filtered. |
+| Auth modes? | None. No `--bare` analogue, so `mode` is **not** invented for symmetry — a config carrying one is refused with an explanation pointing at the `google` backend. |
+
+**Three corrections to the pre-login characterization**
+
+| The item document said | The recording showed |
+|---|---|
+| `--resume` takes `latest` or an **index number** "(not a uuid)" | It takes the **UUID**. This is what makes the clean continuity story possible. |
+| `--skip-trust` suppresses the approval-mode override | It does — *and* without it a headless run in an untrusted directory **refuses to start at all**. It is mandatory, not an optimisation. |
+| The read-only `plan` pin may be silently overridden | It is — but **not** with `--skip-trust`. Verified against a canary: asked to write a file, the child refused and wrote nothing. |
+
+**What was built**
+
+- [x] **`source/backends/gemini_cli_events.h/.cpp`** — wire→typed-event mapping over the shared framer.
+- [x] **`source/backends/gemini_cli.h/.cpp`** — the provider. No persistent child (no stdin turn stream), but Apogee generates the session UUID up front: turn one passes `--session-id`, every later turn passes `--resume <same uuid>`, and only the new user message goes out.
+- [x] **`TurnComplete::model`** on the shared event union — "which model answered" is turn accounting, and this is the first CLI where it is not simply what was asked for.
+- [x] **`gemini-cli` config type**, documented in the starter config including the `GEMINI_API_KEY` precedence trap and the two pinned flags.
+- [x] **`cli.no_vendor_credentials` widened to the whole family** — it had only ever covered Claude's paths, so three of four backends were unguarded. Now covers `.gemini/`, `google_accounts.json`, `oauth_creds.json`, and `.codex/`. `~/.ollama/` is deliberately excluded and the reason is written down: it is a *model* store, and reading it is a supported source in [model-acquisition.md](../backlog/model-acquisition.md).
+- [x] **16 new tests** (588 total), with **recorded** fixtures from the real session.
+
+**The safety pin needed two flags, not one.** `--approval-mode plan` alone pins nothing: this CLI was observed replacing it with `default` in an untrusted folder, and Apogee spawns wherever the user's shell happens to be. So `plan` and `--skip-trust` are both literals in the argv builder, asserted together, and mutation-tested together — removing either turns the safety test red. `--raw-output` (which disables output sanitisation and which the CLI itself calls a security risk) can never appear.
+
+**A test that passed without ever running.**
+
+The test asserting the answering model is reported was named `the model that answered is reported, not "auto"`. `catch_discover_tests` registers each case by passing its **name** to the binary as a filter — and the embedded quotes broke the generated command's shell quoting, splitting one filter into two, neither of which matched anything. Catch2 printed "No tests ran" and **exited 0**. The ctest entry passed. It had never executed.
+
+It surfaced only because the guardrail was mutation-tested: hard-coding `response.model = "auto"` — precisely what the test forbids — came back 100% green. Running the case by tag instead showed it failing correctly all along. The test was right; its *name* made it unrunnable.
+
+`tests/test_names.cmake` already existed for the sibling bug (a leading dash is read as an option, which cost real time twice), so the quote case was added there rather than in a second checker. Its first draft did not fire either, for a second-order reason worth keeping: **`if(... MATCHES ...)` clobbers `CMAKE_MATCH_1`**, so testing the capture twice in a row silently tests an empty string the second time. The capture is now saved before either check. Both checks are mutation-tested.
+
+The general lesson is the one this repo already applies elsewhere and had not applied to test *registration*: a check that can pass vacuously will eventually pass vacuously, and "no tests ran" is the most expensive kind of green there is.
+
+**Verified live** against the user's own Google login: `apogee complete -m gem-sub` answers, an API-billing `google` entry and a subscription `gemini-cli` entry coexist in one config and are selectable per entry, and through machine mode the concatenated `answer_delta`s equal `result.text` exactly.
+
+**Two things recorded rather than fixed.**
+
+*The answering model does not reach the user.* The provider reports it (unit-tested at the seam), but `complete` builds a fresh `ChatResponse` from the agent loop's `RunResult` and sets `response.model` to the backend selector. That is pre-existing and affects every backend — the loop's result type carries no model — so surfacing it is its own item, not a change smuggled in here.
+
+*This backend is not in the cross-provider conformance table.* Neither are its three siblings, and for a structural reason: that table scripts a **tool-calling** turn, and no vendor-CLI backend surfaces a `harness::ToolCall` — each runs tools inside the CLI and emits only text. The item asked for a conformance row; the honest answer is that the table's contract does not fit this family, and the family's own shared guardrail — fixture replay at adversarial chunk sizes — is what covers it instead.
+
+**Where this backend stands in the family:** the best of the four on session handling (Apogee owns the id), second on streaming (real deltas, behind Claude's), and the only one whose safety pin needs two flags to hold.
 
 ---
 

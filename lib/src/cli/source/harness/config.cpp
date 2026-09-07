@@ -27,13 +27,14 @@ char fold(char c) noexcept {
 ///
 /// Widening the enum is a row here plus a case in the switch below -- the
 /// loader dispatches through this table, so no other file learns the new name.
-constexpr std::array<std::pair<std::string_view, BackendType>, 8> kBackendTypeNames{{
+constexpr std::array<std::pair<std::string_view, BackendType>, 9> kBackendTypeNames{{
     {"anthropic", BackendType::Anthropic},
     {"openai", BackendType::OpenAI},
     {"google", BackendType::Google},
     {"llamacpp", BackendType::LlamaCpp},
     {"claude-cli", BackendType::ClaudeCli},
     {"codex-cli", BackendType::CodexCli},
+    {"gemini-cli", BackendType::GeminiCli},
     {"ollama-cli", BackendType::OllamaCli},
     {"mock", BackendType::Mock},
 }};

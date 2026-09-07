@@ -60,6 +60,12 @@ struct ToolOutcome {
 struct TurnComplete {
     std::string session_id;
     std::string final_text;
+    /// Which model actually answered, when the CLI reports it and it is not
+    /// simply what was asked for. Empty means "the configured model", which is
+    /// what most of the family reports; the gemini CLI routes one turn across
+    /// several models and names them, so the concept is real rather than
+    /// gemini-shaped -- it is turn accounting, which is what this event is.
+    std::string model;
     /// Raw JSON from `--json-schema` runs; empty when no schema was set.
     std::string structured_output;
     double cost_usd = 0.0;

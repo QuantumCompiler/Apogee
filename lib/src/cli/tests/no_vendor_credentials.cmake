@@ -25,13 +25,29 @@ endif()
 
 # Paths and mechanisms that would mean reading a vendor's credentials. The
 # CLI's own name on a command line is fine -- spawning it is the whole point --
-# so this looks for its DOT-directories and credential stores instead.
+# so this looks for their DOT-directories and credential stores instead.
+#
+# Covers claude, gemini, and codex. `~/.ollama/` is deliberately NOT listed:
+# that directory is a MODEL store, and reading it is a supported source in the
+# model-acquisition item. Ollama's account credentials are the CLI's own, and
+# the generic keychain/oauth patterns below catch an attempt to reach them.
 set(forbidden
     "[.]claude/"
     "[.]claude\"'"
     "\\.claude'"
     "claude[.]json"
     "credentials[.]json"
+    # gemini. A Google CLI is likelier than most to hold an OAuth refresh
+    # token, which makes the rule matter more here, not less.
+    "[.]gemini/"
+    "[.]gemini\"'"
+    "\\.gemini'"
+    "google_accounts[.]json"
+    "oauth_creds[.]json"
+    # codex.
+    "[.]codex/"
+    "[.]codex\"'"
+    "\\.codex'"
     "apiKeyHelper"
     "oauth"
     "OAuth"

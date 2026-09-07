@@ -34,6 +34,7 @@ add_executable(apogee_tests
     backends/claude_cli_test.cpp
     backends/ollama_cli_test.cpp
     backends/codex_cli_test.cpp
+    backends/gemini_cli_test.cpp
     backends/jsonl_framer_test.cpp
     backends/chat_template_test.cpp
     agentloop/conformance_test.cpp

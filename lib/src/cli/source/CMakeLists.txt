@@ -119,6 +119,10 @@ add_library(apogee_core STATIC
     backends/codex_cli_events.cpp
     backends/codex_cli.h
     backends/codex_cli.cpp
+    backends/gemini_cli_events.h
+    backends/gemini_cli_events.cpp
+    backends/gemini_cli.h
+    backends/gemini_cli.cpp
     backends/ollama_cli_output.h
     backends/ollama_cli_output.cpp
     backends/ollama_cli.h

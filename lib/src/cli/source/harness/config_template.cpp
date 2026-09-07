@@ -100,6 +100,31 @@ backends:
   #   # binary: /usr/local/bin/claude
   #   # model: claude-sonnet-5
 
+  # ── Gemini through the official CLI (subscription plan) ────────────────────
+  # The subscription-auth path for Google, beside the API-billing `google`
+  # entry above -- both can live in this file at once, chosen per entry.
+  # Apogee spawns the `gemini` binary you installed and signed into with your
+  # Google account. It never reads your credentials -- not ~/.gemini, not a
+  # keychain, not a session file.
+  #
+  # binary: resolved from PATH when unset.
+  # There is no `mode` here: this CLI has no auth modes, so setting one is an
+  # error rather than a no-op. For an API key, use the `google` entry above.
+  #
+  # Watch out for GEMINI_API_KEY: if it is set in your environment, the CLI
+  # prefers it over your Google login, which quietly bills per token -- the
+  # same trap ANTHROPIC_API_KEY sets for the claude-cli entry.
+  #
+  # Two flags are pinned and not configurable, because this CLI runs tools
+  # while it answers: --approval-mode plan (read-only) and --skip-trust. The
+  # second is not optional -- without it the CLI silently downgrades the
+  # read-only pin to its default in an untrusted folder, and refuses to run
+  # headless at all.
+  # gem-sub:
+  #   type: gemini-cli
+  #   # binary: /usr/local/bin/gemini
+  #   # model: gemini-3.5-flash
+
   # ── Local inference via llama.cpp ───────────────────────────────────────────
   # Runs in-process: no server and no listening socket. The model STAYS LOADED
   # between turns, which is what keeps a multi-turn chat warm -- each turn adds

@@ -55,12 +55,14 @@ Items are numbered in the **suggested order of implementation**. The rule stays 
 
 ### Phase 2 — the gated ring (after v0.1.0 ships)
 
-Six semi-independent tracks that can interleave: the **vendor-CLI family** (11 shipped 2026-09-02; 12 split at grooming 2026-09-06 into 12a/12b/12c, one per CLI; 12a and 12c shipped 2026-09-06), the **front-end contract** (13 — the GUI project gates on it), **local-model depth** (14), **RAG** (15 → 16 → 17), **serving** (18 → 19 — server deployments only), and **tools/agents** (20); item 21 needs the RAG track complete. The numbering is the suggested serial order when working alone.
+Six semi-independent tracks that can interleave: the **vendor-CLI family** — **complete**: 11 shipped 2026-09-02, and 12's three split items (12a codex, 12b gemini, 12c ollama) all shipped 2026-09-06, the **front-end contract** (13 — shipped 2026-09-06, and the GUI project gates on it), **local-model depth** (14, split at grooming 2026-09-06 into 14a/14b/14c/14d), **RAG** (15 → 16 → 17), **serving** (18 → 19 — server deployments only), and **tools/agents** (20); item 21 needs the RAG track complete. The numbering is the suggested serial order when working alone.
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 12b | [gemini-cli-backend.md](gemini-cli-backend.md) | ✅ 11 (shipped) · ⛔ **blocked**: the `gemini` CLI is set to `gemini-api-key` auth, not the Google login this backend needs | Gemini CLI backend: Google's subscription path as a spawned child |
-| 14 | [model-profiles-and-management.md](model-profiles-and-management.md) | — · **split first** (profiles / management+sources) | Local-model depth: per-family profiles, filters, tool dialects + roles, models suite, open model sources (HF + Ollama) |
+| 14a | [model-profiles.md](model-profiles.md) | ✅ 9 (shipped) · ⚠ **needs local weights on the build machine**: profiles are characterized from real output, not specs (Gemma 3 + Llama 3 — user downloading 2026-09-06) | Model profiles: the local-model quirk layer — template resolution, reasoning/markup stream filters, native tool-call dialects |
+| 14b | [model-operations.md](model-operations.md) | — | Model operations: the one shared role resolver, `models list/info/status`, GGUF header inspection, `check` extensions |
+| 14c | [model-acquisition.md](model-acquisition.md) | 14b | Model acquisition: open pulls from Hugging Face **and** Ollama, verify-then-rename atomicity, delete/repair, quantize, install offer |
+| 14d | [multimodal-vision.md](multimodal-vision.md) | — | Local multimodal: llama.cpp mtmd + `mmproj_path`, making `accepts_images()` truthful, and the cross-surface `--image` guard |
 | 15 | [embedstore-lexical-rag.md](embedstore-lexical-rag.md) | — | SQLite chunk store with FTS5/BM25 lexical retrieval + basic --rag injection |
 | 16 | [embedding-clients.md](embedding-clients.md) | 15 | Embedding clients: OpenAI/Google endpoints + in-process llama.cpp, behind can_embed |
 | 17 | [vector-hybrid-rerank.md](vector-hybrid-rerank.md) | 16 | Vector + hybrid retrieval, per-turn resolver, and LLM rerank with a capability-driven gate |
