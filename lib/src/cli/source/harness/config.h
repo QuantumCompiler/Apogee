@@ -123,10 +123,11 @@ struct BackendConfig {
 
 /// The `models:` role pointers.
 ///
-/// Each names a key in `backends`. They are resolved through ONE shared
-/// resolver once model-profiles-and-management lands -- CLI and HTTP must
-/// never grow independent resolution chains, which is a real Ommi bug class.
-/// Until then, treat these as raw names and validate them at the point of use.
+/// Each names a key in `backends`, and they are resolved through ONE shared
+/// resolver -- `harness/roles.h` -- because CLI and HTTP must never grow
+/// independent resolution chains, which is a real Ommi bug class. Read them
+/// directly only to display or validate the raw value; to decide which backend
+/// to RUN, call `resolve_backend_key()`. `cli.one_role_resolver` enforces it.
 struct ModelsConfig {
     std::string default_backend;
     std::string default_embedding;

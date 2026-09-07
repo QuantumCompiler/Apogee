@@ -25,6 +25,7 @@
 #include "harness/errors.h"
 #include "harness/harness.h"
 #include "harness/paths.h"
+#include "harness/roles.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -389,8 +390,7 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                 }
             }
 
-            const std::string model =
-                flags->model.empty() ? config.models.default_backend : flags->model;
+            const std::string model = harness::resolve_chat_backend(config, flags->model);
             (void)run_one(harness, config, *flags, model, prompt, attachments, decorate);
             return;
         }

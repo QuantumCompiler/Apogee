@@ -25,6 +25,7 @@
 #include "harness/context_windows.h"
 #include "harness/errors.h"
 #include "harness/paths.h"
+#include "harness/roles.h"
 #include "logger/operational.h"
 #include "platform/platform.h"
 
@@ -357,10 +358,14 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             session.chat_id = logger::new_chat_id();
         }
 
-        // Precedence: an explicit flag beats the saved value beats the default.
-        const std::string model = !flags->model.empty()      ? flags->model
-                                  : !session.backend.empty() ? session.backend
-                                                             : config.models.default_backend;
+        // Precedence: an explicit flag beats the saved value beats the default
+        // -- expressed through the one shared resolver rather than restated
+        // here, because a session's saved backend is exactly the "per-feature
+        // pin" rung the chain already has.
+        const std::string model = harness::resolve_backend_key(
+            config, harness::RoleRequest{.role = harness::ModelRole::Chat,
+                                         .override = flags->model,
+                                         .entry_backend = session.backend});
         session.backend = model;
 
         if (flags->temperature_option->count() > 0) {

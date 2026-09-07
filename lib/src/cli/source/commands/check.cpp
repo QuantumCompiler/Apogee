@@ -15,6 +15,7 @@
 #include "commands/helpers.h"
 #include "harness/layout.h"
 #include "harness/paths.h"
+#include "models/gguf_inspect.h"
 #include "platform/platform.h"
 #include "version/version.h"
 
@@ -37,6 +38,14 @@ namespace {
             return "GEMINI_API_KEY";
         case harness::BackendType::LlamaCpp:
         case harness::BackendType::Mock:
+        // The vendor-CLI backends read no key of their own: the CLI they spawn
+        // is already logged in, and Apogee never touches its credentials. Named
+        // explicitly rather than left to the default so that adding a fifth one
+        // is a compiler error here instead of a silent "no key needed".
+        case harness::BackendType::ClaudeCli:
+        case harness::BackendType::CodexCli:
+        case harness::BackendType::GeminiCli:
+        case harness::BackendType::OllamaCli:
             break;
     }
     return {};
@@ -50,39 +59,6 @@ void add(CheckReport& report, Status status, std::string section, std::string na
          std::string detail, std::string remedy = {}) {
     report.rows.push_back(
         {status, std::move(section), std::move(name), std::move(detail), std::move(remedy)});
-}
-
-/// Whether a file begins with the GGUF magic.
-///
-/// Ommi's recorded lesson, and the reason this reads bytes instead of calling
-/// `exists()`: a model can be present, the right size, and match a recorded
-/// digest while still being unloadable -- a truncated download, or a Git LFS
-/// pointer file committed instead of the model. Checking presence alone
-/// reports healthy and the failure surfaces much later, inside llama.cpp.
-///
-/// A full load would be stronger still and is deliberately not done: it costs
-/// gigabytes of I/O per model, and `check` is something a user runs when
-/// something is already wrong. The header read catches the failure modes that
-/// actually occur at nearly no cost.
-[[nodiscard]] bool has_gguf_magic(const std::filesystem::path& path, std::string& why) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        why = "cannot be opened";
-        return false;
-    }
-    std::array<char, 4> magic{};
-    in.read(magic.data(), magic.size());
-    if (in.gcount() != static_cast<std::streamsize>(magic.size())) {
-        why = "is too small to be a GGUF (truncated download?)";
-        return false;
-    }
-    if (magic[0] != 'G' || magic[1] != 'G' || magic[2] != 'U' || magic[3] != 'F') {
-        why =
-            "does not start with the GGUF magic -- it may be a Git LFS pointer or a partial "
-            "download";
-        return false;
-    }
-    return true;
 }
 
 void check_version(CheckReport& report, const CheckInputs& inputs) {
@@ -155,13 +131,28 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                         " --type llamacpp --model-path <an existing .gguf>");
                 continue;
             }
-            std::string why;
-            if (!has_gguf_magic(model, why)) {
-                add(report, Status::Fail, "Config", label,
-                    "model_path " + why + ": " + model.string());
+            // A full header read rather than the 4-byte magic check this used
+            // to do. Magic alone passes a half-finished download -- and the row
+            // then said "model loads", which was a claim four bytes cannot
+            // support and which reads exactly like a pass.
+            const models::GgufInfo info = models::inspect_gguf(model);
+            if (!info.parsed) {
+                add(report, Status::Fail, "Config", label, "unreadable GGUF -- " + info.parse_error,
+                    "re-download the model to " + model.string());
                 continue;
             }
-            add(report, Status::Ok, "Config", label, std::string{type} + " -- model loads");
+            if (info.has_vision_tensors()) {
+                // Advisory, never fatal: under the open-model policy a warning
+                // tells the user something, and refusing tells them nothing
+                // they asked for.
+                add(report, Status::Warn, "Config", label,
+                    std::string{type} + " -- combined text+vision blob (" +
+                        std::to_string(info.tensors - info.text_tensors) + " vision tensors)");
+                continue;
+            }
+            add(report, Status::Ok, "Config", label,
+                std::string{type} + " -- GGUF header ok" +
+                    (info.architecture.empty() ? "" : " (" + info.architecture + ")"));
             continue;
         }
 
@@ -273,12 +264,18 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
             continue;
         }
         ++found;
-        std::string why;
-        if (!has_gguf_magic(entry.path(), why)) {
-            add(report, Status::Fail, "Models", entry.path().filename().string(), why);
+        // A full header read, not the 4-byte magic check this used to do. The
+        // failure that actually happens is a half-finished download, and that
+        // file has perfectly valid magic -- so magic alone reported "valid
+        // GGUF header" for exactly the file that cannot be loaded.
+        const models::GgufInfo info = models::inspect_gguf(entry.path());
+        if (!info.parsed) {
+            add(report, Status::Fail, "Models", entry.path().filename().string(),
+                "unreadable GGUF -- " + info.parse_error, "re-download the model");
         } else {
             add(report, Status::Ok, "Models", entry.path().filename().string(),
-                "valid GGUF header");
+                info.architecture.empty() ? "valid GGUF header"
+                                          : info.architecture + ", valid GGUF header");
         }
     }
 

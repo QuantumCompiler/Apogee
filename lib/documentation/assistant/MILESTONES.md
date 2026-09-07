@@ -992,3 +992,63 @@ The general lesson is the one this repo already applies elsewhere and had not ap
 **The schema document is pinned to the code.** A protocol document that drifts is worse than none: a GUI author trusts it, builds against it, and debugs Apogee for a fault that is in the prose. `cli.machine_schema_conformance` checks the vocabulary in both directions, so an event added without documentation, or documented without an implementation, fails the build.
 
 **What this deliberately does not do.** No push channel (a driving GUI performs its own mutations by shelling out to `apogee config …`, so it already knows when to re-read); no socket, ever (`lsof`, sampled continuously while the child lives); no protocol representation of slash commands, which are terminal-REPL affordances a driver replaces with its own UI.
+
+---
+
+## Milestone N — Model operations
+
+**Goal.** The read-only half of model management: one shared resolver for the `models:` role pointers, an `apogee models list / info / status` suite, and a real GGUF header reader that `check` uses to tell a working model from a broken one. Nothing here downloads anything — acquisition is its own item.
+
+### 2026-09-07 — `model-operations`: one resolver, and a check that stops lying
+
+**What was built**
+
+- [x] **`source/harness/roles.h/.cpp`** — the one resolution chain: `override > per-feature pin > role pointer > models.default`, with whitespace trimmed at every rung. `resolve_backend()` also reports **which rung answered**, so `models status` can say "(via models.default)" without re-walking the chain at the call site.
+- [x] **`source/models/gguf_inspect.h/.cpp`** — a self-contained GGUF header reader: architecture, container version, tensor counts, and a text-vs-vision split, with every self-declared length bounds-checked against the real file size.
+- [x] **`source/commands/models.h/.cpp`** — `list` (aligned table, or JSONL under `--output-format stream-json`), `info <backend>`, and `status`.
+- [x] **Three call sites migrated** to the resolver — `harness.cpp`, `chat.cpp`, `complete.cpp` — plus `cli.one_role_resolver`, a mechanical check that no fourth one appears.
+- [x] **34 new tests** (622 total).
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| GGUF reader | **Ours, not llama.cpp's** — reversing the item's recorded decision | The item chose llama.cpp's `gguf.h` so that "the header parses" and "llama.cpp can read it" would be one claim. But llama.cpp is **off by default**, and `macos-arm64` — the only merge-blocking CI target — builds without it. That reader would leave `check` and `models info` reporting nothing in the default build, and would mean this item's own guardrail never ran in the job that gates merges. A check that cannot run where it matters is not a check. |
+| Fixtures | Built in the test, not committed | The cases that matter are the *malformed* ones — a truncated download, a length running past the end, an LFS pointer. Those cannot be downloaded; they have to be constructed. Building them also keeps the bytes readable in a diff. |
+| `models list` columns | `ARCH` and `PROFILE` kept **separate** | An architecture is what the file says it is; a profile is what Apogee knows about how that family behaves. Until model-profiles lands, every row reads `unprofiled` — true and useful. Showing the architecture in that column would claim knowledge Apogee does not have. |
+| 14b gating | No dependency on model-profiles | Recorded at grooming so this item could be built while model downloads were still in flight — which is exactly how it was taken. |
+
+**`apogee check` was reporting "model loads" on the strength of four bytes.**
+
+The Config section validated a `model_path` with a magic-bytes check and then printed `llamacpp -- model loads`. A half-finished download starts with a perfectly good `GGUF` magic, so the row said "model loads" for precisely the file that cannot be loaded — a claim four bytes cannot support, worded exactly like a pass. Both call sites now do a full header parse; the row says what it actually verified.
+
+The existing test for this passed a fixture of `"GGUF"` plus 64 nul bytes, which the new parser also accepts (it is a valid empty header), so the suite stayed green while asserting nothing about the upgrade. It now uses a real minimal GGUF and there is a new case for the truncated file — the one that separates a header read from a magic glance. Reverting to magic-only turns it red.
+
+**Two duplicates found by writing the guard.**
+
+Adding `check_models` as a new function collided with an existing `check_models` that `run_checks` already called — an overload that would never have run. And the configured-path validation it was meant to add already existed in the Config section. Both were caught before they landed; what survives is one upgraded check rather than a second one beside it. `has_gguf_magic` is gone, its recorded Ommi lesson moved to the reader that now does the work.
+
+**Guardrails, each mutation-tested (thirteen mutations, all caught).**
+
+| Guardrail | Mutation that proved it bites |
+|---|---|
+| The chain's rung order | Role pointer promoted above the override → 2 tests red |
+| Whitespace trimming | Trim removed → the typo test red |
+| Full header parse | Accept on magic alone → 5 reader tests red |
+| No partial results on failure | Keep fields after a failed parse → truncation test red |
+| Self-declared length caps | Cap raised to 2^64 → the huge-string test red |
+| `ARCH` ≠ `PROFILE` | Architecture copied into profile → separation test red |
+| Roles column uses the resolver | Column computed from raw config → resolver test red |
+| `info` states the reason | Reason dropped from the failure line → info test red |
+| `check` rejects a bad GGUF | Forced `parsed = true` → check test red |
+| One resolution chain | Second chain reintroduced in `complete.cpp` → `cli.one_role_resolver` red |
+| …and its own vacuous-pass guard | Allowlist swallowing every file → refuses to run |
+| Completion is registry-derived | `models` unregistered → completion test red |
+
+Two of those mutations initially came back **green**, and both were test bugs worth recording. The `ARCH`/`PROFILE` separation was asserted only over rows whose files were unreadable, so the branch that sets the architecture never ran — the test was vacuous for the property it named. And `info`'s "states the reason" assertion searched the whole body for the filename, which also appears on the `model_path:` line, so deleting the reason from the failure line left it passing. Both now assert what they claim.
+
+**A dangling reference, found by the tests it broke.** Three tests bound `const ModelRow&` to a row inside a temporary vector returned by `build_model_rows(...)`; the vector died at the end of the statement and the fields read as empty strings. The rvalue overload of the helper is now `= delete`, so the mistake is a compile error rather than a test reading freed memory.
+
+**Verified live** against the user's own models: `models list` reports `llama` and `qwen35` from real headers, `models status` names the rung each role resolved through, `check` passes the good files and fails the dangling one, and the JSONL listing is one object per line. A header read on a **71 GB** model takes **0.6 s**, which is what makes running it on every `check` affordable rather than theoretical — and it correctly reported `qwen35moe`, a MoE variant none of the fixtures cover.
+
+**What is deliberately not here.** *Verification state* (a sidecar's `verified` flag) has no source yet — it arrives with model-acquisition, and inventing a column for it now would be a placeholder claiming a fact. *Loadability* is not asserted either: a full load costs gigabytes of I/O, so the reader claims only that the header is well formed, and says so rather than implying more.

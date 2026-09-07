@@ -34,6 +34,12 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(# Apogee configuration.
 
 # Role pointers. Each names an entry under `backends:` below.
 models:
+  # Role pointers. Each names an entry under `backends:` below, and all three
+  # resolve through one shared chain:
+  #     -m on the command line  >  a per-feature pin  >  the role pointer here
+  #                             >  models.default
+  # `apogee models status` prints which rung answered for each role.
+
   # The backend used when nothing else is specified.
   # default: claude
 

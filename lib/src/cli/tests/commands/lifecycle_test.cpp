@@ -1,3 +1,4 @@
+#include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -7,6 +8,7 @@
 #include <vector>
 
 #include "commands/complete_protocol.h"
+#include "commands/registry.h"
 #include "commands/uninstall.h"
 #include "harness/config.h"
 #include "harness/layout.h"
@@ -136,6 +138,43 @@ TEST_CASE("an empty line completes to subcommands", "[commands][completion]") {
     CHECK(contains(candidates, "chat"));
     CHECK(contains(candidates, "check"));
     CHECK(contains(candidates, "uninstall"));
+}
+
+TEST_CASE("every registered command reaches completion with no per-shell edit",
+          "[commands][completion]") {
+    // The completion list is DERIVED from the real registry, never maintained
+    // beside it. `RootContext::command_names` says why: a second list goes
+    // stale the first time a command is added, and the symptom -- tab
+    // completion quietly missing a command -- is one nobody files a bug about.
+    //
+    // Asserted against the actual registry rather than the hand-written
+    // CommandSpec list above, because that list is itself a second list and
+    // could pass while the real path was broken.
+    CLI::App app{"apogee"};
+    apogee::commands::RootContext context;
+    apogee::commands::CommandRegistry registry = apogee::commands::default_registry();
+    registry.bind_all(app, context);
+
+    const std::vector<apogee::commands::CommandSpec> specs = apogee::commands::specs_from_app(app);
+
+    CompletionRequest request;
+    request.current = "";
+    const std::vector<std::string> candidates =
+        completion_candidates(request, two_backends(), specs);
+
+    // Every command the registry knows about, offered -- including the four
+    // shells' stubs, which only ever call back into `apogee __complete`.
+    for (const std::string_view name : registry.names()) {
+        if (name.starts_with("__")) {
+            continue;  // protocol commands are hidden on purpose
+        }
+        INFO("command: " << name);
+        CHECK(contains(candidates, std::string{name}));
+    }
+
+    // And the one this item added, named explicitly so the assertion cannot
+    // pass by iterating an empty list.
+    CHECK(contains(candidates, "models"));
 }
 
 TEST_CASE("a partial subcommand filters", "[commands][completion]") {

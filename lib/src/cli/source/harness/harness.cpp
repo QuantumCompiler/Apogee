@@ -5,6 +5,7 @@
 
 #include "harness/context_windows.h"
 #include "harness/errors.h"
+#include "harness/roles.h"
 
 namespace apogee::harness {
 namespace {
@@ -300,8 +301,8 @@ std::optional<StatusEvent> Harness::model_status(std::string_view backend_name) 
 }
 
 std::int64_t Harness::context_window_for_model(std::string_view model) const {
-    const std::string_view name =
-        model.empty() ? std::string_view{config_.models.default_backend} : model;
+    const std::string resolved = resolve_chat_backend(config_, model);
+    const std::string_view name{resolved};
 
     // An explicit context_size on the backend entry always wins over the
     // table: the user knows something we do not, such as a model served with a

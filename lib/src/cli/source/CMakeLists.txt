@@ -32,6 +32,10 @@ add_library(apogee_core STATIC
     platform/platform.h
     platform/platform.cpp
     commands/command.h
+    models/gguf_inspect.h
+    models/gguf_inspect.cpp
+    commands/models.h
+    commands/models.cpp
     commands/registry.h
     commands/registry.cpp
     commands/root.h
@@ -84,6 +88,8 @@ add_library(apogee_core STATIC
     harness/layout.cpp
     harness/paths.h
     harness/paths.cpp
+    harness/roles.h
+    harness/roles.cpp
     harness/config.h
     harness/config.cpp
     harness/config_template.cpp

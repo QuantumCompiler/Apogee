@@ -9,6 +9,7 @@
 #include "harness/config.h"
 #include "harness/layout.h"
 #include "support/env_guard.h"
+#include "support/gguf_builder.h"
 
 /// The doctor, against a matrix of deliberately broken installs.
 ///
@@ -214,10 +215,40 @@ TEST_CASE("a present but unloadable GGUF fails", "[commands][check]") {
     CHECK_FALSE(report.passed());
 }
 
+TEST_CASE("a truncated GGUF fails even though its magic is valid", "[commands][check]") {
+    // THE case that separates a full header read from the four-byte magic check
+    // this used to do. A half-finished download starts with a perfectly good
+    // GGUF magic, so the old check called it "model loads" -- for precisely the
+    // file that cannot be loaded.
+    const std::string whole = apogee::testing::minimal_gguf("llama");
+
+    Install install;
+    install.seed();
+    install.write("models/half.gguf", whole.substr(0, whole.size() / 2));
+
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml",
+                  "backends:\n  local:\n    type: llamacpp\n    model_path: " +
+                      (install.root / "models" / "half.gguf").string() + "\n");
+    load_into(inputs);
+
+    const CheckReport report = run_checks(inputs);
+
+    const auto* row = row_with(report, "backend: local");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail.find("unreadable GGUF") != std::string::npos);
+    CHECK_FALSE(row->remedy.empty());
+    CHECK_FALSE(report.passed());
+}
+
 TEST_CASE("a valid GGUF header passes", "[commands][check]") {
     Install install;
     install.seed();
-    install.write("models/good.gguf", std::string{"GGUF"} + std::string(64, '\0'));
+    // A real minimal GGUF, not "GGUF" plus padding: the padded version parses
+    // as an empty-but-valid header, so it would pass without ever exercising
+    // the metadata or tensor sections.
+    install.write("models/good.gguf", apogee::testing::minimal_gguf("llama"));
 
     CheckInputs inputs = inputs_for(install);
     install.write("config/config.yaml",
@@ -229,6 +260,9 @@ TEST_CASE("a valid GGUF header passes", "[commands][check]") {
     const auto* row = row_with(report, "backend: local");
     REQUIRE(row != nullptr);
     CHECK(row->status == Status::Ok);
+    // The architecture the header actually declares -- proof the row came from
+    // a real parse rather than from a magic-bytes glance.
+    CHECK(row->detail.find("llama") != std::string::npos);
     CHECK(report.passed());
 }
 

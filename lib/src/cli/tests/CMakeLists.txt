@@ -35,6 +35,9 @@ add_executable(apogee_tests
     backends/ollama_cli_test.cpp
     backends/codex_cli_test.cpp
     backends/gemini_cli_test.cpp
+    harness/roles_test.cpp
+    models/gguf_inspect_test.cpp
+    commands/models_test.cpp
     backends/jsonl_framer_test.cpp
     backends/chat_template_test.cpp
     agentloop/conformance_test.cpp
@@ -61,6 +64,7 @@ add_executable(apogee_tests
     support/fake_transport.h
     support/fake_llama.h
     support/fake_child.h
+    support/gguf_builder.h
     support/fake_transport.cpp
 )
 
@@ -150,6 +154,13 @@ add_test(NAME cli.no_vendor_credentials
     COMMAND "${CMAKE_COMMAND}"
         -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
         -P "${CMAKE_CURRENT_SOURCE_DIR}/no_vendor_credentials.cmake"
+)
+
+# One role-resolution chain, and only one. See the file for the Ommi bug class.
+add_test(NAME cli.one_role_resolver
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/one_role_resolver.cmake"
 )
 
 add_test(NAME cli.test_names
