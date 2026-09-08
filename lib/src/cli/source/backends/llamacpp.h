@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "backends/llama_runtime.h"
+#include "backends/model_profile.h"
 #include "harness/config.h"
 #include "harness/provider.h"
 
@@ -38,6 +39,7 @@ namespace apogee::backends {
 /// parses in-text calls yet. Claiming the capability now would advertise a
 /// parser that does not exist.
 class LlamaCppProvider final : public harness::LLMProvider,
+                               public harness::ModelBehaviorReporting,
                                public harness::TokenCounting,
                                public harness::VisionCapable,
                                public harness::StatusReporting {
@@ -129,6 +131,15 @@ public:
     /// mmproj file to point at.
     [[nodiscard]] bool accepts_images() const noexcept override;
 
+    // --- ModelBehaviorReporting ---------------------------------------------
+
+    /// What Apogee knows about this model's family.
+    ///
+    /// Resolved from the GGUF's own `general.architecture` when the model is
+    /// loaded, falling back to the configured name. The zero value means
+    /// **uncharacterised**, which every consumer must read as permissive.
+    [[nodiscard]] harness::ModelBehavior model_behavior() const override;
+
     // --- StatusReporting ----------------------------------------------------
 
     [[nodiscard]] harness::StatusEvent model_status() const override;
@@ -179,8 +190,19 @@ private:
                                                        const harness::StreamOptions& options,
                                                        const std::vector<std::string>& images);
 
+    /// The resolved profile, and the architecture it was resolved from.
+    ///
+    /// Cached at load rather than recomputed: it is asked once per turn by the
+    /// display and once more by the loop, and the answer cannot change while a
+    /// model is resident.
+    [[nodiscard]] const ModelProfile* profile() const;
+
     Options options_;
     std::unique_ptr<LlamaRuntime> runtime_;
+    /// `general.architecture` of the loaded model, empty before the first load.
+    mutable std::string architecture_;
+    mutable const ModelProfile* profile_ = nullptr;
+    mutable bool profile_resolved_ = false;
     std::unique_ptr<LlamaModel> model_;
 
     /// The conversation's KV cache, and the tokens known to be in it.

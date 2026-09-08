@@ -39,6 +39,7 @@ add_executable(apogee_tests
     models/gguf_inspect_test.cpp
     models/sha256_test.cpp
     models/acquire_test.cpp
+    models/quantize_test.cpp
     models/sidecar_test.cpp
     models/source_ollama_test.cpp
     models/source_hf_test.cpp
@@ -46,6 +47,8 @@ add_executable(apogee_tests
     commands/models_test.cpp
     commands/attachment_guard_test.cpp
     backends/jsonl_framer_test.cpp
+    backends/think_filter_test.cpp
+    backends/model_profile_test.cpp
     backends/chat_template_test.cpp
     agentloop/conformance_test.cpp
     commands/helpers_test.cpp

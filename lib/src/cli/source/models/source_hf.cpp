@@ -123,6 +123,10 @@ HfListing list_gguf_files(backends::HttpClient& client, const HfRef& ref, std::s
             const std::string name = sibling.value("rfilename", std::string{});
             if (name.size() > 5 && name.ends_with(".gguf")) {
                 listing.gguf_files.push_back(name);
+            } else if (name.ends_with(".safetensors")) {
+                // Not downloaded, only NOTICED -- so the refusal above can name
+                // the conversion path instead of a generic "no .gguf".
+                listing.has_safetensors = true;
             }
         }
     }
@@ -142,9 +146,24 @@ bool resolve_file(backends::HttpClient& client, HfRef& ref, std::string_view tok
         return false;
     }
     if (listing.gguf_files.empty()) {
-        error = "'" + ref.repo_id() +
-                "' contains no .gguf file. Apogee runs GGUF models; a SafeTensors repository needs "
-                "converting first";
+        // Naming the conversion path matters: SPEC lists SafeTensors in scope,
+        // so "no .gguf" alone reads as a limitation rather than as a step the
+        // user can take. Apogee does not run the converter itself -- it needs a
+        // Python environment with torch and transformers, which a C++ harness
+        // cannot assume is present and should not install on someone's behalf.
+        error = "'" + ref.repo_id() + "' contains no .gguf file.\n\n";
+        if (listing.has_safetensors) {
+            error +=
+                "It is a SafeTensors repository. Apogee runs GGUF, so it needs converting "
+                "first:\n"
+                "  python convert_hf_to_gguf.py --outfile model.gguf <the downloaded repo>\n"
+                "(that script ships with llama.cpp and needs Python with torch and "
+                "transformers)\n\n"
+                "Or look for a community GGUF conversion -- searching the model's name with "
+                "\"GGUF\" usually finds one.";
+        } else {
+            error += "Apogee runs GGUF models. Look for a GGUF conversion of this model.";
+        }
         return false;
     }
     if (listing.gguf_files.size() > 1) {

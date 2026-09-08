@@ -233,6 +233,10 @@ GgufInfo inspect_gguf(const std::filesystem::path& path) {
             // Only two keys are worth materialising. Everything else is stepped
             // over -- the vocabulary alone is megabytes of strings, and reading
             // it would turn a cheap check into an expensive one.
+            if (type == ValueType::UInt32 && key == "general.file_type") {
+                info.file_type = cursor.number<std::uint32_t>();
+                continue;
+            }
             if (type == ValueType::String &&
                 (key == "general.architecture" || key == "general.name")) {
                 std::string value = cursor.string();
@@ -268,6 +272,7 @@ GgufInfo inspect_gguf(const std::filesystem::path& path) {
         // A partial read must not look like a partial success.
         info.tensors = 0;
         info.text_tensors = 0;
+        info.file_type = kUnknownFileType;
         info.architecture.clear();
         info.name.clear();
     }

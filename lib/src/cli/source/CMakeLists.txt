@@ -44,6 +44,8 @@ add_library(apogee_core STATIC
     models/source_ollama.cpp
     models/source_hf.h
     models/source_hf.cpp
+    models/quantize.h
+    models/quantize.cpp
     commands/models_pull.h
     commands/models_pull.cpp
     commands/models.h
@@ -162,6 +164,10 @@ add_library(apogee_core STATIC
     backends/claude_cli_events.cpp
     backends/llama_runtime.h
     backends/llama_real.cpp
+    backends/think_filter.h
+    backends/think_filter.cpp
+    backends/model_profile.h
+    backends/model_profile.cpp
     backends/chat_template.h
     backends/chat_template.cpp
     backends/llamacpp_tokens.h

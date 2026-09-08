@@ -925,7 +925,7 @@ The fourth and last vendor CLI, completing SPEC's dual-path claim: every cloud v
 - [x] **`source/backends/gemini_cli.h/.cpp`** — the provider. No persistent child (no stdin turn stream), but Apogee generates the session UUID up front: turn one passes `--session-id`, every later turn passes `--resume <same uuid>`, and only the new user message goes out.
 - [x] **`TurnComplete::model`** on the shared event union — "which model answered" is turn accounting, and this is the first CLI where it is not simply what was asked for.
 - [x] **`gemini-cli` config type**, documented in the starter config including the `GEMINI_API_KEY` precedence trap and the two pinned flags.
-- [x] **`cli.no_vendor_credentials` widened to the whole family** — it had only ever covered Claude's paths, so three of four backends were unguarded. Now covers `.gemini/`, `google_accounts.json`, `oauth_creds.json`, and `.codex/`. `~/.ollama/` is deliberately excluded and the reason is written down: it is a *model* store, and reading it is a supported source in [model-acquisition.md](../backlog/model-acquisition.md).
+- [x] **`cli.no_vendor_credentials` widened to the whole family** — it had only ever covered Claude's paths, so three of four backends were unguarded. Now covers `.gemini/`, `google_accounts.json`, `oauth_creds.json`, and `.codex/`. `~/.ollama/` is deliberately excluded and the reason is written down: it is a *model* store, and reading it is a supported source (shipped — Milestone N).
 - [x] **16 new tests** (588 total), with **recorded** fixtures from the real session.
 
 **The safety pin needed two flags, not one.** `--approval-mode plan` alone pins nothing: this CLI was observed replacing it with `default` in an untrusted folder, and Apogee spawns wherever the user's shell happens to be. So `plan` and `--skip-trust` are both literals in the argv builder, asserted together, and mutation-tested together — removing either turns the safety test red. `--raw-output` (which disables output sanitisation and which the CLI itself calls a security risk) can never appear.
@@ -997,7 +997,7 @@ The general lesson is the one this repo already applies elsewhere and had not ap
 
 ## Milestone N — Model operations
 
-**Goal.** Model management: one shared resolver for the `models:` role pointers, the `apogee models` suite, a real GGUF header reader that `check` uses to tell a working model from a broken one, and — from 2026-09-07 — acquiring models from Hugging Face and the user's Ollama store without ever leaving a half-downloaded one on disk.
+**Goal.** Model management, end to end: one shared resolver for the `models:` role pointers, the `apogee models` suite, a real GGUF header reader that `check` uses to tell a working model from a broken one, and — from 2026-09-07 — acquiring, quantizing, and repairing models from Hugging Face and the user's Ollama store without ever leaving a half-downloaded one on disk.
 
 ### 2026-09-07 — `model-operations`: one resolver, and a check that stops lying
 
@@ -1141,4 +1141,82 @@ Two of those mutations needed a second attempt, and both times the *mutation* wa
 
 One of those came back green at first and the *test* was at fault, in the same shape as two earlier ones this branch: the message assertion was guarded behind a refusal that, in a build without llama.cpp, never arrives — so it asserted nothing. The message is now exposed as `image_refusal_message()` and checked directly.
 
-**The question multimodal-vision owed model-acquisition, answered.** **mtmd requires a separate projector file.** Passing a text model as its own `mmproj_path` fails at `mtmd_init_from_file` ("Failed to load CLIP model"). So a combined text+vision blob cannot be used for vision as-is — but note the asymmetry with Ommi's finding: Ommi *stripped* vision tensors so the text model would load, and here the text model loads fine untouched. What a combined blob would need is the projector **extracted**, not the vision tensors discarded. That is recorded on [model-acquisition.md](../backlog/model-acquisition.md) §2, whose remaining question is now narrower.
+**The question multimodal-vision owed model-acquisition, answered.** **mtmd requires a separate projector file.** Passing a text model as its own `mmproj_path` fails at `mtmd_init_from_file` ("Failed to load CLIP model"). So a combined text+vision blob cannot be used for vision as-is — but note the asymmetry with Ommi's finding: Ommi *stripped* vision tensors so the text model would load, and here the text model loads fine untouched. What a combined blob would need is the projector **extracted**, not the vision tensors discarded. That question was closed the same day: the registry showed Ollama already ships the projector as its own layer, so no transform was ever needed — see Milestone N's completion entry.
+
+### 2026-09-07 — `model-acquisition` completed: quantize, and a plan the manifests refuted
+
+The residue this item was deliberately reduced to on 2026-09-07 — three pieces that were not buildable in the same pass — is now closed. Two of them landed; the third turned out to be the wrong work.
+
+**What was built**
+
+- [x] **`source/models/quantize.h/.cpp`** — `apogee models quantize in.gguf out.gguf --type Q4_K_M` via `llama_model_quantize`, behind `APOGEE_ENABLE_LLAMA` with a refusal that names the flag. **Verified live: 5 GiB F16 → 1 GiB Q4_K_M in 11 seconds**, and the result loads and generates.
+- [x] **`GgufInfo::file_type` / `is_quantized()`** — the header already knew.
+- [x] **The Ollama projector layer**, read as its own file, with `models pull` fetching it alongside the model and printing the `mmproj_path` line to paste.
+- [x] **A SafeTensors repository now names the conversion path** instead of a bare "no .gguf".
+- [x] **11 new tests** (713 total), green in both builds.
+
+**The plan was wrong, and one HTTP request said so.**
+
+This item inherited from Ommi the idea that Ollama ships vision models as a **single combined blob**, and that Apogee would need a transform to deal with it. Milestone O had already narrowed the question — mtmd needs a *separate* projector, so the operation would be an *extract* rather than Ommi's *strip*. Before building either, the registry was simply asked:
+
+```
+llava:      model 4108.9 MB   projector 624.4 MB   license   template   params
+moondream:  model  828.7 MB   projector 909.8 MB   license   template   params
+```
+
+**Ollama already ships the projector as its own layer** — `application/vnd.ollama.image.projector`. There is nothing combined, nothing to extract, and nothing to strip. The right work was not a transform at all: it was for the store reader to *notice a layer it had been ignoring*, and for `pull` to copy it. Two carefully-reasoned designs, one inherited and one derived from it, both retired by a `curl` that cost nothing.
+
+The lesson is the cheap one: **a plan inherited from the reference implementation is a hypothesis about the world, and the world is queryable.** Ommi's finding was true when Ommi found it; it stopped being true, and nothing in the document said so because documents cannot notice.
+
+**Quantize's error message, improved by running it.** The first live attempt was against an already-quantized model, and llama.cpp does refuse that — after a couple of hundred per-tensor log lines, by which point `requantizing from type q8_0 is disabled` has scrolled away and the user sees a bare failure. The header already carries `general.file_type`, so it is now caught up front in one sentence that names the way forward. Two false-positive tests guard it: an F16 input and a header with no `file_type` must both be allowed through, since refusing either would block the only path that works.
+
+**Two UX faults, also from running it.** `quantize` announced "this reads and rewrites the whole model" *before* discovering it could not, which reads as a crash rather than a refusal; and `quantize types` was unreachable because CLI11 demanded the two positionals before the listing callback could run. It is `--types` now.
+
+**Guardrails, each mutation-tested (five mutations, all caught).** Refusing without naming the flag, silently overwriting an existing output, ignoring the projector layer, dropping the SafeTensors conversion path, and failing to detect an already-quantized input.
+
+**An observation worth recording for [model-profiles.md](../backlog/model-profiles.md).** The freshly quantized Llama 3.2 loads and generates — and answers with ChatML markers and prompt echo, because this GGUF ships no embedded chat template and the narrow name-matched registry falls back to ChatML. The **pre-existing** Q4 of the same model, which Apogee never touched, produces worse output still. So this is not a quantization defect: it is the quirk layer's absence, observed directly. Local models on this machine are not usably conversational until model-profiles lands, which is the most concrete argument for that item anyone has made so far.
+
+**What SafeTensors does and does not do.** A SafeTensors repository is now refused with the `convert_hf_to_gguf.py` invocation and a note that the script needs Python with torch and transformers. Apogee does **not** run it: a C++ harness cannot assume that environment exists and should not install it on someone's behalf. Dataset downloads remain unimplemented and are not refused with a special message — they simply are not GGUF, and land in the same branch.
+
+---
+
+## Milestone P — Model profiles
+
+**Goal.** The local-model quirk layer: a per-family profile registry with an explicit resolution ladder, and a streaming filter that keeps a model's private reasoning out of its answer.
+
+### 2026-09-07 — `model-profiles`: characterized, and the premise was wrong
+
+**The characterization came first, and it contradicted the item.** Three families were pulled and run before any code was written:
+
+| Family | Embedded chat template | Observed |
+|---|---|---|
+| `gemma3` (1b-it Q8_0) | **yes** | Clean. Answered "Paris". Nothing to strip. |
+| `qwen3` (3.6-27b Q4_K_M) | **yes** | **Emitted `<think>\n\n</think>\n\n4` — all of it reaching the user.** |
+| `llama3` (3.2-3b, local files) | **no** | Degenerate on every prompt. |
+
+This item was written from Ommi's Gemma 4, which shipped **no** chat template and had to be reverse-engineered — that was the case the bespoke-override slot existed for. **Gemma 3 ships a good template and needs no help at all.** The family that needed help was Llama, and its files here carry a content hash where a name should be and degenerate like base models, so nothing about it could be verified.
+
+Had the profiles been ported from the reference implementation rather than characterized, Apogee would now carry a hand-written Gemma template that overrode a working one.
+
+**What was built**
+
+- [x] **`source/backends/think_filter.h/.cpp`** — the streaming reasoning filter, with a hold-back buffer sized to the longest marker so a tag split across two tokens is still recognised. **Fixes an observed bug**: Qwen's answer is now `4`, not `<think></think>4`.
+- [x] **`source/backends/model_profile.h/.cpp`** — the registry and its ladder: explicit setting > the GGUF's own `general.architecture` > a name hint > nothing.
+- [x] **`LlamaCppProvider` implements `ModelBehaviorReporting`**, and filters its own stream at the source so display, returned text, and persisted history cannot disagree.
+- [x] **`models list` and `models info` report the resolved profile**, its verified state, and the evidence line behind it.
+- [x] **44 new tests** (738 total), green in both builds.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Ladder rung 2 | The **file's architecture** above a name guess | An architecture is a fact recorded in the GGUF; a name is a string somebody chose. This is "specific before family" in the form that bites. |
+| `verified` | True only for what was **run here** | Under the open-model policy no allowlist makes any family a promise, so characterization state is the only signal a user gets. Two of five profiles are verified; the other three say why not, and a test asserts that list is exactly `{gemma3, qwen3}`. |
+| A known profile's empty tag list | Honoured as "emits none" | Gemma 3 was *observed* emitting no wrapper. Substituting the defaults there would strip text it never wrapped — which is why `known()` exists at all. |
+| Reasoning filtering | At the **source**, in the provider | Filtering at one surface and not another is how a `<think>` block ends up in a saved transcript after being hidden on screen. |
+
+**Guardrails, each mutation-tested (five mutations, all caught).** Removing the hold-back, eating a partial marker at end of stream, routing an unterminated block's residue into the answer, substituting defaults for a known profile's empty list, and swapping ladder rungs 2 and 3.
+
+The third of those **survived its first test**, and the reason is worth keeping. Inside a reasoning block the filter streams text to the thinking sink *as it goes*, holding back only what could still become the close marker — so by end of stream almost nothing remains to leak, and the assertion had nothing to fail on. A second case that ends the stream mid-`</think>` leaves six held-back bytes, and that one catches it. This is the third time on this branch that a green mutation exposed a test which could not observe the property it named.
+
+**What is NOT done, and why the item stays open.** Three acceptance criteria are unmet, and all three need model output nothing here produces: a **channel-header markup filter**, **control-token tool-call parsing**, and the display/parser opener-parity assertion that only matters once a parser exists. Ommi's evidence for those came from Gemma 4's control tokens; Gemma 3 emits none, and this item's own core constraint is that a profile is characterized from real weights rather than a published format. Building them blind is precisely the guesswork the constraint forbids, so they stay queued against a model that actually emits one.

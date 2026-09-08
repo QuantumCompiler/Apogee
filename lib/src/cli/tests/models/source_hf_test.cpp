@@ -111,15 +111,35 @@ TEST_CASE("a repo with several gguf files refuses and lists them", "[models][hf]
     CHECK(ref.file.empty());
 }
 
-TEST_CASE("a repo with no gguf says what is wrong", "[models][hf]") {
+TEST_CASE("a SafeTensors repo names the conversion path", "[models][hf]") {
+    // SPEC lists SafeTensors in scope, so "no .gguf" alone reads as a product
+    // limitation rather than as a step the user can take. Apogee does not run
+    // the converter itself -- it needs Python with torch and transformers,
+    // which a C++ harness cannot assume and should not install for someone.
     auto client =
         client_for({{.status = 200, .body = repo_json({"README.md", "model.safetensors"})}});
 
     HfRef ref{.owner = "owner", .repo = "repo"};
     std::string error;
     CHECK_FALSE(apogee::models::resolve_file(*client, ref, {}, {}, error));
+
     CHECK(error.find("no .gguf") != std::string::npos);
     CHECK(error.find("SafeTensors") != std::string::npos);
+    // The actual next step, not just a diagnosis.
+    CHECK(error.find("convert_hf_to_gguf.py") != std::string::npos);
+}
+
+TEST_CASE("a repo with neither says so without mentioning SafeTensors", "[models][hf]") {
+    // Naming a conversion path for a repository that has nothing to convert
+    // would send the user after a file that is not there.
+    auto client = client_for({{.status = 200, .body = repo_json({"README.md", "config.json"})}});
+
+    HfRef ref{.owner = "owner", .repo = "repo"};
+    std::string error;
+    CHECK_FALSE(apogee::models::resolve_file(*client, ref, {}, {}, error));
+
+    CHECK(error.find("no .gguf") != std::string::npos);
+    CHECK(error.find("convert_hf_to_gguf.py") == std::string::npos);
 }
 
 TEST_CASE("a gated repo explains how to get access", "[models][hf]") {

@@ -167,6 +167,81 @@ TEST_CASE("a manifest naming a blob that is gone reports absent", "[models][olla
     CHECK_FALSE(find_in_store(store.root, "ghost:latest").has_value());
 }
 
+TEST_CASE("a projector layer is read as its own file", "[models][ollama][vision]") {
+    // Checked against the live registry before this was built: `llava` and
+    // `moondream` both carry `application/vnd.ollama.image.projector` as a
+    // SEPARATE layer beside the model. The plan inherited from Ommi was to
+    // *extract* a projector out of a combined blob -- and the manifests say
+    // there is nothing to extract, so this reads a second file instead.
+    Store store;
+    const std::string gguf = apogee::testing::minimal_gguf("llama");
+    const std::string projector = apogee::testing::minimal_gguf("clip");
+    const std::string model_digest = std::string(64, '1');
+    const std::string proj_digest = std::string(64, '2');
+
+    store.write(std::filesystem::path{"blobs"} / ("sha256-" + model_digest), gguf);
+    store.write(std::filesystem::path{"blobs"} / ("sha256-" + proj_digest), projector);
+    store.write(
+        std::filesystem::path{"manifests"} / "registry.ollama.ai" / "library" / "llava" / "latest",
+        R"({"schemaVersion":2,"layers":[)"
+        R"({"mediaType":"application/vnd.ollama.image.model","digest":"sha256:)" +
+            model_digest + R"(","size":)" + std::to_string(gguf.size()) +
+            R"(},)"
+            R"({"mediaType":"application/vnd.ollama.image.projector","digest":"sha256:)" +
+            proj_digest + R"(","size":)" + std::to_string(projector.size()) +
+            R"(})"
+            R"(]})");
+
+    const auto entry = find_in_store(store.root, "llava:latest");
+    REQUIRE(entry.has_value());
+
+    CHECK(entry->has_projector());
+    CHECK(entry->projector_digest == proj_digest);
+    CHECK(entry->projector_size == static_cast<std::int64_t>(projector.size()));
+    CHECK(std::filesystem::exists(entry->projector_blob));
+
+    // Its promise is its own: a separate file with its own digest goes through
+    // the ladder separately and gets its own provenance record.
+    const auto promise = apogee::models::projector_promise_for(*entry);
+    CHECK(promise.digest == proj_digest);
+    CHECK(promise.ref.find("projector") != std::string::npos);
+}
+
+TEST_CASE("a text-only model has no projector", "[models][ollama][vision]") {
+    Store store;
+    store.add_model("llama3.2", "3b", "llama");
+
+    const auto entry = find_in_store(store.root, "llama3.2:3b");
+    REQUIRE(entry.has_value());
+    CHECK_FALSE(entry->has_projector());
+}
+
+TEST_CASE("a projector layer whose blob is gone does not break the model",
+          "[models][ollama][vision]") {
+    // The model still works for text. Failing the whole lookup because the
+    // optional half is missing would take away what does work.
+    Store store;
+    const std::string gguf = apogee::testing::minimal_gguf("llama");
+    const std::string model_digest = std::string(64, '3');
+
+    store.write(std::filesystem::path{"blobs"} / ("sha256-" + model_digest), gguf);
+    store.write(
+        std::filesystem::path{"manifests"} / "registry.ollama.ai" / "library" / "half" / "latest",
+        R"({"schemaVersion":2,"layers":[)"
+        R"({"mediaType":"application/vnd.ollama.image.model","digest":"sha256:)" +
+            model_digest + R"(","size":)" + std::to_string(gguf.size()) +
+            R"(},)"
+            R"({"mediaType":"application/vnd.ollama.image.projector","digest":"sha256:)" +
+            std::string(64, '9') +
+            R"(","size":10})"
+            R"(]})");
+
+    const auto entry = find_in_store(store.root, "half:latest");
+    REQUIRE(entry.has_value());
+    CHECK_FALSE(entry->has_projector());
+    CHECK(std::filesystem::exists(entry->blob));
+}
+
 TEST_CASE("a template layer is recorded as a hint", "[models][ollama]") {
     // Recorded, never auto-applied: applying it would override the profile
     // layer's resolution ladder from outside the ladder.

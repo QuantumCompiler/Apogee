@@ -62,6 +62,9 @@
 /// the case `models repair` exists for and must be able to *diagnose*.
 namespace apogee::models {
 
+/// `general.file_type` was absent from the header.
+inline constexpr std::uint32_t kUnknownFileType = 0xFFFFFFFFU;
+
 /// What a header read found. `parsed == false` always carries a `parse_error`.
 struct GgufInfo {
     /// The header was understood end to end.
@@ -97,6 +100,22 @@ struct GgufInfo {
 
     /// The file's size on disk, in bytes.
     std::int64_t file_size = 0;
+
+    /// `general.file_type` — llama.cpp's `llama_ftype`, recording how the
+    /// tensors are stored. 0 is all-F32, 1 is mostly-F16, 32 is BF16;
+    /// everything else is a quantized model. `kUnknownFileType` when absent.
+    std::uint32_t file_type = kUnknownFileType;
+
+    /// Whether the weights are already quantized.
+    ///
+    /// Load-bearing for `models quantize`: llama.cpp **refuses to requantize**,
+    /// and its own message ("requantizing from type q8_0 is disabled") arrives
+    /// buried in a couple of hundred per-tensor log lines. Knowing up front
+    /// turns that into one sentence before anything starts.
+    [[nodiscard]] bool is_quantized() const noexcept {
+        return parsed && file_type != kUnknownFileType && file_type != 0 && file_type != 1 &&
+               file_type != 32;
+    }
 
     /// Whether this file is a standalone multimodal projector (an "mmproj"):
     /// every tensor is a vision tensor and there is no text model at all.

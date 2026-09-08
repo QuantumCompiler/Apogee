@@ -9,6 +9,7 @@
 #include <map>
 #include <sstream>
 
+#include "backends/model_profile.h"
 #include "commands/json_reporter.h"
 #include "commands/models_pull.h"
 #include "harness/layout.h"
@@ -66,6 +67,22 @@ void pad(std::ostringstream& out, const std::string& value, std::size_t width, b
     if (!last) {
         out << std::string(width - value.size() + 2, ' ');
     }
+}
+
+/// The behaviour profile a model resolves to, and whether it was verified.
+///
+/// "unprofiled" is a real and common answer, not a placeholder: under the
+/// open-model policy any model runs, and one Apogee has never characterized is
+/// handled permissively rather than refused. Marking an unverified profile as
+/// such matters for the same reason -- a documented guess is worth using and
+/// worth labelling.
+[[nodiscard]] std::string describe_profile(std::string_view architecture,
+                                           std::string_view filename) {
+    const backends::ModelProfile* profile = backends::resolve_profile({}, architecture, filename);
+    if (profile == nullptr) {
+        return "unprofiled";
+    }
+    return profile->verified ? profile->name : profile->name + " (unverified)";
 }
 
 /// What a model's sidecar says was checked when it was acquired.
@@ -126,6 +143,9 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         } else {
             row.state = "ok";
             row.architecture = info.architecture.empty() ? "(absent)" : info.architecture;
+            // The same ladder the provider uses, asked the same way -- so this
+            // column cannot claim a profile the run would not resolve.
+            row.profile = describe_profile(info.architecture, path.filename().string());
             if (info.is_projector()) {
                 row.note = "a multimodal projector (" + std::to_string(info.tensors) +
                            " vision tensors) -- point a backend's mmproj_path at this, not "
@@ -162,12 +182,14 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             row.type = "-";
             row.model = entry.path().filename().string();
             row.provenance = "local";
-            row.profile = "unprofiled";
             row.verified = describe_record(entry.path());
 
             const models::GgufInfo info = models::inspect_gguf(entry.path());
             row.state = info.parsed ? "ok" : "unreadable";
             row.architecture = info.parsed && !info.architecture.empty() ? info.architecture : "-";
+            row.profile =
+                info.parsed ? describe_profile(info.architecture, entry.path().filename().string())
+                            : "unprofiled";
             if (!info.parsed) {
                 row.note = info.parse_error;
             } else if (info.is_projector()) {
@@ -295,9 +317,18 @@ std::string render_model_info(const harness::Config& config, std::string_view ba
     out << "header:       ok (GGUF v" << info.version << ")\n";
     out << "architecture: " << (info.architecture.empty() ? "(absent)" : info.architecture) << "\n";
     // Stated separately from the architecture above, and stated at all rather
-    // than omitted: a user comparing two models needs to know Apogee has no
-    // characterized behaviour for either yet.
-    out << "profile:      unprofiled (no profile registry yet -- model-profiles)\n";
+    // than omitted: a user comparing two models needs to know how much Apogee
+    // actually knows about each.
+    const std::string profile =
+        describe_profile(info.architecture, std::filesystem::path{expanded}.filename().string());
+    out << "profile:      " << profile << "\n";
+    if (const backends::ModelProfile* resolved = backends::resolve_profile(
+            {}, info.architecture, std::filesystem::path{expanded}.filename().string());
+        resolved != nullptr) {
+        // The evidence line is what makes `verified` auditable rather than a
+        // bare adjective: it says which model was run, and when.
+        out << "evidence:     " << resolved->evidence << "\n";
+    }
     if (!info.name.empty()) {
         out << "name:         " << info.name << "\n";
     }

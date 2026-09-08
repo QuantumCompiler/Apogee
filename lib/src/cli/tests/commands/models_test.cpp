@@ -176,15 +176,47 @@ TEST_CASE("architecture and profile are separate claims", "[commands][models][li
 
     REQUIRE(parsed.state == "ok");
     CHECK(parsed.architecture == "gemma3");
-    CHECK(parsed.profile == "unprofiled");
+    CHECK(parsed.profile == "gemma3");
 
-    for (const ModelRow& row : rows) {
-        INFO("backend: " << row.backend);
-        CHECK(row.profile == "unprofiled");
-    }
+    // Where the two genuinely differ: Qwen's GGUF declares `qwen35`, and the
+    // profile covering it is named `qwen3` because one profile spans a family's
+    // several architecture spellings. A column that echoed the architecture
+    // would be a weaker, different claim.
+    const RealModel qwen{"qwen35"};
+    const std::vector<ModelRow> qwen_rows = build_model_rows(Config{}, qwen.dir);
+    const ModelRow& qwen_row = row_for(qwen_rows, "(not configured)");
+    CHECK(qwen_row.architecture == "qwen35");
+    CHECK(qwen_row.profile == "qwen3");
 }
 
-TEST_CASE("info on a readable model reports the header and still says unprofiled",
+TEST_CASE("an unrecognised architecture is reported but not profiled",
+          "[commands][models][listing]") {
+    // Both halves matter. The architecture is still shown -- a fact from the
+    // file, useful even when nothing is known about it -- while the profile
+    // honestly says nothing is.
+    const RealModel model{"some-brand-new-arch"};
+
+    const std::vector<ModelRow> rows = build_model_rows(Config{}, model.dir);
+    const ModelRow& parsed = row_for(rows, "(not configured)");
+
+    CHECK(parsed.architecture == "some-brand-new-arch");
+    CHECK(parsed.profile == "unprofiled");
+}
+
+TEST_CASE("an unverified profile says so in the listing", "[commands][models][listing]") {
+    // llama3 is registered from its published format but was never seen working
+    // here. Under the open-model policy that qualifier is the only signal a
+    // user gets about how much Apogee actually knows.
+    const RealModel model{"llama"};
+
+    const std::vector<ModelRow> rows = build_model_rows(Config{}, model.dir);
+    const ModelRow& parsed = row_for(rows, "(not configured)");
+
+    CHECK(parsed.profile.find("llama3") != std::string::npos);
+    CHECK(parsed.profile.find("unverified") != std::string::npos);
+}
+
+TEST_CASE("info on a readable model reports the header and its resolved profile",
           "[commands][models][info]") {
     const RealModel model{"qwen35"};
 
@@ -198,7 +230,7 @@ TEST_CASE("info on a readable model reports the header and still says unprofiled
 
     CHECK(body.find("header:       ok") != std::string::npos);
     CHECK(body.find("architecture: qwen35") != std::string::npos);
-    CHECK(body.find("profile:      unprofiled") != std::string::npos);
+    CHECK(body.find("profile:      qwen3") != std::string::npos);
     CHECK(body.find("1 total, 1 text") != std::string::npos);
 }
 

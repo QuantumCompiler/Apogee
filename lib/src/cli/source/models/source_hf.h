@@ -68,6 +68,13 @@ struct HfListing {
     std::string error;
     /// Every `.gguf` path in the repo, in the order the API returned them.
     std::vector<std::string> gguf_files;
+
+    /// Whether the repo holds SafeTensors instead.
+    ///
+    /// Noticed, not downloaded. SPEC lists SafeTensors in scope and this item's
+    /// residue still owes it; until then, knowing which kind of repository the
+    /// user named is what turns "no .gguf" from a dead end into a next step.
+    bool has_safetensors = false;
 };
 
 /// Lists a repository's GGUF files.

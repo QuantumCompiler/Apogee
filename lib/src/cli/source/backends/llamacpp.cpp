@@ -1,10 +1,12 @@
 #include "backends/llamacpp.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <utility>
 
 #include "backends/llamacpp_tokens.h"
 #include "harness/errors.h"
+#include "models/gguf_inspect.h"
 
 namespace apogee::backends {
 namespace {
@@ -163,6 +165,28 @@ std::string_view LlamaCppProvider::backend_name() const noexcept {
     return options_.backend_name;
 }
 
+const ModelProfile* LlamaCppProvider::profile() const {
+    if (profile_resolved_) {
+        return profile_;
+    }
+    // The architecture comes from the GGUF's own header -- a fact recorded in
+    // the file, which is why the ladder ranks it above guessing from a name.
+    // Read here rather than through the runtime seam because it is a few
+    // kilobytes and needs no model load: `model_behavior()` is asked before a
+    // turn, and loading weights to answer it would be absurd.
+    if (!options_.model_path.empty()) {
+        architecture_ =
+            models::inspect_gguf(std::filesystem::path{options_.model_path}).architecture;
+    }
+    profile_ = resolve_profile({}, architecture_, options_.model);
+    profile_resolved_ = true;
+    return profile_;
+}
+
+harness::ModelBehavior LlamaCppProvider::model_behavior() const {
+    return behavior_for(profile());
+}
+
 bool LlamaCppProvider::accepts_images() const noexcept {
     // Answers from CONFIGURED state, not from a loaded model: this is asked
     // before a turn begins, and loading 16GB of weights to answer a yes/no
@@ -274,6 +298,18 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     std::vector<std::int32_t> generated;
     harness::FinishReason finish = harness::FinishReason::Stop;
 
+    // Reasoning is separated HERE, at the source, so display, the returned
+    // text, persisted history, and any later tool parsing all see the same
+    // thing. Filtering at one surface and not another is how a <think> block
+    // ends up in a saved transcript after being hidden on screen.
+    //
+    // A KNOWN profile's empty pair list is honoured as "this family emits
+    // none"; an unprofiled model gets the permissive default set.
+    ThinkFilter think{reasoning_pairs_for(profile())};
+    if (options.on_thinking) {
+        think.on_thinking(options.on_thinking);
+    }
+
     // Where generation must stop even if the model would keep going. Found on
     // real hardware, not by the scripted runtime: `apogee chat`'s background
     // title request has no max_tokens of its own, so it ran to the provider
@@ -299,16 +335,28 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
         }
 
         const std::string piece = model_->token_text(token);
-        answer += piece;
         generated.push_back(token);
-        if (options.on_token && !piece.empty()) {
-            options.on_token(piece);
+
+        const std::string visible = think.write(piece);
+        answer += visible;
+        if (options.on_token && !visible.empty()) {
+            options.on_token(visible);
         }
 
         // Feed the token back so the next sample sees it. Its position is the
         // end of the prompt plus however many we have already produced.
         context.decode({token}, prompt_end + produced);
     }
+    // Whatever the filter still holds: a partial marker at end of stream was
+    // never a marker, and an unterminated reasoning block's residue goes to the
+    // thinking sink rather than into the answer.
+    if (const std::string tail = think.flush(); !tail.empty()) {
+        answer += tail;
+        if (options.on_token) {
+            options.on_token(tail);
+        }
+    }
+
     // Reaching the cap without an end-of-generation token is a truncated
     // answer, and a surface that shows it as complete is lying to the user.
     if (produced >= limit) {

@@ -55,6 +55,24 @@ struct OllamaEntry {
     /// The chat-template layer's text, when the manifest carries one. A hint,
     /// recorded and never auto-applied.
     std::string template_hint;
+
+    /// The multimodal projector's blob, when this model has one.
+    ///
+    /// **Ollama ships the projector as its OWN layer** —
+    /// `application/vnd.ollama.image.projector` — rather than fused into the
+    /// model blob. That was worth checking rather than assuming: the plan
+    /// inherited from Ommi was to *extract* a projector out of a combined file,
+    /// and the manifests say there is nothing to extract. `llava` and
+    /// `moondream` both carry the two layers side by side.
+    ///
+    /// Empty for a text-only model.
+    std::filesystem::path projector_blob;
+    std::int64_t projector_size = 0;
+    std::string projector_digest;
+
+    [[nodiscard]] bool has_projector() const noexcept {
+        return !projector_blob.empty();
+    }
 };
 
 /// The store root: `$OLLAMA_MODELS`, else `~/.ollama/models`.
@@ -105,5 +123,14 @@ struct OllamaEntry {
 /// The promise an Ollama entry makes: a real digest and a real size, which is
 /// better than most sources manage.
 [[nodiscard]] SourcePromise promise_for(const OllamaEntry& entry);
+
+/// A `ByteSource` and promise for the entry's **projector**, when it has one.
+///
+/// A second acquisition rather than a bolt-on to the first: it is a separate
+/// file with its own digest and its own size, so it goes through the same
+/// copy → verify → commit ladder and gets its own provenance record. Sharing
+/// one call would mean one sidecar describing two files.
+[[nodiscard]] ByteSource projector_source(const OllamaEntry& entry);
+[[nodiscard]] SourcePromise projector_promise_for(const OllamaEntry& entry);
 
 }  // namespace apogee::models

@@ -9,6 +9,7 @@
 #include "backends/http_client.h"
 #include "models/acquire.h"
 #include "models/gguf_inspect.h"
+#include "models/quantize.h"
 #include "models/source_hf.h"
 #include "models/source_ollama.h"
 
@@ -246,9 +247,38 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         if (!result.error.empty()) {
             std::cout << "note: " << result.error << "\n";
         }
+
+        // A vision model's projector is a SEPARATE layer in Ollama's manifest,
+        // and useless to leave behind: without it the model can only do text,
+        // and the user has no way to know a second file was sitting there.
+        std::filesystem::path projector;
+        if (entry.has_value() && entry->has_projector()) {
+            const std::filesystem::path destination_projector =
+                models_dir / filename_for(ref + "-mmproj");
+            std::cout << "\nthis model has a vision projector; copying that too ("
+                      << human_size(entry->projector_size) << ")\n";
+
+            const models::AcquireResult vision =
+                models::acquire(destination_projector, models::projector_promise_for(*entry),
+                                models::projector_source(*entry));
+            if (!vision.ok) {
+                // The model is already in place and usable for text, so this is
+                // a warning rather than a failure of the whole pull.
+                std::cout << "warning: the projector could not be copied -- " << vision.error
+                          << "\n         this model will work for text but not for images\n";
+            } else {
+                projector = vision.path;
+                std::cout << vision.path.string() << "\n";
+            }
+        }
+
         std::cout << "\nUse it by adding a backend:\n"
                   << "  apogee config add-backend <name> --type llamacpp --model-path "
                   << result.path.string() << "\n";
+        if (!projector.empty()) {
+            std::cout << "\nthen add its projector to that backend so it can read images:\n"
+                      << "  mmproj_path: \"" << projector.string() << "\"\n";
+        }
     });
 
     // ---- delete -------------------------------------------------------------
@@ -290,6 +320,47 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             std::filesystem::remove(plan.sidecar, code);
         }
         std::cout << "\nremoved.\n";
+    });
+
+    // ---- quantize -----------------------------------------------------------
+    auto quant_in = std::make_shared<std::string>();
+    auto quant_out = std::make_shared<std::string>();
+    auto quant_type = std::make_shared<std::string>("Q4_K_M");
+    auto quant_list = std::make_shared<bool>(false);
+    CLI::App* quantize = models.add_subcommand("quantize", "Make a smaller copy of a GGUF");
+    // Not `->required()`: --types is a listing, and CLI11 would demand the two
+    // positionals before ever reaching the callback that prints the list.
+    quantize->add_option("input", *quant_in, "Model file to read");
+    quantize->add_option("output", *quant_out, "Where to write the smaller copy");
+    quantize->add_option("-t,--type", *quant_type, "Quantization type (default Q4_K_M)");
+    quantize->add_flag("--types", *quant_list, "List the accepted quantization types and exit");
+
+    quantize->callback([quant_in, quant_out, quant_type, quant_list]() {
+        if (*quant_list) {
+            for (const models::QuantType& type : models::quant_types()) {
+                std::cout << "  " << type.name << "   " << type.summary << "\n";
+            }
+            return;
+        }
+        if (quant_in->empty() || quant_out->empty()) {
+            fail(
+                "quantize needs an input and an output, e.g.\n"
+                "  apogee models quantize model.gguf smaller.gguf --type Q4_K_M\n"
+                "  apogee models quantize --types    (to see the choices)");
+        }
+
+        const models::QuantizeResult result = models::quantize(
+            std::filesystem::path{*quant_in}, std::filesystem::path{*quant_out}, *quant_type);
+        if (!result.ok) {
+            // Reported BEFORE any "this will take a while" note: announcing
+            // work and then refusing to do it reads as a crash rather than as
+            // a refusal.
+            fail(result.error);
+        }
+
+        std::cout << *quant_out << "\n"
+                  << human_size(result.input_bytes) << " -> " << human_size(result.output_bytes)
+                  << "\n";
     });
 
     // ---- repair -------------------------------------------------------------

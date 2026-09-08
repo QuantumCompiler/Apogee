@@ -13,6 +13,7 @@ namespace {
 
 constexpr std::string_view kMediaTypeModel = "application/vnd.ollama.image.model";
 constexpr std::string_view kMediaTypeTemplate = "application/vnd.ollama.image.template";
+constexpr std::string_view kMediaTypeProjector = "application/vnd.ollama.image.projector";
 constexpr std::string_view kDefaultRegistry = "registry.ollama.ai";
 constexpr std::string_view kLibraryNamespace = "library";
 constexpr std::size_t kCopyChunk = 1U << 20U;  // 1 MiB
@@ -115,6 +116,13 @@ std::optional<OllamaEntry> parse_manifest(const std::filesystem::path& root, std
             entry.size = layer.value("size", std::int64_t{0});
             entry.blob = root / "blobs" / blob_filename(digest);
             found_model = true;
+        } else if (media == kMediaTypeProjector) {
+            // Its own layer, verified against the live registry: a vision model
+            // arrives as model + projector side by side, so there is nothing to
+            // extract and both files simply get copied.
+            entry.projector_digest = strip_algorithm(digest);
+            entry.projector_size = layer.value("size", std::int64_t{0});
+            entry.projector_blob = root / "blobs" / blob_filename(digest);
         } else if (media == kMediaTypeTemplate) {
             // Recorded as a hint. Applying it would override the profile
             // layer's resolution ladder from outside the ladder.
@@ -148,6 +156,14 @@ std::optional<OllamaEntry> find_in_store(const std::filesystem::path& root, std:
         return std::nullopt;
     }
     std::optional<OllamaEntry> entry = parse_manifest(root, ref, text);
+    if (entry.has_value() && entry->has_projector() &&
+        !std::filesystem::exists(entry->projector_blob, code)) {
+        // The model is usable without it; only vision is not. Dropping the
+        // path rather than failing keeps a text turn working.
+        entry->projector_blob.clear();
+        entry->projector_size = 0;
+        entry->projector_digest.clear();
+    }
     if (entry.has_value() && !std::filesystem::exists(entry->blob, code)) {
         // The manifest names a blob that is not there -- a store the user has
         // pruned by hand. Reported as absent rather than returned as a path
@@ -233,6 +249,22 @@ ByteSource blob_source(const OllamaEntry& entry) {
         }
         return true;
     };
+}
+
+ByteSource projector_source(const OllamaEntry& entry) {
+    OllamaEntry as_model = entry;
+    as_model.blob = entry.projector_blob;
+    return blob_source(as_model);
+}
+
+SourcePromise projector_promise_for(const OllamaEntry& entry) {
+    SourcePromise promise;
+    promise.ref = entry.ref + " (projector)";
+    promise.source = "ollama";
+    promise.source_url = entry.projector_blob.string();
+    promise.digest = entry.projector_digest;
+    promise.size = entry.projector_size;
+    return promise;
 }
 
 SourcePromise promise_for(const OllamaEntry& entry) {
