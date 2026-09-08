@@ -1174,7 +1174,7 @@ The lesson is the cheap one: **a plan inherited from the reference implementatio
 
 **Guardrails, each mutation-tested (five mutations, all caught).** Refusing without naming the flag, silently overwriting an existing output, ignoring the projector layer, dropping the SafeTensors conversion path, and failing to detect an already-quantized input.
 
-**An observation worth recording for [model-profiles.md](../backlog/model-profiles.md).** The freshly quantized Llama 3.2 loads and generates — and answers with ChatML markers and prompt echo, because this GGUF ships no embedded chat template and the narrow name-matched registry falls back to ChatML. The **pre-existing** Q4 of the same model, which Apogee never touched, produces worse output still. So this is not a quantization defect: it is the quirk layer's absence, observed directly. Local models on this machine are not usably conversational until model-profiles lands, which is the most concrete argument for that item anyone has made so far.
+**An observation worth recording for model profiles** (then queued; shipped later the same day — see [Milestone P](#milestone-p--model-profiles))**.** The freshly quantized Llama 3.2 loads and generates — and answers with ChatML markers and prompt echo, because this GGUF ships no embedded chat template and the narrow name-matched registry falls back to ChatML. The **pre-existing** Q4 of the same model, which Apogee never touched, produces worse output still. So this is not a quantization defect: it is the quirk layer's absence, observed directly. Local models on this machine are not usably conversational until model-profiles lands, which is the most concrete argument for that item anyone has made so far.
 
 **What SafeTensors does and does not do.** A SafeTensors repository is now refused with the `convert_hf_to_gguf.py` invocation and a note that the script needs Python with torch and transformers. Apogee does **not** run it: a C++ harness cannot assume that environment exists and should not install it on someone's behalf. Dataset downloads remain unimplemented and are not refused with a special message — they simply are not GGUF, and land in the same branch.
 
@@ -1219,4 +1219,133 @@ Had the profiles been ported from the reference implementation rather than chara
 
 The third of those **survived its first test**, and the reason is worth keeping. Inside a reasoning block the filter streams text to the thinking sink *as it goes*, holding back only what could still become the close marker — so by end of stream almost nothing remains to leak, and the assertion had nothing to fail on. A second case that ends the stream mid-`</think>` leaves six held-back bytes, and that one catches it. This is the third time on this branch that a green mutation exposed a test which could not observe the property it named.
 
-**What is NOT done, and why the item stays open.** Three acceptance criteria are unmet, and all three need model output nothing here produces: a **channel-header markup filter**, **control-token tool-call parsing**, and the display/parser opener-parity assertion that only matters once a parser exists. Ommi's evidence for those came from Gemma 4's control tokens; Gemma 3 emits none, and this item's own core constraint is that a profile is characterized from real weights rather than a published format. Building them blind is precisely the guesswork the constraint forbids, so they stay queued against a model that actually emits one.
+**What was NOT done at first, and why the item stayed open.** Three acceptance criteria were unmet, and all three needed model output nothing here produced: a **channel-header markup filter**, **control-token tool-call parsing**, and the display/parser opener-parity assertion that only matters once a parser exists. Ommi's evidence for those came from Gemma 4's control tokens; Gemma 3 emits none, and this item's own core constraint is that a profile is characterized from real weights rather than a published format. Building them blind is precisely the guesswork the constraint forbids, so they stayed queued against a model that actually emits one.
+
+### 2026-09-07 — the gate opened: gpt-oss emits both, and Ommi's transcription was right
+
+**The model this was waiting for.** `gpt-oss-20b` (MXFP4, 11.3 GiB, pulled from Hugging Face through Apogee's own acquisition ladder) emits **both** mechanisms. Ommi carries the same framing, transcribed from an Ollama manifest and marked, in its own words, unverified against generation *because the GGUF it had would not load in its bundled llama.cpp at all*. Apogee's pin (`549b9d84`) carries `LLM_ARCH_OPENAI_MOE`, so the thing Ommi could never check is checkable here. **It was right** — which is worth recording precisely because the last two characterization runs on this branch contradicted the plan.
+
+**The bug, verbatim.** "What is 2+2? Answer briefly." reached the caller as:
+
+```
+<|channel|>analysis<|message|>The user asks: "What is 2+2? Answer briefly." The answer is 4.<|end|><|start|>assistant<|channel|>final<|message|>4
+```
+
+Every character of it, shown as the answer. And with one tool declared:
+
+```
+<|channel|>commentary to=functions.read_file <|constrain|>json<|message|>{"path":"/tmp/notes.txt"}
+```
+
+printed as prose while nothing dispatched — the two-symptom failure this item was written against, reproduced exactly.
+
+**Why it is visible at all, and the design that came out of it.** llama.cpp's load log settles it: `<|channel|>`, `<|message|>`, `<|start|>` and `<|constrain|>` are set to **USER_DEFINED**, not CONTROL, so they detokenize into the stream even with `special = false`. `<|return|>` and `<|call|>` *are* control tokens and are end-of-generation, so they never reach the text and generation already stopped correctly. Ommi solved the visibility half with a per-template `show_special` switch; **Apogee needs none** — there is nothing to turn on, only framing to remove.
+
+The characterization also refuted the obvious design. Stripping headers alone would have dropped the model's *reasoning* into its answer, because `<|channel|>analysis<|message|>` … `<|end|>` is not framing to delete — it is a reasoning block whose opener happens to be a header. So the profile splits it: the analysis channel is a **`TagPair` for the existing `ThinkFilter`**, and only what is left over is the markup filter's. Three filters compose in the provider, and **the order is load-bearing**:
+
+| Order | Filter | Why here |
+|---|---|---|
+| 1 | `ThinkFilter` | The reasoning block's opener *is* a header. Strip headers first and the block loses its boundary, putting the model's working into the answer — Milestone P's Qwen bug, reintroduced by a different route. |
+| 2 | `ToolCallGate` | Keys on `<\|channel\|>commentary to=`, and the markup filter would have eaten the `<\|channel\|>` half of it. |
+| 3 | `MarkupFilter` | What is left is pure framing between the channels. |
+
+**What was built**
+
+- [x] **`source/backends/markup_filter.h/.cpp`** — the header filter. Grammar: OPEN, an identifier run, optional whitespace, an **optional** CLOSE. Both gpt-oss shapes are handled — `<|channel|>NAME<|message|>` closes, `<|start|>NAME` does not — and binding to the identifier rather than the close is what keeps an unterminated header costing one word instead of a paragraph.
+- [x] **`source/backends/native_tool_calls.h/.cpp`** — `tool_call_openers()`, the parser, and `ToolCallGate`. The gate withholds a call from the display and hands **exactly the bytes it withheld** to the parser.
+- [x] **The gpt-oss profile**, verified, with the evidence line naming the model and what it emitted.
+- [x] **`LlamaCppProvider` declares `InTextToolCalling`**, answering from the resolved profile rather than from the backend type. It had deliberately not declared it while no parser existed; that comment is now the implementation.
+- [x] **`FakeLlamaRuntime::script_text`** — generation scripted as the exact pieces a model emits. Needed because a real tokenizer splits framing where no word-splitting fake would: gpt-oss emits `commentary` as `comment` + `ary`, straight through the middle of a marker.
+- [x] **32 new tests** (810 total), green in both builds.
+
+**Verified live**, not only against fixtures: `apogee complete` answers `4`; `apogee complete --tools` dispatches `fetch_url` and answers from its result; the saved session file contains `Paris` and no framing at all.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The analysis channel | A **reasoning pair**, not a header to delete | Its content is the model's working. Deleting it would hide reasoning the user asked to see; leaving it would put it in the answer. |
+| Header defaults for an unprofiled model | **None**, unlike reasoning pairs | The asymmetry is the point: a header is deleted outright once matched, so guessing one for an uncharacterised family risks deleting its answer. Recognising too few reasoning wrappers only shows some working. |
+| `tool_call_openers()` | One entry, for the one family observed | A list is not a wish list. A second entry belongs to whichever family is run next. |
+| Suppress-then-parse | The gate holds the bytes and the parser reads *those* | Two lists that must agree are two lists that will not. Here there is one buffer, so they cannot disagree. |
+| GBNF grammar-constrained sampling *(open call)* | Recorded default taken: **not now** | The model emits a well-formed call unaided. Constraining it into a grammar it was not trained on trades one failure mode for a worse one. |
+| An Ollama layer's chat template disagreeing with the profile *(open call)* | Recorded default taken: **a hint, never auto-applied** | The sidecar already treats it as advisory, and the profile is the characterized statement. |
+
+**Guardrails, each mutation-tested (20 mutations, all caught).** Emptying the shared opener list; the **display** and then the **parser** each leaving that shared list; removing the next-opener bound; accepting an unbalanced argument object; removing the safety net; dropping the tool-name plausibility check; not stripping the `functions.` namespace; binding a header to its close alone; removing either filter's hold-back; eating whitespace after an unclosed header; giving an unprofiled model default headers; demoting the reasoning pair; not publishing the openers to the harness; dropping a header from the profile; and, in the provider, each of the three filter orderings, not flushing, dropping parsed calls, and claiming `InTextToolCalling` unconditionally.
+
+**Three of those survived their first run, and every one of the three was a test that could not see the property it named.**
+
+- *The next-opener bound.* The test fed a malformed call followed by a good one — but this grammar rejects a malformed prefix long before it could swallow anything, so the bound changed no outcome. The input that distinguishes it is narrower: a call whose argument object is unterminated, followed by one supplying a closing brace before opening its own. Unbounded, the brace scan spans both and **dispatches a real tool with another call's text as its arguments**. That test now exists.
+- *The tool-name check.* The test used prose containing a brace, which never reaches an opener at all. It now feeds a call whose arguments parse and whose *name* is empty or a path.
+- *Opener parity.* The first attempt mutated the list's contents, which does not break parity — both sides read the same list, so both change together. The mutation that matters is one side ceasing to read it, and there are now two: one for the display, one for the parser.
+
+**And the harness itself was wrong twice**, which is the more useful lesson. Restoring a mutated file with `mv` gave it an *older* mtime than the object built from it, so the next build was skipped and a stale binary reported a clean tree — one supposed pass was really the previous mutation still compiled in. Separately, a patch whose search text did not match changed nothing and was duly reported as "survived": **a no-op mutation always survives, and a harness that cannot tell that is reporting on itself.** Both now fail loudly. The pattern is the same one recorded in Milestone E about the install guard that supplied its own argument.
+
+**Found in passing, and left alone.** Running a tool live for the first time on this branch showed `[tool] [tool] fetch_url` — `agent/tool.cpp` prefixes the tag that `CliReporter` adds again, and machine mode emits a `text` field the protocol reference says should carry no prefix. It is pre-existing, pinned by three tests, and not this item's work; it is filed as its own task.
+
+---
+
+## Milestone Q — The retrieval floor
+
+**Goal.** RAG that works with no model, no API key, and no network: a SQLite chunk store with an FTS5/BM25 index, and `--rag` splicing retrieved context into the outgoing request without ever touching persisted history.
+
+### 2026-09-07 — `embedstore-lexical-rag`: lexical first, and a question that returned nothing
+
+**Verified live** against Apogee's own documentation, with zero backends configured:
+
+```
+$ apogee embed ingest apogee-docs ./lib/documentation/assistant
+2 file(s), 92 chunk(s)
+skipped 1:
+  image.png: looks binary
+
+$ apogee embed query apogee-docs "listening socket"
+0.869  [lexical]  CLAUDE.md#27
+    turns never open a listening socket  **Rule.** Only `apogee serve` may own a port…
+```
+
+**What was built**
+
+- [x] **SQLite with FTS5**, fetched and compiled with the flag on (`third_party/`).
+- [x] **`source/embedstore/store.h/.cpp`** — per-collection database, single-transaction migrations, an **external-content** FTS index kept current by triggers, and `integrity-check 1` for validation.
+- [x] **`source/embedstore/fts.h/.cpp`** — the query builder, and BM25 normalisation to `s/(1+s)`.
+- [x] **`source/embedstore/chunk.h/.cpp`** — overlapping chunking by **codepoint**.
+- [x] **`source/embedstore/ingest.h/.cpp`** — directory walk, binary sniffing, PDF via `pdftotext`.
+- [x] **`source/commands/embed.cpp`** — `ingest` / `query` / `list` / `info` / `delete`.
+- [x] **`source/agentloop/rag.h/.cpp`** and **`--rag` on `complete` and `chat`**.
+- [x] **48 new tests** (778 total).
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| SQLite | **Fetched, not the system library** — the recorded default | The libcurl precedent points the other way, but sqlite fails it twice: **Windows ships no system sqlite3** (two of six targets), and **FTS5 is a compile-time flag** a packager may have left off. A floor that depends on someone else's build options is not a floor. My instinct was to use the system library; checking the targets showed the recorded default was right. |
+| UTF-8 handling | **Hand-rolled, deviating from the recorded utf8proc default** | utf8proc exists for normalisation and character properties; chunking needs "advance N codepoints", which is `(b & 0xC0) != 0x80`. Same trade as the GGUF reader and SHA-256 earlier in this project. |
+| Query terms | **OR-joined, not FTS5's implicit AND** | See below — this one was a bug, not a preference. |
+
+**The first real query returned nothing, and the reason was a design flaw.**
+
+`"what is the capital of France"` against a corpus containing *"the capital of France is Paris"* matched **zero** documents. FTS5 joins space-separated terms with an implicit **AND**, so the document had to contain the word *what* — and a question always carries words its answer does not.
+
+Confirmed directly before changing anything:
+
+```
+AND-form: 0
+OR-form:  1
+```
+
+OR is also what makes BM25 worth having: it ranks by how many terms matched and how rare they were, so a chunk sharing *capital* and *France* outranks one sharing only *the*. AND throws that ranking away by refusing everything imperfect.
+
+**The query builder is a security boundary and a usability boundary, and they are the same boundary.** Every term is quoted as an FTS5 literal, so a query can express nothing but "documents containing these words". The **injection corpus** — 28 strings a person might plausibly type, including `AND`, `NEAR`, unbalanced quotes, `text:`, `*`, `(`, `'; DROP TABLE chunks; --`, and non-ASCII — is a permanent regression suite asserting one sentence: **a search never raises a syntax error.**
+
+**Injected context never reaches persisted history**, asserted as a grep for a distinctive sentence that appears in the request and not in the saved transcript — and verified against a real session file on disk after a live `chat --rag`. Mutating the loop's splice to leak it turns that test red *and* the loop's own pre-existing one, which is the right pair to fail.
+
+**Guardrails, each mutation-tested (five mutations, all caught).** Passing the raw query to MATCH, chunking by byte instead of codepoint, leaking transient context into history, forgetting BM25's negative sign (which silently inverts the ranking), and dropping the delete in `replace_source`.
+
+One of those needed a second attempt: the first "leak into history" mutation changed a message's role rather than where it was written, so it did not touch the property at all. The property lives in the loop's splice, and mutating *that* is what proved the test.
+
+**PDF support verified both ways.** A generated PDF's text is ingested and retrievable by a phrase that exists only inside it; a file `pdftotext` cannot read is skipped **by name, with a reason**, and the rest of the directory still ingests. That is the rule for Apogee's one optional external binary — its absence must never be the reason a directory of Markdown failed.
+
+**What is NOT done.** One acceptance criterion is unmet and the item stays open for it: **auto-registration of `embeddings:` config entries** through the comment-preserving edit helpers, and the **`auto_rag` key** for always-on injection without the flag. Both need an `embeddings:` config section that does not exist yet, plus an edit helper and its byte-diff test — a coherent slice of config-layer work rather than a loose end.
+
+**Retrieval quality is the lexical floor's, honestly.** Targeted terms rank well; a question padded with common words dilutes and ranks the right chunk lower. That is inherent to BM25 over an OR of every word, and it is precisely what `embedding-clients` and `vector-hybrid-rerank` exist to improve — the floor is meant to be a floor.

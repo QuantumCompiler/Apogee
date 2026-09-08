@@ -257,6 +257,16 @@ public:
     std::int32_t eog_token = -1;
     std::string builtin_template_prefix;
 
+    /// Generation scripted as the exact PIECES a model emits, rather than as
+    /// token ids.
+    ///
+    /// Needed to replay a recorded transcript: a real tokenizer splits framing
+    /// across pieces in ways no word-splitting fake reproduces -- gpt-oss emits
+    /// `commentary` as `comment` then `ary`, straight through the middle of a
+    /// marker -- and a filter tested only on whole markers has not been tested.
+    /// Each string becomes one token, so the split is the test's to choose.
+    std::vector<std::string> script_text;
+
     [[nodiscard]] std::unique_ptr<backends::LlamaModel> load(const std::string& path,
                                                              std::int64_t gpu_layers,
                                                              const std::string& mmproj_path,
@@ -272,6 +282,9 @@ public:
         auto loaded = std::make_unique<FakeLlamaModel>();
         loaded->batch_limit = batch_limit;
         loaded->script = script;
+        for (const std::string& piece : script_text) {
+            loaded->script.push_back(loaded->id_for(piece));
+        }
         loaded->eog_token = eog_token;
         loaded->builtin_template_prefix = builtin_template_prefix;
         model = loaded.get();

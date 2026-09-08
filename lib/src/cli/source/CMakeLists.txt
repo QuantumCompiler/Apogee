@@ -48,6 +48,8 @@ add_library(apogee_core STATIC
     models/quantize.cpp
     commands/models_pull.h
     commands/models_pull.cpp
+    commands/embed.h
+    commands/embed.cpp
     commands/models.h
     commands/models.cpp
     commands/registry.h
@@ -166,6 +168,10 @@ add_library(apogee_core STATIC
     backends/llama_real.cpp
     backends/think_filter.h
     backends/think_filter.cpp
+    backends/markup_filter.h
+    backends/markup_filter.cpp
+    backends/native_tool_calls.h
+    backends/native_tool_calls.cpp
     backends/model_profile.h
     backends/model_profile.cpp
     backends/chat_template.h
@@ -184,6 +190,8 @@ add_library(apogee_core STATIC
 
     agentloop/agentloop.h
     agentloop/reporter.h
+    agentloop/rag.h
+    agentloop/rag.cpp
     agentloop/loop.h
     agentloop/loop.cpp
     agentloop/content.h
@@ -195,6 +203,14 @@ add_library(apogee_core STATIC
     # yet -- they exist so every later backlog item has one obvious home, and
     # so `#include "embedstore/embedstore.h"` compiles from the first day.
     embedstore/embedstore.h
+    embedstore/store.h
+    embedstore/store.cpp
+    embedstore/fts.h
+    embedstore/fts.cpp
+    embedstore/chunk.h
+    embedstore/chunk.cpp
+    embedstore/ingest.h
+    embedstore/ingest.cpp
     httpserver/httpserver.h
     mcp/mcp.h
 )
@@ -208,7 +224,7 @@ target_compile_definitions(apogee_core PRIVATE
 )
 
 target_link_libraries(apogee_core PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp
-                      PRIVATE CURL::libcurl replxx::replxx)
+                      PRIVATE CURL::libcurl replxx::replxx apogee_sqlite3)
 
 # Local inference is opt-in at build time. When it is off, backends/llama_real.cpp
 # compiles to the "not built in" answer and never includes llama.h -- so the

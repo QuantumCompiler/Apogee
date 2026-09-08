@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 
+#include "backends/native_tool_calls.h"
+
 namespace apogee::backends {
 namespace {
 
@@ -53,6 +55,44 @@ const std::vector<ModelProfile>& model_profiles() {
                         .verified = true,
                         .evidence = "qwen3.6-27b Q4_K_M, 2026-09-07: emitted a literal "
                                     "<think></think> block into the answer text"});
+
+        // gpt-oss. The family this item was gated on, and the only one here
+        // that emits BOTH mechanisms the item is about.
+        //
+        // Its framing tokens are USER_DEFINED rather than CONTROL, so
+        // llama.cpp detokenizes them straight into the stream. Observed
+        // verbatim for "What is 2+2? Answer briefly.":
+        //
+        //   <|channel|>analysis<|message|>The user asks: … The answer is 4.
+        //   <|end|><|start|>assistant<|channel|>final<|message|>4
+        //
+        // All of which reached the caller as the answer.
+        //
+        // The reasoning entry is what makes the analysis channel a reasoning
+        // BLOCK rather than framing to delete: its content is the model's
+        // working and belongs in the thinking view, so it is an open/close pair
+        // like any other. What is left afterwards -- `<|start|>assistant` and
+        // `<|channel|>final<|message|>` -- is pure framing, and that is the
+        // markup filter's half. Two mechanisms, composed, each doing the thing
+        // it is right about.
+        //
+        // Ommi carries this same framing, transcribed from a manifest and
+        // marked unverified because the GGUF it had would not load. It was
+        // right; this is the run that says so.
+        list.push_back(
+            {.name = "gpt-oss",
+             .architectures = {"gpt-oss", "openai-moe", "gptoss"},
+             .name_hints = {"gpt-oss", "gpt_oss", "gptoss"},
+             .reasoning = {{.open = "<|channel|>analysis<|message|>", .close = "<|end|>"}},
+             .headers = {{.open = "<|channel|>", .close = "<|message|>"},
+                         {.open = "<|start|>", .close = ""}},
+             .tools = {.injected = true, .native = true},
+             .verified = true,
+             .evidence = "gpt-oss-20b MXFP4, 2026-09-07: emitted "
+                         "<|channel|>analysis<|message|>…<|end|><|start|>assistant"
+                         "<|channel|>final<|message|> framing into the answer, and called a "
+                         "tool as <|channel|>commentary to=functions.NAME <|constrain|>json"
+                         "<|message|>{json}"});
 
         // --- Registered, NOT verified ----------------------------------------
 
@@ -158,6 +198,12 @@ harness::ModelBehavior behavior_for(const ModelProfile* profile) {
 
     behavior.profile = profile->name;
     behavior.native_tool_calls = profile->tools.native;
+    if (profile->tools.native) {
+        // The same list the parser accepts and the display suppresses on. It
+        // crosses to the harness as plain strings, so a surface can ask what a
+        // tool call looks like without learning that profiles exist.
+        behavior.tool_call_openers = tool_call_openers();
+    }
     behavior.reasoning_tags.reserve(profile->reasoning.size());
     for (const TagPair& pair : profile->reasoning) {
         behavior.reasoning_tags.emplace_back(pair.open, pair.close);
@@ -174,6 +220,18 @@ std::vector<TagPair> reasoning_pairs_for(const ModelProfile* profile) {
     // A KNOWN profile's empty list is a verified "emits none", and is honoured
     // as such -- that is the whole reason known() exists.
     return profile->reasoning;
+}
+
+std::vector<HeaderMarker> header_markers_for(const ModelProfile* profile) {
+    if (profile == nullptr) {
+        // No permissive default here, and the asymmetry with reasoning pairs is
+        // deliberate. A header is deleted outright once matched, so inventing
+        // one for an uncharacterised family risks removing its answer. Missing
+        // a reasoning wrapper shows the user some working; missing an answer
+        // shows the user nothing.
+        return {};
+    }
+    return profile->headers;
 }
 
 }  // namespace apogee::backends

@@ -596,3 +596,137 @@ backends:
     // giving it back has to be asked for.
     CHECK_FALSE(entry->idle_unload_seconds.has_value());
 }
+
+// --- Model profiles: the framing a family leaks into its own answer ----------
+//
+// These drive the PROVIDER rather than the filters, because the thing they
+// assert is the provider's composition order. `ThinkFilter` runs before
+// `MarkupFilter` on purpose: for gpt-oss the reasoning block's opener IS a
+// header, so stripping headers first would leave the model's working with no
+// boundary and drop it straight into the answer. A unit test over the filters
+// cannot catch that -- it would be re-implementing the order it is checking.
+
+namespace {
+
+/// The pieces gpt-oss-20b (MXFP4) actually emitted on 2026-09-07 for
+/// "What is 2+2? Answer briefly.", split where its tokenizer split them.
+const std::vector<std::string> kGptOssAnswerPieces = {
+    "<|channel|>", "analysis",  "<|message|>", "The",         " answer", " is",         " 4", ".",
+    "<|end|>",     "<|start|>", "assistant",   "<|channel|>", "final",   "<|message|>", "4"};
+
+/// The same, for a tool call. `commentary` arrives in two pieces because that
+/// is how the real tokenizer produced it.
+const std::vector<std::string> kGptOssToolPieces = {"<|channel|>", "analysis",    "<|message|>",
+                                                    "We",          " need",       " to",
+                                                    " read",       ".",           "<|end|>",
+                                                    "<|start|>",   "assistant",   "<|channel|>",
+                                                    "comment",     "ary",         " to",
+                                                    "=",           "functions",   ".read",
+                                                    "_file",       " ",           "<|constrain|>",
+                                                    "json",        "<|message|>", "{\"",
+                                                    "path",        "\":\"",       "/tmp/notes.txt",
+                                                    "\"}"};
+
+/// A provider whose model name resolves to the gpt-oss profile.
+struct GptOssFixture {
+    FakeLlamaRuntime* runtime = nullptr;
+    std::unique_ptr<LlamaCppProvider> provider;
+
+    explicit GptOssFixture(std::vector<std::string> pieces) {
+        auto owned = std::make_unique<FakeLlamaRuntime>();
+        owned->script_text = std::move(pieces);
+        owned->eog_token = -1;
+        runtime = owned.get();
+
+        LlamaCppProvider::Options options;
+        options.backend_name = "local";
+        // No model_path, so the profile resolves off the name hint -- the same
+        // rung a user gets when they name a model rather than a file.
+        options.model = "gpt-oss-20b";
+        provider = std::make_unique<LlamaCppProvider>(std::move(options), std::move(owned));
+    }
+};
+
+}  // namespace
+
+TEST_CASE("gpt-oss framing never reaches the answer", "[backends][llamacpp][profile]") {
+    // The bug, at the surface that had it. Before this, the reply to
+    // "What is 2+2?" arrived as
+    //   <|channel|>analysis<|message|>The answer is 4.<|end|>
+    //   <|start|>assistant<|channel|>final<|message|>4
+    // with every character shown to the user as the answer.
+    GptOssFixture fixture{kGptOssAnswerPieces};
+
+    std::string thinking;
+    apogee::harness::StreamOptions options;
+    options.on_thinking = [&thinking](std::string_view piece) { thinking.append(piece); };
+
+    const auto response =
+        fixture.provider->stream_chat(turn({ChatMessage::user("what is 2+2")}), options);
+
+    CHECK(response.message.content.plain_text() == "4");
+    // The reasoning was not deleted -- it went where reasoning goes.
+    CHECK(thinking.find("The answer is 4.") != std::string::npos);
+}
+
+TEST_CASE("the streamed tokens and the returned text agree", "[backends][llamacpp][profile]") {
+    // Filtering at one surface and not another is how a marker hidden on screen
+    // reappears in a saved transcript.
+    GptOssFixture fixture{kGptOssAnswerPieces};
+
+    std::string streamed;
+    apogee::harness::StreamOptions options;
+    options.on_token = [&streamed](std::string_view piece) { streamed.append(piece); };
+
+    const auto response =
+        fixture.provider->stream_chat(turn({ChatMessage::user("what is 2+2")}), options);
+    CHECK(streamed == response.message.content.plain_text());
+}
+
+TEST_CASE("a gpt-oss tool call dispatches instead of printing", "[backends][llamacpp][profile]") {
+    GptOssFixture fixture{kGptOssToolPieces};
+
+    std::string streamed;
+    apogee::harness::StreamOptions options;
+    options.on_token = [&streamed](std::string_view piece) { streamed.append(piece); };
+
+    const auto response =
+        fixture.provider->stream_chat(turn({ChatMessage::user("read it")}), options);
+
+    REQUIRE(response.message.tool_calls.size() == 1);
+    CHECK(response.message.tool_calls.front().name == "read_file");
+    CHECK(response.message.tool_calls.front().arguments == R"({"path":"/tmp/notes.txt"})");
+    // Nothing of the call was shown, on either surface.
+    CHECK(streamed.empty());
+    CHECK(response.message.content.plain_text().empty());
+    // And the turn ended for the honest reason.
+    CHECK(response.finish_reason == apogee::harness::FinishReason::ToolCalls);
+}
+
+TEST_CASE("the backend claims in-text tool calls only for a family that emits them",
+          "[backends][llamacpp][profile]") {
+    // Answered from the resolved profile, not the backend type. Claiming it
+    // always would advertise parsers for grammars nobody has characterized.
+    GptOssFixture gpt_oss{kGptOssAnswerPieces};
+    CHECK(gpt_oss.provider->uses_in_text_tool_calls());
+
+    Fixture unprofiled;
+    CHECK_FALSE(unprofiled.provider->uses_in_text_tool_calls());
+}
+
+TEST_CASE("an unprofiled model has no framing removed from its answer",
+          "[backends][llamacpp][profile]") {
+    // The asymmetry with reasoning, asserted. A header is deleted outright once
+    // matched, so guessing one for an uncharacterised family risks deleting its
+    // answer -- the opposite of the reasoning case.
+    auto owned = std::make_unique<FakeLlamaRuntime>();
+    owned->script_text = {"<|channel|>", "final", "<|message|>", "hello"};
+    owned->eog_token = -1;
+    LlamaCppProvider::Options options;
+    options.backend_name = "local";
+    options.model = "some-unknown-model";
+    LlamaCppProvider provider{std::move(options), std::move(owned)};
+
+    const auto response = provider.chat(turn({ChatMessage::user("hi")}), {});
+    CHECK(response.message.content.plain_text() == "<|channel|>final<|message|>hello");
+}

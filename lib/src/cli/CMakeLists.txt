@@ -17,7 +17,10 @@ cmake_minimum_required(VERSION 3.25)
 project(Apogee
     VERSION 0.1.0
     DESCRIPTION "A self-contained C++ AI harness for local and cloud LLMs"
-    LANGUAGES CXX
+    # C is enabled for one reason: SQLite ships as a C amalgamation, and the
+    # chunk store compiles it. No Apogee source is C -- "primarily C++" is
+    # unaffected by the language a vendored dependency happens to be written in.
+    LANGUAGES CXX C
 )
 
 # C++20 baseline, decided 2026-08-24: the only standard uniformly supported

@@ -48,8 +48,15 @@ add_executable(apogee_tests
     commands/attachment_guard_test.cpp
     backends/jsonl_framer_test.cpp
     backends/think_filter_test.cpp
+    backends/markup_filter_test.cpp
+    backends/native_tool_calls_test.cpp
     backends/model_profile_test.cpp
     backends/chat_template_test.cpp
+    embedstore/store_test.cpp
+    agentloop/rag_test.cpp
+    embedstore/fts_query_test.cpp
+    embedstore/chunk_test.cpp
+    embedstore/ingest_test.cpp
     agentloop/conformance_test.cpp
     commands/helpers_test.cpp
     commands/thinking_view_test.cpp

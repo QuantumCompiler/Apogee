@@ -12,12 +12,14 @@
 #include "agent/fetch_url.h"
 #include "agent/tool.h"
 #include "agentloop/loop.h"
+#include "agentloop/rag.h"
 #include "agentloop/reporter.h"
 #include "ansi/ansi.h"
 #include "backends/factory.h"
 #include "backends/http_client.h"
 #include "commands/ask_prompt.h"
 #include "commands/cli_reporter.h"
+#include "commands/embed.h"
 #include "commands/helpers.h"
 #include "commands/json_reporter.h"
 #include "commands/terminal.h"
@@ -45,6 +47,9 @@ struct CompleteFlags {
     bool all_backends = false;
     bool tools = false;
     bool search = false;
+    /// The collection to retrieve from. Empty means no retrieval.
+    std::string rag;
+    int rag_limit = 4;
     bool no_color = false;
     OutputFormat output_format = OutputFormat::Text;
 
@@ -250,6 +255,32 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     loop_options.max_tokens = max_tokens;
     loop_options.stream_answer = true;
 
+    // Retrieval, spliced into the OUTGOING request only. `transient_prefix` is
+    // the seam the agent loop already test-locks as never reaching persisted
+    // history -- which is what keeps a transcript readable and keeps turn one's
+    // chunks from competing with turn two's question.
+    if (!flags.rag.empty()) {
+        const agentloop::RagResult rag =
+            agentloop::build_rag_prefix(collection_path(flags.rag), prompt, flags.rag_limit);
+        if (!rag.error.empty()) {
+            // Reported, not fatal: answering without retrieved context beats
+            // refusing to answer because a collection was missing.
+            reporter.status().print_line(reporter_options.style.tag(ansi::Role::Warning) +
+                                         " retrieval unavailable -- " + rag.error);
+        } else if (rag.chunks == 0) {
+            reporter.status().print_line(reporter_options.style.tag(ansi::Role::Apogee) +
+                                         " no matching context in '" + flags.rag + "'");
+        } else {
+            loop_options.transient_prefix = rag.prefix;
+            // The retriever is always named beside the score: lexical and
+            // vector scales are incomparable.
+            reporter.status().print_line(
+                reporter_options.style.tag(ansi::Role::Apogee) + " " + std::to_string(rag.chunks) +
+                " chunk(s) from '" + flags.rag + "', top " +
+                std::to_string(rag.top_score).substr(0, 5) + " [" + rag.retriever + "]");
+        }
+    }
+
     agent::ToolRegistry registry;
     if (flags.tools) {
         registry = built_in_tools();
@@ -305,6 +336,9 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
     // by default, so `--image pic.png "my prompt"` would put BOTH into images
     // and leave the positional prompt empty -- after which the command blocks
     // reading a stdin that never arrives. One value per occurrence, repeatable.
+    cmd->add_option("--rag", flags->rag,
+                    "Retrieve context from this collection (see 'apogee embed')");
+    cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
     cmd->add_option("--image", flags->images, "Image file to attach (repeatable)")
         ->allow_extra_args(false);
     flags->temperature_option =

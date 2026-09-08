@@ -33,15 +33,16 @@ namespace apogee::backends {
 
 /// The three capabilities this backend answers for, alongside LLMProvider.
 ///
-/// It does NOT declare `InTextToolCalling`. A local model does put tool calls
-/// in its text, so that is a true fact being deliberately left unstated: the
-/// per-family tool dialects live in model-profiles-and-management, and nothing
-/// parses in-text calls yet. Claiming the capability now would advertise a
-/// parser that does not exist.
+/// `InTextToolCalling` is declared **conditionally**, and that is the point:
+/// it answers true only for a model whose resolved profile says the family
+/// emits native calls. Claiming it unconditionally would advertise a parser
+/// for grammars nobody has characterized; refusing it unconditionally is what
+/// it used to do, and left gpt-oss's calls printing as the answer.
 class LlamaCppProvider final : public harness::LLMProvider,
                                public harness::ModelBehaviorReporting,
                                public harness::TokenCounting,
                                public harness::VisionCapable,
+                               public harness::InTextToolCalling,
                                public harness::StatusReporting {
 public:
     /// Reads the wall clock. Injected so the idle-unload policy is testable
@@ -140,6 +141,16 @@ public:
     /// **uncharacterised**, which every consumer must read as permissive.
     [[nodiscard]] harness::ModelBehavior model_behavior() const override;
 
+    // --- InTextToolCalling --------------------------------------------------
+
+    /// True when the resolved profile says this family emits native calls.
+    ///
+    /// Answered from the profile rather than from the backend type, so it stays
+    /// true of the model actually loaded. An unprofiled model answers false:
+    /// there is no grammar to parse, and claiming otherwise would make a
+    /// surface wait for structured calls that never arrive.
+    [[nodiscard]] bool uses_in_text_tool_calls() const noexcept override;
+
     // --- StatusReporting ----------------------------------------------------
 
     [[nodiscard]] harness::StatusEvent model_status() const override;
@@ -168,6 +179,11 @@ private:
     struct Generation {
         std::string text;
         std::vector<std::int32_t> tokens;
+        /// Native tool calls parsed out of the stream. The text they were
+        /// parsed from is not in `text` -- the gate withheld exactly those
+        /// bytes from the display and handed them to the parser, so the two
+        /// cannot disagree about what a tool call is.
+        std::vector<harness::ToolCall> tool_calls;
         harness::FinishReason finish = harness::FinishReason::Stop;
     };
 

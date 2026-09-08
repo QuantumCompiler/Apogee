@@ -25,4 +25,4 @@
 - [ ] can_embed and dimensions are discoverable per backend through the harness capability interface; Anthropic reports false
 - [ ] Dimension-mismatch fixtures exist for vector-hybrid-rerank's per-store binding tests to consume
 
-**Scope note.** gated on [embedstore-lexical-rag.md](embedstore-lexical-rag.md) shipping.
+**Scope note.** **Gate satisfied 2026-09-07.** The floor this waited on — the SQLite/FTS5 chunk store, the chunker, ingest, and the `Store::search` seam every retriever will implement — shipped with [Milestone Q](../assistant/MILESTONES.md#milestone-q--the-retrieval-floor). [embedstore-lexical-rag.md](embedstore-lexical-rag.md) still exists, reduced to its config residue, but that residue does not block this: read Milestone Q for what already exists before designing against it.

@@ -10,12 +10,14 @@
 #include "agent/fetch_url.h"
 #include "agentloop/content.h"
 #include "agentloop/loop.h"
+#include "agentloop/rag.h"
 #include "ansi/ansi.h"
 #include "backends/factory.h"
 #include "backends/http_client.h"
 #include "commands/ask_prompt.h"
 #include "commands/chat_history.h"
 #include "commands/cli_reporter.h"
+#include "commands/embed.h"
 #include "commands/helpers.h"
 #include "commands/input_gate.h"
 #include "commands/json_reporter.h"
@@ -64,6 +66,8 @@ struct ChatFlags {
     std::string model;
     std::string system_prompt;
     std::vector<std::string> images;
+    std::string rag;
+    int rag_limit = 4;
     double temperature = 0.0;
     std::int64_t max_tokens = 0;
     bool tools = false;
@@ -151,11 +155,17 @@ namespace {
 /// stdout carries only protocol events and a context warning is a diagnostic
 /// rather than a Reporter event. Inventing an event type for it would grow a
 /// second vocabulary out of the first.
+/// Which collection a chat turn retrieves from, and how much it injects.
+struct RagSettings {
+    std::string collection;
+    int limit = 4;
+};
+
 void run_chat_turn(const harness::Harness& harness, logger::Session& session,
                    const std::string& input, std::vector<harness::ContentPart>& attachments,
                    agent::ToolRegistry* tools, const agentloop::AskFn& ask,
                    agentloop::Reporter& reporter,
-                   const std::function<void(const std::string&)>& notice) {
+                   const std::function<void(const std::string&)>& notice, const RagSettings& rag) {
     std::vector<harness::ContentPart> turn_attachments;
     turn_attachments.swap(attachments);  // first message only
 
@@ -195,6 +205,27 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     if (tools != nullptr) {
         loop_options.tools = tools;
         loop_options.ask = ask;
+    }
+
+    // Retrieval runs PER TURN, against what the user just asked -- which is the
+    // reason the injected chunks must stay out of history. Turn one's context
+    // left lying in the transcript would still be competing for attention on
+    // turn five, against the chunks that actually answer the new question.
+    if (!rag.collection.empty()) {
+        const agentloop::RagResult retrieved =
+            agentloop::build_rag_prefix(collection_path(rag.collection), input, rag.limit);
+        if (!retrieved.error.empty()) {
+            notice("retrieval unavailable -- " + retrieved.error);
+        } else if (retrieved.chunks == 0) {
+            notice("no matching context in '" + rag.collection + "'");
+        } else {
+            loop_options.transient_prefix = retrieved.prefix;
+            // Chunks, top score, and the retriever that produced it -- the last
+            // because lexical and vector scales are incomparable.
+            notice(std::to_string(retrieved.chunks) + " chunk(s) from '" + rag.collection +
+                   "', top " + std::to_string(retrieved.top_score).substr(0, 5) + " [" +
+                   retrieved.retriever + "]");
+        }
     }
 
     try {
@@ -250,6 +281,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
     cmd->add_option("-m,--model", flags->model, "Backend or model to use");
     cmd->add_option("-s,--system", flags->system_prompt, "System prompt for the session");
+    cmd->add_option("--rag", flags->rag,
+                    "Retrieve context from this collection each turn (see 'apogee embed')");
+    cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
     cmd->add_option("--image", flags->images, "Image to attach to the first message (repeatable)")
         ->allow_extra_args(false);
     flags->temperature_option =
@@ -474,6 +508,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user(refusal);
         }
 
+        const RagSettings rag_settings{.collection = flags->rag, .limit = flags->rag_limit};
+
         if (input_format == InputFormat::StreamJson) {
             JsonReporter machine_reporter{std::cout};
             machine_reporter.begin_session(session.backend);
@@ -502,7 +538,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 // advertised" rule is satisfied rather than sidestepped.
                 run_chat_turn(harness, session, message.text, attachments,
                               flags->tools ? &registry : nullptr, driver_ask, machine_reporter,
-                              machine_notice);
+                              machine_notice, rag_settings);
 
                 harness::ChatResponse response;
                 response.message = session.messages.empty() ? harness::ChatMessage::assistant("")
@@ -629,9 +665,11 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             run_chat_turn(
                 harness, session, input, attachments, flags->tools ? &registry : nullptr,
                 flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
-                reporter, [&reporter, &style](const std::string& message) {
+                reporter,
+                [&reporter, &style](const std::string& message) {
                     reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + message);
-                });
+                },
+                rag_settings);
         }
 
         logger::save(session);

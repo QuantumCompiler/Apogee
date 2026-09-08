@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "backends/markup_filter.h"
 #include "backends/think_filter.h"
 #include "harness/behavior.h"
 
@@ -51,7 +52,7 @@ namespace apogee::backends {
 struct ToolDialect {
     /// Recognises Apogee's injected `TOOL_CALL: {json}` protocol.
     bool injected = true;
-    /// Recognises control-token calls (`<|tool_call>…`).
+    /// Recognises control-token calls (`<|channel|>commentary to=…`).
     ///
     /// Permissive by default: **failing to recognise a call is the expensive
     /// direction.** Nothing dispatches AND the raw markup is printed as if it
@@ -81,6 +82,13 @@ struct ModelProfile {
     /// `ModelBehavior` is what distinguishes the two, and conflating them is
     /// how a filter either strips nothing or strips everything.
     std::vector<TagPair> reasoning;
+
+    /// Control-token **headers** this family leaks into its own answer.
+    ///
+    /// Not reasoning wrappers, and the distinction is the design: a wrapper
+    /// encloses content and routes it somewhere, a header is a bare marker
+    /// naming a section and carries nothing. See `markup_filter.h`.
+    std::vector<HeaderMarker> headers;
 
     ToolDialect tools;
 
@@ -125,5 +133,14 @@ struct ModelProfile {
 /// nullptr (unprofiled) yields the permissive default set; a known profile
 /// yields exactly its own, which may legitimately be empty.
 [[nodiscard]] std::vector<TagPair> reasoning_pairs_for(const ModelProfile* profile);
+
+/// The control-token headers to strip, for a resolved profile.
+///
+/// Unlike reasoning pairs there is no permissive default: an unprofiled model
+/// gets none. A header is stripped **unconditionally** once recognised, so
+/// guessing at one for an uncharacterised family risks deleting its answer --
+/// the opposite of the reasoning case, where the expensive direction is
+/// recognising too little.
+[[nodiscard]] std::vector<HeaderMarker> header_markers_for(const ModelProfile* profile);
 
 }  // namespace apogee::backends

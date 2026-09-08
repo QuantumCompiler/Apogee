@@ -14,6 +14,7 @@
 namespace {
 
 using apogee::backends::behavior_for;
+using apogee::backends::header_markers_for;
 using apogee::backends::model_profiles;
 using apogee::backends::ModelProfile;
 using apogee::backends::reasoning_pairs_for;
@@ -138,16 +139,65 @@ TEST_CASE("every profile says whether it was verified, and why", "[backends][pro
     }
 }
 
-TEST_CASE("the two families actually run here are the verified ones",
+TEST_CASE("the three families actually run here are the verified ones",
           "[backends][profile][honesty]") {
     // Pins the characterization to what was really observed. If someone marks
-    // a third family verified without running it, this is what asks them which
+    // a fourth family verified without running it, this is what asks them which
     // model they used.
+    //
+    // gpt-oss joined the list on 2026-09-07, and it is the reason this test
+    // needed editing rather than a reason to loosen it: the family was pulled,
+    // run, and its framing recorded from the stream before a line of the
+    // filter was written.
     std::vector<std::string> verified;
     for (const ModelProfile& profile : model_profiles()) {
         if (profile.verified) {
             verified.push_back(profile.name);
         }
     }
-    CHECK(verified == std::vector<std::string>{"gemma3", "qwen3"});
+    CHECK(verified == std::vector<std::string>{"gemma3", "qwen3", "gpt-oss"});
+}
+
+TEST_CASE("only a characterized family declares headers", "[backends][profile][honesty]") {
+    // A header is deleted outright once matched, so a profile that lists one
+    // without having seen it risks deleting a real answer. Verified families
+    // may; unverified families may not.
+    for (const ModelProfile& profile : model_profiles()) {
+        INFO("profile: " << profile.name);
+        if (!profile.headers.empty()) {
+            CHECK(profile.verified);
+        }
+    }
+}
+
+TEST_CASE("an unprofiled model is given no headers to strip", "[backends][profile]") {
+    // The asymmetry with reasoning pairs, which DO have a permissive default.
+    // Recognising too few reasoning wrappers shows the user some working;
+    // deleting a header that was never framing shows the user less than they
+    // asked for.
+    CHECK(header_markers_for(nullptr).empty());
+    CHECK_FALSE(reasoning_pairs_for(nullptr).empty());
+}
+
+TEST_CASE("the gpt-oss profile carries what was observed", "[backends][profile]") {
+    // Named markers rather than a count, so a mutation that swaps one for
+    // another is caught rather than passing on arity.
+    const ModelProfile* profile = resolve_profile("", "gpt-oss", "");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->name == "gpt-oss");
+
+    REQUIRE(profile->reasoning.size() == 1);
+    CHECK(profile->reasoning.front().open == "<|channel|>analysis<|message|>");
+    CHECK(profile->reasoning.front().close == "<|end|>");
+
+    REQUIRE(profile->headers.size() == 2);
+    CHECK(profile->headers[0].open == "<|channel|>");
+    CHECK(profile->headers[0].close == "<|message|>");
+    // The second closes at its identifier run: `<|start|>assistant` has no
+    // closing marker, and binding it to one would swallow the answer.
+    CHECK(profile->headers[1].open == "<|start|>");
+    CHECK(profile->headers[1].close.empty());
+
+    CHECK(profile->tools.native);
+    CHECK(profile->evidence.find("gpt-oss-20b") != std::string::npos);
 }

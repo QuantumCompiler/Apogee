@@ -5,6 +5,8 @@
 #include <utility>
 
 #include "backends/llamacpp_tokens.h"
+#include "backends/markup_filter.h"
+#include "backends/native_tool_calls.h"
 #include "harness/errors.h"
 #include "models/gguf_inspect.h"
 
@@ -210,6 +212,10 @@ void LlamaCppProvider::unload() {
     model_.reset();
 }
 
+bool LlamaCppProvider::uses_in_text_tool_calls() const noexcept {
+    return model_behavior().native_tool_calls;
+}
+
 harness::StatusEvent LlamaCppProvider::model_status() const {
     harness::StatusEvent event;
     event.type = model_ == nullptr ? harness::StatusEvent::Type::ModelLoading
@@ -310,6 +316,27 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
         think.on_thinking(options.on_thinking);
     }
 
+    // Three filters, in this order, and the order is load-bearing.
+    //
+    // ThinkFilter first, because for gpt-oss the reasoning block's OPENER is
+    // itself a header (`<|channel|>analysis<|message|>`). Strip headers first
+    // and the block loses its boundary, so the model's working lands in the
+    // answer -- the exact bug Milestone P fixed for Qwen, reintroduced by a
+    // different route.
+    //
+    // The gate second, because it keys on `<|channel|>commentary to=` and the
+    // markup filter would have eaten the `<|channel|>` half of that.
+    //
+    // The markup filter last, on what is left: the pure framing between the
+    // channels.
+    ToolCallGate gate{model_behavior().native_tool_calls};
+    MarkupFilter markup{header_markers_for(profile())};
+
+    // One funnel, so every path -- token callback, returned text, saved history
+    // -- sees the same bytes. A filter applied on one and not another is how a
+    // hidden marker reappears in a transcript.
+    const auto pump = [&](std::string_view piece) { return markup.write(gate.write(piece)); };
+
     // Where generation must stop even if the model would keep going. Found on
     // real hardware, not by the scripted runtime: `apogee chat`'s background
     // title request has no max_tokens of its own, so it ran to the provider
@@ -337,7 +364,7 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
         const std::string piece = model_->token_text(token);
         generated.push_back(token);
 
-        const std::string visible = think.write(piece);
+        const std::string visible = pump(think.write(piece));
         answer += visible;
         if (options.on_token && !visible.empty()) {
             options.on_token(visible);
@@ -350,7 +377,15 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     // Whatever the filter still holds: a partial marker at end of stream was
     // never a marker, and an unterminated reasoning block's residue goes to the
     // thinking sink rather than into the answer.
-    if (const std::string tail = think.flush(); !tail.empty()) {
+    // Flushed in the same order they are written through. `gate.flush()` is
+    // where the safety net lives: a span that opened like a tool call and
+    // parsed as nothing comes back out as text here, rather than leaving a turn
+    // with no answer, no tool, and no error -- the least debuggable outcome
+    // there is, and exactly how an unrecognised grammar variant presents.
+    std::string tail = markup.write(gate.write(think.flush()));
+    tail += markup.write(gate.flush());
+    tail += markup.flush();
+    if (!tail.empty()) {
         answer += tail;
         if (options.on_token) {
             options.on_token(tail);
@@ -366,7 +401,14 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     Generation result;
     result.text = std::move(answer);
     result.tokens = std::move(generated);
+    result.tool_calls = gate.calls();
     result.finish = finish;
+    if (!result.tool_calls.empty()) {
+        // A native call ends the turn on the model's side (`<|call|>` is
+        // end-of-generation), so the honest finish reason is the tool call,
+        // not the stop token that carried it.
+        result.finish = harness::FinishReason::ToolCalls;
+    }
     return result;
 }
 
@@ -417,6 +459,11 @@ harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatReques
 
     harness::ChatResponse response;
     response.message = harness::ChatMessage::assistant(generation.text);
+    // The image path shares `generate()`, so it gets tool calls for free. A
+    // model asked to look at a picture and then act on it is the ordinary case,
+    // not an exotic one -- and forgetting this here is how a capability comes
+    // out working on one surface and silently missing on another.
+    response.message.tool_calls = generation.tool_calls;
     response.model = options_.model;
     response.finish_reason = generation.finish;
     response.usage.completion_tokens = static_cast<std::int64_t>(generation.tokens.size());
@@ -509,6 +556,7 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
 
     harness::ChatResponse response;
     response.message = harness::ChatMessage::assistant(answer);
+    response.message.tool_calls = generation.tool_calls;
     response.finish_reason = generation.finish;
     response.model = options_.model;
     // Exact on both sides: this is our own tokenizer, not an estimate and not a
