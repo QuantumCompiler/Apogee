@@ -141,6 +141,14 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                     "re-download the model to " + model.string());
                 continue;
             }
+            if (info.is_projector()) {
+                // A projector configured as a model_path is a real mistake with
+                // an exact fix, so it is a failure rather than a note.
+                add(report, Status::Fail, "Config", label,
+                    "this is a multimodal projector, not a model",
+                    "move it to mmproj_path and set model_path to the model it projects for");
+                continue;
+            }
             if (info.has_vision_tensors()) {
                 // Advisory, never fatal: under the open-model policy a warning
                 // tells the user something, and refusing tells them nothing

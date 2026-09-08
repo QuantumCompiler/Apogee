@@ -56,6 +56,10 @@ public:
         /// Path to the GGUF. Required.
         std::string model_path;
 
+        /// Path to the multimodal projector, when this entry can read images.
+        /// Empty means text-only.
+        std::string mmproj_path;
+
         /// KV context size in tokens. **0 means the model's own training
         /// length**, which is the right default: a fixed number warns on a
         /// model trained shorter and truncates one trained longer.
@@ -113,9 +117,16 @@ public:
 
     // --- VisionCapable ------------------------------------------------------
 
-    /// False. Local vision (llama.cpp mtmd + an mmproj model) is scheduled into
-    /// model-profiles-and-management, decided 2026-08-31 -- an mmproj path is a
-    /// per-family model property, which is what that item owns.
+    /// False, and honestly so: this build wires no mtmd context, so there is
+    /// nothing here that could read an image. It answers through the capability
+    /// seam rather than being absent, which is what lets every surface refuse
+    /// an attachment with one shared message instead of discovering the gap at
+    /// inference time.
+    ///
+    /// Making it a real answer is multimodal-vision's job, and needs two things
+    /// this build does not have: llama.cpp's `mtmd` library (which lives under
+    /// its `tools/` tree and is excluded by `LLAMA_BUILD_TOOLS OFF`), and an
+    /// mmproj file to point at.
     [[nodiscard]] bool accepts_images() const noexcept override;
 
     // --- StatusReporting ----------------------------------------------------
@@ -141,6 +152,32 @@ private:
 
     [[nodiscard]] harness::ChatResponse run(const harness::ChatRequest& request,
                                             const harness::StreamOptions& options);
+
+    /// One turn's generated output.
+    struct Generation {
+        std::string text;
+        std::vector<std::int32_t> tokens;
+        harness::FinishReason finish = harness::FinishReason::Stop;
+    };
+
+    /// Samples until end-of-generation, the token cap, or the context wall.
+    ///
+    /// Shared by the text and image paths. Extracted when vision landed: the
+    /// alternative was a second copy of the stop conditions, which would drift
+    /// the first time one of them changed.
+    [[nodiscard]] Generation generate(LlamaContext& context, std::int64_t prompt_end,
+                                      const harness::ChatRequest& request,
+                                      const harness::StreamOptions& options);
+
+    /// The turn when the request carries images.
+    ///
+    /// A separate path because a multimodal prompt is not a token vector: mtmd
+    /// produces interleaved text and embedding chunks, so there is nothing to
+    /// prefix-match and the KV cache is rebuilt from scratch. That cost is real
+    /// and is paid only on turns that actually carry a picture.
+    [[nodiscard]] harness::ChatResponse run_multimodal(const harness::ChatRequest& request,
+                                                       const harness::StreamOptions& options,
+                                                       const std::vector<std::string>& images);
 
     Options options_;
     std::unique_ptr<LlamaRuntime> runtime_;

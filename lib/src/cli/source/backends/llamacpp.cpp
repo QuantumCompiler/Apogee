@@ -58,6 +58,66 @@ void decode_in_batches(LlamaContext& context, const std::vector<std::int32_t>& t
     }
 }
 
+/// Decodes the base64 payload of a `data:` URI. Empty for anything else.
+///
+/// The IR carries images as data URIs because that is what the cloud vendors
+/// take; mtmd wants the raw bytes, so this is where the two meet. A remote
+/// `https://` image is NOT fetched here -- a local backend silently reaching
+/// out to the network to answer a prompt is a surprise nobody asked for, and
+/// the caller reports it as unsupported instead.
+[[nodiscard]] std::string decode_data_uri(std::string_view url) {
+    constexpr std::string_view marker_text = ";base64,";
+    if (!url.starts_with("data:")) {
+        return {};
+    }
+    const std::size_t marker = url.find(marker_text);
+    if (marker == std::string_view::npos) {
+        return {};
+    }
+    const std::string_view encoded = url.substr(marker + marker_text.size());
+
+    static constexpr std::string_view alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(encoded.size() / 4 * 3);
+
+    std::uint32_t accumulator = 0;
+    int bits = 0;
+    for (const char c : encoded) {
+        if (c == '=') {
+            break;
+        }
+        const std::size_t value = alphabet.find(c);
+        if (value == std::string_view::npos) {
+            continue;  // whitespace and newlines are legal in a data URI
+        }
+        accumulator = (accumulator << 6U) | static_cast<std::uint32_t>(value);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back(static_cast<char>((accumulator >> static_cast<unsigned>(bits)) & 0xFFU));
+        }
+    }
+    return out;
+}
+
+/// Every image in `messages`, as raw encoded bytes.
+[[nodiscard]] std::vector<std::string> collect_images(
+    const std::vector<harness::ChatMessage>& messages) {
+    std::vector<std::string> images;
+    for (const harness::ChatMessage& message : messages) {
+        for (const harness::ContentPart& part : message.content.parts()) {
+            if (part.kind != harness::ContentPart::Kind::ImageUrl) {
+                continue;
+            }
+            if (std::string bytes = decode_data_uri(part.image_url); !bytes.empty()) {
+                images.push_back(std::move(bytes));
+            }
+        }
+    }
+    return images;
+}
+
 }  // namespace
 
 LlamaCppProvider::LlamaCppProvider(Options options, std::unique_ptr<LlamaRuntime> runtime)
@@ -86,6 +146,7 @@ std::unique_ptr<LlamaCppProvider> LlamaCppProvider::from_config(
     options.backend_name = backend_name;
     options.model = config.model.empty() ? config.model_path : config.model;
     options.model_path = config.model_path;
+    options.mmproj_path = harness::expand_env(config.mmproj_path);
     if (config.context_size.has_value()) {
         options.context_size = *config.context_size;
     }
@@ -103,7 +164,15 @@ std::string_view LlamaCppProvider::backend_name() const noexcept {
 }
 
 bool LlamaCppProvider::accepts_images() const noexcept {
-    return false;
+    // Answers from CONFIGURED state, not from a loaded model: this is asked
+    // before a turn begins, and loading 16GB of weights to answer a yes/no
+    // question would make every `--image` check cost a model load.
+    //
+    // Both conditions are necessary. Without llama.cpp there is no mtmd at all;
+    // without an mmproj_path there is no projector to use. Whether the
+    // projector actually does images (rather than audio) is checked when it
+    // loads, and a mismatch surfaces there with a message naming the file.
+    return llama_available() && !options_.mmproj_path.empty();
 }
 
 bool LlamaCppProvider::model_loaded() const noexcept {
@@ -149,7 +218,7 @@ void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
     }
 
     std::string error;
-    model_ = runtime_->load(options_.model_path, options_.gpu_layers, error);
+    model_ = runtime_->load(options_.model_path, options_.gpu_layers, options_.mmproj_path, error);
     if (model_ == nullptr) {
         if (on_status) {
             harness::StatusEvent failed;
@@ -192,10 +261,135 @@ harness::ChatResponse LlamaCppProvider::stream_chat(const harness::ChatRequest& 
     return run(request, options);
 }
 
+LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
+                                                        std::int64_t prompt_end,
+                                                        const harness::ChatRequest& request,
+                                                        const harness::StreamOptions& options) {
+    options.cancellation.throw_if_cancelled();
+
+    const std::int64_t limit =
+        request.max_tokens.value_or(0) > 0 ? *request.max_tokens : options_.max_tokens;
+
+    std::string answer;
+    std::vector<std::int32_t> generated;
+    harness::FinishReason finish = harness::FinishReason::Stop;
+
+    // Where generation must stop even if the model would keep going. Found on
+    // real hardware, not by the scripted runtime: `apogee chat`'s background
+    // title request has no max_tokens of its own, so it ran to the provider
+    // default -- and a model that never emits end-of-generation filled the KV
+    // cache and threw, taking the whole turn down with it. A truncated title is
+    // a non-event; an exception mid-conversation is not.
+    const std::int64_t wall = context.capacity();
+
+    std::int64_t produced = 0;
+    for (; produced < limit; ++produced) {
+        if (wall > 0 && prompt_end + produced >= wall) {
+            finish = harness::FinishReason::Length;
+            break;
+        }
+
+        // Between tokens, not merely at entry: a local model generating into a
+        // long answer is exactly when a user reaches for Ctrl-C.
+        options.cancellation.throw_if_cancelled();
+
+        const std::int32_t token = context.sample();
+        if (model_->is_eog(token)) {
+            break;
+        }
+
+        const std::string piece = model_->token_text(token);
+        answer += piece;
+        generated.push_back(token);
+        if (options.on_token && !piece.empty()) {
+            options.on_token(piece);
+        }
+
+        // Feed the token back so the next sample sees it. Its position is the
+        // end of the prompt plus however many we have already produced.
+        context.decode({token}, prompt_end + produced);
+    }
+    // Reaching the cap without an end-of-generation token is a truncated
+    // answer, and a surface that shows it as complete is lying to the user.
+    if (produced >= limit) {
+        finish = harness::FinishReason::Length;
+    }
+
+    Generation result;
+    result.text = std::move(answer);
+    result.tokens = std::move(generated);
+    result.finish = finish;
+    return result;
+}
+
+harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatRequest& request,
+                                                       const harness::StreamOptions& options,
+                                                       const std::vector<std::string>& images) {
+    if (!model_->supports_vision()) {
+        // Reached when a model loaded but its projector does not do images --
+        // an audio-only mmproj, say. The capability probe answered from config,
+        // which cannot know that; this is where the truth arrives.
+        throw harness::ProviderError(
+            options_.backend_name,
+            "this model has no usable image support. Check that mmproj_path points at the "
+            "projector matching this model");
+    }
+
+    // The prompt is rendered as text with one marker per image, which is the
+    // contract mtmd's tokenizer expects. Markers go at the FRONT of the user's
+    // text: every vision model in this family was trained with the picture
+    // before the question about it.
+    const std::string marker = model_->image_marker();
+    std::string prompt;
+    for (std::size_t i = 0; i < images.size(); ++i) {
+        prompt += marker;
+        prompt += "\n";
+    }
+    prompt += llama_tokens::render_prompt(*model_, options_.model, request.messages, true);
+
+    // A fresh context every time. There is no prefix to reuse -- an image
+    // occupies embedding positions that no token comparison can match -- so
+    // pretending otherwise would corrupt the cache rather than save work.
+    std::unique_ptr<LlamaContext> scratch = model_->make_context(options_.context_size);
+    LlamaContext& context = *scratch;
+
+    std::string error;
+    const std::int64_t prompt_end = context.decode_multimodal(images, prompt, 0, error);
+    if (prompt_end < 0) {
+        throw harness::ProviderError(options_.backend_name, error);
+    }
+
+    const Generation generation = generate(context, prompt_end, request, options);
+
+    // The session's own KV is deliberately untouched: this turn ran on a
+    // throwaway context, so `session_tokens_` still describes what the text
+    // path cached and the next text turn can still reuse it.
+    last_use_ = options_.clock();
+    used_ = true;
+
+    harness::ChatResponse response;
+    response.message = harness::ChatMessage::assistant(generation.text);
+    response.model = options_.model;
+    response.finish_reason = generation.finish;
+    response.usage.completion_tokens = static_cast<std::int64_t>(generation.tokens.size());
+    return response;
+}
+
 harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
                                             const harness::StreamOptions& options) {
     expire_if_idle();
     ensure_model(options.on_status);
+
+    // Images take a different route entirely. mtmd turns text-with-markers plus
+    // decoded pictures into interleaved text and embedding chunks, so there is
+    // no flat token vector to prefix-match against -- which is why the image
+    // path below decodes from scratch and skips the KV reuse the text path
+    // depends on. Paying that on a turn with a picture in it is the honest
+    // trade; pretending an image is a token sequence is not.
+    const std::vector<std::string> images = collect_images(request.messages);
+    if (!images.empty()) {
+        return run_multimodal(request, options, images);
+    }
 
     const std::vector<std::int32_t> prompt =
         llama_tokens::tokenize_prompt(*model_, options_.model, request.messages, true);
@@ -239,55 +433,11 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
     // so generation continues from there regardless of how much was reused.
     const std::int64_t prompt_end = static_cast<std::int64_t>(prompt.size());
 
-    options.cancellation.throw_if_cancelled();
-
-    const std::int64_t limit =
-        request.max_tokens.value_or(0) > 0 ? *request.max_tokens : options_.max_tokens;
-
-    std::string answer;
-    std::vector<std::int32_t> generated;
-    harness::FinishReason finish = harness::FinishReason::Stop;
-
-    // Where generation must stop even if the model would keep going. Found on
-    // real hardware, not by the scripted runtime: `apogee chat`'s background
-    // title request has no max_tokens of its own, so it ran to the provider
-    // default -- and a model that never emits end-of-generation filled the KV
-    // cache and threw, taking the whole turn down with it. A truncated title is
-    // a non-event; an exception mid-conversation is not.
-    const std::int64_t wall = context->capacity();
-
-    std::int64_t produced = 0;
-    for (; produced < limit; ++produced) {
-        if (wall > 0 && prompt_end + produced >= wall) {
-            finish = harness::FinishReason::Length;
-            break;
-        }
-
-        // Between tokens, not merely at entry: a local model generating into a
-        // long answer is exactly when a user reaches for Ctrl-C.
-        options.cancellation.throw_if_cancelled();
-
-        const std::int32_t token = context->sample();
-        if (model_->is_eog(token)) {
-            break;
-        }
-
-        const std::string piece = model_->token_text(token);
-        answer += piece;
-        generated.push_back(token);
-        if (options.on_token && !piece.empty()) {
-            options.on_token(piece);
-        }
-
-        // Feed the token back so the next sample sees it. Its position is the
-        // end of the prompt plus however many we have already produced.
-        context->decode({token}, prompt_end + produced);
-    }
-    // Reaching the cap without an end-of-generation token is a truncated
-    // answer, and a surface that shows it as complete is lying to the user.
-    if (produced >= limit) {
-        finish = harness::FinishReason::Length;
-    }
+    // The sampling loop is shared with the image path: extracted when vision
+    // landed, because the alternative was a second copy that would drift the
+    // first time a stop condition changed.
+    const Generation generation = generate(*context, prompt_end, request, options);
+    const std::string& answer = generation.text;
 
     if (!side_request) {
         // What the KV now holds is the prompt plus everything generated, and
@@ -302,7 +452,8 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
         // step was written first and then removed -- it could only ever make
         // the remembered prefix SHORTER than the truth, never protect
         // correctness, and it could not be made to fail a test.
-        session_tokens_.insert(session_tokens_.end(), generated.begin(), generated.end());
+        session_tokens_.insert(session_tokens_.end(), generation.tokens.begin(),
+                               generation.tokens.end());
     }
 
     last_use_ = options_.clock();
@@ -310,12 +461,12 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
 
     harness::ChatResponse response;
     response.message = harness::ChatMessage::assistant(answer);
-    response.finish_reason = finish;
+    response.finish_reason = generation.finish;
     response.model = options_.model;
     // Exact on both sides: this is our own tokenizer, not an estimate and not a
     // vendor's report.
     response.usage.prompt_tokens = static_cast<std::int64_t>(prompt.size());
-    response.usage.completion_tokens = static_cast<std::int64_t>(generated.size());
+    response.usage.completion_tokens = static_cast<std::int64_t>(generation.tokens.size());
     return response;
 }
 

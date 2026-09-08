@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "harness/harness.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -148,6 +149,27 @@ harness::ContentPart load_image_part(const std::filesystem::path& path) {
         throw std::runtime_error(path.string() + ": file is empty");
     }
     return harness::ContentPart::from_image_url("data:" + media_type + ";base64," + encoded);
+}
+
+std::string attachment_refusal(const harness::Harness& harness, const std::string& model,
+                               const std::vector<harness::ContentPart>& attachments) {
+    if (attachments.empty()) {
+        return {};
+    }
+    if (harness.accepts_images(model)) {
+        return {};
+    }
+    return image_refusal_message(model);
+}
+
+std::string image_refusal_message(const std::string& model) {
+    // Names the backend and BOTH ways forward. A message that only says
+    // "cannot accept images" leaves a user guessing between three different
+    // problems: the wrong backend, a missing mmproj_path, or a build without
+    // llama.cpp.
+    return "backend '" + model +
+           "' cannot accept images. Local (llamacpp) vision needs an mmproj_path on the backend "
+           "and a build with -DAPOGEE_ENABLE_LLAMA=ON; a cloud backend accepts --image today";
 }
 
 std::vector<harness::ChatMessage> build_messages(

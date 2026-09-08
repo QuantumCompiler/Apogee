@@ -98,10 +98,22 @@ struct GgufInfo {
     /// The file's size on disk, in bytes.
     std::int64_t file_size = 0;
 
-    /// Whether this file carries vision/projector tensors alongside a text
-    /// model.
+    /// Whether this file is a standalone multimodal projector (an "mmproj"):
+    /// every tensor is a vision tensor and there is no text model at all.
+    ///
+    /// Distinguished from a combined blob because the two need opposite
+    /// messages. A projector is a normal, expected file — it is exactly what
+    /// `mmproj_path` wants — and reporting it as a "combined text+vision blob"
+    /// (which the first version did) tells a user something is wrong with a
+    /// file that is perfectly correct.
+    [[nodiscard]] bool is_projector() const noexcept {
+        return parsed && tensors > 0 && text_tensors == 0;
+    }
+
+    /// Whether this file carries vision tensors **alongside** a text model —
+    /// the shape Ollama distributes some models in.
     [[nodiscard]] bool has_vision_tensors() const noexcept {
-        return parsed && tensors > text_tensors;
+        return parsed && tensors > text_tensors && text_tensors > 0;
     }
 };
 

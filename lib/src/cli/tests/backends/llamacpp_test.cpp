@@ -298,21 +298,62 @@ TEST_CASE("a backend with no model_path refuses with an actionable message",
     }
 }
 
-TEST_CASE("the local backend declares itself vision-incapable",
+TEST_CASE("the vision capability answers from configured state",
           "[backends][llamacpp][capability]") {
-    // Local vision (mtmd + an mmproj model) is scheduled into
-    // model-profiles-and-management. Declaring the capability honestly is what
-    // let commands/complete.cpp drop its backend-type switch.
-    Fixture fixture;
-    CHECK_FALSE(fixture.provider->accepts_images());
+    // The truth table, over the injected runtime rather than over weights: the
+    // whole point of asking from CONFIGURATION is that the answer costs nothing
+    // and is available before a turn starts. Loading 16 GB to answer a yes/no
+    // question would make every --image check pay for a model load.
+    //
+    // Note what this asserts in a build WITHOUT llama.cpp: false either way,
+    // because there is no mtmd to use. That is the third row of the table and
+    // it is the row this test actually exercises on the merge-blocking target.
+    SECTION("no mmproj configured") {
+        Fixture fixture;
+        CHECK_FALSE(fixture.provider->accepts_images());
+    }
 
+    SECTION("an mmproj configured") {
+        auto owned = std::make_unique<FakeLlamaRuntime>();
+        LlamaCppProvider::Options options;
+        options.backend_name = "local";
+        options.model_path = "/models/model.gguf";
+        options.mmproj_path = "/models/mmproj.gguf";
+        LlamaCppProvider provider{std::move(options), std::move(owned)};
+
+        // True only when this build HAS llama.cpp: a projector path alone
+        // cannot make a build that lacks mtmd able to read a picture.
+        CHECK(provider.accepts_images() == apogee::backends::llama_available());
+    }
+}
+
+TEST_CASE("the configured projector reaches the runtime", "[backends][llamacpp][capability]") {
+    // The field must actually be plumbed. A config key that parses, displays,
+    // and is dropped on the way to the loader is the quiet failure here.
+    auto owned = std::make_unique<FakeLlamaRuntime>();
+    FakeLlamaRuntime* runtime = owned.get();
+
+    LlamaCppProvider::Options options;
+    options.backend_name = "local";
+    options.model_path = "/models/model.gguf";
+    options.mmproj_path = "/models/mmproj.gguf";
+    LlamaCppProvider provider{std::move(options), std::move(owned)};
+
+    (void)provider.list_models({});
+    (void)provider.chat(turn({ChatMessage::user("hello")}), {});
+
+    CHECK(runtime->last_mmproj_path == "/models/mmproj.gguf");
+}
+
+TEST_CASE("an unknown backend is assumed capable", "[backends][llamacpp][capability]") {
+    Fixture fixture;
     apogee::harness::Harness harness{apogee::harness::Config{}};
     harness.register_provider("local", std::move(fixture.provider));
     harness.use_default_router();
 
     CHECK_FALSE(harness.accepts_images("local"));
-    // An unknown backend is assumed capable: pre-refusing on a backend we
-    // cannot ask is the expensive direction of a wrong guess.
+    // Pre-refusing on a backend we cannot ask is the expensive direction of a
+    // wrong guess: it blocks a capability that probably works.
     CHECK(harness.accepts_images("some-cloud-model"));
 }
 

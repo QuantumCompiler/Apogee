@@ -10,8 +10,11 @@
 #include <sstream>
 
 #include "commands/json_reporter.h"
+#include "commands/models_pull.h"
+#include "harness/layout.h"
 #include "harness/paths.h"
 #include "harness/roles.h"
+#include "models/sidecar.h"
 
 namespace apogee::commands {
 namespace {
@@ -65,9 +68,18 @@ void pad(std::ostringstream& out, const std::string& value, std::size_t width, b
     }
 }
 
+/// What a model's sidecar says was checked when it was acquired.
+[[nodiscard]] std::string describe_record(const std::filesystem::path& model) {
+    const std::optional<models::Sidecar> sidecar = models::load_sidecar(model);
+    // "no record" rather than "unverified": a model placed by hand is
+    // legitimate, it simply has nothing to be rechecked against.
+    return sidecar.has_value() ? sidecar->verification.summary() : "no record";
+}
+
 }  // namespace
 
-std::vector<ModelRow> build_model_rows(const harness::Config& config) {
+std::vector<ModelRow> build_model_rows(const harness::Config& config,
+                                       const std::filesystem::path& models_dir) {
     std::vector<ModelRow> rows;
     rows.reserve(config.backends.size());
 
@@ -87,6 +99,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config) {
             row.provenance = "-";
             row.architecture = "-";
             row.state = "-";
+            row.verified = "-";
             rows.push_back(std::move(row));
             continue;
         }
@@ -104,6 +117,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config) {
 
         const std::filesystem::path path{expanded};
         row.model = path.filename().string();
+        row.verified = describe_record(path);
 
         const models::GgufInfo info = models::inspect_gguf(path);
         if (!info.parsed) {
@@ -112,12 +126,60 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config) {
         } else {
             row.state = "ok";
             row.architecture = info.architecture.empty() ? "(absent)" : info.architecture;
-            if (info.has_vision_tensors()) {
+            if (info.is_projector()) {
+                row.note = "a multimodal projector (" + std::to_string(info.tensors) +
+                           " vision tensors) -- point a backend's mmproj_path at this, not "
+                           "model_path";
+            } else if (info.has_vision_tensors()) {
                 row.note = "combined text+vision blob (" +
                            std::to_string(info.tensors - info.text_tensors) + " vision tensors)";
             }
         }
         rows.push_back(std::move(row));
+    }
+
+    // The second half: models on disk that no backend points at -- everything
+    // `models pull` has ever fetched, until the user wires it up.
+    if (!models_dir.empty()) {
+        std::error_code code;
+        for (const auto& entry : std::filesystem::directory_iterator(models_dir, code)) {
+            if (code) {
+                break;
+            }
+            if (!entry.is_regular_file(code) || entry.path().extension() != ".gguf") {
+                continue;
+            }
+            const bool already_listed = std::ranges::any_of(rows, [&](const ModelRow& row) {
+                return row.model == entry.path().filename().string();
+            });
+            if (already_listed) {
+                continue;
+            }
+
+            ModelRow row;
+            // Not a backend: it is a file waiting to be pointed at.
+            row.backend = "(not configured)";
+            row.type = "-";
+            row.model = entry.path().filename().string();
+            row.provenance = "local";
+            row.profile = "unprofiled";
+            row.verified = describe_record(entry.path());
+
+            const models::GgufInfo info = models::inspect_gguf(entry.path());
+            row.state = info.parsed ? "ok" : "unreadable";
+            row.architecture = info.parsed && !info.architecture.empty() ? info.architecture : "-";
+            if (!info.parsed) {
+                row.note = info.parse_error;
+            } else if (info.is_projector()) {
+                row.note = "a multimodal projector (" + std::to_string(info.tensors) +
+                           " vision tensors) -- point a backend's mmproj_path at this, not "
+                           "model_path";
+            } else if (info.has_vision_tensors()) {
+                row.note = "combined text+vision blob (" +
+                           std::to_string(info.tensors - info.text_tensors) + " vision tensors)";
+            }
+            rows.push_back(std::move(row));
+        }
     }
 
     std::ranges::sort(rows,
@@ -140,6 +202,7 @@ std::string render_model_table(const std::vector<ModelRow>& rows) {
         {"ARCH", [](const ModelRow& r) -> const std::string& { return r.architecture; }},
         {"PROFILE", [](const ModelRow& r) -> const std::string& { return r.profile; }},
         {"STATE", [](const ModelRow& r) -> const std::string& { return r.state; }},
+        {"VERIFIED", [](const ModelRow& r) -> const std::string& { return r.verified; }},
     };
 
     std::vector<std::size_t> widths;
@@ -179,6 +242,7 @@ std::string render_model_jsonl(const std::vector<ModelRow>& rows) {
         object["architecture"] = row.architecture;
         object["profile"] = row.profile;
         object["state"] = row.state;
+        object["verified"] = row.verified;
         if (!row.note.empty()) {
             object["note"] = row.note;
         }
@@ -239,7 +303,9 @@ std::string render_model_info(const harness::Config& config, std::string_view ba
     }
     out << "tensors:      " << info.tensors << " total, " << info.text_tensors << " text\n";
     out << "size:         " << (info.file_size / (1024LL * 1024)) << " MiB\n";
-    if (info.has_vision_tensors()) {
+    if (info.is_projector()) {
+        out << "note:         a multimodal projector -- belongs on mmproj_path, not model_path\n";
+    } else if (info.has_vision_tensors()) {
         out << "note:         combined text+vision blob -- " << (info.tensors - info.text_tensors)
             << " vision/projector tensors\n";
     }
@@ -305,7 +371,7 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
     list->add_option("--output-format", *format, "text (default) or stream-json")
         ->check(CLI::IsMember({"text", "stream-json"}));
     list->callback([load, format]() {
-        const std::vector<ModelRow> rows = build_model_rows(load());
+        const std::vector<ModelRow> rows = build_model_rows(load(), harness::models_dir());
         std::cout << (*format == "stream-json" ? render_model_jsonl(rows)
                                                : render_model_table(rows));
     });
@@ -324,6 +390,10 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
 
     CLI::App* status = cmd->add_subcommand("status", "Show which backend each role resolves to");
     status->callback([load]() { std::cout << render_role_status(load()); });
+
+    // The mutating verbs live in their own translation unit, so "what can this
+    // command destroy?" has a short answer.
+    bind_model_mutations(*cmd, harness::models_dir());
 }
 
 }  // namespace apogee::commands

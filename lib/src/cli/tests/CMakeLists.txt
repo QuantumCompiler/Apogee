@@ -37,7 +37,14 @@ add_executable(apogee_tests
     backends/gemini_cli_test.cpp
     harness/roles_test.cpp
     models/gguf_inspect_test.cpp
+    models/sha256_test.cpp
+    models/acquire_test.cpp
+    models/sidecar_test.cpp
+    models/source_ollama_test.cpp
+    models/source_hf_test.cpp
+    commands/models_pull_test.cpp
     commands/models_test.cpp
+    commands/attachment_guard_test.cpp
     backends/jsonl_framer_test.cpp
     backends/chat_template_test.cpp
     agentloop/conformance_test.cpp
@@ -76,6 +83,9 @@ target_compile_definitions(apogee_tests PRIVATE
     # Recorded vendor-CLI JSONL, replayed by the framing suite. Same reason as
     # above: found by absolute path, not by whatever directory ctest ran in.
     APOGEE_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    # The cross-surface guard scan reads the command sources themselves: the
+    # assertion that survives is "every surface calls it", which needs the tree.
+    APOGEE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../source"
 )
 
 # So tests can `#include "support/fake_command.h"` the same way source files

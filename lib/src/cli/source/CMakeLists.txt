@@ -34,6 +34,18 @@ add_library(apogee_core STATIC
     commands/command.h
     models/gguf_inspect.h
     models/gguf_inspect.cpp
+    models/sha256.h
+    models/sha256.cpp
+    models/sidecar.h
+    models/sidecar.cpp
+    models/acquire.h
+    models/acquire.cpp
+    models/source_ollama.h
+    models/source_ollama.cpp
+    models/source_hf.h
+    models/source_hf.cpp
+    commands/models_pull.h
+    commands/models_pull.cpp
     commands/models.h
     commands/models.cpp
     commands/registry.h
@@ -197,7 +209,13 @@ target_link_libraries(apogee_core PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_js
 # provider, its tokenizer arithmetic, and every test over them build and run on
 # the merge-blocking target, which has no llama.cpp in it.
 if(APOGEE_ENABLE_LLAMA)
-    target_link_libraries(apogee_core PRIVATE llama)
+    # `mtmd` is linked as well as `llama`, and not only for the symbols: it
+    # carries the include directory for its own headers. Without it a
+    # `#include <mtmd.h>` falls through to whatever the system has -- on a
+    # machine with llama.cpp installed via Homebrew that is a DIFFERENT
+    # llama.cpp, and the build fails with a wall of ggml redefinitions that
+    # names neither the real cause nor this file.
+    target_link_libraries(apogee_core PRIVATE llama mtmd)
     target_compile_definitions(apogee_core PRIVATE APOGEE_ENABLE_LLAMA=1)
 endif()
 

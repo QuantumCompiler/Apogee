@@ -92,6 +92,48 @@ TEST_CASE("vision tensors are counted apart from the text model", "[models][gguf
     CHECK(info.has_vision_tensors());
 }
 
+TEST_CASE("an all-vision file is a projector, not a combined blob", "[models][gguf]") {
+    // Found by inspecting a real mmproj: it has 198 tensors and every one of
+    // them is a vision tensor. The first version reported it as a "combined
+    // text+vision blob", which tells a user something is wrong with a file that
+    // is exactly what mmproj_path wants.
+    Builder builder;
+    builder.magic().u32(3).u64(3).u64(1);
+    builder.string_kv("general.architecture", "clip");
+    builder.tensor("v.blk.0.attn_q.weight").tensor("v.blk.1.attn_q.weight").tensor("mm.0.weight");
+
+    const GgufInfo info = inspect_bytes(builder.bytes(), "projector");
+
+    REQUIRE(info.parsed);
+    CHECK(info.tensors == 3);
+    CHECK(info.text_tensors == 0);
+    CHECK(info.is_projector());
+    // The two are mutually exclusive: a projector is not "combined".
+    CHECK_FALSE(info.has_vision_tensors());
+}
+
+TEST_CASE("text plus vision in one file is combined, not a projector", "[models][gguf]") {
+    Builder builder;
+    builder.magic().u32(3).u64(3).u64(1);
+    builder.string_kv("general.architecture", "gemma3");
+    builder.tensor("token_embd.weight")
+        .tensor("blk.0.attn_q.weight")
+        .tensor("v.blk.0.attn_q.weight");
+
+    const GgufInfo info = inspect_bytes(builder.bytes(), "combined2");
+
+    REQUIRE(info.parsed);
+    CHECK(info.has_vision_tensors());
+    CHECK_FALSE(info.is_projector());
+}
+
+TEST_CASE("a plain text model is neither", "[models][gguf]") {
+    const GgufInfo info = inspect_bytes(well_formed(), "textonly");
+    REQUIRE(info.parsed);
+    CHECK_FALSE(info.is_projector());
+    CHECK_FALSE(info.has_vision_tensors());
+}
+
 TEST_CASE("a truncated download is reported, not accepted", "[models][gguf]") {
     // THE case this reader exists for, and the one a magic-bytes check gets
     // wrong: the first four bytes are a perfectly valid GGUF magic.

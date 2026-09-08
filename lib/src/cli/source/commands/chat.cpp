@@ -456,6 +456,24 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                       "; a driven chat session speaks the protocol in both directions");
         }
 
+        // THE guard this surface was missing. `complete` had it inline from the
+        // day --image landed; chat never got a copy, so `apogee chat --image`
+        // loaded the file and handed it to a provider that had just answered
+        // that it cannot read images. Both surfaces now call one helper, and a
+        // fifth surface fails the cross-surface test by existing.
+        //
+        // Placed after the format resolution so the refusal can take the shape
+        // the surface requires: prose on a terminal, an `error` event when
+        // stdout carries only JSONL.
+        if (const std::string refusal = attachment_refusal(harness, model, attachments);
+            !refusal.empty()) {
+            if (input_format == InputFormat::StreamJson) {
+                JsonReporter{std::cout}.emit_error(refusal);
+                throw CLI::RuntimeError(1);
+            }
+            fail_user(refusal);
+        }
+
         if (input_format == InputFormat::StreamJson) {
             JsonReporter machine_reporter{std::cout};
             machine_reporter.begin_session(session.backend);

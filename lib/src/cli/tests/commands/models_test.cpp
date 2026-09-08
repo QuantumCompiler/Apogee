@@ -6,9 +6,11 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "harness/roles.h"
+#include "models/sidecar.h"
 #include "support/gguf_builder.h"
 
 /// The `models` listing surface.
@@ -33,11 +35,17 @@ using apogee::harness::Config;
 /// A real, parseable GGUF on disk, so tests can exercise the branch that reads
 /// one. Removed by `RealModel`'s destructor.
 struct RealModel {
-    std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "apogee-models-test-real.gguf";
+    /// A directory of its own per instance. A shared path let one test's
+    /// sidecar leak into another's: the destructor removed the .gguf but not
+    /// the .json beside it, so the result depended on test order. An
+    /// order-dependent test is worse than no test.
+    std::filesystem::path dir = std::filesystem::temp_directory_path() /
+                                ("apogee-models-test-" + std::to_string(counter()));
+    std::filesystem::path path = dir / "real.gguf";
 
     explicit RealModel(std::string_view architecture) {
-        apogee::testing::GgufBuilder builder;
+        std::error_code code;
+        std::filesystem::create_directories(dir, code);
         const std::string bytes = apogee::testing::minimal_gguf(architecture);
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         REQUIRE(out.good());
@@ -53,7 +61,14 @@ struct RealModel {
 
     ~RealModel() {
         std::error_code code;
-        std::filesystem::remove(path, code);
+        // The whole directory, so a sidecar written beside the model goes too.
+        std::filesystem::remove_all(dir, code);
+    }
+
+private:
+    static int counter() {
+        static int next = 0;
+        return ++next;
     }
 };
 
@@ -185,6 +200,48 @@ TEST_CASE("info on a readable model reports the header and still says unprofiled
     CHECK(body.find("architecture: qwen35") != std::string::npos);
     CHECK(body.find("profile:      unprofiled") != std::string::npos);
     CHECK(body.find("1 total, 1 text") != std::string::npos);
+}
+
+TEST_CASE("a model on disk is listed even when no backend points at it",
+          "[commands][models][listing]") {
+    // Found by running it: after a 460 MB pull, `models list` said "no backends
+    // configured". A freshly acquired model is not in the config, so a listing
+    // built only from `backends:` cannot see the thing the user just fetched.
+    const RealModel model{"llama"};
+    const std::vector<ModelRow> rows = build_model_rows(Config{}, model.dir);
+    const auto match = std::ranges::find_if(
+        rows, [&](const ModelRow& row) { return row.model == model.path.filename().string(); });
+    REQUIRE(match != rows.end());
+
+    CHECK(match->backend == "(not configured)");
+    CHECK(match->provenance == "local");
+    CHECK(match->architecture == "llama");
+    CHECK(match->state == "ok");
+    // No sidecar: honest about that rather than claiming anything.
+    CHECK(match->verified == "no record");
+}
+
+TEST_CASE("the verified column reports what was checked, never the word verified",
+          "[commands][models][listing]") {
+    // The honesty rule, surfaced where a user reads it. "no digest published"
+    // and "DIGEST MISMATCH" must not both render as one reassuring word.
+    const RealModel model{"llama"};
+
+    apogee::models::Sidecar sidecar;
+    sidecar.source = "huggingface";
+    sidecar.file = model.path.filename().string();
+    sidecar.verification.header_checked = true;
+    sidecar.verification.header_parsed = true;
+    REQUIRE(apogee::models::write_sidecar(model.path, sidecar));
+
+    const std::vector<ModelRow> rows = build_model_rows(Config{}, model.dir);
+    const auto match = std::ranges::find_if(
+        rows, [&](const ModelRow& row) { return row.model == model.path.filename().string(); });
+    REQUIRE(match != rows.end());
+
+    CHECK(match->verified.find("no digest published") != std::string::npos);
+    CHECK(match->verified.find("header ok") != std::string::npos);
+    CHECK(match->verified != "verified");
 }
 
 TEST_CASE("an empty config explains itself instead of printing a bare header",

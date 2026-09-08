@@ -997,7 +997,7 @@ The general lesson is the one this repo already applies elsewhere and had not ap
 
 ## Milestone N — Model operations
 
-**Goal.** The read-only half of model management: one shared resolver for the `models:` role pointers, an `apogee models list / info / status` suite, and a real GGUF header reader that `check` uses to tell a working model from a broken one. Nothing here downloads anything — acquisition is its own item.
+**Goal.** Model management: one shared resolver for the `models:` role pointers, the `apogee models` suite, a real GGUF header reader that `check` uses to tell a working model from a broken one, and — from 2026-09-07 — acquiring models from Hugging Face and the user's Ollama store without ever leaving a half-downloaded one on disk.
 
 ### 2026-09-07 — `model-operations`: one resolver, and a check that stops lying
 
@@ -1052,3 +1052,93 @@ Two of those mutations initially came back **green**, and both were test bugs wo
 **Verified live** against the user's own models: `models list` reports `llama` and `qwen35` from real headers, `models status` names the rung each role resolved through, `check` passes the good files and fails the dangling one, and the JSONL listing is one object per line. A header read on a **71 GB** model takes **0.6 s**, which is what makes running it on every `check` affordable rather than theoretical — and it correctly reported `qwen35moe`, a MoE variant none of the fixtures cover.
 
 **What is deliberately not here.** *Verification state* (a sidecar's `verified` flag) has no source yet — it arrives with model-acquisition, and inventing a column for it now would be a placeholder claiming a fact. *Loadability* is not asserted either: a full load costs gigabytes of I/O, so the reader claims only that the header is well formed, and says so rather than implying more.
+
+### 2026-09-07 — `model-acquisition`: the copy → verify → commit ladder
+
+**What was built**
+
+- [x] **`source/models/acquire.h/.cpp`** — the ladder: stream to `<name>.partial`, check size (when declared), check sha256 (when published), parse the GGUF header, and only then rename. A failure at any rung removes the partial and lands **nothing**.
+- [x] **`source/models/sidecar.h/.cpp`** — the provenance/integrity record, with what the source *claimed* and what is *on disk* as separate fields from the first version.
+- [x] **`source/models/sha256.h/.cpp`** — streaming SHA-256, because nothing in the build hashed and adding OpenSSL across six targets for one function is the worse trade.
+- [x] **`source/models/source_ollama.h/.cpp`** — the store reader: manifest → model layer → blob, `$OLLAMA_MODELS` honoured, **read-only by construction**.
+- [x] **`source/models/source_hf.h/.cpp`** — Hugging Face, entirely new (Ommi had no such path): ref grammar, repository listing, and a download over the existing HTTP transport.
+- [x] **`source/commands/models_pull.h/.cpp`** — `pull`, `delete`, `repair`, in their own translation unit so "what can this command destroy?" has a short answer.
+- [x] **`models list` widened** to show models on disk and a `VERIFIED` column.
+- [x] **68 new tests** (687 total).
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The end-of-install offer | **There is none** *(user call)* | Installing installs; nothing is downloaded and nothing is asked. This removed a whole limb of the item — no offer module, no decline-marker file, no install-path wiring — and is the reading most faithful to SPEC's *installers download nothing unasked*. |
+| A repo with several GGUFs | **Refuse and list them** | A quantised upload holds a dozen precisions differing by gigabytes and by quality. Picking one spends the user's bandwidth on a file they did not choose. Verified live: a real repo returned 12 files and all 12 were named. |
+| Ollama store mutation | **Never** | Its blobs are shared between models, so removing one corrupts every sibling. `ollama rm` is the only supported removal; the module has no delete path to misuse. |
+| SHA-256 | Ours, ~120 lines | Nothing in the build hashed; libcurl exposes no portable digest API and OpenSSL is not a dependency. |
+
+**The verification report is a set of checks, not a boolean — and that is the whole design.**
+
+Ommi could always compare against a pinned digest because it *chose* its models. Apogee has no allowlist by policy, so most sources publish no digest at all. Three states have to stay distinguishable: a digest matched, a digest did **not** match, and no digest was ever published. Collapsing the third into the second would train a user to ignore the word. So nothing here ever prints the bare word "verified" — the live pull reports `no digest published, header ok`, which is exactly what happened.
+
+**A live 460 MB pull** from `TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF` landed in 43 s, wrote its sidecar, and `repair` then reported `size ok, digest ok, header ok` — because the sidecar records the *on-disk* digest even when the source published none. That is the provenance/integrity split earning its place: at pull time there was nothing to compare against, and afterwards there is.
+
+**Three things running it found that the tests had not.**
+
+*`models list` could not see a pulled model.* Immediately after that 460 MB download the listing said "no backends configured" — it was built (in Milestone N's first half) from `backends:` alone, and a freshly acquired model is not in the config. It now lists both halves.
+
+*A cloud model was reported as never pulled.* `gpt-oss:20b-cloud` **is** in the Ollama store; its manifest simply carries an empty `layers` array because the weights are on Ollama's servers. Telling that user to run `ollama pull` sends them to re-fetch what they already have. `store_has_manifest` now separates the two cases.
+
+*Hugging Face answers 401 for a repository that does not exist,* not just for a gated one — it will not leak which. The message asserted "gated or private", sending anyone with a typo hunting for a licence to accept. It now names the likelier cause first.
+
+**Guardrails, each mutation-tested (nine mutations, all caught).** Leaving the `.partial` behind, committing before verifying, allowing a `..` in a model name, printing a bare "verified", guessing a quantisation instead of refusing, treating a cloud manifest as local weights, corrupting one SHA-256 round constant, dropping the on-disk half of the listing, and claiming a model with no record is verified — each turns its own tests red.
+
+Two of those mutations needed a second attempt, and both times the *mutation* was at fault rather than the test: the first "commit early" mutation also moved the cleanup, so it preserved the very property it was meant to break.
+
+**A flaky test, caught by mutation testing rather than by a run.** Two listing tests shared one temp path, and the fixture's destructor removed the `.gguf` but not the `.json` beside it — so one test's sidecar leaked into the other and the result depended on order. Each fixture now gets its own directory, and the suite was re-run under randomised orders to confirm it.
+
+**What is NOT done, and why.** Three of this item's acceptance criteria are unmet and the backlog document stays open for exactly them: **in-process `quantize`** (needs llama.cpp linked, which is off by default — the same constraint that shaped the GGUF reader), the **vision transform** for Ollama's combined text+vision blobs (an open question then, answered the same day in Milestone O: mtmd needs a separate projector, so the operation required is an *extract* rather than Ommi's strip), and **SafeTensors/dataset** downloads, which SPEC lists in scope and which only the GGUF path covers today.
+
+---
+
+## Milestone O — Local multimodal
+
+**Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.
+
+### 2026-09-07 — `multimodal-vision`: a real answer, and the guard that was written once
+
+**Verified live.** A 128×128 red circle through `apogee complete -m vision --image circle.png` against SmolVLM-500M answered `Circle.` — a local model, in-process, reading an actual image.
+
+**What was built**
+
+- [x] **The seam extended** (`backends/llama_runtime.h`): `LlamaContext::decode_multimodal`, `LlamaModel::supports_vision`/`image_marker`, and an `mmproj_path` parameter on `load`. Every addition has a default that refuses, so a runtime without vision says so rather than ignoring the pictures it was handed.
+- [x] **`backends/llama_real.cpp`** — mtmd wired: projector loading, image decoding, `mtmd_tokenize`, and `mtmd_helper_eval_chunks`, with every raw handle in a `unique_ptr` at the boundary per the Code Style rule for C APIs.
+- [x] **`third_party/CMakeLists.txt`** — mtmd enabled *narrowly*. Upstream ships it under `tools/`, whose only documented switch also builds llama-bench, perplexity, quantize and more; adding the one subdirectory gets the library without the rest.
+- [x] **`mmproj_path`** as a backend field, documented in the starter config.
+- [x] **`commands/helpers.cpp` → `attachment_refusal`** — the shared guard, plus the missing call in `chat.cpp`.
+- [x] **The sampling loop extracted** into `LlamaCppProvider::generate`, shared by the text and image paths.
+- [x] **`GgufInfo::is_projector()`** — a projector is no longer misreported as a combined blob.
+- [x] **12 new tests** (699 total), green in **both** the default build and the llama-enabled one.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Enabling mtmd | Add the one subdirectory, not `LLAMA_BUILD_TOOLS=ON` | The documented switch builds half a dozen binaries Apogee has no use for. `mtmd` is self-contained (`PUBLIC ggml llama`), so the narrow version works and stays honest about what it costs. |
+| `accepts_images()` | Answers from **configured state** | It is asked before a turn starts; loading 16 GB of weights to answer a yes/no question would make every `--image` check pay for a model load. |
+| The image path | A fresh context, no KV reuse | An image occupies embedding positions no token comparison can match. Pretending otherwise would corrupt the cache rather than save work, so the cost is paid only on turns that carry a picture. |
+| A projector that fails to load | An **error**, not a downgrade to text | The user configured vision. Quietly answering without looking at their picture is worse than saying why. |
+
+**Three bugs that only running it found.**
+
+*mtmd logs to stdout.* The first successful image turn printed `encoding image slice...` and `image decoded (batch 1/1) in 55 ms` **interleaved with the answer**. `llama_log_set` does not reach mtmd — it has its own two log channels. On a terminal that is noise; in machine mode it is non-JSON in the middle of the event stream, which breaks a driver's parser at the worst possible moment. Both channels now route WARN-and-above to stderr and drop the rest, and machine mode was re-checked: zero non-JSON lines with an image attached.
+
+*A Homebrew llama.cpp hijacked the build.* `apogee_core` linked `llama` but not `mtmd`, so `#include <mtmd.h>` fell through to `/opt/homebrew/include` — a **different** llama.cpp — and the build failed with a wall of `ggml` redefinitions naming neither the real cause nor the file. Linking the target carries its include directory and fixes it.
+
+*A projector was reported as a combined blob.* A real mmproj has 198 tensors and every one is a vision tensor, so `tensors > text_tensors` was true and `models list` announced "combined text+vision blob" about a file that is exactly what `mmproj_path` wants. `is_projector()` now separates the two, and `check` fails a projector configured as a `model_path` with the exact fix.
+
+**The parity gap, closed.** `complete.cpp` guarded attachments from the day `--image` landed; `chat.cpp` never got a copy, so `apogee chat --image` loaded the file, built the content part, and handed it to a provider that had just answered that it cannot read images — silently. Both now call one helper, and the test is written over a **list** of surfaces so a sixth that grows an `--image` flag fails by existing. That is the only shape of the assertion that keeps working after everyone has forgotten it: nobody writes the per-surface test for the surface they forgot.
+
+**Guardrails, each mutation-tested (six mutations, all caught).** Removing the guard from `chat`, reaching for a private capability probe, dropping the refusal's guidance, ignoring the build flag in `accepts_images`, dropping `mmproj_path` on the way to the loader, and reporting a projector as a combined blob.
+
+One of those came back green at first and the *test* was at fault, in the same shape as two earlier ones this branch: the message assertion was guarded behind a refusal that, in a build without llama.cpp, never arrives — so it asserted nothing. The message is now exposed as `image_refusal_message()` and checked directly.
+
+**The question multimodal-vision owed model-acquisition, answered.** **mtmd requires a separate projector file.** Passing a text model as its own `mmproj_path` fails at `mtmd_init_from_file` ("Failed to load CLIP model"). So a combined text+vision blob cannot be used for vision as-is — but note the asymmetry with Ommi's finding: Ommi *stripped* vision tensors so the text model would load, and here the text model loads fine untouched. What a combined blob would need is the projector **extracted**, not the vision tensors discarded. That is recorded on [model-acquisition.md](../backlog/model-acquisition.md) §2, whose remaining question is now narrower.

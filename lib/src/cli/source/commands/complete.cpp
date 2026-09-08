@@ -157,13 +157,10 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                               const CompleteFlags& flags, const std::string& model,
                               const std::string& prompt,
                               const std::vector<harness::ContentPart>& attachments, bool decorate) {
-    // A capability probe, not a type switch: the Harness asks the provider
-    // itself, so this stays correct when a local backend gains vision without
-    // this file learning that llamacpp exists.
-    if (!attachments.empty() && !harness.accepts_images(model)) {
-        fail_user("backend '" + model +
-                  "' cannot accept images yet -- local (llamacpp) vision support has not "
-                  "landed. Use a cloud backend for --image, or drop the flag");
+    // The shared guard, not a private copy: the copy is what `chat` never got.
+    if (const std::string refusal = attachment_refusal(harness, model, attachments);
+        !refusal.empty()) {
+        fail_user(refusal);
     }
 
     harness::ChatRequest request;

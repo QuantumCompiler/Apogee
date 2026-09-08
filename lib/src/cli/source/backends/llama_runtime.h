@@ -72,6 +72,33 @@ public:
     /// especially in-process, where there is no child to lose instead.
     [[nodiscard]] virtual std::int64_t capacity() const noexcept = 0;
 
+    /// Decodes an interleaved text-and-image prompt, extending the KV cache
+    /// from `position`. Returns the new position, or -1 with `error` filled.
+    ///
+    /// **Separate from `decode` because a multimodal prompt is not a token
+    /// vector.** llama.cpp's mtmd turns text-with-markers plus decoded images
+    /// into a mixture of text chunks and image-embedding chunks, and only it
+    /// knows how to feed them. Squeezing that through the token-vector
+    /// interface would mean either lying about the type or exposing the raw
+    /// `llama_context` — and exposing it is what makes every later caller free
+    /// to bypass this seam.
+    ///
+    /// `images` are raw encoded bytes (PNG, JPEG, …), decoded by mtmd rather
+    /// than by us. `text` carries one marker per image, in order.
+    ///
+    /// The default refuses: a runtime without vision must say so rather than
+    /// silently ignore the pictures it was handed.
+    [[nodiscard]] virtual std::int64_t decode_multimodal(const std::vector<std::string>& images,
+                                                         std::string_view text,
+                                                         std::int64_t position,
+                                                         std::string& error) {
+        (void)images;
+        (void)text;
+        (void)position;
+        error = "this context has no multimodal projector loaded";
+        return -1;
+    }
+
     /// The most tokens one `decode` call may carry.
     ///
     /// Not a detail the caller can ignore: llama.cpp rejects an over-long batch
@@ -124,6 +151,22 @@ public:
 
     /// A fresh context over this model, with its own empty KV cache.
     [[nodiscard]] virtual std::unique_ptr<LlamaContext> make_context(std::int64_t context_size) = 0;
+
+    /// Whether a multimodal projector was loaded alongside this model AND it
+    /// actually supports images.
+    ///
+    /// Both halves matter: a projector file can load and still be audio-only,
+    /// and answering yes on the strength of "an mmproj was configured" is how a
+    /// surface ends up accepting a picture it cannot use.
+    [[nodiscard]] virtual bool supports_vision() const noexcept {
+        return false;
+    }
+
+    /// The literal a prompt uses to stand for an image, e.g. `<__media__>`.
+    /// Empty when this model has no projector.
+    [[nodiscard]] virtual std::string image_marker() const {
+        return {};
+    }
 };
 
 /// Loads models. One per process in practice.
@@ -142,8 +185,13 @@ public:
     /// missing or corrupt model file is an ordinary user mistake with an
     /// obvious fix, and the acceptance criterion for it is a clear message
     /// naming the file -- never a crash.
+    /// `mmproj_path` empty loads a text-only model, which is the common case.
+    /// A projector that fails to load is an error rather than a downgrade to
+    /// text: the user asked for vision, and silently answering without looking
+    /// at their picture is worse than saying why.
     [[nodiscard]] virtual std::unique_ptr<LlamaModel> load(const std::string& path,
                                                            std::int64_t gpu_layers,
+                                                           const std::string& mmproj_path,
                                                            std::string& error) = 0;
 };
 

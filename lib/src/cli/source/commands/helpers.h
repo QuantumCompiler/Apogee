@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "harness/config.h"
+#include "harness/harness.h"
 #include "harness/types.h"
 
 /// Shared plumbing for the CLI commands.
@@ -75,6 +76,36 @@ enum ExitCode : int {
 /// The image media type implied by `path`'s extension, or empty when the
 /// extension is not a format the cloud vendors accept.
 [[nodiscard]] std::string image_media_type(const std::filesystem::path& path);
+
+/// Why a backend cannot take the attachments it was given, or empty when it
+/// can.
+///
+/// **One helper, called by every surface that accepts `--image`.** It exists
+/// because the check was originally written inline in `complete.cpp` and simply
+/// never written in `chat.cpp`, so `apogee chat --image` handed pictures to a
+/// provider that had just said it could not read them. A capability check
+/// present on one surface and absent on another is precisely what "parity is
+/// the product" forbids, and the fix that lasts is one function rather than a
+/// second copy.
+///
+/// It returns a message rather than printing or throwing, so each surface can
+/// deliver it in its own idiom: prose on a terminal, an `error` event in
+/// machine mode where stdout carries only JSONL.
+///
+/// The probe goes through `Harness::accepts_images()`, never a `dynamic_cast`
+/// — so this stays correct the day a local backend gains vision without this
+/// file learning that llamacpp exists.
+[[nodiscard]] std::string attachment_refusal(const harness::Harness& harness,
+                                             const std::string& model,
+                                             const std::vector<harness::ContentPart>& attachments);
+
+/// The message `attachment_refusal` gives, for `model`.
+///
+/// Exposed separately so its content can be asserted directly. It has to be:
+/// in a build without llama.cpp no provider ever answers "no", so a test that
+/// waits for a real refusal to inspect its wording never runs its own
+/// assertions — which is exactly what the first version of that test did.
+[[nodiscard]] std::string image_refusal_message(const std::string& model);
 
 /// Builds the message list for a one-shot turn.
 ///

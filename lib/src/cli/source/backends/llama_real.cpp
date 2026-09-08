@@ -17,6 +17,8 @@
 #if defined(APOGEE_ENABLE_LLAMA)
 
 #include <llama.h>
+#include <mtmd-helper.h>
+#include <mtmd.h>
 
 #include <cstdio>
 #include <cstring>
@@ -56,6 +58,24 @@ void ensure_backend_init() {
                 }
             },
             nullptr);
+
+        // mtmd logs through its OWN channels, which `llama_log_set` does not
+        // reach -- and it is chattier: "encoding image slice...", "image
+        // decoded (batch 1/1) in 55 ms". Found by running it: those lines
+        // landed on STDOUT, interleaved with the answer. On a terminal that is
+        // noise; in machine mode it is non-JSON in the middle of the event
+        // stream, which breaks the driver's parser at the worst moment.
+        //
+        // Same rule as above, applied to both of mtmd's loggers: WARN and above
+        // to stderr, everything below dropped.
+        const auto quiet = [](ggml_log_level level, const char* text, void* /*user_data*/) {
+            if (level >= GGML_LOG_LEVEL_WARN && text != nullptr) {
+                std::fputs(text, stderr);
+            }
+        };
+        mtmd_log_set(quiet, nullptr);
+        mtmd_helper_log_set(quiet, nullptr);
+
         llama_backend_init();
     });
 }
@@ -78,11 +98,35 @@ struct SamplerDeleter {
     }
 };
 
+/// llama.cpp's multimodal projector. Owned by the model; contexts borrow it.
+struct MtmdDeleter {
+    void operator()(mtmd_context* context) const noexcept {
+        mtmd_free(context);
+    }
+};
+
+using MtmdPtr = std::unique_ptr<mtmd_context, MtmdDeleter>;
+
+struct BitmapDeleter {
+    void operator()(mtmd_bitmap* bitmap) const noexcept {
+        mtmd_bitmap_free(bitmap);
+    }
+};
+
+struct ChunksDeleter {
+    void operator()(mtmd_input_chunks* chunks) const noexcept {
+        mtmd_input_chunks_free(chunks);
+    }
+};
+
+using BitmapPtr = std::unique_ptr<mtmd_bitmap, BitmapDeleter>;
+using ChunksPtr = std::unique_ptr<mtmd_input_chunks, ChunksDeleter>;
+
 class RealContext final : public LlamaContext {
 public:
     RealContext(std::unique_ptr<llama_context, ContextDeleter> context,
-                std::unique_ptr<llama_sampler, SamplerDeleter> sampler)
-        : context_{std::move(context)}, sampler_{std::move(sampler)} {}
+                std::unique_ptr<llama_sampler, SamplerDeleter> sampler, mtmd_context* vision)
+        : context_{std::move(context)}, sampler_{std::move(sampler)}, vision_{vision} {}
 
     void decode(const std::vector<std::int32_t>& tokens, std::int64_t position) override {
         if (tokens.empty()) {
@@ -143,15 +187,84 @@ public:
     }
 
 private:
+    std::int64_t decode_multimodal(const std::vector<std::string>& images, std::string_view text,
+                                   std::int64_t position, std::string& error) override {
+        if (vision_ == nullptr) {
+            error = "this backend has no mmproj_path configured, so it cannot read images";
+            return -1;
+        }
+
+        // mtmd decodes the image bytes itself -- PNG, JPEG, and the rest --
+        // which is why the seam carries raw bytes rather than pixels. Doing our
+        // own decoding would mean a second image library and a second set of
+        // format bugs.
+        std::vector<BitmapPtr> owned;
+        std::vector<const mtmd_bitmap*> borrowed;
+        owned.reserve(images.size());
+        borrowed.reserve(images.size());
+        for (const std::string& bytes : images) {
+            BitmapPtr bitmap{mtmd_helper_bitmap_init_from_buf(
+                vision_, reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size())};
+            if (bitmap == nullptr) {
+                error =
+                    "an attached image could not be decoded -- it may be a format this "
+                    "projector does not handle, or the file may be damaged";
+                return -1;
+            }
+            borrowed.push_back(bitmap.get());
+            owned.push_back(std::move(bitmap));
+        }
+
+        ChunksPtr chunks{mtmd_input_chunks_init()};
+        if (chunks == nullptr) {
+            error = "could not allocate multimodal input";
+            return -1;
+        }
+
+        mtmd_input_text input{};
+        const std::string prompt{text};
+        input.text = prompt.c_str();
+        input.add_special = true;
+        input.parse_special = true;
+
+        if (mtmd_tokenize(vision_, chunks.get(), &input, borrowed.data(), borrowed.size()) != 0) {
+            // The usual cause is a marker count that does not match the number
+            // of images, which is our bug rather than the user's -- so it says
+            // what went wrong rather than blaming the picture.
+            error = "the multimodal prompt could not be tokenized (marker/image mismatch)";
+            return -1;
+        }
+
+        llama_pos new_position = 0;
+        const std::int32_t status = mtmd_helper_eval_chunks(
+            vision_, context_.get(), chunks.get(), static_cast<llama_pos>(position),
+            /*seq_id=*/0, static_cast<std::int32_t>(llama_n_batch(context_.get())),
+            /*logits_last=*/true, &new_position);
+        if (status != 0) {
+            error = "evaluating the image failed -- the context may be too small to hold it";
+            return -1;
+        }
+
+        evaluated_ += static_cast<std::int64_t>(new_position) - position;
+        return static_cast<std::int64_t>(new_position);
+    }
+
     std::unique_ptr<llama_context, ContextDeleter> context_;
     std::unique_ptr<llama_sampler, SamplerDeleter> sampler_;
     std::int64_t evaluated_ = 0;
+    /// Borrowed from the model, which outlives every context made from it.
+    mtmd_context* vision_ = nullptr;
 };
 
 class RealModel final : public LlamaModel {
 public:
     explicit RealModel(std::unique_ptr<llama_model, ModelDeleter> model)
         : model_{std::move(model)}, vocab_{llama_model_get_vocab(model_.get())} {}
+
+    RealModel(std::unique_ptr<llama_model, ModelDeleter> model, MtmdPtr vision)
+        : model_{std::move(model)},
+          vocab_{llama_model_get_vocab(model_.get())},
+          vision_{std::move(vision)} {}
 
     [[nodiscard]] std::vector<std::int32_t> tokenize(std::string_view text,
                                                      bool add_special) const override {
@@ -286,17 +399,34 @@ public:
         // the per-family sampling profiles in model-profiles-and-management.
         llama_sampler_chain_add(sampler.get(), llama_sampler_init_greedy());
 
-        return std::make_unique<RealContext>(std::move(context), std::move(sampler));
+        return std::make_unique<RealContext>(std::move(context), std::move(sampler), vision_.get());
+    }
+
+    [[nodiscard]] bool supports_vision() const noexcept override {
+        // Both halves: a projector was loaded AND it does images. A projector
+        // can load and be audio-only, and answering yes on the strength of
+        // "an mmproj was configured" is how a surface accepts a picture it
+        // cannot use.
+        return vision_ != nullptr && mtmd_support_vision(vision_.get());
+    }
+
+    [[nodiscard]] std::string image_marker() const override {
+        const char* marker = mtmd_default_marker();
+        return marker == nullptr ? std::string{} : std::string{marker};
     }
 
 private:
     std::unique_ptr<llama_model, ModelDeleter> model_;
     const llama_vocab* vocab_ = nullptr;
+    /// The projector, when one was configured. Outlives every context made
+    /// from this model, which is why contexts may borrow it raw.
+    MtmdPtr vision_;
 };
 
 class RealRuntime final : public LlamaRuntime {
 public:
     [[nodiscard]] std::unique_ptr<LlamaModel> load(const std::string& path, std::int64_t gpu_layers,
+                                                   const std::string& mmproj_path,
                                                    std::string& error) override {
         ensure_backend_init();
 
@@ -312,7 +442,25 @@ public:
                     "' -- check that the file exists and is a valid GGUF";
             return nullptr;
         }
-        return std::make_unique<RealModel>(std::move(model));
+        if (mmproj_path.empty()) {
+            return std::make_unique<RealModel>(std::move(model));
+        }
+
+        mtmd_context_params vision_params = mtmd_context_params_default();
+        vision_params.use_gpu = gpu_layers > 0;
+        // mtmd is chatty on stderr at info level, and this runs inside a turn.
+        vision_params.print_timings = false;
+
+        MtmdPtr vision{mtmd_init_from_file(mmproj_path.c_str(), model.get(), vision_params)};
+        if (vision == nullptr) {
+            // A projector that will not load is an ERROR, not a downgrade to
+            // text: the user configured vision, and quietly answering without
+            // looking at their picture is worse than saying why.
+            error = "could not load the multimodal projector at '" + mmproj_path +
+                    "' -- check that it is the mmproj file matching this model";
+            return nullptr;
+        }
+        return std::make_unique<RealModel>(std::move(model), std::move(vision));
     }
 };
 

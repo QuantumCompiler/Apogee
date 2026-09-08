@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,16 +54,32 @@ struct ModelRow {
     /// Header state for a local model: "ok", "unreadable", or "missing".
     /// Cloud backends report "-".
     std::string state;
+
+    /// What acquisition checked, from the model's sidecar — "size ok, digest
+    /// ok, header ok", or "no digest published, header ok", and so on.
+    ///
+    /// "no record" for a model a user placed by hand: legitimate, and simply
+    /// not something integrity can be rechecked against. Never the bare word
+    /// "verified"; what was checked is the information.
+    std::string verified;
     /// An advisory note — a missing file, a combined multimodal blob, an
     /// unreadable header's reason. Never fatal on its own.
     std::string note;
 };
 
-/// Builds the listing for `config`, inspecting any local model files it names.
+/// Builds the listing: every configured backend, plus every model on disk.
 ///
-/// Pure with respect to everything but reading those files' headers, so a test
+/// **Both halves are needed and neither is enough.** A configured backend may
+/// point anywhere on the filesystem, so scanning the models directory alone
+/// would miss it. And a freshly pulled model is not in the config at all — a
+/// listing built only from `backends:` reported "no backends configured"
+/// immediately after a 460 MB download, which is how this was found.
+///
+/// Pure with respect to everything but reading headers and sidecars, so a test
 /// drives it with a temp directory rather than the developer's installation.
-[[nodiscard]] std::vector<ModelRow> build_model_rows(const harness::Config& config);
+/// `models_dir` empty skips the on-disk half.
+[[nodiscard]] std::vector<ModelRow> build_model_rows(const harness::Config& config,
+                                                     const std::filesystem::path& models_dir = {});
 
 /// Renders rows as an aligned table. Empty input yields a single explanatory
 /// line, never a bare header with nothing under it.

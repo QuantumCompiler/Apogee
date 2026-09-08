@@ -127,6 +127,23 @@ backends:
   #   # context_size: 8192
   #   # idle_unload_seconds: 900
 
+  # ── Local vision ────────────────────────────────────────────────────────────
+  # A local model can read images when you also point it at that model's
+  # multimodal projector -- a separate "mmproj" GGUF, usually published beside
+  # the model itself. It is a field of its own rather than something Apogee
+  # guesses: projectors have no reliable naming relationship to their model, and
+  # the wrong one produces nonsense instead of an error.
+  #
+  # Needs a build with -DAPOGEE_ENABLE_LLAMA=ON. Without an mmproj_path the
+  # entry is text-only and `--image` is refused with a message saying so.
+  #
+  # `apogee models info <backend>` tells you which of your files is which: a
+  # projector reports as one rather than as a model.
+  # vision:
+  #   type: llamacpp
+  #   model_path: "${HOME}/.cache/llms/SmolVLM-500M-Instruct-Q8_0.gguf"
+  #   mmproj_path: "${HOME}/.cache/llms/mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
+
   # ── User-supplied embedding backend (vector RAG) ────────────────────────────
   # No embedding model ships with Apogee. To enable vector retrieval, point
   # model_path at a local GGUF -- a dedicated embedding model is best, though a

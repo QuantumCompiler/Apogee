@@ -78,6 +78,17 @@ struct BackendConfig {
 
     std::string model;
     std::string model_path;
+
+    /// Path to the multimodal projector (an "mmproj" GGUF), for a local model
+    /// that can read images.
+    ///
+    /// A field of its own rather than inferred from `model_path`, because
+    /// inference guesses and a field states: projectors are separate files with
+    /// no reliable naming relationship to their model, and picking the wrong
+    /// one produces nonsense rather than an error. Unset means text-only, which
+    /// is the common case.
+    std::string mmproj_path;
+
     std::string system_prompt;
 
     /// Context window in tokens. Unlike Ommi -- whose claude entries omitted

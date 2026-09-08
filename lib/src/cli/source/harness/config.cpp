@@ -122,6 +122,8 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     backend.api_key = scalar(node["api_key"], origin, where + ".api_key");
     backend.model = scalar(node["model"], origin, where + ".model");
     backend.model_path = scalar(node["model_path"], origin, where + ".model_path");
+
+    backend.mmproj_path = scalar(node["mmproj_path"], origin, where + ".mmproj_path");
     backend.system_prompt = scalar(node["system_prompt"], origin, where + ".system_prompt");
     backend.context_size = integer(node["context_size"], origin, where + ".context_size");
     backend.max_tokens = integer(node["max_tokens"], origin, where + ".max_tokens");

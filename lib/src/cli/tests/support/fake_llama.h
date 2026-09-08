@@ -259,7 +259,9 @@ public:
 
     [[nodiscard]] std::unique_ptr<backends::LlamaModel> load(const std::string& path,
                                                              std::int64_t gpu_layers,
+                                                             const std::string& mmproj_path,
                                                              std::string& error) override {
+        last_mmproj_path = mmproj_path;
         (void)gpu_layers;
         last_path = path;
         if (!load_error.empty()) {
@@ -277,6 +279,10 @@ public:
     }
 
     std::string last_path;
+
+    /// The projector the provider asked for, so a test can assert the config
+    /// field reaches the runtime rather than being dropped on the way.
+    std::string last_mmproj_path;
 };
 
 }  // namespace apogee::testing
