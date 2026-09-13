@@ -17,6 +17,14 @@ std::string lower(std::string_view text) {
 
 }  // namespace
 
+bool is_loopback_host(std::string_view host) {
+    std::string h = lower(host);
+    if (h.size() >= 2 && h.front() == '[' && h.back() == ']') {
+        h = h.substr(1, h.size() - 2);
+    }
+    return h == "localhost" || h == "::1" || h == "0:0:0:0:0:0:0:1" || h.starts_with("127.");
+}
+
 bool HttpRequest::has_query(std::string_view key) const {
     return query.contains(std::string{key});
 }

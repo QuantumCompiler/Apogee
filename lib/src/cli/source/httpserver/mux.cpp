@@ -2,45 +2,118 @@
 
 #include <array>
 #include <string>
+#include <utility>
+
+#include "httpserver/admin_auth.h"
 
 namespace apogee::httpserver {
 namespace {
 
-using RouteFn = HttpResponse (*)(Handler&, const HttpRequest&, const std::string&);
+using RouteFn = HttpResponse (*)(Handler&, AdminHandler*, const HttpRequest&, const std::string&);
 
 struct Route {
     const char* method;
     const char* pattern;
+    bool admin;
     RouteFn call;
 };
+
+constexpr std::string_view kAdminPrefix = "/v1/admin";
 
 /// The table. `tests/http_api_conformance.cmake` reads the method/pattern
 /// pairs off these lines and requires each to be documented in
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
-/// routes that exist.
-constexpr std::array<Route, 8> kRoutes{{
-    {"POST", "/v1/chat/completions",
-     +[](Handler& h, const HttpRequest& r, const std::string&) { return h.chat_completions(r); }},
-    {"POST", "/v1/completions",
-     +[](Handler& h, const HttpRequest& r, const std::string&) { return h.completions(r); }},
-    {"GET", "/v1/models",
-     +[](Handler& h, const HttpRequest& r, const std::string&) { return h.list_models(r); }},
-    {"GET", "/v1/model/status",
-     +[](Handler& h, const HttpRequest& r, const std::string&) { return h.model_status(r); }},
-    {"GET", "/health",
-     +[](Handler& h, const HttpRequest& r, const std::string&) { return h.health(r); }},
-    {"GET", "/v1/sessions",
-     +[](Handler& h, const HttpRequest& r, const std::string&) { return h.list_sessions(r); }},
-    {"GET", "/v1/sessions/{id}",
-     +[](Handler& h, const HttpRequest& r, const std::string& id) { return h.get_session(r, id); }},
-    {"DELETE", "/v1/sessions/{id}",
-     +[](Handler& h, const HttpRequest& r, const std::string& id) {
+/// routes that exist. Admin rows are only reachable through the gate.
+constexpr std::array<Route, 20> kRoutes{{
+    {"POST", "/v1/chat/completions", false,
+     +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
+         return h.chat_completions(r);
+     }},
+    {"POST", "/v1/completions", false,
+     +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
+         return h.completions(r);
+     }},
+    {"GET", "/v1/models", false,
+     +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
+         return h.list_models(r);
+     }},
+    {"GET", "/v1/model/status", false,
+     +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
+         return h.model_status(r);
+     }},
+    {"GET", "/health", false,
+     +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
+         return h.health(r);
+     }},
+    {"GET", "/v1/sessions", false,
+     +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
+         return h.list_sessions(r);
+     }},
+    {"GET", "/v1/sessions/{id}", false,
+     +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string& id) {
+         return h.get_session(r, id);
+     }},
+    {"DELETE", "/v1/sessions/{id}", false,
+     +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string& id) {
          return h.delete_session(r, id);
+     }},
+    // --- the control plane ------------------------------------------------
+    {"GET", "/v1/admin/backends", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_backends(r);
+     }},
+    {"POST", "/v1/admin/backends", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->create_backend(r);
+     }},
+    {"POST", "/v1/admin/backends/default", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->set_default(r);
+     }},
+    {"POST", "/v1/admin/backends/default-embedding", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->set_default_embedding(r);
+     }},
+    {"POST", "/v1/admin/backends/default-extraction", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->set_default_extraction(r);
+     }},
+    {"GET", "/v1/admin/backends/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->get_backend(r, id);
+     }},
+    {"DELETE", "/v1/admin/backends/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->delete_backend(r, id);
+     }},
+    {"POST", "/v1/admin/config/format", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->format_config(r);
+     }},
+    {"GET", "/v1/admin/events", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->events_stream(r);
+     }},
+    {"GET", "/v1/admin/jobs", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_jobs(r);
+     }},
+    {"GET", "/v1/admin/jobs/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->get_job(r, id);
+     }},
+    {"DELETE", "/v1/admin/jobs/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->cancel_job(r, id);
      }},
 }};
 
 }  // namespace
+
+bool is_admin_path(std::string_view path) noexcept {
+    return path == kAdminPrefix || path.starts_with("/v1/admin/");
+}
 
 std::optional<std::string> match_route(std::string_view pattern, std::string_view path) {
     std::string captured;
@@ -71,16 +144,31 @@ std::optional<std::string> match_route(std::string_view pattern, std::string_vie
 
 Mux::Mux(Handler& handler) : handler_{&handler} {}
 
+Mux::Mux(Handler& handler, AdminHandler& admin, std::string admin_token)
+    : handler_{&handler}, admin_{&admin}, admin_token_{std::move(admin_token)} {}
+
 std::vector<RouteSpec> Mux::routes() {
     std::vector<RouteSpec> out;
     out.reserve(kRoutes.size());
     for (const Route& route : kRoutes) {
-        out.push_back(RouteSpec{route.method, route.pattern});
+        out.push_back(RouteSpec{route.method, route.pattern, route.admin});
     }
     return out;
 }
 
 HttpResponse Mux::dispatch(const HttpRequest& request) const {
+    if (is_admin_path(request.path)) {
+        if (admin_ == nullptr) {
+            return error_response(404, "the admin plane is not mounted on this server",
+                                  kNotFoundError);
+        }
+        // The gate runs BEFORE routing: an unauthenticated probe learns
+        // nothing about which routes exist.
+        if (!bearer_valid(request, admin_token_)) {
+            return unauthorized_response();
+        }
+    }
+
     std::string allowed;
     for (const Route& route : kRoutes) {
         const std::optional<std::string> captured = match_route(route.pattern, request.path);
@@ -92,7 +180,7 @@ HttpResponse Mux::dispatch(const HttpRequest& request) const {
             allowed += route.method;
             continue;
         }
-        return route.call(*handler_, request, *captured);
+        return route.call(*handler_, admin_, request, *captured);
     }
     if (!allowed.empty()) {
         HttpResponse out = error_response(405, request.method + " is not allowed on " +

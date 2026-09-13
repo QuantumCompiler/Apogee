@@ -154,6 +154,12 @@ struct ModelsConfig {
     std::string default_extraction;
 };
 
+/// Whether two role-pointer sets are identical. Defined in `config.cpp` -- the
+/// one place besides the resolver allowed to name the fields -- so a caller
+/// comparing configs (the admin plane's `restart_required`) never reads a
+/// pointer directly.
+[[nodiscard]] bool operator==(const ModelsConfig& lhs, const ModelsConfig& rhs) noexcept;
+
 /// One entry under `embeddings:` -- a RAG collection the config knows about.
 ///
 /// A collection exists on disk the moment `apogee embed ingest` creates it,

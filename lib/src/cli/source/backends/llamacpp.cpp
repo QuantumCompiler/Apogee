@@ -8,6 +8,7 @@
 #include "backends/llamacpp_tokens.h"
 #include "backends/markup_filter.h"
 #include "backends/native_tool_calls.h"
+#include "events/bus.h"
 #include "harness/errors.h"
 #include "models/gguf_inspect.h"
 
@@ -275,6 +276,11 @@ void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
     if (model_ != nullptr) {
         return;
     }
+    // The lifecycle bus hears about a load whether or not anyone streams
+    // status: a served client subscribed to /v1/admin/events sees the model
+    // come up.
+    events::emit(events::kModelLoadStarted,
+                 nlohmann::json{{"backend", options_.backend_name}, {"model", options_.model}});
 
     if (on_status) {
         harness::StatusEvent event;
@@ -307,6 +313,8 @@ void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
         ready.name = options_.model;
         on_status(ready);
     }
+    events::emit(events::kModelLoadCompleted,
+                 nlohmann::json{{"backend", options_.backend_name}, {"model", options_.model}});
 }
 
 std::int64_t LlamaCppProvider::count_prompt_tokens(const harness::ChatRequest& request) {

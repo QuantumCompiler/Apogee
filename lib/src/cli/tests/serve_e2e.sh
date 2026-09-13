@@ -117,6 +117,51 @@ CODE="$(curl -s -o "$WORK_DIR/404.json" -w '%{http_code}' "$BASE/nope")"
 [ "$CODE" = "404" ] || fail "an unknown route was not a 404 (got $CODE)"
 grep -q '"error":{' "$WORK_DIR/404.json" || fail "the 404 was not in the error shape"
 
+# --- the control plane: gated, and byte-identical to the CLI -----------------
+TOKEN="$("$APOGEE_BIN" serve --print-admin-token </dev/null 2>/dev/null)"
+[ -n "$TOKEN" ] || fail "--print-admin-token printed nothing"
+[ "$(stat -f '%Lp' "$WORK_DIR/config/admin-token" 2>/dev/null || stat -c '%a' "$WORK_DIR/config/admin-token")" = "600" ] \
+    || fail "the admin token is not 0600"
+
+CODE="$(curl -s -o "$WORK_DIR/noauth.json" -w '%{http_code}' "$BASE/v1/admin/backends")"
+[ "$CODE" = "401" ] || fail "an unauthenticated admin request was not a 401 (got $CODE)"
+grep -q '"authentication_error"' "$WORK_DIR/noauth.json" || fail "the 401 was not in the error shape"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/admin/backends?token=$TOKEN")"
+[ "$CODE" = "401" ] || fail "a query-string token was accepted (got $CODE)"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer wrong" "$BASE/v1/admin/backends")"
+[ "$CODE" = "401" ] || fail "a wrong bearer was accepted (got $CODE)"
+
+CODE="$(curl -s -o "$WORK_DIR/admin-list.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/v1/admin/backends")"
+[ "$CODE" = "200" ] || fail "the bearer was refused (got $CODE): $(cat "$WORK_DIR/admin-list.json")"
+grep -q '"name":"mock"' "$WORK_DIR/admin-list.json" || fail "the backend list did not name mock"
+grep -q 'api_key' "$WORK_DIR/admin-list.json" && ! grep -q '"api_key":' "$WORK_DIR/admin-list.json" \
+    || fail "the backend view carried a key field: $(cat "$WORK_DIR/admin-list.json")"
+
+# An HTTP add-backend the CLI then reads back -- and the file it wrote is the
+# one the CLI would have written.
+cp "$WORK_DIR/config/config.yaml" "$WORK_DIR/before.yaml"
+CODE="$(curl -s -o "$WORK_DIR/added.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"second","type":"mock","model":"mock-2"}' "$BASE/v1/admin/backends")"
+[ "$CODE" = "201" ] || fail "add-backend over HTTP failed (got $CODE): $(cat "$WORK_DIR/added.json")"
+grep -q '"restart_required":true' "$WORK_DIR/added.json" || fail "a new backend did not report restart_required"
+[ "$("$APOGEE_BIN" config get backends.second.type </dev/null)" = "mock" ] || fail "the CLI does not see the backend added over HTTP"
+cp "$WORK_DIR/config/config.yaml" "$WORK_DIR/http.yaml"
+cp "$WORK_DIR/before.yaml" "$WORK_DIR/config/config.yaml"
+"$APOGEE_BIN" config add-backend second --type mock --model mock-2 >/dev/null </dev/null || fail "CLI add-backend"
+cmp -s "$WORK_DIR/config/config.yaml" "$WORK_DIR/http.yaml" || fail "the HTTP edit and the CLI edit produced different bytes"
+
+# The lifecycle stream: a session minted over the public plane shows up on it.
+curl -s -N --max-time 3 -H "Authorization: Bearer $TOKEN" "$BASE/v1/admin/events" >"$WORK_DIR/events.txt" 2>/dev/null &
+EVENTS=$!
+sleep 0.3
+curl -s -o /dev/null -H 'Content-Type: application/json' \
+    -d '{"messages":[{"role":"user","content":"ping"}],"session_id":"new"}' "$BASE/v1/chat/completions"
+wait $EVENTS 2>/dev/null
+grep -q '^event: session.created' "$WORK_DIR/events.txt" || fail "the events stream did not carry session.created: $(cat "$WORK_DIR/events.txt")"
+grep -q '^event: agent.run.completed' "$WORK_DIR/events.txt" || fail "the events stream did not carry agent.run.completed"
+grep -q "$TOKEN" "$WORK_DIR/events.txt" && fail "the token appeared in the event stream"
+
 # --- SIGTERM stops it cleanly ------------------------------------------------
 kill -TERM "$SERVER"
 for _ in $(seq 1 100); do

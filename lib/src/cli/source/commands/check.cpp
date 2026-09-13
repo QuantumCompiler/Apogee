@@ -17,6 +17,7 @@
 #include "commands/helpers.h"
 #include "harness/layout.h"
 #include "harness/paths.h"
+#include "httpserver/admin_auth.h"
 #include "models/gguf_inspect.h"
 #include "platform/platform.h"
 #include "version/version.h"
@@ -348,13 +349,70 @@ std::size_t CheckReport::count(Status status) const noexcept {
         rows.begin(), rows.end(), [status](const CheckRow& row) { return row.status == status; }));
 }
 
+/// Per-install secrets beside the config: the admin token today, the
+/// credential store next. Never seeded -- each is created by the command that
+/// needs it -- so install parity never sees them; but when one exists, it had
+/// better be private.
+void check_secrets(CheckReport& report, const CheckInputs& inputs) {
+    if (inputs.config_path.empty()) {
+        return;
+    }
+    const std::filesystem::path token = httpserver::admin_token_path(inputs.config_path);
+    const std::string label = "Admin token";
+    std::error_code code;
+    if (!std::filesystem::exists(token, code)) {
+        add(report, Status::Ok, "Secrets", label,
+            "not generated yet -- created at the first 'apogee serve'");
+        return;
+    }
+    if (!harness::supports_private_modes()) {
+        add(report, Status::Skipped, "Secrets", label,
+            "mode check not applicable on this platform (no POSIX file modes)");
+        return;
+    }
+    const std::filesystem::perms mode =
+        std::filesystem::status(token, code).permissions() & std::filesystem::perms::mask;
+    const bool leaks =
+        (mode & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) !=
+        std::filesystem::perms::none;
+    if (leaks) {
+        add(report, Status::Fail, "Secrets", label,
+            "is readable by other users, and it is the /v1/admin bearer",
+            "chmod 600 '" + token.string() + "'   (or: apogee check --fix)");
+        return;
+    }
+    add(report, Status::Ok, "Secrets", label, "present, private (0600)");
+}
+
 CheckReport run_checks(const CheckInputs& inputs) {
     CheckReport report;
     check_version(report, inputs);
     check_config(report, inputs);
     check_filesystem(report, inputs);
+    check_secrets(report, inputs);
     check_models(report, inputs);
     return report;
+}
+
+/// Tightens a secret file's mode. Returns what it did, or nothing.
+std::string fix_secret_mode(const std::filesystem::path& file) {
+    std::error_code code;
+    if (!harness::supports_private_modes() || !std::filesystem::exists(file, code)) {
+        return {};
+    }
+    const std::filesystem::perms mode =
+        std::filesystem::status(file, code).permissions() & std::filesystem::perms::mask;
+    if ((mode & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) ==
+        std::filesystem::perms::none) {
+        return {};
+    }
+    std::filesystem::permissions(
+        file, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace, code);
+    if (code) {
+        return "could not set the mode of " + file.string() + ": " + code.message();
+    }
+    return "set " + file.string() + " to 0600";
 }
 
 std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
@@ -376,6 +434,15 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
     }
     if (!seeded.ok()) {
         done.push_back("could not finish: " + seeded.error);
+    }
+    // A per-install secret left readable by others is a repair too -- the
+    // same kind as a private directory's mode, one file down.
+    if (!inputs.config_path.empty()) {
+        if (const std::string fixed =
+                fix_secret_mode(httpserver::admin_token_path(inputs.config_path));
+            !fixed.empty()) {
+            done.push_back(fixed);
+        }
     }
     return done;
 }

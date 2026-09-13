@@ -13,6 +13,7 @@
 #include "agentloop/loop.h"
 #include "agentloop/rag.h"
 #include "agentloop/retriever.h"
+#include "events/bus.h"
 #include "harness/errors.h"
 #include "harness/roles.h"
 #include "httpserver/sse_reporter.h"
@@ -491,7 +492,21 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
         }
     }
 
-    const agentloop::RunResult result = agentloop::run(*harness_, history, loop_options, reporter);
+    events::emit(
+        events::kAgentRunStarted,
+        nlohmann::json{{"model", plan.backend},
+                       {"tools", loop_options.tools == nullptr ? 0 : loop_options.tools->size()},
+                       {"stream", plan.stream},
+                       {"session_id", plan.session.has_value() ? plan.session->chat_id : ""}});
+    agentloop::RunResult result;
+    try {
+        result = agentloop::run(*harness_, history, loop_options, reporter);
+    } catch (...) {
+        events::emit(events::kAgentRunCompleted,
+                     nlohmann::json{{"model", plan.backend}, {"ok", false}});
+        throw;
+    }
+    events::emit(events::kAgentRunCompleted, nlohmann::json{{"model", plan.backend}, {"ok", true}});
     outcome.answer = result.answer;
     outcome.usage = result.usage;
     outcome.finish_reason = result.finish_reason;

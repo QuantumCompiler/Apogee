@@ -400,3 +400,13 @@ Config load_config(const std::filesystem::path& path) {
 }
 
 }  // namespace apogee::harness
+
+namespace apogee::harness {
+
+bool operator==(const ModelsConfig& lhs, const ModelsConfig& rhs) noexcept {
+    return lhs.default_backend == rhs.default_backend &&
+           lhs.default_embedding == rhs.default_embedding &&
+           lhs.default_extraction == rhs.default_extraction;
+}
+
+}  // namespace apogee::harness

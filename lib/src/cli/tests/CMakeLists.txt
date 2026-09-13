@@ -85,6 +85,12 @@ add_executable(apogee_tests
     httpserver/sse_test.cpp
     httpserver/session_test.cpp
     httpserver/serve_test.cpp
+    httpserver/admin_auth_test.cpp
+    httpserver/admin_config_test.cpp
+    httpserver/admin_events_test.cpp
+    httpserver/jobs_test.cpp
+    httpserver/parity_test.cpp
+    events/bus_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h

@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -15,12 +16,16 @@
 #include "agentloop/retriever.h"
 #include "backends/factory.h"
 #include "commands/helpers.h"
+#include "events/bus.h"
 #include "harness/config.h"
 #include "harness/errors.h"
 #include "harness/harness.h"
 #include "harness/paths.h"
 #include "harness/roles.h"
+#include "httpserver/admin.h"
+#include "httpserver/admin_auth.h"
 #include "httpserver/handler.h"
+#include "httpserver/jobs.h"
 #include "httpserver/mux.h"
 #include "httpserver/serve.h"
 #include "logger/operational.h"
@@ -46,6 +51,7 @@ struct ServeFlags {
     bool ignore_timeout = false;
     int session_ttl = 60;
     bool verbose = false;
+    bool print_admin_token = false;
 };
 
 [[noreturn]] void fail_user(const std::string& message) {
@@ -119,13 +125,29 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
                     "Minutes a server-side session may sit idle before it is dropped from "
                     "memory (default 60; 0 keeps them)");
     cmd->add_flag("-v,--verbose", flags->verbose, "Log every request to stderr");
+    cmd->add_flag("--print-admin-token", flags->print_admin_token,
+                  "Print the /v1/admin bearer token (generating it if needed) and exit");
 
     cmd->callback([&context, flags]() {
         harness::Config config;
+        std::filesystem::path config_path;
         try {
-            config = harness::load_config(harness::resolve_config_path(context.config_path));
+            config_path = harness::resolve_config_path(context.config_path);
+            config = harness::load_config(config_path);
         } catch (const harness::ConfigError& e) {
             fail_user(e.what());
+        }
+
+        // The control plane's token lives beside the config and follows it.
+        std::string admin_token;
+        try {
+            admin_token = httpserver::load_or_create_admin_token(config_path);
+        } catch (const std::runtime_error& e) {
+            fail_user(e.what());
+        }
+        if (flags->print_admin_token) {
+            std::cout << admin_token << "\n";
+            return;
         }
 
         if (flags->ignore_timeout) {
@@ -216,7 +238,16 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
         }
 
         httpserver::Handler handler{harness, options, flags->tools ? &registry : nullptr};
-        httpserver::Mux mux{handler};
+
+        // The control plane, on the same listener, behind the bearer. Its
+        // startup snapshot is the config the providers were built from, which
+        // is what `restart_required` compares the file against.
+        httpserver::JobRegistry jobs{events::default_bus()};
+        httpserver::AdminOptions admin_options;
+        admin_options.config_path = config_path;
+        admin_options.startup = config;
+        httpserver::AdminHandler admin{std::move(admin_options), jobs, events::default_bus()};
+        httpserver::Mux mux{handler, admin, admin_token};
 
         if (flags->preload) {
             for (const std::string& name : options.served) {
@@ -269,6 +300,9 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
                                                 std::to_string(flags->session_ttl) + " min"
                                           : " -- sessions never idle out";
         note(summary);
+        note(
+            "/v1/admin enabled -- bearer token required; 'apogee serve --print-admin-token' "
+            "prints it");
         if (!httpserver::is_loopback_host(flags->bind)) {
             note(
                 "bound to a non-loopback host: the inference plane is unauthenticated, so "

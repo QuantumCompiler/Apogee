@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "httpserver/handler.h"
+#include "httpserver/http_types.h"
 #include "httpserver/mux.h"
 
 /// The listener, and the bind policy in front of it.
@@ -31,9 +32,6 @@ struct BindOptions {
     int port = 8080;
     bool allow_remote = false;
 };
-
-/// Whether `host` can only be reached from this machine.
-[[nodiscard]] bool is_loopback_host(std::string_view host);
 
 /// Why `bind` is refused, or empty when it is permitted. **Fail-closed**: an
 /// unrecognisable host is not loopback, and so needs `allow_remote`.

@@ -8,6 +8,7 @@
 
 #include "harness/config.h"
 #include "harness/layout.h"
+#include "httpserver/admin_auth.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
 
@@ -471,4 +472,55 @@ TEST_CASE("check rejects a rerank or backend pin naming a backend that is not co
     REQUIRE(row_with(ok, "collection: notes") != nullptr);
     CHECK(row_with(ok, "collection: notes")->status == Status::Ok);
     CHECK(row_with(ok, "collection: notes")->detail == "vector");
+}
+
+TEST_CASE("the doctor reports the admin token: absent is fine, present must be private",
+          "[check][secrets]") {
+    // A per-install secret is never seeded, so install parity never sees it;
+    // but when it exists, it had better be 0600 -- and --fix makes it so.
+    const apogee::testing::TempDir home{"check-secrets"};
+    const std::filesystem::path config_path = home.path() / "config" / "config.yaml";
+    std::filesystem::create_directories(config_path.parent_path());
+    std::ofstream{config_path} << apogee::harness::config_template();
+
+    CheckInputs inputs;
+    inputs.home = home.path();
+    inputs.config_path = config_path;
+    inputs.config = apogee::harness::load_config(config_path);
+
+    const auto token_row = [&]() {
+        for (const apogee::commands::CheckRow& row : apogee::commands::run_checks(inputs).rows) {
+            if (row.name == "Admin token") {
+                return row;
+            }
+        }
+        FAIL("no Admin token row");
+        return apogee::commands::CheckRow{};
+    };
+
+    CHECK(token_row().status == apogee::commands::Status::Ok);  // not generated yet
+
+    const std::filesystem::path token = apogee::httpserver::admin_token_path(config_path);
+    std::ofstream{token} << "deadbeef\n";
+    if (!apogee::harness::supports_private_modes()) {
+        CHECK(token_row().status == apogee::commands::Status::Skipped);
+        return;
+    }
+    std::filesystem::permissions(token, std::filesystem::perms::owner_all |
+                                            std::filesystem::perms::group_read |
+                                            std::filesystem::perms::others_read);
+    CHECK(token_row().status == apogee::commands::Status::Fail);
+
+    const std::vector<std::string> fixed = apogee::commands::apply_fixes(inputs);
+    bool tightened = false;
+    for (const std::string& line : fixed) {
+        if (line.find("admin-token") != std::string::npos &&
+            line.find("0600") != std::string::npos) {
+            tightened = true;
+        }
+    }
+    CHECK(tightened);
+    CHECK(token_row().status == apogee::commands::Status::Ok);
+    CHECK((std::filesystem::status(token).permissions() & std::filesystem::perms::mask) ==
+          (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write));
 }

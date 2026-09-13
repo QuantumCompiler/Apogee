@@ -67,6 +67,11 @@ inline constexpr std::string_view kSessionNotFound = "session_not_found";
 inline constexpr std::string_view kBackendUnavailable = "backend_unavailable";
 inline constexpr std::string_view kServerError = "server_error";
 
+/// Whether `host` -- a bind host or a peer address -- can only be this machine:
+/// `127.x.x.x`, `::1` (bracketed or not), `localhost`. Fail-closed: anything
+/// unrecognisable is not loopback.
+[[nodiscard]] bool is_loopback_host(std::string_view host);
+
 [[nodiscard]] HttpResponse json_response(int status, const nlohmann::json& body);
 
 /// The OpenAI error envelope: `{"error":{"message":…,"type":…}}`. Every error

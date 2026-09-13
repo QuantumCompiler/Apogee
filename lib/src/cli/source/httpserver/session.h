@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "events/bus.h"
 #include "logger/session.h"
 
 /// Server-owned conversations.
@@ -44,8 +45,9 @@ public:
     using Clock = std::function<std::chrono::system_clock::time_point()>;
 
     /// `clock` is injected so a test can age sessions without sleeping. The
-    /// default reads the system clock.
-    explicit SessionStore(Clock clock = {});
+    /// default reads the system clock. `bus` receives `session.created` and
+    /// `session.evicted`; null means the process-wide bus.
+    explicit SessionStore(Clock clock = {}, events::Bus* bus = nullptr);
 
     /// Mints a session bound to `backend`, persists it, and returns its id.
     /// The id is a chat id: `apogee chat --resume <id>` finds the file.
@@ -79,6 +81,7 @@ private:
     };
 
     Clock clock_;
+    events::Bus* bus_;
     mutable std::mutex mutex_;
     std::map<std::string, Live, std::less<>> live_;
 };

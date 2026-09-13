@@ -147,7 +147,11 @@ public:
 /// Same-directory matters: rename is only atomic within a filesystem, and a
 /// temp file in /tmp can land on a different one. An interrupted write leaves
 /// the original file intact rather than a truncated config.
-void write_file_atomically(const std::filesystem::path& path, std::string_view content);
+/// With `private_mode`, the file is `0600` before it is renamed into place
+/// (POSIX; a no-op where modes do not exist), so a secret is never on disk
+/// under a permissive mode, not even between two syscalls.
+void write_file_atomically(const std::filesystem::path& path, std::string_view content,
+                           bool private_mode = false);
 
 /// Reads `path`, applies `transform`, re-parses the result, and writes it
 /// atomically.

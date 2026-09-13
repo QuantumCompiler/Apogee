@@ -83,7 +83,20 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
         }
         return false;
     };
-    CHECK(routes.size() == 8);
+    // Eight public rows, and every admin row flagged as gated.
+    std::size_t public_rows = 0;
+    std::size_t admin_rows = 0;
+    for (const RouteSpec& route : routes) {
+        if (route.admin) {
+            CHECK(route.pattern.rfind("/v1/admin/", 0) == 0);
+            ++admin_rows;
+        } else {
+            CHECK(route.pattern.rfind("/v1/admin", 0) != 0);
+            ++public_rows;
+        }
+    }
+    CHECK(public_rows == 8);
+    CHECK(admin_rows == 12);
     CHECK(has("POST", "/v1/chat/completions"));
     CHECK(has("POST", "/v1/completions"));
     CHECK(has("GET", "/v1/models"));
@@ -92,4 +105,7 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
     CHECK(has("GET", "/v1/sessions"));
     CHECK(has("GET", "/v1/sessions/{id}"));
     CHECK(has("DELETE", "/v1/sessions/{id}"));
+    CHECK(has("POST", "/v1/admin/backends"));
+    CHECK(has("GET", "/v1/admin/events"));
+    CHECK(has("DELETE", "/v1/admin/jobs/{id}"));
 }

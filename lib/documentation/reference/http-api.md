@@ -226,12 +226,143 @@ One session's `messages` (the same shape as a request's), with `turn_count` and
 
 Ends the live session (`204`). The transcript on disk is untouched.
 
+## The admin plane
+
+Everything that *changes* configuration or data lives under `/v1/admin/`, behind
+a bearer token. The public plane above stays open for OpenAI-client
+compatibility; this one never is.
+
+### Authentication
+
+Every request under `/v1/admin/` carries:
+
+```
+Authorization: Bearer <token>
+```
+
+The token is a per-install secret generated at the first `apogee serve` as a
+sibling of `config.yaml` (`~/.apogee/config/admin-token`, mode `0600`). Read it,
+generating it if needed, with:
+
+```bash
+apogee serve --print-admin-token
+```
+
+- A missing or wrong token is `401` with `WWW-Authenticate: Bearer`, **whether
+  or not the path exists** — the gate runs before routing, so an unauthenticated
+  probe learns nothing about which routes there are.
+- **Query-string tokens are refused**, even when correct: a query string lands in
+  request logs. An SSE client therefore needs a fetch-style streaming reader
+  that can set a header, not a bare browser `EventSource`.
+- There is no separate bind flag for this plane. A non-loopback bind already
+  needs `--allow-remote` (above), and the bearer is required on top of it.
+
+Every write reads the config fresh from disk and reports `restart_required`:
+`true` when the file now differs from what the running server started with, in
+backend membership or the role pointers. The server does not hot-reload; a
+backend added here is served after a restart (and only if the server is started
+with `-m` or `--all-backends` to serve it).
+
+### `GET /v1/admin/backends`
+
+Every backend entry as a **view that has no `api_key` field** — `api_key_set`
+says whether one is configured — plus `roles`, each named by the backend that
+*resolves* for it and which rung answered (`default`, `role_pointer`, …), and
+`restart_required`.
+
+### `POST /v1/admin/backends`
+
+The twin of `apogee config add-backend`. Body: `name` and `type` (required),
+then any of `model`, `model_path`, `api_key`, `embedding_model`,
+`system_prompt`, `context_size`, `max_tokens`, `temperature`, and `force`
+(the `--force` twin: replace an existing entry). `201` with the view; `409`
+(`type: conflict`) on a name collision without `force`; `400` on a bad type or
+body.
+
+A **literal** `api_key` is accepted from loopback peers only (`403` otherwise),
+judged from the connection's own peer address and never from a forwarded
+header. The `${ENV_VAR}` reference the CLI recommends is not a secret and is
+accepted from anywhere. The key is never returned, by any route.
+
+### `GET /v1/admin/backends/{id}`
+
+One entry's view. `404` when unknown.
+
+### `DELETE /v1/admin/backends/{id}`
+
+The twin of `apogee config delete-backend`. `200 {deleted, restart_required}`;
+`404` when unknown.
+
+### `POST /v1/admin/backends/default`
+
+The twin of `apogee config set-default`: `{"name": "<backend>"}` sets
+`models.default`. `400` when the backend is not configured, naming the ones that
+are.
+
+### `POST /v1/admin/backends/default-embedding`
+
+The twin of `apogee config set-default-embedding`. Same body and rules.
+
+### `POST /v1/admin/backends/default-extraction`
+
+The twin of `apogee config set-default-extraction`. Same body and rules.
+
+### `POST /v1/admin/config/format`
+
+The twin of `apogee config format`: trailing spaces stripped, blank-line runs
+folded, one final newline. Content untouched; `200 {formatted, restart_required}`.
+
+Every one of these writes goes through the same comment-preserving edit the
+CLI uses, so a file edited here is **byte-identical** to one edited from the
+terminal.
+
+### `GET /v1/admin/events`
+
+One server-wide stream of lifecycle events — distinct from a chat request's
+`apogee_events` meta-frames — as named Server-Sent Events, with a `: heartbeat`
+comment every 25 seconds:
+
+```
+event: session.created
+data: {"type":"session.created","time":"2026-09-13T10:04:11Z","data":{"session_id":"…","model":"…"}}
+```
+
+| Event | Fires when | `data` |
+|---|---|---|
+| `session.created` | a server-side session is minted | `session_id`, `model` |
+| `session.evicted` | a session leaves memory | `session_id`, `model`, `turns`, `reason` (`ttl` or `deleted`) |
+| `model.load.started` / `model.load.completed` | a local model loads | `backend`, `model` |
+| `agent.run.started` / `agent.run.completed` | a chat turn begins / ends | `model`, `tools`, `stream`, `session_id` / `model`, `ok` |
+| `admin.job.started` / `progress` / `completed` / `failed` / `cancelled` | an async admin job moves | `job_id`, `kind`, plus the job's own fields |
+
+Delivery is advisory: a client that falls 256 events behind drops the next one
+rather than stalling the server.
+
+### `GET /v1/admin/jobs`
+
+Every async job this process has run, newest first:
+`{id, kind, status, message?, result?, error?, started, finished?}` with
+`status` one of `running`, `succeeded`, `failed`, `cancelled`.
+
+### `GET /v1/admin/jobs/{id}`
+
+One job. `404` when unknown.
+
+### `DELETE /v1/admin/jobs/{id}`
+
+Cancels a running job and returns its record. A cancelled job stays cancelled:
+a worker that dies afterwards cannot turn it into `failed`. Idempotent on a
+finished job; `404` when unknown.
+
+No route starts a job yet: the substrate ships with the plane, and the first
+job kinds — a server-local ingest, a model pull — arrive with the routes that
+own them.
+
 ## What this server does not do
 
-- **It does not authenticate.** The public inference plane stays open for
+- **The inference plane does not authenticate.** It stays open for
   OpenAI-client compatibility; the bind policy is the guard, and a deployment
-  puts its own access control in front. The mutating control plane (`/v1/admin`)
-  waits for its own item, with a bearer token.
+  puts its own access control in front. Only the admin plane takes a bearer.
 - **It does not terminate TLS.** Plain HTTP, behind a reverse proxy that does.
 - **It does not serve subscription backends.** A vendor-CLI entry is refused by
   type, with a 400 that says why.

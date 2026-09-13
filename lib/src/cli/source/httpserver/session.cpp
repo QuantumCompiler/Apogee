@@ -1,9 +1,12 @@
 #include "httpserver/session.h"
 
+#include <nlohmann/json.hpp>
+
 #include <ctime>
 #include <iomanip>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 namespace apogee::httpserver {
 
@@ -20,8 +23,9 @@ std::string format_utc(std::chrono::system_clock::time_point when) {
     return out.str();
 }
 
-SessionStore::SessionStore(Clock clock)
-    : clock_{clock ? std::move(clock) : [] { return std::chrono::system_clock::now(); }} {}
+SessionStore::SessionStore(Clock clock, events::Bus* bus)
+    : clock_{clock ? std::move(clock) : [] { return std::chrono::system_clock::now(); }},
+      bus_{bus != nullptr ? bus : &events::default_bus()} {}
 
 std::string SessionStore::create(const std::string& backend,
                                  const logger::InferenceParams& params) {
@@ -37,9 +41,14 @@ std::string SessionStore::create(const std::string& backend,
     // saves one too when the user quits before asking anything.
     logger::save(session);
 
-    const std::lock_guard<std::mutex> lock{mutex_};
     const std::string id = session.chat_id;
-    live_[id] = Live{std::move(session), clock_()};
+    {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        live_[id] = Live{std::move(session), clock_()};
+    }
+    bus_->publish(events::Event{std::string{events::kSessionCreated},
+                                {},
+                                nlohmann::json{{"session_id", id}, {"model", backend}}});
     return id;
 }
 
@@ -63,12 +72,20 @@ void SessionStore::commit(const logger::Session& session) {
 }
 
 bool SessionStore::erase(std::string_view id) {
-    const std::lock_guard<std::mutex> lock{mutex_};
-    const auto it = live_.find(id);
-    if (it == live_.end()) {
-        return false;
+    nlohmann::json data;
+    {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        const auto it = live_.find(id);
+        if (it == live_.end()) {
+            return false;
+        }
+        data = nlohmann::json{{"session_id", it->first},
+                              {"model", it->second.session.backend},
+                              {"turns", it->second.session.turns},
+                              {"reason", "deleted"}};
+        live_.erase(it);
     }
-    live_.erase(it);
+    bus_->publish(events::Event{std::string{events::kSessionEvicted}, {}, std::move(data)});
     return true;
 }
 
@@ -92,17 +109,25 @@ std::size_t SessionStore::evict_idle(std::chrono::minutes ttl) {
         return 0;
     }
     const auto now = clock_();
-    const std::lock_guard<std::mutex> lock{mutex_};
-    std::size_t evicted = 0;
-    for (auto it = live_.begin(); it != live_.end();) {
-        if (now - it->second.last_active > ttl) {
-            it = live_.erase(it);
-            ++evicted;
-        } else {
-            ++it;
+    std::vector<nlohmann::json> evicted_data;
+    {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        for (auto it = live_.begin(); it != live_.end();) {
+            if (now - it->second.last_active > ttl) {
+                evicted_data.push_back(nlohmann::json{{"session_id", it->first},
+                                                      {"model", it->second.session.backend},
+                                                      {"turns", it->second.session.turns},
+                                                      {"reason", "ttl"}});
+                it = live_.erase(it);
+            } else {
+                ++it;
+            }
         }
     }
-    return evicted;
+    for (nlohmann::json& data : evicted_data) {
+        bus_->publish(events::Event{std::string{events::kSessionEvicted}, {}, std::move(data)});
+    }
+    return evicted_data.size();
 }
 
 std::size_t SessionStore::size() const {

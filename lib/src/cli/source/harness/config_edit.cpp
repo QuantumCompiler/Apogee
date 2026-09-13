@@ -8,6 +8,8 @@
 #include <system_error>
 #include <utility>
 
+#include "harness/layout.h"
+
 namespace apogee::harness {
 namespace {
 
@@ -633,7 +635,8 @@ std::string read_config_file(const std::filesystem::path& path) {
     return buffer.str();
 }
 
-void write_file_atomically(const std::filesystem::path& path, std::string_view content) {
+void write_file_atomically(const std::filesystem::path& path, std::string_view content,
+                           bool private_mode) {
     const std::filesystem::path directory =
         path.has_parent_path() ? path.parent_path() : std::filesystem::path{"."};
 
@@ -661,11 +664,25 @@ void write_file_atomically(const std::filesystem::path& path, std::string_view c
         }
     }
 
+    if (private_mode && supports_private_modes()) {
+        // On the temporary file, BEFORE the rename: the secret is never on
+        // disk under the umask's mode, not even between two syscalls.
+        std::filesystem::permissions(
+            temp_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+            std::filesystem::perm_options::replace, ec);
+        if (ec) {
+            std::error_code cleanup;
+            std::filesystem::remove(temp_path, cleanup);
+            throw ConfigEditError(temp_path.string() +
+                                  ": cannot set private mode: " + ec.message());
+        }
+    }
+
     std::filesystem::rename(temp_path, path, ec);
     if (ec) {
         std::error_code cleanup;
         std::filesystem::remove(temp_path, cleanup);
-        throw ConfigEditError(path.string() + ": cannot replace config file: " + ec.message());
+        throw ConfigEditError(path.string() + ": cannot replace file: " + ec.message());
     }
 }
 

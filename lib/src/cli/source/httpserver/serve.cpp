@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "httpserver/http_types.h"
+#include "httpserver/shutdown.h"
 
 namespace apogee::httpserver {
 namespace {
@@ -76,14 +77,6 @@ void apply(HttpResponse out, httplib::Response& response) {
 
 }  // namespace
 
-bool is_loopback_host(std::string_view host) {
-    std::string h = lower(host);
-    if (h.size() >= 2 && h.front() == '[' && h.back() == ']') {
-        h = h.substr(1, h.size() - 2);
-    }
-    return h == "localhost" || h == "::1" || h == "0:0:0:0:0:0:0:1" || h.starts_with("127.");
-}
-
 std::string bind_refusal(const BindOptions& bind) {
     if (bind.host.empty()) {
         return "--bind needs a host";
@@ -101,6 +94,9 @@ std::string bind_refusal(const BindOptions& bind) {
 }
 
 void stop_serving() noexcept {
+    // The flag first, so a stream blocked waiting for its next event sees it
+    // on its next poll; then the socket, which ends the accept loop.
+    request_shutdown();
     if (httplib::Server* server = active_server.load()) {
         server->stop();
     }
@@ -111,6 +107,7 @@ void run_server(Mux& mux, Handler& handler, const ServeOptions& options) {
         throw std::runtime_error(refusal);
     }
 
+    clear_shutdown();
     httplib::Server server;
     server.set_payload_max_length(kMaxPayloadBytes);
 

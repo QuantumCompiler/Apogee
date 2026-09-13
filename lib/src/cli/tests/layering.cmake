@@ -57,5 +57,30 @@ if(NOT VIOLATIONS STREQUAL "")
         "backend.")
 endif()
 
+# `events/` is a LEAF: it may include nothing from the project but itself.
+# That is what lets any subsystem publish to it without an include cycle --
+# and the day it includes `harness/` or `httpserver/`, a backend that publishes
+# has pulled the server into the harness's dependency graph.
+file(GLOB_RECURSE events_sources "${APOGEE_SOURCE_DIR}/events/*.h"
+                                 "${APOGEE_SOURCE_DIR}/events/*.cpp")
+if(events_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/events — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS events_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"events/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  events/${name} is not a leaf: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the events package includes the project:\n${pretty}\n"
+                        "events/ is a leaf so that anything can publish to it.")
+endif()
+
 list(LENGTH ALL_SOURCES count)
 message(STATUS "layering: ${count} sources across ${GUARDED_PACKAGES}, no backends includes - OK")

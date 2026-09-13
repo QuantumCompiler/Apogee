@@ -215,6 +215,10 @@ add_library(apogee_core STATIC
     agentloop/question.h
     agentloop/question.cpp
 
+    # A leaf: includes nothing else from the project, so anything may publish.
+    events/bus.h
+    events/bus.cpp
+
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and
     # so `#include "embedstore/embedstore.h"` compiles from the first day.
@@ -242,6 +246,18 @@ add_library(apogee_core STATIC
     httpserver/handler.cpp
     httpserver/mux.h
     httpserver/mux.cpp
+    httpserver/shutdown.h
+    httpserver/shutdown.cpp
+    httpserver/admin_auth.h
+    httpserver/admin_auth.cpp
+    httpserver/jobs.h
+    httpserver/jobs.cpp
+    httpserver/admin_events.h
+    httpserver/admin_events.cpp
+    httpserver/admin_config.h
+    httpserver/admin_config.cpp
+    httpserver/admin.h
+    httpserver/admin.cpp
     # The ONE translation unit that may reference listen()/accept(). The
     # no-listen symbol check allow-lists exactly this object and requires it to
     # be the only one -- see tests/no_listen_symbols.cmake.
