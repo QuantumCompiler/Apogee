@@ -356,6 +356,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         harness::Harness harness{config};
         backends::BuildOptions build_options;
         build_options.web_search = flags->search;
+        build_options.config_path = config_path;
         const backends::BuildResult built = backends::build_providers(harness, build_options);
 
         if (built.constructed_count() == 0) {

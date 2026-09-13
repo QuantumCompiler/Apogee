@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <string>
@@ -7,6 +8,7 @@
 
 #include "harness/config.h"
 #include "harness/harness.h"
+#include "secrets/resolve.h"
 
 /// Construction of providers from config.
 ///
@@ -45,6 +47,17 @@ struct BuildOptions {
     /// Providers without one ignore it -- there is no local search tool, by
     /// decision (2026-08-26): scraping a search results page breaks silently.
     bool web_search = false;
+
+    /// The config file's path, which locates the credential store beside it.
+    /// Empty means no store is consulted -- the second rung of the key chain
+    /// is skipped -- which is what a test building providers from an
+    /// in-memory config wants.
+    std::filesystem::path config_path;
+
+    /// The environment the third rung reads. Null means the process-wide
+    /// snapshot; a test passes its own so the developer's shell cannot leak
+    /// a real key into a case that expects none.
+    const secrets::EnvSnapshot* env = nullptr;
 };
 
 /// Constructs a provider for every backend in `config` and registers it on

@@ -316,6 +316,39 @@ Every one of these writes goes through the same comment-preserving edit the
 CLI uses, so a file edited here is **byte-identical** to one edited from the
 terminal.
 
+### `GET /v1/admin/auth`
+
+The stored provider credentials as **metadata** — `{"object":"list","data":[{provider, stored_at}]}` — plus
+`backends`: for every configured backend that takes a key, its `name`, `type`,
+and which `source` currently answers for it (`config`, `store`, `env` with the
+`variable`, or `none`). No key is ever in this response; the type it serializes
+has no field for one. A store file that cannot be read is reported as an empty
+list with a `warning`, never an error.
+
+### `PUT /v1/admin/auth/{id}`
+
+The twin of `apogee auth add <provider>`. `{id}` is a provider **type** with
+API billing — `anthropic`, `openai`, or `google` — and the key travels in the
+body only: `{"key": "sk-…"}`. `200` with the slot's metadata. Served to
+**loopback peers only**: `403` (`type: forbidden`) from any other address,
+whatever the bind, judged from the connection's own peer and never from a
+forwarded header. A vendor-CLI type (`claude-cli`, `codex-cli`, `gemini-cli`,
+`ollama-cli`) is `400` with the principle — those CLIs authenticate themselves,
+and Apogee never stores, reads or proxies their credentials.
+
+The stored key is used by every backend of that type that has no `api_key` of
+its own in `config.yaml`; a configured `api_key` (literal or `${ENV}`) still
+wins, and the ambient `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
+`GEMINI_API_KEY` (then `GOOGLE_API_KEY`) is the last resort. Backends read
+their key when they are built, so a stored key reaches a running server after a
+restart.
+
+### `DELETE /v1/admin/auth/{id}`
+
+The twin of `apogee auth clear <provider>`. `200 {"cleared": "<provider>"}`;
+`404` when nothing was stored for it. It accepts no secret and mints none, so
+the bearer alone gates it.
+
 ### `GET /v1/admin/events`
 
 One server-wide stream of lifecycle events — distinct from a chat request's

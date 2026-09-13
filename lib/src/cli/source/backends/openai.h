@@ -39,7 +39,7 @@ public:
     OpenAIProvider(Options options, std::unique_ptr<HttpClient> client);
 
     [[nodiscard]] static std::unique_ptr<OpenAIProvider> from_config(
-        const std::string& backend_name, const harness::BackendConfig& config,
+        const std::string& backend_name, const harness::BackendConfig& config, std::string api_key,
         bool web_search = false);
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;

@@ -5,6 +5,7 @@
 
 #include "events/bus.h"
 #include "harness/config.h"
+#include "httpserver/admin_auth_routes.h"
 #include "httpserver/admin_config.h"
 #include "httpserver/admin_events.h"
 #include "httpserver/http_types.h"
@@ -26,6 +27,9 @@ struct AdminOptions {
     /// The config this server started from -- for `restart_required`.
     harness::Config startup;
     EventStreamOptions events;
+    /// The environment the credential listing reports against; null means
+    /// the process-wide snapshot.
+    const secrets::EnvSnapshot* env = nullptr;
 };
 
 class AdminHandler {
@@ -41,6 +45,12 @@ public:
     [[nodiscard]] HttpResponse set_default_embedding(const HttpRequest& request);
     [[nodiscard]] HttpResponse set_default_extraction(const HttpRequest& request);
     [[nodiscard]] HttpResponse format_config(const HttpRequest& request);
+
+    [[nodiscard]] HttpResponse list_credentials(const HttpRequest& request);
+    [[nodiscard]] HttpResponse put_credential(const HttpRequest& request,
+                                              std::string_view provider);
+    [[nodiscard]] HttpResponse clear_credential(const HttpRequest& request,
+                                                std::string_view provider);
 
     [[nodiscard]] HttpResponse events_stream(const HttpRequest& request);
 

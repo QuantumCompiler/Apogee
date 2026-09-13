@@ -222,11 +222,15 @@ std::unique_ptr<AnthropicProvider> AnthropicProvider::create(Options options) {
 }
 
 std::unique_ptr<AnthropicProvider> AnthropicProvider::from_config(
-    const std::string& backend_name, const harness::BackendConfig& config, bool web_search) {
+    const std::string& backend_name, const harness::BackendConfig& config, std::string api_key,
+    bool web_search) {
     Options options;
     options.backend_name = backend_name;
     options.web_search = web_search;
-    options.api_key = config.api_key;  // already ${ENV}-expanded by the loader
+    // The key arrives resolved: the factory ran the one precedence chain
+    // (config entry > stored slot > environment). This provider neither knows
+    // nor cares where it came from.
+    options.api_key = std::move(api_key);
     if (!config.model.empty()) {
         options.model = config.model;
     }
@@ -235,12 +239,8 @@ std::unique_ptr<AnthropicProvider> AnthropicProvider::from_config(
     }
 
     if (options.api_key.empty()) {
-        // Actionable, and it names the key rather than printing one.
-        throw harness::ProviderError(
-            backend_name,
-            "no API key configured. Set api_key on this backend -- a "
-            "\"${ANTHROPIC_API_KEY}\" reference is expanded when the config is read, so "
-            "the key itself never has to be written to the file");
+        // Defensive: the factory resolves and refuses before it gets here.
+        throw harness::ProviderError(backend_name, "no API key provided");
     }
     return std::make_unique<AnthropicProvider>(
         std::move(options), std::make_unique<HttpClient>(std::make_unique<CurlTransport>()));

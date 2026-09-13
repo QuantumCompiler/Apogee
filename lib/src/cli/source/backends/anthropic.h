@@ -61,7 +61,7 @@ public:
     /// provider. A per-run flag rather than a config key -- see
     /// backends::BuildOptions.
     [[nodiscard]] static std::unique_ptr<AnthropicProvider> from_config(
-        const std::string& backend_name, const harness::BackendConfig& config,
+        const std::string& backend_name, const harness::BackendConfig& config, std::string api_key,
         bool web_search = false);
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;

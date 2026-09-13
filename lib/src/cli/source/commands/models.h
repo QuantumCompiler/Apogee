@@ -8,6 +8,7 @@
 #include "commands/command.h"
 #include "harness/config.h"
 #include "models/gguf_inspect.h"
+#include "secrets/resolve.h"
 
 /// `apogee models` — what this machine has, and which backend each role uses.
 ///
@@ -52,7 +53,10 @@ struct ModelRow {
     /// architecture here instead would claim knowledge Apogee does not have.
     std::string profile;
     /// Header state for a local model: "ok", "unreadable", or "missing".
-    /// Cloud backends report "-".
+    /// For an API-billing cloud backend, **where its key comes from** --
+    /// "key: config", "key: store", "key: OPENAI_API_KEY" -- or "no key";
+    /// asked of the one resolver, so this column and a build agree. Other
+    /// cloud backends report "-".
     std::string state;
 
     /// What acquisition checked, from the model's sidecar — "size ok, digest
@@ -77,9 +81,13 @@ struct ModelRow {
 ///
 /// Pure with respect to everything but reading headers and sidecars, so a test
 /// drives it with a temp directory rather than the developer's installation.
-/// `models_dir` empty skips the on-disk half.
+/// `models_dir` empty skips the on-disk half. `config_path` locates the
+/// credential store beside it (empty: no store is consulted), and `env` is
+/// the snapshot the key column reports against (null: the process-wide one).
 [[nodiscard]] std::vector<ModelRow> build_model_rows(const harness::Config& config,
-                                                     const std::filesystem::path& models_dir = {});
+                                                     const std::filesystem::path& models_dir = {},
+                                                     const std::filesystem::path& config_path = {},
+                                                     const secrets::EnvSnapshot* env = nullptr);
 
 /// Renders rows as an aligned table. Empty input yields a single explanatory
 /// line, never a bare header with nothing under it.

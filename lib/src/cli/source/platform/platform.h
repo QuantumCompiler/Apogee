@@ -107,4 +107,14 @@ enum class StandardStream : std::uint8_t { In, Out, Err };
 /// start because a flush was refused.
 void discard_pending_input() noexcept;
 
+/// Reads one line from standard input with echo off, for a secret.
+///
+/// Writes `prompt` to standard error, disables terminal echo for the read,
+/// restores it, and prints the newline the user's Enter did not echo. On a
+/// pipe -- no terminal to silence -- it reads the line plainly. Returns
+/// nullopt at end of input. Never leaves echo off: the terminal state is
+/// restored on every path out, which is why the whole read lives here rather
+/// than in the command that wants it.
+[[nodiscard]] std::optional<std::string> read_hidden_line(std::string_view prompt);
+
 }  // namespace apogee::platform

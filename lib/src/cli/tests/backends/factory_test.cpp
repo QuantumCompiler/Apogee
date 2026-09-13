@@ -2,10 +2,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <random>
 #include <string>
 
 #include "harness/config.h"
 #include "harness/harness.h"
+#include "secrets/store.h"
+#include "support/env_guard.h"
 
 using apogee::backends::build_providers;
 using apogee::backends::make_provider;
@@ -18,6 +22,15 @@ namespace {
 
 Config config_from(std::string_view yaml) {
     return apogee::harness::parse_config(yaml, "<test>");
+}
+
+/// No environment: the developer's own ANTHROPIC_API_KEY must not turn a
+/// "no key" case into a built provider.
+apogee::backends::BuildOptions no_env() {
+    static const apogee::secrets::EnvSnapshot empty;
+    apogee::backends::BuildOptions options;
+    options.env = &empty;
+    return options;
 }
 
 }  // namespace
@@ -39,8 +52,9 @@ TEST_CASE("an Anthropic entry with no key is skipped with a reason", "[backends]
     config.type = BackendType::Anthropic;
 
     std::string reason;
-    CHECK(make_provider("claude", config, reason) == nullptr);
+    CHECK(make_provider("claude", config, reason, no_env()) == nullptr);
     CHECK(reason.find("api_key") != std::string::npos);
+    CHECK(reason.find("apogee auth add anthropic") != std::string::npos);
 }
 
 TEST_CASE("an unimplemented backend type names itself in the reason", "[backends][factory]") {
@@ -110,7 +124,7 @@ TEST_CASE("a cloud type with no key names ITS OWN environment variable", "[backe
         config.type = c.type;
 
         std::string reason;
-        CHECK(make_provider("x", config, reason) == nullptr);
+        CHECK(make_provider("x", config, reason, no_env()) == nullptr);
         CHECK(reason.find(c.expected) != std::string::npos);
     }
 }
@@ -127,7 +141,7 @@ backends:
     type: mock
 )")};
 
-    const auto result = build_providers(harness);
+    const auto result = build_providers(harness, no_env());
 
     CHECK(result.constructed_count() == 1);
     CHECK(result.statuses.size() == 2);
@@ -197,4 +211,42 @@ TEST_CASE("embedding is a per-entry capability the harness discovers, and Anthro
     CHECK_FALSE(harness.can_embed("mock"));
     CHECK(harness.can_embed("gpt"));
     CHECK(harness.can_embed("gemini"));
+}
+
+TEST_CASE("the factory resolves through the store and the environment, config first",
+          "[backends][factory][secrets]") {
+    // The one chain, seen from the factory: a keyless entry builds from the
+    // store beside the config, or from the snapshot it was handed, and a
+    // config key wins over both. The provider never knows which rung answered.
+    const apogee::testing::TempDir home{"factory-secrets-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path config_path = home.path() / "config.yaml";
+    apogee::secrets::CredentialStore store{apogee::secrets::credentials_path(config_path)};
+    const apogee::secrets::EnvSnapshot env = apogee::secrets::EnvSnapshot::capture(
+        [](std::string_view name) { return name == "OPENAI_API_KEY" ? "env-key" : ""; });
+
+    BackendConfig config;
+    config.type = BackendType::OpenAI;
+    std::string reason;
+
+    // Store only.
+    store.put("openai", "store-key");
+    apogee::backends::BuildOptions from_store = no_env();
+    from_store.config_path = config_path;
+    CHECK(make_provider("gpt", config, reason, from_store) != nullptr);
+    CHECK(reason.empty());
+    // No store path: the store is not consulted, and an empty snapshot has
+    // nothing -- so this is the "no key" case again.
+    CHECK(make_provider("gpt", config, reason, no_env()) == nullptr);
+    CHECK(reason.find("OPENAI_API_KEY") != std::string::npos);
+    // Environment only.
+    apogee::backends::BuildOptions from_env;
+    from_env.env = &env;
+    reason.clear();
+    CHECK(make_provider("gpt", config, reason, from_env) != nullptr);
+    CHECK(reason.empty());
+    // A different vendor's slot answers nothing for this one.
+    BackendConfig other;
+    other.type = BackendType::Anthropic;
+    CHECK(make_provider("claude", other, reason, from_store) == nullptr);
 }

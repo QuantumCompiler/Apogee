@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <sstream>
 
 #include "backends/model_profile.h"
@@ -16,6 +17,8 @@
 #include "harness/paths.h"
 #include "harness/roles.h"
 #include "models/sidecar.h"
+#include "secrets/resolve.h"
+#include "secrets/store.h"
 
 namespace apogee::commands {
 namespace {
@@ -96,9 +99,16 @@ void pad(std::ostringstream& out, const std::string& value, std::size_t width, b
 }  // namespace
 
 std::vector<ModelRow> build_model_rows(const harness::Config& config,
-                                       const std::filesystem::path& models_dir) {
+                                       const std::filesystem::path& models_dir,
+                                       const std::filesystem::path& config_path,
+                                       const secrets::EnvSnapshot* env) {
     std::vector<ModelRow> rows;
     rows.reserve(config.backends.size());
+    std::optional<secrets::CredentialStore> store;
+    if (!config_path.empty()) {
+        store.emplace(secrets::credentials_path(config_path));
+    }
+    const secrets::EnvSnapshot& snapshot = env != nullptr ? *env : secrets::EnvSnapshot::process();
 
     for (const auto& [key, backend] : config.backends) {
         ModelRow row;
@@ -116,6 +126,28 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             row.provenance = "-";
             row.architecture = "-";
             row.state = "-";
+            if (secrets::takes_api_key(backend.type)) {
+                // The one chain -- so this column says what a build would
+                // use, and only WHERE it came from. Never the key.
+                const secrets::KeyResolution key = secrets::resolve_api_key(
+                    backend, store.has_value() ? &*store : nullptr, snapshot);
+                switch (key.source) {
+                    case secrets::KeySource::Config:
+                        row.state = "key: config";
+                        break;
+                    case secrets::KeySource::Store:
+                        row.state = "key: store";
+                        break;
+                    case secrets::KeySource::Environment:
+                        row.state = "key: " + key.variable;
+                        break;
+                    case secrets::KeySource::None:
+                        row.state = "no key";
+                        row.note = "no API key found; run 'apogee auth add " +
+                                   std::string{harness::to_string(backend.type)} + "'";
+                        break;
+                }
+            }
             row.verified = "-";
             rows.push_back(std::move(row));
             continue;
@@ -401,8 +433,9 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* list = cmd->add_subcommand("list", "List configured backends and their models");
     list->add_option("--output-format", *format, "text (default) or stream-json")
         ->check(CLI::IsMember({"text", "stream-json"}));
-    list->callback([load, format]() {
-        const std::vector<ModelRow> rows = build_model_rows(load(), harness::models_dir());
+    list->callback([load, format, &context]() {
+        const std::vector<ModelRow> rows = build_model_rows(
+            load(), harness::models_dir(), harness::resolve_config_path(context.config_path));
         std::cout << (*format == "stream-json" ? render_model_jsonl(rows)
                                                : render_model_table(rows));
     });

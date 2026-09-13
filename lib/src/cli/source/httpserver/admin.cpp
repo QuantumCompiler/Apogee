@@ -47,6 +47,23 @@ HttpResponse AdminHandler::format_config(const HttpRequest& /*request*/) {
     return admin_format_config(config_context());
 }
 
+HttpResponse AdminHandler::list_credentials(const HttpRequest& /*request*/) {
+    return admin_list_credentials(
+        AdminAuthContext{.config_path = options_.config_path, .env = options_.env});
+}
+
+HttpResponse AdminHandler::put_credential(const HttpRequest& request, std::string_view provider) {
+    return admin_put_credential(
+        AdminAuthContext{.config_path = options_.config_path, .env = options_.env}, provider,
+        request);
+}
+
+HttpResponse AdminHandler::clear_credential(const HttpRequest& /*request*/,
+                                            std::string_view provider) {
+    return admin_clear_credential(
+        AdminAuthContext{.config_path = options_.config_path, .env = options_.env}, provider);
+}
+
 HttpResponse AdminHandler::events_stream(const HttpRequest& /*request*/) {
     return event_stream(*bus_, options_.events);
 }

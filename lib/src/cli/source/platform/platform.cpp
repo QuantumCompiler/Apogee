@@ -2,6 +2,8 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
+#include <string>
 #include <system_error>
 
 #if defined(_WIN32)
@@ -189,6 +191,49 @@ void discard_pending_input() noexcept {
     // Ignored on failure: this is an ergonomic nicety, not a precondition.
     static_cast<void>(::tcflush(STDIN_FILENO, TCIFLUSH));
 #endif
+}
+
+std::optional<std::string> read_hidden_line(std::string_view prompt) {
+    std::cerr << prompt << std::flush;
+    std::string line;
+    if (!is_terminal(StandardStream::In)) {
+        if (!std::getline(std::cin, line)) {
+            return std::nullopt;
+        }
+        return line;
+    }
+#if defined(_WIN32)
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0;
+    const bool had_mode = GetConsoleMode(input, &mode) != 0;
+    if (had_mode) {
+        SetConsoleMode(input, mode & ~static_cast<DWORD>(ENABLE_ECHO_INPUT));
+    }
+    const bool got = static_cast<bool>(std::getline(std::cin, line));
+    if (had_mode) {
+        SetConsoleMode(input, mode);
+    }
+#else
+    ::termios saved{};
+    const bool had_mode = ::tcgetattr(STDIN_FILENO, &saved) == 0;
+    if (had_mode) {
+        ::termios quiet = saved;
+        quiet.c_lflag &= static_cast<tcflag_t>(~ECHO);
+        static_cast<void>(::tcsetattr(STDIN_FILENO, TCSAFLUSH, &quiet));
+    }
+    const bool got = static_cast<bool>(std::getline(std::cin, line));
+    if (had_mode) {
+        static_cast<void>(::tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved));
+    }
+#endif
+    std::cerr << "\n";
+    if (!got) {
+        return std::nullopt;
+    }
+    if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+    }
+    return line;
 }
 
 std::string host_target() {

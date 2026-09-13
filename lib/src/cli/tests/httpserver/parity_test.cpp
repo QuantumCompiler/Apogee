@@ -73,6 +73,8 @@ const std::map<std::string, Classification>& table() {
         {"config set-default-embedding", twin("POST", "/v1/admin/backends/default-embedding")},
         {"config set-default-extraction", twin("POST", "/v1/admin/backends/default-extraction")},
         {"config format", twin("POST", "/v1/admin/config/format")},
+        {"auth add", twin("PUT", "/v1/admin/auth/{id}")},
+        {"auth clear", twin("DELETE", "/v1/admin/auth/{id}")},
         // --- backfills: owned by the area that owns the CLI action ----------
         {"embed ingest", backfill("embedstore: the embeddings data plane, an async job")},
         {"embed delete", backfill("embedstore: the embeddings data plane")},
@@ -94,6 +96,7 @@ const std::map<std::string, Classification>& table() {
         {"__complete", read_only()},
         {"config get", read_only()},
         {"config path", read_only()},
+        {"auth list", read_only()},
         {"embed query", read_only()},
         {"embed list", read_only()},
         {"embed info", read_only()},

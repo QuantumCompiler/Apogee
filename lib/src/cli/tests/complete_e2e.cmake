@@ -14,6 +14,13 @@ endif()
 file(REMOVE_RECURSE "${APOGEE_WORK_DIR}")
 file(MAKE_DIRECTORY "${APOGEE_WORK_DIR}")
 set(ENV{APOGEE_HOME} "${APOGEE_WORK_DIR}")
+# A developer's own keys stay out: the resolver's third rung reads the
+# environment, and a real ANTHROPIC_API_KEY here would quietly turn "no key"
+# expectations into a live cloud backend.
+unset(ENV{ANTHROPIC_API_KEY})
+unset(ENV{OPENAI_API_KEY})
+unset(ENV{GEMINI_API_KEY})
+unset(ENV{GOOGLE_API_KEY})
 
 # Every invocation gets an explicit stdin. Without one the child inherits
 # ctest's, which may be a pipe that never delivers EOF -- so a command that

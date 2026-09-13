@@ -25,7 +25,7 @@ if(NOT DEFINED APOGEE_SOURCE_DIR)
     message(FATAL_ERROR "APOGEE_SOURCE_DIR must be set")
 endif()
 
-set(GUARDED_PACKAGES harness agentloop agent)
+set(GUARDED_PACKAGES harness agentloop agent secrets)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
@@ -80,6 +80,32 @@ if(NOT VIOLATIONS STREQUAL "")
     string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
     message(FATAL_ERROR "the events package includes the project:\n${pretty}\n"
                         "events/ is a leaf so that anything can publish to it.")
+endif()
+
+# `secrets/` sits beside the harness: it may include `harness/` (for the
+# backend types) and itself, and nothing else. The day it includes
+# `httpserver/` or `commands/`, the one place that returns a key has grown a
+# dependency on a surface that renders -- the leak the package exists to
+# make impossible.
+file(GLOB_RECURSE secrets_sources "${APOGEE_SOURCE_DIR}/secrets/*.h"
+                                  "${APOGEE_SOURCE_DIR}/secrets/*.cpp")
+if(secrets_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/secrets — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS secrets_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(secrets|harness)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  secrets/${name} reaches past the harness: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the secrets package includes a surface:\n${pretty}\n"
+                        "secrets/ may include only harness/ and itself.")
 endif()
 
 list(LENGTH ALL_SOURCES count)

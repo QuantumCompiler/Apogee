@@ -19,10 +19,17 @@
 /// This umbrella header is what `tests/packages_test.cpp` includes; it names
 /// the package's own headers so a broken include path fails the day it breaks.
 
+#include "httpserver/admin.h"
+#include "httpserver/admin_auth.h"
+#include "httpserver/admin_auth_routes.h"
+#include "httpserver/admin_config.h"
+#include "httpserver/admin_events.h"
 #include "httpserver/handler.h"
 #include "httpserver/http_types.h"
+#include "httpserver/jobs.h"
 #include "httpserver/mux.h"
 #include "httpserver/serve.h"
 #include "httpserver/session.h"
+#include "httpserver/shutdown.h"
 #include "httpserver/sse_reporter.h"
 #include "httpserver/sse_writer.h"

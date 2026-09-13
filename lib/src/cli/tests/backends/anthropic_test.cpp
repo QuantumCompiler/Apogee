@@ -520,12 +520,14 @@ TEST_CASE("a missing API key is refused with an actionable message",
     config.model = "claude-sonnet-5";
 
     try {
-        (void)AnthropicProvider::from_config("claude", config);
+        (void)AnthropicProvider::from_config("claude", config, /*api_key=*/"");
         FAIL("expected ProviderError");
     } catch (const ProviderError& e) {
+        // The variable and the field are named by the FACTORY's message; the
+        // provider only knows it was handed nothing.
         const std::string message = e.what();
-        CHECK(message.find("api_key") != std::string::npos);
-        CHECK(message.find("ANTHROPIC_API_KEY") != std::string::npos);
+        CHECK(message.find("no API key") != std::string::npos);
+        CHECK(message.find("claude") != std::string::npos);
     }
 }
 

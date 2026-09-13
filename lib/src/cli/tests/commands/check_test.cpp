@@ -9,6 +9,7 @@
 #include "harness/config.h"
 #include "harness/layout.h"
 #include "httpserver/admin_auth.h"
+#include "secrets/store.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
 
@@ -86,6 +87,11 @@ struct Install {
 };
 
 /// Finds the row whose name contains `needle`.
+/// A pointer into a temporary report would dangle at the end of the statement
+/// -- `row_with(run_checks(inputs), ...)` read freed memory once. Deleted, so
+/// it cannot be written: name the report first.
+[[nodiscard]] const apogee::commands::CheckRow* row_with(CheckReport&&, std::string_view) = delete;
+
 [[nodiscard]] const apogee::commands::CheckRow* row_with(const CheckReport& report,
                                                          std::string_view needle) {
     for (const apogee::commands::CheckRow& row : report.rows) {
@@ -388,7 +394,8 @@ TEST_CASE("a world-readable private directory fails and --fix tightens it",
     CHECK(row->detail.find("readable by other users") != std::string::npos);
 
     (void)apply_fixes(inputs);
-    const auto* repaired = row_with(run_checks(inputs), "sessions/");
+    const CheckReport repaired_report = run_checks(inputs);
+    const auto* repaired = row_with(repaired_report, "sessions/");
     REQUIRE(repaired != nullptr);
     CHECK(repaired->status == Status::Ok);
 }
@@ -523,4 +530,105 @@ TEST_CASE("the doctor reports the admin token: absent is fine, present must be p
     CHECK(token_row().status == apogee::commands::Status::Ok);
     CHECK((std::filesystem::status(token).permissions() & std::filesystem::perms::mask) ==
           (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write));
+}
+
+TEST_CASE("the doctor names where each key comes from, and never the key",
+          "[commands][check][secrets]") {
+    // Three rungs, three wordings -- a user reading the report learns which
+    // to change. The store rung is the new one; the others are the chain
+    // the factory uses, reported from the same resolver.
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml",
+                  "backends:\n"
+                  "  cfg:\n    type: openai\n    api_key: \"${APOGEE_CHECK_KEY}\"\n"
+                  "  stored:\n    type: anthropic\n"
+                  "  ambient:\n    type: google\n");
+    const apogee::testing::EnvGuard guard{"APOGEE_CHECK_KEY", "sk-CFGSECRET"};
+    load_into(inputs);
+    inputs.env = [](std::string_view name) {
+        return name == "GOOGLE_API_KEY" ? std::string{"sk-ENVSECRET"} : std::string{};
+    };
+    apogee::secrets::CredentialStore store{apogee::secrets::credentials_path(inputs.config_path)};
+    store.put("anthropic", "sk-STORESECRET");
+
+    const CheckReport report = run_checks(inputs);
+    const auto* cfg = row_with(report, "backend: cfg");
+    REQUIRE(cfg != nullptr);
+    CHECK(cfg->status == Status::Ok);
+    CHECK(cfg->detail.find("from config") != std::string::npos);
+    const auto* stored = row_with(report, "backend: stored");
+    REQUIRE(stored != nullptr);
+    CHECK(stored->status == Status::Ok);
+    CHECK(stored->detail.find("from the credential store") != std::string::npos);
+    const auto* ambient = row_with(report, "backend: ambient");
+    REQUIRE(ambient != nullptr);
+    CHECK(ambient->status == Status::Ok);
+    CHECK(ambient->detail.find("from GOOGLE_API_KEY") != std::string::npos);
+
+    const auto* store_row = row_with(report, "Credential store");
+    REQUIRE(store_row != nullptr);
+    if (apogee::harness::supports_private_modes()) {
+        CHECK(store_row->status == Status::Ok);
+        CHECK(store_row->detail.find("1 key") != std::string::npos);
+    }
+
+    const std::string rendered = render_report(report, false);
+    CHECK(rendered.find("SECRET") == std::string::npos);
+
+    // A missing key points at the store first.
+    store.clear("anthropic");
+    const CheckReport after = run_checks(inputs);
+    const auto* missing = row_with(after, "backend: stored");
+    REQUIRE(missing != nullptr);
+    CHECK(missing->status == Status::Warn);
+    CHECK(missing->remedy.find("apogee auth add anthropic") != std::string::npos);
+    CHECK(missing->remedy.find("ANTHROPIC_API_KEY") != std::string::npos);
+}
+
+TEST_CASE("the doctor reports the credential store: absent is fine, present must be private",
+          "[commands][check][secrets]") {
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", "backends:\n  gpt:\n    type: openai\n");
+    load_into(inputs);
+
+    const auto store_row = [&]() {
+        const CheckReport report = run_checks(inputs);
+        const auto* row = row_with(report, "Credential store");
+        REQUIRE(row != nullptr);
+        return *row;  // a copy: the report dies with this frame
+    };
+    CHECK(store_row().status == Status::Ok);  // nothing stored yet
+    CHECK(store_row().detail.find("none") != std::string::npos);
+
+    apogee::secrets::CredentialStore store{apogee::secrets::credentials_path(inputs.config_path)};
+    store.put("openai", "sk-x");
+    if (!apogee::harness::supports_private_modes()) {
+        CHECK(store_row().status == Status::Skipped);
+        return;
+    }
+    CHECK(store_row().status == Status::Ok);
+    std::filesystem::permissions(store.path(), std::filesystem::perms::owner_all |
+                                                   std::filesystem::perms::group_read |
+                                                   std::filesystem::perms::others_read);
+    CHECK(store_row().status == Status::Fail);
+    CHECK(store_row().remedy.find("--fix") != std::string::npos);
+
+    bool tightened = false;
+    for (const std::string& line : apogee::commands::apply_fixes(inputs)) {
+        if (line.find("credentials.json") != std::string::npos &&
+            line.find("0600") != std::string::npos) {
+            tightened = true;
+        }
+    }
+    CHECK(tightened);
+    CHECK(store_row().status == Status::Ok);
+
+    // A corrupt store is a warning that names the file, not a crash.
+    std::ofstream{store.path(), std::ios::trunc} << "{ not json";
+    CHECK(store_row().status == Status::Warn);
+    CHECK(store_row().detail.find("credentials.json") != std::string::npos);
 }

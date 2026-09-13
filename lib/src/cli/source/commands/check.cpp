@@ -20,6 +20,8 @@
 #include "httpserver/admin_auth.h"
 #include "models/gguf_inspect.h"
 #include "platform/platform.h"
+#include "secrets/resolve.h"
+#include "secrets/store.h"
 #include "version/version.h"
 
 namespace apogee::commands {
@@ -31,32 +33,6 @@ namespace {
 /// missing-key error rather than inventing a second convention: a doctor that
 /// names a different variable than the failure message does is worse than one
 /// that stays quiet.
-[[nodiscard]] std::string_view key_variable_for(harness::BackendType type) noexcept {
-    switch (type) {
-        case harness::BackendType::Anthropic:
-            return "ANTHROPIC_API_KEY";
-        case harness::BackendType::OpenAI:
-            return "OPENAI_API_KEY";
-        case harness::BackendType::Google:
-            return "GEMINI_API_KEY";
-        case harness::BackendType::LlamaCpp:
-        case harness::BackendType::Mock:
-        // The vendor-CLI backends read no key of their own: the CLI they spawn
-        // is already logged in, and Apogee never touches its credentials. Named
-        // explicitly rather than left to the default so that adding a fifth one
-        // is a compiler error here instead of a silent "no key needed".
-        case harness::BackendType::ClaudeCli:
-        case harness::BackendType::CodexCli:
-        case harness::BackendType::GeminiCli:
-        case harness::BackendType::OllamaCli:
-            break;
-    }
-    return {};
-}
-
-[[nodiscard]] bool needs_api_key(harness::BackendType type) noexcept {
-    return !key_variable_for(type).empty();
-}
 
 void add(CheckReport& report, Status status, std::string section, std::string name,
          std::string detail, std::string remedy = {}) {
@@ -111,6 +87,8 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         return;
     }
 
+    const secrets::CredentialStore store{secrets::credentials_path(inputs.config_path)};
+    const secrets::EnvSnapshot env = secrets::EnvSnapshot::capture(inputs.env);
     for (const auto& [name, backend] : config.backends) {
         const std::string label = "backend: " + name;
         const std::string_view type = harness::to_string(backend.type);
@@ -167,21 +145,36 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
             continue;
         }
 
-        if (needs_api_key(backend.type)) {
-            const std::string_view variable = key_variable_for(backend.type);
-            const std::string resolved =
-                backend.api_key.empty() ? std::string{} : harness::expand_env(backend.api_key);
-            if (!resolved.empty()) {
-                // NEVER the key itself. SPEC: secrets are never logged.
-                add(report, Status::Ok, "Config", label, std::string{type} + " -- API key present");
-            } else {
-                // A missing key is a WARNING, not a failure: a keyless install
-                // is valid, and the whole point of the fresh-install criterion
-                // is that it passes.
-                add(report, Status::Warn, "Config", label,
-                    std::string{type} + " -- no API key configured",
-                    "export " + std::string{variable} + "=... (and set api_key: \"${" +
-                        std::string{variable} + "}\" on this backend)");
+        if (secrets::takes_api_key(backend.type)) {
+            // The ONE chain, so the doctor reports exactly what a build would
+            // use -- and only WHERE it came from. NEVER the key itself.
+            const secrets::KeyResolution resolution =
+                secrets::resolve_api_key(backend, &store, env);
+            switch (resolution.source) {
+                case secrets::KeySource::Config:
+                    add(report, Status::Ok, "Config", label,
+                        std::string{type} + " -- API key from config");
+                    break;
+                case secrets::KeySource::Store:
+                    add(report, Status::Ok, "Config", label,
+                        std::string{type} + " -- API key from the credential store");
+                    break;
+                case secrets::KeySource::Environment:
+                    add(report, Status::Ok, "Config", label,
+                        std::string{type} + " -- API key from " + resolution.variable);
+                    break;
+                case secrets::KeySource::None: {
+                    // A missing key is a WARNING, not a failure: a keyless
+                    // install is valid, and the whole point of the
+                    // fresh-install criterion is that it passes.
+                    const std::string variable =
+                        std::string{secrets::conventional_variables(backend.type).front()};
+                    add(report, Status::Warn, "Config", label,
+                        std::string{type} + " -- no API key found",
+                        "apogee auth add " + std::string{type} + "   (or export " + variable +
+                            "=..., or set api_key: \"${" + variable + "}\" on this backend)");
+                    break;
+                }
             }
             continue;
         }
@@ -384,12 +377,51 @@ void check_secrets(CheckReport& report, const CheckInputs& inputs) {
     add(report, Status::Ok, "Secrets", label, "present, private (0600)");
 }
 
+/// The credential store, the same way: never seeded, private when present.
+void check_credential_store(CheckReport& report, const CheckInputs& inputs) {
+    if (inputs.config_path.empty()) {
+        return;
+    }
+    const std::filesystem::path file = secrets::credentials_path(inputs.config_path);
+    const std::string label = "Credential store";
+    std::error_code code;
+    if (!std::filesystem::exists(file, code)) {
+        add(report, Status::Ok, "Secrets", label, "none -- 'apogee auth add' creates it");
+        return;
+    }
+    if (!harness::supports_private_modes()) {
+        add(report, Status::Skipped, "Secrets", label,
+            "mode check not applicable on this platform (no POSIX file modes)");
+        return;
+    }
+    const std::filesystem::perms mode =
+        std::filesystem::status(file, code).permissions() & std::filesystem::perms::mask;
+    const bool leaks =
+        (mode & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) !=
+        std::filesystem::perms::none;
+    if (leaks) {
+        add(report, Status::Fail, "Secrets", label,
+            "is readable by other users, and it holds provider API keys",
+            "chmod 600 '" + file.string() + "'   (or: apogee check --fix)");
+        return;
+    }
+    const secrets::CredentialStore store{file};
+    const std::size_t slots = store.list().size();
+    if (!store.warning().empty()) {
+        add(report, Status::Warn, "Secrets", label, store.warning());
+        return;
+    }
+    add(report, Status::Ok, "Secrets", label,
+        "present, private (0600), " + std::to_string(slots) + " key(s) stored");
+}
+
 CheckReport run_checks(const CheckInputs& inputs) {
     CheckReport report;
     check_version(report, inputs);
     check_config(report, inputs);
     check_filesystem(report, inputs);
     check_secrets(report, inputs);
+    check_credential_store(report, inputs);
     check_models(report, inputs);
     return report;
 }
@@ -438,10 +470,12 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
     // A per-install secret left readable by others is a repair too -- the
     // same kind as a private directory's mode, one file down.
     if (!inputs.config_path.empty()) {
-        if (const std::string fixed =
-                fix_secret_mode(httpserver::admin_token_path(inputs.config_path));
-            !fixed.empty()) {
-            done.push_back(fixed);
+        for (const std::filesystem::path& secret :
+             {httpserver::admin_token_path(inputs.config_path),
+              secrets::credentials_path(inputs.config_path)}) {
+            if (const std::string fixed = fix_secret_mode(secret); !fixed.empty()) {
+                done.push_back(fixed);
+            }
         }
     }
     return done;

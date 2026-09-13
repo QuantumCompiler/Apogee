@@ -93,8 +93,11 @@ void require_plain_name(std::string_view name) {
 struct Providers {
     harness::Harness harness;
 
-    explicit Providers(const harness::Config& config) : harness{config} {
-        (void)backends::build_providers(harness, {});
+    Providers(const harness::Config& config, const std::filesystem::path& config_path)
+        : harness{config} {
+        backends::BuildOptions options;
+        options.config_path = config_path;
+        (void)backends::build_providers(harness, options);
     }
 };
 
@@ -207,7 +210,7 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
         const std::string collection_backend =
             registered != nullptr ? registered->backend : std::string{};
         if (config.has_value() && *in_retriever != "lexical" && pin != "lexical") {
-            providers.emplace(*config);
+            providers.emplace(*config, config_path);
             embedder = agentloop::resolve_embedder(providers->harness, *config, collection_backend,
                                                    embedder_reason);
         }
@@ -331,8 +334,10 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
 
         // The same decision `complete` and `chat` make, from the same facts.
         std::optional<harness::Config> config;
+        std::filesystem::path config_path;
         try {
-            config = harness::load_config(harness::resolve_config_path(context.config_path));
+            config_path = harness::resolve_config_path(context.config_path);
+            config = harness::load_config(config_path);
         } catch (const std::exception&) {
             // No config is the lexical floor's home ground; the resolver sees
             // no embedder and no pins.
@@ -352,7 +357,7 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
         std::optional<agentloop::Embedder> embedder;
         std::string embedder_reason;
         if (config.has_value() && *q_retriever != "lexical" && pin != "lexical") {
-            providers.emplace(*config);
+            providers.emplace(*config, config_path);
             embedder = agentloop::resolve_embedder(providers->harness, *config, collection_backend,
                                                    embedder_reason);
         }
@@ -379,7 +384,7 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
                     std::cout << judge.note << "\n";
                 }
                 if (!judge.backend.empty() && !providers.has_value()) {
-                    providers.emplace(*config);
+                    providers.emplace(*config, config_path);
                 }
             }
             const int fetch = agentloop::rerank_fetch_limit(*q_limit, !judge.backend.empty());

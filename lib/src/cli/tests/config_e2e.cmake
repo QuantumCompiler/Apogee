@@ -59,6 +59,13 @@ function(expect_equal actual expected what)
 endfunction()
 
 set(ENV{APOGEE_HOME} "${APOGEE_WORK_DIR}")
+# A developer's own keys stay out: the resolver's third rung reads the
+# environment, and a real ANTHROPIC_API_KEY here would quietly turn "no key"
+# expectations into a live cloud backend.
+unset(ENV{ANTHROPIC_API_KEY})
+unset(ENV{OPENAI_API_KEY})
+unset(ENV{GEMINI_API_KEY})
+unset(ENV{GOOGLE_API_KEY})
 
 # --- init ------------------------------------------------------------------
 apogee_run(0 config path)

@@ -172,6 +172,7 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
         harness::Harness harness{config};
         backends::BuildOptions build_options;
         build_options.web_search = flags->search;
+        build_options.config_path = config_path;
         const backends::BuildResult built = backends::build_providers(harness, build_options);
 
         // Which backends this server answers for. The default alone unless

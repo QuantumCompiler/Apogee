@@ -91,6 +91,10 @@ add_executable(apogee_tests
     httpserver/jobs_test.cpp
     httpserver/parity_test.cpp
     events/bus_test.cpp
+    secrets/store_test.cpp
+    secrets/resolve_test.cpp
+    secrets/leak_test.cpp
+    httpserver/admin_auth_routes_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h
@@ -265,6 +269,13 @@ add_test(NAME cli.one_role_resolver
     COMMAND "${CMAKE_COMMAND}"
         -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
         -P "${CMAKE_CURRENT_SOURCE_DIR}/one_role_resolver.cmake"
+)
+
+# One key-resolution chain, and only one: the same bug class, for secrets.
+add_test(NAME cli.one_key_resolver
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/one_key_resolver.cmake"
 )
 
 add_test(NAME cli.test_names

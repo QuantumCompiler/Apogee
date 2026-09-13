@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include "commands/auth_cmd.h"
 #include "commands/chat.h"
 #include "commands/chat_history.h"
 #include "commands/check.h"
@@ -61,6 +62,7 @@ void CommandRegistry::bind_all(CLI::App& root, const RootContext& context) {
 
 CommandRegistry default_registry() {
     CommandRegistry registry;
+    registry.add(std::make_unique<AuthCommand>());
     registry.add(std::make_unique<ChatCommand>());
     registry.add(std::make_unique<CheckCommand>());
     registry.add(std::make_unique<ChatsCommand>());

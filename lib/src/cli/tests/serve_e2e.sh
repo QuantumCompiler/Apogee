@@ -23,6 +23,8 @@ fi
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 export APOGEE_HOME="$WORK_DIR"
+# A developer's own keys stay out of the suite (the resolver reads the environment).
+unset ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY
 SERVER=""
 cleanup() {
     if [ -n "$SERVER" ] && kill -0 "$SERVER" 2>/dev/null; then
@@ -161,6 +163,58 @@ wait $EVENTS 2>/dev/null
 grep -q '^event: session.created' "$WORK_DIR/events.txt" || fail "the events stream did not carry session.created: $(cat "$WORK_DIR/events.txt")"
 grep -q '^event: agent.run.completed' "$WORK_DIR/events.txt" || fail "the events stream did not carry agent.run.completed"
 grep -q "$TOKEN" "$WORK_DIR/events.txt" && fail "the token appeared in the event stream"
+
+# --- the credential store: private, keyed by type, never echoed anywhere -----
+SECRET="sk-e2e-LEAKPROBE-$$-$(date +%s)"
+printf '%s\n' "$SECRET" | "$APOGEE_BIN" auth add openai --stdin >"$WORK_DIR/auth-add.txt" 2>&1 || fail "auth add openai --stdin: $(cat "$WORK_DIR/auth-add.txt")"
+[ "$(stat -f '%Lp' "$WORK_DIR/config/credentials.json" 2>/dev/null || stat -c '%a' "$WORK_DIR/config/credentials.json")" = "600" ] \
+    || fail "the credential store is not 0600"
+"$APOGEE_BIN" auth list </dev/null >"$WORK_DIR/auth-list.txt" 2>&1 || fail "auth list: $(cat "$WORK_DIR/auth-list.txt")"
+grep -q 'openai' "$WORK_DIR/auth-list.txt" || fail "auth list did not show the openai slot: $(cat "$WORK_DIR/auth-list.txt")"
+# A keyless cloud entry now resolves from the store, and the doctor says so.
+"$APOGEE_BIN" config add-backend gpt --type openai --model gpt-e2e >/dev/null </dev/null || fail "add-backend gpt"
+# (The throwaway home has no models/ or cache/ and umask-mode directories, so
+# the doctor fails rows this test is not about; its exit status is not asserted.)
+"$APOGEE_BIN" check </dev/null >"$WORK_DIR/check.txt" 2>&1 || true
+grep -q 'from the credential store' "$WORK_DIR/check.txt" || fail "check did not attribute the key to the store: $(cat "$WORK_DIR/check.txt")"
+# The same over HTTP: metadata only, a PUT from loopback, a DELETE.
+CODE="$(curl -s -o "$WORK_DIR/auth-get.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/v1/admin/auth")"
+[ "$CODE" = "200" ] || fail "GET /v1/admin/auth failed (got $CODE): $(cat "$WORK_DIR/auth-get.json")"
+grep -q '"provider":"openai"' "$WORK_DIR/auth-get.json" || fail "the credential listing did not name the openai slot: $(cat "$WORK_DIR/auth-get.json")"
+grep -q '"stored_at"' "$WORK_DIR/auth-get.json" || fail "the credential listing carried no stored_at"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/admin/auth")"
+[ "$CODE" = "401" ] || fail "an unauthenticated credential listing was not a 401 (got $CODE)"
+CODE="$(curl -s -o "$WORK_DIR/auth-put.json" -w '%{http_code}' -X PUT -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' -d "{\"key\":\"$SECRET-anthropic\"}" "$BASE/v1/admin/auth/anthropic")"
+[ "$CODE" = "200" ] || fail "PUT /v1/admin/auth/anthropic from loopback failed (got $CODE): $(cat "$WORK_DIR/auth-put.json")"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' -d '{"key":"x"}' "$BASE/v1/admin/auth/claude-cli")"
+[ "$CODE" = "400" ] || fail "a vendor-CLI credential slot was accepted (got $CODE)"
+CODE="$(curl -s -o "$WORK_DIR/auth-del.json" -w '%{http_code}' -X DELETE -H "Authorization: Bearer $TOKEN" "$BASE/v1/admin/auth/anthropic")"
+[ "$CODE" = "200" ] || fail "DELETE /v1/admin/auth/anthropic failed (got $CODE): $(cat "$WORK_DIR/auth-del.json")"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $TOKEN" "$BASE/v1/admin/auth/anthropic")"
+[ "$CODE" = "404" ] || fail "clearing an empty slot was not a 404 (got $CODE)"
+# The secret is in exactly one file. Nothing else that was written mentions it.
+grep -q "$SECRET" "$WORK_DIR/config/credentials.json" || fail "the store does not hold the key"
+for f in "$WORK_DIR"/*.txt "$WORK_DIR"/*.json "$WORK_DIR"/serve.err "$WORK_DIR"/config/config.yaml "$WORK_DIR"/config/admin-token; do
+    case "$f" in */credentials.json) continue ;; esac
+    [ -f "$f" ] || continue
+    grep -q "LEAKPROBE" "$f" && fail "the secret leaked into $f"
+done
+if [ -d "$WORK_DIR/logs" ]; then
+    grep -rq "LEAKPROBE" "$WORK_DIR/logs" && fail "the secret leaked into the operational log"
+fi
+"$APOGEE_BIN" auth clear openai </dev/null >/dev/null || fail "auth clear openai"
+# A vendor CLI has no slot -- refused with the principle -- and a key is never
+# taken on the command line.
+if printf 'x\n' | "$APOGEE_BIN" auth add claude-cli --stdin >"$WORK_DIR/auth-cli.txt" 2>&1; then
+    fail "auth add accepted a vendor-CLI type"
+fi
+grep -qi 'vendor CLI' "$WORK_DIR/auth-cli.txt" || fail "the vendor-CLI refusal did not name the principle: $(cat "$WORK_DIR/auth-cli.txt")"
+if "$APOGEE_BIN" auth add openai sk-on-the-command-line </dev/null >/dev/null 2>&1; then
+    fail "auth add accepted a key as a command-line argument"
+fi
+grep -q "LEAKPROBE" "$WORK_DIR/config/credentials.json" && fail "auth clear left the key in the store"
 
 # --- SIGTERM stops it cleanly ------------------------------------------------
 kill -TERM "$SERVER"

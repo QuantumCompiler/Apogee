@@ -85,6 +85,8 @@ add_library(apogee_core STATIC
 
     commands/serve_cmd.h
     commands/serve_cmd.cpp
+    commands/auth_cmd.h
+    commands/auth_cmd.cpp
     commands/chat.h
     commands/chat.cpp
     commands/chat_history.h
@@ -219,6 +221,14 @@ add_library(apogee_core STATIC
     events/bus.h
     events/bus.cpp
 
+    # The credential store and the one key resolver. Beside the harness:
+    # includes harness/config.h and nothing from backends/.
+    secrets/secrets.h
+    secrets/store.h
+    secrets/store.cpp
+    secrets/resolve.h
+    secrets/resolve.cpp
+
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and
     # so `#include "embedstore/embedstore.h"` compiles from the first day.
@@ -258,6 +268,8 @@ add_library(apogee_core STATIC
     httpserver/admin_config.cpp
     httpserver/admin.h
     httpserver/admin.cpp
+    httpserver/admin_auth_routes.h
+    httpserver/admin_auth_routes.cpp
     # The ONE translation unit that may reference listen()/accept(). The
     # no-listen symbol check allow-lists exactly this object and requires it to
     # be the only one -- see tests/no_listen_symbols.cmake.

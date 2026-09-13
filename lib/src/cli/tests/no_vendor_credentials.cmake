@@ -58,6 +58,7 @@ set(forbidden
 
 set(offenders "")
 foreach(source IN LISTS sources)
+    file(RELATIVE_PATH relative "${SOURCE_DIR}" "${source}")
     file(STRINGS "${source}" lines)
     set(line_number 0)
     foreach(line IN LISTS lines)
@@ -72,6 +73,15 @@ foreach(source IN LISTS sources)
             continue()
         endif()
         foreach(pattern IN LISTS forbidden)
+            # Apogee's OWN credential store is `config/credentials.json`
+            # (provider-credential-store, 2026-09-13). The one place that
+            # names it is the constant in secrets/store.h; everything else
+            # goes through `kCredentialsFileName`, so this is the whole
+            # exemption -- a vendor's file of the same name is still caught
+            # anywhere else, including secrets/store.cpp.
+            if(relative STREQUAL "secrets/store.h" AND pattern STREQUAL "credentials[.]json")
+                continue()
+            endif()
             if(line MATCHES "${pattern}")
                 get_filename_component(name "${source}" NAME)
                 list(APPEND offenders "${name}:${line_number}: ${stripped}")

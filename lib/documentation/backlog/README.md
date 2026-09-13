@@ -55,11 +55,10 @@ Items are numbered in the **suggested order of implementation**. The rule stays 
 
 ### Phase 2 — the gated ring (after v0.1.0 ships)
 
-Six semi-independent tracks that can interleave: the **vendor-CLI family** — **complete**: 11 shipped 2026-09-02, and 12's three split items (12a codex, 12b gemini, 12c ollama) all shipped 2026-09-06, the **front-end contract** (13 — shipped 2026-09-06, and the GUI project gates on it), **local-model depth** (14, split at grooming 2026-09-06 into 14a/14b/14c/14d; **all four shipped 2026-09-07 — the track is complete**), **RAG** (15 → 16 → 17; **all three shipped, 2026-09-12 and 2026-09-13 — the track is complete**), **serving** (18 → 19a → 19b — server deployments only; **18 and 19a shipped 2026-09-13**, 19 having been split at grooming that day into the admin plane and the provider credential store, so 19b's gate is satisfied), and **tools/agents** (20); item 21's gate on the RAG track is now satisfied. The numbering is the suggested serial order when working alone.
+Six semi-independent tracks that can interleave: the **vendor-CLI family** — **complete**: 11 shipped 2026-09-02, and 12's three split items (12a codex, 12b gemini, 12c ollama) all shipped 2026-09-06, the **front-end contract** (13 — shipped 2026-09-06, and the GUI project gates on it), **local-model depth** (14, split at grooming 2026-09-06 into 14a/14b/14c/14d; **all four shipped 2026-09-07 — the track is complete**), **RAG** (15 → 16 → 17; **all three shipped, 2026-09-12 and 2026-09-13 — the track is complete**), **serving** (18 → 19a → 19b — server deployments only; **all shipped 2026-09-13**, 19 having been split at grooming that day into the admin plane and the provider credential store — **the track is complete**), and **tools/agents** (20); item 21's gate on the RAG track is now satisfied. The numbering is the suggested serial order when working alone.
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 19b | [provider-credential-store.md](provider-credential-store.md) | ✅ 19a (shipped) | Provider credential store: 0600 slots, `apogee auth`, one key resolver, the loopback-only `/v1/admin/auth` routes |
 | 20 | [mcp-client-tools-agents.md](mcp-client-tools-agents.md) | — · **split first** (native tools / MCP client / analyze+agents) | MCP client, in-process native tools + analyze/agents runner |
 | 21 | [knowledge-graph-stack.md](knowledge-graph-stack.md) | ✅ 17 (shipped) · **split first** (four docs) | Knowledge layer + knowledge graph (placeholder) |
 

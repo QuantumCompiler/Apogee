@@ -5,12 +5,16 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
 #include <system_error>
 #include <vector>
 
 #include "harness/roles.h"
 #include "models/sidecar.h"
+#include "secrets/resolve.h"
+#include "secrets/store.h"
+#include "support/env_guard.h"
 #include "support/gguf_builder.h"
 
 /// The `models` listing surface.
@@ -125,14 +129,50 @@ TEST_CASE("the roles column comes from the shared resolver", "[commands][models]
 TEST_CASE("a cloud backend is not reported as a missing local file",
           "[commands][models][listing]") {
     // A remote backend has no file, and rendering it as "missing" would send a
-    // user looking for a model that was never supposed to be there.
-    const std::vector<ModelRow> rows = build_model_rows(sample_config());
+    // user looking for a model that was never supposed to be there. What its
+    // state column carries instead is the key -- where it comes from, never
+    // what it is -- so the developer's own shell is kept out with an empty
+    // snapshot.
+    const apogee::secrets::EnvSnapshot empty;
+    const std::vector<ModelRow> rows = build_model_rows(sample_config(), {}, {}, &empty);
     const ModelRow& cloud = row_for(rows, "cloud");
 
     CHECK(cloud.provenance == "-");
-    CHECK(cloud.state == "-");
+    CHECK(cloud.state == "no key");
     CHECK(cloud.architecture == "-");
-    CHECK(cloud.note.empty());
+    CHECK(cloud.note.find("apogee auth add anthropic") != std::string::npos);
+}
+
+TEST_CASE("a cloud row names where its key comes from, through the one resolver",
+          "[commands][models][listing][secrets]") {
+    // The same chain the factory builds with, so this column and a run agree:
+    // config, then the store beside the config, then the snapshot.
+    const apogee::testing::TempDir home{"models-secrets-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path config_path = home.path() / "config.yaml";
+    apogee::secrets::CredentialStore store{apogee::secrets::credentials_path(config_path)};
+    const apogee::secrets::EnvSnapshot env = apogee::secrets::EnvSnapshot::capture(
+        [](std::string_view name) { return name == "ANTHROPIC_API_KEY" ? "sk-ENVSECRET" : ""; });
+    Config config = sample_config();
+
+    const std::vector<ModelRow> from_env = build_model_rows(config, {}, config_path, &env);
+    CHECK(row_for(from_env, "cloud").state == "key: ANTHROPIC_API_KEY");
+    store.put("anthropic", "sk-STORESECRET");
+    const std::vector<ModelRow> from_store = build_model_rows(config, {}, config_path, &env);
+    CHECK(row_for(from_store, "cloud").state == "key: store");
+    // No config path means no store is consulted.
+    const std::vector<ModelRow> no_store = build_model_rows(config, {}, {}, &env);
+    CHECK(row_for(no_store, "cloud").state == "key: ANTHROPIC_API_KEY");
+    config.backends["cloud"].api_key = "sk-CFGSECRET";
+    const std::vector<ModelRow> rows = build_model_rows(config, {}, config_path, &env);
+    CHECK(row_for(rows, "cloud").state == "key: config");
+    CHECK(row_for(rows, "cloud").note.empty());
+    // A local backend's column is untouched by any of this.
+    CHECK(row_for(rows, "unset").state == "missing");
+
+    // And nothing rendered carries a key.
+    for (const std::string& rendered : {render_model_table(rows), render_model_jsonl(rows)}) {
+        CHECK(rendered.find("SECRET") == std::string::npos);
+    }
 }
 
 TEST_CASE("a dangling model_path is reported with its reason", "[commands][models][listing]") {

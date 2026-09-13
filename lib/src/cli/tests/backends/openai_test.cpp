@@ -329,10 +329,10 @@ TEST_CASE("a missing OpenAI key is refused with an actionable message",
     apogee::harness::BackendConfig config;
     config.type = apogee::harness::BackendType::OpenAI;
     try {
-        (void)OpenAIProvider::from_config("gpt", config);
+        (void)OpenAIProvider::from_config("gpt", config, /*api_key=*/"");
         FAIL("expected ProviderError");
     } catch (const ProviderError& e) {
-        CHECK(std::string{e.what()}.find("OPENAI_API_KEY") != std::string::npos);
+        CHECK(std::string{e.what()}.find("no API key") != std::string::npos);
     }
 }
 

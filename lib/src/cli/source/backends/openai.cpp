@@ -152,10 +152,13 @@ OpenAIProvider::OpenAIProvider(Options options, std::unique_ptr<HttpClient> clie
 
 std::unique_ptr<OpenAIProvider> OpenAIProvider::from_config(const std::string& backend_name,
                                                             const harness::BackendConfig& config,
-                                                            bool web_search) {
+                                                            std::string api_key, bool web_search) {
     Options options;
     options.backend_name = backend_name;
-    options.api_key = config.api_key;
+    // The key arrives resolved: the factory ran the one precedence chain
+    // (config entry > stored slot > environment). This provider neither knows
+    // nor cares where it came from.
+    options.api_key = std::move(api_key);
     options.web_search = web_search;
     if (!config.model.empty()) {
         options.model = config.model;
@@ -165,11 +168,8 @@ std::unique_ptr<OpenAIProvider> OpenAIProvider::from_config(const std::string& b
         options.max_tokens = *config.max_tokens;
     }
     if (options.api_key.empty()) {
-        throw harness::ProviderError(
-            backend_name,
-            "no API key configured. Set api_key on this backend -- a \"${OPENAI_API_KEY}\" "
-            "reference is expanded when the config is read, so the key itself never has to be "
-            "written to the file");
+        // Defensive: the factory resolves and refuses before it gets here.
+        throw harness::ProviderError(backend_name, "no API key provided");
     }
     return std::make_unique<OpenAIProvider>(
         std::move(options), std::make_unique<HttpClient>(std::make_unique<CurlTransport>()));
