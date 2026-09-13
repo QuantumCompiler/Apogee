@@ -2,6 +2,8 @@
 
 #include <utility>
 
+#include "backends/embedding_batch.h"
+#include "backends/google_embed.h"
 #include "backends/sse_parser.h"
 #include "harness/errors.h"
 
@@ -104,6 +106,7 @@ std::unique_ptr<GoogleProvider> GoogleProvider::from_config(const std::string& b
     if (!config.model.empty()) {
         options.model = config.model;
     }
+    options.embedding_model = config.embedding_model;
     if (config.max_tokens.has_value() && *config.max_tokens > 0) {
         options.max_tokens = *config.max_tokens;
     }
@@ -144,6 +147,68 @@ HttpRequest GoogleProvider::build_http_request(const nlohmann::json& body, bool 
     request.headers = {{"content-type", "application/json"}, {"x-goog-api-key", options_.api_key}};
     request.timeout = std::chrono::seconds{0};
     return request;
+}
+
+HttpRequest GoogleProvider::build_embed_request(const nlohmann::json& body) const {
+    HttpRequest request;
+    request.method = "POST";
+    // The embedding model in the path -- not the chat model this entry answers
+    // with -- and repeated inside every row by the translator.
+    request.url = options_.base_url + "/" + options_.api_version + "/models/" +
+                  std::string{embedding_model()} + ":batchEmbedContents";
+    request.body = body.dump();
+    request.headers = {{"content-type", "application/json"}, {"x-goog-api-key", options_.api_key}};
+    request.timeout = std::chrono::seconds{120};
+    return request;
+}
+
+std::string_view GoogleProvider::embedding_model() const noexcept {
+    return options_.embedding_model.empty() ? google_embed::default_model()
+                                            : std::string_view{options_.embedding_model};
+}
+
+std::size_t GoogleProvider::embedding_dimensions() const noexcept {
+    const std::size_t known = google_embed::known_dimensions(embedding_model());
+    return known != 0 ? known : observed_dimensions_;
+}
+
+std::vector<std::vector<float>> GoogleProvider::embed(
+    const std::vector<std::string>& inputs, const harness::CancellationToken& cancellation) {
+    std::vector<std::vector<float>> vectors;
+    vectors.reserve(inputs.size());
+
+    for (const auto& [begin, end] :
+         batch_ranges(inputs.size(), google_embed::kMaxInputsPerRequest)) {
+        cancellation.throw_if_cancelled();
+        const std::vector<std::string> batch(inputs.begin() + static_cast<std::ptrdiff_t>(begin),
+                                             inputs.begin() + static_cast<std::ptrdiff_t>(end));
+
+        const nlohmann::json body = google_embed::build_request(embedding_model(), batch);
+        const HttpResponse response = client_->send(build_embed_request(body), {}, cancellation);
+        if (!response.ok()) {
+            fail(response.status, response.body);
+        }
+
+        const nlohmann::json parsed = nlohmann::json::parse(response.body, nullptr, false);
+        if (parsed.is_discarded()) {
+            throw harness::ProviderError(options_.backend_name,
+                                         "the API returned a response that was not valid JSON");
+        }
+        try {
+            std::vector<std::vector<float>> got =
+                google_embed::parse_response(parsed, batch.size());
+            for (std::vector<float>& vector : got) {
+                vectors.push_back(std::move(vector));
+            }
+        } catch (const std::runtime_error& e) {
+            throw harness::ProviderError(options_.backend_name, e.what());
+        }
+    }
+
+    if (observed_dimensions_ == 0 && !vectors.empty()) {
+        observed_dimensions_ = vectors.front().size();
+    }
+    return vectors;
 }
 
 void GoogleProvider::fail(long status, std::string_view body) const {

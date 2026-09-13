@@ -29,6 +29,10 @@ add_executable(apogee_tests
     backends/factory_test.cpp
     backends/openai_test.cpp
     backends/google_test.cpp
+    backends/openai_embed_test.cpp
+    backends/google_embed_test.cpp
+    backends/embedding_batch_test.cpp
+    backends/llamacpp_embed_test.cpp
     backends/llamacpp_test.cpp
     backends/claude_cli_events_test.cpp
     backends/claude_cli_test.cpp

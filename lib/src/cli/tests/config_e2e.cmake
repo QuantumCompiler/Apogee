@@ -141,6 +141,14 @@ expect_equal("${APOGEE_OUT}" "claude-sonnet-5" "get a nested key")
 apogee_run(0 config get backends.claude.context_size)
 expect_equal("${APOGEE_OUT}" "200000" "get a numeric key")
 
+# A cloud entry can name the model it embeds with, separately from the one it
+# chats with.
+apogee_run(0 config add-backend gpt --type openai --api-key "\${OPENAI_API_KEY}"
+           --model gpt-5 --embedding-model text-embedding-3-large)
+apogee_run(0 config get backends.gpt.embedding_model)
+expect_equal("${APOGEE_OUT}" "text-embedding-3-large" "the embedding model is its own field")
+apogee_run(0 config delete-backend gpt)
+
 # The secret stays a literal on disk and is redacted on the way out.
 file(READ "${CONFIG_FILE}" WITH_BACKEND)
 if(NOT WITH_BACKEND MATCHES "\\\${ANTHROPIC_API_KEY}")

@@ -17,11 +17,16 @@
 /// CLI) is a separate backend in the vendor-CLI family.
 namespace apogee::backends {
 
-class GoogleProvider final : public harness::LLMProvider {
+/// It also embeds, through `batchEmbedContents` -- the same key, a different
+/// model. See `openai.h` for why this is a per-provider capability rather than
+/// an entry in a type list.
+class GoogleProvider final : public harness::LLMProvider, public harness::EmbeddingCapable {
 public:
     struct Options {
         std::string backend_name = "google";
         std::string model = "gemini-2.5-pro";
+        /// Empty means the vendor's documented default.
+        std::string embedding_model;
         std::string api_key;
         std::string base_url = "https://generativelanguage.googleapis.com";
         std::string api_version = "v1beta";
@@ -50,13 +55,26 @@ public:
     [[nodiscard]] std::vector<harness::ModelInfo> list_models(
         const harness::CancellationToken& cancellation) override;
 
+    // --- EmbeddingCapable ---------------------------------------------------
+
+    [[nodiscard]] std::vector<std::vector<float>> embed(
+        const std::vector<std::string>& inputs,
+        const harness::CancellationToken& cancellation) override;
+
+    [[nodiscard]] std::size_t embedding_dimensions() const noexcept override;
+
+    /// The model `embed` will use.
+    [[nodiscard]] std::string_view embedding_model() const noexcept;
+
 private:
     [[nodiscard]] HttpRequest build_http_request(const nlohmann::json& body, bool stream) const;
+    [[nodiscard]] HttpRequest build_embed_request(const nlohmann::json& body) const;
     [[nodiscard]] google::RequestOptions request_options(const harness::ChatRequest& request) const;
     [[noreturn]] void fail(long status, std::string_view body) const;
 
     Options options_;
     std::unique_ptr<HttpClient> client_;
+    std::size_t observed_dimensions_ = 0;
 };
 
 }  // namespace apogee::backends

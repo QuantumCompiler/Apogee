@@ -178,6 +178,14 @@ add_library(apogee_core STATIC
     backends/chat_template.cpp
     backends/llamacpp_tokens.h
     backends/llamacpp_tokens.cpp
+    backends/embedding_batch.h
+    backends/embedding_batch.cpp
+    backends/openai_embed.h
+    backends/openai_embed.cpp
+    backends/google_embed.h
+    backends/google_embed.cpp
+    backends/llamacpp_embed.h
+    backends/llamacpp_embed.cpp
     backends/llamacpp.h
     backends/llamacpp.cpp
     backends/factory.h

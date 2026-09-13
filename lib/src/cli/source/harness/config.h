@@ -79,6 +79,15 @@ struct BackendConfig {
     std::string model;
     std::string model_path;
 
+    /// The model used when this entry EMBEDS rather than chats.
+    ///
+    /// A cloud vendor serves chat and embeddings from different models behind
+    /// one key, so one entry can do both: `model` answers questions,
+    /// `embedding_model` turns text into vectors. Empty means the vendor's
+    /// documented default (`text-embedding-3-small`, `gemini-embedding-001`).
+    /// A local entry ignores it -- a GGUF embeds with whatever it is.
+    std::string embedding_model;
+
     /// Path to the multimodal projector (an "mmproj" GGUF), for a local model
     /// that can read images.
     ///

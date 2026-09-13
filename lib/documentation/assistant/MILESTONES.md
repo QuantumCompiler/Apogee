@@ -1384,3 +1384,48 @@ One of those needed a second attempt: the first "leak into history" mutation cha
 **Two platform facts surfaced by the tests, both kept.** CMake's `execute_process` drops an empty list element, so there is no way to pass `--rag ""` from a `cmake -P` script at all — and `--rag=` reaches CLI11 as a flag still awaiting its value, which then swallows the prompt and blocks on stdin (the first run of the e2e hung there). The off switch and the mid-session re-read therefore live in a POSIX shell check, `cli.auto_rag`, the same recorded-skip convention as `no_listen_check.sh`; the precedence itself is table-tested everywhere. And a one-document corpus scores its only hit as `0.000` — BM25's IDF for a term in every document is zero — which is a property of the lexical floor and not a regression; the e2e corpus was made six sentences long so chunk size has something to change.
 
 **Retrieval quality is the lexical floor's, honestly.** Targeted terms rank well; a question padded with common words dilutes and ranks the right chunk lower. That is inherent to BM25 over an OR of every word, and it is precisely what `embedding-clients` and `vector-hybrid-rerank` exist to improve — the floor is meant to be a floor.
+
+---
+
+## Milestone R — Embedding clients
+
+**Goal.** The vector supply side: turn text into vectors through every backend that can, discovered as a capability of the entry rather than looked up in a list of types — OpenAI and Gemini over their embeddings endpoints, llama.cpp in-process — so `vector-hybrid-rerank` has embedders to consume and every v0.1.0 backend shipped without dead code.
+
+### 2026-09-12 — `embedding-clients`: the capability the type list could not have learned
+
+**What was built**
+
+- [x] **`source/backends/openai_embed.h/.cpp`** and **`google_embed.h/.cpp`** — pure wire translators for `POST /v1/embeddings` and `:batchEmbedContents`, with the vendor default model, the documented native widths, and a parser that refuses a body whose row count does not match the request. OpenAI rows are placed **by their `index`**, never by position — the API does not promise request order, and a parser that trusts it hands input 0 the vector for input 1 silently.
+- [x] **`source/backends/embedding_batch.h/.cpp`** — the one shared piece: `batch_ranges`, splitting a list at a provider's maximum. Batch-first is a Core constraint (Ommi's graph item recorded per-chunk calls as its cost trap); the recorded default took the **documented maxima** as the batch sizes, 2048 inputs for OpenAI and 100 rows for Gemini.
+- [x] **`OpenAIProvider` and `GoogleProvider` implement `EmbeddingCapable`.** Same key, same retry policy, same `fail()` that never echoes the key; a bounded 120 s timeout, unlike the streaming chat path, because an embeddings call returns one body and a long silence *is* a hung connection.
+- [x] **`BackendConfig::embedding_model`** — the model an entry uses when it embeds, beside the `model` it chats with. One OpenAI key serves both, so one entry does both. Parsed, written by `append_backend`, settable by `config add-backend --embedding-model`, readable by `config get`. Empty means the vendor's default, decided by the **provider**, not the loader — so the default differs per vendor without the loader knowing any vendor.
+- [x] **`LlamaModel::embed_batch` / `embedding_dimensions`** on the runtime seam, **`source/backends/llamacpp_embed.h/.cpp`** for the provider side (64 texts per runtime call so Ctrl-C between slices is honoured promptly), and **`LlamaCppProvider` implements `EmbeddingCapable`**: mean-pooled, L2-normalised vectors from a dedicated embedding context, cleared between batches, so the conversation's warm KV state is never touched.
+- [x] **`tests/support/embedding_fixtures.h`** — the dimension fixtures `vector-hybrid-rerank`'s per-store binding will consume: both vendors' native widths, and response bodies of deliberately different, deliberately small widths.
+- [x] **47 new test cases** (858 total), green in both builds.
+
+**Verified live, in-process, against a real GGUF** (gpt-oss-20b, the model already on disk from Milestone P): four texts embedded in 1.07 s including the model load, width 2880, every norm 1.0000, the two sentences about Paris closer to each other (0.58) than either to a sentence about SQLite (0.53, 0.33), and a warm second call at 43 ms. Then 64 chunk-length texts: packed into one decode, 2.15 s; one decode per text, 7.65 s.
+
+**Two bugs the scripted runtime could not have found, both found by that run.**
+
+*The first* was an abort on the very first real call. The embedding context was created with llama.cpp's default of **one** sequence, and a batch using sequence id 1 against it is `decode failed (-1)` — which Apogee turned into a clear `ProviderError`, as designed, but the call still failed. `n_seq_max` is now the packing bound.
+
+*The second* was quieter and worse. The same text embedded alone and embedded in a batch came back at cosine **0.986** of each other — deterministic per shape, so not float noise. A controlled run showed the rule: a text is perturbed exactly when a **shorter** text shares its batch, worse the closer the lengths (a six-token companion to an eight-token text: cosine **0.565**), and never when every batch-mate is at least as long. That is llama.cpp's non-unified KV mode giving each sequence its own stream and splitting a mixed-length batch into **equal-length micro-batches** — with pooling done per micro-batch, so the longer sequence is pooled over a fragment of itself. `kv_unified = true` makes the batch one micro-batch with the sequences distinguished by id, and every case went to 1.000000: single tokens, empty inputs, six-token companions, and 64 packed texts against 64 single ones at 0.99984 — the ordinary Metal kernel-shape noise, not a 44% distortion. The one-decode-per-text alternative would also have been correct, at 3.5× the cost; the fix keeps the packing.
+
+Neither is reachable from the merge-blocking target, whose runtime is a fake with no allocator and no micro-batches. They are recorded here, in the code beside the two parameters, and in the llama-enabled build's live check — and they are the argument, once more, for running the real thing before believing the green.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Which entries embed | **The provider type inherits `EmbeddingCapable`**; Anthropic, the vendor CLIs and the plain mock do not | The harness discovers it by asking the object. A test over *built* providers asserts Anthropic answers no and OpenAI and Google yes — the Core constraint, against the objects the factory actually produced. |
+| The embedding model | A **per-entry `embedding_model`**, defaulting to the vendor's | A cloud vendor serves chat and embeddings from different models behind one key. Making the user add a second entry to embed would have meant a second key reference for the same key. |
+| Dimensions | The documented width for a known model, else **0 until the first vector**, then observed | The interface's "known after the first call", made true rather than guessed at. |
+| Fixtures | **Shaped from the documented format, not recorded** | Apogee holds no API key and never reads a user's, so there is nothing to record with; the chat translators were fixtured the same way. Said so in every fixture file. |
+| Local pooling | **Mean, L2-normalised**, one embedding context per model | What llama.cpp's own embedding tool does by default; cosine downstream becomes a dot product. A separate context because generation and pooling want different settings, and because a document decoded into the chat KV would corrupt the warm state. |
+| An over-long local input | **Truncated to the batch** | The chunker bounds real inputs far below it; this is the defence against a pathological one, and the choice llama.cpp's tool makes. |
+| An empty local input | Embedded as a single space | A zero-length sequence has nothing to pool. The chunker never emits one; the defence costs nothing. |
+| Idle policy | **An embed is a use**, and runs the idle check on the way in | A long ingest is nothing but embedding calls; an embed-only workload that never counted as use would unload the weights under itself — or, the gap the test found, never unload at all. |
+
+**Guardrails, each mutation-tested (15 mutations, all caught).** The last batch overrunning the input; OpenAI rows placed by position; a row-count mismatch accepted; OpenAI never splitting; the OpenAI key leaking into the URL; the entry's model ignored; an unknown width never learned; Gemini rows losing their `models/` prefix; Gemini embedding through the chat model's URL; Gemini batching at OpenAI's size; llama handed a whole corpus in one call; llama never reporting its width; `embedding_model` not parsed; not written; and `embed` skipping the idle check. **The two live findings are not on that list and cannot be**: no scripted runtime models `n_seq_max` or micro-batch splitting, so they are held by the code comments and by re-running the live check when the llama.cpp pin moves.
+
+**The idle check was missing when the test for it was written.** `expire_if_idle()` ran at the start of a chat turn and nowhere else, so an embed-only process with `idle_unload_seconds` set would have kept its model forever. The test asserting "an embedding is a use" failed on its last assertion — the model never unloaded — which is the right way round for a test to be wrong.

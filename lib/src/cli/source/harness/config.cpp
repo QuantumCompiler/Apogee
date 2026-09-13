@@ -122,6 +122,7 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     backend.api_key = scalar(node["api_key"], origin, where + ".api_key");
     backend.model = scalar(node["model"], origin, where + ".model");
     backend.model_path = scalar(node["model_path"], origin, where + ".model_path");
+    backend.embedding_model = scalar(node["embedding_model"], origin, where + ".embedding_model");
 
     backend.mmproj_path = scalar(node["mmproj_path"], origin, where + ".mmproj_path");
     backend.system_prompt = scalar(node["system_prompt"], origin, where + ".system_prompt");

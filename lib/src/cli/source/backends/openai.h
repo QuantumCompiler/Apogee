@@ -16,11 +16,18 @@
 /// CLI family; both are selectable per config entry.
 namespace apogee::backends {
 
-class OpenAIProvider final : public harness::LLMProvider {
+/// It also embeds. OpenAI serves chat and embeddings from different models
+/// behind one key, so one entry does both: `model` answers, `embedding_model`
+/// vectorises. That is the per-provider capability the harness discovers; a
+/// type allowlist would have had to be edited to learn this, which is the
+/// Ommi gate that did not transfer.
+class OpenAIProvider final : public harness::LLMProvider, public harness::EmbeddingCapable {
 public:
     struct Options {
         std::string backend_name = "openai";
         std::string model = "gpt-5";
+        /// Empty means the vendor's documented default.
+        std::string embedding_model;
         std::string api_key;
         std::string base_url = "https://api.openai.com";
         std::int64_t max_tokens = 4096;
@@ -47,14 +54,32 @@ public:
     [[nodiscard]] std::vector<harness::ModelInfo> list_models(
         const harness::CancellationToken& cancellation) override;
 
+    // --- EmbeddingCapable ---------------------------------------------------
+
+    /// Batches at the documented maximum, retries like the chat path, and
+    /// never lets the key into an error message.
+    [[nodiscard]] std::vector<std::vector<float>> embed(
+        const std::vector<std::string>& inputs,
+        const harness::CancellationToken& cancellation) override;
+
+    /// The model's documented width, or 0 for a model this build does not
+    /// know -- which becomes the real width after the first call.
+    [[nodiscard]] std::size_t embedding_dimensions() const noexcept override;
+
+    /// The model `embed` will use.
+    [[nodiscard]] std::string_view embedding_model() const noexcept;
+
 private:
     [[nodiscard]] HttpRequest build_http_request(const nlohmann::json& body) const;
+    [[nodiscard]] HttpRequest build_embed_request(const nlohmann::json& body) const;
     [[nodiscard]] openai::RequestOptions request_options(const harness::ChatRequest& request,
                                                          bool stream) const;
     [[noreturn]] void fail(long status, std::string_view body) const;
 
     Options options_;
     std::unique_ptr<HttpClient> client_;
+    /// Learned from the first vector when the model's width was not known.
+    std::size_t observed_dimensions_ = 0;
 };
 
 }  // namespace apogee::backends

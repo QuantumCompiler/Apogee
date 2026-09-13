@@ -165,3 +165,36 @@ backends:
     CHECK(harness.route("model-b").backend_name() == "b");
     CHECK(harness.route("").backend_name() == "a");
 }
+
+TEST_CASE("embedding is a per-entry capability the harness discovers, and Anthropic has none",
+          "[backends][factory][embed][capability]") {
+    // The Core constraint, asserted against BUILT providers rather than hand-
+    // made ones: which entries can embed is answered by the objects the factory
+    // produced, never by a list of types. Anthropic has no embeddings endpoint
+    // and must say so; OpenAI and Google do and must say so too.
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig anthropic;
+    anthropic.type = apogee::harness::BackendType::Anthropic;
+    anthropic.api_key = "sk-ant-test";
+    apogee::harness::BackendConfig openai;
+    openai.type = apogee::harness::BackendType::OpenAI;
+    openai.api_key = "sk-test";
+    apogee::harness::BackendConfig google;
+    google.type = apogee::harness::BackendType::Google;
+    google.api_key = "AIza-test";
+    apogee::harness::BackendConfig mock;
+    mock.type = apogee::harness::BackendType::Mock;
+    config.backends.emplace("claude", anthropic);
+    config.backends.emplace("gpt", openai);
+    config.backends.emplace("gemini", google);
+    config.backends.emplace("mock", mock);
+
+    apogee::harness::Harness harness{config};
+    const auto built = apogee::backends::build_providers(harness, {});
+    REQUIRE(built.constructed_count() == 4);
+
+    CHECK_FALSE(harness.can_embed("claude"));
+    CHECK_FALSE(harness.can_embed("mock"));
+    CHECK(harness.can_embed("gpt"));
+    CHECK(harness.can_embed("gemini"));
+}

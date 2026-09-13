@@ -167,6 +167,26 @@ public:
     [[nodiscard]] virtual std::string image_marker() const {
         return {};
     }
+
+    /// Width of the vectors `embed_batch` produces -- the model's hidden size.
+    [[nodiscard]] virtual std::size_t embedding_dimensions() const noexcept = 0;
+
+    /// Embeds `texts`, one L2-normalised vector each, in order.
+    ///
+    /// **A separate context from the conversation's.** Embedding runs with
+    /// pooling on and every token's output kept, which is a different context
+    /// configuration from generation -- and decoding a document into the chat
+    /// KV cache would corrupt the warm state the whole in-process design
+    /// exists to keep. The real runtime holds one embedding context per model
+    /// and clears it between batches; nothing here touches `make_context`'s.
+    ///
+    /// A text longer than the context's batch is **truncated to fit**, the
+    /// same choice llama.cpp's own embedding tool makes: the chunker bounds
+    /// chunk sizes far below that line, so this is the defence against a
+    /// pathological input rather than a policy. Returns an empty vector and
+    /// fills `error` when the model cannot embed at all.
+    [[nodiscard]] virtual std::vector<std::vector<float>> embed_batch(
+        const std::vector<std::string>& texts, std::string& error) = 0;
 };
 
 /// Loads models. One per process in practice.

@@ -225,6 +225,9 @@ Lines format_backend_entry(std::string_view name, const BackendConfig& backend,
     if (!backend.model_path.empty()) {
         field("model_path", yaml_scalar(backend.model_path));
     }
+    if (!backend.embedding_model.empty()) {
+        field("embedding_model", yaml_scalar(backend.embedding_model));
+    }
     if (backend.context_size.has_value()) {
         field("context_size", std::to_string(*backend.context_size));
     }

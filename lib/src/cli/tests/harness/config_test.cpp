@@ -323,3 +323,16 @@ TEST_CASE("auto_rag is a top-level scalar that defaults to off", "[config][embed
     CHECK(apogee::harness::parse_config("", "<test>").auto_rag.empty());
     CHECK(apogee::harness::parse_config("auto_rag: notes\n", "<test>").auto_rag == "notes");
 }
+
+TEST_CASE("embedding_model is a backend field with no default in the loader",
+          "[config][embeddings]") {
+    const auto config = apogee::harness::parse_config(
+        "backends:\n  gpt:\n    type: openai\n    api_key: k\n    embedding_model: "
+        "text-embedding-3-large\n  plain:\n    type: openai\n    api_key: k\n",
+        "<test>");
+    CHECK(config.find_backend("gpt")->embedding_model == "text-embedding-3-large");
+    // Empty, not a vendor default: the loader reports what the file says and
+    // the provider decides what empty means, so the default can differ per
+    // vendor without the loader knowing any vendor.
+    CHECK(config.find_backend("plain")->embedding_model.empty());
+}

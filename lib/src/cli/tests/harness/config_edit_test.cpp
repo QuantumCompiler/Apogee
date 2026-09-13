@@ -530,3 +530,17 @@ TEST_CASE("the collection helpers never touch the backends section", "[config_ed
           std::vector<std::string>{"adrs", "claude"});
     CHECK_THROWS_AS(delete_embedding(kWithCollections, "claude"), ConfigEditError);
 }
+
+TEST_CASE("embedding_model is written when set and omitted when not", "[config_edit][embeddings]") {
+    BackendConfig with = anthropic_backend();
+    with.type = BackendType::OpenAI;
+    with.embedding_model = "text-embedding-3-large";
+    const std::string added = append_backend(kCommented, "gpt", with, false);
+    require_parses(added);
+    CHECK(added.find("    embedding_model: text-embedding-3-large\n") != std::string::npos);
+    CHECK(apogee::harness::parse_config(added, "<t>").find_backend("gpt")->embedding_model ==
+          "text-embedding-3-large");
+
+    const std::string without = append_backend(kCommented, "gpt", anthropic_backend(), false);
+    CHECK(without.find("embedding_model") == std::string::npos);
+}

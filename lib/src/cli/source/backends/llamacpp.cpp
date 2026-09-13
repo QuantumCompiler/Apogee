@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <utility>
 
+#include "backends/llamacpp_embed.h"
 #include "backends/llamacpp_tokens.h"
 #include "backends/markup_filter.h"
 #include "backends/native_tool_calls.h"
@@ -210,6 +211,31 @@ void LlamaCppProvider::unload() {
     session_.reset();
     session_tokens_.clear();
     model_.reset();
+}
+
+std::vector<std::vector<float>> LlamaCppProvider::embed(
+    const std::vector<std::string>& inputs, const harness::CancellationToken& cancellation) {
+    cancellation.throw_if_cancelled();
+    // The same idle policy as a chat turn, on the way in as well as the way
+    // out: a model left resident by an embed-only workload is the 16GB this
+    // setting exists to give back. The test for this found it missing.
+    expire_if_idle();
+    ensure_model({});
+    try {
+        std::vector<std::vector<float>> vectors = embed_with_llama(*model_, inputs, cancellation);
+        // An embedding is a use of the model like any other, so the idle
+        // timer restarts from here -- otherwise a long ingest could unload the
+        // weights under itself.
+        last_use_ = options_.clock();
+        used_ = true;
+        return vectors;
+    } catch (const std::runtime_error& e) {
+        throw harness::ProviderError(options_.backend_name, e.what());
+    }
+}
+
+std::size_t LlamaCppProvider::embedding_dimensions() const noexcept {
+    return model_ == nullptr ? 0 : model_->embedding_dimensions();
 }
 
 bool LlamaCppProvider::uses_in_text_tool_calls() const noexcept {

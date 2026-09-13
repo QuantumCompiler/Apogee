@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -204,6 +205,44 @@ public:
 
     [[nodiscard]] std::int64_t context_length() const noexcept override {
         return 4096;
+    }
+
+    /// Width of the vectors the fake produces. Settable so a test can stage a
+    /// dimension mismatch between two models.
+    std::size_t embedding_width = 4;
+
+    /// How many texts each `embed_batch` call carried, in order -- the
+    /// batch-boundary assertion point.
+    std::vector<std::size_t> embed_batches;
+
+    /// When set, `embed_batch` fails with this message.
+    std::string embed_error;
+
+    [[nodiscard]] std::size_t embedding_dimensions() const noexcept override {
+        return embedding_width;
+    }
+
+    [[nodiscard]] std::vector<std::vector<float>> embed_batch(const std::vector<std::string>& texts,
+                                                              std::string& error) override {
+        embed_batches.push_back(texts.size());
+        if (!embed_error.empty()) {
+            error = embed_error;
+            return {};
+        }
+        // Deterministic from the text, so identical inputs embed identically
+        // and different ones do not, without pinning magic numbers.
+        std::vector<std::vector<float>> out;
+        out.reserve(texts.size());
+        for (const std::string& text : texts) {
+            std::vector<float> vector(embedding_width, 0.0F);
+            std::size_t seed = std::hash<std::string>{}(text);
+            for (float& component : vector) {
+                seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
+                component = static_cast<float>((seed >> 33) % 1000) / 1000.0F;
+            }
+            out.push_back(std::move(vector));
+        }
+        return out;
     }
 
     [[nodiscard]] std::unique_ptr<backends::LlamaContext> make_context(

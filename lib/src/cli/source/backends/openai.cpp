@@ -3,6 +3,8 @@
 #include <map>
 #include <utility>
 
+#include "backends/embedding_batch.h"
+#include "backends/openai_embed.h"
 #include "backends/sse_parser.h"
 #include "harness/errors.h"
 
@@ -158,6 +160,7 @@ std::unique_ptr<OpenAIProvider> OpenAIProvider::from_config(const std::string& b
     if (!config.model.empty()) {
         options.model = config.model;
     }
+    options.embedding_model = config.embedding_model;
     if (config.max_tokens.has_value() && *config.max_tokens > 0) {
         options.max_tokens = *config.max_tokens;
     }
@@ -196,6 +199,66 @@ HttpRequest OpenAIProvider::build_http_request(const nlohmann::json& body) const
                        {"authorization", "Bearer " + options_.api_key}};
     request.timeout = std::chrono::seconds{0};
     return request;
+}
+
+HttpRequest OpenAIProvider::build_embed_request(const nlohmann::json& body) const {
+    HttpRequest request = build_http_request(body);
+    request.url = options_.base_url + "/v1/embeddings";
+    // A bounded timeout, unlike the streaming chat path: an embeddings call
+    // returns one JSON body, so a long silence IS a hung connection.
+    request.timeout = std::chrono::seconds{120};
+    return request;
+}
+
+std::string_view OpenAIProvider::embedding_model() const noexcept {
+    return options_.embedding_model.empty() ? openai_embed::default_model()
+                                            : std::string_view{options_.embedding_model};
+}
+
+std::size_t OpenAIProvider::embedding_dimensions() const noexcept {
+    const std::size_t known = openai_embed::known_dimensions(embedding_model());
+    return known != 0 ? known : observed_dimensions_;
+}
+
+std::vector<std::vector<float>> OpenAIProvider::embed(
+    const std::vector<std::string>& inputs, const harness::CancellationToken& cancellation) {
+    std::vector<std::vector<float>> vectors;
+    vectors.reserve(inputs.size());
+
+    // Batched at the documented maximum, not per input: a corpus of ten
+    // thousand chunks is ten thousand round trips one way and five the other.
+    for (const auto& [begin, end] :
+         batch_ranges(inputs.size(), openai_embed::kMaxInputsPerRequest)) {
+        cancellation.throw_if_cancelled();
+        const std::vector<std::string> batch(inputs.begin() + static_cast<std::ptrdiff_t>(begin),
+                                             inputs.begin() + static_cast<std::ptrdiff_t>(end));
+
+        const nlohmann::json body = openai_embed::build_request(embedding_model(), batch);
+        const HttpResponse response = client_->send(build_embed_request(body), {}, cancellation);
+        if (!response.ok()) {
+            fail(response.status, response.body);
+        }
+
+        const nlohmann::json parsed = nlohmann::json::parse(response.body, nullptr, false);
+        if (parsed.is_discarded()) {
+            throw harness::ProviderError(options_.backend_name,
+                                         "the API returned a response that was not valid JSON");
+        }
+        try {
+            std::vector<std::vector<float>> got =
+                openai_embed::parse_response(parsed, batch.size());
+            for (std::vector<float>& vector : got) {
+                vectors.push_back(std::move(vector));
+            }
+        } catch (const std::runtime_error& e) {
+            throw harness::ProviderError(options_.backend_name, e.what());
+        }
+    }
+
+    if (observed_dimensions_ == 0 && !vectors.empty()) {
+        observed_dimensions_ = vectors.front().size();
+    }
+    return vectors;
 }
 
 void OpenAIProvider::fail(long status, std::string_view body) const {

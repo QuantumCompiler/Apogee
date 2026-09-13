@@ -20,6 +20,7 @@
 #include <mtmd-helper.h>
 #include <mtmd.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -415,12 +416,165 @@ public:
         return marker == nullptr ? std::string{} : std::string{marker};
     }
 
+    /// Sequences one embedding batch may carry -- the context's `n_seq_max`.
+    static constexpr std::size_t kEmbeddingSequences = 64;
+
+    [[nodiscard]] std::size_t embedding_dimensions() const noexcept override {
+        const std::int32_t width = llama_model_n_embd(model_.get());
+        return width > 0 ? static_cast<std::size_t>(width) : 0;
+    }
+
+    [[nodiscard]] std::vector<std::vector<float>> embed_batch(const std::vector<std::string>& texts,
+                                                              std::string& error) override {
+        if (texts.empty()) {
+            return {};
+        }
+        if (!ensure_embedding_context(error)) {
+            return {};
+        }
+        llama_context* ctx = embedding_context_.get();
+        const auto n_batch = static_cast<std::size_t>(llama_n_batch(ctx));
+        const std::size_t width = embedding_dimensions();
+
+        // Tokenize every text first, truncating to the batch so one
+        // pathological input cannot fail the whole call (the chunker keeps
+        // real inputs far below this line).
+        std::vector<std::vector<llama_token>> token_lists;
+        token_lists.reserve(texts.size());
+        for (const std::string& text : texts) {
+            std::vector<std::int32_t> tokens = tokenize(text.empty() ? " " : text, true);
+            if (tokens.size() > n_batch) {
+                tokens.resize(n_batch);
+            }
+            token_lists.emplace_back(tokens.begin(), tokens.end());
+        }
+
+        std::vector<std::vector<float>> out(texts.size());
+
+        // Pack as many sequences as fit one batch, decode, read each sequence's
+        // pooled vector, clear, repeat. One sequence id per text is what lets
+        // the pooling be per-text rather than over the whole batch -- bounded
+        // by the sequences the context was created to hold.
+        std::size_t next = 0;
+        while (next < token_lists.size()) {
+            const std::size_t first = next;
+            std::size_t packed = 0;
+            while (next < token_lists.size() && next - first < kEmbeddingSequences &&
+                   packed + token_lists[next].size() <= n_batch) {
+                packed += token_lists[next].size();
+                ++next;
+            }
+            if (next == first) {
+                // Cannot happen after truncation, but a loop that could spin
+                // forever on a bug is worse than a clear failure.
+                error = "an input could not be fitted into an embedding batch";
+                return {};
+            }
+
+            llama_batch batch = llama_batch_init(static_cast<std::int32_t>(packed), 0,
+                                                 static_cast<std::int32_t>(next - first));
+            for (std::size_t seq = first; seq < next; ++seq) {
+                const auto seq_id = static_cast<llama_seq_id>(seq - first);
+                for (std::size_t pos = 0; pos < token_lists[seq].size(); ++pos) {
+                    const std::int32_t at = batch.n_tokens;
+                    batch.token[at] = token_lists[seq][pos];
+                    batch.pos[at] = static_cast<llama_pos>(pos);
+                    batch.n_seq_id[at] = 1;
+                    batch.seq_id[at][0] = seq_id;
+                    // Every token's output is kept: pooling reads them all.
+                    batch.logits[at] = 1;
+                    ++batch.n_tokens;
+                }
+            }
+
+            llama_memory_clear(llama_get_memory(ctx), true);
+            const std::int32_t status =
+                llama_model_has_encoder(model_.get()) && !llama_model_has_decoder(model_.get())
+                    ? llama_encode(ctx, batch)
+                    : llama_decode(ctx, batch);
+            if (status != 0) {
+                llama_batch_free(batch);
+                error = "llama.cpp: embedding decode failed (" + std::to_string(status) + ")";
+                return {};
+            }
+
+            for (std::size_t seq = first; seq < next; ++seq) {
+                const float* pooled =
+                    llama_get_embeddings_seq(ctx, static_cast<llama_seq_id>(seq - first));
+                if (pooled == nullptr) {
+                    llama_batch_free(batch);
+                    error = "llama.cpp: no pooled embedding came back for an input";
+                    return {};
+                }
+                std::vector<float> vector(pooled, pooled + width);
+                // L2-normalised, so cosine similarity downstream is a dot
+                // product -- the same output llama.cpp's own embedding tool
+                // produces by default.
+                double norm = 0.0;
+                for (const float component : vector) {
+                    norm += static_cast<double>(component) * component;
+                }
+                if (norm > 0.0) {
+                    const auto scale = static_cast<float>(1.0 / std::sqrt(norm));
+                    for (float& component : vector) {
+                        component *= scale;
+                    }
+                }
+                out[seq] = std::move(vector);
+            }
+            llama_batch_free(batch);
+        }
+        return out;
+    }
+
 private:
+    /// Creates the embedding context on first use.
+    ///
+    /// Separate from `make_context`'s on purpose: embeddings need pooling on
+    /// and all outputs kept, which generation does not want, and decoding a
+    /// document into the conversation's KV cache would corrupt the warm state
+    /// this backend exists to keep. Sized to its batch, because a pooled
+    /// sequence never needs more positions than one batch carries.
+    [[nodiscard]] bool ensure_embedding_context(std::string& error) {
+        if (embedding_context_ != nullptr) {
+            return true;
+        }
+        llama_context_params params = llama_context_default_params();
+        params.embeddings = true;
+        params.pooling_type = LLAMA_POOLING_TYPE_MEAN;
+        // Batch and micro-batch equal: pooling over a sequence needs the whole
+        // sequence in one micro-batch.
+        params.n_batch = 2048;
+        params.n_ubatch = 2048;
+        params.n_ctx = 2048;
+        // One sequence per text in a batch, so the cache must be told to hold
+        // that many. llama.cpp's default is ONE, and a batch using sequence id
+        // 1 against it is an assertion failure, not an error return -- found
+        // live on the first real run, after every scripted test had passed.
+        params.n_seq_max = static_cast<std::uint32_t>(kEmbeddingSequences);
+        // ONE shared cache for all sequences, distinguished by sequence id.
+        // Without this llama.cpp gives each sequence its own stream and splits
+        // a mixed-length batch into EQUAL-LENGTH micro-batches -- and pooling
+        // happens per micro-batch, so a sequence longer than its batch-mates
+        // is pooled over a fragment of itself. Found live: a text's vector
+        // moved to cosine 0.56 of itself when a shorter text shared its batch,
+        // and was exact whenever every batch-mate was at least as long.
+        params.kv_unified = true;
+        embedding_context_.reset(llama_init_from_model(model_.get(), params));
+        if (embedding_context_ == nullptr) {
+            error = "llama.cpp: could not create an embedding context for this model";
+            return false;
+        }
+        return true;
+    }
+
     std::unique_ptr<llama_model, ModelDeleter> model_;
     const llama_vocab* vocab_ = nullptr;
     /// The projector, when one was configured. Outlives every context made
     /// from this model, which is why contexts may borrow it raw.
     MtmdPtr vision_;
+    /// Lazily created; see ensure_embedding_context.
+    std::unique_ptr<llama_context, ContextDeleter> embedding_context_;
 };
 
 class RealRuntime final : public LlamaRuntime {

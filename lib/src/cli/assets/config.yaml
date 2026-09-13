@@ -21,10 +21,12 @@ models:
   # The backend used when nothing else is specified.
   # default: claude
 
-  # Used for embeddings (RAG). Apogee bundles no embedding model; point this at
-  # a local GGUF you supply. With this unset, embedding falls back to
-  # models.default -- which works for a local backend and not for a cloud one,
-  # since cloud chat backends cannot embed.
+  # Used for embeddings (RAG). With this unset, embedding falls back to
+  # models.default. Which entries can embed is a property of the entry, not of
+  # a list: an openai or google entry embeds with its vendor's embedding model
+  # (see embedding_model on those entries), a llamacpp entry embeds with
+  # whatever GGUF it holds, and anthropic cannot -- that vendor has no
+  # embeddings endpoint. `apogee models status` says which rung answered.
   # default_embedding: embedder
 
   # Used for structured-extraction work. Unset means models.default.
@@ -52,18 +54,23 @@ backends:
   #   max_tokens: 8192
 
   # ── OpenAI ──────────────────────────────────────────────────────────────────
+  # embedding_model is what this entry uses when it EMBEDS rather than chats;
+  # unset means text-embedding-3-small. One key serves both.
   # gpt:
   #   type: openai
   #   api_key: "${OPENAI_API_KEY}"
   #   model: gpt-5
   #   context_size: 128000
+  #   # embedding_model: text-embedding-3-large
 
   # ── Google ──────────────────────────────────────────────────────────────────
+  # embedding_model: unset means gemini-embedding-001.
   # gemini:
   #   type: google
   #   api_key: "${GEMINI_API_KEY}"
   #   model: gemini-2.5-pro
   #   context_size: 1048576
+  #   # embedding_model: gemini-embedding-001
 
   # ── Claude through the official CLI (subscription plan) ────────────────────
   # The subscription-auth path: Apogee spawns the `claude` binary you already
@@ -190,4 +197,4 @@ backends:
 #     chunk_size: 512        # codepoints per chunk; the default for re-ingests
 #     chunk_overlap: 64      # codepoints shared between neighbouring chunks
 #     description: "Meeting notes"
-#     # backend: embedder    # arrives with embedding-clients; lexical needs none
+#     # backend: embedder    # which entry embeds this collection; lexical needs none

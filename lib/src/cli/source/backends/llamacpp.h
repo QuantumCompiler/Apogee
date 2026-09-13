@@ -43,6 +43,7 @@ class LlamaCppProvider final : public harness::LLMProvider,
                                public harness::TokenCounting,
                                public harness::VisionCapable,
                                public harness::InTextToolCalling,
+                               public harness::EmbeddingCapable,
                                public harness::StatusReporting {
 public:
     /// Reads the wall clock. Injected so the idle-unload policy is testable
@@ -140,6 +141,24 @@ public:
     /// loaded, falling back to the configured name. The zero value means
     /// **uncharacterised**, which every consumer must read as permissive.
     [[nodiscard]] harness::ModelBehavior model_behavior() const override;
+
+    // --- EmbeddingCapable ---------------------------------------------------
+
+    /// In-process embeddings from the loaded GGUF, mean-pooled and
+    /// L2-normalised, through a context of their own so the conversation's
+    /// warm KV state is never touched. Any GGUF will embed; a model trained
+    /// for it embeds well, a chat model embeds with variable quality, and the
+    /// config's `default_embedding` is where the user says which.
+    [[nodiscard]] std::vector<std::vector<float>> embed(
+        const std::vector<std::string>& inputs,
+        const harness::CancellationToken& cancellation) override;
+
+    /// The model's hidden size once loaded, else 0 -- the interface's "known
+    /// after the first call". Deliberately does NOT load the model to answer:
+    /// this is asked from capability probes, and paging gigabytes off disk to
+    /// answer a yes/no question would make every probe the slowest thing in
+    /// the session.
+    [[nodiscard]] std::size_t embedding_dimensions() const noexcept override;
 
     // --- InTextToolCalling --------------------------------------------------
 
