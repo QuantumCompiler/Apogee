@@ -170,3 +170,24 @@ backends:
 # color: false turns off ANSI color everywhere. When unset, color is enabled on
 # a terminal unless NO_COLOR is set or --no-color is passed.
 # color: true
+
+# ── Retrieval (RAG) ──────────────────────────────────────────────────────────
+# Collections are made by `apogee embed ingest <name> <path>`; the first ingest
+# of a new name registers it under `embeddings:` below, creating that section
+# on first use. Registration is a convenience, not a requirement -- a
+# collection works the moment its file exists. Every write here goes through
+# the comment-preserving editor, so this commentary survives it.
+#
+# auto_rag names ONE collection to retrieve from on every turn without typing
+# --rag. The flag still wins: `--rag other` for a single run, `--rag ""` to
+# switch it off for a single run. Read each turn, so an edit here takes effect
+# on the next question rather than the next session. The status line always
+# says when context was injected this way.
+# auto_rag: notes
+
+# embeddings:
+#   notes:
+#     chunk_size: 512        # codepoints per chunk; the default for re-ingests
+#     chunk_overlap: 64      # codepoints shared between neighbouring chunks
+#     description: "Meeting notes"
+#     # backend: embedder    # arrives with embedding-clients; lexical needs none

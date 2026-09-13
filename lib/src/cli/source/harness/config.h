@@ -145,6 +145,29 @@ struct ModelsConfig {
     std::string default_extraction;
 };
 
+/// One entry under `embeddings:` -- a RAG collection the config knows about.
+///
+/// A collection exists on disk the moment `apogee embed ingest` creates it,
+/// with or without an entry here. The entry is what lets it carry settings:
+/// today its chunk sizes, so a corpus of ADRs can want 768 where prose wants
+/// 512 without anyone re-typing that on every ingest -- which is how corpora
+/// end up chunked inconsistently. Later, `embedding-clients` hangs a
+/// per-collection backend here; that field is deliberately not declared until
+/// something consumes it.
+///
+/// Keyed by name in a map, like `backends:`, rather than Ommi's list of
+/// `- name:` items: the edit helpers, the loader's collision check, and
+/// `config get`'s dotted keys are all map-shaped, and a list would have needed
+/// a second copy of every one of them.
+struct EmbeddingConfig {
+    /// Codepoints per chunk. Unset means the ingest default.
+    std::optional<std::int64_t> chunk_size;
+    /// Codepoints of overlap between chunks. Unset means the ingest default.
+    std::optional<std::int64_t> chunk_overlap;
+    /// Free text, for a listing. Never interpreted.
+    std::string description;
+};
+
 /// Optional search roots that pre-populate path prompts. All optional; a
 /// missing value means "no default", not an error.
 struct PathsConfig {
@@ -185,6 +208,25 @@ struct Config {
 
     ModelsConfig models;
     PathsConfig paths;
+
+    /// Collection entries keyed by their name AS WRITTEN, compared
+    /// case-insensitively for the same reason `backends` is.
+    std::map<std::string, EmbeddingConfig, CaseInsensitiveLess> embeddings;
+
+    /// A collection to retrieve from on EVERY turn, with no `--rag` flag.
+    ///
+    /// One name, not several: merging two collections' scores means merging
+    /// incomparable scales, which is `vector-hybrid-rerank`'s problem and not
+    /// this key's. Empty means off. The flag still wins -- `--rag other` for
+    /// one run, `--rag ""` to switch it off for one run -- because a key that
+    /// cannot be overridden per invocation is a key people stop using.
+    ///
+    /// Read at turn build, not at startup, so a mid-session edit takes effect
+    /// on the next turn. It names a collection, which need not appear under
+    /// `embeddings:` -- retrieval never depended on registration and does not
+    /// start to here.
+    std::string auto_rag;
+
     StatusMode status_mode = StatusMode::Line;
     bool color = true;
 
@@ -194,6 +236,13 @@ struct Config {
 
     /// Backend names as written, in the map's (case-folded) order.
     [[nodiscard]] std::vector<std::string> backend_names() const;
+
+    /// Case-insensitive lookup of a collection entry. nullptr when absent --
+    /// which is not an error: an unregistered collection still works.
+    [[nodiscard]] const EmbeddingConfig* find_embedding(std::string_view name) const noexcept;
+
+    /// Collection names as written, in the map's (case-folded) order.
+    [[nodiscard]] std::vector<std::string> embedding_names() const;
 };
 
 /// Expands `${VAR}` references against the process environment.

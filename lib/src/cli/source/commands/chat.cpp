@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -68,6 +69,8 @@ struct ChatFlags {
     std::vector<std::string> images;
     std::string rag;
     int rag_limit = 4;
+    /// Kept so an explicit `--rag ""` can be told from no flag at all.
+    CLI::Option* rag_option = nullptr;
     double temperature = 0.0;
     std::int64_t max_tokens = 0;
     bool tools = false;
@@ -155,10 +158,17 @@ namespace {
 /// stdout carries only protocol events and a context warning is a diagnostic
 /// rather than a Reporter event. Inventing an event type for it would grow a
 /// second vocabulary out of the first.
-/// Which collection a chat turn retrieves from, and how much it injects.
+/// How a chat turn decides what to retrieve from.
+///
+/// The FLAG is fixed for the session; the config's `auto_rag` is read again
+/// on every turn, from the file, so an edit mid-conversation takes effect on
+/// the next question like every other config value. That is why this holds a
+/// path rather than a loaded value.
 struct RagSettings {
-    std::string collection;
+    bool flag_given = false;
+    std::string flag_value;
     int limit = 4;
+    std::filesystem::path config_path;
 };
 
 void run_chat_turn(const harness::Harness& harness, logger::Session& session,
@@ -211,21 +221,29 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     // reason the injected chunks must stay out of history. Turn one's context
     // left lying in the transcript would still be competing for attention on
     // turn five, against the chunks that actually answer the new question.
-    if (!rag.collection.empty()) {
-        const agentloop::RagResult retrieved =
-            agentloop::build_rag_prefix(collection_path(rag.collection), input, rag.limit);
-        if (!retrieved.error.empty()) {
-            notice("retrieval unavailable -- " + retrieved.error);
-        } else if (retrieved.chunks == 0) {
-            notice("no matching context in '" + rag.collection + "'");
-        } else {
-            loop_options.transient_prefix = retrieved.prefix;
-            // Chunks, top score, and the retriever that produced it -- the last
-            // because lexical and vector scales are incomparable.
-            notice(std::to_string(retrieved.chunks) + " chunk(s) from '" + rag.collection +
-                   "', top " + std::to_string(retrieved.top_score).substr(0, 5) + " [" +
-                   retrieved.retriever + "]");
+    //
+    // Which collection: the flag for the whole session, else whatever
+    // `auto_rag` says RIGHT NOW. The config is re-read here rather than at
+    // startup on purpose, and a config that has become unreadable mid-session
+    // costs this turn its auto_rag and says so -- never the turn itself.
+    RagChoice rag_choice;
+    if (rag.flag_given) {
+        rag_choice = choose_rag_collection(true, rag.flag_value, {});
+    } else {
+        try {
+            rag_choice =
+                choose_rag_collection(false, {}, harness::load_config(rag.config_path).auto_rag);
+        } catch (const harness::ConfigError& e) {
+            notice(std::string{"auto_rag skipped -- config unreadable: "} + e.what());
         }
+    }
+    if (rag_choice.active()) {
+        const agentloop::RagResult retrieved =
+            agentloop::build_rag_prefix(collection_path(rag_choice.collection), input, rag.limit);
+        if (retrieved.error.empty() && retrieved.chunks > 0) {
+            loop_options.transient_prefix = retrieved.prefix;
+        }
+        notice(describe_retrieval(rag_choice, retrieved));
     }
 
     try {
@@ -281,8 +299,10 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
     cmd->add_option("-m,--model", flags->model, "Backend or model to use");
     cmd->add_option("-s,--system", flags->system_prompt, "System prompt for the session");
-    cmd->add_option("--rag", flags->rag,
-                    "Retrieve context from this collection each turn (see 'apogee embed')");
+    flags->rag_option =
+        cmd->add_option("--rag", flags->rag,
+                        "Retrieve context from this collection each turn (see 'apogee embed'); "
+                        "\"\" switches off the config's auto_rag for this session");
     cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
     cmd->add_option("--image", flags->images, "Image to attach to the first message (repeatable)")
         ->allow_extra_args(false);
@@ -324,8 +344,10 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         const bool decorate = platform::is_terminal(platform::StandardStream::Out);
 
         harness::Config config;
+        std::filesystem::path config_path;
         try {
-            config = harness::load_config(harness::resolve_config_path(context.config_path));
+            config_path = harness::resolve_config_path(context.config_path);
+            config = harness::load_config(config_path);
         } catch (const harness::ConfigError& e) {
             fail_user(e.what());
         }
@@ -508,7 +530,10 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user(refusal);
         }
 
-        const RagSettings rag_settings{.collection = flags->rag, .limit = flags->rag_limit};
+        const RagSettings rag_settings{.flag_given = flags->rag_option->count() > 0,
+                                       .flag_value = flags->rag,
+                                       .limit = flags->rag_limit,
+                                       .config_path = config_path};
 
         if (input_format == InputFormat::StreamJson) {
             JsonReporter machine_reporter{std::cout};

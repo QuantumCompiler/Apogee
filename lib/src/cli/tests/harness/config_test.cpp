@@ -1,6 +1,7 @@
 #include "harness/config.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -267,4 +268,58 @@ TEST_CASE("load_config reports an unreadable file by name", "[config]") {
         CHECK(message.find("nope.yaml") != std::string::npos);
         CHECK(message.find("config init") != std::string::npos);
     }
+}
+
+// --- embeddings: and auto_rag: --------------------------------------------------
+
+TEST_CASE("embeddings entries parse into typed settings", "[config][embeddings]") {
+    const auto config = apogee::harness::parse_config(R"YAML(
+embeddings:
+  adrs:
+    chunk_size: 768
+    chunk_overlap: 96
+    description: "Architecture decision records"
+  notes:
+)YAML",
+                                                      "<test>");
+    REQUIRE(config.embeddings.size() == 2);
+
+    const apogee::harness::EmbeddingConfig* adrs = config.find_embedding("adrs");
+    REQUIRE(adrs != nullptr);
+    CHECK(adrs->chunk_size == 768);
+    CHECK(adrs->chunk_overlap == 96);
+    CHECK(adrs->description == "Architecture decision records");
+
+    // A bare name is a valid entry: registered, with every setting defaulted.
+    const apogee::harness::EmbeddingConfig* notes = config.find_embedding("notes");
+    REQUIRE(notes != nullptr);
+    CHECK_FALSE(notes->chunk_size.has_value());
+    CHECK_FALSE(notes->chunk_overlap.has_value());
+
+    CHECK(config.embedding_names() == std::vector<std::string>{"adrs", "notes"});
+    CHECK(config.find_embedding("nope") == nullptr);
+}
+
+TEST_CASE("collection names are looked up and collide case-insensitively", "[config][embeddings]") {
+    // The same rule as backends: two names that fold together would be the
+    // same file on a case-insensitive filesystem, so the loader names both
+    // rather than letting one shadow the other.
+    const auto config = apogee::harness::parse_config("embeddings:\n  Notes:\n", "<test>");
+    CHECK(config.find_embedding("notes") != nullptr);
+
+    CHECK_THROWS_WITH(apogee::harness::parse_config("embeddings:\n  Notes:\n  notes:\n", "<test>"),
+                      Catch::Matchers::ContainsSubstring("collides"));
+}
+
+TEST_CASE("embeddings settings of the wrong shape are rejected by name", "[config][embeddings]") {
+    CHECK_THROWS_WITH(
+        apogee::harness::parse_config("embeddings:\n  a:\n    chunk_size: lots\n", "<test>"),
+        Catch::Matchers::ContainsSubstring("embeddings.a.chunk_size"));
+    CHECK_THROWS_WITH(apogee::harness::parse_config("embeddings:\n  - a\n", "<test>"),
+                      Catch::Matchers::ContainsSubstring("embeddings:"));
+}
+
+TEST_CASE("auto_rag is a top-level scalar that defaults to off", "[config][embeddings]") {
+    CHECK(apogee::harness::parse_config("", "<test>").auto_rag.empty());
+    CHECK(apogee::harness::parse_config("auto_rag: notes\n", "<test>").auto_rag == "notes");
 }

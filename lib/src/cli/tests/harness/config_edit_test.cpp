@@ -11,10 +11,13 @@
 #include "support/env_guard.h"
 
 using apogee::harness::append_backend;
+using apogee::harness::append_embedding;
 using apogee::harness::BackendConfig;
 using apogee::harness::BackendType;
 using apogee::harness::ConfigEditError;
 using apogee::harness::delete_backend;
+using apogee::harness::delete_embedding;
+using apogee::harness::EmbeddingConfig;
 using apogee::harness::format_config;
 using apogee::harness::set_models_role;
 using apogee::testing::TempDir;
@@ -403,4 +406,127 @@ TEST_CASE("write_file_atomically creates missing parent directories", "[config_e
         std::filesystem::path{dir.path()} / "a" / "b" / "config.yaml";
     apogee::harness::write_file_atomically(path, "backends:\n");
     CHECK(std::filesystem::exists(path));
+}
+
+// --- embeddings: the collection entries -----------------------------------------
+//
+// `apogee embed ingest` writes these without anyone typing `config`, which is
+// exactly why they are held to the same byte-diff bar as everything else here:
+// a registration that disturbed a comment would be a config edit the user
+// never asked for AND never saw.
+
+namespace {
+
+/// Comment-dense, with a collection section that already has an entry, a
+/// comment block above it, and file-level commentary after it.
+constexpr std::string_view kWithCollections = R"YAML(# Apogee configuration.
+#
+# Every one of these comments must survive every edit.
+
+models:
+  default: claude   # the backend used when nothing else is named
+
+backends:
+  claude:
+    type: anthropic
+
+# auto_rag names one collection to search on every turn.
+# auto_rag: adrs
+
+embeddings:
+
+  # ── Architecture decision records ─────────────────────────────
+  # Chunked larger than prose: a decision reads as a unit.
+  adrs:
+    chunk_size: 768
+    chunk_overlap: 96
+
+# status_mode: line
+)YAML";
+
+EmbeddingConfig notes_collection() {
+    EmbeddingConfig collection;
+    collection.chunk_size = 512;
+    collection.chunk_overlap = 64;
+    return collection;
+}
+
+}  // namespace
+
+TEST_CASE("registering a collection is a byte-exact insertion and nothing else moves",
+          "[config_edit][golden][embeddings]") {
+    // THE acceptance criterion, as a literal diff rather than a "still
+    // contains": the result must be the fixture with exactly these lines
+    // inserted at exactly this place -- after the last entry, above the
+    // trailing commentary, one blank separator, the section's own indent.
+    const std::string added =
+        append_embedding(kWithCollections, "notes", notes_collection(), false);
+    require_parses(added);
+
+    constexpr std::string_view kInserted =
+        "\n"
+        "  notes:\n"
+        "    chunk_size: 512\n"
+        "    chunk_overlap: 64\n";
+    const std::string expected =
+        std::string{kWithCollections.substr(0, kWithCollections.find("\n# status_mode: line"))} +
+        std::string{kInserted} + "\n# status_mode: line\n";
+    CHECK(added == expected);
+}
+
+TEST_CASE("register then delete is byte-identical on a comment-dense config",
+          "[config_edit][golden][embeddings]") {
+    const std::string added =
+        append_embedding(kWithCollections, "notes", notes_collection(), false);
+    REQUIRE(added != std::string{kWithCollections});
+    CHECK(delete_embedding(added, "notes") == std::string{kWithCollections});
+}
+
+TEST_CASE("registering creates the embeddings section when the config has none",
+          "[config_edit][golden][embeddings]") {
+    // The shipped template documents `embeddings:` as a comment, which is not
+    // a section. The first ingest on a fresh install lands here.
+    const std::string added = append_embedding(kCommented, "notes", notes_collection(), false);
+    require_parses(added);
+    CHECK(added == std::string{kCommented} +
+                       "\nembeddings:\n  notes:\n    chunk_size: 512\n    chunk_overlap: 64\n");
+    // ...and the round trip still holds, leaving an empty section behind: an
+    // orphaned header is recoverable where a deleted comment is not.
+    require_parses(delete_embedding(added, "notes"));
+}
+
+TEST_CASE("a collection with defaulted settings is a bare entry", "[config_edit][embeddings]") {
+    const std::string added = append_embedding(kCommented, "notes", EmbeddingConfig{}, false);
+    require_parses(added);
+    CHECK(added.find("  notes:\n") != std::string::npos);
+    CHECK(added.find("chunk_size") == std::string::npos);
+}
+
+TEST_CASE("collection names collide case-insensitively and need --force to replace",
+          "[config_edit][embeddings]") {
+    CHECK_THROWS_AS(append_embedding(kWithCollections, "ADRS", notes_collection(), false),
+                    ConfigEditError);
+    CHECK_THROWS_AS(append_embedding(kWithCollections, "adrs", notes_collection(), false),
+                    ConfigEditError);
+
+    const std::string replaced =
+        append_embedding(kWithCollections, "adrs", notes_collection(), true);
+    require_parses(replaced);
+    CHECK(replaced.find("chunk_size: 512") != std::string::npos);
+    CHECK(replaced.find("chunk_size: 768") == std::string::npos);
+    // Replaced IN PLACE: the comment block above it is still above it.
+    CHECK(replaced.find("# Chunked larger than prose") < replaced.find("  adrs:"));
+}
+
+TEST_CASE("the collection helpers never touch the backends section", "[config_edit][embeddings]") {
+    // Section-scoped by construction: a collection named like a backend is a
+    // different entry in a different section.
+    const std::string added =
+        append_embedding(kWithCollections, "claude", notes_collection(), false);
+    require_parses(added);
+    CHECK(apogee::harness::section_entry_names(added, "backends") ==
+          std::vector<std::string>{"claude"});
+    CHECK(apogee::harness::section_entry_names(added, "embeddings") ==
+          std::vector<std::string>{"adrs", "claude"});
+    CHECK_THROWS_AS(delete_embedding(kWithCollections, "claude"), ConfigEditError);
 }

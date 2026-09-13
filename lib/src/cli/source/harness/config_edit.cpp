@@ -240,6 +240,30 @@ Lines format_backend_entry(std::string_view name, const BackendConfig& backend,
     return out;
 }
 
+/// Renders one collection entry's lines (key line first), each terminated.
+Lines format_embedding_entry(std::string_view name, const EmbeddingConfig& collection,
+                             std::string_view terminator) {
+    Lines out;
+    const std::string indent(kFieldIndent, ' ');
+
+    auto field = [&](std::string_view key, const std::string& value) {
+        out.push_back(indent + std::string{key} + ": " + value + std::string{terminator});
+    };
+
+    out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
+                  std::string{terminator});
+    if (collection.chunk_size.has_value()) {
+        field("chunk_size", std::to_string(*collection.chunk_size));
+    }
+    if (collection.chunk_overlap.has_value()) {
+        field("chunk_overlap", std::to_string(*collection.chunk_overlap));
+    }
+    if (!collection.description.empty()) {
+        field("description", yaml_scalar(collection.description));
+    }
+    return out;
+}
+
 /// The line range one entry occupies, given its key line.
 ///
 /// Blank and comment lines are TENTATIVE: they extend the entry only when a
@@ -302,43 +326,52 @@ std::optional<std::string> fold_collision(const std::vector<std::string>& existi
     return std::nullopt;
 }
 
-std::string append_backend(std::string_view content, std::string_view name,
-                           const BackendConfig& backend, bool force) {
+namespace {
+
+/// Appends `entry` (key line first, every line terminated) under `section:`,
+/// creating the section at the end of the file when absent.
+///
+/// Shared by every "add an entry" helper. `noun` is what the entry is called
+/// in error messages -- "backend", "collection" -- so the message a user reads
+/// names the thing they typed rather than the mechanism underneath.
+std::string append_entry(std::string_view content, std::string_view section, std::string_view noun,
+                         std::string_view name, Lines entry, bool force) {
     if (name.empty()) {
-        throw ConfigEditError("backend name cannot be empty");
+        throw ConfigEditError(std::string{noun} + " name cannot be empty");
     }
     if (name.find_first_of(" \t:#") != std::string_view::npos) {
-        throw ConfigEditError("backend name '" + std::string{name} +
+        throw ConfigEditError(std::string{noun} + " name '" + std::string{name} +
                               "' cannot contain spaces, tabs, colons, or '#'");
     }
 
     Lines lines = split_lines(content);
     const std::string terminator = dominant_terminator(lines);
 
-    const std::vector<std::string> existing = section_entry_names(content, "backends");
+    const std::vector<std::string> existing = section_entry_names(content, section);
     if (!force) {
         if (const std::optional<std::string> clash = fold_collision(existing, name);
             clash.has_value()) {
-            throw ConfigEditError(
-                "backend '" + std::string{name} + "' collides with existing '" + *clash +
-                "' -- backend names are compared case-insensitively, so the two would be the "
-                "same backend; choose a distinct name");
+            throw ConfigEditError(std::string{noun} + " '" + std::string{name} +
+                                  "' collides with existing '" + *clash + "' -- " +
+                                  std::string{noun} +
+                                  " names are compared case-insensitively, so the two would be "
+                                  "the same " +
+                                  std::string{noun} + "; choose a distinct name");
         }
     }
 
-    SectionRange section = find_section(lines, "backends");
+    SectionRange range = find_section(lines, section);
 
-    if (section.found) {
-        if (const std::optional<std::size_t> existing_line = find_entry_line(lines, section, name);
+    if (range.found) {
+        if (const std::optional<std::size_t> existing_line = find_entry_line(lines, range, name);
             existing_line.has_value()) {
             if (!force) {
-                throw ConfigEditError("backend '" + std::string{name} +
+                throw ConfigEditError(std::string{noun} + " '" + std::string{name} +
                                       "' already exists; pass --force to replace it");
             }
             // Replace in place, so the entry keeps its position and whatever
             // comment block sits above it.
-            const auto [begin, end] = entry_extent(lines, *existing_line, section.end);
-            Lines entry = format_backend_entry(name, backend, terminator);
+            const auto [begin, end] = entry_extent(lines, *existing_line, range.end);
             lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
                         lines.begin() + static_cast<std::ptrdiff_t>(end));
             lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(begin), entry.begin(),
@@ -353,12 +386,12 @@ std::string append_backend(std::string_view content, std::string_view name,
         // ends with a block of commented-out examples (the shipped template's
         // `backends:` is nothing but those), and a section is only terminated
         // by the next TOP-LEVEL line -- which a comment is not. Appending at
-        // section.end would drop the entry below every trailing comment in the
-        // file, so the new backend would appear to sit under commentary about
+        // range.end would drop the entry below every trailing comment in the
+        // file, so the new entry would appear to sit under commentary about
         // something else entirely. It would still parse; it would just read as
         // though the file had been vandalised.
-        std::size_t insert_at = section.begin;
-        for (std::size_t i = section.begin; i < section.end; ++i) {
+        std::size_t insert_at = range.begin;
+        for (std::size_t i = range.begin; i < range.end; ++i) {
             const std::string_view line = body(lines[i]);
             if (!is_blank(line) && !is_comment(line)) {
                 insert_at = i + 1;
@@ -375,12 +408,11 @@ std::string append_backend(std::string_view content, std::string_view name,
             }
         }
 
-        Lines entry = format_backend_entry(name, backend, terminator);
         // One blank separator, but only when there is real content above to
-        // separate from -- an entry going in directly under the `backends:`
-        // header needs none. delete_backend removes this line again, which is
-        // what makes add-then-delete byte-identical.
-        if (insert_at > section.begin) {
+        // separate from -- an entry going in directly under the section header
+        // needs none. The delete helper removes this line again, which is what
+        // makes add-then-delete byte-identical.
+        if (insert_at > range.begin) {
             entry.insert(entry.begin(), terminator);
         }
         lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insert_at), entry.begin(),
@@ -388,7 +420,7 @@ std::string append_backend(std::string_view content, std::string_view name,
         return join_lines(lines);
     }
 
-    // No `backends:` section yet -- create one at the end of the file.
+    // No such section yet -- create one at the end of the file.
     if (!lines.empty()) {
         std::string& last = lines.back();
         if (!last.empty() && last.back() != '\n') {
@@ -398,37 +430,65 @@ std::string append_backend(std::string_view content, std::string_view name,
             lines.push_back(terminator);
         }
     }
-    lines.push_back("backends:" + terminator);
-    Lines entry = format_backend_entry(name, backend, terminator);
+    lines.push_back(std::string{section} + ":" + terminator);
     lines.insert(lines.end(), entry.begin(), entry.end());
     return join_lines(lines);
 }
 
-std::string delete_backend(std::string_view content, std::string_view name) {
+/// Removes the entry `name` from `section:` -- its key line, its field lines,
+/// and the single blank separator above it. The inverse of append_entry.
+std::string delete_entry(std::string_view content, std::string_view section, std::string_view noun,
+                         std::string_view name) {
     Lines lines = split_lines(content);
-    const SectionRange section = find_section(lines, "backends");
-    if (!section.found) {
-        throw ConfigEditError("no 'backends:' section in this config");
+    const SectionRange range = find_section(lines, section);
+    if (!range.found) {
+        throw ConfigEditError("no '" + std::string{section} + ":' section in this config");
     }
 
-    const std::optional<std::size_t> key_line = find_entry_line(lines, section, name);
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
     if (!key_line.has_value()) {
-        throw ConfigEditError("backend '" + std::string{name} + "' not found in config");
+        throw ConfigEditError(std::string{noun} + " '" + std::string{name} +
+                              "' not found in config");
     }
 
-    auto [begin, end] = entry_extent(lines, *key_line, section.end);
+    auto [begin, end] = entry_extent(lines, *key_line, range.end);
 
     // Take the blank separator above the entry with it -- the exact inverse of
-    // what append_backend inserted. A COMMENT above the entry is left alone:
-    // it may belong to the section rather than this entry, and an orphaned
+    // what append_entry inserted. A COMMENT above the entry is left alone: it
+    // may belong to the section rather than this entry, and an orphaned
     // comment is recoverable where a deleted one is not.
-    if (begin > section.begin && is_blank(body(lines[begin - 1]))) {
+    if (begin > range.begin && is_blank(body(lines[begin - 1]))) {
         --begin;
     }
 
     lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
                 lines.begin() + static_cast<std::ptrdiff_t>(end));
     return join_lines(lines);
+}
+
+}  // namespace
+
+std::string append_backend(std::string_view content, std::string_view name,
+                           const BackendConfig& backend, bool force) {
+    const Lines lines = split_lines(content);
+    return append_entry(content, "backends", "backend", name,
+                        format_backend_entry(name, backend, dominant_terminator(lines)), force);
+}
+
+std::string delete_backend(std::string_view content, std::string_view name) {
+    return delete_entry(content, "backends", "backend", name);
+}
+
+std::string append_embedding(std::string_view content, std::string_view name,
+                             const EmbeddingConfig& collection, bool force) {
+    const Lines lines = split_lines(content);
+    return append_entry(content, "embeddings", "collection", name,
+                        format_embedding_entry(name, collection, dominant_terminator(lines)),
+                        force);
+}
+
+std::string delete_embedding(std::string_view content, std::string_view name) {
+    return delete_entry(content, "embeddings", "collection", name);
 }
 
 std::vector<std::string_view> models_role_fields() {

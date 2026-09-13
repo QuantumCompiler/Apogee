@@ -9,7 +9,9 @@
 
 #include "agentloop/loop.h"
 #include "backends/mock.h"
+#include "commands/helpers.h"
 #include "embedstore/store.h"
+#include "harness/config.h"
 #include "harness/harness.h"
 
 /// RAG injection, and the one property that makes it safe to use every turn:
@@ -180,4 +182,66 @@ TEST_CASE("injected context is framed as retrieved excerpts", "[agentloop][rag]"
 
 TEST_CASE("rendering nothing yields nothing", "[agentloop][rag]") {
     CHECK(render_rag_context({}).empty());
+}
+
+TEST_CASE("context injected by auto_rag reaches the request and never persisted history",
+          "[agentloop][rag][transient][config]") {
+    // The transient-history rule, extended to the CONFIG path. Injection that
+    // nobody typed a flag for is held to exactly the rule the flag is: it rides
+    // the outgoing request, and the saved transcript never learns it happened.
+    //
+    // Two assertions, and the first is what keeps the second honest: the
+    // secret MUST appear in what the provider was sent, so this cannot pass by
+    // simply not injecting anything.
+    const Scratch scratch;
+    seed(scratch);
+
+    apogee::harness::Config config;
+    config.auto_rag = "notes";  // the key, with no --rag flag anywhere
+    const apogee::commands::RagChoice choice =
+        apogee::commands::choose_rag_collection(false, {}, config.auto_rag);
+    REQUIRE(choice.source == apogee::commands::RagSource::Config);
+    REQUIRE(choice.collection == "notes");
+
+    const RagResult rag = build_rag_prefix(scratch.db(), "zarquon protocol widgets", 4);
+    REQUIRE(rag.chunks > 0);
+
+    bool secret_reached_the_model = false;
+    apogee::backends::MockProvider::Options options;
+    options.backend_name = "mock";
+    options.turns = {apogee::backends::MockTurn{.text = "answered"}};
+    options.on_request = [&secret_reached_the_model](const apogee::harness::ChatRequest& request) {
+        for (const apogee::harness::ChatMessage& message : request.messages) {
+            if (message.content.plain_text().find(kSecret) != std::string::npos) {
+                secret_reached_the_model = true;
+            }
+        }
+    };
+
+    apogee::harness::Harness harness{apogee::harness::Config{}};
+    harness.register_provider("mock",
+                              std::make_shared<apogee::backends::MockProvider>(std::move(options)));
+    harness.use_default_router();
+
+    std::vector<apogee::harness::ChatMessage> history{
+        apogee::harness::ChatMessage::user("what does the protocol require?")};
+
+    apogee::agentloop::Options loop;
+    loop.model = "mock";
+    loop.transient_prefix = rag.prefix;  // the same seam the flag path uses
+    loop.stream_answer = false;
+
+    apogee::agentloop::NullReporter reporter;
+    (void)apogee::agentloop::run(harness, history, loop, reporter);
+
+    CHECK(secret_reached_the_model);
+
+    std::string persisted;
+    for (const apogee::harness::ChatMessage& message : history) {
+        persisted += message.content.plain_text();
+        persisted += "\n";
+    }
+    INFO("persisted history:\n" << persisted);
+    CHECK(persisted.find(kSecret) == std::string::npos);
+    CHECK(persisted.find("what does the protocol require?") != std::string::npos);
 }

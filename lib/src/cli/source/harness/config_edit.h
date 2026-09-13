@@ -97,6 +97,23 @@ public:
 /// actually spells.
 [[nodiscard]] std::string delete_backend(std::string_view content, std::string_view name);
 
+/// Adds an `embeddings:` entry -- a RAG collection -- appended at the end of
+/// that section, creating the section when absent.
+///
+/// The same shape and the same rules as append_backend, and the same
+/// implementation underneath: the collision check, the placement above
+/// trailing comments, and the blank separator that delete_embedding removes
+/// again. `apogee embed ingest` calls this the first time it sees a
+/// collection, which is the one config write in Apogee that a user did not
+/// type `config` to get -- so it is held to the same byte-diff guarantee, and
+/// a failure to register is reported and never fails the ingest.
+[[nodiscard]] std::string append_embedding(std::string_view content, std::string_view name,
+                                           const EmbeddingConfig& collection, bool force);
+
+/// Removes an `embeddings:` entry. The exact inverse of append_embedding, with
+/// the same documented exception for a file that did not end in a newline.
+[[nodiscard]] std::string delete_embedding(std::string_view content, std::string_view name);
+
 /// Field names accepted by set_models_role.
 [[nodiscard]] std::vector<std::string_view> models_role_fields();
 

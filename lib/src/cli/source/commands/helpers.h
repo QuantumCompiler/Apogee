@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "agentloop/rag.h"
 #include "harness/config.h"
 #include "harness/harness.h"
 #include "harness/types.h"
@@ -52,6 +53,49 @@ enum ExitCode : int {
 [[nodiscard]] std::string resolve_system_prompt(const std::string& flag_value,
                                                 const harness::Config& config,
                                                 std::string_view backend_name);
+
+/// Where a turn's retrieval collection came from.
+enum class RagSource : std::uint8_t {
+    /// No retrieval this turn.
+    None,
+    /// `--rag <name>` on the command line.
+    Flag,
+    /// The config's `auto_rag` key, with no flag given.
+    Config,
+};
+
+/// The collection a turn retrieves from, and why.
+struct RagChoice {
+    std::string collection;
+    RagSource source = RagSource::None;
+
+    [[nodiscard]] bool active() const noexcept {
+        return !collection.empty();
+    }
+};
+
+/// Decides which collection a turn retrieves from.
+///
+/// **One function, called by every surface**, because the precedence is the
+/// whole contract: the flag beats the config, and an explicitly empty flag
+/// (`--rag ""`) means *no retrieval this run* rather than "fall back to
+/// `auto_rag`". A key that cannot be switched off for a single invocation is
+/// a key people stop using. `flag_given` is therefore distinct from
+/// `flag_value.empty()` -- an absent flag falls through to the config, a
+/// present-but-empty one does not.
+[[nodiscard]] RagChoice choose_rag_collection(bool flag_given, std::string_view flag_value,
+                                              std::string_view auto_rag);
+
+/// What to tell the user about a turn's retrieval, without the surface's own
+/// tag or framing.
+///
+/// Always names the chunk count, the top score, and the retriever -- and says
+/// when the collection came from `auto_rag` rather than a flag. **Silent
+/// injection is the failure mode**: a user who does not know context was added
+/// cannot tell why an answer went sideways, and that is doubly true when
+/// nothing on the command line asked for it.
+[[nodiscard]] std::string describe_retrieval(const RagChoice& choice,
+                                             const agentloop::RagResult& result);
 
 /// Reads all of standard input. Used when no prompt argument was given.
 [[nodiscard]] std::string read_stdin();

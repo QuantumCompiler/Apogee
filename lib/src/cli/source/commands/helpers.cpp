@@ -61,6 +61,36 @@ std::string resolve_system_prompt(const std::string& flag_value, const harness::
     return entry == nullptr ? std::string{} : entry->system_prompt;
 }
 
+RagChoice choose_rag_collection(bool flag_given, std::string_view flag_value,
+                                std::string_view auto_rag) {
+    RagChoice choice;
+    if (flag_given) {
+        // Present wins, even when empty: `--rag ""` is the off switch.
+        choice.collection = std::string{flag_value};
+        choice.source = flag_value.empty() ? RagSource::None : RagSource::Flag;
+        return choice;
+    }
+    if (!auto_rag.empty()) {
+        choice.collection = std::string{auto_rag};
+        choice.source = RagSource::Config;
+    }
+    return choice;
+}
+
+std::string describe_retrieval(const RagChoice& choice, const agentloop::RagResult& result) {
+    const std::string origin = choice.source == RagSource::Config ? " (auto_rag)" : "";
+    if (!result.error.empty()) {
+        return "retrieval unavailable -- " + result.error + origin;
+    }
+    if (result.chunks == 0) {
+        return "no matching context in '" + choice.collection + "'" + origin;
+    }
+    // Chunks, top score, and the retriever that produced it -- the last because
+    // lexical and vector scales are incomparable.
+    return std::to_string(result.chunks) + " chunk(s) from '" + choice.collection + "', top " +
+           std::to_string(result.top_score).substr(0, 5) + " [" + result.retriever + "]" + origin;
+}
+
 std::string read_stdin() {
     std::ostringstream buffer;
     buffer << std::cin.rdbuf();

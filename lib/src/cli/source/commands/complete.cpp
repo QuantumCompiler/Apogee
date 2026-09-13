@@ -55,6 +55,8 @@ struct CompleteFlags {
 
     CLI::Option* temperature_option = nullptr;
     CLI::Option* max_tokens_option = nullptr;
+    /// Kept so an explicit `--rag ""` can be told from no flag at all.
+    CLI::Option* rag_option = nullptr;
 };
 
 /// Reports a user error and sets the exit code.
@@ -259,26 +261,23 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     // the seam the agent loop already test-locks as never reaching persisted
     // history -- which is what keeps a transcript readable and keeps turn one's
     // chunks from competing with turn two's question.
-    if (!flags.rag.empty()) {
-        const agentloop::RagResult rag =
-            agentloop::build_rag_prefix(collection_path(flags.rag), prompt, flags.rag_limit);
-        if (!rag.error.empty()) {
-            // Reported, not fatal: answering without retrieved context beats
-            // refusing to answer because a collection was missing.
-            reporter.status().print_line(reporter_options.style.tag(ansi::Role::Warning) +
-                                         " retrieval unavailable -- " + rag.error);
-        } else if (rag.chunks == 0) {
-            reporter.status().print_line(reporter_options.style.tag(ansi::Role::Apogee) +
-                                         " no matching context in '" + flags.rag + "'");
-        } else {
+    //
+    // The collection comes from the flag, else the config's `auto_rag` -- one
+    // shared decision, so this surface and chat cannot disagree about which
+    // wins. Either way the status line says what was injected and from where.
+    const RagChoice rag_choice =
+        choose_rag_collection(flags.rag_option->count() > 0, flags.rag, config.auto_rag);
+    if (rag_choice.active()) {
+        const agentloop::RagResult rag = agentloop::build_rag_prefix(
+            collection_path(rag_choice.collection), prompt, flags.rag_limit);
+        // A missing collection is reported, not fatal: answering without
+        // retrieved context beats refusing to answer.
+        const ansi::Role role = rag.error.empty() ? ansi::Role::Apogee : ansi::Role::Warning;
+        if (rag.error.empty() && rag.chunks > 0) {
             loop_options.transient_prefix = rag.prefix;
-            // The retriever is always named beside the score: lexical and
-            // vector scales are incomparable.
-            reporter.status().print_line(
-                reporter_options.style.tag(ansi::Role::Apogee) + " " + std::to_string(rag.chunks) +
-                " chunk(s) from '" + flags.rag + "', top " +
-                std::to_string(rag.top_score).substr(0, 5) + " [" + rag.retriever + "]");
         }
+        reporter.status().print_line(reporter_options.style.tag(role) + " " +
+                                     describe_retrieval(rag_choice, rag));
     }
 
     agent::ToolRegistry registry;
@@ -336,8 +335,10 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
     // by default, so `--image pic.png "my prompt"` would put BOTH into images
     // and leave the positional prompt empty -- after which the command blocks
     // reading a stdin that never arrives. One value per occurrence, repeatable.
-    cmd->add_option("--rag", flags->rag,
-                    "Retrieve context from this collection (see 'apogee embed')");
+    flags->rag_option =
+        cmd->add_option("--rag", flags->rag,
+                        "Retrieve context from this collection (see 'apogee embed'); "
+                        "\"\" switches off the config's auto_rag for this run");
     cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
     cmd->add_option("--image", flags->images, "Image file to attach (repeatable)")
         ->allow_extra_args(false);

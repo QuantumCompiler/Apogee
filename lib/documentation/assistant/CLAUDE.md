@@ -62,7 +62,7 @@ The first of them is now enforced in code:
 - Every edit re-parses its own output before it lands, and writes via temp-file-then-rename, so a bad transform cannot corrupt a config.
 - Reading is `load_config` / `parse_config`; those are the *only* uses of yaml-cpp.
 
-**Enforcement.** The golden-file suite in `tests/harness/config_edit_test.cpp` asserts byte-identical round trips over a comment-dense fixture, plus CRLF preservation and the atomic-failure paths. `apogee config` is a thin caller — it formats no YAML of its own.
+**Enforcement.** The golden-file suite in `tests/harness/config_edit_test.cpp` asserts byte-identical round trips over a comment-dense fixture, plus CRLF preservation and the atomic-failure paths. `apogee config` is a thin caller — it formats no YAML of its own. The one config write a user never types `config` for — `apogee embed ingest` registering a new collection — goes through the same helpers, and `cli.config_lifecycle` holds it to a literal equality over the whole shipped template: pristine bytes plus exactly the new entry.
 
 ### ⚠ The harness never includes backends
 

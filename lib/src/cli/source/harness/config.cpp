@@ -205,6 +205,20 @@ std::vector<std::string> Config::backend_names() const {
     return names;
 }
 
+const EmbeddingConfig* Config::find_embedding(std::string_view name) const noexcept {
+    const auto it = embeddings.find(name);
+    return it == embeddings.end() ? nullptr : &it->second;
+}
+
+std::vector<std::string> Config::embedding_names() const {
+    std::vector<std::string> names;
+    names.reserve(embeddings.size());
+    for (const auto& [name, unused] : embeddings) {
+        names.push_back(name);
+    }
+    return names;
+}
+
 std::string expand_env(std::string_view input) {
     std::string out;
     out.reserve(input.size());
@@ -305,6 +319,45 @@ Config parse_config(std::string_view content, std::string_view origin) {
         config.paths.mcp_dir = scalar(paths["mcp_dir"], origin, "paths.mcp_dir");
         config.paths.embeddings_dir =
             scalar(paths["embeddings_dir"], origin, "paths.embeddings_dir");
+    }
+
+    if (const YAML::Node embeddings = root["embeddings"];
+        embeddings.IsDefined() && !embeddings.IsNull()) {
+        if (!embeddings.IsMap()) {
+            fail(origin, "embeddings: expected a mapping of collection name -> settings");
+        }
+        for (const auto& entry : embeddings) {
+            const std::string name = entry.first.Scalar();
+            if (name.empty()) {
+                fail(origin, "embeddings: an entry has an empty name");
+            }
+            const std::string where = "embeddings." + name;
+            const YAML::Node node = entry.second;
+            EmbeddingConfig collection;
+            if (node.IsDefined() && !node.IsNull()) {
+                if (!node.IsMap()) {
+                    fail(origin, where + ": expected a mapping of settings");
+                }
+                collection.chunk_size = integer(node["chunk_size"], origin, where + ".chunk_size");
+                collection.chunk_overlap =
+                    integer(node["chunk_overlap"], origin, where + ".chunk_overlap");
+                collection.description =
+                    scalar(node["description"], origin, where + ".description");
+            }
+            const auto [it, inserted] = config.embeddings.emplace(name, std::move(collection));
+            if (!inserted) {
+                // The same rule as backends, for the same reason: a collection
+                // is addressed by name, and two names that fold together would
+                // be the same file on a case-insensitive filesystem.
+                fail(origin, "embeddings: '" + name + "' collides with '" + it->first +
+                                 "' -- collection names are compared case-insensitively, so "
+                                 "these would be the same collection; rename one");
+            }
+        }
+    }
+
+    if (const YAML::Node auto_rag = root["auto_rag"]; auto_rag.IsDefined() && !auto_rag.IsNull()) {
+        config.auto_rag = scalar(auto_rag, origin, "auto_rag");
     }
 
     if (const YAML::Node mode = root["status_mode"]; mode.IsDefined() && !mode.IsNull()) {

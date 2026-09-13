@@ -6,12 +6,16 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <system_error>
 
 #include "embedstore/ingest.h"
 #include "embedstore/store.h"
+#include "harness/config.h"
+#include "harness/config_edit.h"
 #include "harness/layout.h"
+#include "harness/paths.h"
 
 namespace apogee::commands {
 namespace {
@@ -86,8 +90,6 @@ std::string_view EmbedCommand::summary() const noexcept {
 }
 
 void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
-    (void)context;  // collections live under APOGEE_HOME, not beside the config
-
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
     cmd->require_subcommand(1);
 
@@ -100,10 +102,14 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* ingest = cmd->add_subcommand("ingest", "Add a file or directory to a collection");
     ingest->add_option("collection", *in_collection, "Collection name")->required();
     ingest->add_option("path", *in_path, "File or directory to read")->required();
-    ingest->add_option("--chunk-size", *in_size, "Codepoints per chunk (default 512)");
-    ingest->add_option("--chunk-overlap", *in_overlap, "Codepoints of overlap (default 64)");
+    CLI::Option* size_option = ingest->add_option(
+        "--chunk-size", *in_size, "Codepoints per chunk (default: the collection's, else 512)");
+    CLI::Option* overlap_option =
+        ingest->add_option("--chunk-overlap", *in_overlap,
+                           "Codepoints of overlap (default: the collection's, else 64)");
 
-    ingest->callback([in_collection, in_path, in_size, in_overlap]() {
+    ingest->callback([&context, in_collection, in_path, in_size, in_overlap, size_option,
+                      overlap_option]() {
         require_plain_name(*in_collection);
 
         const std::filesystem::path target{*in_path};
@@ -112,10 +118,41 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
             fail("no such file or directory: " + target.string());
         }
 
+        // The config is consulted, never required. A collection works the
+        // moment its file exists; the entry under `embeddings:` is where its
+        // settings live, and it is written the first time a name is seen. A
+        // config that will not load costs the user its defaults and its
+        // registration -- both said out loud below -- and never the ingest.
+        std::filesystem::path config_path;
+        std::optional<harness::Config> config;
+        std::string config_trouble;
+        try {
+            config_path = harness::resolve_config_path(context.config_path);
+            config = harness::load_config(config_path);
+        } catch (const std::exception& e) {
+            config_trouble = e.what();
+        }
+        const harness::EmbeddingConfig* registered =
+            config.has_value() ? config->find_embedding(*in_collection) : nullptr;
+
+        // Chunking: the flag, else the collection's own entry, else the
+        // default. A corpus of ADRs wants 768 where prose wants 512, and
+        // re-typing that on every ingest is how corpora end up chunked
+        // inconsistently -- so the entry remembers, and the flag overrides for
+        // one run without rewriting what the user put in the file.
+        embedstore::ChunkOptions chunking{.size = *in_size, .overlap = *in_overlap};
+        if (size_option->count() == 0 && registered != nullptr &&
+            registered->chunk_size.value_or(0) > 0) {
+            chunking.size = static_cast<std::size_t>(*registered->chunk_size);
+        }
+        if (overlap_option->count() == 0 && registered != nullptr &&
+            registered->chunk_overlap.value_or(-1) >= 0) {
+            chunking.overlap = static_cast<std::size_t>(*registered->chunk_overlap);
+        }
+
         embedstore::IngestReport report;
         try {
-            report = embedstore::ingest_path(collection_path(*in_collection), target,
-                                             {.size = *in_size, .overlap = *in_overlap});
+            report = embedstore::ingest_path(collection_path(*in_collection), target, chunking);
         } catch (const std::exception& e) {
             fail(e.what());
         }
@@ -130,6 +167,32 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
             }
             if (!embedstore::pdftotext_available()) {
                 std::cout << "\n(install poppler for PDF support -- it provides pdftotext)\n";
+            }
+        }
+
+        // Register a collection the config has not met, through the one path
+        // that writes a config file -- so this edit is byte-for-byte the edit
+        // `apogee config` would have made, and every comment survives it.
+        //
+        // Reported and never fatal: the corpus is already on disk, and telling
+        // the user their ingest failed because their config could not be
+        // edited would be a lie about what happened.
+        if (!config_trouble.empty()) {
+            std::cerr << "apogee embed: not registered in config -- " << config_trouble << "\n";
+        } else if (registered == nullptr) {
+            const harness::EmbeddingConfig entry{
+                .chunk_size = static_cast<std::int64_t>(chunking.size),
+                .chunk_overlap = static_cast<std::int64_t>(chunking.overlap),
+                .description = {}};
+            try {
+                harness::edit_config_file(config_path, [&](std::string_view content) {
+                    return harness::append_embedding(content, *in_collection, entry, false);
+                });
+                std::cout << "registered '" << *in_collection << "' in " << config_path.string()
+                          << "\n";
+            } catch (const std::exception& e) {
+                std::cerr << "apogee embed: could not register '" << *in_collection
+                          << "' in config -- " << e.what() << "\n";
             }
         }
     });

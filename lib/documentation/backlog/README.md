@@ -55,12 +55,11 @@ Items are numbered in the **suggested order of implementation**. The rule stays 
 
 ### Phase 2 — the gated ring (after v0.1.0 ships)
 
-Six semi-independent tracks that can interleave: the **vendor-CLI family** — **complete**: 11 shipped 2026-09-02, and 12's three split items (12a codex, 12b gemini, 12c ollama) all shipped 2026-09-06, the **front-end contract** (13 — shipped 2026-09-06, and the GUI project gates on it), **local-model depth** (14, split at grooming 2026-09-06 into 14a/14b/14c/14d; **all four shipped 2026-09-07 — the track is complete**), **RAG** (15 → 16 → 17), **serving** (18 → 19 — server deployments only), and **tools/agents** (20); item 21 needs the RAG track complete. The numbering is the suggested serial order when working alone.
+Six semi-independent tracks that can interleave: the **vendor-CLI family** — **complete**: 11 shipped 2026-09-02, and 12's three split items (12a codex, 12b gemini, 12c ollama) all shipped 2026-09-06, the **front-end contract** (13 — shipped 2026-09-06, and the GUI project gates on it), **local-model depth** (14, split at grooming 2026-09-06 into 14a/14b/14c/14d; **all four shipped 2026-09-07 — the track is complete**), **RAG** (15 → 16 → 17; **15 shipped in full 2026-09-12**), **serving** (18 → 19 — server deployments only), and **tools/agents** (20); item 21 needs the RAG track complete. The numbering is the suggested serial order when working alone.
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 15 | [embedstore-lexical-rag.md](embedstore-lexical-rag.md) | — | RAG **config residue** — the lexical floor (SQLite/FTS5 store, chunking, ingest, `embed` CLI, `--rag`) shipped 2026-09-07; what remains is the `embeddings:` config section, auto-registration, and the `auto_rag` key |
-| 16 | [embedding-clients.md](embedding-clients.md) | — | Embedding clients: OpenAI/Google endpoints + in-process llama.cpp, behind can_embed. **Gate satisfied 2026-09-07** — item 15's lexical floor shipped; its remaining config residue does not block this |
+| 16 | [embedding-clients.md](embedding-clients.md) | ✅ 15 (shipped) | Embedding clients: OpenAI/Google endpoints + in-process llama.cpp, behind can_embed. The `embeddings:` section it hangs a per-collection backend on exists as of 2026-09-12 |
 | 17 | [vector-hybrid-rerank.md](vector-hybrid-rerank.md) | 16 | Vector + hybrid retrieval, per-turn resolver, and LLM rerank with a capability-driven gate |
 | 18 | [serve-public-plane.md](serve-public-plane.md) | — | `apogee serve` — OpenAI-compatible HTTP server with server-side sessions (server deployments only: remote REST clients) |
 | 19 | [admin-plane-foundation.md](admin-plane-foundation.md) | 18 · **split first** (plane / credstore) | /v1/admin foundation: bearer auth, events bus, jobs, first CRUD, parity test + provider credential store |

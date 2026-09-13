@@ -206,6 +206,16 @@ if(UNIX)
     )
     set_tests_properties(cli.machine_mode PROPERTIES TIMEOUT 120)
 
+    # auto_rag's two shell-only properties: `--rag ""` as the off switch (CMake's
+    # execute_process cannot pass an EMPTY argument at all), and the key being
+    # re-read at turn build rather than at startup.
+    add_test(NAME cli.auto_rag
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/auto_rag_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/auto-rag
+    )
+    set_tests_properties(cli.auto_rag PROPERTIES TIMEOUT 60)
+
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_check.sh"
             $<TARGET_FILE:apogee>

@@ -123,6 +123,57 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     if (key == "paths.embeddings_dir") {
         return render(config.paths.embeddings_dir);
     }
+    if (key == "auto_rag") {
+        return render(config.auto_rag);
+    }
+    if (key == "embeddings") {
+        std::string out;
+        for (const std::string& name : config.embedding_names()) {
+            out += out.empty() ? "" : "\n";
+            out += name;
+        }
+        return out;
+    }
+    if (key.starts_with("embeddings.")) {
+        const std::string_view rest = key.substr(std::string_view{"embeddings."}.size());
+        const std::size_t dot = rest.find('.');
+        const std::string_view name = rest.substr(0, dot);
+        const harness::EmbeddingConfig* collection = config.find_embedding(name);
+        if (collection == nullptr) {
+            return std::nullopt;
+        }
+        if (dot == std::string_view::npos) {
+            // The entry itself: its fields, one per line, like a backend.
+            std::string out;
+            if (collection->chunk_size.has_value()) {
+                out += "chunk_size: " + std::to_string(*collection->chunk_size) + "\n";
+            }
+            if (collection->chunk_overlap.has_value()) {
+                out += "chunk_overlap: " + std::to_string(*collection->chunk_overlap) + "\n";
+            }
+            if (!collection->description.empty()) {
+                out += "description: " + collection->description + "\n";
+            }
+            if (!out.empty()) {
+                out.pop_back();
+            }
+            return out;
+        }
+        const std::string_view field = rest.substr(dot + 1);
+        if (field == "chunk_size") {
+            return collection->chunk_size.has_value() ? std::to_string(*collection->chunk_size)
+                                                      : std::string{};
+        }
+        if (field == "chunk_overlap") {
+            return collection->chunk_overlap.has_value()
+                       ? std::to_string(*collection->chunk_overlap)
+                       : std::string{};
+        }
+        if (field == "description") {
+            return render(collection->description);
+        }
+        return std::nullopt;
+    }
     if (key == "backends") {
         std::string out;
         for (const std::string& name : config.backend_names()) {
@@ -318,7 +369,7 @@ void bind_get(CLI::App& parent, const RootContext& context) {
     CLI::App* cmd = parent.add_subcommand("get", "Print a config value by dotted key");
     cmd->add_option("key", *key,
                     "Dotted key, e.g. models.default or backends.claude.model. 'backends' "
-                    "lists every backend name")
+                    "lists every backend name; 'embeddings' every registered collection")
         ->required();
     cmd->add_flag("--reveal", *reveal, "Print api_key values instead of redacting them");
     cmd->callback([&context, key, reveal]() {

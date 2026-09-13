@@ -156,3 +156,88 @@ TEST_CASE("an attachment with no prompt text still forms a valid turn", "[comman
     REQUIRE(messages.back().content.parts().size() == 1);
     CHECK(messages.back().content.parts()[0].kind == ContentPart::Kind::ImageUrl);
 }
+
+// --- which collection a turn retrieves from -------------------------------------
+
+namespace {
+
+using apogee::commands::choose_rag_collection;
+using apogee::commands::describe_retrieval;
+using apogee::commands::RagChoice;
+using apogee::commands::RagSource;
+
+}  // namespace
+
+TEST_CASE("the flag beats auto_rag, and an empty flag switches it off",
+          "[commands][helpers][rag]") {
+    // The whole contract of the shared decision, as a table. Every surface
+    // calls this one function, so the precedence cannot differ between them.
+    struct Row {
+        bool flag_given;
+        std::string_view flag_value;
+        std::string_view auto_rag;
+        std::string_view collection;
+        RagSource source;
+    };
+
+    const Row rows[] = {
+        // absent flag, no config: nothing
+        {false, "", "", "", RagSource::None},
+        // absent flag: the config decides, and says so
+        {false, "", "notes", "notes", RagSource::Config},
+        // a named flag wins over the config
+        {true, "adrs", "notes", "adrs", RagSource::Flag},
+        // an EMPTY flag is the off switch, not a fall-through to the config
+        {true, "", "notes", "", RagSource::None},
+        // a named flag with no config behind it
+        {true, "adrs", "", "adrs", RagSource::Flag},
+    };
+    for (const Row& row : rows) {
+        INFO("flag_given=" << row.flag_given << " flag='" << row.flag_value << "' auto_rag='"
+                           << row.auto_rag << "'");
+        const RagChoice choice =
+            choose_rag_collection(row.flag_given, row.flag_value, row.auto_rag);
+        CHECK(choice.collection == row.collection);
+        CHECK(choice.source == row.source);
+        CHECK(choice.active() == !row.collection.empty());
+    }
+}
+
+TEST_CASE("the retrieval line names chunks, score, retriever, and its origin",
+          "[commands][helpers][rag]") {
+    apogee::agentloop::RagResult result;
+    result.chunks = 3;
+    result.top_score = 0.869;
+    result.retriever = "lexical";
+
+    const RagChoice from_flag{.collection = "notes", .source = RagSource::Flag};
+    const std::string flagged = describe_retrieval(from_flag, result);
+    CHECK(flagged.find("3 chunk(s)") != std::string::npos);
+    CHECK(flagged.find("'notes'") != std::string::npos);
+    CHECK(flagged.find("0.869") != std::string::npos);
+    CHECK(flagged.find("[lexical]") != std::string::npos);
+    CHECK(flagged.find("auto_rag") == std::string::npos);
+
+    // Injection nobody typed a flag for is the one that must announce itself:
+    // a user who does not know context was added cannot tell why an answer
+    // went sideways.
+    const RagChoice from_config{.collection = "notes", .source = RagSource::Config};
+    const std::string automatic = describe_retrieval(from_config, result);
+    CHECK(automatic.find("3 chunk(s)") != std::string::npos);
+    CHECK(automatic.find("[lexical]") != std::string::npos);
+    CHECK(automatic.find("(auto_rag)") != std::string::npos);
+
+    // The same origin marker on the two non-injecting outcomes, so a user can
+    // see that a key in their config is trying and failing.
+    apogee::agentloop::RagResult nothing;
+    nothing.retriever = "lexical";
+    CHECK(describe_retrieval(from_config, nothing).find("no matching context") !=
+          std::string::npos);
+    CHECK(describe_retrieval(from_config, nothing).find("(auto_rag)") != std::string::npos);
+
+    apogee::agentloop::RagResult broken;
+    broken.error = "no collection at /x";
+    CHECK(describe_retrieval(from_config, broken).find("retrieval unavailable") !=
+          std::string::npos);
+    CHECK(describe_retrieval(from_config, broken).find("(auto_rag)") != std::string::npos);
+}
