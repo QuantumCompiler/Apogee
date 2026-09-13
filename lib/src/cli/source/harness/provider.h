@@ -89,6 +89,23 @@ public:
     /// Dimensionality of the vectors this provider produces, or 0 if it only
     /// becomes known after the first call.
     [[nodiscard]] virtual std::size_t embedding_dimensions() const noexcept = 0;
+
+    /// The model these vectors come from, as a store should record it.
+    ///
+    /// Vectors from two models are two vector spaces; a collection records
+    /// which one it was built in so a query is never scored across spaces.
+    [[nodiscard]] virtual std::string embedding_model_name() const = 0;
+
+    /// Whether each call costs money.
+    ///
+    /// A fact the provider states about itself, never a list of types: the
+    /// spend policy (a whole corpus is never vectorised through a metered
+    /// embedder without being asked) reads this. **Unknown is metered** -- the
+    /// default answers true, so a new embedder is assumed to cost until it
+    /// says otherwise.
+    [[nodiscard]] virtual bool embedding_is_metered() const noexcept {
+        return true;
+    }
 };
 
 /// Implemented by a provider whose model loads lazily and can report progress.

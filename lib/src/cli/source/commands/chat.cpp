@@ -6,12 +6,15 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 
 #include "agent/fetch_url.h"
 #include "agentloop/content.h"
 #include "agentloop/loop.h"
 #include "agentloop/rag.h"
+#include "agentloop/rerank.h"
+#include "agentloop/retriever.h"
 #include "ansi/ansi.h"
 #include "backends/factory.h"
 #include "backends/http_client.h"
@@ -71,6 +74,10 @@ struct ChatFlags {
     int rag_limit = 4;
     /// Kept so an explicit `--rag ""` can be told from no flag at all.
     CLI::Option* rag_option = nullptr;
+    std::string retriever;
+    std::string rerank;
+    CLI::Option* retriever_option = nullptr;
+    CLI::Option* rerank_option = nullptr;
     double temperature = 0.0;
     std::int64_t max_tokens = 0;
     bool tools = false;
@@ -227,19 +234,28 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     // startup on purpose, and a config that has become unreadable mid-session
     // costs this turn its auto_rag and says so -- never the turn itself.
     RagChoice rag_choice;
-    if (rag.flag_given) {
-        rag_choice = choose_rag_collection(true, rag.flag_value, {});
-    } else {
-        try {
-            rag_choice =
-                choose_rag_collection(false, {}, harness::load_config(rag.config_path).auto_rag);
-        } catch (const harness::ConfigError& e) {
+    std::optional<harness::Config> turn_config;
+    try {
+        turn_config = harness::load_config(rag.config_path);
+    } catch (const harness::ConfigError& e) {
+        if (!rag.flag_given) {
             notice(std::string{"auto_rag skipped -- config unreadable: "} + e.what());
         }
     }
+    if (rag.flag_given) {
+        rag_choice = choose_rag_collection(true, rag.flag_value, {});
+    } else if (turn_config.has_value()) {
+        rag_choice = choose_rag_collection(false, {}, turn_config->auto_rag);
+    }
     if (rag_choice.active()) {
+        // The session's retriever and rerank SETTINGS, read each turn so
+        // /retriever and /rerank take effect on the next question and a
+        // resumed session continues as it was last set.
+        const harness::Config fallback;
+        const harness::Config& config = turn_config.has_value() ? *turn_config : fallback;
         const agentloop::RagResult retrieved =
-            agentloop::build_rag_prefix(collection_path(rag_choice.collection), input, rag.limit);
+            retrieve_for_collection(harness, config, rag_choice.collection, input, rag.limit,
+                                    session.retriever, session.rerank, {});
         if (retrieved.error.empty() && retrieved.chunks > 0) {
             loop_options.transient_prefix = retrieved.prefix;
         }
@@ -304,6 +320,17 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                         "Retrieve context from this collection each turn (see 'apogee embed'); "
                         "\"\" switches off the config's auto_rag for this session");
     cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
+    flags->retriever_option =
+        cmd->add_option("--retriever", flags->retriever,
+                        "How to search the collection: lexical, vector, hybrid, or auto")
+            ->check([](const std::string& value) {
+                return agentloop::valid_retriever(value)
+                           ? std::string{}
+                           : agentloop::retriever_values_message("", value);
+            });
+    flags->rerank_option =
+        cmd->add_option("--rerank", flags->rerank,
+                        "Backend that reorders retrieved chunks with one generation call, or off");
     cmd->add_option("--image", flags->images, "Image to attach to the first message (repeatable)")
         ->allow_extra_args(false);
     flags->temperature_option =
@@ -424,6 +451,14 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                          .entry_backend = session.backend});
         session.backend = model;
 
+        // Retrieval settings follow the same precedence as every other saved
+        // parameter: an explicit flag wins, else what the session last had.
+        if (flags->retriever_option->count() > 0) {
+            session.retriever = flags->retriever == "auto" ? std::string{} : flags->retriever;
+        }
+        if (flags->rerank_option->count() > 0) {
+            session.rerank = flags->rerank;
+        }
         if (flags->temperature_option->count() > 0) {
             session.params.temperature = flags->temperature;
         }
@@ -666,6 +701,49 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                     } catch (const std::exception&) {
                         reporter.status().print_line(style.tag(ansi::Role::Error) +
                                                      " not a number: '" + argument + "'");
+                    }
+                } else if (verb == "retriever") {
+                    if (argument.empty()) {
+                        reporter.status().print_line(
+                            style.tag(ansi::Role::Rag) + " retriever: " +
+                            (session.retriever.empty() ? "auto" : session.retriever) +
+                            (session.retriever.empty()
+                                 ? " -- vector when the collection's vectors match the "
+                                   "embedding backend, else lexical; hybrid only when asked"
+                                 : ""));
+                    } else if (!agentloop::valid_retriever(argument)) {
+                        reporter.status().print_line(
+                            style.tag(ansi::Role::Error) + " " +
+                            agentloop::retriever_values_message("/retriever", argument));
+                    } else {
+                        session.retriever = argument == "auto" ? std::string{} : argument;
+                        // Persisted now, so a resume continues with this.
+                        logger::save(session);
+                        reporter.status().print_line(
+                            style.tag(ansi::Role::Rag) + " retriever set to " +
+                            (session.retriever.empty() ? "auto" : session.retriever));
+                    }
+                } else if (verb == "rerank") {
+                    if (argument.empty()) {
+                        reporter.status().print_line(
+                            style.tag(ansi::Role::Rag) + " rerank: " +
+                            (session.rerank.empty() ? "following each collection's rerank: pin"
+                                                    : session.rerank) +
+                            " -- /rerank <backend>|off|auto");
+                    } else if (argument == "auto") {
+                        session.rerank.clear();
+                        logger::save(session);
+                        reporter.status().print_line(style.tag(ansi::Role::Rag) +
+                                                     " rerank follows the collection's pin");
+                    } else if (argument != agentloop::kRerankOff &&
+                               config.find_backend(argument) == nullptr) {
+                        reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                     " no backend named '" + argument + "'");
+                    } else {
+                        session.rerank = argument;
+                        logger::save(session);
+                        reporter.status().print_line(style.tag(ansi::Role::Rag) +
+                                                     " rerank set to " + argument);
                     }
                 } else if (verb == "title") {
                     session.custom_name = argument;

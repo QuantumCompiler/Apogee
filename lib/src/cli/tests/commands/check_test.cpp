@@ -418,3 +418,57 @@ TEST_CASE("warnings alone do not fail the run", "[commands][check]") {
     report.rows.push_back({Status::Fail, "Config", "default_backend", "dangling", ""});
     CHECK_FALSE(report.passed());
 }
+
+// --- collections: a typo never silently means auto ------------------------------------
+
+namespace {
+
+/// Writes `yaml` as the install's config and loads it into the inputs.
+CheckInputs inputs_with_config(const Install& install, std::string_view yaml) {
+    CheckInputs inputs = inputs_for(install);
+    std::filesystem::create_directories(inputs.config_path.parent_path());
+    std::ofstream out(inputs.config_path, std::ios::binary | std::ios::trunc);
+    out << yaml;
+    out.close();
+    load_into(inputs);
+    return inputs;
+}
+
+}  // namespace
+
+TEST_CASE("check rejects a retriever typo on a collection", "[commands][check][embeddings]") {
+    const Install install;
+    const CheckInputs inputs = inputs_with_config(
+        install,
+        "backends:\n  mock:\n    type: mock\nembeddings:\n  notes:\n    retriever: hybird\n");
+    const CheckReport report = run_checks(inputs);
+    const apogee::commands::CheckRow* row = row_with(report, "collection: notes");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail.find("hybird") != std::string::npos);
+    CHECK(row->detail.find("lexical, vector, hybrid, auto") != std::string::npos);
+}
+
+TEST_CASE("check rejects a rerank or backend pin naming a backend that is not configured",
+          "[commands][check][embeddings]") {
+    const Install install;
+    const CheckReport rerank = run_checks(inputs_with_config(
+        install, "backends:\n  mock:\n    type: mock\nembeddings:\n  notes:\n    rerank: ghost\n"));
+    REQUIRE(row_with(rerank, "collection: notes") != nullptr);
+    CHECK(row_with(rerank, "collection: notes")->status == Status::Fail);
+    CHECK(row_with(rerank, "collection: notes")->detail.find("ghost") != std::string::npos);
+
+    const CheckReport backend = run_checks(inputs_with_config(
+        install,
+        "backends:\n  mock:\n    type: mock\nembeddings:\n  notes:\n    backend: ghost\n"));
+    CHECK(row_with(backend, "collection: notes")->status == Status::Fail);
+
+    // `off` is a setting, and a real backend is fine: both pass.
+    const CheckReport ok = run_checks(inputs_with_config(
+        install,
+        "backends:\n  mock:\n    type: mock\nembeddings:\n  notes:\n    retriever: vector\n    "
+        "rerank: off\n    backend: mock\n"));
+    REQUIRE(row_with(ok, "collection: notes") != nullptr);
+    CHECK(row_with(ok, "collection: notes")->status == Status::Ok);
+    CHECK(row_with(ok, "collection: notes")->detail == "vector");
+}

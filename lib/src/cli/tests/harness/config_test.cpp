@@ -336,3 +336,21 @@ TEST_CASE("embedding_model is a backend field with no default in the loader",
     // vendor without the loader knowing any vendor.
     CHECK(config.find_backend("plain")->embedding_model.empty());
 }
+
+TEST_CASE("a collection's backend, retriever and rerank pins parse as written",
+          "[config][embeddings]") {
+    const auto config = apogee::harness::parse_config(
+        "embeddings:\n  adrs:\n    backend: embedder\n    retriever: vector\n    rerank: haiku\n",
+        "<test>");
+    const apogee::harness::EmbeddingConfig* adrs = config.find_embedding("adrs");
+    REQUIRE(adrs != nullptr);
+    CHECK(adrs->backend == "embedder");
+    CHECK(adrs->retriever == "vector");
+    CHECK(adrs->rerank == "haiku");
+    // The LOADER does not validate the retriever spelling -- that is `check`'s
+    // job, with the one shared validator -- so a typo loads and is reported,
+    // rather than refusing to load a config over one field.
+    CHECK(apogee::harness::parse_config("embeddings:\n  a:\n    retriever: hybird\n", "<test>")
+              .find_embedding("a")
+              ->retriever == "hybird");
+}

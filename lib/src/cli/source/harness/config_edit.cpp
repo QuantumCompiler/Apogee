@@ -264,6 +264,15 @@ Lines format_embedding_entry(std::string_view name, const EmbeddingConfig& colle
     if (!collection.description.empty()) {
         field("description", yaml_scalar(collection.description));
     }
+    if (!collection.backend.empty()) {
+        field("backend", yaml_scalar(collection.backend));
+    }
+    if (!collection.retriever.empty()) {
+        field("retriever", yaml_scalar(collection.retriever));
+    }
+    if (!collection.rerank.empty()) {
+        field("rerank", yaml_scalar(collection.rerank));
+    }
     return out;
 }
 

@@ -10,10 +10,15 @@
 #include <sstream>
 #include <system_error>
 
+#include "agentloop/embed_func.h"
+#include "agentloop/rerank.h"
+#include "agentloop/retriever.h"
+#include "backends/factory.h"
 #include "embedstore/ingest.h"
 #include "embedstore/store.h"
 #include "harness/config.h"
 #include "harness/config_edit.h"
+#include "harness/harness.h"
 #include "harness/layout.h"
 #include "harness/paths.h"
 
@@ -59,6 +64,39 @@ void require_plain_name(std::string_view name) {
     }
     return out;
 }
+
+/// The facts the resolver reads from a store.
+[[nodiscard]] agentloop::StoreFacts facts_for(const embedstore::Store& store) {
+    agentloop::StoreFacts facts;
+    facts.exists = true;
+    const embedstore::Store::Stats stats = store.stats();
+    facts.chunk_count = stats.chunk_count;
+    facts.dimension = stats.dimension;
+    facts.lexical_only = stats.lexical_only;
+    facts.vector_dims = stats.vector_dims;
+    facts.recorded_model = store.embedding_model().model;
+    return facts;
+}
+
+[[nodiscard]] agentloop::EmbedderFacts facts_for(const std::optional<agentloop::Embedder>& e) {
+    agentloop::EmbedderFacts facts;
+    if (e.has_value()) {
+        facts.available = true;
+        facts.model = e->model;
+        facts.metered = e->metered;
+    }
+    return facts;
+}
+
+/// Builds every configured provider so the embedding capability can be asked
+/// of the real objects. Only done when a decision might need an embedder.
+struct Providers {
+    harness::Harness harness;
+
+    explicit Providers(const harness::Config& config) : harness{config} {
+        (void)backends::build_providers(harness, {});
+    }
+};
 
 }  // namespace
 
@@ -107,9 +145,18 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::Option* overlap_option =
         ingest->add_option("--chunk-overlap", *in_overlap,
                            "Codepoints of overlap (default: the collection's, else 64)");
+    auto in_retriever = std::make_shared<std::string>();
+    ingest
+        ->add_option("--retriever", *in_retriever,
+                     "lexical (text index only), vector (also embed every chunk), or auto")
+        ->check([](const std::string& value) {
+            return agentloop::valid_retriever(value)
+                       ? std::string{}
+                       : agentloop::retriever_values_message("", value);
+        });
 
-    ingest->callback([&context, in_collection, in_path, in_size, in_overlap, size_option,
-                      overlap_option]() {
+    ingest->callback([&context, in_collection, in_path, in_size, in_overlap, in_retriever,
+                      size_option, overlap_option]() {
         require_plain_name(*in_collection);
 
         const std::filesystem::path target{*in_path};
@@ -150,14 +197,70 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
             chunking.overlap = static_cast<std::size_t>(*registered->chunk_overlap);
         }
 
+        // Lexical or vector, decided ONCE by the shared resolver -- and under
+        // the user's spend rule: a whole collection is never pushed through a
+        // paid embedder unless asked. The pin is the collection's own.
+        std::optional<Providers> providers;
+        std::optional<agentloop::Embedder> embedder;
+        std::string embedder_reason;
+        const std::string pin = registered != nullptr ? registered->retriever : std::string{};
+        const std::string collection_backend =
+            registered != nullptr ? registered->backend : std::string{};
+        if (config.has_value() && *in_retriever != "lexical" && pin != "lexical") {
+            providers.emplace(*config);
+            embedder = agentloop::resolve_embedder(providers->harness, *config, collection_backend,
+                                                   embedder_reason);
+        }
+        const agentloop::IngestRetrieval decision =
+            agentloop::resolve_ingest_retriever(*in_retriever, pin, facts_for(embedder));
+        if (!decision.error.empty()) {
+            fail(decision.error + (embedder_reason.empty() ? "" : " (" + embedder_reason + ")"));
+        }
+
+        embedstore::EmbedChunks embed;
+        if (decision.retriever == agentloop::Retriever::Vector) {
+            embed = [&embedder](const std::vector<std::string>& texts) {
+                return embedder->embed(texts, {});
+            };
+        }
+
         embedstore::IngestReport report;
         try {
-            report = embedstore::ingest_path(collection_path(*in_collection), target, chunking);
+            report =
+                embedstore::ingest_path(collection_path(*in_collection), target, chunking, embed);
+            embedstore::Store store{collection_path(*in_collection)};
+            const embedstore::Store::Stats stats = store.stats();
+            if (decision.retriever == agentloop::Retriever::Vector && stats.dimension > 0) {
+                // Record the space the vectors live in, so a later query under
+                // another model falls to lexical instead of scoring across
+                // spaces.
+                store.set_embedding_model(embedder->model, stats.dimension);
+            } else if (stats.dimension == 0) {
+                // No vectors left at all: a stale record must not make auto
+                // pick vector search over a store that holds none.
+                store.clear_embedding_model();
+            }
         } catch (const std::exception& e) {
             fail(e.what());
         }
 
-        std::cout << report.files_read << " file(s), " << report.chunks_written << " chunk(s)\n";
+        std::cout << report.files_read << " file(s), " << report.chunks_written << " chunk(s)";
+        if (decision.retriever == agentloop::Retriever::Vector) {
+            std::cout << ", " << report.vectors_written << " vector(s) [" << embedder->model << "]";
+        }
+        std::cout << "\n";
+        if (!decision.note.empty()) {
+            std::cout << decision.note << "\n";
+        }
+        if (!report.unvectorised.empty()) {
+            // Named, like every skip: these chunks are searchable by text but
+            // invisible to vector search, and the resolver will say so until
+            // they are re-ingested.
+            std::cout << "\nstored without vectors " << report.unvectorised.size() << ":\n";
+            for (const std::string& entry : report.unvectorised) {
+                std::cout << "  " << entry << "\n";
+            }
+        }
         if (report.files_skipped > 0) {
             // Every skip is NAMED. A corpus that quietly omitted half a
             // directory answers wrongly and gives no clue why.
@@ -202,12 +305,22 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
     auto q_text = std::make_shared<std::string>();
     auto q_limit = std::make_shared<int>(5);
 
+    auto q_retriever = std::make_shared<std::string>();
+    auto q_rerank = std::make_shared<std::string>();
     CLI::App* query = cmd->add_subcommand("query", "Search a collection");
     query->add_option("collection", *q_collection, "Collection name")->required();
     query->add_option("text", *q_text, "What to search for")->required();
     query->add_option("-n,--limit", *q_limit, "How many results (default 5)");
+    query->add_option("--retriever", *q_retriever, "lexical, vector, hybrid, or auto")
+        ->check([](const std::string& value) {
+            return agentloop::valid_retriever(value)
+                       ? std::string{}
+                       : agentloop::retriever_values_message("", value);
+        });
+    query->add_option("--rerank", *q_rerank,
+                      "Backend that reorders the hits with one generation call, or off");
 
-    query->callback([q_collection, q_text, q_limit]() {
+    query->callback([&context, q_collection, q_text, q_limit, q_retriever, q_rerank]() {
         require_plain_name(*q_collection);
         const std::filesystem::path path = collection_path(*q_collection);
         std::error_code code;
@@ -216,19 +329,94 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
                  "ingest " + *q_collection + " <path>'");
         }
 
+        // The same decision `complete` and `chat` make, from the same facts.
+        std::optional<harness::Config> config;
+        try {
+            config = harness::load_config(harness::resolve_config_path(context.config_path));
+        } catch (const std::exception&) {
+            // No config is the lexical floor's home ground; the resolver sees
+            // no embedder and no pins.
+        }
+        std::string pin;
+        std::string rerank_pin;
+        std::string collection_backend;
+        if (config.has_value()) {
+            if (const harness::EmbeddingConfig* entry = config->find_embedding(*q_collection);
+                entry != nullptr) {
+                pin = entry->retriever;
+                rerank_pin = entry->rerank;
+                collection_backend = entry->backend;
+            }
+        }
+        std::optional<Providers> providers;
+        std::optional<agentloop::Embedder> embedder;
+        std::string embedder_reason;
+        if (config.has_value() && *q_retriever != "lexical" && pin != "lexical") {
+            providers.emplace(*config);
+            embedder = agentloop::resolve_embedder(providers->harness, *config, collection_backend,
+                                                   embedder_reason);
+        }
+
         try {
             const embedstore::Store store{path};
-            const std::vector<embedstore::SearchHit> hits = store.search(*q_text, *q_limit);
+            const agentloop::TurnRetrieval decision = agentloop::resolve_turn_retriever(
+                *q_retriever, pin, facts_for(embedder), facts_for(store));
+            if (!decision.error.empty()) {
+                fail(decision.error);
+            }
+            if (decision.excluded) {
+                std::cout << decision.note << "\n";
+                return;
+            }
+            if (!decision.note.empty()) {
+                std::cout << decision.note << "\n";
+            }
+
+            agentloop::RerankChoice judge;
+            if (config.has_value()) {
+                judge = agentloop::resolve_turn_rerank(*q_rerank, rerank_pin, *config);
+                if (!judge.note.empty()) {
+                    std::cout << judge.note << "\n";
+                }
+                if (!judge.backend.empty() && !providers.has_value()) {
+                    providers.emplace(*config);
+                }
+            }
+            const int fetch = agentloop::rerank_fetch_limit(*q_limit, !judge.backend.empty());
+
+            std::vector<embedstore::SearchHit> hits;
+            if (decision.retriever == agentloop::Retriever::Lexical) {
+                hits = store.search(*q_text, fetch);
+            } else {
+                const std::vector<std::vector<float>> vectors = embedder->embed({*q_text}, {});
+                hits = decision.retriever == agentloop::Retriever::Vector
+                           ? store.search_vector(vectors.front(), fetch)
+                           : store.search_hybrid(vectors.front(), *q_text, fetch);
+            }
+            bool reranked = false;
+            if (!judge.backend.empty()) {
+                const agentloop::RerankOutcome judged = agentloop::rerank(
+                    providers->harness, judge.backend, *q_text, hits, *q_limit, {});
+                hits = judged.hits;
+                reranked = judged.applied;
+                if (!judged.note.empty()) {
+                    std::cout << judged.note << "\n";
+                }
+            } else if (*q_limit > 0 && static_cast<std::size_t>(*q_limit) < hits.size()) {
+                hits.resize(static_cast<std::size_t>(*q_limit));
+            }
+
             if (hits.empty()) {
-                std::cout << "no matches\n";
+                std::cout << "no matches [" << agentloop::to_string(decision.retriever) << "]\n";
                 return;
             }
             for (const embedstore::SearchHit& hit : hits) {
-                // The retriever is printed with every score. Lexical and vector
-                // scales are incomparable, and a bare number invites exactly
-                // the comparison that cannot be made.
-                std::cout << two_places(hit.score) << "  [" << hit.retriever << "]  "
-                          << hit.chunk.source << "#" << hit.chunk.ordinal << "\n";
+                // The retriever is printed with every score. Lexical, vector
+                // and RRF scales are incomparable, and a bare number invites
+                // exactly the comparison that cannot be made.
+                std::cout << two_places(hit.score) << "  [" << hit.retriever
+                          << (reranked ? ", reranked" : "") << "]  " << hit.chunk.source << "#"
+                          << hit.chunk.ordinal << "\n";
                 std::cout << "    " << preview(hit.chunk.text, 100) << "\n";
             }
         } catch (const std::exception& e) {
@@ -273,8 +461,26 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
             std::cout << "collection:  " << *info_collection << "\n";
             std::cout << "path:        " << path.string() << "\n";
             std::cout << "schema:      v" << store.schema_version() << "\n";
-            std::cout << "chunks:      " << store.chunk_count() << "\n";
-            std::cout << "retriever:   lexical (BM25) -- works with no model and no network\n";
+            const embedstore::Store::Stats stats = store.stats();
+            const embedstore::Store::EmbeddingBinding binding = store.embedding_model();
+            std::cout << "chunks:      " << stats.chunk_count << "\n";
+            std::cout
+                << "lexical:     BM25 over every chunk -- works with no model and no network\n";
+            if (stats.dimension == 0) {
+                std::cout << "vectors:     none (ingest with --retriever vector to build them)\n";
+            } else {
+                std::cout << "vectors:     " << (stats.chunk_count - stats.lexical_only) << " of "
+                          << stats.chunk_count << " chunk(s), " << stats.dimension << "-d";
+                if (binding.recorded()) {
+                    std::cout << " [" << binding.model << "]";
+                } else {
+                    std::cout << " [model not recorded -- re-ingest to bind]";
+                }
+                if (stats.vector_dims > 1) {
+                    std::cout << " -- MIXED: " << stats.vector_dims << " widths";
+                }
+                std::cout << "\n";
+            }
 
             const std::string trouble = store.verify_index();
             std::cout << "index:       " << (trouble.empty() ? "ok" : "FAILED -- " + trouble)

@@ -270,3 +270,50 @@ TEST_CASE("a partially written session cannot replace a good one", "[chat][sessi
     CHECK(files == 1);
     CHECK(apogee::logger::load(session.chat_id, {}).session.messages.size() == 3);
 }
+
+TEST_CASE("retriever and rerank settings round-trip and default to empty",
+          "[logger][session][retrieval]") {
+    // The SETTING, never a per-turn resolution: what the user chose is what a
+    // resumed session continues with.
+    apogee::logger::Session session;
+    session.chat_id = "abc";
+    session.backend = "mock";
+    session.retriever = "lexical";
+    session.rerank = "haiku";
+    const std::string text = apogee::logger::serialize(session);
+    const auto json = nlohmann::json::parse(text);
+    CHECK(json.at("retriever") == "lexical");
+    CHECK(json.at("rerank") == "haiku");
+
+    const auto loaded = apogee::logger::deserialize(text, {{"mock", "haiku"}});
+    CHECK(loaded.session.retriever == "lexical");
+    CHECK(loaded.session.rerank == "haiku");
+    CHECK(loaded.warnings.empty());
+
+    // Unset settings are omitted, not written as empty strings, so an older
+    // reader sees nothing new and a newer one reads auto.
+    apogee::logger::Session plain;
+    plain.chat_id = "p";
+    plain.backend = "mock";
+    const std::string plain_text = apogee::logger::serialize(plain);
+    CHECK(plain_text.find("retriever") == std::string::npos);
+    CHECK(apogee::logger::deserialize(plain_text, {{"mock"}}).session.retriever.empty());
+}
+
+TEST_CASE("a rerank judge that has since been deleted is dropped with a warning, never fatal",
+          "[logger][session][retrieval]") {
+    apogee::logger::Session session;
+    session.chat_id = "abc";
+    session.backend = "mock";
+    session.rerank = "vanished";
+    const auto loaded = apogee::logger::deserialize(apogee::logger::serialize(session), {{"mock"}});
+    CHECK(loaded.session.rerank.empty());
+    REQUIRE(loaded.warnings.size() == 1);
+    CHECK(loaded.warnings.front().kind == apogee::logger::WarningKind::RerankBackendMissing);
+    CHECK(loaded.warnings.front().message.find("vanished") != std::string::npos);
+
+    // `off` is a setting, not a backend, and is never checked against the list.
+    session.rerank = "off";
+    CHECK(apogee::logger::deserialize(apogee::logger::serialize(session), {{"mock"}})
+              .warnings.empty());
+}

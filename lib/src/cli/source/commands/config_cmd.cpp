@@ -154,6 +154,15 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
             if (!collection->description.empty()) {
                 out += "description: " + collection->description + "\n";
             }
+            if (!collection->backend.empty()) {
+                out += "backend: " + collection->backend + "\n";
+            }
+            if (!collection->retriever.empty()) {
+                out += "retriever: " + collection->retriever + "\n";
+            }
+            if (!collection->rerank.empty()) {
+                out += "rerank: " + collection->rerank + "\n";
+            }
             if (!out.empty()) {
                 out.pop_back();
             }
@@ -171,6 +180,15 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
         }
         if (field == "description") {
             return render(collection->description);
+        }
+        if (field == "backend") {
+            return render(collection->backend);
+        }
+        if (field == "retriever") {
+            return render(collection->retriever);
+        }
+        if (field == "rerank") {
+            return render(collection->rerank);
         }
         return std::nullopt;
     }

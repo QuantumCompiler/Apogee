@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "agentloop/rag.h"
+#include "harness/cancellation.h"
 #include "harness/config.h"
 #include "harness/harness.h"
 #include "harness/types.h"
@@ -96,6 +97,18 @@ struct RagChoice {
 /// nothing on the command line asked for it.
 [[nodiscard]] std::string describe_retrieval(const RagChoice& choice,
                                              const agentloop::RagResult& result);
+
+/// One turn's retrieval against a named collection, for every surface.
+///
+/// Gathers what the resolver needs -- the collection's pins from the config,
+/// the embedder that would answer (through the capability probe, never a
+/// type), the judge -- and hands them to `agentloop::retrieve_for_turn`, which
+/// decides once and reports honestly. Lives here so `complete` and `chat`
+/// cannot assemble the facts differently.
+[[nodiscard]] agentloop::RagResult retrieve_for_collection(
+    const harness::Harness& harness, const harness::Config& config, std::string_view collection,
+    const std::string& question, int limit, std::string_view retriever_flag,
+    std::string_view rerank_flag, const harness::CancellationToken& cancellation);
 
 /// Reads all of standard input. Used when no prompt argument was given.
 [[nodiscard]] std::string read_stdin();

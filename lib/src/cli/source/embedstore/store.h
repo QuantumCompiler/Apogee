@@ -84,6 +84,13 @@ public:
     /// two document versions, which is worse than either.
     void replace_source(std::string_view source, const std::vector<std::string>& chunks);
 
+    /// Replaces a source with chunks AND their vectors, one per chunk (an
+    /// empty vector stores that chunk lexical-only, `dim = 0`). The vectors'
+    /// width is recorded per row, so a store can report whether it holds one
+    /// vector space or several.
+    void replace_source(std::string_view source, const std::vector<std::string>& chunks,
+                        const std::vector<std::vector<float>>& vectors);
+
     /// Removes every chunk belonging to `source`. Returns how many went.
     [[nodiscard]] std::int64_t delete_source(std::string_view source);
 
@@ -93,6 +100,54 @@ public:
     /// `fts_match_query`. A user typing `AND` or a quote gets results, never a
     /// syntax error.
     [[nodiscard]] std::vector<SearchHit> search(std::string_view query, int limit) const;
+
+    /// Cosine over every vector in the store, best first, labelled `vector`.
+    /// Lexical-only chunks (`dim = 0`) are skipped: they have no position in
+    /// any vector space. Reaching them is `search`'s job, and a turn that
+    /// needs every chunk searchable is resolved to lexical before it gets here.
+    [[nodiscard]] std::vector<SearchHit> search_vector(const std::vector<float>& query_vector,
+                                                       int limit) const;
+
+    /// Both halves, each fetched `kHybridFetchDepth` deep, fused by RRF and cut
+    /// to `limit`, labelled `hybrid`. Requires a query vector: whether the
+    /// vector half is available is the resolver's decision, made before this
+    /// is called, so a hybrid turn without one never reaches the store.
+    [[nodiscard]] std::vector<SearchHit> search_hybrid(const std::vector<float>& query_vector,
+                                                       std::string_view query, int limit) const;
+
+    /// What the store holds, for retriever resolution.
+    struct Stats {
+        std::int64_t chunk_count = 0;
+        /// The vector width, or 0 when the store holds no vectors.
+        std::int64_t dimension = 0;
+        /// Chunks stored without a vector. Any non-zero count means vector
+        /// search would silently skip part of the corpus.
+        std::int64_t lexical_only = 0;
+        /// Distinct non-zero widths. More than one means mixed vector spaces.
+        std::int64_t vector_dims = 0;
+    };
+
+    [[nodiscard]] Stats stats() const;
+
+    /// Which model vectorised this store, recorded at vector ingest.
+    ///
+    /// Kept in `store_meta` beside the schema version. Query-time resolution
+    /// compares it with the model that would embed the question; a mismatch
+    /// falls to lexical rather than scoring across two vector spaces.
+    struct EmbeddingBinding {
+        std::string model;
+        std::int64_t dimension = 0;
+
+        [[nodiscard]] bool recorded() const noexcept {
+            return !model.empty();
+        }
+    };
+
+    void set_embedding_model(std::string_view model, std::int64_t dimension);
+    /// Returns the store to the unrecorded state, so a stale record cannot
+    /// make auto pick vector over a store that no longer holds any.
+    void clear_embedding_model();
+    [[nodiscard]] EmbeddingBinding embedding_model() const;
 
     /// Total chunks held.
     [[nodiscard]] std::int64_t chunk_count() const;
@@ -117,6 +172,8 @@ private:
 };
 
 /// The current schema version. Bumped when a migration is added.
-inline constexpr int kSchemaVersion = 1;
+/// v2 added `chunks.embedding` and `chunks.dim`, and the `embed_model` /
+/// `embed_dim` keys in `store_meta`. A v1 store gains the columns on open.
+inline constexpr int kSchemaVersion = 2;
 
 }  // namespace apogee::embedstore

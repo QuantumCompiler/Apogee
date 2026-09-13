@@ -160,6 +160,15 @@ public:
     /// the session.
     [[nodiscard]] std::size_t embedding_dimensions() const noexcept override;
 
+    /// The configured name, else the GGUF's file name: what a collection
+    /// records as the space its vectors live in.
+    [[nodiscard]] std::string embedding_model_name() const override;
+
+    /// Local weights cost nothing per call.
+    [[nodiscard]] bool embedding_is_metered() const noexcept override {
+        return false;
+    }
+
     // --- InTextToolCalling --------------------------------------------------
 
     /// True when the resolved profile says this family emits native calls.

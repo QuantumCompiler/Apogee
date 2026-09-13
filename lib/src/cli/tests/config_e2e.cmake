@@ -34,6 +34,23 @@ function(apogee_run expected_code)
     set(APOGEE_ERR "${err}" PARENT_SCOPE)
 endfunction()
 
+# Runs the binary and fails the test unless it exited NON-zero. For refusals
+# whose exact code belongs to CLI11 (a rejected option value exits with its
+# validation code, not Apogee's 1) -- what matters is that it refused.
+function(apogee_run_fails)
+    execute_process(
+        COMMAND "${APOGEE_BIN}" ${ARGN}
+        RESULT_VARIABLE code
+        OUTPUT_VARIABLE out
+        ERROR_VARIABLE err
+    )
+    if(code EQUAL 0)
+        message(FATAL_ERROR "apogee ${ARGN}\n  expected a refusal, got exit 0\n  stdout: ${out}")
+    endif()
+    set(APOGEE_OUT "${out}" PARENT_SCOPE)
+    set(APOGEE_ERR "${err}" PARENT_SCOPE)
+endfunction()
+
 function(expect_equal actual expected what)
     string(STRIP "${actual}" actual_stripped)
     if(NOT actual_stripped STREQUAL expected)
@@ -248,6 +265,114 @@ foreach(session_file ${SESSION_FILES})
         message(FATAL_ERROR "the session did not record the question, so the check is vacuous")
     endif()
 endforeach()
+
+# --- vector and hybrid retrieval through the real binary ------------------
+# A mock embedder from config (a mock entry with an embedding_model) stands in
+# for a real one: free, deterministic, and -- the point -- a second one with a
+# different embedding_model is a different vector space.
+apogee_run(0 config add-backend embedder --type mock --embedding-model mock-embed-a)
+apogee_run(0 config set-default-embedding embedder)
+
+# A fresh collection, vectorised. The mock embedder is not metered, so auto
+# builds vectors without being asked.
+apogee_run(0 embed ingest vecs "${CORPUS_DIR}")
+if(NOT APOGEE_OUT MATCHES "vector\\(s\\) \\[mock-embed-a\\]")
+    message(FATAL_ERROR "a free embedder did not vectorise on auto: ${APOGEE_OUT}")
+endif()
+apogee_run(0 embed info vecs)
+if(NOT APOGEE_OUT MATCHES "\\[mock-embed-a\\]")
+    message(FATAL_ERROR "the binding was not recorded: ${APOGEE_OUT}")
+endif()
+
+# Every surface reports the retriever that actually ran.
+apogee_run(0 embed query vecs "zarquon widgets")
+if(NOT APOGEE_OUT MATCHES "\\[vector\\]")
+    message(FATAL_ERROR "auto did not resolve to vector on a matching store: ${APOGEE_OUT}")
+endif()
+apogee_run(0 embed query vecs "zarquon widgets" --retriever hybrid)
+if(NOT APOGEE_OUT MATCHES "\\[hybrid\\]")
+    message(FATAL_ERROR "an explicit hybrid did not run hybrid: ${APOGEE_OUT}")
+endif()
+apogee_run(0 embed query vecs "zarquon widgets" --retriever lexical)
+if(NOT APOGEE_OUT MATCHES "\\[lexical\\]")
+    message(FATAL_ERROR "an explicit lexical did not run lexical: ${APOGEE_OUT}")
+endif()
+
+# A typo is refused at the flag, by the same validator check uses -- and the
+# message names the value once, not twice.
+apogee_run_fails(embed query vecs "zarquon" --retriever hybird)
+if(NOT APOGEE_ERR MATCHES "unknown value 'hybird'")
+    message(FATAL_ERROR "the refusal did not name the value: ${APOGEE_ERR}")
+endif()
+if(APOGEE_ERR MATCHES "--retriever: --retriever")
+    message(FATAL_ERROR "the refusal doubled its label: ${APOGEE_ERR}")
+endif()
+
+# The collection was built under mock-embed-a; switch the default embedder to
+# another model and auto must fall to lexical with the re-ingest hint -- never
+# a cross-space query. An explicit vector ask is a hard error.
+apogee_run(0 config add-backend embedder2 --type mock --embedding-model mock-embed-b)
+apogee_run(0 config set-default-embedding embedder2)
+apogee_run(0 embed query vecs "zarquon widgets")
+if(NOT APOGEE_OUT MATCHES "\\[lexical\\]")
+    message(FATAL_ERROR "a model mismatch did not fall to lexical: ${APOGEE_OUT}")
+endif()
+if(NOT APOGEE_OUT MATCHES "re-run")
+    message(FATAL_ERROR "the lexical fallback carried no re-ingest hint: ${APOGEE_OUT}")
+endif()
+apogee_run(1 embed query vecs "zarquon widgets" --retriever vector)
+if(NOT APOGEE_ERR MATCHES "--retriever lexical")
+    message(FATAL_ERROR "the hard error did not name lexical as the way out: ${APOGEE_ERR}")
+endif()
+apogee_run(0 config set-default-embedding embedder)
+
+# The same decision on a conversational surface, and the status line names it.
+apogee_run(0 complete -m mock -v --rag vecs --retriever vector "what does zarquon require?")
+set(TURN_OUTPUT "${APOGEE_OUT}${APOGEE_ERR}")
+if(NOT TURN_OUTPUT MATCHES "\\[vector\\]")
+    message(FATAL_ERROR "complete did not report the vector retriever: ${TURN_OUTPUT}")
+endif()
+apogee_run(0 complete -m mock -v --rag vecs --retriever hybrid "what does zarquon require?")
+set(TURN_OUTPUT "${APOGEE_OUT}${APOGEE_ERR}")
+if(NOT TURN_OUTPUT MATCHES "\\[hybrid\\]")
+    message(FATAL_ERROR "complete did not report the hybrid retriever: ${TURN_OUTPUT}")
+endif()
+
+# A collection pin that `check` must refuse: a typo never silently means auto.
+# Edited INTO the entry the ingest registered -- a second `embeddings:` key
+# would be invalid YAML, and check would be failing for the wrong reason.
+file(READ "${CONFIG_FILE}" WITH_VECS)
+string(REPLACE "  vecs:\n" "  vecs:\n    retriever: hybird\n" WITH_TYPO "${WITH_VECS}")
+if(WITH_TYPO STREQUAL WITH_VECS)
+    message(FATAL_ERROR "the registered vecs entry was not found to edit")
+endif()
+file(WRITE "${CONFIG_FILE}" "${WITH_TYPO}")
+apogee_run(1 check)
+if(NOT "${APOGEE_OUT}${APOGEE_ERR}" MATCHES "hybird")
+    message(FATAL_ERROR "check did not name the bad retriever value")
+endif()
+
+# Retrieval settings persist on the session and restore on resume.
+file(WRITE "${APOGEE_WORK_DIR}/q.txt" "what does zarquon require?\n")
+execute_process(
+    COMMAND "${APOGEE_BIN}" chat -m mock --rag vecs --retriever lexical --rerank off
+    INPUT_FILE "${APOGEE_WORK_DIR}/q.txt"
+    RESULT_VARIABLE chat_code OUTPUT_VARIABLE chat_out ERROR_VARIABLE chat_err
+)
+if(NOT chat_code EQUAL 0)
+    message(FATAL_ERROR "chat with --retriever failed: ${chat_out}\n${chat_err}")
+endif()
+file(GLOB SESSION_FILES "${APOGEE_WORK_DIR}/sessions/*.json")
+set(found_setting FALSE)
+foreach(session_file ${SESSION_FILES})
+    file(READ "${session_file}" SESSION_TEXT)
+    if(SESSION_TEXT MATCHES "\"retriever\": *\"lexical\"" AND SESSION_TEXT MATCHES "\"rerank\": *\"off\"")
+        set(found_setting TRUE)
+    endif()
+endforeach()
+if(NOT found_setting)
+    message(FATAL_ERROR "the retriever/rerank settings were not persisted on the session")
+endif()
 
 # --- errors ----------------------------------------------------------------
 apogee_run(1 config get no.such.key)

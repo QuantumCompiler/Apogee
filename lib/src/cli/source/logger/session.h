@@ -43,6 +43,8 @@ enum class WarningKind : std::uint8_t {
     SchemaLegacy,
     /// The saved backend is no longer in the config.
     BackendMissing,
+    /// The saved rerank judge is no longer in the config; resumed without it.
+    RerankBackendMissing,
     /// The file parsed but a field was the wrong shape; a default was used.
     FieldDropped,
 };
@@ -96,6 +98,15 @@ struct Session {
 
     /// How many times this session has been compacted.
     int compactions = 0;
+
+    /// The session's `--retriever` SETTING (`lexical` / `vector` / `hybrid`;
+    /// empty means auto) and its `--rerank` setting (a backend, `off`, or
+    /// empty for the collections' pins). What the user chose, never what auto
+    /// resolved to on some turn -- persisting a resolution would freeze an
+    /// adaptive choice. Updated when `/retriever` or `/rerank` changes it, so
+    /// a resumed session continues as it was last set.
+    std::string retriever;
+    std::string rerank;
 
     /// The name shown in listings: `custom_name` when set, else `title`, else
     /// the id.

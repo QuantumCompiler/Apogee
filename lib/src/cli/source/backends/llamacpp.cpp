@@ -234,6 +234,13 @@ std::vector<std::vector<float>> LlamaCppProvider::embed(
     }
 }
 
+std::string LlamaCppProvider::embedding_model_name() const {
+    if (!options_.model.empty()) {
+        return options_.model;
+    }
+    return std::filesystem::path{options_.model_path}.filename().string();
+}
+
 std::size_t LlamaCppProvider::embedding_dimensions() const noexcept {
     return model_ == nullptr ? 0 : model_->embedding_dimensions();
 }

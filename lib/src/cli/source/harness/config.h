@@ -175,6 +175,21 @@ struct EmbeddingConfig {
     std::optional<std::int64_t> chunk_overlap;
     /// Free text, for a listing. Never interpreted.
     std::string description;
+
+    /// Which backend embeds this collection. Empty means the embedding role
+    /// (`models.default_embedding`, then `models.default`).
+    std::string backend;
+
+    /// How this collection is searched when no flag says: `lexical`, `vector`,
+    /// `hybrid`, or empty/`auto`. A pin, not a preference: a `vector` pin is
+    /// never searched lexically, and is excluded with a note when its vectors
+    /// do not qualify. Validated by `apogee check`, so a typo cannot silently
+    /// mean auto.
+    std::string retriever;
+
+    /// The backend that reranks this collection's hits with one generation
+    /// call, or `off`. Empty means no reranking.
+    std::string rerank;
 };
 
 /// Optional search roots that pre-populate path prompts. All optional; a

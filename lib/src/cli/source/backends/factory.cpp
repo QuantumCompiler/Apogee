@@ -55,6 +55,16 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
             }
         }
         case harness::BackendType::Mock: {
+            if (!config.embedding_model.empty()) {
+                // A mock that embeds, so the vector path can be driven end to
+                // end with nothing installed -- the mock's stated purpose. The
+                // embedding_model becomes the space its vectors are recorded
+                // in, so two mock embedders with different names mismatch
+                // exactly as two real models would.
+                auto provider = std::make_shared<MockEmbeddingProvider>(name);
+                provider->set_model_name(config.embedding_model);
+                return provider;
+            }
             MockProvider::Options options;
             options.backend_name = name;
             if (!config.model.empty()) {

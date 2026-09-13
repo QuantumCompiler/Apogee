@@ -14,6 +14,7 @@
 #include "agentloop/loop.h"
 #include "agentloop/rag.h"
 #include "agentloop/reporter.h"
+#include "agentloop/retriever.h"
 #include "ansi/ansi.h"
 #include "backends/factory.h"
 #include "backends/http_client.h"
@@ -50,6 +51,10 @@ struct CompleteFlags {
     /// The collection to retrieve from. Empty means no retrieval.
     std::string rag;
     int rag_limit = 4;
+    /// `lexical` / `vector` / `hybrid` / `auto`; empty defers to the pin.
+    std::string retriever;
+    /// A backend to rerank with, `off`, or empty for the collection's pin.
+    std::string rerank;
     bool no_color = false;
     OutputFormat output_format = OutputFormat::Text;
 
@@ -268,10 +273,16 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     const RagChoice rag_choice =
         choose_rag_collection(flags.rag_option->count() > 0, flags.rag, config.auto_rag);
     if (rag_choice.active()) {
-        const agentloop::RagResult rag = agentloop::build_rag_prefix(
-            collection_path(rag_choice.collection), prompt, flags.rag_limit);
-        // A missing collection is reported, not fatal: answering without
-        // retrieved context beats refusing to answer.
+        const agentloop::RagResult rag =
+            retrieve_for_collection(harness, config, rag_choice.collection, prompt, flags.rag_limit,
+                                    flags.retriever, flags.rerank, {});
+        // Explicitly asked for and impossible -- an `--retriever vector` with
+        // no vectors -- is the user's request failing, not a fallback.
+        if (!rag.error.empty() && !flags.retriever.empty()) {
+            fail_user(rag.error);
+        }
+        // Otherwise a missing collection is reported, not fatal: answering
+        // without retrieved context beats refusing to answer.
         const ansi::Role role = rag.error.empty() ? ansi::Role::Apogee : ansi::Role::Warning;
         if (rag.error.empty() && rag.chunks > 0) {
             loop_options.transient_prefix = rag.prefix;
@@ -340,6 +351,15 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                         "Retrieve context from this collection (see 'apogee embed'); "
                         "\"\" switches off the config's auto_rag for this run");
     cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
+    cmd->add_option("--retriever", flags->retriever,
+                    "How to search the collection: lexical, vector, hybrid, or auto")
+        ->check([](const std::string& value) {
+            return agentloop::valid_retriever(value)
+                       ? std::string{}
+                       : agentloop::retriever_values_message("", value);
+        });
+    cmd->add_option("--rerank", flags->rerank,
+                    "Backend that reorders retrieved chunks with one generation call, or off");
     cmd->add_option("--image", flags->images, "Image file to attach (repeatable)")
         ->allow_extra_args(false);
     flags->temperature_option =

@@ -2,9 +2,15 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "agentloop/embed_func.h"
+#include "agentloop/retriever.h"
+#include "harness/cancellation.h"
+#include "harness/config.h"
+#include "harness/harness.h"
 #include "harness/types.h"
 
 /// Retrieval-augmented generation: finding relevant chunks and splicing them
@@ -45,7 +51,45 @@ struct RagResult {
     /// Set when retrieval could not run at all — a missing collection, say.
     /// A reason to tell the user, not a reason to fail the turn.
     std::string error;
+
+    /// Whether a judge's ranking was actually applied. False on every rerank
+    /// degradation, so the claim and the ordering come from one place.
+    bool reranked = false;
+
+    /// Things worth saying once: why auto fell back, why hybrid ran lexical,
+    /// why a collection was excluded, why the judge was not used.
+    std::vector<std::string> notes;
 };
+
+/// Everything one turn's retrieval needs, gathered by the surface.
+struct RagTurn {
+    std::filesystem::path store_path;
+    std::string question;
+    int limit = 4;
+
+    /// Raw spellings, already validated with `valid_retriever`.
+    std::string retriever_flag;
+    std::string retriever_pin;
+    std::string rerank_flag;
+    std::string rerank_pin;
+
+    /// The embedder that would answer, or nullopt when none resolves.
+    std::optional<Embedder> embedder;
+    /// Why it did not resolve, for the note.
+    std::string embedder_reason;
+
+    /// For the judge. May be null, in which case reranking is off.
+    const harness::Harness* harness = nullptr;
+    const harness::Config* config = nullptr;
+    harness::CancellationToken cancellation;
+};
+
+/// The full retrieval matrix for one turn: resolve the retriever ONCE, run it,
+/// optionally rerank, and package the transient prefix. Never throws for an
+/// ordinary problem; `error` is set when the user asked for something that
+/// cannot run (an explicit vector search with no vectors), which the surface
+/// must fail rather than substitute.
+[[nodiscard]] RagResult retrieve_for_turn(const RagTurn& turn);
 
 /// Retrieves for `question` from the collection at `store_path`.
 ///

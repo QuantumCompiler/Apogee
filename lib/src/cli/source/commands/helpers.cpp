@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "commands/embed.h"
 #include "harness/harness.h"
 #include "platform/platform.h"
 
@@ -61,6 +62,30 @@ std::string resolve_system_prompt(const std::string& flag_value, const harness::
     return entry == nullptr ? std::string{} : entry->system_prompt;
 }
 
+agentloop::RagResult retrieve_for_collection(
+    const harness::Harness& harness, const harness::Config& config, std::string_view collection,
+    const std::string& question, int limit, std::string_view retriever_flag,
+    std::string_view rerank_flag, const harness::CancellationToken& cancellation) {
+    agentloop::RagTurn turn;
+    turn.store_path = collection_path(collection);
+    turn.question = question;
+    turn.limit = limit;
+    turn.retriever_flag = std::string{retriever_flag};
+    turn.rerank_flag = std::string{rerank_flag};
+    std::string collection_backend;
+    if (const harness::EmbeddingConfig* pin = config.find_embedding(collection); pin != nullptr) {
+        turn.retriever_pin = pin->retriever;
+        turn.rerank_pin = pin->rerank;
+        collection_backend = pin->backend;
+    }
+    turn.embedder =
+        agentloop::resolve_embedder(harness, config, collection_backend, turn.embedder_reason);
+    turn.harness = &harness;
+    turn.config = &config;
+    turn.cancellation = cancellation;
+    return agentloop::retrieve_for_turn(turn);
+}
+
 RagChoice choose_rag_collection(bool flag_given, std::string_view flag_value,
                                 std::string_view auto_rag) {
     RagChoice choice;
@@ -79,16 +104,27 @@ RagChoice choose_rag_collection(bool flag_given, std::string_view flag_value,
 
 std::string describe_retrieval(const RagChoice& choice, const agentloop::RagResult& result) {
     const std::string origin = choice.source == RagSource::Config ? " (auto_rag)" : "";
+    std::string notes;
+    for (const std::string& note : result.notes) {
+        notes += " -- " + note;
+    }
     if (!result.error.empty()) {
-        return "retrieval unavailable -- " + result.error + origin;
+        return "retrieval unavailable -- " + result.error + origin + notes;
     }
     if (result.chunks == 0) {
-        return "no matching context in '" + choice.collection + "'" + origin;
+        return "no matching context in '" + choice.collection + "' [" + result.retriever + "]" +
+               origin + notes;
     }
     // Chunks, top score, and the retriever that produced it -- the last because
-    // lexical and vector scales are incomparable.
-    return std::to_string(result.chunks) + " chunk(s) from '" + choice.collection + "', top " +
-           std::to_string(result.top_score).substr(0, 5) + " [" + result.retriever + "]" + origin;
+    // lexical, vector and RRF scales are incomparable -- and whether a judge's
+    // ranking was actually applied, from the same place as the ranking.
+    std::string line = std::to_string(result.chunks) + " chunk(s) from '" + choice.collection +
+                       "', top " + std::to_string(result.top_score).substr(0, 5) + " [" +
+                       result.retriever + (result.reranked ? ", reranked" : "") + "]" + origin;
+    for (const std::string& note : result.notes) {
+        line += " -- " + note;
+    }
+    return line;
 }
 
 std::string read_stdin() {

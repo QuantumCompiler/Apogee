@@ -1,6 +1,7 @@
 #include "embedstore/ingest.h"
 
 #include <algorithm>
+#include <exception>
 #include <fstream>
 #include <system_error>
 
@@ -103,7 +104,8 @@ bool read_as_text(const std::filesystem::path& path, std::string& text, std::str
 }
 
 IngestReport ingest_path(const std::filesystem::path& store_path,
-                         const std::filesystem::path& target, const ChunkOptions& options) {
+                         const std::filesystem::path& target, const ChunkOptions& options,
+                         const EmbedChunks& embed) {
     IngestReport report;
     Store store{store_path};
 
@@ -142,7 +144,32 @@ IngestReport ingest_path(const std::filesystem::path& store_path,
         const std::string source = code || relative.empty() ? file.string() : relative.string();
 
         const std::vector<std::string> chunks = chunk_text(text, options);
-        store.replace_source(source, chunks);
+        if (embed) {
+            // Vectors for this source, or -- if the embedder fails -- the
+            // chunks stored lexical-only and the failure NAMED, so the store
+            // reports partial coverage rather than hiding a hole.
+            std::vector<std::vector<float>> vectors;
+            std::string trouble;
+            try {
+                vectors = embed(chunks);
+                if (vectors.size() != chunks.size()) {
+                    trouble = "embedder returned " + std::to_string(vectors.size()) +
+                              " vector(s) for " + std::to_string(chunks.size()) + " chunk(s)";
+                    vectors.clear();
+                }
+            } catch (const std::exception& e) {
+                trouble = e.what();
+                vectors.clear();
+            }
+            if (!trouble.empty()) {
+                report.unvectorised.push_back(source + ": " + trouble);
+            } else {
+                report.vectors_written += static_cast<std::int64_t>(vectors.size());
+            }
+            store.replace_source(source, chunks, vectors);
+        } else {
+            store.replace_source(source, chunks);
+        }
 
         ++report.files_read;
         report.chunks_written += static_cast<std::int64_t>(chunks.size());

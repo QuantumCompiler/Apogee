@@ -344,6 +344,9 @@ Config parse_config(std::string_view content, std::string_view origin) {
                     integer(node["chunk_overlap"], origin, where + ".chunk_overlap");
                 collection.description =
                     scalar(node["description"], origin, where + ".description");
+                collection.backend = scalar(node["backend"], origin, where + ".backend");
+                collection.retriever = scalar(node["retriever"], origin, where + ".retriever");
+                collection.rerank = scalar(node["rerank"], origin, where + ".rerank");
             }
             const auto [it, inserted] = config.embeddings.emplace(name, std::move(collection));
             if (!inserted) {

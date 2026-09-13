@@ -69,6 +69,15 @@ public:
     /// The model `embed` will use.
     [[nodiscard]] std::string_view embedding_model() const noexcept;
 
+    [[nodiscard]] std::string embedding_model_name() const override {
+        return std::string{embedding_model()};
+    }
+
+    /// Every call is billed. Said explicitly rather than inherited.
+    [[nodiscard]] bool embedding_is_metered() const noexcept override {
+        return true;
+    }
+
 private:
     [[nodiscard]] HttpRequest build_http_request(const nlohmann::json& body) const;
     [[nodiscard]] HttpRequest build_embed_request(const nlohmann::json& body) const;

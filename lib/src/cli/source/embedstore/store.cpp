@@ -2,10 +2,12 @@
 
 #include <sqlite3.h>
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
 #include "embedstore/fts.h"
+#include "embedstore/vector.h"
 
 namespace apogee::embedstore {
 namespace {
@@ -68,6 +70,18 @@ void bind_text(sqlite3_stmt* statement, int index, std::string_view value) {
                        static_cast<std::size_t>(sqlite3_column_bytes(statement, index))};
 }
 
+/// Whether `table` already has `column` -- the guard a schema migration needs,
+/// since SQLite's ADD COLUMN has no IF NOT EXISTS.
+[[nodiscard]] bool has_column(sqlite3* handle, std::string_view table, std::string_view column) {
+    StatementPtr info = prepare(handle, "PRAGMA table_info(" + std::string{table} + ")");
+    while (sqlite3_step(info.get()) == SQLITE_ROW) {
+        if (column_text(info.get(), 1) == column) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// Runs `body` inside a transaction, rolling back if it throws.
 template <typename Body>
 void in_transaction(sqlite3* handle, Body&& body) {
@@ -127,6 +141,17 @@ Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()
              "  text    TEXT NOT NULL)");
         exec(handle, "CREATE INDEX IF NOT EXISTS chunks_by_source ON chunks(source, ordinal)");
 
+        // v1 -> v2: vectors beside the text. Guarded, because a store made by
+        // this build already has them and ADD COLUMN cannot say IF NOT EXISTS.
+        // Existing rows read as `dim = 0` -- lexical-only -- which is exactly
+        // what they are.
+        if (!has_column(handle, "chunks", "embedding")) {
+            exec(handle, "ALTER TABLE chunks ADD COLUMN embedding BLOB");
+        }
+        if (!has_column(handle, "chunks", "dim")) {
+            exec(handle, "ALTER TABLE chunks ADD COLUMN dim INTEGER NOT NULL DEFAULT 0");
+        }
+
         // An EXTERNAL-CONTENT index: the text lives once, in `chunks`, and FTS5
         // holds only the inverted index over it. Storing it twice would double
         // a corpus on disk and create a second copy to fall out of step.
@@ -171,6 +196,15 @@ Store::Store(Store&&) noexcept = default;
 Store& Store::operator=(Store&&) noexcept = default;
 
 void Store::replace_source(std::string_view source, const std::vector<std::string>& chunks) {
+    replace_source(source, chunks, {});
+}
+
+void Store::replace_source(std::string_view source, const std::vector<std::string>& chunks,
+                           const std::vector<std::vector<float>>& vectors) {
+    if (!vectors.empty() && vectors.size() != chunks.size()) {
+        throw std::runtime_error("replace_source: " + std::to_string(vectors.size()) +
+                                 " vector(s) for " + std::to_string(chunks.size()) + " chunk(s)");
+    }
     sqlite3* handle = impl_->connection.get();
 
     // One transaction for the delete AND the insert. Replacing a source in two
@@ -183,13 +217,24 @@ void Store::replace_source(std::string_view source, const std::vector<std::strin
             fail(handle, "could not clear the previous chunks");
         }
 
-        StatementPtr insert =
-            prepare(handle, "INSERT INTO chunks(source, ordinal, text) VALUES(?, ?, ?)");
+        StatementPtr insert = prepare(
+            handle,
+            "INSERT INTO chunks(source, ordinal, text, embedding, dim) VALUES(?, ?, ?, ?, ?)");
         for (std::size_t index = 0; index < chunks.size(); ++index) {
             sqlite3_reset(insert.get());
             bind_text(insert.get(), 1, source);
             sqlite3_bind_int64(insert.get(), 2, static_cast<sqlite3_int64>(index));
             bind_text(insert.get(), 3, chunks[index]);
+            const std::string blob = vectors.empty() ? std::string{} : to_blob(vectors[index]);
+            if (blob.empty()) {
+                sqlite3_bind_null(insert.get(), 4);
+                sqlite3_bind_int64(insert.get(), 5, 0);
+            } else {
+                sqlite3_bind_blob(insert.get(), 4, blob.data(), static_cast<int>(blob.size()),
+                                  SQLITE_TRANSIENT);
+                sqlite3_bind_int64(insert.get(), 5,
+                                   static_cast<sqlite3_int64>(vectors[index].size()));
+            }
             if (sqlite3_step(insert.get()) != SQLITE_DONE) {
                 fail(handle, "could not store a chunk");
             }
@@ -238,6 +283,118 @@ std::vector<SearchHit> Store::search(std::string_view query, int limit) const {
         hits.push_back(std::move(hit));
     }
     return hits;
+}
+
+std::vector<SearchHit> Store::search_vector(const std::vector<float>& query_vector,
+                                            int limit) const {
+    std::vector<SearchHit> hits;
+    if (query_vector.empty()) {
+        return hits;
+    }
+    sqlite3* handle = impl_->connection.get();
+    // Brute force over every vector: the recorded default, revisited when a
+    // collection outgrows a linear scan. `dim > 0` leaves lexical-only rows
+    // out rather than scoring them at zero and letting them sink the list.
+    StatementPtr select =
+        prepare(handle, "SELECT id, source, ordinal, text, embedding FROM chunks WHERE dim > 0");
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        const void* bytes = sqlite3_column_blob(select.get(), 4);
+        const int size = sqlite3_column_bytes(select.get(), 4);
+        if (bytes == nullptr || size <= 0) {
+            continue;
+        }
+        SearchHit hit;
+        hit.chunk.id = sqlite3_column_int64(select.get(), 0);
+        hit.chunk.source = column_text(select.get(), 1);
+        hit.chunk.ordinal = sqlite3_column_int64(select.get(), 2);
+        hit.chunk.text = column_text(select.get(), 3);
+        hit.score =
+            cosine(query_vector, from_blob(std::string_view{static_cast<const char*>(bytes),
+                                                            static_cast<std::size_t>(size)}));
+        hit.retriever = "vector";
+        hits.push_back(std::move(hit));
+    }
+    std::stable_sort(hits.begin(), hits.end(), [](const SearchHit& lhs, const SearchHit& rhs) {
+        if (lhs.score != rhs.score) {
+            return lhs.score > rhs.score;
+        }
+        return lhs.chunk.id < rhs.chunk.id;
+    });
+    if (limit > 0 && static_cast<std::size_t>(limit) < hits.size()) {
+        hits.resize(static_cast<std::size_t>(limit));
+    }
+    return hits;
+}
+
+std::vector<SearchHit> Store::search_hybrid(const std::vector<float>& query_vector,
+                                            std::string_view query, int limit) const {
+    // Each half widened, then fused by rank alone. See vector.h for why depth
+    // matters and why scores are never added.
+    return fuse_rrf(
+        {search_vector(query_vector, kHybridFetchDepth), search(query, kHybridFetchDepth)}, limit);
+}
+
+Store::Stats Store::stats() const {
+    sqlite3* handle = impl_->connection.get();
+    Stats out;
+    out.chunk_count = chunk_count();
+    // Lexical-only rows are ignored here on purpose, so a mixed store reports
+    // its vector width regardless of insert order; 0 means no vectors at all.
+    StatementPtr dim = prepare(handle, "SELECT dim FROM chunks WHERE dim > 0 LIMIT 1");
+    if (sqlite3_step(dim.get()) == SQLITE_ROW) {
+        out.dimension = sqlite3_column_int64(dim.get(), 0);
+    }
+    StatementPtr lexical = prepare(handle, "SELECT COUNT(*) FROM chunks WHERE dim = 0");
+    if (sqlite3_step(lexical.get()) == SQLITE_ROW) {
+        out.lexical_only = sqlite3_column_int64(lexical.get(), 0);
+    }
+    StatementPtr spaces = prepare(handle, "SELECT COUNT(DISTINCT dim) FROM chunks WHERE dim > 0");
+    if (sqlite3_step(spaces.get()) == SQLITE_ROW) {
+        out.vector_dims = sqlite3_column_int64(spaces.get(), 0);
+    }
+    return out;
+}
+
+void Store::set_embedding_model(std::string_view model, std::int64_t dimension) {
+    sqlite3* handle = impl_->connection.get();
+    in_transaction(handle, [&] {
+        StatementPtr set = prepare(handle,
+                                   "INSERT INTO store_meta(key, value) VALUES(?, ?)"
+                                   " ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+        for (const auto& [key, value] :
+             {std::pair<std::string_view, std::string>{"embed_model", std::string{model}},
+              std::pair<std::string_view, std::string>{"embed_dim", std::to_string(dimension)}}) {
+            sqlite3_reset(set.get());
+            bind_text(set.get(), 1, key);
+            bind_text(set.get(), 2, value);
+            if (sqlite3_step(set.get()) != SQLITE_DONE) {
+                fail(handle, "could not record the embedding model");
+            }
+        }
+    });
+}
+
+void Store::clear_embedding_model() {
+    exec(impl_->connection.get(),
+         "DELETE FROM store_meta WHERE key IN ('embed_model', 'embed_dim')");
+}
+
+Store::EmbeddingBinding Store::embedding_model() const {
+    sqlite3* handle = impl_->connection.get();
+    EmbeddingBinding binding;
+    StatementPtr model = prepare(handle, "SELECT value FROM store_meta WHERE key='embed_model'");
+    if (sqlite3_step(model.get()) == SQLITE_ROW) {
+        binding.model = column_text(model.get(), 0);
+    }
+    StatementPtr dim = prepare(handle, "SELECT value FROM store_meta WHERE key='embed_dim'");
+    if (sqlite3_step(dim.get()) == SQLITE_ROW) {
+        try {
+            binding.dimension = std::stoll(column_text(dim.get(), 0));
+        } catch (const std::exception&) {
+            binding.dimension = 0;  // a malformed record reads as unknown width
+        }
+    }
+    return binding;
 }
 
 std::int64_t Store::chunk_count() const {

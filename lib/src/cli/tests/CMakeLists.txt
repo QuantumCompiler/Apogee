@@ -58,6 +58,9 @@ add_executable(apogee_tests
     backends/chat_template_test.cpp
     embedstore/store_test.cpp
     agentloop/rag_test.cpp
+    agentloop/retrieval_test.cpp
+    agentloop/rerank_test.cpp
+    embedstore/vector_test.cpp
     embedstore/fts_query_test.cpp
     embedstore/chunk_test.cpp
     embedstore/ingest_test.cpp

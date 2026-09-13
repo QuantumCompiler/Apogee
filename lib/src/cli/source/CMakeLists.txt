@@ -198,6 +198,12 @@ add_library(apogee_core STATIC
 
     agentloop/agentloop.h
     agentloop/reporter.h
+    agentloop/embed_func.h
+    agentloop/embed_func.cpp
+    agentloop/retriever.h
+    agentloop/retriever.cpp
+    agentloop/rerank.h
+    agentloop/rerank.cpp
     agentloop/rag.h
     agentloop/rag.cpp
     agentloop/loop.h
@@ -219,6 +225,8 @@ add_library(apogee_core STATIC
     embedstore/chunk.cpp
     embedstore/ingest.h
     embedstore/ingest.cpp
+    embedstore/vector.h
+    embedstore/vector.cpp
     httpserver/httpserver.h
     mcp/mcp.h
 )

@@ -11,6 +11,8 @@
 #include <sstream>
 #include <system_error>
 
+#include "agentloop/rerank.h"
+#include "agentloop/retriever.h"
 #include "ansi/ansi.h"
 #include "commands/helpers.h"
 #include "harness/layout.h"
@@ -203,6 +205,36 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
     role("default_backend", config.models.default_backend);
     role("default_embedding", config.models.default_embedding);
     role("default_extraction", config.models.default_extraction);
+
+    // Collections: a typo in `retriever:` must never silently mean auto, and a
+    // `rerank:` or `backend:` must name something that exists. The validator
+    // is the same one the flag uses, so a value cannot pass here and fail
+    // there.
+    for (const auto& [name, collection] : config.embeddings) {
+        const std::string label = "collection: " + name;
+        if (!agentloop::valid_retriever(collection.retriever)) {
+            add(report, Status::Fail, "Config", label,
+                agentloop::retriever_values_message("retriever", collection.retriever),
+                "set retriever to lexical, vector, hybrid, or auto");
+            continue;
+        }
+        if (!collection.rerank.empty() && collection.rerank != agentloop::kRerankOff &&
+            config.find_backend(collection.rerank) == nullptr) {
+            add(report, Status::Fail, "Config", label,
+                "rerank names a backend that is not configured: '" + collection.rerank + "'",
+                "set rerank to a configured backend, or off");
+            continue;
+        }
+        if (!collection.backend.empty() && config.find_backend(collection.backend) == nullptr) {
+            add(report, Status::Fail, "Config", label,
+                "backend names a backend that is not configured: '" + collection.backend + "'",
+                "set backend to a configured backend, or remove it to use "
+                "models.default_embedding");
+            continue;
+        }
+        add(report, Status::Ok, "Config", label,
+            collection.retriever.empty() ? "auto" : collection.retriever);
+    }
 }
 
 void check_filesystem(CheckReport& report, const CheckInputs& inputs) {

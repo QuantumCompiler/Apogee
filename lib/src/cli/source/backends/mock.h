@@ -122,9 +122,24 @@ public:
 
     [[nodiscard]] std::size_t embedding_dimensions() const noexcept override;
 
+    /// Its own name, so a store built with one mock embedder is distinct from
+    /// one built with another -- which is what a mismatch test needs.
+    [[nodiscard]] std::string embedding_model_name() const override {
+        return model_name_;
+    }
+
+    [[nodiscard]] bool embedding_is_metered() const noexcept override {
+        return false;
+    }
+
+    void set_model_name(std::string name) {
+        model_name_ = std::move(name);
+    }
+
 private:
     std::string backend_name_;
     std::size_t dimensions_;
+    std::string model_name_ = "mock-embed";
 };
 
 }  // namespace apogee::backends

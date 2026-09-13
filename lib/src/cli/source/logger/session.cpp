@@ -58,6 +58,8 @@ std::string_view to_string(WarningKind kind) noexcept {
             return "backend_missing";
         case WarningKind::FieldDropped:
             return "field_dropped";
+        case WarningKind::RerankBackendMissing:
+            return "rerank_backend_missing";
     }
     return "unknown";
 }
@@ -116,6 +118,12 @@ std::string serialize(const Session& session) {
     if (!session.custom_name.empty()) {
         out["custom_name"] = session.custom_name;
     }
+    if (!session.retriever.empty()) {
+        out["retriever"] = session.retriever;
+    }
+    if (!session.rerank.empty()) {
+        out["rerank"] = session.rerank;
+    }
     if (!session.title.empty()) {
         out["title"] = session.title;
     }
@@ -156,6 +164,18 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
     session.custom_name = string_field(parsed, "custom_name", loaded.warnings);
     session.title = string_field(parsed, "title", loaded.warnings);
     session.backend = string_field(parsed, "backend", loaded.warnings);
+    session.retriever = string_field(parsed, "retriever", loaded.warnings);
+    session.rerank = string_field(parsed, "rerank", loaded.warnings);
+    // A judge that has since been deleted: resume without reranking, and say
+    // so. `off` is a setting, not a backend, and is never checked.
+    if (!known.backends.empty() && !session.rerank.empty() && session.rerank != "off" &&
+        std::find(known.backends.begin(), known.backends.end(), session.rerank) ==
+            known.backends.end()) {
+        loaded.warnings.push_back({WarningKind::RerankBackendMissing, session.rerank,
+                                   "rerank backend '" + session.rerank +
+                                       "' is no longer configured -- resuming without reranking"});
+        session.rerank.clear();
+    }
     session.provider_session_id = string_field(parsed, "provider_session_id", loaded.warnings);
     session.started_at = string_field(parsed, "started_at", loaded.warnings);
     session.updated_at = string_field(parsed, "updated_at", loaded.warnings);

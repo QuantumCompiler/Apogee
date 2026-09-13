@@ -192,9 +192,28 @@ backends:
 # says when context was injected this way.
 # auto_rag: notes
 
+# Each collection can also say HOW it is searched. Three retrievers exist:
+#   lexical  BM25 full-text; needs no model and no network (the floor)
+#   vector   cosine over embeddings; needs an embedding backend, and the
+#            collection must have been ingested with that same model
+#   hybrid   both, fused by rank (never by score); explicit only -- auto
+#            never picks it
+# With nothing set, `auto` picks vector when the collection's vectors match
+# the embedding backend that would answer, else lexical -- and never spends
+# money on your behalf to build vectors: ingesting a whole collection through
+# a paid embedder (openai, google) takes `--retriever vector` or a `retriever:
+# vector` pin, while answering a question against one already built is one
+# small call and is allowed. A local embedder costs nothing either way.
+#
+# rerank names a backend that reorders retrieved chunks with one generation
+# call and drops the ones that only share words with the question. Every
+# failure of the judge falls back to the raw order and says so.
+#
 # embeddings:
 #   notes:
 #     chunk_size: 512        # codepoints per chunk; the default for re-ingests
 #     chunk_overlap: 64      # codepoints shared between neighbouring chunks
 #     description: "Meeting notes"
-#     # backend: embedder    # which entry embeds this collection; lexical needs none
+#     # backend: embedder    # which entry embeds this collection (default: models.default_embedding)
+#     # retriever: auto      # lexical | vector | hybrid | auto -- checked by `apogee check`
+#     # rerank: off          # a backend name, or off

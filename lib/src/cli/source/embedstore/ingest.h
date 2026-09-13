@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,11 @@
 namespace apogee::embedstore {
 
 /// What one ingest run did.
+/// Turns a source's chunks into vectors, one per chunk. Empty means a
+/// lexical-only ingest. Throws to report a failure; the walk records it for
+/// that source and stores the chunks lexical-only rather than dropping them.
+using EmbedChunks = std::function<std::vector<std::vector<float>>(const std::vector<std::string>&)>;
+
 struct IngestReport {
     std::int64_t files_read = 0;
     std::int64_t files_skipped = 0;
@@ -22,6 +28,11 @@ struct IngestReport {
     /// answers questions wrongly and gives no clue why — the user believes the
     /// document is in there. Every skip says which file and what reason.
     std::vector<std::string> skips;
+    /// Sources stored without vectors because embedding them failed. Each
+    /// names the file and the reason; the store then holds lexical-only rows,
+    /// which the resolver reports rather than hides.
+    std::vector<std::string> unvectorised;
+    std::int64_t vectors_written = 0;
 };
 
 /// Whether `bytes` look like a binary file rather than text.
@@ -60,6 +71,7 @@ struct IngestReport {
 /// machines produce the same source names.
 [[nodiscard]] IngestReport ingest_path(const std::filesystem::path& store_path,
                                        const std::filesystem::path& target,
-                                       const ChunkOptions& options = {});
+                                       const ChunkOptions& options = {},
+                                       const EmbedChunks& embed = {});
 
 }  // namespace apogee::embedstore

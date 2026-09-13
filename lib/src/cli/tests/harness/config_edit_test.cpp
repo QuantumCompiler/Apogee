@@ -544,3 +544,18 @@ TEST_CASE("embedding_model is written when set and omitted when not", "[config_e
     const std::string without = append_backend(kCommented, "gpt", anthropic_backend(), false);
     CHECK(without.find("embedding_model") == std::string::npos);
 }
+
+TEST_CASE("a collection's pins are written when set and round-trip", "[config_edit][embeddings]") {
+    EmbeddingConfig collection = notes_collection();
+    collection.backend = "embedder";
+    collection.retriever = "vector";
+    collection.rerank = "haiku";
+    const std::string added = append_embedding(kCommented, "notes", collection, false);
+    require_parses(added);
+    CHECK(added.find("    backend: embedder\n") != std::string::npos);
+    CHECK(added.find("    retriever: vector\n") != std::string::npos);
+    CHECK(added.find("    rerank: haiku\n") != std::string::npos);
+    const auto parsed = apogee::harness::parse_config(added, "<t>");
+    CHECK(parsed.find_embedding("notes")->retriever == "vector");
+    CHECK(delete_embedding(added, "notes") == std::string{kCommented} + "\nembeddings:\n");
+}

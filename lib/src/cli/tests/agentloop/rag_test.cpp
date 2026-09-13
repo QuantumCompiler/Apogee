@@ -3,11 +3,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
 
+#include "agentloop/embed_func.h"
 #include "agentloop/loop.h"
+#include "agentloop/retriever.h"
 #include "backends/mock.h"
 #include "commands/helpers.h"
 #include "embedstore/store.h"
@@ -244,4 +247,228 @@ TEST_CASE("context injected by auto_rag reaches the request and never persisted 
     INFO("persisted history:\n" << persisted);
     CHECK(persisted.find(kSecret) == std::string::npos);
     CHECK(persisted.find("what does the protocol require?") != std::string::npos);
+}
+
+// --- the full matrix through one turn --------------------------------------------
+
+namespace {
+
+/// A deterministic embedder over a two-dimensional space: "zarquon" texts point
+/// one way, everything else the other. Enough for vector search to have an
+/// opinion, and for a model-name mismatch to be staged.
+apogee::agentloop::Embedder toy_embedder(std::string model, bool metered = false) {
+    apogee::agentloop::Embedder embedder;
+    embedder.backend = "toy";
+    embedder.model = std::move(model);
+    embedder.dimensions = 2;
+    embedder.metered = metered;
+    embedder.embed = [](const std::vector<std::string>& texts,
+                        const apogee::harness::CancellationToken&) {
+        std::vector<std::vector<float>> out;
+        for (const std::string& text : texts) {
+            const bool zarquon = text.find("zarquon") != std::string::npos;
+            out.push_back(zarquon ? std::vector<float>{1.0F, 0.0F}
+                                  : std::vector<float>{0.0F, 1.0F});
+        }
+        return out;
+    };
+    return embedder;
+}
+
+/// Seeds with vectors from `embedder` and records its model on the store.
+void seed_vectors(const Scratch& scratch, const apogee::agentloop::Embedder& embedder) {
+    Store store{scratch.db()};
+    const std::vector<std::string> chunks{std::string{kSecret}, "an unrelated second chunk"};
+    store.replace_source("notes.md", chunks, embedder.embed(chunks, {}));
+    store.set_embedding_model(embedder.model, 2);
+}
+
+apogee::agentloop::RagTurn turn_for(const Scratch& scratch, std::string question) {
+    apogee::agentloop::RagTurn turn;
+    turn.store_path = scratch.db();
+    turn.question = std::move(question);
+    turn.limit = 4;
+    return turn;
+}
+
+}  // namespace
+
+TEST_CASE("a vector turn retrieves by cosine and reports vector", "[agentloop][rag][vector]") {
+    const Scratch scratch;
+    const auto embedder = toy_embedder("toy-v1");
+    seed_vectors(scratch, embedder);
+
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "tell me about zarquon");
+    turn.embedder = embedder;
+    const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+
+    CHECK(result.error.empty());
+    CHECK(result.retriever == "vector");
+    REQUIRE(result.chunks > 0);
+    CHECK(result.prefix.front().content.plain_text().find(kSecret) != std::string::npos);
+    CHECK_FALSE(result.reranked);
+}
+
+TEST_CASE("a model mismatch falls to lexical with the re-ingest hint, never a cross-space query",
+          "[agentloop][rag][vector]") {
+    // Ingested under toy-v1, queried under toy-v2: the first acceptance
+    // criterion of the item.
+    const Scratch scratch;
+    seed_vectors(scratch, toy_embedder("toy-v1"));
+
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon protocol widgets");
+    turn.embedder = toy_embedder("toy-v2");
+    const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+
+    CHECK(result.error.empty());
+    CHECK(result.retriever == "lexical");
+    REQUIRE_FALSE(result.notes.empty());
+    CHECK(result.notes.front().find("re-run") != std::string::npos);
+    CHECK(result.notes.front().find("toy-v1") != std::string::npos);
+    CHECK(result.chunks > 0);  // the lexical half still answers
+}
+
+TEST_CASE("an explicit vector flag that cannot run is an error, not a substitution",
+          "[agentloop][rag][vector]") {
+    const Scratch scratch;
+    seed(scratch);  // lexical-only
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon");
+    turn.embedder = toy_embedder("toy-v1");
+    turn.retriever_flag = "vector";
+    const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK_FALSE(result.error.empty());
+    CHECK(result.chunks == 0);
+    CHECK(result.prefix.empty());
+}
+
+TEST_CASE("a hybrid turn fuses and reports hybrid; without a vector half it reports lexical",
+          "[agentloop][rag][hybrid]") {
+    const Scratch scratch;
+    const auto embedder = toy_embedder("toy-v1");
+    seed_vectors(scratch, embedder);
+
+    apogee::agentloop::RagTurn both = turn_for(scratch, "zarquon protocol");
+    both.embedder = embedder;
+    both.retriever_flag = "hybrid";
+    const RagResult fused = apogee::agentloop::retrieve_for_turn(both);
+    CHECK(fused.retriever == "hybrid");
+    CHECK(fused.chunks > 0);
+    // RRF scores are small numbers on their own scale; the label says so.
+    CHECK(fused.top_score < 0.1);
+
+    apogee::agentloop::RagTurn degraded = turn_for(scratch, "zarquon protocol");
+    degraded.retriever_flag = "hybrid";  // no embedder at all
+    const RagResult lexical = apogee::agentloop::retrieve_for_turn(degraded);
+    CHECK(lexical.error.empty());
+    CHECK(lexical.retriever == "lexical");
+    REQUIRE_FALSE(lexical.notes.empty());
+    CHECK(lexical.notes.front().find("hybrid requested") != std::string::npos);
+    CHECK(lexical.chunks > 0);
+}
+
+TEST_CASE("a transient embedding failure degrades the turn to lexical and says so",
+          "[agentloop][rag][vector]") {
+    const Scratch scratch;
+    seed_vectors(scratch, toy_embedder("toy-v1"));
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon protocol");
+    turn.embedder = toy_embedder("toy-v1");
+    turn.embedder->embed =
+        [](const std::vector<std::string>&,
+           const apogee::harness::CancellationToken&) -> std::vector<std::vector<float>> {
+        throw std::runtime_error("endpoint down");
+    };
+    const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK(result.error.empty());
+    CHECK(result.retriever == "lexical");
+    REQUIRE_FALSE(result.notes.empty());
+    CHECK(result.notes.front().find("endpoint down") != std::string::npos);
+    CHECK(result.chunks > 0);
+}
+
+TEST_CASE("context from a vector turn never reaches persisted history either",
+          "[agentloop][rag][vector][transient]") {
+    // The grep, on the new path: the secret reaches the provider and not the
+    // history, so this cannot pass by not injecting.
+    const Scratch scratch;
+    const auto embedder = toy_embedder("toy-v1");
+    seed_vectors(scratch, embedder);
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "what does zarquon require?");
+    turn.embedder = embedder;
+    const RagResult rag = apogee::agentloop::retrieve_for_turn(turn);
+    REQUIRE(rag.retriever == "vector");
+    REQUIRE(rag.chunks > 0);
+
+    bool seen = false;
+    apogee::backends::MockProvider::Options options;
+    options.backend_name = "mock";
+    options.turns = {apogee::backends::MockTurn{.text = "answered"}};
+    options.on_request = [&seen](const apogee::harness::ChatRequest& request) {
+        for (const apogee::harness::ChatMessage& message : request.messages) {
+            if (message.content.plain_text().find(kSecret) != std::string::npos) {
+                seen = true;
+            }
+        }
+    };
+    apogee::harness::Harness harness{apogee::harness::Config{}};
+    harness.register_provider("mock",
+                              std::make_shared<apogee::backends::MockProvider>(std::move(options)));
+    harness.use_default_router();
+
+    std::vector<apogee::harness::ChatMessage> history{
+        apogee::harness::ChatMessage::user("what does zarquon require?")};
+    apogee::agentloop::Options loop;
+    loop.model = "mock";
+    loop.transient_prefix = rag.prefix;
+    loop.stream_answer = false;
+    apogee::agentloop::NullReporter reporter;
+    (void)apogee::agentloop::run(harness, history, loop, reporter);
+
+    CHECK(seen);
+    std::string persisted;
+    for (const apogee::harness::ChatMessage& message : history) {
+        persisted += message.content.plain_text() + "\n";
+    }
+    CHECK(persisted.find(kSecret) == std::string::npos);
+    CHECK(persisted.find("answered") != std::string::npos);
+}
+
+TEST_CASE("a judge on the turn is reported as applied only when its ranking was used",
+          "[agentloop][rag][rerank]") {
+    const Scratch scratch;
+    seed(scratch);
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig mock;
+    mock.type = apogee::harness::BackendType::Mock;
+    config.backends.emplace("judge", mock);
+
+    apogee::backends::MockProvider::Options options;
+    options.backend_name = "judge";
+    options.turns = {apogee::backends::MockTurn{.text = "[2]"}};
+    apogee::harness::Harness harness{config};
+    harness.register_provider("judge",
+                              std::make_shared<apogee::backends::MockProvider>(std::move(options)));
+    harness.use_default_router();
+
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon widgets chunk");
+    turn.rerank_flag = "judge";
+    turn.harness = &harness;
+    turn.config = &config;
+    const RagResult judged = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK(judged.reranked);
+    CHECK(judged.chunks == 1);
+
+    // A garbage judge: raw order, and the flag says so.
+    apogee::backends::MockProvider::Options bad;
+    bad.backend_name = "judge";
+    bad.turns = {apogee::backends::MockTurn{.text = "no idea"}};
+    apogee::harness::Harness harness2{config};
+    harness2.register_provider("judge",
+                               std::make_shared<apogee::backends::MockProvider>(std::move(bad)));
+    harness2.use_default_router();
+    turn.harness = &harness2;
+    const RagResult raw = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK_FALSE(raw.reranked);
+    CHECK(raw.chunks > 0);
+    REQUIRE_FALSE(raw.notes.empty());
+    CHECK(raw.notes.back().find("not a ranking") != std::string::npos);
 }
