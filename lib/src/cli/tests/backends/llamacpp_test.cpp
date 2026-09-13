@@ -730,3 +730,24 @@ TEST_CASE("an unprofiled model has no framing removed from its answer",
     const auto response = provider.chat(turn({ChatMessage::user("hi")}), {});
     CHECK(response.message.content.plain_text() == "<|channel|>final<|message|>hello");
 }
+
+TEST_CASE("preload loads the model before any request, and only once",
+          "[backends][llamacpp][preload]") {
+    // `apogee serve --preload` asks for this so the first remote client does
+    // not pay the load. It is not a use: the idle window starts with the
+    // first real request, not here.
+    Fixture fixture;
+    CHECK(fixture.runtime->loads == 0);
+    CHECK_FALSE(fixture.provider->model_loaded());
+
+    std::vector<apogee::harness::StatusEvent::Type> seen;
+    fixture.provider->preload(
+        [&seen](const apogee::harness::StatusEvent& event) { seen.push_back(event.type); });
+    CHECK(fixture.runtime->loads == 1);
+    CHECK(fixture.provider->model_loaded());
+    REQUIRE_FALSE(seen.empty());
+    CHECK(seen.back() == apogee::harness::StatusEvent::Type::ModelReady);
+
+    fixture.provider->preload({});
+    CHECK(fixture.runtime->loads == 1);
+}

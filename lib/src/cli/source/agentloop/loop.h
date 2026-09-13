@@ -75,6 +75,18 @@ struct RunResult {
     /// call fell back to estimation — a partly-exact total is an estimate.
     TokenCount tokens;
 
+    /// The same accounting split into prompt and completion, summed over the
+    /// calls that REPORTED usage and nothing else. `reported()` is false when
+    /// no call did -- a served response then omits its usage block rather
+    /// than sending zeros, because absent is not zero.
+    harness::Usage usage;
+
+    /// Why the FINAL model call stopped, as the provider reported it. A served
+    /// response passes it on, because a client reads `length` as "the answer
+    /// was cut short" -- and an empty answer from a reasoning model that spent
+    /// its whole budget thinking is exactly that, not a `stop`.
+    harness::FinishReason finish_reason = harness::FinishReason::Stop;
+
     /// Model→tool→model cycles performed.
     int iterations = 0;
 

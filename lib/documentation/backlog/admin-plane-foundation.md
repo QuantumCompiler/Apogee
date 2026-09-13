@@ -33,4 +33,4 @@
 - [ ] Keys stored via `apogee auth add` are used by backends without appearing in config; `auth list` and every error/log/response path show metadata only (grep test across surfaces); env precedence is snapshotted once — mutating env mid-process cannot change resolution; secret-accepting routes 403 non-loopback peers regardless of bind
 - [ ] Key-resolution retrofit (doc B): the anthropic/openai/google backends resolve keys through the shared resolver under the decided precedence, covered by the existing backend fixtures
 
-**Scope note.** gated on [serve-public-plane.md](serve-public-plane.md) shipping.
+**Scope note.** Its gate is satisfied: `apogee serve` shipped 2026-09-13 ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone T), so the listener, the route table (`httpserver/mux.cpp`), the bind policy (`httpserver/serve.h` — `--allow-remote`, which this item's `--allow-remote-admin` should fold into rather than duplicate), and the transport-neutral `HttpRequest`/`HttpResponse` this plane mounts onto all exist. **Split first** (plane / credstore) before building.

@@ -23,9 +23,11 @@ std::string trim(std::string_view text) {
     return std::string{text.substr(begin, end - begin)};
 }
 
-void accumulate(TokenCount& total, const harness::Usage& usage) {
+void accumulate(TokenCount& total, harness::Usage& split, const harness::Usage& usage) {
     if (usage.reported()) {
         total.tokens += usage.total_tokens();
+        split.prompt_tokens += usage.prompt_tokens;
+        split.completion_tokens += usage.completion_tokens;
         // `estimated` stays whatever it was: a total mixing an exact count with
         // an estimated one is an estimate, and saying otherwise overstates it.
         return;
@@ -138,7 +140,7 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
             reporter.on_clear_status();
             throw;
         }
-        accumulate(result.tokens, response.usage);
+        accumulate(result.tokens, result.usage, response.usage);
 
         const std::vector<harness::ToolCall> calls = response.message.tool_calls;
 
@@ -164,6 +166,7 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
             }
 
             result.answer = answer;
+            result.finish_reason = response.finish_reason;
             result.hit_iteration_limit = final_pass && !calls.empty();
             return result;
         }

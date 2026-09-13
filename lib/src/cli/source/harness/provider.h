@@ -119,6 +119,15 @@ public:
     StatusReporting& operator=(StatusReporting&&) = delete;
 
     [[nodiscard]] virtual StatusEvent model_status() const = 0;
+
+    /// Loads now rather than on the first request, reporting progress through
+    /// `on_status`. The default does nothing: a provider whose status is
+    /// always "ready" has nothing to load. `apogee serve --preload` calls this
+    /// through `Harness::preload_model`, so the first remote client does not
+    /// pay the load. Throws ProviderError when the load fails.
+    virtual void preload(const StatusSink& on_status) {
+        (void)on_status;
+    }
 };
 
 /// Implemented by a provider that embeds tool calls inside the text stream

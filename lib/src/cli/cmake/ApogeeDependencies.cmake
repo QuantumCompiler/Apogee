@@ -33,6 +33,18 @@
 #                                  (Secure Transport / OpenSSL / Schannel),
 #                                  which is what makes the system trust store
 #                                  work without a bundled CA list.
+#   HTTP server cpp-httplib     -- wired below (arrived with serve-public-plane).
+#                                  Header-only, FETCHED NEVER FOUND: a system
+#                                  copy is a compiled library built with
+#                                  whatever TLS and compression options its
+#                                  packager chose, and `apogee serve` must not
+#                                  gain a TLS stack on one machine and not
+#                                  another. Every optional feature is switched
+#                                  off explicitly, so the binary's dependency
+#                                  set is the same on all six targets. Plain
+#                                  HTTP only: a deployment terminates TLS in
+#                                  front of it, which is where certificates
+#                                  belong.
 
 include(FetchContent)
 
@@ -115,6 +127,27 @@ set(REPLXX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(REPLXX_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(nlohmann_json CLI11 replxx)
+
+# cpp-httplib: the `apogee serve` listener. Deliberately WITHOUT
+# FIND_PACKAGE_ARGS -- see the note at the top of this file -- and with every
+# optional integration off, so that including it changes nothing about what
+# the binary links. The library's own CMake target would otherwise probe for
+# OpenSSL, zlib, brotli and zstd and quietly link whichever it found.
+FetchContent_Declare(httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG        v0.56.0
+    GIT_SHALLOW    TRUE
+    SYSTEM
+)
+set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_ZSTD_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_REQUIRE_OPENSSL OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_COMPILE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_INSTALL OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_TEST OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(httplib)
 
 # yaml-cpp 0.8.0 (the newest release; tagged 2023) opens with
 # cmake_minimum_required(VERSION 3.4), and CMake >= 4.0 refuses to configure a

@@ -83,6 +83,8 @@ add_library(apogee_core STATIC
     commands/cli_reporter.h
     commands/cli_reporter.cpp
 
+    commands/serve_cmd.h
+    commands/serve_cmd.cpp
     commands/chat.h
     commands/chat.cpp
     commands/chat_history.h
@@ -228,6 +230,23 @@ add_library(apogee_core STATIC
     embedstore/vector.h
     embedstore/vector.cpp
     httpserver/httpserver.h
+    httpserver/http_types.h
+    httpserver/http_types.cpp
+    httpserver/sse_writer.h
+    httpserver/sse_writer.cpp
+    httpserver/sse_reporter.h
+    httpserver/sse_reporter.cpp
+    httpserver/session.h
+    httpserver/session.cpp
+    httpserver/handler.h
+    httpserver/handler.cpp
+    httpserver/mux.h
+    httpserver/mux.cpp
+    # The ONE translation unit that may reference listen()/accept(). The
+    # no-listen symbol check allow-lists exactly this object and requires it to
+    # be the only one -- see tests/no_listen_symbols.cmake.
+    httpserver/serve.h
+    httpserver/serve.cpp
     mcp/mcp.h
 )
 
@@ -240,7 +259,7 @@ target_compile_definitions(apogee_core PRIVATE
 )
 
 target_link_libraries(apogee_core PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp
-                      PRIVATE CURL::libcurl replxx::replxx apogee_sqlite3)
+                      PRIVATE CURL::libcurl replxx::replxx apogee_sqlite3 httplib::httplib)
 
 # Local inference is opt-in at build time. When it is off, backends/llama_real.cpp
 # compiles to the "not built in" answer and never includes llama.h -- so the

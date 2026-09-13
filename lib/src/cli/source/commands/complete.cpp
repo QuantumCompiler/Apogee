@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include "agent/fetch_url.h"
 #include "agent/tool.h"
 #include "agentloop/loop.h"
 #include "agentloop/rag.h"
@@ -17,7 +16,6 @@
 #include "agentloop/retriever.h"
 #include "ansi/ansi.h"
 #include "backends/factory.h"
-#include "backends/http_client.h"
 #include "commands/ask_prompt.h"
 #include "commands/cli_reporter.h"
 #include "commands/embed.h"
@@ -109,60 +107,6 @@ std::vector<harness::ContentPart> load_attachments(const CompleteFlags& flags) {
     return attachments;
 }
 
-/// Whether `model` names something the config actually defines.
-///
-/// Mirrors the router's first two rungs -- a backend key, or a backend entry's
-/// `model:` field -- and deliberately NOT its third, the fallback to
-/// `models.default`.
-///
-/// That fallback is right for an unspecified model and wrong for an explicit
-/// one. `apogee complete -m sonnnet` is a typo, and silently answering from a
-/// different backend is the worst possible response: the user gets a real
-/// answer from a model they did not choose, with nothing to indicate it. So
-/// `-m` is checked here before the router ever sees it.
-bool names_a_configured_backend(const harness::Config& config, std::string_view model) {
-    if (config.find_backend(model) != nullptr) {
-        return true;
-    }
-    const std::string normalized = harness::normalize_route_key(model);
-    for (const auto& [name, entry] : config.backends) {
-        if (entry.model == model || harness::normalize_route_key(entry.model) == normalized) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/// The built-in tool set for `--tools`.
-///
-/// `fetch_url` only, for now. Web search comes from the provider's own
-/// server-side tool (`--search`), not a local one -- see the decision recorded
-/// on this item. Native filesystem toolsets and MCP register here later.
-agent::ToolRegistry built_in_tools() {
-    agent::ToolRegistry registry;
-
-    auto client =
-        std::make_shared<backends::HttpClient>(std::make_unique<backends::CurlTransport>());
-
-    registry.add(agent::make_fetch_url_tool([client](std::string_view url) {
-        agent::FetchResult result;
-        backends::HttpRequest request;
-        request.method = "GET";
-        request.url = std::string{url};
-        request.timeout = std::chrono::seconds{30};
-        try {
-            const backends::HttpResponse response = client->send(request, {}, {});
-            result.status = response.status;
-            result.body = response.body;
-        } catch (const std::exception& e) {
-            result.error = e.what();
-        }
-        return result;
-    }));
-
-    return registry;
-}
-
 /// Runs one prompt against one backend, streaming to stdout.
 /// Returns the finish reason so a caller can note truncation.
 harness::ChatResponse run_one(const harness::Harness& harness, const harness::Config& config,
@@ -205,7 +149,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
 
         agent::ToolRegistry machine_registry;
         if (flags.tools) {
-            machine_registry = built_in_tools();
+            machine_registry = make_built_in_tools();
             machine_options.tools = &machine_registry;
             // No AskFn: a one-shot driver has no way to answer a question
             // mid-turn. The loop's rule then applies unchanged -- ask_user is
@@ -293,7 +237,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
 
     agent::ToolRegistry registry;
     if (flags.tools) {
-        registry = built_in_tools();
+        registry = make_built_in_tools();
         loop_options.tools = &registry;
         // Advertised only when there is a terminal to answer on. A null AskFn
         // means the tool never appears in the request at all.

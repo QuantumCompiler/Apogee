@@ -10,9 +10,11 @@
 #include "harness/config.h"
 
 using apogee::agentloop::compact_history;
+using apogee::agentloop::ContextUsage;
 using apogee::agentloop::count_turns;
 using apogee::agentloop::estimate_prompt_tokens;
 using apogee::agentloop::estimate_tokens;
+using apogee::agentloop::measure_context;
 using apogee::agentloop::splice_transient;
 using apogee::backends::MockProvider;
 using apogee::backends::MockTurn;
@@ -117,4 +119,92 @@ TEST_CASE("compacting a system-only history is a no-op", "[agentloop][content][c
     harness.use_default_router();
     const std::vector<ChatMessage> history{ChatMessage::system("only a prompt")};
     CHECK(compact_history(harness, history, "m").size() == 1);
+}
+
+// ---------------------------------------------------------------------------
+// Context monitoring
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the 80 and 90 percent thresholds fire in order", "[agentloop][context]") {
+    ContextUsage usage;
+    usage.window = 1000;
+
+    usage.used_tokens = 700;
+    CHECK_FALSE(usage.should_warn());
+    CHECK_FALSE(usage.should_compact());
+
+    usage.used_tokens = 800;
+    CHECK(usage.should_warn());
+    CHECK_FALSE(usage.should_compact());
+
+    usage.used_tokens = 899;
+    CHECK(usage.should_warn());
+    CHECK_FALSE(usage.should_compact());
+
+    usage.used_tokens = 900;
+    CHECK(usage.should_warn());
+    CHECK(usage.should_compact());
+}
+
+TEST_CASE("an unknown window never triggers either threshold", "[agentloop][context]") {
+    // 0 means unknown, not full. Warning on every turn for a model whose window
+    // we cannot resolve would train the user to ignore the warning.
+    ContextUsage usage;
+    usage.window = 0;
+    usage.used_tokens = 1'000'000;
+
+    CHECK(usage.fraction() == 0.0);
+    CHECK_FALSE(usage.should_warn());
+    CHECK_FALSE(usage.should_compact());
+}
+
+TEST_CASE("context is measured against the message about to be sent", "[agentloop][context]") {
+    // The ordering that actually matters. Measuring the SAVED history alone
+    // means the first turn always reads as empty and a single large prompt
+    // never trips the threshold it should -- which is exactly what shipped
+    // before this test existed.
+    const Config config = apogee::harness::parse_config(R"(
+backends:
+  small:
+    type: mock
+    model: mock-1
+    context_size: 50
+)",
+                                                        "<test>");
+    Harness harness{config};
+    harness.register_provider("small", std::make_shared<apogee::backends::MockProvider>(
+                                           apogee::backends::MockProvider::Options{}));
+    harness.use_default_router();
+
+    // An empty history is not close to full...
+    CHECK_FALSE(measure_context(harness, {}, "small").should_compact());
+
+    // ...but the history PLUS a large incoming message is.
+    const std::vector<ChatMessage> prospective{ChatMessage::user(std::string(400, 'x'))};
+    CHECK(measure_context(harness, prospective, "small").should_compact());
+}
+
+TEST_CASE("measure_context resolves the window and flags estimates", "[agentloop][context]") {
+    // A warning that fires at the wrong point is worse than none, so whether
+    // the number is exact or estimated is carried rather than smoothed over.
+    const Config config = apogee::harness::parse_config(R"(
+backends:
+  small:
+    type: mock
+    model: mock-1
+    context_size: 100
+)",
+                                                        "<test>");
+    Harness harness{config};
+    harness.register_provider("small", std::make_shared<apogee::backends::MockProvider>(
+                                           apogee::backends::MockProvider::Options{}));
+    harness.use_default_router();
+
+    const std::vector<ChatMessage> messages{ChatMessage::user(std::string(400, 'x'))};
+    const ContextUsage usage = measure_context(harness, messages, "small");
+
+    CHECK(usage.window == 100);
+    CHECK(usage.used_tokens > 0);
+    CHECK_FALSE(usage.exact);  // no provider counting API is wired yet
+    CHECK(usage.should_compact());
 }

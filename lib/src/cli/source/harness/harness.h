@@ -188,6 +188,15 @@ public:
     /// Status for one backend, when it reports any.
     [[nodiscard]] std::optional<StatusEvent> model_status(std::string_view backend_name) const;
 
+    /// Loads `backend_name`'s model now, when the backend loads lazily.
+    ///
+    /// False when the backend reports no load state -- there is nothing to
+    /// preload on a cloud entry, and asking is not an error. Only a backend
+    /// that answers `model_status` is asked, so a paid provider is never sent
+    /// a warm-up request in the name of preloading. Throws ProviderError when
+    /// the load itself fails.
+    bool preload_model(std::string_view backend_name, const StatusSink& on_status) const;
+
     /// The effective context window for `model`: the backend entry\'s
     /// `context_size` when set, else the compiled fallback table.
     /// 0 means unknown — never unlimited.

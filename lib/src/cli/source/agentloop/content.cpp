@@ -1,6 +1,7 @@
 #include "agentloop/content.h"
 
 #include <algorithm>
+#include <optional>
 
 #include "harness/errors.h"
 
@@ -35,6 +36,34 @@ TokenCount estimate_prompt_tokens(const std::vector<harness::ChatMessage>& messa
     return TokenCount{
         static_cast<std::int64_t>((characters + kCharactersPerToken - 1) / kCharactersPerToken),
         true};
+}
+
+ContextUsage measure_context(const harness::Harness& harness,
+                             const std::vector<harness::ChatMessage>& messages,
+                             const std::string& model) {
+    ContextUsage usage;
+    usage.window = harness.context_window_for_model(model);
+
+    // Ask the provider first: a backend that owns a tokenizer (a local model
+    // does) answers exactly, and the 80/90 thresholds are only as good as the
+    // number they fire on. `std::nullopt` means "no tokenizer, or not cheaply
+    // right now" -- never an error, and never a reason to skip the check.
+    harness::ChatRequest probe;
+    probe.messages = messages;
+    probe.model = model;
+    if (const std::optional<std::int64_t> exact = harness.count_prompt_tokens(model, probe)) {
+        usage.used_tokens = *exact;
+        usage.exact = true;
+        return usage;
+    }
+
+    // The estimate path. `exact` is carried rather than assumed because a
+    // warning that fires at the wrong point is worse than none, and the surface
+    // says which number it has.
+    const TokenCount count = estimate_prompt_tokens(messages);
+    usage.used_tokens = count.tokens;
+    usage.exact = !count.estimated;
+    return usage;
 }
 
 std::size_t count_turns(const std::vector<harness::ChatMessage>& history) {

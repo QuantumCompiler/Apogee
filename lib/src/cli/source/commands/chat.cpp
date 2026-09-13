@@ -9,7 +9,6 @@
 #include <optional>
 #include <sstream>
 
-#include "agent/fetch_url.h"
 #include "agentloop/content.h"
 #include "agentloop/loop.h"
 #include "agentloop/rag.h"
@@ -17,7 +16,6 @@
 #include "agentloop/retriever.h"
 #include "ansi/ansi.h"
 #include "backends/factory.h"
-#include "backends/http_client.h"
 #include "commands/ask_prompt.h"
 #include "commands/chat_history.h"
 #include "commands/cli_reporter.h"
@@ -117,34 +115,6 @@ std::optional<SlashCommand> parse_slash(std::string_view line) {
     return command;
 }
 
-ContextUsage measure_context(const harness::Harness& harness,
-                             const std::vector<harness::ChatMessage>& messages,
-                             const std::string& model) {
-    ContextUsage usage;
-    usage.window = harness.context_window_for_model(model);
-
-    // Ask the provider first: a backend that owns a tokenizer (a local model
-    // does) answers exactly, and the 80/90 thresholds are only as good as the
-    // number they fire on. `std::nullopt` means "no tokenizer, or not cheaply
-    // right now" -- never an error, and never a reason to skip the check.
-    harness::ChatRequest probe;
-    probe.messages = messages;
-    probe.model = model;
-    if (const std::optional<std::int64_t> exact = harness.count_prompt_tokens(model, probe)) {
-        usage.used_tokens = *exact;
-        usage.exact = true;
-        return usage;
-    }
-
-    // The estimate path. `exact` is carried rather than assumed because a
-    // warning that fires at the wrong point is worse than none, and the surface
-    // says which number it has.
-    const agentloop::TokenCount count = agentloop::estimate_prompt_tokens(messages);
-    usage.used_tokens = count.tokens;
-    usage.exact = !count.estimated;
-    return usage;
-}
-
 namespace {
 
 /// Everything one chat turn does, for every surface that drives one.
@@ -195,7 +165,8 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     // trips the threshold it should.
     std::vector<harness::ChatMessage> prospective = session.messages;
     prospective.insert(prospective.end(), incoming.begin(), incoming.end());
-    const ContextUsage usage = measure_context(harness, prospective, session.backend);
+    const agentloop::ContextUsage usage =
+        agentloop::measure_context(harness, prospective, session.backend);
 
     if (usage.should_compact()) {
         notice("context " + std::to_string(static_cast<int>(usage.fraction() * 100)) +
@@ -479,23 +450,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         // --- tools ----------------------------------------------------------
         agent::ToolRegistry registry;
         if (flags->tools) {
-            auto client =
-                std::make_shared<backends::HttpClient>(std::make_unique<backends::CurlTransport>());
-            registry.add(agent::make_fetch_url_tool([client](std::string_view url) {
-                agent::FetchResult result;
-                backends::HttpRequest request;
-                request.method = "GET";
-                request.url = std::string{url};
-                request.timeout = std::chrono::seconds{30};
-                try {
-                    const backends::HttpResponse response = client->send(request, {}, {});
-                    result.status = response.status;
-                    result.body = response.body;
-                } catch (const std::exception& e) {
-                    result.error = e.what();
-                }
-                return result;
-            }));
+            registry = make_built_in_tools();
         }
 
         // --- attachments, for the first message only -------------------------

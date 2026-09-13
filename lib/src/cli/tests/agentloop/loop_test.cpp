@@ -585,3 +585,15 @@ TEST_CASE("a provider error clears the status before propagating", "[agentloop]"
                     apogee::harness::NoAvailableBackendError);
     CHECK(reporter.saw("clear"));
 }
+
+TEST_CASE("the final call's finish reason rides the result", "[agentloop][finish]") {
+    // A served response passes it to the client, where `length` means "cut
+    // short" -- the difference between an empty answer that is a bug and one
+    // that is a budget.
+    Fixture f = make_fixture({MockTurn{"partial", {}, apogee::harness::FinishReason::Length, {}}});
+    Options options;
+    options.model = "mock";
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options);
+    CHECK(result.finish_reason == apogee::harness::FinishReason::Length);
+    CHECK(result.answer == "partial");
+}

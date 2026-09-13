@@ -12,10 +12,8 @@
 #include "logger/operational.h"
 #include "support/env_guard.h"
 
-using apogee::commands::ContextUsage;
 using apogee::commands::format_session_info;
 using apogee::commands::format_session_row;
-using apogee::commands::measure_context;
 using apogee::commands::parse_slash;
 using apogee::commands::sanitize_title;
 using apogee::harness::ChatMessage;
@@ -56,94 +54,6 @@ TEST_CASE("ordinary prompts are not commands", "[chat][slash]") {
     CHECK_FALSE(parse_slash("/").has_value());
     // A leading slash mid-sentence is still a prompt.
     CHECK_FALSE(parse_slash("tell me about /proc").has_value());
-}
-
-// ---------------------------------------------------------------------------
-// Context monitoring
-// ---------------------------------------------------------------------------
-
-TEST_CASE("the 80 and 90 percent thresholds fire in order", "[chat][context]") {
-    ContextUsage usage;
-    usage.window = 1000;
-
-    usage.used_tokens = 700;
-    CHECK_FALSE(usage.should_warn());
-    CHECK_FALSE(usage.should_compact());
-
-    usage.used_tokens = 800;
-    CHECK(usage.should_warn());
-    CHECK_FALSE(usage.should_compact());
-
-    usage.used_tokens = 899;
-    CHECK(usage.should_warn());
-    CHECK_FALSE(usage.should_compact());
-
-    usage.used_tokens = 900;
-    CHECK(usage.should_warn());
-    CHECK(usage.should_compact());
-}
-
-TEST_CASE("an unknown window never triggers either threshold", "[chat][context]") {
-    // 0 means unknown, not full. Warning on every turn for a model whose window
-    // we cannot resolve would train the user to ignore the warning.
-    ContextUsage usage;
-    usage.window = 0;
-    usage.used_tokens = 1'000'000;
-
-    CHECK(usage.fraction() == 0.0);
-    CHECK_FALSE(usage.should_warn());
-    CHECK_FALSE(usage.should_compact());
-}
-
-TEST_CASE("context is measured against the message about to be sent", "[chat][context]") {
-    // The ordering that actually matters. Measuring the SAVED history alone
-    // means the first turn always reads as empty and a single large prompt
-    // never trips the threshold it should -- which is exactly what shipped
-    // before this test existed.
-    const Config config = apogee::harness::parse_config(R"(
-backends:
-  small:
-    type: mock
-    model: mock-1
-    context_size: 50
-)",
-                                                        "<test>");
-    Harness harness{config};
-    harness.register_provider("small", std::make_shared<apogee::backends::MockProvider>(
-                                           apogee::backends::MockProvider::Options{}));
-    harness.use_default_router();
-
-    // An empty history is not close to full...
-    CHECK_FALSE(measure_context(harness, {}, "small").should_compact());
-
-    // ...but the history PLUS a large incoming message is.
-    const std::vector<ChatMessage> prospective{ChatMessage::user(std::string(400, 'x'))};
-    CHECK(measure_context(harness, prospective, "small").should_compact());
-}
-
-TEST_CASE("measure_context resolves the window and flags estimates", "[chat][context]") {
-    // A warning that fires at the wrong point is worse than none, so whether
-    // the number is exact or estimated is carried rather than smoothed over.
-    const Config config = apogee::harness::parse_config(R"(
-backends:
-  small:
-    type: mock
-    model: mock-1
-    context_size: 100
-)",
-                                                        "<test>");
-    Harness harness{config};
-    harness.register_provider("small", std::make_shared<apogee::backends::MockProvider>(
-                                           apogee::backends::MockProvider::Options{}));
-    harness.use_default_router();
-
-    const std::vector<ChatMessage> messages{ChatMessage::user(std::string(400, 'x'))};
-    const ContextUsage usage = measure_context(harness, messages, "small");
-
-    CHECK(usage.window == 100);
-    CHECK(usage.used_tokens > 0);
-    CHECK_FALSE(usage.exact);  // no provider counting API is wired yet
-    CHECK(usage.should_compact());
 }
 
 // ---------------------------------------------------------------------------

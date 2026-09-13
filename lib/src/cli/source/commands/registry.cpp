@@ -13,6 +13,7 @@
 #include "commands/config_cmd.h"
 #include "commands/embed.h"
 #include "commands/models.h"
+#include "commands/serve_cmd.h"
 #include "commands/uninstall.h"
 #include "commands/version_command.h"
 
@@ -67,6 +68,7 @@ CommandRegistry default_registry() {
     registry.add(std::make_unique<ConfigCommand>());
     registry.add(std::make_unique<EmbedCommand>());
     registry.add(std::make_unique<ModelsCommand>());
+    registry.add(std::make_unique<ServeCommand>());
     registry.add(std::make_unique<UninstallCommand>());
     registry.add(std::make_unique<VersionCommand>());
     // Hidden: the shell-completion protocol, not a user-facing command.

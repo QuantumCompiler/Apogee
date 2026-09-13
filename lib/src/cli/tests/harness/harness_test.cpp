@@ -472,3 +472,76 @@ TEST_CASE("the longest matching prefix wins in the window table", "[harness][con
     CHECK(apogee::harness::context_window_for("gpt-4") == 8192);
     CHECK(apogee::harness::context_window_for("gpt-4.1") == 1047576);
 }
+
+// ---------------------------------------------------------------------------
+// Preload
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A provider whose model loads lazily and says so.
+class LazyProvider final : public apogee::harness::LLMProvider,
+                           public apogee::harness::StatusReporting {
+public:
+    bool loaded = false;
+
+    [[nodiscard]] std::string_view backend_name() const noexcept override {
+        return "lazy";
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse chat(
+        const apogee::harness::ChatRequest& /*request*/,
+        const apogee::harness::CancellationToken& /*cancellation*/) override {
+        return {};
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse stream_chat(
+        const apogee::harness::ChatRequest& /*request*/,
+        const apogee::harness::StreamOptions& /*options*/) override {
+        return {};
+    }
+
+    [[nodiscard]] std::vector<apogee::harness::ModelInfo> list_models(
+        const apogee::harness::CancellationToken& /*cancellation*/) override {
+        return {};
+    }
+
+    [[nodiscard]] apogee::harness::StatusEvent model_status() const override {
+        apogee::harness::StatusEvent event;
+        event.type = loaded ? apogee::harness::StatusEvent::Type::ModelReady
+                            : apogee::harness::StatusEvent::Type::ModelLoading;
+        return event;
+    }
+
+    void preload(const apogee::harness::StatusSink& on_status) override {
+        loaded = true;
+        if (on_status) {
+            on_status(model_status());
+        }
+    }
+};
+
+}  // namespace
+
+TEST_CASE("preload_model loads a lazily loading backend and answers no for the rest",
+          "[harness][capability]") {
+    // Asked through the harness, never through a cast at the call site -- and
+    // only a backend that REPORTS a load state is asked, so a cloud provider is
+    // never sent a warm-up request in the name of preloading.
+    auto lazy = std::make_shared<LazyProvider>();
+    Harness harness{Config{}};
+    harness.register_provider("lazy", lazy);
+    harness.register_provider("mock", std::make_shared<MockProvider>(MockProvider::Options{}));
+    harness.use_default_router();
+
+    REQUIRE(harness.model_status("lazy")->type == apogee::harness::StatusEvent::Type::ModelLoading);
+    int reported = 0;
+    CHECK(harness.preload_model("lazy",
+                                [&reported](const apogee::harness::StatusEvent&) { ++reported; }));
+    CHECK(lazy->loaded);
+    CHECK(reported == 1);
+    CHECK(harness.model_status("lazy")->type == apogee::harness::StatusEvent::Type::ModelReady);
+
+    CHECK_FALSE(harness.preload_model("mock", {}));
+    CHECK_FALSE(harness.preload_model("ghost", {}));
+}

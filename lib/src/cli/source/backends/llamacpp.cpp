@@ -258,6 +258,10 @@ harness::StatusEvent LlamaCppProvider::model_status() const {
     return event;
 }
 
+void LlamaCppProvider::preload(const harness::StatusSink& on_status) {
+    ensure_model(on_status);
+}
+
 void LlamaCppProvider::expire_if_idle() {
     if (options_.idle_unload.count() <= 0 || model_ == nullptr || !used_) {
         return;

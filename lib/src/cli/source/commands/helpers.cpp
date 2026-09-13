@@ -2,12 +2,16 @@
 
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
 
+#include "agent/fetch_url.h"
+#include "backends/http_client.h"
 #include "commands/embed.h"
 #include "harness/harness.h"
 #include "platform/platform.h"
@@ -125,6 +129,54 @@ std::string describe_retrieval(const RagChoice& choice, const agentloop::RagResu
         line += " -- " + note;
     }
     return line;
+}
+
+std::string configured_backend_key(const harness::Config& config, std::string_view model) {
+    if (model.empty()) {
+        return {};
+    }
+    // The key as WRITTEN, found the way the map compares keys -- a request
+    // spelling `Claude` must land on the entry named `claude`, and the name
+    // handed back must be the file's spelling so later lookups agree.
+    if (const auto it = config.backends.find(model); it != config.backends.end()) {
+        return it->first;
+    }
+    const std::string normalized = harness::normalize_route_key(model);
+    for (const auto& [name, entry] : config.backends) {
+        if (entry.model == model || harness::normalize_route_key(entry.model) == normalized) {
+            return name;
+        }
+    }
+    return {};
+}
+
+bool names_a_configured_backend(const harness::Config& config, std::string_view model) {
+    return !configured_backend_key(config, model).empty();
+}
+
+agent::ToolRegistry make_built_in_tools() {
+    agent::ToolRegistry registry;
+
+    auto client =
+        std::make_shared<backends::HttpClient>(std::make_unique<backends::CurlTransport>());
+
+    registry.add(agent::make_fetch_url_tool([client](std::string_view url) {
+        agent::FetchResult result;
+        backends::HttpRequest request;
+        request.method = "GET";
+        request.url = std::string{url};
+        request.timeout = std::chrono::seconds{30};
+        try {
+            const backends::HttpResponse response = client->send(request, {}, {});
+            result.status = response.status;
+            result.body = response.body;
+        } catch (const std::exception& e) {
+            result.error = e.what();
+        }
+        return result;
+    }));
+
+    return registry;
 }
 
 std::string read_stdin() {

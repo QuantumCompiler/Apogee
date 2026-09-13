@@ -300,6 +300,19 @@ std::optional<StatusEvent> Harness::model_status(std::string_view backend_name) 
     return reporter->model_status();
 }
 
+bool Harness::preload_model(std::string_view backend_name, const StatusSink& on_status) const {
+    const auto it = providers_.find(std::string{backend_name});
+    if (it == providers_.end() || it->second == nullptr) {
+        return false;
+    }
+    auto* reporter = dynamic_cast<StatusReporting*>(it->second.get());
+    if (reporter == nullptr) {
+        return false;
+    }
+    reporter->preload(on_status);
+    return true;
+}
+
 std::int64_t Harness::context_window_for_model(std::string_view model) const {
     const std::string resolved = resolve_chat_backend(config_, model);
     const std::string_view name{resolved};

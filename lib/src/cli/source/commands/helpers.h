@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "agent/tool.h"
 #include "agentloop/rag.h"
 #include "harness/cancellation.h"
 #include "harness/config.h"
@@ -109,6 +110,40 @@ struct RagChoice {
     const harness::Harness& harness, const harness::Config& config, std::string_view collection,
     const std::string& question, int limit, std::string_view retriever_flag,
     std::string_view rerank_flag, const harness::CancellationToken& cancellation);
+
+/// Whether `model` names something the config actually defines.
+///
+/// Mirrors the router's first two rungs -- a backend key, or a backend entry's
+/// `model:` field -- and deliberately NOT its third, the fallback to
+/// `models.default`.
+///
+/// That fallback is right for an unspecified model and wrong for an explicit
+/// one. `apogee complete -m sonnnet` is a typo, and silently answering from a
+/// different backend is the worst possible response: the user gets a real
+/// answer from a model they did not choose, with nothing to indicate it. So an
+/// explicit model is checked here before the router ever sees it -- by
+/// `complete`, and by `serve` for a request's `model` field, through this one
+/// function so the two cannot disagree about what "configured" means.
+[[nodiscard]] bool names_a_configured_backend(const harness::Config& config,
+                                              std::string_view model);
+
+/// The backend KEY `model` names, as written in the config: the key itself, or
+/// the key of the entry whose `model:` field it matches (literal or
+/// normalized). Empty when nothing matches. `names_a_configured_backend` is
+/// this test made boolean; `serve` needs the key, because the set of backends
+/// it serves is a set of keys.
+[[nodiscard]] std::string configured_backend_key(const harness::Config& config,
+                                                 std::string_view model);
+
+/// The built-in tool set behind `--tools` on every surface.
+///
+/// `fetch_url` only, for now. Web search comes from the provider's own
+/// server-side tool (`--search`), not a local one -- see the decision recorded
+/// on the complete item. Native filesystem toolsets and MCP register here
+/// later. **One function, three callers**: `complete`, `chat`, and `serve`
+/// build the same registry, so a tool added here reaches every surface at
+/// once rather than the one someone remembered to edit.
+[[nodiscard]] agent::ToolRegistry make_built_in_tools();
 
 /// Reads all of standard input. Used when no prompt argument was given.
 [[nodiscard]] std::string read_stdin();

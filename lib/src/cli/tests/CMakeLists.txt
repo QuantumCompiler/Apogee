@@ -81,6 +81,10 @@ add_executable(apogee_tests
     agentloop/anthropic_loop_test.cpp
     agentloop/content_test.cpp
     agentloop/question_test.cpp
+    httpserver/handler_test.cpp
+    httpserver/sse_test.cpp
+    httpserver/session_test.cpp
+    httpserver/serve_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h
@@ -160,13 +164,80 @@ add_test(NAME cli.complete_lifecycle
 # the day the first interactive command exists. TWO checks, because neither is
 # sufficient on its own -- see the header comments in each for why.
 #
-#   symbols: deterministic; catches our own code calling listen/accept.
+#   symbols: deterministic; catches code calling listen/accept, ours and any
+#            static dependency's, attributed to the object that made the call.
 #   runtime: catches a spawned child process holding a port.
+#
+# Every library the executable links THAT THIS BUILD PRODUCES is scanned --
+# static archives and shared libraries alike (llama.cpp is shared under the
+# llama preset, and a shared library's imports never show in the executable's
+# own symbol table) -- collected by walking the link graph, so a new in-process
+# dependency is covered without anyone remembering to list it. Imported system
+# libraries are the platform's, not Apogee's code, and are left out. Exactly
+# one object may reference listen/accept: httpserver/serve.cpp, the
+# `apogee serve` listener, allow-listed by name.
+function(apogee_collect_static_archives target visited_var files_var)
+    set(visited ${${visited_var}})
+    set(files ${${files_var}})
+    if(NOT TARGET "${target}")
+        return()
+    endif()
+    get_target_property(aliased "${target}" ALIASED_TARGET)
+    if(aliased)
+        set(target "${aliased}")
+    endif()
+    if("${target}" IN_LIST visited)
+        return()
+    endif()
+    list(APPEND visited "${target}")
+    get_target_property(type "${target}" TYPE)
+    get_target_property(imported "${target}" IMPORTED)
+    if(type STREQUAL "STATIC_LIBRARY")
+        list(APPEND files "$<TARGET_FILE:${target}>")
+    elseif((type STREQUAL "SHARED_LIBRARY" OR type STREQUAL "MODULE_LIBRARY") AND NOT imported)
+        list(APPEND files "$<TARGET_FILE:${target}>")
+    endif()
+    set(deps "")
+    foreach(property LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+        get_target_property(value "${target}" ${property})
+        if(value)
+            list(APPEND deps ${value})
+        endif()
+    endforeach()
+    foreach(dep IN LISTS deps)
+        if(dep MATCHES "^\\$<LINK_ONLY:(.+)>$")
+            set(dep "${CMAKE_MATCH_1}")
+        elseif(dep MATCHES "^\\$<" OR dep MATCHES "^::@")
+            continue()
+        endif()
+        apogee_collect_static_archives("${dep}" visited files)
+    endforeach()
+    set(${visited_var} "${visited}" PARENT_SCOPE)
+    set(${files_var} "${files}" PARENT_SCOPE)
+endfunction()
+
+set(APOGEE_LINKED_VISITED "")
+set(APOGEE_LINKED_ARCHIVES "")
+apogee_collect_static_archives(apogee APOGEE_LINKED_VISITED APOGEE_LINKED_ARCHIVES)
+string(JOIN "|" APOGEE_LINKED_ARCHIVE_LIST ${APOGEE_LINKED_ARCHIVES})
 add_test(NAME cli.no_listen_symbols
     COMMAND "${CMAKE_COMMAND}"
-        -DAPOGEE_CORE_LIB=$<TARGET_FILE:apogee_core>
-        -DAPOGEE_BINARY=$<TARGET_FILE:apogee>
+        "-DAPOGEE_ARCHIVES=${APOGEE_LINKED_ARCHIVE_LIST}"
+        -DAPOGEE_LISTENER_OBJECT=serve.cpp.o
         -P "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_symbols.cmake"
+)
+
+# `apogee serve` exists, and its help must say what a server deployment needs
+# to know: the bind policy.
+add_test(NAME cli.serve_help COMMAND apogee serve --help)
+set_tests_properties(cli.serve_help PROPERTIES PASS_REGULAR_EXPRESSION "allow-remote")
+
+# The HTTP API reference, pinned to the route table in both directions.
+add_test(NAME cli.http_api_conformance
+    COMMAND "${CMAKE_COMMAND}"
+        -DMUX_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/../source/httpserver/mux.cpp
+        -DAPI_DOC=${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/http-api.md
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/http_api_conformance.cmake"
 )
 
 add_test(NAME cli.install_is_ours_only
@@ -229,6 +300,16 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/no-listen-home
     )
     set_tests_properties(cli.complete_opens_no_listening_socket PROPERTIES TIMEOUT 60)
+
+    # The other half of that boundary: serve DOES hold a port, fails closed on a
+    # non-loopback bind, streams to a real client, mints sessions the terminal
+    # can resume, and stops on SIGTERM. Properties of the process, not a class.
+    add_test(NAME cli.serve_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/serve_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/serve-e2e-home
+    )
+    set_tests_properties(cli.serve_lifecycle PROPERTIES TIMEOUT 120)
 endif()
 
 # Startup output discipline, under a real pseudo-terminal.

@@ -183,6 +183,11 @@ public:
 
     [[nodiscard]] harness::StatusEvent model_status() const override;
 
+    /// Loads the model now. `apogee serve --preload` asks for this so the
+    /// first client does not pay the load; it is not a use, so the idle
+    /// window does not start until a request actually runs.
+    void preload(const harness::StatusSink& on_status) override;
+
     /// Whether the model is resident right now. For tests and diagnostics.
     [[nodiscard]] bool model_loaded() const noexcept;
 
