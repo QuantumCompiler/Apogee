@@ -48,7 +48,8 @@ into its usual typed exception:
 | 404 | `not_found_error` | No such route, or a backend that reports no load state |
 | 404 | `session_not_found` | An unknown or evicted `session_id`; the body also carries `session_id` |
 | 405 | `invalid_request_error` | Wrong method; the `Allow` header names the right one |
-| 502 | `backend_error` | The provider failed |
+| 501 | `backend_unavailable` | An admin route that needs a generation backend on a server that serves none (`/v1/admin/knowledge/capture`) |
+| 502 | `backend_error` | The provider failed; the knowledge clerk returned no record |
 | 503 | `backend_unavailable` | A backend that is configured but could not be built, with its reason |
 
 On a streamed response an error arrives as a `data:` frame carrying the same
@@ -396,6 +397,52 @@ The twin of `apogee agents delete`: the entry is removed; with `?purge=true`
 its prompt and schema files are removed too. `200 {deleted, files_removed}`;
 `404` when there is no entry -- including for a bundled agent that was never
 overridden, which has no entry to delete.
+
+### `POST /v1/admin/knowledge/capture`
+
+The twin of `apogee knowledge capture`: the normalization clerk over a raw
+conversation, one canonical record out, stored. Body: `raw` (required -- the
+conversation), and optionally `model` (the backend that runs the clerk; a
+served backend, resolved exactly as a chat request's `model` is, so a
+vendor-CLI or unserved backend is a `400`), `db` (the collection; default
+the config's `knowledge.db`, then `knowledge`), and the overrides that win
+over the clerk for their field: `status` (`shipped` | `rejected` |
+`superseded`, synonyms accepted), `discipline`, `source`, `link`,
+`supersedes` (the id of the record this one replaces, which is marked
+superseded), and `retriever` (`lexical` | `vector` | `auto`, resolved against
+the collection's pin through the same resolver `embed ingest` uses, under the
+same spend rule).
+
+`201` with:
+
+```json
+{"record": {"id": "kr-20260913T194429Z-3fa2c1", "intent": "…", "decision": "…",
+            "status": "shipped", "discipline": "eng", "downstream_link": "",
+            "provenance": {"source": "chat"}, "raw_ref": "…/knowledge/raw/kr-….md",
+            "timestamp": "2026-09-13T19:44:29.512034Z"},
+ "db": "knowledge", "retriever": "lexical", "registered": true}
+```
+
+`registered` says the collection was added under `embeddings:` by this call
+(the first capture into a new name); `note` carries the resolver's fallback
+reason when there is one, `notes` anything non-fatal (a `supersedes` target
+that does not exist). The raw conversation is archived on the server under
+`knowledge/raw/` and never returned. `400` on a missing `raw`, a bad status,
+a bad retriever, or a resolver refusal (an explicit `vector` with no embedding
+backend); `501` when the server serves no generation backend; `502` when the
+clerk failed to produce a conforming record after its one retry.
+
+### `POST /v1/admin/knowledge`
+
+Stores a finished record without running the clerk -- the store step of a
+review flow, where a client has a draft it has looked at. Body: the record's
+fields at the top level (`intent` required; `status` must be canonical;
+`decision`, `discipline`, `downstream_link`, `provenance{source,
+attribution}`, `supersedes` as the client has them), plus optionally `raw`
+(archived beside it), `db` and `retriever` as above. An `id` and `timestamp`
+are assigned when absent and kept when present. `201` with the same envelope
+as capture; `400` when the record does not validate. It needs no generation
+backend: only the embedder, when the retriever resolves to `vector`.
 
 ### `GET /v1/admin/permissions`
 

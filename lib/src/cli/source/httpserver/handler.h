@@ -116,6 +116,12 @@ public:
         return options_;
     }
 
+    /// The harness this plane dispatches to. The admin plane's knowledge
+    /// routes run their clerk on it: one set of providers per server.
+    [[nodiscard]] const harness::Harness& harness() const noexcept {
+        return *harness_;
+    }
+
     /// Resolves a request's `model` to a served backend key, or throws the
     /// error the request should get. Public so the rule is testable on its
     /// own: unknown → 400 naming what is served; vendor CLI → 400 saying why;

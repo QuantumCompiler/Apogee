@@ -51,6 +51,14 @@ public:
     [[nodiscard]] virtual bool interactive() const noexcept {
         return false;
     }
+
+    /// Whether the last `read` returned nullopt because the user interrupted
+    /// (Ctrl-C at the editor) rather than because the input ended. False for
+    /// the plain reader, whose input only ever ends. What lets a surface
+    /// tell a clean exit -- `/exit`, end of input -- from an abandoned one.
+    [[nodiscard]] virtual bool interrupted() const noexcept {
+        return false;
+    }
 };
 
 /// `std::getline`, for a pipe or a redirect.
@@ -93,9 +101,14 @@ public:
         return true;
     }
 
+    [[nodiscard]] bool interrupted() const noexcept override {
+        return interrupted_;
+    }
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    bool interrupted_ = false;
 };
 
 /// Picks a reader: editing when stdin AND stdout are both terminals, plain

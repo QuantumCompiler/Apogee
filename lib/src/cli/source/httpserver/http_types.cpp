@@ -56,4 +56,16 @@ HttpResponse error_response(int status, std::string_view message, std::string_vi
     return json_response(status, error_body(message, type));
 }
 
+nlohmann::json error_json(const HttpError& error) {
+    nlohmann::json body = error_body(error.message, error.type);
+    for (const auto& [key, value] : error.extra.items()) {
+        body["error"][key] = value;
+    }
+    return body;
+}
+
+HttpResponse to_response(const HttpError& error) {
+    return json_response(error.status, error_json(error));
+}
+
 }  // namespace apogee::httpserver

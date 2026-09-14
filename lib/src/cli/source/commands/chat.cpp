@@ -24,6 +24,7 @@
 #include "commands/helpers.h"
 #include "commands/input_gate.h"
 #include "commands/json_reporter.h"
+#include "commands/knowledge_core.h"
 #include "commands/line_reader.h"
 #include "commands/permissions.h"
 #include "commands/terminal.h"
@@ -32,6 +33,8 @@
 #include "harness/errors.h"
 #include "harness/paths.h"
 #include "harness/roles.h"
+#include "knowledge/clerk.h"
+#include "knowledge/record.h"
 #include "logger/operational.h"
 #include "mcp/registry.h"
 #include "platform/platform.h"
@@ -62,8 +65,8 @@ std::string trim(std::string_view text) {
 /// and then rejected -- or added and silently left uncompletable.
 const std::vector<std::string>& slash_commands() {
     static const std::vector<std::string> commands{
-        "/help",    "/model", "/models", "/system", "/temperature", "/max-tokens",
-        "/compact", "/title", "/branch", "/exit",   "/quit",
+        "/help",    "/model", "/models", "/system",  "/temperature", "/max-tokens",
+        "/compact", "/title", "/branch", "/capture", "/exit",        "/quit",
     };
     return commands;
 }
@@ -653,6 +656,46 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         const std::unique_ptr<LineReader> reader =
             make_line_reader(std::move(reader_options), std::cin);
 
+        // --- capture: this conversation as one knowledge record --------------
+        //
+        // The loaded model is the clerk -- no second backend, no second load
+        // -- and the record goes through the same core as `knowledge
+        // capture`, so `/capture` and the command produce the same record
+        // from the same transcript. The session's own --retriever describes
+        // how its DOCUMENTS are searched and says nothing about how a record
+        // should be indexed, so only the collection's pin and auto apply.
+        const auto capture_session = [&](knowledge::Overrides overrides) {
+            const std::string transcript = logger::transcript_text(session.messages);
+            if (transcript.empty()) {
+                reporter.status().print_line(
+                    style.tag(ansi::Role::Warning) +
+                    " nothing to capture yet -- have a conversation first");
+                return;
+            }
+            if (overrides.source.empty()) {
+                overrides.source = "chat";
+            }
+            CaptureInputs inputs;
+            inputs.raw = transcript;
+            inputs.overrides = std::move(overrides);
+            reporter.status().print_line(style.tag(ansi::Role::Apogee) +
+                                         " distilling this conversation into a record...");
+            const CaptureResult result =
+                capture_and_store(harness, config, config_path, inputs,
+                                  knowledge::make_structured_clerk(harness, session.backend));
+            if (!result.ok()) {
+                reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                             " capture failed: " + result.error);
+                return;
+            }
+            for (const std::string& note : result.notes) {
+                reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + note);
+            }
+            reporter.status().print_line(style.tag(ansi::Role::Apogee) + " captured " +
+                                         result.record.id + " [" + result.record.status + "] -- " +
+                                         preview_text(result.record.intent, 80));
+        };
+
         // --- the REPL --------------------------------------------------------
         bool running = true;
         while (running) {
@@ -729,6 +772,18 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                             style.tag(ansi::Role::Apogee) + " review " +
                             (review.active() ? agentloop::review_summary(review) : "off"));
                     }
+                } else if (verb == "capture") {
+                    // An argument is a status when it is one, else a link.
+                    knowledge::Overrides overrides;
+                    if (!argument.empty()) {
+                        const std::string status = knowledge::normalize_status(argument);
+                        if (knowledge::is_valid_status(status)) {
+                            overrides.status = status;
+                        } else {
+                            overrides.link = argument;
+                        }
+                    }
+                    capture_session(std::move(overrides));
                 } else if (verb == "system") {
                     session.params.system_prompt = argument;
                     reporter.status().print_line(style.tag(ansi::Role::Apogee) +
@@ -824,6 +879,14 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         }
 
         logger::save(session);
+        // Opt-in auto-capture on a CLEAN exit -- /exit, /quit, the end of the
+        // input -- with the still-loaded model as the clerk. Never on an
+        // interrupt: a user who hit Ctrl-C did not ask for a model call, and
+        // the transcript is already saved either way. Best-effort: a failure
+        // is a line, never a non-zero exit.
+        if (config.knowledge.auto_capture && !reader->interrupted()) {
+            capture_session({});
+        }
         if (decorate) {
             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " saved " +
                                          session.chat_id);

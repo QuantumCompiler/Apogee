@@ -95,6 +95,10 @@ add_library(apogee_core STATIC
     commands/analyze.cpp
     commands/agents_cmd.h
     commands/agents_cmd.cpp
+    commands/knowledge_core.h
+    commands/knowledge_core.cpp
+    commands/knowledge.h
+    commands/knowledge.cpp
     commands/chat.h
     commands/chat.cpp
     commands/chat_history.h
@@ -276,6 +280,16 @@ add_library(apogee_core STATIC
     scaffold/agent.h
     scaffold/agent.cpp
 
+    # The knowledge layer: records, the capture clerk, and the store over the
+    # chunk store. Includes embedstore/, agentloop/, harness/ and platform/
+    # only -- never backends/ or commands/ (tests/layering.cmake).
+    knowledge/record.h
+    knowledge/record.cpp
+    knowledge/clerk.h
+    knowledge/clerk.cpp
+    knowledge/store.h
+    knowledge/store.cpp
+
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and
     # so `#include "embedstore/embedstore.h"` compiles from the first day.
@@ -315,6 +329,8 @@ add_library(apogee_core STATIC
     httpserver/admin_config.cpp
     httpserver/admin_agents.h
     httpserver/admin_agents.cpp
+    httpserver/admin_knowledge.h
+    httpserver/admin_knowledge.cpp
     httpserver/admin.h
     httpserver/admin.cpp
     httpserver/admin_auth_routes.h

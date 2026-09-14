@@ -3,6 +3,7 @@
 #include <sqlite3.h>
 
 #include <algorithm>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -152,6 +153,15 @@ Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()
             exec(handle, "ALTER TABLE chunks ADD COLUMN dim INTEGER NOT NULL DEFAULT 0");
         }
 
+        // v2 -> v3: structured data beside the text. Nullable, so every
+        // existing row reads as "no metadata" -- an ordinary chunk -- and
+        // the FTS triggers below never see the column: metadata is never
+        // indexed, which is the archive-rich / surface-thin rule at the
+        // storage layer.
+        if (!has_column(handle, "chunks", "metadata")) {
+            exec(handle, "ALTER TABLE chunks ADD COLUMN metadata TEXT");
+        }
+
         // An EXTERNAL-CONTENT index: the text lives once, in `chunks`, and FTS5
         // holds only the inverted index over it. Storing it twice would double
         // a corpus on disk and create a second copy to fall out of step.
@@ -201,9 +211,20 @@ void Store::replace_source(std::string_view source, const std::vector<std::strin
 
 void Store::replace_source(std::string_view source, const std::vector<std::string>& chunks,
                            const std::vector<std::vector<float>>& vectors) {
+    replace_source(source, chunks, vectors, {});
+}
+
+void Store::replace_source(std::string_view source, const std::vector<std::string>& chunks,
+                           const std::vector<std::vector<float>>& vectors,
+                           const std::vector<std::string>& metadata) {
     if (!vectors.empty() && vectors.size() != chunks.size()) {
         throw std::runtime_error("replace_source: " + std::to_string(vectors.size()) +
                                  " vector(s) for " + std::to_string(chunks.size()) + " chunk(s)");
+    }
+    if (!metadata.empty() && metadata.size() < chunks.size()) {
+        throw std::runtime_error("replace_source: " + std::to_string(metadata.size()) +
+                                 " metadata string(s) for " + std::to_string(chunks.size()) +
+                                 " chunk(s)");
     }
     sqlite3* handle = impl_->connection.get();
 
@@ -217,9 +238,10 @@ void Store::replace_source(std::string_view source, const std::vector<std::strin
             fail(handle, "could not clear the previous chunks");
         }
 
-        StatementPtr insert = prepare(
-            handle,
-            "INSERT INTO chunks(source, ordinal, text, embedding, dim) VALUES(?, ?, ?, ?, ?)");
+        StatementPtr insert =
+            prepare(handle,
+                    "INSERT INTO chunks(source, ordinal, text, embedding, dim, metadata)"
+                    " VALUES(?, ?, ?, ?, ?, ?)");
         for (std::size_t index = 0; index < chunks.size(); ++index) {
             sqlite3_reset(insert.get());
             bind_text(insert.get(), 1, source);
@@ -234,6 +256,11 @@ void Store::replace_source(std::string_view source, const std::vector<std::strin
                                   SQLITE_TRANSIENT);
                 sqlite3_bind_int64(insert.get(), 5,
                                    static_cast<sqlite3_int64>(vectors[index].size()));
+            }
+            if (metadata.empty() || metadata[index].empty()) {
+                sqlite3_bind_null(insert.get(), 6);
+            } else {
+                bind_text(insert.get(), 6, metadata[index]);
             }
             if (sqlite3_step(insert.get()) != SQLITE_DONE) {
                 fail(handle, "could not store a chunk");
@@ -252,6 +279,78 @@ std::int64_t Store::delete_source(std::string_view source) {
     return sqlite3_changes(handle);
 }
 
+std::int64_t Store::update_metadata(std::string_view source, std::string_view metadata) {
+    sqlite3* handle = impl_->connection.get();
+    // An UPDATE that names only `metadata` fires the FTS update trigger with
+    // old.text == new.text: the index is rewritten to the same bytes, and the
+    // vector column is not on the statement at all. The test that reads the
+    // vector back after an edit is what holds this to "not re-embedded".
+    StatementPtr update = prepare(handle, "UPDATE chunks SET metadata = ? WHERE source = ?");
+    if (metadata.empty()) {
+        sqlite3_bind_null(update.get(), 1);
+    } else {
+        bind_text(update.get(), 1, metadata);
+    }
+    bind_text(update.get(), 2, source);
+    if (sqlite3_step(update.get()) != SQLITE_DONE) {
+        fail(handle, "could not update the metadata");
+    }
+    return sqlite3_changes(handle);
+}
+
+namespace {
+
+/// Reads the `id, source, ordinal, text, metadata` columns of a stepped row.
+[[nodiscard]] Chunk chunk_row(sqlite3_stmt* statement) {
+    Chunk chunk;
+    chunk.id = sqlite3_column_int64(statement, 0);
+    chunk.source = column_text(statement, 1);
+    chunk.ordinal = sqlite3_column_int64(statement, 2);
+    chunk.text = column_text(statement, 3);
+    chunk.metadata = column_text(statement, 4);
+    return chunk;
+}
+
+}  // namespace
+
+std::vector<Chunk> Store::chunks_with_metadata() const {
+    StatementPtr select = prepare(impl_->connection.get(),
+                                  "SELECT id, source, ordinal, text, metadata FROM chunks"
+                                  " WHERE metadata IS NOT NULL ORDER BY id");
+    std::vector<Chunk> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out.push_back(chunk_row(select.get()));
+    }
+    return out;
+}
+
+std::optional<Chunk> Store::chunk_by_id(std::int64_t id) const {
+    StatementPtr select = prepare(impl_->connection.get(),
+                                  "SELECT id, source, ordinal, text, metadata FROM chunks"
+                                  " WHERE id = ?");
+    sqlite3_bind_int64(select.get(), 1, id);
+    if (sqlite3_step(select.get()) != SQLITE_ROW) {
+        return std::nullopt;
+    }
+    return chunk_row(select.get());
+}
+
+std::vector<float> Store::chunk_vector(std::int64_t id) const {
+    StatementPtr select =
+        prepare(impl_->connection.get(), "SELECT embedding FROM chunks WHERE id = ? AND dim > 0");
+    sqlite3_bind_int64(select.get(), 1, id);
+    if (sqlite3_step(select.get()) != SQLITE_ROW) {
+        return {};
+    }
+    const void* bytes = sqlite3_column_blob(select.get(), 0);
+    const int size = sqlite3_column_bytes(select.get(), 0);
+    if (bytes == nullptr || size <= 0) {
+        return {};
+    }
+    return from_blob(
+        std::string_view{static_cast<const char*>(bytes), static_cast<std::size_t>(size)});
+}
+
 std::vector<SearchHit> Store::search(std::string_view query, int limit) const {
     const std::string match = fts_match_query(query);
     if (match.empty()) {
@@ -262,7 +361,8 @@ std::vector<SearchHit> Store::search(std::string_view query, int limit) const {
 
     sqlite3* handle = impl_->connection.get();
     StatementPtr select = prepare(handle,
-                                  "SELECT c.id, c.source, c.ordinal, c.text, bm25(chunks_fts)"
+                                  "SELECT c.id, c.source, c.ordinal, c.text, bm25(chunks_fts),"
+                                  "       c.metadata"
                                   "  FROM chunks_fts"
                                   "  JOIN chunks c ON c.id = chunks_fts.rowid"
                                   " WHERE chunks_fts MATCH ?"
@@ -279,6 +379,7 @@ std::vector<SearchHit> Store::search(std::string_view query, int limit) const {
         hit.chunk.ordinal = sqlite3_column_int64(select.get(), 2);
         hit.chunk.text = column_text(select.get(), 3);
         hit.score = normalize_bm25(sqlite3_column_double(select.get(), 4));
+        hit.chunk.metadata = column_text(select.get(), 5);
         hit.retriever = "lexical";
         hits.push_back(std::move(hit));
     }
@@ -295,8 +396,8 @@ std::vector<SearchHit> Store::search_vector(const std::vector<float>& query_vect
     // Brute force over every vector: the recorded default, revisited when a
     // collection outgrows a linear scan. `dim > 0` leaves lexical-only rows
     // out rather than scoring them at zero and letting them sink the list.
-    StatementPtr select =
-        prepare(handle, "SELECT id, source, ordinal, text, embedding FROM chunks WHERE dim > 0");
+    StatementPtr select = prepare(
+        handle, "SELECT id, source, ordinal, text, embedding, metadata FROM chunks WHERE dim > 0");
     while (sqlite3_step(select.get()) == SQLITE_ROW) {
         const void* bytes = sqlite3_column_blob(select.get(), 4);
         const int size = sqlite3_column_bytes(select.get(), 4);
@@ -308,6 +409,7 @@ std::vector<SearchHit> Store::search_vector(const std::vector<float>& query_vect
         hit.chunk.source = column_text(select.get(), 1);
         hit.chunk.ordinal = sqlite3_column_int64(select.get(), 2);
         hit.chunk.text = column_text(select.get(), 3);
+        hit.chunk.metadata = column_text(select.get(), 5);
         hit.score =
             cosine(query_vector, from_blob(std::string_view{static_cast<const char*>(bytes),
                                                             static_cast<std::size_t>(size)}));

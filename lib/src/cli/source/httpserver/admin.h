@@ -9,6 +9,7 @@
 #include "httpserver/admin_auth_routes.h"
 #include "httpserver/admin_config.h"
 #include "httpserver/admin_events.h"
+#include "httpserver/admin_knowledge.h"
 #include "httpserver/http_types.h"
 #include "httpserver/jobs.h"
 
@@ -22,6 +23,8 @@
 /// first is open for OpenAI-client compatibility, the second is gated and
 /// mutating, and a route can only be in one of them.
 namespace apogee::httpserver {
+
+class Handler;
 
 struct AdminOptions {
     std::filesystem::path config_path;
@@ -59,6 +62,11 @@ public:
     [[nodiscard]] HttpResponse get_agent(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse put_agent(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse delete_agent(const HttpRequest& request, std::string_view name);
+
+    /// The knowledge routes borrow the inference plane: its harness runs the
+    /// clerk, its served set decides which backend may.
+    [[nodiscard]] HttpResponse capture_knowledge(Handler& plane, const HttpRequest& request);
+    [[nodiscard]] HttpResponse create_knowledge(Handler& plane, const HttpRequest& request);
 
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);

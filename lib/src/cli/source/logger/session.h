@@ -162,4 +162,10 @@ void save(const Session& session);
 /// What `--continue` resolves to.
 [[nodiscard]] std::optional<Session> most_recent();
 
+/// A conversation as plain text for a reader that is not a model client --
+/// the knowledge clerk, above all: `User: ...` and `Assistant: ...` turns
+/// separated by blank lines, system messages, tool results and empty turns
+/// left out. Only the participants' words are the participants' words.
+[[nodiscard]] std::string transcript_text(const std::vector<harness::ChatMessage>& messages);
+
 }  // namespace apogee::logger

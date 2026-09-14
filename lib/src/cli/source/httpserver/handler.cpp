@@ -30,31 +30,12 @@ constexpr std::string_view kNewSession = "new";
 constexpr std::string_view kSessionHeader = "X-Apogee-Session-Id";
 constexpr std::string_view kToolsHeader = "X-Apogee-Tools-Used";
 constexpr std::string_view kBackendError = "backend_error";
-constexpr int kUnprocessable = 400;
 constexpr int kNotFound = 404;
 constexpr int kUnavailable = 503;
 constexpr int kBadGateway = 502;
 
-/// A problem with the request, answered in the OpenAI error shape.
-struct HttpError {
-    int status = kUnprocessable;
-    std::string message;
-    std::string type{kInvalidRequestError};
-    /// Extra fields beside `message` and `type` -- the session id on a 404.
-    nlohmann::json extra = nlohmann::json::object();
-};
-
-[[nodiscard]] nlohmann::json error_json(const HttpError& error) {
-    nlohmann::json body = error_body(error.message, error.type);
-    for (const auto& [key, value] : error.extra.items()) {
-        body["error"][key] = value;
-    }
-    return body;
-}
-
-[[nodiscard]] HttpResponse to_response(const HttpError& error) {
-    return json_response(error.status, error_json(error));
-}
+// `HttpError`, `error_json` and `to_response` live in http_types.h: the
+// admin plane borrows `resolve_served` and needs to catch what it throws.
 
 [[nodiscard]] std::int64_t now_seconds() {
     return std::chrono::duration_cast<std::chrono::seconds>(

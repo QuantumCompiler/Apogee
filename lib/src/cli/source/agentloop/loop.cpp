@@ -109,6 +109,7 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
         // coexist with tools applies it on the tools-less final pass, and one
         // whose mode can applies it throughout.
         request.transient.response_schema = options.response_schema;
+        request.transient.side_request = options.side_request;
 
         harness::ChatResponse response;
         bool streamed = false;

@@ -385,6 +385,10 @@ PermissionLevel PermissionsConfig::level(std::string_view tool) const noexcept {
     return it == levels.end() ? PermissionLevel::Ask : it->second;
 }
 
+std::string KnowledgeConfig::collection() const {
+    return db.empty() ? std::string{kDefaultCollection} : db;
+}
+
 bool ToolsConfig::is_disabled(std::string_view toolset) const noexcept {
     for (const std::string& name : disabled) {
         if (name == toolset) {
@@ -690,6 +694,24 @@ Config parse_config(std::string_view content, std::string_view origin) {
             for (const YAML::Node& item : disabled) {
                 config.tools.disabled.push_back(scalar(item, origin, "tools.disabled[]"));
             }
+        }
+    }
+
+    if (const YAML::Node knowledge = root["knowledge"];
+        knowledge.IsDefined() && !knowledge.IsNull()) {
+        if (!knowledge.IsMap()) {
+            fail(origin, "knowledge: expected a mapping");
+        }
+        config.knowledge.auto_capture =
+            boolean(knowledge["auto_capture"], origin, "knowledge.auto_capture", false);
+        config.knowledge.db = scalar(knowledge["db"], origin, "knowledge.db");
+        if (config.knowledge.db.find("..") != std::string::npos ||
+            config.knowledge.db.find('/') != std::string::npos ||
+            config.knowledge.db.find('\\') != std::string::npos) {
+            // A collection is NAMED, not pathed -- the rule `embed` applies,
+            // caught here rather than at the first capture.
+            fail(origin,
+                 "knowledge.db: '" + config.knowledge.db + "' is not a plain collection name");
         }
     }
 

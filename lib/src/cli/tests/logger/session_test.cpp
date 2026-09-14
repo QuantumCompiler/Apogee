@@ -317,3 +317,28 @@ TEST_CASE("a rerank judge that has since been deleted is dropped with a warning,
     CHECK(apogee::logger::deserialize(apogee::logger::serialize(session), {{"mock"}})
               .warnings.empty());
 }
+
+TEST_CASE("transcript_text renders the participants' turns and nothing else",
+          "[logger][session][transcript]") {
+    using apogee::harness::ChatMessage;
+    apogee::harness::ToolResult result;
+    result.tool_call_id = "c1";
+    result.name = "git_diff";
+    result.content = "TOOL OUTPUT";
+    ChatMessage calls = ChatMessage::assistant("");
+    calls.tool_calls.push_back(apogee::harness::ToolCall{"c1", "git_diff", "{}"});
+    const std::vector<ChatMessage> messages{
+        ChatMessage::system("You are terse."),
+        ChatMessage::user("  drop the cancel button?  "),
+        calls,
+        ChatMessage::from_tool_result(result),
+        ChatMessage::assistant("yes -- testers mistook it for back\n"),
+        ChatMessage::user("   "),
+    };
+    const std::string text = apogee::logger::transcript_text(messages);
+    CHECK(text == "User: drop the cancel button?\n\nAssistant: yes -- testers mistook it for back");
+    CHECK(text.find("terse") == std::string::npos);
+    CHECK(text.find("TOOL OUTPUT") == std::string::npos);
+    CHECK(apogee::logger::transcript_text({}).empty());
+    CHECK(apogee::logger::transcript_text({ChatMessage::system("only")}).empty());
+}

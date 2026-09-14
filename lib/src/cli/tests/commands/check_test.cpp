@@ -9,6 +9,8 @@
 #include "harness/config.h"
 #include "harness/layout.h"
 #include "httpserver/admin_auth.h"
+#include "knowledge/record.h"
+#include "knowledge/store.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
@@ -823,4 +825,82 @@ TEST_CASE("the Agents section: bundled files present or warned, and every entry 
     CHECK(fresh_report.passed());
     (void)apply_fixes(fresh_inputs);
     CHECK(std::filesystem::exists(fresh.root / "schemas" / "merge-request-output.json"));
+}
+
+TEST_CASE(
+    "the doctor's Knowledge section: no records is fine, records are counted, and the "
+    "raw archive must be private",
+    "[commands][check][knowledge]") {
+    const Install install;
+    CheckInputs inputs = inputs_with_config(install, "backends:\n  mock:\n    type: mock\n");
+    const auto rows_named = [](const apogee::commands::CheckReport& report, std::string_view name) {
+        std::vector<apogee::commands::CheckRow> out;
+        for (const apogee::commands::CheckRow& row : report.rows) {
+            if (row.section == "Knowledge" && row.name == name) {
+                out.push_back(row);
+            }
+        }
+        return out;
+    };
+
+    // A fresh install: both rows ok, and honest about being empty.
+    apogee::commands::CheckReport report = apogee::commands::run_checks(inputs);
+    REQUIRE(rows_named(report, "collection: knowledge").size() == 1);
+    CHECK(rows_named(report, "collection: knowledge").front().status ==
+          apogee::commands::Status::Ok);
+    CHECK(rows_named(report, "collection: knowledge").front().detail.find("no records yet") !=
+          std::string::npos);
+    REQUIRE(rows_named(report, "raw archive").size() == 1);
+    CHECK(rows_named(report, "raw archive").front().detail.find("none archived") !=
+          std::string::npos);
+
+    // Two records captured: counted, the index verified, the archive private.
+    {
+        apogee::knowledge::Store store{install.root / "embeddings" / "knowledge.db",
+                                       install.root / "knowledge" / "raw"};
+        for (const char* id : {"kr-20260913T120000Z-000001", "kr-20260913T120001Z-000001"}) {
+            apogee::knowledge::Record record;
+            record.id = id;
+            record.intent = "why";
+            record.status = "shipped";
+            record.timestamp = "2026-09-13T12:00:00.000000Z";
+            store.put(record, {}, "raw words");
+        }
+    }
+    report = apogee::commands::run_checks(inputs);
+    CHECK(rows_named(report, "collection: knowledge").front().detail.find("2 record(s)") !=
+          std::string::npos);
+    CHECK(rows_named(report, "collection: knowledge").front().detail.find("text index ok") !=
+          std::string::npos);
+    CHECK(rows_named(report, "raw archive").front().status == apogee::commands::Status::Ok);
+    CHECK(rows_named(report, "raw archive").front().detail.find("2 conversation(s)") !=
+          std::string::npos);
+
+    // The collection the config names is the one inspected.
+    CheckInputs renamed = inputs_with_config(
+        install, "backends:\n  mock:\n    type: mock\nknowledge:\n  db: decisions\n");
+    report = apogee::commands::run_checks(renamed);
+    CHECK(rows_named(report, "collection: decisions").size() == 1);
+    CHECK(rows_named(report, "collection: knowledge").empty());
+
+#if !defined(_WIN32)
+    // A world-readable archive fails, and --fix tightens it.
+    std::error_code code;
+    std::filesystem::permissions(install.root / "knowledge" / "raw",
+                                 std::filesystem::perms::owner_all |
+                                     std::filesystem::perms::others_read |
+                                     std::filesystem::perms::others_exec,
+                                 std::filesystem::perm_options::replace, code);
+    report = apogee::commands::run_checks(inputs);
+    CHECK(rows_named(report, "raw archive").front().status == apogee::commands::Status::Fail);
+    CHECK(rows_named(report, "raw archive").front().remedy.find("chmod 700") != std::string::npos);
+    const std::vector<std::string> done = apogee::commands::apply_fixes(inputs);
+    bool tightened = false;
+    for (const std::string& line : done) {
+        tightened = tightened || line.find("knowledge/raw") != std::string::npos;
+    }
+    CHECK(tightened);
+    report = apogee::commands::run_checks(inputs);
+    CHECK(rows_named(report, "raw archive").front().status == apogee::commands::Status::Ok);
+#endif
 }

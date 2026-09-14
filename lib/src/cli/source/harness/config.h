@@ -288,6 +288,24 @@ struct AgentConfig {
     std::string save_subdir;
 };
 
+/// The `knowledge:` section -- the organizational knowledge layer's two
+/// settings. Read-only here: hand-edited, like `auto_rag`.
+struct KnowledgeConfig {
+    /// Distil one record from an interactive chat when it ends cleanly. Off
+    /// by default: a generation call per session, and most chats are
+    /// low-signal.
+    bool auto_capture = false;
+
+    /// The collection records go into. Empty means the default, `knowledge`.
+    std::string db;
+
+    /// The default collection name.
+    static constexpr std::string_view kDefaultCollection = "knowledge";
+
+    /// `db`, or the default when unset.
+    [[nodiscard]] std::string collection() const;
+};
+
 /// Optional search roots that pre-populate path prompts. All optional; a
 /// missing value means "no default", not an error.
 struct PathsConfig {
@@ -389,6 +407,7 @@ struct Config {
 
     PermissionsConfig permissions;
     ToolsConfig tools;
+    KnowledgeConfig knowledge;
 
     /// MCP servers keyed by name AS WRITTEN, compared case-insensitively
     /// for the same reason `backends` is.

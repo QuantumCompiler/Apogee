@@ -25,7 +25,7 @@ if(NOT DEFINED APOGEE_SOURCE_DIR)
     message(FATAL_ERROR "APOGEE_SOURCE_DIR must be set")
 endif()
 
-set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp)
+set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
@@ -115,6 +115,33 @@ if(NOT VIOLATIONS STREQUAL "")
     string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
     message(FATAL_ERROR "the secrets package includes a surface:\n${pretty}\n"
                         "secrets/ may include only harness/ and itself.")
+endif()
+
+# `knowledge/` is a domain core: it may include the chunk store, the loop,
+# the harness, the platform seam and itself -- never a surface. The day it
+# includes `commands/` or `httpserver/`, the record logic every surface
+# shares has grown a dependency on one of them, and the parity between the
+# CLI capture, chat's /capture and the HTTP twin stops being structural.
+file(GLOB_RECURSE knowledge_sources "${APOGEE_SOURCE_DIR}/knowledge/*.h"
+                                    "${APOGEE_SOURCE_DIR}/knowledge/*.cpp")
+if(knowledge_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/knowledge — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS knowledge_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(knowledge|embedstore|agentloop|agent|harness|platform)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  knowledge/${name} reaches a surface: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the knowledge package includes a surface:\n${pretty}\n"
+                        "knowledge/ may include only embedstore/, agentloop/, agent/, harness/, "
+                        "platform/ and itself.")
 endif()
 
 list(LENGTH ALL_SOURCES count)

@@ -72,6 +72,14 @@ HttpResponse AdminHandler::set_mcp_server_enabled(const HttpRequest& request,
     return admin_set_mcp_server_enabled(config_context(), name, request);
 }
 
+HttpResponse AdminHandler::capture_knowledge(Handler& plane, const HttpRequest& request) {
+    return admin_capture_knowledge(config_context(), plane, request);
+}
+
+HttpResponse AdminHandler::create_knowledge(Handler& plane, const HttpRequest& request) {
+    return admin_create_knowledge(config_context(), plane, request);
+}
+
 HttpResponse AdminHandler::list_permissions(const HttpRequest&) {
     return admin_list_permissions(config_context());
 }

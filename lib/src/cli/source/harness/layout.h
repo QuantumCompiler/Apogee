@@ -78,6 +78,15 @@ struct LayoutEntry {
 
 /// `<APOGEE_HOME>/analyses` -- saved `analyze` reports, one directory per agent.
 [[nodiscard]] std::filesystem::path analyses_dir();
+
+/// `<APOGEE_HOME>/knowledge` -- the knowledge layer's own files: the raw
+/// conversations behind captured records live in `raw/` beneath it. Private:
+/// a raw conversation may hold anything the user typed.
+[[nodiscard]] std::filesystem::path knowledge_dir();
+
+/// `<APOGEE_HOME>/knowledge/raw` -- one `<record id>.md` per archived
+/// conversation. Created by the first capture, never seeded, never exported.
+[[nodiscard]] std::filesystem::path knowledge_raw_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 
 /// What `seed_data_directory()` did.

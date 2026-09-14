@@ -14,7 +14,7 @@ namespace {
 /// Order matters only for readability -- `create_directories` handles nesting
 /// -- but keeping it stable keeps `apogee check` output stable, and diffing
 /// two installs is easier when both enumerate in the same order.
-constexpr std::array<LayoutEntry, 11> kDirectories{{
+constexpr std::array<LayoutEntry, 12> kDirectories{{
     // `config` is a row like any other, even though `config_dir()` is the
     // accessor callers use. Leaving it out was the first version, and it
     // immediately produced the bug this whole file exists to prevent: seeding
@@ -31,6 +31,7 @@ constexpr std::array<LayoutEntry, 11> kDirectories{{
     {"prompts", "agents' system prompts, loaded by 'apogee analyze --agent'", false, true},
     {"schemas", "agents' output schemas (JSON Schema), loaded beside the prompts", false, true},
     {"analyses", "reports saved by 'apogee analyze', one directory per agent", false, true},
+    {"knowledge", "captured decision records' raw conversations (knowledge/raw)", true, true},
     {"cache", "downloads and scratch state, safe to delete", false, false},
 }};
 
@@ -78,6 +79,14 @@ std::filesystem::path schemas_dir() {
 
 std::filesystem::path analyses_dir() {
     return apogee_home() / "analyses";
+}
+
+std::filesystem::path knowledge_dir() {
+    return apogee_home() / "knowledge";
+}
+
+std::filesystem::path knowledge_raw_dir() {
+    return knowledge_dir() / "raw";
 }
 
 bool supports_private_modes() noexcept {

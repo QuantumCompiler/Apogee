@@ -63,6 +63,12 @@ struct Options {
     /// prose.
     std::string response_schema;
 
+    /// This run is not a turn of the caller's conversation -- a clerk
+    /// distilling a chat, a background summary -- and is marked so on every
+    /// request (`ChatRequest::Transient::side_request`): a local backend
+    /// runs it on its own context, and the session's cache is untouched.
+    bool side_request = false;
+
     /// Hard ceiling on model→tool→model cycles.
     ///
     /// A model can loop calling the same tool forever, and without a bound the

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nlohmann/json_fwd.hpp>
+#include <nlohmann/json.hpp>
 
 #include <functional>
 #include <map>
@@ -82,5 +82,23 @@ inline constexpr std::string_view kServerError = "server_error";
 
 [[nodiscard]] HttpResponse error_response(int status, std::string_view message,
                                           std::string_view type = kInvalidRequestError);
+
+/// A problem with a request, thrown from deep inside a handler and answered
+/// in the OpenAI error shape at the top. Public so a route that borrows
+/// another handler's resolution -- the admin plane asking the inference
+/// plane which backends it serves -- can catch what it throws.
+struct HttpError {
+    int status = 400;
+    std::string message;
+    std::string type{kInvalidRequestError};
+    /// Extra fields beside `message` and `type` -- the session id on a 404.
+    nlohmann::json extra = nlohmann::json::object();
+};
+
+/// The error envelope for `error`, extras included.
+[[nodiscard]] nlohmann::json error_json(const HttpError& error);
+
+/// `error` as a response.
+[[nodiscard]] HttpResponse to_response(const HttpError& error);
 
 }  // namespace apogee::httpserver

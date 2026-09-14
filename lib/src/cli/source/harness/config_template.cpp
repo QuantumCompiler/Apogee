@@ -302,6 +302,21 @@ backends:
 #     # backend: embedder    # which entry embeds this collection (default: models.default_embedding)
 #     # retriever: auto      # lexical | vector | hybrid | auto -- checked by `apogee check`
 #     # rerank: off          # a backend name, or off
+
+# ── Knowledge (captured decisions) ───────────────────────────────────────────
+# `apogee knowledge capture` distils a conversation into one canonical record
+# -- the why behind a decision, what was chosen, whether it shipped -- and
+# stores it in an ordinary collection (the default is `knowledge`, registered
+# under `embeddings:` above on first use), with the raw conversation archived
+# privately under knowledge/raw/. `/capture` in chat does the same for the
+# live conversation using the model already loaded.
+#
+# auto_capture distils one record from every interactive chat that ends
+# cleanly. Off by default: it costs a generation call per session, and most
+# chats carry nothing worth keeping.
+# knowledge:
+#   auto_capture: false
+#   db: knowledge          # the collection records go into
 )APOGEE";
 
 }  // namespace

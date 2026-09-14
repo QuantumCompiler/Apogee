@@ -24,6 +24,7 @@
 #include "harness/layout.h"
 #include "harness/paths.h"
 #include "httpserver/admin_auth.h"
+#include "knowledge/store.h"
 #include "models/gguf_inspect.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
@@ -641,6 +642,75 @@ void check_agents(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
+/// The `Knowledge` section: the records collection readable with its text
+/// index intact, and the raw archive private. Neither exists on a fresh
+/// install, and that is fine -- the first capture creates both.
+void check_knowledge(CheckReport& report, const CheckInputs& inputs) {
+    if (inputs.config_missing || !inputs.config_error.empty()) {
+        return;
+    }
+    std::error_code code;
+    const std::string db = inputs.config.knowledge.collection();
+    // The collection lives under the embeddings row, like every other; the
+    // path is spelled from the inspected home so a test tree stays hermetic.
+    const std::filesystem::path collection = inputs.home / "embeddings" / (db + ".db");
+    const std::string label = "collection: " + db;
+    if (!std::filesystem::exists(collection, code)) {
+        add(report, Status::Ok, "Knowledge", label,
+            "no records yet -- 'apogee knowledge capture' creates it");
+    } else {
+        try {
+            const knowledge::Store store{collection, {}};
+            const std::size_t records = store.list().size();
+            const std::string trouble = store.chunks().verify_index();
+            if (trouble.empty()) {
+                add(report, Status::Ok, "Knowledge", label,
+                    std::to_string(records) + " record(s), text index ok");
+            } else {
+                add(report, Status::Fail, "Knowledge", label,
+                    std::to_string(records) + " record(s), text index FAILED -- " + trouble);
+            }
+        } catch (const std::exception& e) {
+            add(report, Status::Fail, "Knowledge", label, std::string{"unreadable -- "} + e.what());
+        }
+    }
+
+    const std::filesystem::path raw = inputs.home / "knowledge" / "raw";
+    const std::string archive = "raw archive";
+    if (!std::filesystem::exists(raw, code)) {
+        add(report, Status::Ok, "Knowledge", archive,
+            "none archived yet -- created by the first capture");
+        return;
+    }
+    if (!harness::supports_private_modes()) {
+        add(report, Status::Skipped, "Knowledge", archive,
+            "mode check not applicable on this platform (no POSIX file modes)");
+        return;
+    }
+    const std::filesystem::perms mode =
+        std::filesystem::status(raw, code).permissions() & std::filesystem::perms::mask;
+    const bool leaks =
+        (mode & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) !=
+        std::filesystem::perms::none;
+    if (leaks) {
+        add(report, Status::Fail, "Knowledge", archive,
+            "is readable by other users, and it holds raw conversations",
+            "chmod 700 '" + raw.string() + "'   (or: apogee check --fix)");
+        return;
+    }
+    std::size_t files = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(raw, code)) {
+        if (code) {
+            break;
+        }
+        if (entry.is_regular_file(code)) {
+            ++files;
+        }
+    }
+    add(report, Status::Ok, "Knowledge", archive,
+        "private (0700), " + std::to_string(files) + " conversation(s)");
+}
+
 CheckReport run_checks(const CheckInputs& inputs) {
     CheckReport report;
     check_version(report, inputs);
@@ -648,6 +718,7 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_tools(report, inputs);
     check_mcp(report, inputs);
     check_agents(report, inputs);
+    check_knowledge(report, inputs);
     check_filesystem(report, inputs);
     check_secrets(report, inputs);
     check_credential_store(report, inputs);
@@ -718,6 +789,24 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
                                          std::filesystem::perm_options::add, code);
             if (!code) {
                 done.push_back("made executable " + server.command);
+            }
+        }
+    }
+    // The raw archive is a private directory the first capture made rather
+    // than the seeding path; its mode is the install's to repair all the same.
+    if (harness::supports_private_modes()) {
+        const std::filesystem::path raw = inputs.home / "knowledge" / "raw";
+        std::error_code code;
+        if (std::filesystem::is_directory(raw, code)) {
+            const std::filesystem::perms mode =
+                std::filesystem::status(raw, code).permissions() & std::filesystem::perms::mask;
+            if ((mode & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) !=
+                std::filesystem::perms::none) {
+                std::filesystem::permissions(raw, std::filesystem::perms::owner_all,
+                                             std::filesystem::perm_options::replace, code);
+                if (!code) {
+                    done.push_back("set " + raw.string() + " to 0700");
+                }
             }
         }
     }

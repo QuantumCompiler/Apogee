@@ -83,6 +83,7 @@ const std::map<std::string, Classification>& table() {
         {"agents create", twin("POST", "/v1/admin/agents")},
         {"agents edit", twin("PUT", "/v1/admin/agents/{id}")},
         {"agents delete", twin("DELETE", "/v1/admin/agents/{id}")},
+        {"knowledge capture", twin("POST", "/v1/admin/knowledge/capture")},
         // --- backfills: owned by the area that owns the CLI action ----------
         {"embed ingest", backfill("embedstore: the embeddings data plane, an async job")},
         {"embed delete", backfill("embedstore: the embeddings data plane")},

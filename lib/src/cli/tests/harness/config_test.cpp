@@ -490,3 +490,32 @@ TEST_CASE("is_vendor_cli names exactly the four CLI types", "[config][vendor]") 
     CHECK_FALSE(is_vendor_cli(BackendType::LlamaCpp));
     CHECK_FALSE(is_vendor_cli(BackendType::Mock));
 }
+
+TEST_CASE("knowledge: parses auto_capture and db, defaults the collection, and refuses a path",
+          "[config][knowledge]") {
+    const apogee::harness::Config empty = apogee::harness::parse_config("", "<test>");
+    CHECK_FALSE(empty.knowledge.auto_capture);
+    CHECK(empty.knowledge.db.empty());
+    CHECK(empty.knowledge.collection() == "knowledge");
+
+    const apogee::harness::Config set = apogee::harness::parse_config(
+        "knowledge:\n  auto_capture: true\n  db: decisions\n", "<test>");
+    CHECK(set.knowledge.auto_capture);
+    CHECK(set.knowledge.db == "decisions");
+    CHECK(set.knowledge.collection() == "decisions");
+
+    CHECK_THROWS_AS(
+        apogee::harness::parse_config("knowledge:\n  auto_capture: yes-please\n", "<t>"),
+        apogee::harness::ConfigError);
+    CHECK_THROWS_AS(apogee::harness::parse_config("knowledge: 7\n", "<t>"),
+                    apogee::harness::ConfigError);
+    CHECK_THROWS_AS(apogee::harness::parse_config("knowledge:\n  db: ../escape\n", "<t>"),
+                    apogee::harness::ConfigError);
+    CHECK_THROWS_AS(apogee::harness::parse_config("knowledge:\n  db: a/b\n", "<t>"),
+                    apogee::harness::ConfigError);
+    // The shipped template documents the section, commented out.
+    CHECK(std::string{apogee::harness::config_template()}.find("# knowledge:") !=
+          std::string::npos);
+    CHECK(std::string{apogee::harness::config_template()}.find("#   auto_capture: false") !=
+          std::string::npos);
+}

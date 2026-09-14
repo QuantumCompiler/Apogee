@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <fstream>
 #include <iomanip>
@@ -309,6 +310,36 @@ std::optional<Session> most_recent() {
         return std::nullopt;
     }
     return sessions.front();
+}
+
+std::string transcript_text(const std::vector<harness::ChatMessage>& messages) {
+    std::string out;
+    for (const harness::ChatMessage& message : messages) {
+        std::string_view label;
+        if (message.role == harness::Role::User) {
+            label = "User: ";
+        } else if (message.role == harness::Role::Assistant) {
+            label = "Assistant: ";
+        } else {
+            continue;
+        }
+        const std::string text = message.content.plain_text();
+        std::size_t begin = 0;
+        while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])) != 0) {
+            ++begin;
+        }
+        std::size_t end = text.size();
+        while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) {
+            --end;
+        }
+        if (begin == end) {
+            continue;  // an assistant turn that only called tools
+        }
+        out += out.empty() ? "" : "\n\n";
+        out += label;
+        out += text.substr(begin, end - begin);
+    }
+    return out;
 }
 
 }  // namespace apogee::logger

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -42,6 +43,11 @@ struct Chunk {
     /// Position within that source, so chunks can be re-assembled in order.
     std::int64_t ordinal = 0;
     std::string text;
+    /// Structured data riding beside the text -- a knowledge record's full
+    /// JSON beside its thin index text. Empty for an ordinary ingested chunk
+    /// (stored NULL). Never searched: the text is what the index sees, and
+    /// this is what a reader decodes afterwards. Schema v3.
+    std::string metadata;
 };
 
 /// A retrieval hit.
@@ -91,8 +97,36 @@ public:
     void replace_source(std::string_view source, const std::vector<std::string>& chunks,
                         const std::vector<std::vector<float>>& vectors);
 
+    /// Replaces a source with chunks, their vectors, AND per-chunk metadata
+    /// (one string per chunk; an empty string stores NULL). `vectors` may be
+    /// empty for a lexical-only source; `metadata` may not be shorter than
+    /// `chunks` when given at all.
+    void replace_source(std::string_view source, const std::vector<std::string>& chunks,
+                        const std::vector<std::vector<float>>& vectors,
+                        const std::vector<std::string>& metadata);
+
     /// Removes every chunk belonging to `source`. Returns how many went.
     [[nodiscard]] std::int64_t delete_source(std::string_view source);
+
+    /// Rewrites the metadata of every chunk under `source`, touching nothing
+    /// else -- not the text, not the vector, not the FTS index. Returns how
+    /// many rows changed. **This is what lets a record's mutable fields be
+    /// edited without a re-embed**: the index is built from what does not
+    /// change, and what changes lives here.
+    [[nodiscard]] std::int64_t update_metadata(std::string_view source, std::string_view metadata);
+
+    /// Every chunk that carries metadata, in id order. The knowledge store's
+    /// listing walks this rather than every chunk, so a shared collection
+    /// holding plain documents beside records costs nothing to list.
+    [[nodiscard]] std::vector<Chunk> chunks_with_metadata() const;
+
+    /// One chunk by its id, or nullopt.
+    [[nodiscard]] std::optional<Chunk> chunk_by_id(std::int64_t id) const;
+
+    /// The stored vector of chunk `id`, or empty when it has none. Exposed
+    /// so a caller -- a test, above all -- can assert that an edit which must
+    /// not re-embed left the bytes alone.
+    [[nodiscard]] std::vector<float> chunk_vector(std::int64_t id) const;
 
     /// Lexical search. `limit` caps the hits returned.
     ///
@@ -173,7 +207,8 @@ private:
 
 /// The current schema version. Bumped when a migration is added.
 /// v2 added `chunks.embedding` and `chunks.dim`, and the `embed_model` /
-/// `embed_dim` keys in `store_meta`. A v1 store gains the columns on open.
-inline constexpr int kSchemaVersion = 2;
+/// `embed_dim` keys in `store_meta`. v3 added the nullable `chunks.metadata`
+/// column (knowledge records). A v1 or v2 store gains the columns on open.
+inline constexpr int kSchemaVersion = 3;
 
 }  // namespace apogee::embedstore

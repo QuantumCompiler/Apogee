@@ -1,6 +1,7 @@
 #include "commands/line_reader.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <iostream>
 #include <replxx.hxx>
 #include <utility>
@@ -90,12 +91,18 @@ EditingLineReader::~EditingLineReader() {
 }
 
 std::optional<std::string> EditingLineReader::read(std::string_view prompt) {
+    // replxx reports an aborted line (Ctrl-C) by setting errno to EAGAIN
+    // before returning null; a plain end of input (Ctrl-D) leaves it alone.
+    errno = 0;
     const char* line = impl_->editor.input(std::string{prompt});
     if (line == nullptr) {
         // EOF (Ctrl-D) or an interrupt (Ctrl-C). Both end the session, which
-        // is what a user pressing either expects.
+        // is what a user pressing either expects -- but only one of them is
+        // a clean exit, and the surface may want to know which.
+        interrupted_ = errno == EAGAIN;
         return std::nullopt;
     }
+    interrupted_ = false;
     return std::string{line};
 }
 

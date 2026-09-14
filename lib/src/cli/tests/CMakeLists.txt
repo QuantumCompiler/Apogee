@@ -117,6 +117,12 @@ add_executable(apogee_tests
     commands/analyze_test.cpp
     commands/agents_test.cpp
     httpserver/admin_agents_test.cpp
+    knowledge/record_test.cpp
+    knowledge/clerk_test.cpp
+    knowledge/store_test.cpp
+    embedstore/metadata_test.cpp
+    commands/knowledge_test.cpp
+    httpserver/admin_knowledge_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h
@@ -146,7 +152,10 @@ target_compile_definitions(apogee_tests PRIVATE
 # include across packages.
 target_include_directories(apogee_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
-target_link_libraries(apogee_tests PRIVATE apogee_core Catch2::Catch2WithMain)
+# The migration test builds a schema-v2 database by hand, through SQLite
+# itself, so the v3 migration runs against a real predecessor. Same
+# amalgamation the store uses, nothing else.
+target_link_libraries(apogee_tests PRIVATE apogee_core Catch2::Catch2WithMain apogee_sqlite3)
 apogee_set_target_options(apogee_tests)
 
 catch_discover_tests(apogee_tests)
@@ -372,6 +381,17 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/analyze-e2e
     )
     set_tests_properties(cli.analyze_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The knowledge layer on the real binary: capture on the scripted mock,
+    # --dry-run's zero footprint, overrides, a supersede, the raw archive
+    # present and the index text free of the attribution, the doctor's rows,
+    # a vendor CLI refused, and chat's /capture through the same core.
+    add_test(NAME cli.knowledge_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/knowledge_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/knowledge-e2e
+    )
+    set_tests_properties(cli.knowledge_lifecycle PROPERTIES TIMEOUT 120)
 endif()
 
 # Startup output discipline, under a real pseudo-terminal.
