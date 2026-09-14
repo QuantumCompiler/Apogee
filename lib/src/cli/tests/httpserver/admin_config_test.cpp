@@ -22,11 +22,16 @@
 namespace {
 
 using apogee::httpserver::admin_create_backend;
+using apogee::httpserver::admin_create_mcp_server;
 using apogee::httpserver::admin_delete_backend;
+using apogee::httpserver::admin_delete_mcp_server;
 using apogee::httpserver::admin_get_backend;
+using apogee::httpserver::admin_get_mcp_server;
 using apogee::httpserver::admin_list_backends;
+using apogee::httpserver::admin_list_mcp_servers;
 using apogee::httpserver::admin_list_permissions;
 using apogee::httpserver::admin_put_permission;
+using apogee::httpserver::admin_set_mcp_server_enabled;
 using apogee::httpserver::admin_set_role;
 using apogee::httpserver::AdminConfigContext;
 using apogee::httpserver::HttpRequest;
@@ -278,4 +283,63 @@ TEST_CASE("the permissions twin edits the same line the CLI edits, byte for byte
     put.body = R"({"level":"ask"})";
     CHECK(nlohmann::json::parse(admin_put_permission(fixture.context(), "write_file", put)
                                     .body)["restart_required"] == false);
+}
+
+TEST_CASE("the MCP server twins leave the same bytes the CLI leaves, and never list env values",
+          "[httpserver][admin][mcp]") {
+    const Fixture fixture;
+    // Register-only over HTTP and on the CLI, with args.
+    HttpRequest post;
+    post.method = "POST";
+    post.body = R"({"name":"ext","command":"/opt/srv","args":["--x","1"]})";
+    const HttpResponse created = admin_create_mcp_server(fixture.context(), post);
+    REQUIRE(created.status == 201);
+    const nlohmann::json view = nlohmann::json::parse(created.body);
+    CHECK(view["name"] == "ext");
+    CHECK(view["enabled"] == true);
+    CHECK(view["env_set"] == false);
+    CHECK(view["restart_required"] == true);
+    CHECK(view["directory"] == "");
+    fixture.cli({"mcp", "create", "ext", "--command", "/opt/srv", "--args", "--x", "1"});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+
+    // A duplicate is a 409; force replaces.
+    CHECK(admin_create_mcp_server(fixture.context(), post).status == 409);
+    post.body = R"({"name":"ext","command":"/opt/srv2","force":true})";
+    CHECK(admin_create_mcp_server(fixture.context(), post).status == 201);
+    post.body = R"({"command":"/opt/srv"})";
+    CHECK(admin_create_mcp_server(fixture.context(), post).status == 400);
+    post.body = R"({"name":"bad name","command":"/opt/srv"})";
+    CHECK(admin_create_mcp_server(fixture.context(), post).status == 400);
+
+    // The view: command, args, enabled, env presence -- and no env values.
+    fixture.cli({"mcp", "create", "ext", "--command", "/opt/srv2", "--force"});
+    const HttpResponse listed = admin_list_mcp_servers(fixture.context());
+    REQUIRE(listed.status == 200);
+    CHECK(nlohmann::json::parse(listed.body)["data"].size() == 1);
+    const HttpResponse one = admin_get_mcp_server(fixture.context(), "ext");
+    REQUIRE(one.status == 200);
+    CHECK(nlohmann::json::parse(one.body)["command"] == "/opt/srv2");
+    CHECK_FALSE(nlohmann::json::parse(one.body).contains("env"));
+    CHECK(admin_get_mcp_server(fixture.context(), "nope").status == 404);
+
+    // enable/disable: one line, byte-identical to the CLI.
+    HttpRequest put;
+    put.method = "PUT";
+    put.body = R"({"enabled":false})";
+    const HttpResponse disabled = admin_set_mcp_server_enabled(fixture.context(), "ext", put);
+    REQUIRE(disabled.status == 200);
+    CHECK(nlohmann::json::parse(disabled.body)["enabled"] == false);
+    fixture.cli({"mcp", "disable", "ext"});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+    put.body = R"({"enabled":"yes"})";
+    CHECK(admin_set_mcp_server_enabled(fixture.context(), "ext", put).status == 400);
+    put.body = R"({"enabled":true})";
+    CHECK(admin_set_mcp_server_enabled(fixture.context(), "nope", put).status == 404);
+
+    // Delete, both ways.
+    CHECK(admin_delete_mcp_server(fixture.context(), "ext").status == 200);
+    fixture.cli({"config", "delete-mcp-server", "ext"});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+    CHECK(admin_delete_mcp_server(fixture.context(), "ext").status == 404);
 }

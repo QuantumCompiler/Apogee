@@ -139,6 +139,41 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
         // Unlisted is `ask`, which is an answer, not a missing key.
         return std::string{harness::to_string(config.permissions.level(tool))};
     }
+    if (key == "mcp_servers") {
+        std::string out;
+        for (const std::string& name : config.mcp_server_names()) {
+            out += out.empty() ? "" : "\n";
+            out += name;
+        }
+        return out;
+    }
+    if (key.starts_with("mcp_servers.")) {
+        const std::string_view rest = key.substr(std::string_view{"mcp_servers."}.size());
+        const std::size_t dot = rest.find('.');
+        const harness::McpServerConfig* server = config.find_mcp_server(rest.substr(0, dot));
+        if (server == nullptr) {
+            return std::nullopt;
+        }
+        if (dot == std::string_view::npos) {
+            return render(server->command);
+        }
+        const std::string_view field = rest.substr(dot + 1);
+        if (field == "command") {
+            return render(server->command);
+        }
+        if (field == "enabled") {
+            return server->enabled ? "true" : "false";
+        }
+        if (field == "args" || field == "env") {
+            std::string out;
+            for (const std::string& item : field == "args" ? server->args : server->env) {
+                out += out.empty() ? "" : "\n";
+                out += item;
+            }
+            return out;
+        }
+        return std::nullopt;
+    }
     if (key == "tools.fs_root") {
         return render(config.tools.fs_root);
     }
@@ -413,6 +448,20 @@ void bind_set_role(CLI::App& parent, const RootContext& context, const std::stri
     });
 }
 
+void bind_delete_mcp_server(CLI::App& parent, const RootContext& context) {
+    auto name = std::make_shared<std::string>();
+    CLI::App* cmd = parent.add_subcommand("delete-mcp-server",
+                                          "Remove an MCP server entry (its files are left alone)");
+    cmd->add_option("name", *name, "The server's name")->required();
+    cmd->callback([&context, name]() {
+        const std::filesystem::path path = config_path_for(context);
+        apply_edit(path, [name](std::string_view content) {
+            return harness::delete_mcp_server(content, *name);
+        });
+        std::cout << "removed MCP server '" << *name << "' from " << path.string() << "\n";
+    });
+}
+
 void bind_set_permission(CLI::App& parent, const RootContext& context) {
     auto tool = std::make_shared<std::string>();
     auto level = std::make_shared<std::string>();
@@ -490,6 +539,7 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
     bind_set_role(*cmd, context, "set-default-extraction", "default_extraction",
                   "Set the backend used for structured extraction");
     bind_set_permission(*cmd, context);
+    bind_delete_mcp_server(*cmd, context);
     bind_get(*cmd, context);
     bind_format(*cmd, context);
 }

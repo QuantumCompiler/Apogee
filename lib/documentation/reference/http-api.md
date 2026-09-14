@@ -316,6 +316,43 @@ Every one of these writes goes through the same comment-preserving edit the
 CLI uses, so a file edited here is **byte-identical** to one edited from the
 terminal.
 
+### `GET /v1/admin/mcp-servers`
+
+Every `mcp_servers:` entry as a view: `{name, command, args, enabled,
+env_set}`. `env_set` says whether the entry carries an `env:` list; the values
+are never returned — a user may well have put a token in one.
+
+### `POST /v1/admin/mcp-servers`
+
+The twin of `apogee mcp create`. Body: `name` (required), and either
+`command` with optional `args` (register an existing executable, nothing
+written) or nothing else (scaffold a runnable Python server under the data
+directory's `mcp/<name>/`, exactly as the CLI would); `force` replaces an
+existing entry. `201` with the view plus `directory` (empty for register-only)
+and `restart_required: true` — servers connect at startup. `409` (`type:
+conflict`) on a name collision without `force`; `400` on a name that is not a
+server name or a malformed body.
+
+### `GET /v1/admin/mcp-servers/{id}`
+
+One entry's view. `404` when unknown.
+
+### `DELETE /v1/admin/mcp-servers/{id}`
+
+The twin of `apogee config delete-mcp-server`: the entry is removed, its
+files are left alone. `200 {deleted, restart_required}`; `404` when unknown.
+
+### `PUT /v1/admin/mcp-servers/{id}`
+
+The twin of `apogee mcp enable` and `mcp disable`: `{"enabled": true|false}`
+edits exactly one line of the entry. `200` with the view and
+`restart_required: true`; `400` on a body without a boolean `enabled`; `404`
+when unknown.
+
+Every one of these writes goes through the same comment-preserving edit the
+CLI uses, so a server registered here leaves the file byte-identical to one
+registered from the terminal.
+
 ### `GET /v1/admin/permissions`
 
 What the permission gate does for each destructive native tool — `ask`,

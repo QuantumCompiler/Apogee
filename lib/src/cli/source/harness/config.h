@@ -199,6 +199,24 @@ struct EmbeddingConfig {
     std::string rerank;
 };
 
+/// One entry under `mcp_servers:` -- a stdio MCP server the loop connects
+/// to at startup and whose tools appear as `mcp__<name>__<tool>`.
+///
+/// Keyed by name in a map like `backends:` and `embeddings:`, so the edit
+/// helpers, the loader's collision check and `config get` all work the same
+/// way. `command`, `args` and `env` have `${ENV_VAR}` and a leading `~`
+/// expanded at load -- Ommi expanded only the former while its documentation
+/// showed the latter, which is the trap this closes.
+struct McpServerConfig {
+    /// The executable, or a bare program name found on PATH.
+    std::string command;
+    std::vector<std::string> args;
+    /// `KEY=VALUE` entries overlaying the inherited environment.
+    std::vector<std::string> env;
+    /// A disabled server is listed by `mcp list` and never dialled.
+    bool enabled = true;
+};
+
 /// Optional search roots that pre-populate path prompts. All optional; a
 /// missing value means "no default", not an error.
 struct PathsConfig {
@@ -301,6 +319,10 @@ struct Config {
     PermissionsConfig permissions;
     ToolsConfig tools;
 
+    /// MCP servers keyed by name AS WRITTEN, compared case-insensitively
+    /// for the same reason `backends` is.
+    std::map<std::string, McpServerConfig, CaseInsensitiveLess> mcp_servers;
+
     StatusMode status_mode = StatusMode::Line;
     bool color = true;
 
@@ -317,7 +339,17 @@ struct Config {
 
     /// Collection names as written, in the map's (case-folded) order.
     [[nodiscard]] std::vector<std::string> embedding_names() const;
+
+    /// Case-insensitive lookup of an MCP server entry. nullptr when absent.
+    [[nodiscard]] const McpServerConfig* find_mcp_server(std::string_view name) const noexcept;
+
+    /// Server names as written, in the map's (case-folded) order.
+    [[nodiscard]] std::vector<std::string> mcp_server_names() const;
 };
+
+/// `expand_env`, then a leading `~` or `~/` replaced by the home directory.
+/// What every path-like MCP field is read through.
+[[nodiscard]] std::string expand_env_and_home(std::string_view input);
 
 /// Expands `${VAR}` references against the process environment.
 ///

@@ -66,6 +66,9 @@ struct LayoutEntry {
 
 /// `<APOGEE_HOME>/notes` -- the notes toolset's directory.
 [[nodiscard]] std::filesystem::path notes_dir();
+
+/// `<APOGEE_HOME>/mcp` -- scaffolded MCP servers, one directory each.
+[[nodiscard]] std::filesystem::path mcp_servers_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 
 /// What `seed_data_directory()` did.

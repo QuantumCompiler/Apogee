@@ -32,6 +32,7 @@
 #include "harness/paths.h"
 #include "harness/roles.h"
 #include "logger/operational.h"
+#include "mcp/registry.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -453,9 +454,21 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
 
         // --- tools ----------------------------------------------------------
         agent::ToolRegistry registry;
+        const auto mcp_registry = std::make_shared<mcp::Registry>();
         if (flags->tools) {
-            registry =
-                make_built_in_tools(BuiltInToolOptions{.config = &config, .harness = &harness});
+            registry = make_built_in_tools(BuiltInToolOptions{
+                .config = &config,
+                .harness = &harness,
+                .mcp = mcp_registry,
+                .mcp_status = mcp_status_line(reporter.status()),
+                // A server's stderr never reaches the terminal unless asked
+                // for: with --verbose it is the raw stream, otherwise the
+                // bounded tail rides the connect-failure message.
+                .mcp_server_log = flags->verbose
+                                      ? mcp::StderrTail::Sink{[](std::string_view bytes) {
+                                            std::cerr << bytes << std::flush;
+                                        }}
+                                      : mcp::StderrTail::Sink{}});
         }
         // The gate: config levels, then what the user answers for this
         // session. The prompt half is chosen per surface below.

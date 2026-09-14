@@ -14,6 +14,7 @@
 #include "harness/harness.h"
 #include "httpserver/httpserver.h"
 #include "mcp/mcp.h"
+#include "scaffold/mcp_server.h"
 #include "secrets/secrets.h"
 #include "tools/tools.h"
 

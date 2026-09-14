@@ -10,6 +10,7 @@
 
 #include "harness/config_edit.h"
 #include "harness/roles.h"
+#include "scaffold/mcp_server.h"
 #include "tools/toolsets.h"
 
 namespace apogee::httpserver {
@@ -338,6 +339,157 @@ nlohmann::json permissions_view(const harness::Config& config) {
 }
 
 }  // namespace
+
+namespace {
+
+/// A server entry as the plane serializes it. `env` is a list of `KEY=VALUE`
+/// strings a user may well have put a token in, so only its presence is
+/// shown -- the same rule as `api_key_set`.
+nlohmann::json mcp_server_view(std::string_view name, const harness::McpServerConfig& server) {
+    return nlohmann::json{{"name", std::string{name}},
+                          {"command", server.command},
+                          {"args", server.args},
+                          {"enabled", server.enabled},
+                          {"env_set", !server.env.empty()}};
+}
+
+}  // namespace
+
+HttpResponse admin_list_mcp_servers(const AdminConfigContext& context) {
+    const Loaded loaded = load_now(context);
+    if (!loaded.config.has_value()) {
+        return loaded.failure;
+    }
+    nlohmann::json data = nlohmann::json::array();
+    for (const auto& [name, server] : loaded.config->mcp_servers) {
+        data.push_back(mcp_server_view(name, server));
+    }
+    return json_response(200, nlohmann::json{{"object", "list"}, {"data", std::move(data)}});
+}
+
+HttpResponse admin_create_mcp_server(const AdminConfigContext& context,
+                                     const HttpRequest& request) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+    if (body.is_discarded() || !body.is_object()) {
+        return error_response(400, "the request body must be a JSON object");
+    }
+    std::string error;
+    scaffold::McpServerSpec spec;
+    spec.name = optional_string(body, "name", error).value_or("");
+    spec.command = optional_string(body, "command", error).value_or("");
+    if (!error.empty()) {
+        return error_response(400, error);
+    }
+    if (spec.name.empty()) {
+        return error_response(400, "name is required");
+    }
+    if (const auto args = body.find("args"); args != body.end() && !args->is_null()) {
+        if (!args->is_array()) {
+            return error_response(400, "args must be a list of strings");
+        }
+        for (const nlohmann::json& item : *args) {
+            if (!item.is_string()) {
+                return error_response(400, "args must be a list of strings");
+            }
+            spec.args.push_back(item.get<std::string>());
+        }
+    }
+    if (const auto force = body.find("force"); force != body.end() && force->is_boolean()) {
+        spec.force = force->get<bool>();
+    }
+    scaffold::McpServerResult result;
+    try {
+        result = scaffold::create_mcp_server(context.config_path, spec);
+    } catch (const std::exception& e) {
+        const std::string what = e.what();
+        const bool collision = what.find("already exists") != std::string::npos ||
+                               what.find("collides") != std::string::npos;
+        return error_response(collision ? 409 : 400, what,
+                              collision ? kConflict : std::string_view{});
+    }
+    const Loaded after = load_now(context);
+    if (!after.config.has_value()) {
+        return after.failure;
+    }
+    const harness::McpServerConfig* entry = after.config->find_mcp_server(result.name);
+    nlohmann::json view = entry != nullptr ? mcp_server_view(result.name, *entry)
+                                           : nlohmann::json{{"name", result.name}};
+    view["directory"] = result.directory.string();
+    view["restart_required"] = true;
+    return json_response(201, view);
+}
+
+HttpResponse admin_get_mcp_server(const AdminConfigContext& context, std::string_view name) {
+    const Loaded loaded = load_now(context);
+    if (!loaded.config.has_value()) {
+        return loaded.failure;
+    }
+    const harness::McpServerConfig* entry = loaded.config->find_mcp_server(name);
+    if (entry == nullptr) {
+        return error_response(404, "no MCP server named '" + std::string{name} + "'",
+                              kNotFoundError);
+    }
+    return json_response(200, mcp_server_view(name, *entry));
+}
+
+HttpResponse admin_delete_mcp_server(const AdminConfigContext& context, std::string_view name) {
+    const Loaded loaded = load_now(context);
+    if (!loaded.config.has_value()) {
+        return loaded.failure;
+    }
+    if (loaded.config->find_mcp_server(name) == nullptr) {
+        return error_response(404, "no MCP server named '" + std::string{name} + "'",
+                              kNotFoundError);
+    }
+    try {
+        harness::edit_config_file(context.config_path, [&](std::string_view content) {
+            return harness::delete_mcp_server(content, name);
+        });
+    } catch (const harness::ConfigEditError& e) {
+        return error_response(400, e.what());
+    } catch (const harness::ConfigError& e) {
+        return error_response(400, e.what(), kConfigError);
+    }
+    return json_response(
+        200, nlohmann::json{{"deleted", std::string{name}}, {"restart_required", true}});
+}
+
+HttpResponse admin_set_mcp_server_enabled(const AdminConfigContext& context, std::string_view name,
+                                          const HttpRequest& request) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+    if (body.is_discarded() || !body.is_object()) {
+        return error_response(400, "the request body must be a JSON object");
+    }
+    const auto enabled = body.find("enabled");
+    if (enabled == body.end() || !enabled->is_boolean()) {
+        return error_response(400, "enabled is required, true or false");
+    }
+    const Loaded loaded = load_now(context);
+    if (!loaded.config.has_value()) {
+        return loaded.failure;
+    }
+    if (loaded.config->find_mcp_server(name) == nullptr) {
+        return error_response(404, "no MCP server named '" + std::string{name} + "'",
+                              kNotFoundError);
+    }
+    try {
+        harness::edit_config_file(context.config_path, [&](std::string_view content) {
+            return harness::set_mcp_server_enabled(content, name, enabled->get<bool>());
+        });
+    } catch (const harness::ConfigEditError& e) {
+        return error_response(400, e.what());
+    } catch (const harness::ConfigError& e) {
+        return error_response(400, e.what(), kConfigError);
+    }
+    const Loaded after = load_now(context);
+    if (!after.config.has_value()) {
+        return after.failure;
+    }
+    const harness::McpServerConfig* entry = after.config->find_mcp_server(name);
+    nlohmann::json view = entry != nullptr ? mcp_server_view(name, *entry) : nlohmann::json{};
+    view["restart_required"] = true;
+    return json_response(200, view);
+}
 
 HttpResponse admin_list_permissions(const AdminConfigContext& context) {
     const Loaded loaded = load_now(context);

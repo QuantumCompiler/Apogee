@@ -46,6 +46,13 @@ public:
     [[nodiscard]] HttpResponse set_default_extraction(const HttpRequest& request);
     [[nodiscard]] HttpResponse format_config(const HttpRequest& request);
 
+    [[nodiscard]] HttpResponse list_mcp_servers(const HttpRequest& request);
+    [[nodiscard]] HttpResponse create_mcp_server(const HttpRequest& request);
+    [[nodiscard]] HttpResponse get_mcp_server(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse delete_mcp_server(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse set_mcp_server_enabled(const HttpRequest& request,
+                                                      std::string_view name);
+
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);
 

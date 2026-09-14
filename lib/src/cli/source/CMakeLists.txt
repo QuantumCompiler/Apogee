@@ -85,6 +85,8 @@ add_library(apogee_core STATIC
 
     commands/serve_cmd.h
     commands/serve_cmd.cpp
+    commands/mcp_cmd.h
+    commands/mcp_cmd.cpp
     commands/permissions.h
     commands/permissions.cpp
     commands/auth_cmd.h
@@ -247,6 +249,18 @@ add_library(apogee_core STATIC
     tools/rag_query.cpp
     tools/toolsets.h
     tools/toolsets.cpp
+    mcp/types.h
+    mcp/types.cpp
+    mcp/transport.h
+    mcp/transport.cpp
+    mcp/client.h
+    mcp/client.cpp
+    mcp/registry.h
+    mcp/registry.cpp
+    mcp/serve_stdio.h
+    mcp/serve_stdio.cpp
+    scaffold/mcp_server.h
+    scaffold/mcp_server.cpp
 
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and

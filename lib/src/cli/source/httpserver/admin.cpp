@@ -31,6 +31,27 @@ HttpResponse AdminHandler::delete_backend(const HttpRequest& /*request*/, std::s
     return admin_delete_backend(config_context(), name);
 }
 
+HttpResponse AdminHandler::list_mcp_servers(const HttpRequest&) {
+    return admin_list_mcp_servers(config_context());
+}
+
+HttpResponse AdminHandler::create_mcp_server(const HttpRequest& request) {
+    return admin_create_mcp_server(config_context(), request);
+}
+
+HttpResponse AdminHandler::get_mcp_server(const HttpRequest&, std::string_view name) {
+    return admin_get_mcp_server(config_context(), name);
+}
+
+HttpResponse AdminHandler::delete_mcp_server(const HttpRequest&, std::string_view name) {
+    return admin_delete_mcp_server(config_context(), name);
+}
+
+HttpResponse AdminHandler::set_mcp_server_enabled(const HttpRequest& request,
+                                                  std::string_view name) {
+    return admin_set_mcp_server_enabled(config_context(), name, request);
+}
+
 HttpResponse AdminHandler::list_permissions(const HttpRequest&) {
     return admin_list_permissions(config_context());
 }

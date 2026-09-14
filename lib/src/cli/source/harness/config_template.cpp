@@ -82,6 +82,19 @@ permissions:
 #   fs_root: ~            # the filesystem tools cannot leave this directory
 #   disabled: [shell]     # switch a whole toolset off: fs, shell, git, notes, rag
 
+# MCP servers: external tool servers spoken to over stdio (the Model Context
+# Protocol). Each one's tools appear to the model as mcp__<name>__<tool> and
+# go through the permission gate above unless the server marks them read-only.
+# `apogee mcp create <name>` scaffolds one and registers it here; `apogee mcp
+# list` shows what connected. A server's stderr never reaches your terminal.
+#
+# mcp_servers:
+#   weather:
+#     command: ~/.apogee/mcp/weather/server.py
+#     args: []
+#     enabled: true
+#     env: ["WEATHER_API_URL=https://example.invalid"]
+
 backends:
 
   # ── Anthropic (API billing plan) ────────────────────────────────────────────

@@ -690,3 +690,66 @@ TEST_CASE("the doctor's Tools section: keys, the root, the switches, and git",
         }
     }
 }
+
+TEST_CASE("the doctor's MCP section: PATH lookup, a missing file, a lost execute bit fixed",
+          "[commands][check][mcp]") {
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("mcp/local/server.py", "#!/bin/sh\n");
+    const std::filesystem::path script = install.root / "mcp" / "local" / "server.py";
+    install.write("config/config.yaml",
+                  "mcp_servers:\n"
+                  "  onpath:\n    command: sh\n"
+                  "  nowhere:\n    command: definitely-not-a-program-apogee\n"
+                  "  missing:\n    command: " +
+                      (install.root / "mcp" / "gone" / "server.py").string() +
+                      "\n"
+                      "  local:\n    command: " +
+                      script.string() +
+                      "\n"
+                      "  off:\n    command: /nonexistent\n    enabled: false\n"
+                      "  blank:\n    enabled: true\n");
+    load_into(inputs);
+    const CheckReport report = run_checks(inputs);
+
+    const auto* onpath = row_with(report, "server: onpath");
+    REQUIRE(onpath != nullptr);
+    CHECK(onpath->status == Status::Ok);
+    const auto* nowhere = row_with(report, "server: nowhere");
+    REQUIRE(nowhere != nullptr);
+    CHECK(nowhere->status == Status::Fail);
+    CHECK(nowhere->remedy.find("delete-mcp-server nowhere") != std::string::npos);
+    const auto* missing = row_with(report, "server: missing");
+    REQUIRE(missing != nullptr);
+    CHECK(missing->status == Status::Fail);
+    CHECK(missing->remedy.find("delete-mcp-server missing") != std::string::npos);
+    const auto* off = row_with(report, "server: off");
+    REQUIRE(off != nullptr);
+    CHECK(off->status == Status::Ok);  // disabled: never dialled, never checked
+    const auto* blank = row_with(report, "server: blank");
+    REQUIRE(blank != nullptr);
+    CHECK(blank->status == Status::Warn);
+
+    if (!apogee::harness::supports_private_modes()) {
+        return;
+    }
+    // A scaffolded server without its execute bit is a warning --fix repairs.
+    std::filesystem::permissions(
+        script, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace);
+    const CheckReport before = run_checks(inputs);
+    const auto* local = row_with(before, "server: local");
+    REQUIRE(local != nullptr);
+    CHECK(local->status == Status::Warn);
+    CHECK(local->remedy.find("--fix") != std::string::npos);
+    bool fixed = false;
+    for (const std::string& line : apogee::commands::apply_fixes(inputs)) {
+        fixed = fixed || line.find("made executable") != std::string::npos;
+    }
+    CHECK(fixed);
+    const CheckReport after = run_checks(inputs);
+    CHECK(row_with(after, "server: local")->status == Status::Ok);
+    // --fix never touched the config.
+    CHECK(apogee::harness::load_config(inputs.config_path).find_mcp_server("nowhere") != nullptr);
+}

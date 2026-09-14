@@ -20,6 +20,7 @@
 #include "harness/config.h"
 #include "platform/platform.h"
 #include "support/env_guard.h"
+#include "support/fake_mcp_server.h"
 
 /// The gate's two halves as the surfaces make them: the checker's precedence
 /// and the machine-mode prompt, driven over string streams.
@@ -153,4 +154,41 @@ TEST_CASE("the built-in registry honours tools.disabled and tools.fs_root",
     CHECK(registry.find("read_file")->description.find("/srv/sandbox") != std::string::npos);
     // Every toolset on, with nothing configured.
     CHECK(apogee::commands::make_built_in_tools({}).find("run_command") != nullptr);
+}
+
+TEST_CASE("the built-in registry connects the configured MCP servers and registers their tools",
+          "[commands][mcp]") {
+    Config config;
+    apogee::harness::McpServerConfig well;
+    well.command = "well";
+    config.mcp_servers.emplace("srv", well);
+    apogee::harness::McpServerConfig off;
+    off.command = "well";
+    off.enabled = false;
+    config.mcp_servers.emplace("off", off);
+    std::vector<std::string> lines;
+    const auto mcp = std::make_shared<apogee::mcp::Registry>();
+    const apogee::agent::ToolRegistry registry =
+        apogee::commands::make_built_in_tools(apogee::commands::BuiltInToolOptions{
+            .config = &config,
+            .mcp = mcp,
+            .mcp_status = [&lines](std::string_view line) { lines.emplace_back(line); },
+            .mcp_spawn = apogee::testing::fake_fleet()});
+    REQUIRE(registry.find("mcp__srv__echo") != nullptr);
+    CHECK_FALSE(registry.find("mcp__srv__echo")->writes);
+    CHECK(registry.find("mcp__srv__write")->writes);
+    CHECK(registry.find("mcp__off__echo") == nullptr);  // disabled: never dialled
+    CHECK(registry.find("read_file") != nullptr);       // built-ins regardless
+    CHECK(mcp->connected_count() == 1);
+    bool connecting_first = false;
+    for (const std::string& line : lines) {
+        if (line == "[mcp] connecting: srv...") {
+            connecting_first = true;
+            break;
+        }
+        if (line.find("connected") != std::string::npos) {
+            break;
+        }
+    }
+    CHECK(connecting_first);
 }

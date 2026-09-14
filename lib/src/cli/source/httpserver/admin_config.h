@@ -49,6 +49,29 @@ struct AdminConfigContext {
 /// `GET /v1/admin/backends`.
 [[nodiscard]] HttpResponse admin_list_backends(const AdminConfigContext& context);
 
+/// `GET /v1/admin/mcp-servers`: every entry as a view -- `command`, `args`,
+/// `enabled`, and whether `env` is set, never its values.
+[[nodiscard]] HttpResponse admin_list_mcp_servers(const AdminConfigContext& context);
+
+/// `POST /v1/admin/mcp-servers` -- the `mcp create` twin: `{name, command?,
+/// args?, force?}`; without `command` a Python server is scaffolded under the
+/// data directory, exactly as the CLI would.
+[[nodiscard]] HttpResponse admin_create_mcp_server(const AdminConfigContext& context,
+                                                   const HttpRequest& request);
+
+[[nodiscard]] HttpResponse admin_get_mcp_server(const AdminConfigContext& context,
+                                                std::string_view name);
+
+/// `DELETE /v1/admin/mcp-servers/{id}` -- the `config delete-mcp-server` twin.
+[[nodiscard]] HttpResponse admin_delete_mcp_server(const AdminConfigContext& context,
+                                                   std::string_view name);
+
+/// `PUT /v1/admin/mcp-servers/{id}` -- the `mcp enable`/`disable` twin:
+/// `{"enabled": true|false}`.
+[[nodiscard]] HttpResponse admin_set_mcp_server_enabled(const AdminConfigContext& context,
+                                                        std::string_view name,
+                                                        const HttpRequest& request);
+
 /// `GET /v1/admin/permissions`: every destructive tool with its effective
 /// level, plus any other key the config carries.
 [[nodiscard]] HttpResponse admin_list_permissions(const AdminConfigContext& context);

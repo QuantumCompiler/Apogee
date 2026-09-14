@@ -493,6 +493,111 @@ std::string delete_backend(std::string_view content, std::string_view name) {
     return delete_entry(content, "backends", "backend", name);
 }
 
+namespace {
+
+Lines format_mcp_server_entry(std::string_view name, const McpServerConfig& server,
+                              std::string_view terminator) {
+    Lines out;
+    const std::string indent(kFieldIndent, ' ');
+    auto field = [&](std::string_view key, const std::string& value) {
+        out.push_back(indent + std::string{key} + ": " + value + std::string{terminator});
+    };
+    // Inside a flow list a comma or a bracket ends the item; yaml_scalar
+    // already quotes both (and every other character YAML could misread),
+    // so the items go through it unchanged. A mutation test found a second
+    // check here to be dead code, and it was removed.
+    auto list = [&](std::string_view key, const std::vector<std::string>& values) {
+        std::string rendered = "[";
+        for (const std::string& value : values) {
+            rendered += rendered.size() > 1 ? ", " : "";
+            rendered += yaml_scalar(value);
+        }
+        rendered += "]";
+        out.push_back(indent + std::string{key} + ": " + rendered + std::string{terminator});
+    };
+    out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
+                  std::string{terminator});
+    // Alphabetical after the name, as Ommi's formatter was, so two entries
+    // written by two surfaces read alike.
+    if (!server.args.empty()) {
+        list("args", server.args);
+    }
+    field("command", yaml_scalar(server.command));
+    field("enabled", server.enabled ? "true" : "false");
+    if (!server.env.empty()) {
+        list("env", server.env);
+    }
+    return out;
+}
+
+}  // namespace
+
+std::string append_mcp_server(std::string_view content, std::string_view name,
+                              const McpServerConfig& server, bool force) {
+    const Lines lines = split_lines(content);
+    return append_entry(content, "mcp_servers", "MCP server", name,
+                        format_mcp_server_entry(name, server, dominant_terminator(lines)), force);
+}
+
+std::string delete_mcp_server(std::string_view content, std::string_view name) {
+    return delete_entry(content, "mcp_servers", "MCP server", name);
+}
+
+std::string set_mcp_server_enabled(std::string_view content, std::string_view name, bool enabled) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange range = find_section(lines, "mcp_servers");
+    if (!range.found) {
+        throw ConfigEditError("no 'mcp_servers:' section in this config");
+    }
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
+    if (!key_line.has_value()) {
+        throw ConfigEditError("MCP server '" + std::string{name} + "' not found in config");
+    }
+    const auto [begin, end] = entry_extent(lines, *key_line, range.end);
+    const std::string value = enabled ? "true" : "false";
+    for (std::size_t i = begin + 1; i < end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line) || indent_of(line) != kFieldIndent) {
+            continue;
+        }
+        const std::string_view rest = line.substr(kFieldIndent);
+        if (!rest.starts_with("enabled:")) {
+            continue;
+        }
+        // Replace only the value token, keeping any trailing comment.
+        const std::string& original = lines[i];
+        const std::size_t key_colon = original.find(':', kFieldIndent);
+        const std::size_t hash = original.find('#', key_colon);
+        const std::size_t limit = hash == std::string::npos ? original.size() : hash;
+        std::size_t value_start = key_colon + 1;
+        while (value_start < limit &&
+               (original[value_start] == ' ' || original[value_start] == '\t')) {
+            ++value_start;
+        }
+        std::size_t value_end = limit;
+        while (value_end > value_start &&
+               (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
+                original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
+            --value_end;
+        }
+        std::string replacement = original.substr(0, value_start);
+        if (value_start == key_colon + 1) {
+            replacement += ' ';
+        }
+        replacement += value;
+        replacement += original.substr(value_end);
+        if (replacement.empty() || replacement.back() != '\n') {
+            replacement += terminator;
+        }
+        lines[i] = replacement;
+        return join_lines(lines);
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(*key_line + 1),
+                 std::string(kFieldIndent, ' ') + "enabled: " + value + terminator);
+    return join_lines(lines);
+}
+
 std::string append_embedding(std::string_view content, std::string_view name,
                              const EmbeddingConfig& collection, bool force) {
     const Lines lines = split_lines(content);

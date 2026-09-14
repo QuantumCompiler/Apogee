@@ -74,6 +74,10 @@ const std::map<std::string, Classification>& table() {
         {"config set-default-extraction", twin("POST", "/v1/admin/backends/default-extraction")},
         {"config format", twin("POST", "/v1/admin/config/format")},
         {"config set-permission", twin("PUT", "/v1/admin/permissions/{id}")},
+        {"config delete-mcp-server", twin("DELETE", "/v1/admin/mcp-servers/{id}")},
+        {"mcp create", twin("POST", "/v1/admin/mcp-servers")},
+        {"mcp enable", twin("PUT", "/v1/admin/mcp-servers/{id}")},
+        {"mcp disable", twin("PUT", "/v1/admin/mcp-servers/{id}")},
         {"auth add", twin("PUT", "/v1/admin/auth/{id}")},
         {"auth clear", twin("DELETE", "/v1/admin/auth/{id}")},
         // --- backfills: owned by the area that owns the CLI action ----------
@@ -90,6 +94,8 @@ const std::map<std::string, Classification>& table() {
         {"check", carve_out("--fix repairs the local install; host-local by nature")},
         {"uninstall", carve_out("removes the binary and the data directory; host-local")},
         {"serve", carve_out("it is the server")},
+        {"__mcp-tools",
+         carve_out("an MCP server on this process's own stdio, spawned by another client")},
         // --- read-only / interactive ------------------------------------------
         {"chat", read_only()},
         {"complete", read_only()},
@@ -97,6 +103,8 @@ const std::map<std::string, Classification>& table() {
         {"__complete", read_only()},
         {"config get", read_only()},
         {"config path", read_only()},
+        {"mcp list", read_only()},
+        {"mcp test", read_only()},
         {"auth list", read_only()},
         {"embed query", read_only()},
         {"embed list", read_only()},

@@ -25,7 +25,7 @@ if(NOT DEFINED APOGEE_SOURCE_DIR)
     message(FATAL_ERROR "APOGEE_SOURCE_DIR must be set")
 endif()
 
-set(GUARDED_PACKAGES harness agentloop agent secrets tools)
+set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
@@ -41,6 +41,15 @@ endforeach()
 set(VIOLATIONS "")
 foreach(source IN LISTS ALL_SOURCES)
     file(STRINGS "${source}" offending REGEX "^[ \t]*#[ \t]*include[ \t]*[\"<]backends/")
+    # The one allowance: `mcp/` reads newline-delimited JSON off a child's
+    # pipe, which is exactly what `backends/jsonl_framer.h` was written to do
+    # for the vendor CLIs -- a pure line splitter with no provider in it. A
+    # second framer would be a second copy of the chunk-boundary bug class
+    # the first one exists to hold. Nothing else under `backends/` is
+    # reachable from `mcp/`.
+    if(source MATCHES "/mcp/")
+        list(FILTER offending EXCLUDE REGEX "backends/jsonl_framer\\.h")
+    endif()
     if(NOT offending STREQUAL "")
         get_filename_component(name "${source}" NAME)
         list(APPEND VIOLATIONS "  ${name}: ${offending}")

@@ -28,6 +28,7 @@
 #include "harness/harness.h"
 #include "harness/paths.h"
 #include "harness/roles.h"
+#include "mcp/registry.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -149,9 +150,14 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         machine_options.stream_answer = true;
 
         agent::ToolRegistry machine_registry;
+        const auto machine_mcp = std::make_shared<mcp::Registry>();
         if (flags.tools) {
-            machine_registry =
-                make_built_in_tools(BuiltInToolOptions{.config = &config, .harness = &harness});
+            // stdout is the protocol: connection notes go to stderr.
+            machine_registry = make_built_in_tools(BuiltInToolOptions{
+                .config = &config,
+                .harness = &harness,
+                .mcp = machine_mcp,
+                .mcp_status = [](std::string_view line) { std::cerr << line << "\n"; }});
             machine_options.tools = &machine_registry;
             // The config's levels only: a one-shot driver cannot be asked, so
             // ask resolves to deny, exactly as on a pipe.
@@ -241,8 +247,17 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     }
 
     agent::ToolRegistry registry;
+    const auto mcp_registry = std::make_shared<mcp::Registry>();
     if (flags.tools) {
-        registry = make_built_in_tools(BuiltInToolOptions{.config = &config, .harness = &harness});
+        registry = make_built_in_tools(BuiltInToolOptions{
+            .config = &config,
+            .harness = &harness,
+            .mcp = mcp_registry,
+            .mcp_status = mcp_status_line(reporter.status()),
+            .mcp_server_log = flags.verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
+                std::cerr << bytes << std::flush;
+            }}
+                                            : mcp::StderrTail::Sink{}});
         loop_options.tools = &registry;
         // Advertised only when there is a terminal to answer on. A null AskFn
         // means the tool never appears in the request at all -- and a null

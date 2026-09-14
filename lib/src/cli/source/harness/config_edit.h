@@ -124,6 +124,21 @@ public:
 [[nodiscard]] std::string set_models_role(std::string_view content, std::string_view field,
                                           std::string_view value);
 
+/// Appends an MCP server entry under `mcp_servers:` (creating the section),
+/// fields alphabetical after the name and `enabled` always written, so a
+/// later `set_mcp_server_enabled` replaces a line rather than inserting one.
+/// Same collision and `force` rules as `append_backend`.
+[[nodiscard]] std::string append_mcp_server(std::string_view content, std::string_view name,
+                                            const McpServerConfig& server, bool force);
+
+/// Removes the entry and its fields; the exact inverse of the append.
+[[nodiscard]] std::string delete_mcp_server(std::string_view content, std::string_view name);
+
+/// Sets `mcp_servers.<name>.enabled`, replacing the line in place (keeping
+/// its trailing comment) or inserting one right after the name.
+[[nodiscard]] std::string set_mcp_server_enabled(std::string_view content, std::string_view name,
+                                                 bool enabled);
+
 /// Sets `permissions.<tool>` to `level` (`ask`, `allow`, or `deny`),
 /// replacing the existing line (keeping any trailing comment) or inserting
 /// one, creating `permissions:` if needed. The one path by which the

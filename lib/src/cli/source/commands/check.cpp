@@ -490,11 +490,63 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
+/// Each enabled MCP server's command: a bare name is looked up on PATH; a
+/// path must exist and be executable. `--fix` adds the execute bit and never
+/// edits the config -- a dangling entry is the user's to delete.
+void check_mcp(CheckReport& report, const CheckInputs& inputs) {
+    if (inputs.config_missing || !inputs.config_error.empty()) {
+        return;
+    }
+    std::error_code code;
+    for (const auto& [name, server] : inputs.config.mcp_servers) {
+        const std::string label = "server: " + name;
+        if (!server.enabled) {
+            add(report, Status::Ok, "MCP", label, "disabled");
+            continue;
+        }
+        if (server.command.empty()) {
+            add(report, Status::Warn, "MCP", label, "no command set",
+                "set mcp_servers." + name + ".command, or: apogee config delete-mcp-server " +
+                    name);
+            continue;
+        }
+        const bool bare = server.command.find('/') == std::string::npos &&
+                          server.command.find('\\') == std::string::npos;
+        if (bare) {
+            if (platform::find_on_path(server.command).empty()) {
+                add(report, Status::Fail, "MCP", label,
+                    "command not found on PATH: " + server.command,
+                    "install it, or: apogee config delete-mcp-server " + name);
+            } else {
+                add(report, Status::Ok, "MCP", label, server.command + " (on PATH)");
+            }
+            continue;
+        }
+        const std::filesystem::path command{server.command};
+        if (!std::filesystem::exists(command, code)) {
+            add(report, Status::Fail, "MCP", label, "command not found: " + server.command,
+                "apogee config delete-mcp-server " + name);
+            continue;
+        }
+        if (harness::supports_private_modes()) {
+            const std::filesystem::perms mode =
+                std::filesystem::status(command, code).permissions();
+            if ((mode & std::filesystem::perms::owner_exec) == std::filesystem::perms::none) {
+                add(report, Status::Warn, "MCP", label, server.command + " is not executable",
+                    "chmod +x '" + server.command + "'   (or: apogee check --fix)");
+                continue;
+            }
+        }
+        add(report, Status::Ok, "MCP", label, server.command);
+    }
+}
+
 CheckReport run_checks(const CheckInputs& inputs) {
     CheckReport report;
     check_version(report, inputs);
     check_config(report, inputs);
     check_tools(report, inputs);
+    check_mcp(report, inputs);
     check_filesystem(report, inputs);
     check_secrets(report, inputs);
     check_credential_store(report, inputs);
@@ -542,6 +594,31 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
     }
     if (!seeded.ok()) {
         done.push_back("could not finish: " + seeded.error);
+    }
+    // A scaffolded server that lost its execute bit is a repair of the same
+    // kind: the file is the user's, its mode is the install's.
+    if (harness::supports_private_modes() && inputs.config_error.empty() &&
+        !inputs.config_missing) {
+        for (const auto& [name, server] : inputs.config.mcp_servers) {
+            if (!server.enabled || server.command.find('/') == std::string::npos) {
+                continue;
+            }
+            std::error_code code;
+            const std::filesystem::path command{server.command};
+            if (!std::filesystem::exists(command, code)) {
+                continue;
+            }
+            const std::filesystem::perms mode =
+                std::filesystem::status(command, code).permissions();
+            if ((mode & std::filesystem::perms::owner_exec) != std::filesystem::perms::none) {
+                continue;
+            }
+            std::filesystem::permissions(command, std::filesystem::perms::owner_exec,
+                                         std::filesystem::perm_options::add, code);
+            if (!code) {
+                done.push_back("made executable " + server.command);
+            }
+        }
     }
     // A per-install secret left readable by others is a repair too -- the
     // same kind as a private directory's mode, one file down.

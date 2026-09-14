@@ -13,6 +13,7 @@
 #include "commands/complete_protocol.h"
 #include "commands/config_cmd.h"
 #include "commands/embed.h"
+#include "commands/mcp_cmd.h"
 #include "commands/models.h"
 #include "commands/serve_cmd.h"
 #include "commands/uninstall.h"
@@ -69,12 +70,14 @@ CommandRegistry default_registry() {
     registry.add(std::make_unique<CompleteCommand>());
     registry.add(std::make_unique<ConfigCommand>());
     registry.add(std::make_unique<EmbedCommand>());
+    registry.add(std::make_unique<McpCommand>());
     registry.add(std::make_unique<ModelsCommand>());
     registry.add(std::make_unique<ServeCommand>());
     registry.add(std::make_unique<UninstallCommand>());
     registry.add(std::make_unique<VersionCommand>());
     // Hidden: the shell-completion protocol, not a user-facing command.
     registry.add(std::make_unique<CompleteProtocolCommand>());
+    registry.add(std::make_unique<McpToolsServerCommand>());
     return registry;
 }
 

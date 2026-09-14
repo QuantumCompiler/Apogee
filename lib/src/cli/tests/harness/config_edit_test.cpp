@@ -12,13 +12,16 @@
 
 using apogee::harness::append_backend;
 using apogee::harness::append_embedding;
+using apogee::harness::append_mcp_server;
 using apogee::harness::BackendConfig;
 using apogee::harness::BackendType;
 using apogee::harness::ConfigEditError;
 using apogee::harness::delete_backend;
 using apogee::harness::delete_embedding;
+using apogee::harness::delete_mcp_server;
 using apogee::harness::EmbeddingConfig;
 using apogee::harness::format_config;
+using apogee::harness::set_mcp_server_enabled;
 using apogee::harness::set_models_role;
 using apogee::harness::set_permission;
 using apogee::testing::TempDir;
@@ -601,4 +604,57 @@ TEST_CASE("set_permission creates the section when absent and refuses bad input"
     CHECK_THROWS_AS((void)set_permission(kCommented, "../x", "allow"), ConfigEditError);
     // A namespaced MCP tool name is a valid key.
     require_parses(set_permission(kCommented, "mcp__srv__tool", "allow"));
+}
+
+TEST_CASE("an MCP server entry appends alphabetically, toggles one line, and deletes cleanly",
+          "[config_edit][golden][mcp]") {
+    apogee::harness::McpServerConfig server;
+    server.command = "/home/u/.apogee/mcp/w/server.py";
+    server.args = {"--flag", "value with space", "a,b"};
+    server.env = {"KEY=v"};
+    const std::string appended = append_mcp_server(kCommented, "w", server, false);
+    require_parses(appended);
+    // Alphabetical after the name; a comma-bearing item quoted, the rest plain.
+    CHECK(appended.find("mcp_servers:\n  w:\n    args: [--flag, value with space, \"a,b\"]\n"
+                        "    command: /home/u/.apogee/mcp/w/server.py\n    enabled: true\n"
+                        "    env: [KEY=v]\n") != std::string::npos);
+    CHECK(appended.starts_with(kCommented));
+    const auto loaded = apogee::harness::parse_config(appended, "<test>");
+    REQUIRE(loaded.find_mcp_server("w") != nullptr);
+    CHECK(loaded.find_mcp_server("w")->args ==
+          std::vector<std::string>{"--flag", "value with space", "a,b"});
+    CHECK(loaded.find_mcp_server("w")->env == std::vector<std::string>{"KEY=v"});
+
+    // A collision, case-folded, is refused without force.
+    CHECK_THROWS_AS((void)append_mcp_server(appended, "W", server, false), ConfigEditError);
+    CHECK_THROWS_AS((void)append_mcp_server(appended, "a b", server, false), ConfigEditError);
+
+    // Toggling replaces the one line and keeps a trailing comment.
+    std::string commented = appended;
+    const std::size_t at = commented.find("    enabled: true\n");
+    REQUIRE(at != std::string::npos);
+    commented.replace(at, std::string{"    enabled: true\n"}.size(), "    enabled: true   # on\n");
+    const std::string off = set_mcp_server_enabled(commented, "w", false);
+    require_parses(off);
+    CHECK(off.find("    enabled: false   # on\n") != std::string::npos);
+    CHECK(off.size() == commented.size() + 1);
+    CHECK_FALSE(apogee::harness::parse_config(off, "<test>").find_mcp_server("w")->enabled);
+    CHECK(set_mcp_server_enabled(off, "w", true) == commented);
+    CHECK_THROWS_AS((void)set_mcp_server_enabled(off, "nope", true), ConfigEditError);
+    CHECK_THROWS_AS((void)set_mcp_server_enabled(kCommented, "w", true), ConfigEditError);
+
+    // An entry with no enabled line gets one right after its name.
+    const std::string bare = "mcp_servers:\n  x:\n    command: srv\n";
+    const std::string with_line = set_mcp_server_enabled(bare, "x", false);
+    CHECK(with_line == "mcp_servers:\n  x:\n    enabled: false\n    command: srv\n");
+
+    // Delete is the inverse of append: the entry goes, the file it was
+    // appended to is intact (the section header it created stays, empty --
+    // the same as a deleted backend leaves).
+    const std::string deleted = delete_mcp_server(appended, "w");
+    require_parses(deleted);
+    CHECK(deleted.starts_with(kCommented));
+    CHECK(apogee::harness::parse_config(deleted, "<test>").mcp_servers.empty());
+    CHECK(deleted.find("  w:") == std::string::npos);
+    CHECK_THROWS_AS((void)delete_mcp_server(kCommented, "w"), ConfigEditError);
 }

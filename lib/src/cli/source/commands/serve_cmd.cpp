@@ -30,6 +30,7 @@
 #include "httpserver/mux.h"
 #include "httpserver/serve.h"
 #include "logger/operational.h"
+#include "mcp/registry.h"
 
 namespace apogee::commands {
 namespace {
@@ -235,9 +236,17 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
         options.session_ttl = std::chrono::minutes{flags->session_ttl};
 
         agent::ToolRegistry registry;
+        const auto mcp_registry = std::make_shared<mcp::Registry>();
         if (flags->tools) {
-            registry =
-                make_built_in_tools(BuiltInToolOptions{.config = &config, .harness = &harness});
+            // A daemon's stderr is its log: a server's stderr goes there too,
+            // so one that misbehaves hours in stays diagnosable.
+            registry = make_built_in_tools(BuiltInToolOptions{
+                .config = &config,
+                .harness = &harness,
+                .mcp = mcp_registry,
+                .mcp_status = [](std::string_view line) { std::cerr << line << "\n"; },
+                .mcp_server_log =
+                    [](std::string_view bytes) { std::cerr << bytes << std::flush; }});
             // Nobody is attached to a served request: the config's levels
             // decide, and ask is deny.
             options.permission = make_permission_checker(config, nullptr);

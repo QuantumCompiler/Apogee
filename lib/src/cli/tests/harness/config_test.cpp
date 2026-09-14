@@ -389,3 +389,30 @@ TEST_CASE("permissions: and tools: parse, and a bad level fails at load",
     CHECK(shipped.tools.fs_root.empty());
     CHECK(shipped.tools.disabled.empty());
 }
+
+TEST_CASE("mcp_servers: parses, expands ~ and ${ENV}, validates enabled, refuses collisions",
+          "[config][mcp]") {
+    const apogee::testing::EnvGuard guard{"APOGEE_MCP_TEST_DIR", "/srv/mcp"};
+    const Config config = load_text(
+        "mcp_servers:\n"
+        "  weather:\n    command: ~/mcp/weather/server.py\n    args: [\"--root\", "
+        "\"${APOGEE_MCP_TEST_DIR}\"]\n"
+        "    env: [\"KEY=${APOGEE_MCP_TEST_DIR}/x\"]\n    enabled: false\n"
+        "  bare:\n    command: some-server\n");
+    const apogee::harness::McpServerConfig* weather = config.find_mcp_server("weather");
+    REQUIRE(weather != nullptr);
+    CHECK(weather->command.find('~') == std::string::npos);
+    CHECK(weather->command.ends_with("/mcp/weather/server.py"));
+    CHECK(weather->args == std::vector<std::string>{"--root", "/srv/mcp"});
+    CHECK(weather->env == std::vector<std::string>{"KEY=/srv/mcp/x"});
+    CHECK_FALSE(weather->enabled);
+    REQUIRE(config.find_mcp_server("BARE") != nullptr);  // case-insensitive, like backends
+    CHECK(config.find_mcp_server("bare")->enabled);      // the default
+    CHECK(config.mcp_server_names() == std::vector<std::string>{"bare", "weather"});
+
+    CHECK_THROWS_AS(load_text("mcp_servers:\n  a:\n    enabled: maybe\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("mcp_servers:\n  a:\n    args: notalist\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("mcp_servers:\n  a:\n    command: x\n  A:\n    command: y\n"),
+                    ConfigError);
+    CHECK(load_text(apogee::harness::config_template()).mcp_servers.empty());
+}

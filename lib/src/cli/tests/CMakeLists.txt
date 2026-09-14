@@ -102,10 +102,17 @@ add_executable(apogee_tests
     tools/rag_query_test.cpp
     tools/gate_test.cpp
     commands/permissions_test.cpp
+    mcp/types_test.cpp
+    mcp/transport_test.cpp
+    mcp/client_test.cpp
+    mcp/registry_test.cpp
+    mcp/serve_stdio_test.cpp
+    scaffold/mcp_server_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h
     support/env_guard.cpp
+    support/fake_mcp_server.cpp
     support/fake_transport.h
     support/fake_llama.h
     support/fake_child.h
@@ -334,6 +341,17 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/serve-e2e-home
     )
     set_tests_properties(cli.serve_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The MCP client on the real binary: a scaffolded server created, tested
+    # through the production client, connected by a tool-using run, a dying
+    # one skipped with its stderr tail, and the in-binary server as one more
+    # server. Needs python3 for the scaffold (skips itself without one).
+    add_test(NAME cli.mcp_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/mcp_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/mcp-e2e-home
+    )
+    set_tests_properties(cli.mcp_lifecycle PROPERTIES TIMEOUT 120)
 endif()
 
 # Startup output discipline, under a real pseudo-terminal.
@@ -356,6 +374,16 @@ if(UNIX)
         # applies to a terminal input queue, and on a pipe the buffered bytes
         # ARE the input); the second needs a real SIGKILL. Neither reproduces
         # in a unit test.
+        # A noisy, dying MCP server under a PTY: its stderr never paints the
+        # terminal, the failure carries its tail, and startup does not wait
+        # out the connect timeout. Ommi's Milestone P postmortem, locked.
+        add_test(NAME cli.mcp_server_stderr_stays_off_the_terminal
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/pty_mcp_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.mcp_server_stderr_stays_off_the_terminal PROPERTIES TIMEOUT 120)
+
         add_test(NAME cli.chat_typeahead_and_crash_safety
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/pty_chat_check.py"

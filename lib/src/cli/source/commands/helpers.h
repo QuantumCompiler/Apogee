@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -9,10 +11,12 @@
 
 #include "agent/tool.h"
 #include "agentloop/rag.h"
+#include "commands/status_line.h"
 #include "harness/cancellation.h"
 #include "harness/config.h"
 #include "harness/harness.h"
 #include "harness/types.h"
+#include "mcp/registry.h"
 #include "tools/toolsets.h"
 
 /// Shared plumbing for the CLI commands.
@@ -152,7 +156,28 @@ struct BuiltInToolOptions {
     const harness::Harness* harness = nullptr;
     /// The review defaults `git_diff` falls back to, set by flags.
     tools::ReviewDefaults review;
+
+    /// When set, every enabled `mcp_servers:` entry is connected on this
+    /// registry and its tools registered as `mcp__<server>__<tool>`. The
+    /// caller owns it: the connections live as long as this object does.
+    std::shared_ptr<mcp::Registry> mcp;
+    /// Where `[mcp] connecting: …` and the connection results go.
+    std::function<void(std::string_view)> mcp_status;
+    /// Where a server's raw stderr goes; null discards it (the bounded tail
+    /// is kept either way). `--verbose` points it at the terminal, `serve`
+    /// at its own stderr.
+    mcp::StderrTail::Sink mcp_server_log;
+    /// How a server's transport is made; null means a real child. A test
+    /// hands in the scripted fleet.
+    std::function<std::unique_ptr<mcp::Transport>(const mcp::ServerSpec&, mcp::StderrTail::Sink,
+                                                  std::string&)>
+        mcp_spawn;
 };
+
+/// The status callback for an interactive surface: progress repaints the one
+/// transient line, a warning stays -- a server that failed to connect is
+/// something the user should still be able to read once the prompt is up.
+[[nodiscard]] std::function<void(std::string_view)> mcp_status_line(StatusLine& status);
 
 /// `fetch_url` plus the native toolsets, honouring `tools.disabled`. The one
 /// place that decides which tools a `--tools` run has.

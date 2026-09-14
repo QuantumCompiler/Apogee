@@ -15,6 +15,7 @@
 #include "commands/embed.h"
 #include "harness/harness.h"
 #include "platform/platform.h"
+#include "version/version.h"
 
 namespace apogee::commands {
 namespace {
@@ -186,7 +187,35 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
     }
     tools::register_native_toolsets(registry, toolsets);
 
+    // Third-party servers last, so a namespaced name can never shadow a
+    // native one -- the registry refuses duplicates either way.
+    if (options.mcp != nullptr && options.config != nullptr &&
+        !options.config->mcp_servers.empty()) {
+        std::vector<mcp::ServerSpec> specs;
+        for (const auto& [name, server] : options.config->mcp_servers) {
+            specs.push_back(
+                mcp::ServerSpec{name, server.command, server.args, server.env, server.enabled});
+        }
+        mcp::RegistryOptions mcp_options;
+        mcp_options.status = options.mcp_status;
+        mcp_options.server_log = options.mcp_server_log;
+        mcp_options.spawn = options.mcp_spawn;
+        mcp_options.client_version = std::string{version::semantic()};
+        options.mcp->connect_all(specs, mcp_options);
+        options.mcp->register_into(registry);
+    }
+
     return registry;
+}
+
+std::function<void(std::string_view)> mcp_status_line(StatusLine& status) {
+    return [&status](std::string_view line) {
+        if (line.find("warning") != std::string_view::npos) {
+            status.print_line(line);
+        } else {
+            status.set(line);
+        }
+    };
 }
 
 std::string read_stdin() {

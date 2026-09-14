@@ -10,6 +10,8 @@
 #include <sstream>
 #include <utility>
 
+#include "platform/platform.h"
+
 namespace apogee::harness {
 namespace {
 
@@ -172,6 +174,30 @@ std::span<const std::string_view> backend_type_names() noexcept {
         return out;
     }();
     return names;
+}
+
+const McpServerConfig* Config::find_mcp_server(std::string_view name) const noexcept {
+    const auto it = mcp_servers.find(name);
+    return it == mcp_servers.end() ? nullptr : &it->second;
+}
+
+std::vector<std::string> Config::mcp_server_names() const {
+    std::vector<std::string> names;
+    names.reserve(mcp_servers.size());
+    for (const auto& [name, unused] : mcp_servers) {
+        names.push_back(name);
+    }
+    return names;
+}
+
+std::string expand_env_and_home(std::string_view input) {
+    std::string expanded = expand_env(input);
+    if (expanded == "~" || expanded.starts_with("~/")) {
+        if (const std::optional<std::string> home = platform::home_directory(); home.has_value()) {
+            return *home + expanded.substr(1);
+        }
+    }
+    return expanded;
 }
 
 std::string_view to_string(PermissionLevel level) noexcept {
@@ -420,6 +446,60 @@ Config parse_config(std::string_view content, std::string_view origin) {
                                  "' is not a permission level (accepted: ask, allow, deny)");
             }
             config.permissions.levels[tool] = *level;
+        }
+    }
+
+    if (const YAML::Node servers = root["mcp_servers"]; servers.IsDefined() && !servers.IsNull()) {
+        if (!servers.IsMap()) {
+            fail(origin, "mcp_servers: expected a mapping of server name -> settings");
+        }
+        for (const auto& entry : servers) {
+            const std::string name = entry.first.Scalar();
+            if (name.empty()) {
+                fail(origin, "mcp_servers: an entry has an empty name");
+            }
+            const std::string where = "mcp_servers." + name;
+            const YAML::Node node = entry.second;
+            McpServerConfig server;
+            if (node.IsDefined() && !node.IsNull()) {
+                if (!node.IsMap()) {
+                    fail(origin, where + ": expected a mapping of settings");
+                }
+                server.command =
+                    expand_env_and_home(scalar(node["command"], origin, where + ".command"));
+                for (const char* list : {"args", "env"}) {
+                    const YAML::Node items = node[list];
+                    if (!items.IsDefined() || items.IsNull()) {
+                        continue;
+                    }
+                    if (!items.IsSequence()) {
+                        fail(origin, where + "." + list + ": expected a list of strings");
+                    }
+                    std::vector<std::string>& target =
+                        std::string{list} == "args" ? server.args : server.env;
+                    for (const YAML::Node& item : items) {
+                        target.push_back(
+                            expand_env_and_home(scalar(item, origin, where + "." + list + "[]")));
+                    }
+                }
+                if (const YAML::Node enabled = node["enabled"];
+                    enabled.IsDefined() && !enabled.IsNull()) {
+                    const std::string value = scalar(enabled, origin, where + ".enabled");
+                    if (value == "true") {
+                        server.enabled = true;
+                    } else if (value == "false") {
+                        server.enabled = false;
+                    } else {
+                        fail(origin, where + ".enabled: '" + value + "' is not true or false");
+                    }
+                }
+            }
+            const auto [it, inserted] = config.mcp_servers.emplace(name, std::move(server));
+            if (!inserted) {
+                fail(origin, "mcp_servers: '" + name + "' collides with '" + it->first +
+                                 "' -- server names are compared case-insensitively, so these "
+                                 "would be the same server; rename one");
+            }
         }
     }
 
