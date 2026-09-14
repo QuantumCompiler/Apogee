@@ -598,6 +598,78 @@ std::string set_mcp_server_enabled(std::string_view content, std::string_view na
     return join_lines(lines);
 }
 
+namespace {
+
+Lines format_agent_entry(std::string_view name, const AgentConfig& agent,
+                         std::string_view terminator) {
+    Lines out;
+    const std::string indent(kFieldIndent, ' ');
+    auto field = [&](std::string_view key, const std::string& value) {
+        out.push_back(indent + std::string{key} + ": " + value + std::string{terminator});
+    };
+    auto list = [&](std::string_view key, const std::vector<std::string>& values) {
+        std::string rendered = "[";
+        for (const std::string& value : values) {
+            rendered += rendered.size() > 1 ? ", " : "";
+            rendered += yaml_scalar(value);
+        }
+        rendered += "]";
+        out.push_back(indent + std::string{key} + ": " + rendered + std::string{terminator});
+    };
+    out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
+                  std::string{terminator});
+    // Alphabetical after the name; a value is written only when it says
+    // something, so a defaulted entry is a bare name plus its policy.
+    if (!agent.collection.empty()) {
+        field("collection", yaml_scalar(agent.collection));
+    }
+    if (!agent.description.empty()) {
+        field("description", yaml_scalar(agent.description));
+    }
+    if (!agent.mcp.empty()) {
+        list("mcp", agent.mcp);
+    }
+    if (!agent.model.empty()) {
+        field("model", yaml_scalar(agent.model));
+    }
+    if (agent.output_format != AgentOutputFormat::Auto) {
+        field("output_format", std::string{to_string(agent.output_format)});
+    }
+    if (!agent.prompts.empty()) {
+        list("prompts", agent.prompts);
+    }
+    if (agent.questions) {
+        field("questions", "true");
+    }
+    if (!agent.save_dir.empty()) {
+        field("save_dir", yaml_scalar(agent.save_dir));
+    }
+    if (!agent.save_filename.empty()) {
+        field("save_filename", yaml_scalar(agent.save_filename));
+    }
+    if (!agent.save_subdir.empty()) {
+        field("save_subdir", yaml_scalar(agent.save_subdir));
+    }
+    if (!agent.schemas.empty()) {
+        list("schemas", agent.schemas);
+    }
+    field("tools", std::string{to_string(agent.tools)});
+    return out;
+}
+
+}  // namespace
+
+std::string append_agent(std::string_view content, std::string_view name, const AgentConfig& agent,
+                         bool force) {
+    const Lines lines = split_lines(content);
+    return append_entry(content, "agents", "agent", name,
+                        format_agent_entry(name, agent, dominant_terminator(lines)), force);
+}
+
+std::string delete_agent(std::string_view content, std::string_view name) {
+    return delete_entry(content, "agents", "agent", name);
+}
+
 std::string append_embedding(std::string_view content, std::string_view name,
                              const EmbeddingConfig& collection, bool force) {
     const Lines lines = split_lines(content);

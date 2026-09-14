@@ -69,11 +69,21 @@ struct LayoutEntry {
 
 /// `<APOGEE_HOME>/mcp` -- scaffolded MCP servers, one directory each.
 [[nodiscard]] std::filesystem::path mcp_servers_dir();
+
+/// `<APOGEE_HOME>/prompts` -- agents' system prompts (`apogee analyze --agent`).
+[[nodiscard]] std::filesystem::path prompts_dir();
+
+/// `<APOGEE_HOME>/schemas` -- agents' output schemas.
+[[nodiscard]] std::filesystem::path schemas_dir();
+
+/// `<APOGEE_HOME>/analyses` -- saved `analyze` reports, one directory per agent.
+[[nodiscard]] std::filesystem::path analyses_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 
 /// What `seed_data_directory()` did.
 struct SeedResult {
-    /// Directories that did not exist and were created, relative to the root.
+    /// Directories -- and bundled asset files -- that did not exist and were
+    /// created, relative to the root.
     std::vector<std::string> created;
 
     /// Non-empty on failure. Seeding is all-or-nothing from the caller's point
@@ -100,6 +110,12 @@ struct SeedResult {
 /// init`'s job and goes through the one config mutation path; a second writer
 /// here would be the same mistake in the one place the repo already has an
 /// invariant about it.
+///
+/// It DOES materialise the bundled agents' prompt and schema files (see
+/// `harness/assets.h`), skip-if-present: they are assets landing under the
+/// data directory, and the parity rule says every install path seeds them
+/// identically -- which is true by construction only when the one seeding
+/// implementation does it.
 [[nodiscard]] SeedResult seed_data_directory(const std::filesystem::path& root);
 
 /// Seeds the tree at `apogee_home()`.

@@ -47,6 +47,18 @@ constexpr std::array<std::pair<std::string_view, StatusMode>, 3> kStatusModeName
     {"quiet", StatusMode::Quiet},
 }};
 
+constexpr std::array<std::pair<std::string_view, AgentToolPolicy>, 3> kAgentToolPolicyNames{{
+    {"read-only", AgentToolPolicy::ReadOnly},
+    {"all", AgentToolPolicy::All},
+    {"none", AgentToolPolicy::None},
+}};
+
+constexpr std::array<std::pair<std::string_view, AgentOutputFormat>, 3> kAgentOutputFormatNames{{
+    {"auto", AgentOutputFormat::Auto},
+    {"json", AgentOutputFormat::Json},
+    {"markdown", AgentOutputFormat::Markdown},
+}};
+
 std::string accepted_backend_types() {
     std::string out;
     for (const auto& [name, unused] : kBackendTypeNames) {
@@ -140,6 +152,82 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     return backend;
 }
 
+/// A `true`/`false` scalar, or a load failure naming the key.
+bool boolean(const YAML::Node& node, std::string_view origin, std::string_view key, bool fallback) {
+    if (!node.IsDefined() || node.IsNull()) {
+        return fallback;
+    }
+    const std::string value = scalar(node, origin, key);
+    if (value == "true") {
+        return true;
+    }
+    if (value == "false") {
+        return false;
+    }
+    fail(origin, std::string{key} + ": '" + value + "' is not true or false");
+}
+
+/// A list of strings at `node`, each read through `expand_env_and_home`
+/// when `paths`, else through `expand_env`.
+std::vector<std::string> string_list(const YAML::Node& node, std::string_view origin,
+                                     std::string_view key, bool paths) {
+    std::vector<std::string> out;
+    if (!node.IsDefined() || node.IsNull()) {
+        return out;
+    }
+    if (!node.IsSequence()) {
+        fail(origin, std::string{key} + ": expected a list of strings");
+    }
+    for (const YAML::Node& item : node) {
+        const std::string value = scalar(item, origin, std::string{key} + "[]");
+        out.push_back(paths ? expand_env_and_home(value) : value);
+    }
+    return out;
+}
+
+AgentConfig parse_agent(const YAML::Node& node, std::string_view origin, const std::string& name) {
+    const std::string where = "agents." + name;
+    AgentConfig agent;
+    if (!node.IsDefined() || node.IsNull()) {
+        return agent;
+    }
+    if (!node.IsMap()) {
+        fail(origin, where + ": expected a mapping of settings");
+    }
+    agent.description = scalar(node["description"], origin, where + ".description");
+    agent.model = scalar(node["model"], origin, where + ".model");
+    agent.prompts = string_list(node["prompts"], origin, where + ".prompts", true);
+    agent.schemas = string_list(node["schemas"], origin, where + ".schemas", true);
+    agent.mcp = string_list(node["mcp"], origin, where + ".mcp", false);
+    agent.questions = boolean(node["questions"], origin, where + ".questions", false);
+    agent.collection = scalar(node["collection"], origin, where + ".collection");
+    agent.save_dir = expand_env_and_home(scalar(node["save_dir"], origin, where + ".save_dir"));
+    agent.save_filename = scalar(node["save_filename"], origin, where + ".save_filename");
+    agent.save_subdir = scalar(node["save_subdir"], origin, where + ".save_subdir");
+
+    // Every enum is validated at load: a typo that silently meant `all` would
+    // be the wrong kind of forgiving for the field that IS the permission
+    // model.
+    if (const std::string value = scalar(node["tools"], origin, where + ".tools"); !value.empty()) {
+        const std::optional<AgentToolPolicy> policy = agent_tool_policy_from_string(value);
+        if (!policy.has_value()) {
+            fail(origin, where + ".tools: '" + value +
+                             "' is not a tool policy (accepted: read-only, all, none)");
+        }
+        agent.tools = *policy;
+    }
+    if (const std::string value = scalar(node["output_format"], origin, where + ".output_format");
+        !value.empty()) {
+        const std::optional<AgentOutputFormat> format = agent_output_format_from_string(value);
+        if (!format.has_value()) {
+            fail(origin, where + ".output_format: '" + value +
+                             "' is not an output format (accepted: auto, json, markdown)");
+        }
+        agent.output_format = *format;
+    }
+    return agent;
+}
+
 }  // namespace
 
 bool CaseInsensitiveLess::operator()(std::string_view lhs, std::string_view rhs) const noexcept {
@@ -163,6 +251,73 @@ std::optional<BackendType> backend_type_from_string(std::string_view name) noexc
         }
     }
     return std::nullopt;
+}
+
+bool is_vendor_cli(BackendType type) noexcept {
+    switch (type) {
+        case BackendType::ClaudeCli:
+        case BackendType::CodexCli:
+        case BackendType::GeminiCli:
+        case BackendType::OllamaCli:
+            return true;
+        case BackendType::Anthropic:
+        case BackendType::OpenAI:
+        case BackendType::Google:
+        case BackendType::LlamaCpp:
+        case BackendType::Mock:
+            return false;
+    }
+    return false;
+}
+
+std::string_view to_string(AgentToolPolicy policy) noexcept {
+    for (const auto& [name, candidate] : kAgentToolPolicyNames) {
+        if (candidate == policy) {
+            return name;
+        }
+    }
+    return "read-only";
+}
+
+std::optional<AgentToolPolicy> agent_tool_policy_from_string(std::string_view name) noexcept {
+    for (const auto& [candidate, policy] : kAgentToolPolicyNames) {
+        if (candidate == name) {
+            return policy;
+        }
+    }
+    return std::nullopt;
+}
+
+std::string_view to_string(AgentOutputFormat format) noexcept {
+    for (const auto& [name, candidate] : kAgentOutputFormatNames) {
+        if (candidate == format) {
+            return name;
+        }
+    }
+    return "auto";
+}
+
+std::optional<AgentOutputFormat> agent_output_format_from_string(std::string_view name) noexcept {
+    for (const auto& [candidate, format] : kAgentOutputFormatNames) {
+        if (candidate == name) {
+            return format;
+        }
+    }
+    return std::nullopt;
+}
+
+const AgentConfig* Config::find_agent(std::string_view name) const noexcept {
+    const auto it = agents.find(name);
+    return it == agents.end() ? nullptr : &it->second;
+}
+
+std::vector<std::string> Config::agent_names() const {
+    std::vector<std::string> names;
+    names.reserve(agents.size());
+    for (const auto& [name, unused] : agents) {
+        names.push_back(name);
+    }
+    return names;
 }
 
 std::span<const std::string_view> backend_type_names() noexcept {
@@ -499,6 +654,25 @@ Config parse_config(std::string_view content, std::string_view origin) {
                 fail(origin, "mcp_servers: '" + name + "' collides with '" + it->first +
                                  "' -- server names are compared case-insensitively, so these "
                                  "would be the same server; rename one");
+            }
+        }
+    }
+
+    if (const YAML::Node agents = root["agents"]; agents.IsDefined() && !agents.IsNull()) {
+        if (!agents.IsMap()) {
+            fail(origin, "agents: expected a mapping of agent name -> settings");
+        }
+        for (const auto& entry : agents) {
+            const std::string name = entry.first.Scalar();
+            if (name.empty()) {
+                fail(origin, "agents: an entry has an empty name");
+            }
+            AgentConfig agent = parse_agent(entry.second, origin, name);
+            const auto [it, inserted] = config.agents.emplace(name, std::move(agent));
+            if (!inserted) {
+                fail(origin, "agents: '" + name + "' collides with '" + it->first +
+                                 "' -- agent names are compared case-insensitively, so these "
+                                 "would be the same agent; rename one");
             }
         }
     }

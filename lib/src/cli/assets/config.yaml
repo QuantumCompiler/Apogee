@@ -73,6 +73,36 @@ permissions:
 #     enabled: true
 #     env: ["WEATHER_API_URL=https://example.invalid"]
 
+# Agents: named workflows run with `apogee analyze --agent <name>` -- a persona
+# from prompt files, an optional output schema the answer must satisfy, and a
+# TOOL POLICY that is the agent's permission model: read-only registers only
+# tools that never write (so a run never blocks on a prompt), all puts it under
+# the gate above like chat, none registers nothing. Three review agents are
+# built in -- security-review, release-notes, merge-request -- with their files
+# under prompts/ and schemas/ (seeded by `apogee check --fix`, never overwritten
+# once present, so edit them freely). An entry here overrides a bundled agent
+# of the same name; `apogee agents create` scaffolds a new one. Relative paths
+# are read against this data directory.
+#
+# agents:
+#   security-review:
+#     model: local              # pin a backend; blank = models.default
+#     tools: read-only          # read-only | all | none
+#     prompts: [prompts/security-review.txt]
+#     schemas: [schemas/security-review-output.json]
+#     save_subdir: security-review
+#   release-notes:
+#     tools: read-only
+#     prompts: [prompts/release-notes.txt]
+#     schemas: [schemas/release-notes-output.json]
+#     save_subdir: release-notes
+#   merge-request:
+#     collection: adrs          # retrieved from on every run (this agent's auto_rag)
+#     tools: read-only
+#     prompts: [prompts/merge-request.txt]
+#     schemas: [schemas/merge-request-output.json]
+#     save_subdir: merge-request
+
 backends:
 
   # ── Anthropic (API billing plan) ────────────────────────────────────────────

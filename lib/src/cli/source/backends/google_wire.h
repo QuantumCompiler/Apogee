@@ -36,6 +36,11 @@ struct RequestOptions {
     bool web_search = false;
 };
 
+/// A JSON Schema reduced to the OpenAPI subset `responseSchema` accepts:
+/// `$schema`, `title`, `additionalProperties` and every other keyword the
+/// API rejects are dropped, recursively. Exposed for the wire tests.
+[[nodiscard]] nlohmann::json gemini_response_schema(const nlohmann::json& schema);
+
 /// Builds the JSON body for `:generateContent` / `:streamGenerateContent`.
 [[nodiscard]] nlohmann::json build_request(const harness::ChatRequest& request,
                                            const RequestOptions& options);

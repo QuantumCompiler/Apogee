@@ -357,3 +357,32 @@ TEST_CASE("the request goes to /v1/responses with a bearer token", "[backends][o
     }
     CHECK(bearer);
 }
+
+TEST_CASE("a response schema becomes text.format json_schema, beside the tools",
+          "[backends][openai][wire][structured]") {
+    ChatRequest request = chat_request();
+    request.tools = {Tool{"search", "search the web", R"({"type":"object"})"}};
+    request.transient.response_schema =
+        R"({"type":"object","properties":{"a":{"type":"string"}},"required":["a"]})";
+
+    Fixture f = make_provider({sse(kTextStream)});
+    (void)f.provider->stream_chat(request, {});
+
+    const json body = json::parse(f.transport->requests()[0].body);
+    REQUIRE(body.contains("text"));
+    const json& format = body.at("text").at("format");
+    CHECK(format.at("type") == "json_schema");
+    CHECK(format.at("name") == "structured_output");
+    CHECK(format.at("schema").at("required")[0] == "a");
+    // Not strict: strict mode rejects a schema with optional properties.
+    CHECK(format.at("strict") == false);
+    // The mode coexists with function tools on this API.
+    CHECK(body.at("tools").size() == 1);
+    // Never the Chat Completions spelling.
+    CHECK_FALSE(body.contains("response_format"));
+
+    // Without a schema, no text.format at all.
+    Fixture plain = make_provider({sse(kTextStream)});
+    (void)plain.provider->stream_chat(chat_request(), {});
+    CHECK_FALSE(json::parse(plain.transport->requests()[0].body).contains("text"));
+}

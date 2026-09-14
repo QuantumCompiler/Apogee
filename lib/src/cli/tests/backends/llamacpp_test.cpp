@@ -751,3 +751,33 @@ TEST_CASE("preload loads the model before any request, and only once",
     fixture.provider->preload({});
     CHECK(fixture.runtime->loads == 1);
 }
+
+TEST_CASE("a response schema is stated once in the prompt, and never twice",
+          "[backends][llamacpp][structured]") {
+    // A local model has no JSON mode here: the schema rides the system block
+    // as text. The fake tokenises words, and usage.prompt_tokens is exact, so
+    // "the instruction was added" and "it was not added twice" are both
+    // token arithmetic.
+    Fixture plain;
+    const auto without = plain.provider->chat(turn({ChatMessage::user("alpha beta gamma")}), {});
+
+    Fixture bound;
+    ChatRequest request = turn({ChatMessage::user("alpha beta gamma")});
+    request.transient.response_schema = R"({"type":"object","properties":{"a":{"type":"string"}}})";
+    const auto with_schema = bound.provider->chat(request, {});
+    CHECK(with_schema.usage.prompt_tokens > without.usage.prompt_tokens + 10);
+
+    // The agent runner states it once itself: a system message carrying the
+    // OUTPUT FORMAT block means nothing is appended, whatever the request
+    // field says -- a model that reads the schema twice is a model told to
+    // follow it twice.
+    Fixture stated;
+    ChatRequest already = turn(
+        {ChatMessage::system("OUTPUT FORMAT already here"), ChatMessage::user("alpha beta gamma")});
+    const auto once = stated.provider->chat(already, {});
+    Fixture stated_again;
+    ChatRequest already_bound = already;
+    already_bound.transient.response_schema = request.transient.response_schema;
+    const auto still_once = stated_again.provider->chat(already_bound, {});
+    CHECK(still_once.usage.prompt_tokens == once.usage.prompt_tokens);
+}

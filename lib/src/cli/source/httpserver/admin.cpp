@@ -31,6 +31,26 @@ HttpResponse AdminHandler::delete_backend(const HttpRequest& /*request*/, std::s
     return admin_delete_backend(config_context(), name);
 }
 
+HttpResponse AdminHandler::list_agents(const HttpRequest&) {
+    return admin_list_agents(config_context());
+}
+
+HttpResponse AdminHandler::create_agent(const HttpRequest& request) {
+    return admin_create_agent(config_context(), request);
+}
+
+HttpResponse AdminHandler::get_agent(const HttpRequest&, std::string_view name) {
+    return admin_get_agent(config_context(), name);
+}
+
+HttpResponse AdminHandler::put_agent(const HttpRequest& request, std::string_view name) {
+    return admin_put_agent(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::delete_agent(const HttpRequest& request, std::string_view name) {
+    return admin_delete_agent(config_context(), name, request);
+}
+
 HttpResponse AdminHandler::list_mcp_servers(const HttpRequest&) {
     return admin_list_mcp_servers(config_context());
 }

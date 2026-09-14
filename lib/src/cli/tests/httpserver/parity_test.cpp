@@ -80,6 +80,9 @@ const std::map<std::string, Classification>& table() {
         {"mcp disable", twin("PUT", "/v1/admin/mcp-servers/{id}")},
         {"auth add", twin("PUT", "/v1/admin/auth/{id}")},
         {"auth clear", twin("DELETE", "/v1/admin/auth/{id}")},
+        {"agents create", twin("POST", "/v1/admin/agents")},
+        {"agents edit", twin("PUT", "/v1/admin/agents/{id}")},
+        {"agents delete", twin("DELETE", "/v1/admin/agents/{id}")},
         // --- backfills: owned by the area that owns the CLI action ----------
         {"embed ingest", backfill("embedstore: the embeddings data plane, an async job")},
         {"embed delete", backfill("embedstore: the embeddings data plane")},
@@ -99,6 +102,8 @@ const std::map<std::string, Classification>& table() {
         // --- read-only / interactive ------------------------------------------
         {"chat", read_only()},
         {"complete", read_only()},
+        {"analyze", read_only()},
+        {"agents list", read_only()},
         {"version", read_only()},
         {"__complete", read_only()},
         {"config get", read_only()},

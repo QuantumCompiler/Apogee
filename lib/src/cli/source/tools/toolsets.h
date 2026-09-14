@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -32,8 +33,11 @@ struct ToolsetOptions {
     std::chrono::milliseconds shell_timeout{30000};
     std::chrono::milliseconds git_timeout{30000};
     std::size_t read_limit = 64 * 1024;
-    /// The review defaults for `git_diff`, set by flags.
+    /// The review defaults for `git_diff` and `git_log`, set by flags.
     ReviewDefaults review;
+    /// A live review the git tools read at call time instead; see
+    /// `GitOptions::live_review`.
+    std::shared_ptr<const ReviewDefaults> live_review;
     /// For the RAG tools' embedder. Null means lexical-only searches.
     const harness::Harness* harness = nullptr;
     const harness::Config* config = nullptr;

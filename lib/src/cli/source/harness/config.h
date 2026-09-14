@@ -63,6 +63,14 @@ enum class BackendType : std::uint8_t {
 /// messages and to drive tests that must stay honest as the enum widens.
 [[nodiscard]] std::span<const std::string_view> backend_type_names() noexcept;
 
+/// Whether `type` drives a vendor's official CLI on a personal subscription.
+///
+/// One predicate, in the harness, because two surfaces refuse these by type
+/// for the same reason and must not disagree: `serve` never dispatches to
+/// one, and `analyze` never runs an agent on one -- the CLI runs its own
+/// tools outside Apogee's gate, so an agent's tool policy cannot hold there.
+[[nodiscard]] bool is_vendor_cli(BackendType type) noexcept;
+
 /// One entry under `backends:`.
 ///
 /// Which fields matter depends on the type -- api_key for the cloud types,
@@ -217,6 +225,69 @@ struct McpServerConfig {
     bool enabled = true;
 };
 
+/// What an agent may call. **This is the agent's permission model**: a policy
+/// is enforced by what is registered, never by asking the model to behave.
+///
+/// `ReadOnly` registers only tools that declare no `writes` -- nothing to
+/// prompt for, so a read-only agent never blocks, on any surface. `All` puts
+/// the agent under the same gate as `chat`. `None` registers nothing.
+enum class AgentToolPolicy : std::uint8_t { ReadOnly, All, None };
+
+[[nodiscard]] std::string_view to_string(AgentToolPolicy policy) noexcept;
+[[nodiscard]] std::optional<AgentToolPolicy> agent_tool_policy_from_string(
+    std::string_view name) noexcept;
+
+/// How an agent's schema shapes its answer.
+///
+/// `Auto`: the model is asked for JSON conforming to the schema, the answer
+/// is validated, and it is rendered to Markdown in-process. `Json`: the same,
+/// printed raw. `Markdown`: the schema is a checklist and the model writes
+/// prose -- nothing is validated, and no provider is asked for JSON.
+enum class AgentOutputFormat : std::uint8_t { Auto, Json, Markdown };
+
+[[nodiscard]] std::string_view to_string(AgentOutputFormat format) noexcept;
+[[nodiscard]] std::optional<AgentOutputFormat> agent_output_format_from_string(
+    std::string_view name) noexcept;
+
+/// One entry under `agents:` -- a named workflow `apogee analyze --agent`
+/// runs: a persona assembled from prompt files, an optional output schema,
+/// a tool policy, and the knobs below. Agents are data, executed by the same
+/// loop every other surface runs.
+///
+/// Keyed by name in a map like every other section. Paths are read through
+/// `expand_env_and_home`; a RELATIVE path resolves against the data directory
+/// the config lives in (`prompts/x.txt`), which is what keeps an entry
+/// portable across machines and a `--config` temp tree hermetic.
+struct AgentConfig {
+    std::string description;
+    /// Backend override; empty means the chat role.
+    std::string model;
+    /// `.txt` files concatenated into the system prompt, in order.
+    std::vector<std::string> prompts;
+    /// JSON Schema files the answer must satisfy. More than one is joined
+    /// in the instruction; the FIRST is what the answer is validated against.
+    std::vector<std::string> schemas;
+    AgentOutputFormat output_format = AgentOutputFormat::Auto;
+    AgentToolPolicy tools = AgentToolPolicy::ReadOnly;
+    /// Names of `mcp_servers:` entries this agent connects to. Empty means
+    /// none: an agent is a curated workflow and names what it needs.
+    std::vector<std::string> mcp;
+    /// Opts the agent into `ask_user` on a terminal. Off by default: most
+    /// agents are unattended report generators, for which a blocking prompt
+    /// is the wrong default.
+    bool questions = false;
+    /// A collection retrieved from on every turn -- `auto_rag`, read from the
+    /// agent instead of the top-level key. `--rag` still wins per run.
+    std::string collection;
+    /// Where a run's report is saved. Empty means the layout's `analyses/`.
+    std::string save_dir;
+    /// The saved file's base name; empty means the agent's name.
+    std::string save_filename;
+    /// A directory under `save_dir` this agent's reports nest in, so agents
+    /// do not all glob into one directory. Empty means flat.
+    std::string save_subdir;
+};
+
 /// Optional search roots that pre-populate path prompts. All optional; a
 /// missing value means "no default", not an error.
 struct PathsConfig {
@@ -323,6 +394,11 @@ struct Config {
     /// for the same reason `backends` is.
     std::map<std::string, McpServerConfig, CaseInsensitiveLess> mcp_servers;
 
+    /// Agents keyed by name AS WRITTEN, compared case-insensitively. The
+    /// bundled agents are not here unless the file overrides one: they are
+    /// compiled in (see `harness/assets.h`) and a same-named entry wins.
+    std::map<std::string, AgentConfig, CaseInsensitiveLess> agents;
+
     StatusMode status_mode = StatusMode::Line;
     bool color = true;
 
@@ -345,6 +421,12 @@ struct Config {
 
     /// Server names as written, in the map's (case-folded) order.
     [[nodiscard]] std::vector<std::string> mcp_server_names() const;
+
+    /// Case-insensitive lookup of an agent entry. nullptr when absent.
+    [[nodiscard]] const AgentConfig* find_agent(std::string_view name) const noexcept;
+
+    /// Agent names as written, in the map's (case-folded) order.
+    [[nodiscard]] std::vector<std::string> agent_names() const;
 };
 
 /// `expand_env`, then a leading `~` or `~/` replaced by the home directory.

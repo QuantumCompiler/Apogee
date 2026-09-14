@@ -1,5 +1,7 @@
 #include "backends/llamacpp.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <filesystem>
 #include <utility>
@@ -14,6 +16,42 @@
 
 namespace apogee::backends {
 namespace {
+
+/// The prompt-level form of structured output: a local model has no JSON
+/// mode here (the pinned subtree carries no schema-to-grammar converter),
+/// so the schema is stated in the system block and the caller validates.
+/// Skipped when a system message already carries the schema text -- the
+/// agent runner states it once itself -- so the model never reads it twice.
+std::vector<harness::ChatMessage> messages_with_schema(const harness::ChatRequest& request) {
+    const std::string& schema = request.transient.response_schema;
+    if (schema.empty()) {
+        return request.messages;
+    }
+    const nlohmann::json parsed = nlohmann::json::parse(schema, nullptr, false);
+    const std::string text = parsed.is_discarded() ? schema : parsed.dump(2);
+    for (const harness::ChatMessage& message : request.messages) {
+        if (message.role == harness::Role::System &&
+            message.content.plain_text().find("OUTPUT FORMAT") != std::string::npos) {
+            return request.messages;
+        }
+    }
+    std::vector<harness::ChatMessage> out = request.messages;
+    const std::string instruction =
+        "OUTPUT FORMAT\nYour response MUST be valid JSON conforming to the following JSON "
+        "Schema. Output only the JSON object -- no surrounding text or markdown code "
+        "blocks.\n\n" +
+        text;
+    // Beside an existing system message when there is one, else first.
+    std::size_t at = 0;
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        if (out[i].role == harness::Role::System) {
+            at = i + 1;
+        }
+    }
+    out.insert(out.begin() + static_cast<std::ptrdiff_t>(at),
+               harness::ChatMessage::system(instruction));
+    return out;
+}
 
 /// A context has to hold at least one token whose logits we can sample from.
 ///
@@ -480,7 +518,8 @@ harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatReques
         prompt += marker;
         prompt += "\n";
     }
-    prompt += llama_tokens::render_prompt(*model_, options_.model, request.messages, true);
+    prompt +=
+        llama_tokens::render_prompt(*model_, options_.model, messages_with_schema(request), true);
 
     // A fresh context every time. There is no prefix to reuse -- an image
     // occupies embedding positions that no token comparison can match -- so
@@ -532,7 +571,7 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
     }
 
     const std::vector<std::int32_t> prompt =
-        llama_tokens::tokenize_prompt(*model_, options_.model, request.messages, true);
+        llama_tokens::tokenize_prompt(*model_, options_.model, messages_with_schema(request), true);
 
     // A side request -- a background title summary, a one-off clerk call -- is
     // not a turn of this conversation. It runs on its own throwaway context so

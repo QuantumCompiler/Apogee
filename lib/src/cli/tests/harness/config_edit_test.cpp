@@ -658,3 +658,58 @@ TEST_CASE("an MCP server entry appends alphabetically, toggles one line, and del
     CHECK(deleted.find("  w:") == std::string::npos);
     CHECK_THROWS_AS((void)delete_mcp_server(kCommented, "w"), ConfigEditError);
 }
+
+TEST_CASE("an agent entry appends alphabetically with only what is set, and deletes cleanly",
+          "[config_edit][golden][agents]") {
+    using apogee::harness::AgentConfig;
+    using apogee::harness::append_agent;
+    using apogee::harness::delete_agent;
+    AgentConfig agent;
+    agent.description = "Reviews: code";  // a colon: quoted on write
+    agent.prompts = {"prompts/r.txt"};
+    agent.schemas = {"schemas/r-output.json"};
+    agent.save_subdir = "r";
+    const std::string appended = append_agent(kCommented, "r", agent, false);
+    require_parses(appended);
+    // Alphabetical after the name; `tools` always; nothing that is unset.
+    CHECK(appended.find("agents:\n  r:\n    description: \"Reviews: code\"\n"
+                        "    prompts: [prompts/r.txt]\n    save_subdir: r\n"
+                        "    schemas: [schemas/r-output.json]\n    tools: read-only\n") !=
+          std::string::npos);
+    CHECK(appended.find("questions") == std::string::npos);
+    CHECK(appended.find("output_format") == std::string::npos);
+    CHECK(appended.starts_with(kCommented));
+    const auto loaded = apogee::harness::parse_config(appended, "<test>");
+    REQUIRE(loaded.find_agent("r") != nullptr);
+    CHECK(loaded.find_agent("r")->save_subdir == "r");
+
+    // Every optional written when it says something; booleans only when true.
+    AgentConfig full;
+    full.collection = "adrs";
+    full.mcp = {"weather"};
+    full.model = "local";
+    full.output_format = apogee::harness::AgentOutputFormat::Json;
+    full.questions = true;
+    full.save_dir = "~/reports";
+    full.save_filename = "rev";
+    full.tools = apogee::harness::AgentToolPolicy::All;
+    const std::string with_all = append_agent(appended, "f", full, false);
+    require_parses(with_all);
+    CHECK(with_all.find("  f:\n    collection: adrs\n    mcp: [weather]\n    model: local\n"
+                        "    output_format: json\n    questions: true\n    save_dir: ~/reports\n"
+                        "    save_filename: rev\n    tools: all\n") != std::string::npos);
+    const auto both = apogee::harness::parse_config(with_all, "<test>");
+    CHECK(both.find_agent("f")->questions);
+    CHECK(both.find_agent("f")->output_format == apogee::harness::AgentOutputFormat::Json);
+
+    // Collisions and force, as every other section.
+    CHECK_THROWS_AS((void)append_agent(appended, "R", agent, false), ConfigEditError);
+    CHECK_THROWS_AS((void)append_agent(appended, "a b", agent, false), ConfigEditError);
+    CHECK_NOTHROW((void)append_agent(appended, "r", full, true));
+
+    // Delete is the inverse of append (the empty section header stays, as
+    // for every section).
+    const std::string deleted = delete_agent(appended, "r");
+    CHECK(deleted == std::string{kCommented} + "\nagents:\n");
+    CHECK_THROWS_AS((void)delete_agent(kCommented, "r"), ConfigEditError);
+}

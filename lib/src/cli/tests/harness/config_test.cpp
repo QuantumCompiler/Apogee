@@ -416,3 +416,77 @@ TEST_CASE("mcp_servers: parses, expands ~ and ${ENV}, validates enabled, refuses
                     ConfigError);
     CHECK(load_text(apogee::harness::config_template()).mcp_servers.empty());
 }
+
+TEST_CASE("agents: parses every field, validates the enums, resolves paths, refuses collisions",
+          "[config][agents]") {
+    const apogee::testing::EnvGuard guard{"APOGEE_AGENT_TEST_DIR", "/srv/agents"};
+    const Config config = load_text(
+        "agents:\n"
+        "  reviewer:\n"
+        "    description: \"Reviews code\"\n"
+        "    model: local\n"
+        "    prompts: [prompts/reviewer.txt, \"${APOGEE_AGENT_TEST_DIR}/extra.txt\"]\n"
+        "    schemas: [~/schemas/reviewer-output.json]\n"
+        "    output_format: json\n"
+        "    tools: all\n"
+        "    mcp: [weather, Git]\n"
+        "    questions: true\n"
+        "    collection: adrs\n"
+        "    save_dir: ~/reports\n"
+        "    save_filename: review\n"
+        "    save_subdir: reviewer\n"
+        "  bare:\n");
+    const apogee::harness::AgentConfig* reviewer = config.find_agent("reviewer");
+    REQUIRE(reviewer != nullptr);
+    CHECK(reviewer->description == "Reviews code");
+    CHECK(reviewer->model == "local");
+    REQUIRE(reviewer->prompts.size() == 2);
+    CHECK(reviewer->prompts[0] == "prompts/reviewer.txt");   // relative: left for the loader
+    CHECK(reviewer->prompts[1] == "/srv/agents/extra.txt");  // ${ENV} expanded
+    REQUIRE(reviewer->schemas.size() == 1);
+    CHECK(reviewer->schemas[0].find('~') == std::string::npos);  // ~ expanded
+    CHECK(reviewer->schemas[0].ends_with("/schemas/reviewer-output.json"));
+    CHECK(reviewer->output_format == apogee::harness::AgentOutputFormat::Json);
+    CHECK(reviewer->tools == apogee::harness::AgentToolPolicy::All);
+    CHECK(reviewer->mcp == std::vector<std::string>{"weather", "Git"});
+    CHECK(reviewer->questions);
+    CHECK(reviewer->collection == "adrs");
+    CHECK(reviewer->save_dir.ends_with("/reports"));
+    CHECK(reviewer->save_filename == "review");
+    CHECK(reviewer->save_subdir == "reviewer");
+
+    // The defaults: read-only, auto, no questions -- the safe policy.
+    const apogee::harness::AgentConfig* bare = config.find_agent("BARE");
+    REQUIRE(bare != nullptr);
+    CHECK(bare->tools == apogee::harness::AgentToolPolicy::ReadOnly);
+    CHECK(bare->output_format == apogee::harness::AgentOutputFormat::Auto);
+    CHECK_FALSE(bare->questions);
+    CHECK(config.agent_names() == std::vector<std::string>{"bare", "reviewer"});
+
+    // Every enum validated at load: a typo never silently means `all`.
+    CHECK_THROWS_AS(load_text("agents:\n  a:\n    tools: sometimes\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("agents:\n  a:\n    output_format: yaml\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("agents:\n  a:\n    questions: maybe\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("agents:\n  a:\n    prompts: notalist\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("agents:\n  a:\n    tools: all\n  A:\n    tools: none\n"),
+                    ConfigError);
+    CHECK(load_text(apogee::harness::config_template()).agents.empty());
+    CHECK(apogee::harness::agent_tool_policy_from_string("read-only") ==
+          apogee::harness::AgentToolPolicy::ReadOnly);
+    CHECK(apogee::harness::to_string(apogee::harness::AgentToolPolicy::None) == "none");
+    CHECK(apogee::harness::to_string(apogee::harness::AgentOutputFormat::Markdown) == "markdown");
+}
+
+TEST_CASE("is_vendor_cli names exactly the four CLI types", "[config][vendor]") {
+    using apogee::harness::BackendType;
+    using apogee::harness::is_vendor_cli;
+    CHECK(is_vendor_cli(BackendType::ClaudeCli));
+    CHECK(is_vendor_cli(BackendType::CodexCli));
+    CHECK(is_vendor_cli(BackendType::GeminiCli));
+    CHECK(is_vendor_cli(BackendType::OllamaCli));
+    CHECK_FALSE(is_vendor_cli(BackendType::Anthropic));
+    CHECK_FALSE(is_vendor_cli(BackendType::OpenAI));
+    CHECK_FALSE(is_vendor_cli(BackendType::Google));
+    CHECK_FALSE(is_vendor_cli(BackendType::LlamaCpp));
+    CHECK_FALSE(is_vendor_cli(BackendType::Mock));
+}

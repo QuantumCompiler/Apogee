@@ -56,6 +56,13 @@ struct Options {
     /// Status reporting happens either way.
     bool stream_answer = true;
 
+    /// A JSON Schema the answer must satisfy, asked of the provider on every
+    /// request through `ChatRequest::Transient::response_schema`. Each wire
+    /// translates it where the API has a native mode and ignores it where
+    /// not; `run_structured` validates the answer either way. Empty means
+    /// prose.
+    std::string response_schema;
+
     /// Hard ceiling on model→tool→model cycles.
     ///
     /// A model can loop calling the same tool forever, and without a bound the

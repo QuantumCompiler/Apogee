@@ -100,6 +100,46 @@ std::optional<nlohmann::json> content_entry(const harness::ChatMessage& message)
     return std::nullopt;
 }
 
+nlohmann::json gemini_response_schema(const nlohmann::json& schema) {
+    if (schema.is_array()) {
+        nlohmann::json out = nlohmann::json::array();
+        for (const nlohmann::json& item : schema) {
+            out.push_back(gemini_response_schema(item));
+        }
+        return out;
+    }
+    if (!schema.is_object()) {
+        return schema;
+    }
+    // The keywords Gemini's OpenAPI-subset schema accepts; everything else
+    // is a 400 from the API, `$schema` and `additionalProperties` included.
+    static constexpr std::string_view kKept[] = {
+        "type",       "format",   "description", "nullable",        "enum", "maxItems", "minItems",
+        "properties", "required", "items",       "propertyOrdering"};
+    nlohmann::json out = nlohmann::json::object();
+    for (const auto& [key, value] : schema.items()) {
+        bool kept = false;
+        for (const std::string_view candidate : kKept) {
+            kept = kept || candidate == key;
+        }
+        if (!kept) {
+            continue;
+        }
+        if (key == "properties" && value.is_object()) {
+            nlohmann::json properties = nlohmann::json::object();
+            for (const auto& [name, property] : value.items()) {
+                properties[name] = gemini_response_schema(property);
+            }
+            out[key] = std::move(properties);
+        } else if (key == "items") {
+            out[key] = gemini_response_schema(value);
+        } else {
+            out[key] = value;
+        }
+    }
+    return out;
+}
+
 nlohmann::json build_request(const harness::ChatRequest& request, const RequestOptions& options) {
     nlohmann::json body;
 
@@ -133,6 +173,20 @@ nlohmann::json build_request(const harness::ChatRequest& request, const RequestO
         // it the budget applies but nothing is emitted to display.
         generation["thinkingConfig"] = {{"includeThoughts", true},
                                         {"thinkingBudget", options.thinking_budget_tokens}};
+    }
+    if (!request.transient.response_schema.empty() && request.tools.empty()) {
+        // JSON mode and function calling are mutually exclusive on this API
+        // ("Function calling with a response mime type: 'application/json'
+        // is unsupported"), so the schema applies only to a request with no
+        // tools -- the loop's final pass, or a tools-less agent. The prompt
+        // carries the schema in text regardless, and the client-side
+        // validator is the check.
+        const nlohmann::json schema =
+            nlohmann::json::parse(request.transient.response_schema, nullptr, false);
+        if (!schema.is_discarded() && schema.is_object()) {
+            generation["responseMimeType"] = "application/json";
+            generation["responseSchema"] = gemini_response_schema(schema);
+        }
     }
     body["generationConfig"] = std::move(generation);
 

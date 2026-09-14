@@ -3,6 +3,7 @@
 #include <array>
 #include <system_error>
 
+#include "harness/assets.h"
 #include "harness/paths.h"
 
 namespace apogee::harness {
@@ -13,7 +14,7 @@ namespace {
 /// Order matters only for readability -- `create_directories` handles nesting
 /// -- but keeping it stable keeps `apogee check` output stable, and diffing
 /// two installs is easier when both enumerate in the same order.
-constexpr std::array<LayoutEntry, 8> kDirectories{{
+constexpr std::array<LayoutEntry, 11> kDirectories{{
     // `config` is a row like any other, even though `config_dir()` is the
     // accessor callers use. Leaving it out was the first version, and it
     // immediately produced the bug this whole file exists to prevent: seeding
@@ -27,6 +28,9 @@ constexpr std::array<LayoutEntry, 8> kDirectories{{
     {"embeddings", "vector stores for RAG", false, true},
     {"notes", "notes the model keeps for you (the write_note / read_note tools)", false, true},
     {"mcp", "MCP servers scaffolded by 'apogee mcp create', one directory each", false, true},
+    {"prompts", "agents' system prompts, loaded by 'apogee analyze --agent'", false, true},
+    {"schemas", "agents' output schemas (JSON Schema), loaded beside the prompts", false, true},
+    {"analyses", "reports saved by 'apogee analyze', one directory per agent", false, true},
     {"cache", "downloads and scratch state, safe to delete", false, false},
 }};
 
@@ -62,6 +66,18 @@ std::filesystem::path mcp_servers_dir() {
 
 std::filesystem::path cache_dir() {
     return apogee_home() / "cache";
+}
+
+std::filesystem::path prompts_dir() {
+    return apogee_home() / "prompts";
+}
+
+std::filesystem::path schemas_dir() {
+    return apogee_home() / "schemas";
+}
+
+std::filesystem::path analyses_dir() {
+    return apogee_home() / "analyses";
 }
 
 bool supports_private_modes() noexcept {
@@ -130,6 +146,16 @@ SeedResult seed_data_directory(const std::filesystem::path& root) {
         }
     }
 #endif
+
+    // The bundled agents' files, skip-if-present, through the one seeding
+    // path -- so `check --fix` and both installers materialise them alike.
+    AssetSeedResult assets = seed_bundled_assets(root);
+    for (std::string& file : assets.created) {
+        result.created.push_back(std::move(file));
+    }
+    if (!assets.ok()) {
+        result.error = assets.error;
+    }
 
     return result;
 }

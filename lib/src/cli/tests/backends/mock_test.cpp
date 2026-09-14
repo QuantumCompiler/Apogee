@@ -1,7 +1,9 @@
 #include "backends/mock.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -210,4 +212,69 @@ TEST_CASE("a chunk size of zero is corrected rather than looping forever", "[bac
     stream.on_token = [&streamed](std::string_view chunk) { streamed += chunk; };
     (void)provider.stream_chat(simple_request(), stream);
     CHECK(streamed == "abc");
+}
+
+TEST_CASE("a mock script parses turns, tool calls, and generated ids", "[backends][mock][script]") {
+    const nlohmann::json script = nlohmann::json::parse(R"({"turns": [
+        {"text": "", "tool_calls": [{"name": "git_diff", "arguments": {"head": "x"}},
+                                    {"name": "git_log", "id": "own", "arguments": "{}"}]},
+        {"text": "done"}
+    ]})");
+    const std::vector<apogee::backends::MockTurn> turns =
+        apogee::backends::parse_mock_script(script);
+    REQUIRE(turns.size() == 2);
+    REQUIRE(turns[0].tool_calls.size() == 2);
+    CHECK(turns[0].tool_calls[0].name == "git_diff");
+    CHECK(turns[0].tool_calls[0].id == "call-1");
+    CHECK(nlohmann::json::parse(turns[0].tool_calls[0].arguments).at("head") == "x");
+    CHECK(turns[0].tool_calls[1].id == "own");
+    CHECK(turns[0].tool_calls[1].arguments == "{}");
+    CHECK(turns[0].finish_reason == apogee::harness::FinishReason::ToolCalls);
+    CHECK(turns[1].text == "done");
+    CHECK(turns[1].finish_reason == apogee::harness::FinishReason::Stop);
+    // A bare list works too; a wrong shape is refused by name.
+    CHECK(apogee::backends::parse_mock_script(nlohmann::json::parse(R"([{"text":"a"}])")).size() ==
+          1);
+    CHECK_THROWS_AS(apogee::backends::parse_mock_script(nlohmann::json::parse(R"({"x":1})")),
+                    std::runtime_error);
+    CHECK_THROWS_AS(apogee::backends::parse_mock_script(
+                        nlohmann::json::parse(R"({"turns":[{"tool_calls":[{"arguments":{}}]}]})")),
+                    std::runtime_error);
+}
+
+TEST_CASE("placeholders expand against the request: the last tool result and the system prompt",
+          "[backends][mock][script]") {
+    apogee::harness::ChatRequest request;
+    request.messages = {apogee::harness::ChatMessage::system("PERSONA"),
+                        apogee::harness::ChatMessage::user("q")};
+    apogee::harness::ToolResult first;
+    first.tool_call_id = "1";
+    first.content = "first";
+    apogee::harness::ToolResult second;
+    second.tool_call_id = "2";
+    second.content = "line \"quoted\"\nsecond";
+    request.messages.push_back(apogee::harness::ChatMessage::from_tool_result(first));
+    request.messages.push_back(apogee::harness::ChatMessage::from_tool_result(second));
+    CHECK(
+        apogee::backends::expand_mock_text("got {{last_tool_result}} under {{system}}", request) ==
+        "got line \"quoted\"\nsecond under PERSONA");
+    // The :json forms are string literals, quotes included, so a scripted JSON
+    // answer can carry a tool result verbatim.
+    const std::string answer =
+        apogee::backends::expand_mock_text(R"({"s": {{last_tool_result:json}}})", request);
+    const nlohmann::json parsed = nlohmann::json::parse(answer, nullptr, false);
+    REQUIRE_FALSE(parsed.is_discarded());
+    CHECK(parsed.at("s") == "line \"quoted\"\nsecond");
+    CHECK(apogee::backends::expand_mock_text("plain", request) == "plain");
+
+    // And through the provider, streamed and not.
+    apogee::backends::MockProvider::Options options;
+    options.turns = {{"echo: {{last_tool_result}}", {}, apogee::harness::FinishReason::Stop, {}}};
+    apogee::backends::MockProvider provider{options};
+    CHECK(provider.chat(request, {}).message.content.plain_text() ==
+          "echo: line \"quoted\"\nsecond");
+    std::string streamed;
+    apogee::harness::StreamOptions stream;
+    stream.on_token = [&streamed](std::string_view chunk) { streamed += chunk; };
+    CHECK(provider.stream_chat(request, stream).message.content.plain_text() == streamed);
 }

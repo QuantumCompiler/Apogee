@@ -88,8 +88,12 @@ public:
     void reset_conversation();
 
 private:
-    [[nodiscard]] HttpRequest build_http_request(const nlohmann::json& body,
-                                                 std::string_view path) const;
+    /// `beta`, when non-empty, rides an `anthropic-beta` header.
+    [[nodiscard]] HttpRequest build_http_request(const nlohmann::json& body, std::string_view path,
+                                                 std::string_view beta = {}) const;
+    /// The beta header a request needs, or empty: the structured-outputs
+    /// beta when a schema rides a natively capable model.
+    [[nodiscard]] std::string beta_for(const harness::ChatRequest& request) const;
     [[nodiscard]] anthropic::RequestOptions request_options(const harness::ChatRequest& request,
                                                             bool stream) const;
     [[noreturn]] void fail(long status, std::string_view body) const;

@@ -353,6 +353,50 @@ Every one of these writes goes through the same comment-preserving edit the
 CLI uses, so a server registered here leaves the file byte-identical to one
 registered from the terminal.
 
+### `GET /v1/admin/agents`
+
+Every agent `apogee analyze --agent` can run, as a view: `{name, description,
+model, prompts, schemas, output_format, tools, mcp, questions, collection,
+save_dir, save_filename, save_subdir, bundled, overrides_bundled}`. The
+bundled three appear with `bundled: true` unless a config entry of the same
+name overrides them, in which case the entry is listed with
+`overrides_bundled: true`. `tools` is the agent's permission model:
+`read-only` (never prompts), `all` (gated like `chat`), or `none`.
+
+### `POST /v1/admin/agents`
+
+The twin of `apogee agents create`. Body: `name` (required), and optionally
+`description`, `model`, `tools`, `no_schema`, `prompt_body`, `schema_body`,
+`output_format`, `collection`, `questions`, `save_dir`, `save_filename`,
+`save_subdir`, `mcp` (a list of server names), and `force`. The prompt is
+written to `prompts/<name>.txt` and the schema to
+`schemas/<name>-output.json` under the data directory -- starter texts when
+no body is given -- and the entry is appended through the CLI's own edit,
+so the result is byte-identical to the CLI's. `201` with the view plus
+`prompt_path` and `schema_path`; `409` (`type: conflict`) when the agent or
+its files exist without `force`; `400` on an invalid name, policy, format, or
+body. No restart is needed: `analyze` reads the config on every run.
+
+### `GET /v1/admin/agents/{id}`
+
+One agent's view plus `prompt_bodies` and `schema_bodies`, each a list of
+`{path, body, present}` -- the file's text, or the compiled-in text for a
+bundled agent whose file has not been seeded (`present: false`). `404` when
+unknown.
+
+### `PUT /v1/admin/agents/{id}`
+
+The twin of `apogee agents edit`: the same body as `POST`, with the name
+from the path and `force` implied, so `prompt_body` and `schema_body`
+replace the files in place. `200` with the view; `400` on a malformed body.
+
+### `DELETE /v1/admin/agents/{id}`
+
+The twin of `apogee agents delete`: the entry is removed; with `?purge=true`
+its prompt and schema files are removed too. `200 {deleted, files_removed}`;
+`404` when there is no entry -- including for a bundled agent that was never
+overridden, which has no entry to delete.
+
 ### `GET /v1/admin/permissions`
 
 What the permission gate does for each destructive native tool — `ask`,

@@ -67,6 +67,7 @@ void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOption
         git.timeout = options.git_timeout;
         git.working_directory = effective_cwd(options);
         git.review = options.review;
+        git.live_review = options.live_review;
         register_git_tools(registry, git);
     }
     if (!disabled(options, "notes")) {

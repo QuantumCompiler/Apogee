@@ -139,6 +139,19 @@ public:
 [[nodiscard]] std::string set_mcp_server_enabled(std::string_view content, std::string_view name,
                                                  bool enabled);
 
+/// Appends an `agents:` entry (creating the section), fields alphabetical
+/// after the name; a string or list is written only when set and a boolean
+/// only when true, so an existing entry stays byte-identical across a
+/// re-append of the same data -- Ommi's `formatAgentEntry` rule. `tools` is
+/// always written: it is the permission model, and an entry that left it
+/// implicit would read as "whatever the default is this release".
+/// Same collision and `force` rules as `append_backend`.
+[[nodiscard]] std::string append_agent(std::string_view content, std::string_view name,
+                                       const AgentConfig& agent, bool force);
+
+/// Removes the entry and its fields; the exact inverse of the append.
+[[nodiscard]] std::string delete_agent(std::string_view content, std::string_view name);
+
 /// Sets `permissions.<tool>` to `level` (`ask`, `allow`, or `deny`),
 /// replacing the existing line (keeping any trailing comment) or inserting
 /// one, creating `permissions:` if needed. The one path by which the

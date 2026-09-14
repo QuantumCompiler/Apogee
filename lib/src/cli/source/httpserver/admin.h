@@ -5,6 +5,7 @@
 
 #include "events/bus.h"
 #include "harness/config.h"
+#include "httpserver/admin_agents.h"
 #include "httpserver/admin_auth_routes.h"
 #include "httpserver/admin_config.h"
 #include "httpserver/admin_events.h"
@@ -52,6 +53,12 @@ public:
     [[nodiscard]] HttpResponse delete_mcp_server(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse set_mcp_server_enabled(const HttpRequest& request,
                                                       std::string_view name);
+
+    [[nodiscard]] HttpResponse list_agents(const HttpRequest& request);
+    [[nodiscard]] HttpResponse create_agent(const HttpRequest& request);
+    [[nodiscard]] HttpResponse get_agent(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse put_agent(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse delete_agent(const HttpRequest& request, std::string_view name);
 
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);

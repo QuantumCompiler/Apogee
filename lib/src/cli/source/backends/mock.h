@@ -1,6 +1,9 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <cstddef>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -24,6 +27,13 @@ namespace apogee::backends {
 /// One scripted turn.
 struct MockTurn {
     /// Text the model "produces". Streamed in chunks; returned whole by chat().
+    ///
+    /// Two placeholders are expanded against the request the turn answers,
+    /// so a script can prove what reached the model without a real one:
+    /// `{{last_tool_result}}` is the content of the most recent tool result
+    /// in the request, `{{system}}` the concatenated system messages; the
+    /// `{{last_tool_result:json}}` / `{{system:json}}` forms expand to a
+    /// JSON string literal, quotes included, for use inside a JSON answer.
     std::string text;
 
     /// Tool calls to attach to the response.
@@ -32,6 +42,21 @@ struct MockTurn {
     harness::FinishReason finish_reason = harness::FinishReason::Stop;
     harness::Usage usage;
 };
+
+/// Turns from a JSON script: `{"turns": [{"text": "...", "tool_calls":
+/// [{"name": "git_diff", "arguments": "{}"}]}, ...]}`. A call's `id` is
+/// generated when absent; `arguments` may be a JSON object or a string.
+/// Throws std::runtime_error naming what is wrong.
+[[nodiscard]] std::vector<MockTurn> parse_mock_script(const nlohmann::json& script);
+
+/// `parse_mock_script` over a file. A `type: mock` entry whose `model_path`
+/// names one answers from it -- which is what lets the CLI be driven end to
+/// end, tool calls and all, with nothing installed.
+[[nodiscard]] std::vector<MockTurn> load_mock_script(const std::filesystem::path& path);
+
+/// `text` with its placeholders expanded against `request`.
+[[nodiscard]] std::string expand_mock_text(std::string_view text,
+                                           const harness::ChatRequest& request);
 
 class MockProvider final : public harness::LLMProvider, public harness::ModelBehaviorReporting {
 public:
@@ -87,7 +112,8 @@ public:
 
 private:
     [[nodiscard]] const MockTurn& next_turn();
-    [[nodiscard]] harness::ChatResponse build_response(const MockTurn& turn) const;
+    [[nodiscard]] harness::ChatResponse build_response(const MockTurn& turn,
+                                                       const std::string& text) const;
     void record(const harness::ChatRequest& request);
 
     Options options_;

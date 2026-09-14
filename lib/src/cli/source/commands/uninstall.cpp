@@ -7,6 +7,7 @@
 #include <sstream>
 #include <system_error>
 
+#include "harness/assets.h"
 #include "harness/layout.h"
 #include "harness/paths.h"
 #include "platform/platform.h"
@@ -57,8 +58,17 @@ UninstallPlan plan_uninstall(const std::filesystem::path& home,
             if (!std::filesystem::exists(path, code)) {
                 continue;
             }
-            const auto begin = std::filesystem::directory_iterator(path, code);
-            if (code || begin == std::filesystem::directory_iterator{}) {
+            // A directory holding only Apogee's own unedited bundled files (a
+            // fresh install's prompts/ and schemas/) is not the user's data;
+            // one holding anything else -- an edit, a scaffolded agent -- is.
+            bool holds_user_data = false;
+            for (const auto& item : std::filesystem::directory_iterator(path, code)) {
+                if (!harness::is_unmodified_bundled_asset(home, item.path())) {
+                    holds_user_data = true;
+                    break;
+                }
+            }
+            if (code || !holds_user_data) {
                 continue;
             }
             plan.user_data.emplace_back(entry.relative_path);

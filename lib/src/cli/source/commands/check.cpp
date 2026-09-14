@@ -1,6 +1,7 @@
 #include "commands/check.h"
 
 #include <CLI/CLI.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
@@ -15,14 +16,18 @@
 
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
+#include "agentloop/structured.h"
 #include "ansi/ansi.h"
+#include "commands/embed.h"
 #include "commands/helpers.h"
+#include "harness/assets.h"
 #include "harness/layout.h"
 #include "harness/paths.h"
 #include "httpserver/admin_auth.h"
 #include "models/gguf_inspect.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
+#include "scaffold/agent.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 #include "tools/toolsets.h"
@@ -541,12 +546,108 @@ void check_mcp(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
+/// The `Agents` section: the bundled assets present, and every configured
+/// agent runnable -- its files there, its schema a schema, its model and
+/// collection things the config knows.
+void check_agents(CheckReport& report, const CheckInputs& inputs) {
+    if (inputs.config_missing || !inputs.config_error.empty()) {
+        return;
+    }
+    std::error_code code;
+    for (const harness::BundledAgent& bundled : harness::bundled_agents()) {
+        for (const std::string& relative : {harness::bundled_prompt_relative_path(bundled.name),
+                                            harness::bundled_schema_relative_path(bundled.name)}) {
+            const std::filesystem::path path = inputs.home / relative;
+            if (std::filesystem::exists(path, code)) {
+                add(report, Status::Ok, "Agents", "bundled: " + relative, "present");
+            } else {
+                // Not a failure: the compiled-in text runs meanwhile. But an
+                // edit made to a file that is not there goes nowhere.
+                add(report, Status::Warn, "Agents", "bundled: " + relative,
+                    "not seeded -- the compiled-in text is used until it is", "apogee check --fix");
+            }
+        }
+    }
+    const harness::Config& config = inputs.config;
+    for (const auto& [name, agent] : config.agents) {
+        const std::string label = "agent: " + name;
+        bool clean = true;
+        for (const std::filesystem::path& file : scaffold::agent_files(inputs.config_path, agent)) {
+            if (!std::filesystem::exists(file, code)) {
+                add(report, Status::Fail, "Agents", label, "file missing: " + file.string(),
+                    "apogee agents create " + name + " --force   (or fix agents." + name +
+                        ".prompts / .schemas)");
+                clean = false;
+            }
+        }
+        if (agent.prompts.empty()) {
+            add(report, Status::Warn, "Agents", label, "no prompts: the agent has no persona",
+                "apogee agents edit " + name);
+            clean = false;
+        }
+        const std::filesystem::path home = harness::home_for_config(inputs.config_path);
+        for (const std::string& schema : agent.schemas) {
+            const std::filesystem::path path = harness::resolve_agent_path(home, schema);
+            std::ifstream in(path, std::ios::binary);
+            if (!in) {
+                continue;  // reported above
+            }
+            std::ostringstream buffer;
+            buffer << in.rdbuf();
+            const nlohmann::json parsed = nlohmann::json::parse(buffer.str(), nullptr, false);
+            if (parsed.is_discarded() || !parsed.is_object()) {
+                add(report, Status::Fail, "Agents", label,
+                    "schema is not a JSON object: " + path.string(), "apogee agents edit " + name);
+                clean = false;
+                continue;
+            }
+            const agentloop::ValidationResult valid = agentloop::validate_schema(parsed);
+            if (!valid.ok) {
+                add(report, Status::Fail, "Agents", label,
+                    "schema is not a valid draft-07 JSON Schema: " + path.string() + " -- " +
+                        valid.errors.front(),
+                    "apogee agents edit " + name);
+                clean = false;
+            }
+        }
+        if (!agent.model.empty() && !names_a_configured_backend(config, agent.model)) {
+            add(report, Status::Fail, "Agents", label,
+                "model '" + agent.model + "' is not a configured backend",
+                "apogee config add-backend " + agent.model + " --type <type>   (or change agents." +
+                    name + ".model)");
+            clean = false;
+        }
+        if (!agent.collection.empty() &&
+            !std::filesystem::exists(collection_path(agent.collection), code)) {
+            add(report, Status::Warn, "Agents", label,
+                "collection '" + agent.collection + "' does not exist; the agent runs without it",
+                "apogee embed ingest " + agent.collection + " <path>");
+            clean = false;
+        }
+        for (const std::string& server : agent.mcp) {
+            if (config.find_mcp_server(server) == nullptr) {
+                add(report, Status::Warn, "Agents", label,
+                    "mcp server '" + server + "' is not configured; it is skipped",
+                    "apogee mcp create " + server);
+                clean = false;
+            }
+        }
+        if (clean) {
+            add(report, Status::Ok, "Agents", label,
+                std::string{harness::to_string(agent.tools)} + ", " +
+                    std::to_string(agent.prompts.size()) + " prompt(s), " +
+                    std::to_string(agent.schemas.size()) + " schema(s)");
+        }
+    }
+}
+
 CheckReport run_checks(const CheckInputs& inputs) {
     CheckReport report;
     check_version(report, inputs);
     check_config(report, inputs);
     check_tools(report, inputs);
     check_mcp(report, inputs);
+    check_agents(report, inputs);
     check_filesystem(report, inputs);
     check_secrets(report, inputs);
     check_credential_store(report, inputs);

@@ -72,7 +72,31 @@ struct RequestOptions {
     std::int64_t web_search_max_uses = 0;
 
     bool stream = false;
+
+    /// Whether the model takes the structured-outputs `output_format` field.
+    /// Off, a schema becomes one forced tool instead (see below).
+    bool native_structured_output = false;
 };
+
+/// The tool a schema becomes on a model without native structured outputs:
+/// its `input_schema` is the answer's schema, the model is made to call it,
+/// and its arguments ARE the answer -- the classic Messages-API pattern,
+/// universal across models. `fold_structured_output` turns the call back
+/// into answer text so nothing above the wire knows it happened.
+inline constexpr std::string_view kStructuredOutputTool = "structured_output";
+
+/// The beta header the native field needs.
+inline constexpr std::string_view kStructuredOutputsBeta = "structured-outputs-2025-11-13";
+
+/// Whether `model` supports `output_format` natively: the Claude 4.5
+/// generation and later (and Opus 4.1), by the version in the model id.
+/// Anything unrecognised answers no, which lands on the universal path.
+[[nodiscard]] bool supports_native_structured_output(std::string_view model) noexcept;
+
+/// If `response` carries a `structured_output` tool call, its arguments
+/// become the message text, the call is removed, and the finish reason is
+/// `Stop` when no other call remains.
+void fold_structured_output(harness::ChatResponse& response);
 
 /// Builds the JSON body for POST /v1/messages.
 [[nodiscard]] nlohmann::json build_request(const harness::ChatRequest& request,

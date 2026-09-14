@@ -103,6 +103,18 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
             if (!config.model.empty()) {
                 options.model = config.model;
             }
+            if (!config.model_path.empty()) {
+                // A script file: canned turns, tool calls included. The
+                // mock's stated purpose is driving the CLI with nothing
+                // installed, and a tool-using run needs a model that calls
+                // tools.
+                try {
+                    options.turns = load_mock_script(config.model_path);
+                } catch (const std::exception& e) {
+                    reason = e.what();
+                    return nullptr;
+                }
+            }
             return std::make_shared<MockProvider>(std::move(options));
         }
         case harness::BackendType::OpenAI: {

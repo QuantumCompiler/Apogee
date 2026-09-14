@@ -301,7 +301,55 @@ std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::stri
     return nullptr;
 }
 
+std::optional<int> run_foreground(const ChildCommand& command, std::string& error) {
+    (void)command;
+    error = "running a foreground program is not implemented on Windows yet";
+    return std::nullopt;
+}
+
 #else
+
+std::optional<int> run_foreground(const ChildCommand& command, std::string& error) {
+    const std::string resolved = find_on_path(command.program);
+    if (resolved.empty()) {
+        error = "'" + command.program + "' was not found on PATH";
+        return std::nullopt;
+    }
+    std::vector<std::string> storage;
+    storage.push_back(resolved);
+    for (const std::string& argument : command.arguments) {
+        storage.push_back(argument);
+    }
+    std::vector<char*> argv;
+    argv.reserve(storage.size() + 1);
+    for (std::string& value : storage) {
+        argv.push_back(value.data());
+    }
+    argv.push_back(nullptr);
+
+    // No file actions: every standard stream is the terminal's own.
+    pid_t pid = -1;
+    const int status =
+        ::posix_spawn(&pid, resolved.c_str(), nullptr, nullptr, argv.data(), environ);
+    if (status != 0) {
+        error = "could not start '" + resolved + "': " + std::strerror(status);
+        return std::nullopt;
+    }
+    int wait_status = 0;
+    while (::waitpid(pid, &wait_status, 0) < 0) {
+        if (errno != EINTR) {
+            error = std::string{"waiting for '"} + resolved + "': " + std::strerror(errno);
+            return std::nullopt;
+        }
+    }
+    if (WIFEXITED(wait_status)) {
+        return WEXITSTATUS(wait_status);
+    }
+    if (WIFSIGNALED(wait_status)) {
+        return 128 + WTERMSIG(wait_status);
+    }
+    return -1;
+}
 
 std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::string& error) {
     const std::string resolved = find_on_path(command.program);

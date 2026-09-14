@@ -263,11 +263,20 @@ anthropic::RequestOptions AnthropicProvider::request_options(const harness::Chat
     options.web_search = options_.web_search;
     options.web_search_max_uses = options_.web_search_max_uses;
     options.stream = stream;
+    options.native_structured_output = anthropic::supports_native_structured_output(options_.model);
     return options;
 }
 
-HttpRequest AnthropicProvider::build_http_request(const nlohmann::json& body,
-                                                  std::string_view path) const {
+std::string AnthropicProvider::beta_for(const harness::ChatRequest& request) const {
+    if (!request.transient.response_schema.empty() &&
+        anthropic::supports_native_structured_output(options_.model)) {
+        return std::string{anthropic::kStructuredOutputsBeta};
+    }
+    return {};
+}
+
+HttpRequest AnthropicProvider::build_http_request(const nlohmann::json& body, std::string_view path,
+                                                  std::string_view beta) const {
     HttpRequest request;
     request.method = "POST";
     request.url = options_.base_url + std::string{path};
@@ -277,6 +286,9 @@ HttpRequest AnthropicProvider::build_http_request(const nlohmann::json& body,
         {"x-api-key", options_.api_key},
         {"anthropic-version", options_.api_version},
     };
+    if (!beta.empty()) {
+        request.headers.push_back({"anthropic-beta", std::string{beta}});
+    }
     // No overall timeout: a long generation is not a hung connection, and a
     // timeout that cannot tell them apart truncates real answers.
     request.timeout = std::chrono::seconds{0};
@@ -295,8 +307,8 @@ harness::ChatResponse AnthropicProvider::chat(const harness::ChatRequest& reques
 
     const nlohmann::json body =
         anthropic::build_request(request, request_options(request, false), thinking_cache_);
-    const HttpResponse response =
-        client_->send(build_http_request(body, "/v1/messages"), {}, cancellation);
+    const HttpResponse response = client_->send(
+        build_http_request(body, "/v1/messages", beta_for(request)), {}, cancellation);
 
     if (!response.ok()) {
         fail(response.status, response.body);
@@ -310,7 +322,9 @@ harness::ChatResponse AnthropicProvider::chat(const harness::ChatRequest& reques
     if (const auto content = parsed.find("content"); content != parsed.end()) {
         thinking_cache_.remember(*content);
     }
-    return anthropic::parse_response(parsed);
+    harness::ChatResponse out = anthropic::parse_response(parsed);
+    anthropic::fold_structured_output(out);
+    return out;
 }
 
 harness::ChatResponse AnthropicProvider::stream_chat(const harness::ChatRequest& request,
@@ -331,7 +345,7 @@ harness::ChatResponse AnthropicProvider::stream_chat(const harness::ChatRequest&
         return parser.feed(chunk);
     };
 
-    HttpRequest http_request = build_http_request(body, "/v1/messages");
+    HttpRequest http_request = build_http_request(body, "/v1/messages", beta_for(request));
     http_request.headers.push_back({"accept", "text/event-stream"});
 
     const HttpResponse response = client_->send(http_request, sink, options.cancellation);
@@ -347,7 +361,12 @@ harness::ChatResponse AnthropicProvider::stream_chat(const harness::ChatRequest&
     }
 
     thinking_cache_.remember(accumulator.raw_blocks());
-    return accumulator.take_response();
+    // A forced structured_output call arrives as a tool_use block whose
+    // arguments were never streamed as text; folding it here means the loop
+    // sees an ordinary un-streamed answer and delivers it whole.
+    harness::ChatResponse out = accumulator.take_response();
+    anthropic::fold_structured_output(out);
+    return out;
 }
 
 std::vector<harness::ModelInfo> AnthropicProvider::list_models(

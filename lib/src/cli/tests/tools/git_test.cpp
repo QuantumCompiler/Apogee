@@ -223,3 +223,47 @@ TEST_CASE(
     // And with no defaults at all, no target on the default branch shows uncommitted changes.
     CHECK(f.run("git_diff", "{}").content.find("uncommitted changes") != std::string::npos);
 }
+
+TEST_CASE("git_log takes the review defaults too, and a live review re-points both tools",
+          "[tools][git][review]") {
+    if (!have_git()) {
+        SKIP("git is not available");
+    }
+    Fixture f;
+    ToolRegistry live;
+    apogee::tools::GitOptions options;
+    options.working_directory = f.repo;
+    const auto review = std::make_shared<apogee::tools::ReviewDefaults>();
+    review->head = "feature-a";
+    review->base = "main";
+    review->fetch = "never";
+    options.live_review = review;
+    apogee::tools::register_git_tools(live, options);
+    const apogee::agent::Tool* log = live.find("git_log");
+    const apogee::agent::Tool* diff = live.find("git_diff");
+    REQUIRE(log != nullptr);
+    REQUIRE(diff != nullptr);
+
+    // The log of what the reviewed branch adds -- not the checked-out one's.
+    const ToolOutcome logged = log->run("{}");
+    REQUIRE_FALSE(logged.is_error);
+    CHECK(logged.content.find("Range: main..feature-a") != std::string::npos);
+    CHECK(logged.content.find("add a.txt") != std::string::npos);
+    CHECK(logged.content.find("add b.txt") == std::string::npos);
+    CHECK(logged.content.find("init") == std::string::npos);
+    // An explicit range from the model still wins.
+    CHECK(log->run(R"({"range":"main..feature-b"})").content.find("add b.txt") !=
+          std::string::npos);
+
+    // Re-pointing the shared value moves both tools without re-registering:
+    // what `/branch` does mid-session.
+    review->head = "feature-b";
+    CHECK(diff->run("{}").content.find("Review: main...feature-b") != std::string::npos);
+    CHECK(log->run("{}").content.find("add b.txt") != std::string::npos);
+    CHECK(log->run("{}").content.find("add a.txt") == std::string::npos);
+    // Switched off: back to the checked-out branch's own log.
+    review->head.clear();
+    review->base.clear();
+    CHECK(log->run("{}").content.find("Branch: main") != std::string::npos);
+    CHECK(log->run("{}").content.find("init") != std::string::npos);
+}

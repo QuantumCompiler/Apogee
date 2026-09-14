@@ -140,6 +140,24 @@ nlohmann::json build_request(const harness::ChatRequest& request, const RequestO
         body["tools"] = std::move(tools);
     }
 
+    if (!request.transient.response_schema.empty()) {
+        // The Responses API's structured output: `text.format`, not Chat
+        // Completions' `response_format`. `strict` stays off -- strict mode
+        // demands every property required and `additionalProperties: false`
+        // at every level, which a schema with optional fields (`cwe`,
+        // `commits`) does not satisfy; the client-side validator is the
+        // check either way, and this mode coexists with tools.
+        const nlohmann::json schema =
+            nlohmann::json::parse(request.transient.response_schema, nullptr, false);
+        if (!schema.is_discarded() && schema.is_object()) {
+            body["text"] = {{"format",
+                             {{"type", "json_schema"},
+                              {"name", "structured_output"},
+                              {"schema", schema},
+                              {"strict", false}}}};
+        }
+    }
+
     if (!options.reasoning_effort.empty()) {
         // `summary: auto` is what makes reasoning summaries stream at all.
         // Without it the effort applies but nothing is emitted to display.

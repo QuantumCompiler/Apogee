@@ -686,3 +686,157 @@ TEST_CASE("the provider satisfies the LLMProvider interface via the harness",
     CHECK_FALSE(response.message.content.plain_text().empty());
     CHECK_FALSE(registry.can_embed("claude"));
 }
+
+// ---------------------------------------------------------------------------
+// Structured output: the native field where the model has it, else one forced tool
+// ---------------------------------------------------------------------------
+
+TEST_CASE("native structured output is a version question, answered from the model id",
+          "[backends][anthropic][wire][structured]") {
+    using apogee::backends::anthropic::supports_native_structured_output;
+    CHECK(supports_native_structured_output("claude-sonnet-5"));
+    CHECK(supports_native_structured_output("claude-opus-5-1"));
+    CHECK(supports_native_structured_output("claude-sonnet-4-5"));
+    CHECK(supports_native_structured_output("claude-sonnet-4-5-20250929"));
+    CHECK(supports_native_structured_output("claude-opus-4-1"));
+    CHECK(supports_native_structured_output("claude-haiku-4.5"));
+    CHECK_FALSE(supports_native_structured_output("claude-sonnet-4"));
+    CHECK_FALSE(supports_native_structured_output("claude-sonnet-4-0"));
+    CHECK_FALSE(supports_native_structured_output("claude-3-7-sonnet"));
+    CHECK_FALSE(supports_native_structured_output("claude-haiku-4-1"));  // only opus at 4.1
+    CHECK_FALSE(supports_native_structured_output("gpt-5"));
+    CHECK_FALSE(supports_native_structured_output(""));
+}
+
+TEST_CASE("a capable model gets output_format and the beta header; nothing else changes",
+          "[backends][anthropic][wire][structured]") {
+    ChatRequest request = chat_request();
+    request.tools = {Tool{"search", "search the web", R"({"type":"object"})"}};
+    request.transient.response_schema = R"({"type":"object","properties":{"a":{"type":"string"}}})";
+
+    Fixture f = make_provider({sse(kTextStream)});  // the default model: claude-sonnet-5
+    (void)f.provider->stream_chat(request, {});
+
+    const json body = json::parse(f.transport->requests()[0].body);
+    REQUIRE(body.contains("output_format"));
+    CHECK(body.at("output_format").at("type") == "json_schema");
+    CHECK(body.at("output_format").at("schema").at("type") == "object");
+    CHECK(body.at("tools").size() == 1);  // no extra tool on this path
+    CHECK_FALSE(body.contains("tool_choice"));
+    bool beta = false;
+    for (const auto& header : f.transport->requests()[0].headers) {
+        beta = beta || (header.name == "anthropic-beta" &&
+                        header.value == apogee::backends::anthropic::kStructuredOutputsBeta);
+    }
+    CHECK(beta);
+
+    // No schema: no beta header, no field.
+    Fixture plain = make_provider({sse(kTextStream)});
+    (void)plain.provider->stream_chat(chat_request(), {});
+    CHECK_FALSE(json::parse(plain.transport->requests()[0].body).contains("output_format"));
+    for (const auto& header : plain.transport->requests()[0].headers) {
+        CHECK(header.name != "anthropic-beta");
+    }
+}
+
+TEST_CASE("a model without the field gets one forced tool, and its arguments are the answer",
+          "[backends][anthropic][wire][structured]") {
+    // The forced call comes back as a tool_use block whose input is the
+    // report; the provider folds it into answer text so the loop sees an
+    // ordinary answer and not a tool call it has no tool for.
+    constexpr std::string_view kForcedStream =
+        "event: message_start\n"
+        R"(data: {"type":"message_start","message":{"model":"claude-3-7-sonnet","usage":{"input_tokens":9}}})"
+        "\n\n"
+        "event: content_block_start\n"
+        R"(data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_9","name":"structured_output"}})"
+        "\n\n"
+        "event: content_block_delta\n"
+        R"(data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"a\":"}})"
+        "\n\n"
+        "event: content_block_delta\n"
+        R"(data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"answer\"}"}})"
+        "\n\n"
+        "event: content_block_stop\n"
+        R"(data: {"type":"content_block_stop","index":0})"
+        "\n\n"
+        "event: message_delta\n"
+        R"(data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":4}})"
+        "\n\n"
+        "event: message_stop\n"
+        R"(data: {"type":"message_stop"})"
+        "\n\n";
+
+    AnthropicProvider::Options options;
+    options.model = "claude-3-7-sonnet";
+    ChatRequest request = chat_request();
+    request.transient.response_schema = R"({"type":"object","properties":{"a":{"type":"string"}}})";
+
+    // No other tools: the output tool is chosen BY NAME.
+    Fixture f = make_provider({sse(kForcedStream)}, options);
+    const apogee::harness::ChatResponse folded = f.provider->stream_chat(request, {});
+    const json body = json::parse(f.transport->requests()[0].body);
+    CHECK_FALSE(body.contains("output_format"));
+    REQUIRE(body.at("tools").size() == 1);
+    CHECK(body.at("tools")[0].at("name") == "structured_output");
+    CHECK(body.at("tools")[0].at("input_schema").at("type") == "object");
+    CHECK(body.at("tool_choice").at("type") == "tool");
+    CHECK(body.at("tool_choice").at("name") == "structured_output");
+    for (const auto& header : f.transport->requests()[0].headers) {
+        CHECK(header.name != "anthropic-beta");
+    }
+    // Folded: the arguments are the text, the call is gone, the turn stopped.
+    CHECK(folded.message.content.plain_text() == R"({"a":"answer"})");
+    CHECK(folded.message.tool_calls.empty());
+    CHECK(folded.finish_reason == FinishReason::Stop);
+
+    // With other tools the model must still be free to call them first:
+    // `any` -- some tool, never prose.
+    request.tools = {Tool{"search", "search the web", R"({"type":"object"})"}};
+    Fixture g = make_provider({sse(kForcedStream)}, options);
+    (void)g.provider->stream_chat(request, {});
+    const json with_tools = json::parse(g.transport->requests()[0].body);
+    CHECK(with_tools.at("tools").size() == 2);
+    CHECK(with_tools.at("tool_choice").at("type") == "any");
+
+    // Under extended thinking a forced choice is rejected by the API, so
+    // the tool is offered and the choice left to the model.
+    options.thinking_budget_tokens = 1024;
+    Fixture h = make_provider({sse(kForcedStream)}, options);
+    (void)h.provider->stream_chat(request, {});
+    const json thinking = json::parse(h.transport->requests()[0].body);
+    CHECK(thinking.at("tools").size() == 2);
+    CHECK_FALSE(thinking.contains("tool_choice"));
+
+    // The non-streaming path folds too.
+    constexpr std::string_view kForcedBody =
+        R"({"model":"claude-3-7-sonnet","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_1","name":"structured_output","input":{"a":"b"}},{"type":"tool_use","id":"toolu_2","name":"search","input":{"q":"x"}}],"usage":{"input_tokens":1,"output_tokens":1}})";
+    Fixture i = make_provider({FakeTransport::Reply{200, std::string{kForcedBody}, 0, false, "",
+                                                    std::nullopt, std::nullopt}},
+                              options);
+    const apogee::harness::ChatResponse mixed = i.provider->chat(request, {});
+    CHECK(mixed.message.content.plain_text() == R"({"a":"b"})");
+    REQUIRE(mixed.message.tool_calls.size() == 1);  // the real call survives
+    CHECK(mixed.message.tool_calls[0].name == "search");
+    CHECK(mixed.finish_reason == FinishReason::ToolCalls);
+}
+
+TEST_CASE("the fold leaves an ordinary turn untouched: its text and its real calls",
+          "[backends][anthropic][wire][structured]") {
+    // A turn with prose AND a real tool call, no structured_output block: the
+    // fold must not run at all. A version that emptied the text before
+    // deciding whether it applied passed every tool-call assertion and lost
+    // the words -- so the words are what this pins.
+    constexpr std::string_view kMixedBody =
+        R"({"model":"claude-sonnet-5","stop_reason":"tool_use","content":[{"type":"text","text":"Let me look."},{"type":"tool_use","id":"toolu_7","name":"search","input":{"q":"x"}}],"usage":{"input_tokens":1,"output_tokens":1}})";
+    ChatRequest request = chat_request();
+    request.transient.response_schema = R"({"type":"object"})";
+    Fixture f = make_provider({FakeTransport::Reply{200, std::string{kMixedBody}, 0, false, "",
+                                                    std::nullopt, std::nullopt}});
+    const apogee::harness::ChatResponse response = f.provider->chat(request, {});
+    CHECK(response.message.content.plain_text() == "Let me look.");
+    REQUIRE(response.message.tool_calls.size() == 1);
+    CHECK(response.message.tool_calls[0].name == "search");
+    CHECK(response.message.tool_calls[0].id == "toolu_7");
+    CHECK(response.finish_reason == FinishReason::ToolCalls);
+}

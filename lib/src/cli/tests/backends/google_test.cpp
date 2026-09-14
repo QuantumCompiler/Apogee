@@ -336,3 +336,42 @@ TEST_CASE("a 429 is retried", "[backends][google][error]") {
     CHECK(response.message.content.plain_text() == "Hello, world");
     CHECK(f.transport->attempts() == 2);
 }
+
+TEST_CASE("a response schema becomes responseSchema only when no tools are in play",
+          "[backends][google][wire][structured]") {
+    const std::string schema =
+        R"({"$schema":"http://json-schema.org/draft-07/schema#","title":"T","type":"object","additionalProperties":false,"properties":{"a":{"type":"string","description":"d"},"list":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"b":{"type":"string","enum":["x"]}},"required":["b"]}}},"required":["a"]})";
+
+    ChatRequest request = chat_request();
+    request.transient.response_schema = schema;
+    Fixture f = make_provider({sse(kTextStream)});
+    (void)f.provider->stream_chat(request, {});
+    const json generation = json::parse(f.transport->requests()[0].body).at("generationConfig");
+    CHECK(generation.at("responseMimeType") == "application/json");
+    const json& sent = generation.at("responseSchema");
+    // The OpenAPI subset: the keywords the API rejects are gone, at every depth.
+    CHECK_FALSE(sent.contains("$schema"));
+    CHECK_FALSE(sent.contains("title"));
+    CHECK_FALSE(sent.contains("additionalProperties"));
+    CHECK(sent.at("properties").at("a").at("description") == "d");
+    CHECK(sent.at("required")[0] == "a");
+    const json& item = sent.at("properties").at("list").at("items");
+    CHECK_FALSE(item.contains("additionalProperties"));
+    CHECK(item.at("properties").at("b").at("enum")[0] == "x");
+
+    // With tools, JSON mode is not sent: the API refuses the combination, so
+    // the schema rides the prompt and the validator on those requests.
+    ChatRequest with_tools = chat_request();
+    with_tools.transient.response_schema = schema;
+    with_tools.tools = {Tool{"search", "search the web", R"({"type":"object"})"}};
+    Fixture g = make_provider({sse(kTextStream)});
+    (void)g.provider->stream_chat(with_tools, {});
+    const json tooled = json::parse(g.transport->requests()[0].body).at("generationConfig");
+    CHECK_FALSE(tooled.contains("responseMimeType"));
+    CHECK_FALSE(tooled.contains("responseSchema"));
+
+    // The sanitizer, directly.
+    const json cleaned = apogee::backends::google::gemini_response_schema(json::parse(schema));
+    CHECK(cleaned.contains("type"));
+    CHECK_FALSE(cleaned.contains("$schema"));
+}

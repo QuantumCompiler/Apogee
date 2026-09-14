@@ -105,6 +105,10 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
         if (!final_pass) {
             request.tools = tools;
         }
+        // The schema rides every request: a provider whose JSON mode cannot
+        // coexist with tools applies it on the tools-less final pass, and one
+        // whose mode can applies it throughout.
+        request.transient.response_schema = options.response_schema;
 
         harness::ChatResponse response;
         bool streamed = false;

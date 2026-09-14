@@ -1,6 +1,11 @@
 #include "backends/mock.h"
 
+#include <nlohmann/json.hpp>
+
+#include <fstream>
 #include <functional>
+#include <sstream>
+#include <stdexcept>
 #include <utility>
 
 #include "harness/errors.h"
@@ -13,7 +18,103 @@ const MockTurn& default_turn() {
     return turn;
 }
 
+void replace_all(std::string& text, std::string_view needle, const std::string& value) {
+    std::size_t at = text.find(needle);
+    while (at != std::string::npos) {
+        text.replace(at, needle.size(), value);
+        at = text.find(needle, at + value.size());
+    }
+}
+
 }  // namespace
+
+std::string expand_mock_text(std::string_view text, const harness::ChatRequest& request) {
+    std::string out{text};
+    if (out.find("{{") == std::string::npos) {
+        return out;
+    }
+    std::string last_tool_result;
+    std::string system;
+    for (const harness::ChatMessage& message : request.messages) {
+        if (message.role == harness::Role::Tool) {
+            last_tool_result = message.content.plain_text();
+        } else if (message.role == harness::Role::System) {
+            system += system.empty() ? "" : "\n\n";
+            system += message.content.plain_text();
+        }
+    }
+    // The `:json` variants expand to a JSON string literal, quotes included,
+    // so a scripted JSON answer can carry a tool result verbatim.
+    replace_all(out, "{{last_tool_result:json}}", nlohmann::json(last_tool_result).dump());
+    replace_all(out, "{{system:json}}", nlohmann::json(system).dump());
+    replace_all(out, "{{last_tool_result}}", last_tool_result);
+    replace_all(out, "{{system}}", system);
+    return out;
+}
+
+std::vector<MockTurn> parse_mock_script(const nlohmann::json& script) {
+    const nlohmann::json* turns = &script;
+    if (script.is_object()) {
+        const auto it = script.find("turns");
+        if (it == script.end()) {
+            throw std::runtime_error("mock script: expected {\"turns\": [...]}");
+        }
+        turns = &*it;
+    }
+    if (!turns->is_array()) {
+        throw std::runtime_error("mock script: turns must be a list");
+    }
+    std::vector<MockTurn> out;
+    std::size_t next_id = 1;
+    for (const nlohmann::json& entry : *turns) {
+        if (!entry.is_object()) {
+            throw std::runtime_error("mock script: each turn must be an object");
+        }
+        MockTurn turn;
+        turn.text = entry.value("text", std::string{});
+        if (const auto calls = entry.find("tool_calls"); calls != entry.end()) {
+            if (!calls->is_array()) {
+                throw std::runtime_error("mock script: tool_calls must be a list");
+            }
+            for (const nlohmann::json& call : *calls) {
+                harness::ToolCall parsed;
+                parsed.name = call.value("name", std::string{});
+                if (parsed.name.empty()) {
+                    throw std::runtime_error("mock script: a tool call needs a name");
+                }
+                parsed.id = call.value("id", std::string{});
+                if (parsed.id.empty()) {
+                    parsed.id = "call-" + std::to_string(next_id);
+                }
+                ++next_id;
+                if (const auto arguments = call.find("arguments"); arguments != call.end()) {
+                    parsed.arguments =
+                        arguments->is_string() ? arguments->get<std::string>() : arguments->dump();
+                }
+                turn.tool_calls.push_back(std::move(parsed));
+            }
+        }
+        if (!turn.tool_calls.empty()) {
+            turn.finish_reason = harness::FinishReason::ToolCalls;
+        }
+        out.push_back(std::move(turn));
+    }
+    return out;
+}
+
+std::vector<MockTurn> load_mock_script(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw std::runtime_error("mock script " + path.string() + ": cannot open");
+    }
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    const nlohmann::json parsed = nlohmann::json::parse(buffer.str(), nullptr, false);
+    if (parsed.is_discarded()) {
+        throw std::runtime_error("mock script " + path.string() + ": not valid JSON");
+    }
+    return parse_mock_script(parsed);
+}
 
 // ---------------------------------------------------------------------------
 // MockProvider
@@ -49,9 +150,10 @@ const MockTurn& MockProvider::next_turn() {
     return options_.turns[index];
 }
 
-harness::ChatResponse MockProvider::build_response(const MockTurn& turn) const {
+harness::ChatResponse MockProvider::build_response(const MockTurn& turn,
+                                                   const std::string& text) const {
     harness::ChatResponse response;
-    response.message = harness::ChatMessage::assistant(turn.text);
+    response.message = harness::ChatMessage::assistant(text);
     response.message.tool_calls = turn.tool_calls;
     response.finish_reason = turn.finish_reason;
     response.usage = turn.usage;
@@ -63,7 +165,8 @@ harness::ChatResponse MockProvider::chat(const harness::ChatRequest& request,
                                          const harness::CancellationToken& cancellation) {
     cancellation.throw_if_cancelled();
     record(request);
-    return build_response(next_turn());
+    const MockTurn& turn = next_turn();
+    return build_response(turn, expand_mock_text(turn.text, request));
 }
 
 harness::ChatResponse MockProvider::stream_chat(const harness::ChatRequest& request,
@@ -83,7 +186,7 @@ harness::ChatResponse MockProvider::stream_chat(const harness::ChatRequest& requ
     // Chunked deliberately, and checked for cancellation between chunks: this
     // is the contract every real provider must honour, so the mock has to hold
     // itself to it or tests of cancellation prove nothing.
-    const std::string& text = turn.text;
+    const std::string text = expand_mock_text(turn.text, request);
     for (std::size_t offset = 0; offset < text.size(); offset += options_.chunk_size) {
         options.cancellation.throw_if_cancelled();
         if (options.on_token) {
@@ -101,7 +204,7 @@ harness::ChatResponse MockProvider::stream_chat(const harness::ChatRequest& requ
         options.on_status(event);
     }
 
-    return build_response(turn);
+    return build_response(turn, text);
 }
 
 std::vector<harness::ModelInfo> MockProvider::list_models(

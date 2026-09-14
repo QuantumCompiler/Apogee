@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 30> kRoutes{{
+constexpr std::array<Route, 35> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -110,6 +110,26 @@ constexpr std::array<Route, 30> kRoutes{{
     {"PUT", "/v1/admin/mcp-servers/{id}", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->set_mcp_server_enabled(r, id);
+     }},
+    {"GET", "/v1/admin/agents", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_agents(r);
+     }},
+    {"POST", "/v1/admin/agents", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->create_agent(r);
+     }},
+    {"GET", "/v1/admin/agents/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->get_agent(r, id);
+     }},
+    {"PUT", "/v1/admin/agents/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->put_agent(r, id);
+     }},
+    {"DELETE", "/v1/admin/agents/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->delete_agent(r, id);
      }},
     {"GET", "/v1/admin/permissions", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {

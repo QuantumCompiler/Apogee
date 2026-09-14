@@ -13,6 +13,7 @@
 #include <string>
 
 #include "agent/tool.h"
+#include "agentloop/loop.h"
 #include "commands/helpers.h"
 #include "commands/json_reporter.h"
 #include "commands/status_line.h"
@@ -191,4 +192,108 @@ TEST_CASE("the built-in registry connects the configured MCP servers and registe
         }
     }
     CHECK(connecting_first);
+}
+
+TEST_CASE("a read-only policy keeps only tools that never write, MCP included; none keeps nothing",
+          "[commands][permissions][policy]") {
+    Config config;
+    apogee::harness::McpServerConfig well;
+    well.command = "well";
+    config.mcp_servers.emplace("srv", well);
+    const auto mcp = std::make_shared<apogee::mcp::Registry>();
+    const apogee::agent::ToolRegistry read_only = apogee::commands::make_built_in_tools(
+        apogee::commands::BuiltInToolOptions{.config = &config,
+                                             .mcp = mcp,
+                                             .mcp_spawn = apogee::testing::fake_fleet(),
+                                             .policy = apogee::harness::AgentToolPolicy::ReadOnly,
+                                             .mcp_servers = std::vector<std::string>{"srv"}});
+    // Nothing that writes is registered -- so nothing can ever prompt.
+    for (const std::string& name : read_only.names()) {
+        INFO(name);
+        CHECK_FALSE(read_only.find(name)->writes);
+    }
+    CHECK(read_only.find("read_file") != nullptr);
+    CHECK(read_only.find("git_diff") != nullptr);
+    CHECK(read_only.find("write_file") == nullptr);
+    CHECK(read_only.find("run_command") == nullptr);
+    CHECK(read_only.find("delete_note") == nullptr);
+    CHECK(read_only.find("mcp__srv__echo") != nullptr);   // the server said read-only
+    CHECK(read_only.find("mcp__srv__write") == nullptr);  // it did not
+    // What the loop advertises IS the filtered set.
+    apogee::agentloop::Options options;
+    options.tools = &read_only;
+    const std::vector<apogee::harness::Tool> advertised =
+        apogee::agentloop::advertised_tools(options);
+    CHECK(advertised.size() == read_only.size());
+    for (const apogee::harness::Tool& tool : advertised) {
+        CHECK(read_only.find(tool.name) != nullptr);
+    }
+
+    // None: an empty registry, and no server dialled at all.
+    const auto untouched = std::make_shared<apogee::mcp::Registry>();
+    const apogee::agent::ToolRegistry none = apogee::commands::make_built_in_tools(
+        apogee::commands::BuiltInToolOptions{.config = &config,
+                                             .mcp = untouched,
+                                             .mcp_spawn = apogee::testing::fake_fleet(),
+                                             .policy = apogee::harness::AgentToolPolicy::None,
+                                             .mcp_servers = std::vector<std::string>{"srv"}});
+    CHECK(none.empty());
+    CHECK(untouched->connected_count() == 0);
+
+    // The filter itself, over a hand-built registry.
+    apogee::agent::ToolRegistry mixed;
+    apogee::agent::Tool reads;
+    reads.name = "r";
+    reads.run = [](std::string_view) { return apogee::agent::ToolOutcome{"r", false}; };
+    apogee::agent::Tool writes;
+    writes.name = "w";
+    writes.writes = true;
+    writes.run = [](std::string_view) { return apogee::agent::ToolOutcome{"w", false}; };
+    mixed.add(reads);
+    mixed.add(writes);
+    CHECK(
+        apogee::commands::apply_tool_policy(mixed, apogee::harness::AgentToolPolicy::All).size() ==
+        2);
+    CHECK(apogee::commands::apply_tool_policy(mixed, apogee::harness::AgentToolPolicy::ReadOnly)
+              .names() == std::vector<std::string>{"r"});
+    CHECK(
+        apogee::commands::apply_tool_policy(mixed, apogee::harness::AgentToolPolicy::None).empty());
+}
+
+TEST_CASE("an agent names the servers it connects; an unknown name is reported and skipped",
+          "[commands][permissions][policy][mcp]") {
+    Config config;
+    apogee::harness::McpServerConfig well;
+    well.command = "well";
+    config.mcp_servers.emplace("srv", well);
+    config.mcp_servers.emplace("other", well);
+    std::vector<std::string> lines;
+    const auto mcp = std::make_shared<apogee::mcp::Registry>();
+    const apogee::agent::ToolRegistry registry =
+        apogee::commands::make_built_in_tools(apogee::commands::BuiltInToolOptions{
+            .config = &config,
+            .mcp = mcp,
+            .mcp_status = [&lines](std::string_view line) { lines.emplace_back(line); },
+            .mcp_spawn = apogee::testing::fake_fleet(),
+            .mcp_servers = std::vector<std::string>{"SRV", "ghost"}});
+    CHECK(registry.find("mcp__srv__echo") != nullptr);    // named, case-insensitively
+    CHECK(registry.find("mcp__other__echo") == nullptr);  // configured but not named
+    CHECK(mcp->connected_count() == 1);
+    bool warned = false;
+    for (const std::string& line : lines) {
+        warned = warned || line.find("no server named 'ghost'") != std::string::npos;
+    }
+    CHECK(warned);
+    // An empty list connects nothing; null (the interactive surfaces) connects all.
+    const auto none = std::make_shared<apogee::mcp::Registry>();
+    (void)apogee::commands::make_built_in_tools(
+        apogee::commands::BuiltInToolOptions{.config = &config,
+                                             .mcp = none,
+                                             .mcp_spawn = apogee::testing::fake_fleet(),
+                                             .mcp_servers = std::vector<std::string>{}});
+    CHECK(none->connected_count() == 0);
+    const auto all = std::make_shared<apogee::mcp::Registry>();
+    (void)apogee::commands::make_built_in_tools(apogee::commands::BuiltInToolOptions{
+        .config = &config, .mcp = all, .mcp_spawn = apogee::testing::fake_fleet()});
+    CHECK(all->connected_count() == 2);
 }

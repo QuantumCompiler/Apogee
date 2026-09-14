@@ -753,3 +753,74 @@ TEST_CASE("the doctor's MCP section: PATH lookup, a missing file, a lost execute
     // --fix never touched the config.
     CHECK(apogee::harness::load_config(inputs.config_path).find_mcp_server("nowhere") != nullptr);
 }
+
+TEST_CASE("the Agents section: bundled files present or warned, and every entry checked",
+          "[commands][check][agents]") {
+    const Install install;
+    install.seed();
+    // Seeding through the one path materialises the bundled files, so they
+    // report present; a fresh tree without them warns with --fix as remedy.
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs =
+        inputs_with_config(install,
+                           "backends:\n  mock:\n    type: mock\nmodels:\n  default: mock\n"
+                           "agents:\n"
+                           "  good:\n    prompts: [prompts/security-review.txt]\n"
+                           "    schemas: [schemas/security-review-output.json]\n    model: mock\n"
+                           "  lost:\n    prompts: [prompts/nowhere.txt]\n    model: ghost\n"
+                           "    collection: missing\n    mcp: [nosuch]\n"
+                           "  badschema:\n    prompts: [prompts/security-review.txt]\n"
+                           "    schemas: [schemas/broken.json]\n");
+    install.write("schemas/broken.json", "{\"type\": 12}");
+    const CheckReport report = run_checks(inputs);
+
+    const apogee::commands::CheckRow* bundled =
+        row_with(report, "bundled: prompts/release-notes.txt");
+    REQUIRE(bundled != nullptr);
+    CHECK(bundled->status == Status::Ok);
+
+    const apogee::commands::CheckRow* good = row_with(report, "agent: good");
+    REQUIRE(good != nullptr);
+    CHECK(good->status == Status::Ok);
+    CHECK(good->detail.find("read-only") != std::string::npos);
+
+    int lost_fail = 0;
+    int lost_warn = 0;
+    for (const apogee::commands::CheckRow& row : report.rows) {
+        if (row.name != "agent: lost") {
+            continue;
+        }
+        lost_fail += row.status == Status::Fail ? 1 : 0;
+        lost_warn += row.status == Status::Warn ? 1 : 0;
+        if (row.detail.find("file missing") != std::string::npos) {
+            CHECK(row.remedy.find("apogee agents create lost --force") != std::string::npos);
+        }
+        if (row.detail.find("model 'ghost'") != std::string::npos) {
+            CHECK(row.remedy.find("add-backend ghost") != std::string::npos);
+        }
+    }
+    CHECK(lost_fail == 2);  // the file and the model
+    CHECK(lost_warn == 2);  // the collection and the server
+
+    const apogee::commands::CheckRow* bad = row_with(report, "agent: badschema");
+    REQUIRE(bad != nullptr);
+    CHECK(bad->status == Status::Fail);
+    CHECK(bad->detail.find("not a valid draft-07") != std::string::npos);
+    CHECK_FALSE(report.passed());
+
+    // A fresh tree: the bundled files are a warning, never a failure, and
+    // --fix is the remedy.
+    const Install fresh;
+    fresh.seed();
+    const CheckInputs fresh_inputs =
+        inputs_with_config(fresh, "backends:\n  mock:\n    type: mock\n");
+    const CheckReport fresh_report = run_checks(fresh_inputs);
+    const apogee::commands::CheckRow* missing =
+        row_with(fresh_report, "bundled: schemas/merge-request-output.json");
+    REQUIRE(missing != nullptr);
+    CHECK(missing->status == Status::Warn);
+    CHECK(missing->remedy == "apogee check --fix");
+    CHECK(fresh_report.passed());
+    (void)apply_fixes(fresh_inputs);
+    CHECK(std::filesystem::exists(fresh.root / "schemas" / "merge-request-output.json"));
+}

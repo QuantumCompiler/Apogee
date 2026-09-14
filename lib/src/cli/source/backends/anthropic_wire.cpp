@@ -243,6 +243,34 @@ nlohmann::json build_request(const harness::ChatRequest& request, const RequestO
         }
         tools.push_back(std::move(search));
     }
+    if (!request.transient.response_schema.empty()) {
+        const nlohmann::json schema =
+            nlohmann::json::parse(request.transient.response_schema, nullptr, false);
+        if (!schema.is_discarded() && schema.is_object()) {
+            if (options.native_structured_output) {
+                body["output_format"] = {{"type", "json_schema"}, {"schema", schema}};
+            } else {
+                // One forced tool whose input IS the answer. With other tools
+                // present the model must still be free to call them first, so
+                // `any` (some tool, never prose) rather than this one by name;
+                // under extended thinking a forced choice is rejected by the
+                // API, so the schema then rides the prompt and the validator.
+                tools.push_back({{"name", std::string{kStructuredOutputTool}},
+                                 {"description",
+                                  "Return the final answer as a JSON object conforming to the "
+                                  "required schema. Call this exactly once, when the answer is "
+                                  "ready; its arguments are the answer."},
+                                 {"input_schema", schema}});
+                if (options.thinking_budget_tokens == 0) {
+                    body["tool_choice"] =
+                        request.tools.empty()
+                            ? nlohmann::json{{"type", "tool"},
+                                             {"name", std::string{kStructuredOutputTool}}}
+                            : nlohmann::json{{"type", "any"}};
+                }
+            }
+        }
+    }
     if (!tools.empty()) {
         body["tools"] = std::move(tools);
     }
@@ -252,6 +280,89 @@ nlohmann::json build_request(const harness::ChatRequest& request, const RequestO
     }
 
     return body;
+}
+
+bool supports_native_structured_output(std::string_view model) noexcept {
+    // "claude-<family>-<major>[-<minor>]…" and the older "claude-<major>-<minor>-
+    // <family>": the version is the first numeric token wherever it sits, the
+    // family the first word. The 4.5 generation and later carry the field;
+    // Opus 4.1 does too. An id the parser cannot read answers no, which lands
+    // on the universal forced-tool path rather than on a 400.
+    if (!model.starts_with("claude-")) {
+        return false;
+    }
+    std::string_view rest = model.substr(7);
+    std::vector<std::string_view> tokens;
+    while (!rest.empty()) {
+        const std::size_t dash = rest.find('-');
+        tokens.push_back(rest.substr(0, dash));
+        rest = dash == std::string_view::npos ? std::string_view{} : rest.substr(dash + 1);
+    }
+    auto numeric = [](std::string_view token) {
+        return !token.empty() && token.front() >= '0' && token.front() <= '9';
+    };
+    auto number = [](std::string_view token) {
+        int value = 0;
+        for (const char c : token) {
+            if (c < '0' || c > '9') {
+                break;
+            }
+            value = value * 10 + (c - '0');
+        }
+        return value;
+    };
+    std::string_view family;
+    int major = -1;
+    int minor = 0;
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        if (numeric(tokens[i])) {
+            if (major >= 0) {
+                continue;
+            }
+            major = number(tokens[i]);
+            // "4.5" in one token, or "4-5" across two.
+            if (const std::size_t dot = tokens[i].find('.'); dot != std::string_view::npos) {
+                minor = number(tokens[i].substr(dot + 1));
+            } else if (i + 1 < tokens.size() && numeric(tokens[i + 1])) {
+                minor = number(tokens[i + 1]);
+            }
+        } else if (family.empty()) {
+            family = tokens[i];
+        }
+    }
+    if (major < 0) {
+        return false;
+    }
+    if (major >= 5 || (major == 4 && minor >= 5)) {
+        return true;
+    }
+    return major == 4 && minor == 1 && family == "opus";
+}
+
+void fold_structured_output(harness::ChatResponse& response) {
+    bool present = false;
+    for (const harness::ToolCall& call : response.message.tool_calls) {
+        present = present || call.name == kStructuredOutputTool;
+    }
+    if (!present) {
+        return;  // untouched: an ordinary turn, tool calls and all
+    }
+    std::vector<harness::ToolCall> remaining;
+    std::string answer;
+    bool folded = false;
+    for (harness::ToolCall& call : response.message.tool_calls) {
+        if (call.name == kStructuredOutputTool && !folded) {
+            answer = call.arguments;
+            folded = true;
+            continue;
+        }
+        remaining.push_back(std::move(call));
+    }
+    response.message.content = answer;
+    response.message.tool_calls = std::move(remaining);
+    if (response.message.tool_calls.empty()) {
+        response.finish_reason = harness::FinishReason::Stop;
+    }
 }
 
 // ---------------------------------------------------------------------------

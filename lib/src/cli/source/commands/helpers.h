@@ -154,8 +154,23 @@ struct BuiltInToolOptions {
     const harness::Config* config = nullptr;
     /// For the RAG tools' embedder; null means lexical-only searches.
     const harness::Harness* harness = nullptr;
-    /// The review defaults `git_diff` falls back to, set by flags.
+    /// The review defaults `git_diff` and `git_log` fall back to, set by flags.
     tools::ReviewDefaults review;
+    /// A live review the git tools read at call time instead (chat's
+    /// `/branch`); see `tools::GitOptions::live_review`.
+    std::shared_ptr<const tools::ReviewDefaults> live_review;
+
+    /// **The agent's permission model.** `ReadOnly` keeps only tools that
+    /// declare no `writes` -- MCP tools included, which are read-only exactly
+    /// when their server said so -- so there is nothing to prompt for and a
+    /// non-interactive run never blocks. `None` builds nothing and dials no
+    /// server. `All` is every tool, under the gate, as `chat` has it.
+    harness::AgentToolPolicy policy = harness::AgentToolPolicy::All;
+    /// Which `mcp_servers:` entries to connect: null means every enabled one
+    /// (the interactive surfaces), a list means only those (an agent names
+    /// what it needs). A name that matches no entry is reported through
+    /// `mcp_status` and skipped.
+    std::optional<std::vector<std::string>> mcp_servers;
 
     /// When set, every enabled `mcp_servers:` entry is connected on this
     /// registry and its tools registered as `mcp__<server>__<tool>`. The
@@ -182,6 +197,13 @@ struct BuiltInToolOptions {
 /// `fetch_url` plus the native toolsets, honouring `tools.disabled`. The one
 /// place that decides which tools a `--tools` run has.
 [[nodiscard]] agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options);
+
+/// `registry` filtered by `policy`: `ReadOnly` drops every tool that
+/// declares `writes`, `None` drops everything, `All` keeps it whole. The
+/// filter is over the REGISTRY, which is what makes the policy structural:
+/// a tool that is not registered is not advertised, whatever the model asks.
+[[nodiscard]] agent::ToolRegistry apply_tool_policy(const agent::ToolRegistry& registry,
+                                                    harness::AgentToolPolicy policy);
 
 /// Reads all of standard input. Used when no prompt argument was given.
 [[nodiscard]] std::string read_stdin();

@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -42,6 +43,12 @@ struct GitOptions {
     /// Where the walk for a `.git` directory starts when no `repo` is given.
     std::filesystem::path working_directory;
     ReviewDefaults review;
+    /// When set, read at every call instead of `review`, so a surface that
+    /// changes the review mid-session (`chat`'s `/branch`) re-points the
+    /// tools without rebuilding the registry -- and without re-dialling
+    /// every MCP server that lives in it. Still a plain in-process value:
+    /// no environment side channel.
+    std::shared_ptr<const ReviewDefaults> live_review;
 };
 
 /// Whether `ref` is a safe git ref token: letters, digits, `.`, `_`, `/`,

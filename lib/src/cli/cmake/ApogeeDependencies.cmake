@@ -25,6 +25,9 @@
 #                                  interactive path; a non-TTY run never
 #                                  constructs it. GNU readline was ruled out on
 #                                  licence grounds (GPL).
+#   JSON Schema json-schema-validator -- wired below (arrived with analyze-agents).
+#                                  Draft-07 validation of structured agent
+#                                  output; sits on nlohmann/json.
 #   Tests       Catch2 v3       -- wired below (only when APOGEE_BUILD_TESTS)
 #   HTTP client libcurl         -- wired below (arrived with anthropic-backend).
 #                                  Found, never fetched: curl is a system
@@ -127,6 +130,28 @@ set(REPLXX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(REPLXX_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(nlohmann_json CLI11 replxx)
+
+# JSON Schema validation (draft-07), for structured agent output: a report is
+# validated client-side on EVERY provider, whatever native mode the wire also
+# asked for. pboettch's validator sits on nlohmann/json -- the project's JSON
+# library -- which is why it was picked over a second JSON stack; a hand-rolled
+# validator would be a second implementation of draft-07 (decided 2026-09-13).
+# Pinned and fetched, with FIND_PACKAGE_ARGS so a packaged copy is preferred.
+FetchContent_Declare(json_schema_validator
+    GIT_REPOSITORY https://github.com/pboettch/json-schema-validator.git
+    GIT_TAG        2.3.0
+    GIT_SHALLOW    TRUE
+    SYSTEM
+    FIND_PACKAGE_ARGS NAMES nlohmann_json_schema_validator
+)
+set(JSON_VALIDATOR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(JSON_VALIDATOR_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(JSON_VALIDATOR_INSTALL OFF CACHE BOOL "" FORCE)
+set(JSON_VALIDATOR_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(json_schema_validator)
+if(NOT TARGET nlohmann_json_schema_validator::validator)
+    add_library(nlohmann_json_schema_validator::validator ALIAS nlohmann_json_schema_validator)
+endif()
 
 # cpp-httplib: the `apogee serve` listener. Deliberately WITHOUT
 # FIND_PACKAGE_ARGS -- see the note at the top of this file -- and with every

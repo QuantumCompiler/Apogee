@@ -237,6 +237,10 @@ void register_git_tools(agent::ToolRegistry& registry, const GitOptions& options
     const auto open = [options](const Arguments& args) {
         return Git{find_repo(args.string("repo"), options.working_directory), options.timeout};
     };
+    // The review defaults, read at CALL time when a live value is shared.
+    const auto review_of = [options]() -> ReviewDefaults {
+        return options.live_review != nullptr ? *options.live_review : options.review;
+    };
     const std::string repo_property =
         R"("repo":{"type":"string","description":"Repository path; defaults to the nearest repository above the working directory"})";
 
@@ -261,7 +265,7 @@ void register_git_tools(agent::ToolRegistry& registry, const GitOptions& options
     log.parameters_schema =
         R"({"type":"object","properties":{)" + repo_property +
         R"(,"n":{"type":"integer","description":"How many commits (1-200); default 10, or 200 with a range"},"branch":{"type":"string","description":"A branch to log instead of the current one"},"range":{"type":"string","description":"A revision range, or a bare ref meaning <ref>..HEAD"}}})";
-    log.run = [open](std::string_view arguments) {
+    log.run = [open, review_of](std::string_view arguments) {
         return guarded(arguments, R"({"n": 10})", [&](const Arguments& args) {
             const Git git = open(args);
             const std::string branch = args.string("branch");
@@ -273,7 +277,26 @@ void register_git_tools(agent::ToolRegistry& registry, const GitOptions& options
             std::vector<std::string> command{"log", "-" + std::to_string(n), "--date=short",
                                              "--pretty=format:%h %ad %s (%an)"};
             std::string header;
-            if (!range.empty()) {
+            const ReviewDefaults review = review_of();
+            if (range.empty() && branch.empty() && review.active()) {
+                // The review form: the commits the branch under review adds
+                // over its base, from the same defaults `git_diff` uses --
+                // so "read the commit messages" means the reviewed branch's,
+                // never the checked-out one's.
+                const std::string remote = review.remote.empty() ? "origin" : review.remote;
+                const std::string fetch = review.fetch.empty() ? "auto" : review.fetch;
+                std::string head = review.head.empty() ? "HEAD" : review.head;
+                std::string base = review.base.empty() ? git.default_branch() : review.base;
+                require_ref(head, "head");
+                require_ref(base, "base");
+                require_ref(remote, "remote");
+                const std::string head_ref = resolve_review_ref(git, head, remote, fetch);
+                const std::string base_ref = resolve_review_ref(git, base, remote, fetch);
+                const std::string spec = base_ref + ".." + head_ref;
+                command.push_back(spec);
+                header = "Repo: " + git.repo().string() + "  |  Range: " + spec +
+                         "  (commits the branch under review adds)\n\n";
+            } else if (!range.empty()) {
                 require_ref(range, "range");
                 const std::string spec =
                     range.find("..") != std::string::npos ? range : range + "..HEAD";
@@ -304,9 +327,10 @@ void register_git_tools(agent::ToolRegistry& registry, const GitOptions& options
     diff.parameters_schema =
         R"({"type":"object","properties":{)" + repo_property +
         R"(,"target":{"type":"string"},"head":{"type":"string","description":"The branch under review"},"base":{"type":"string","description":"The base to compare against; defaults to the default branch"},"remote":{"type":"string","description":"Remote to resolve refs against; default origin"},"fetch":{"type":"string","enum":["auto","always","never"]},"file":{"type":"string","description":"Restrict to one path"}}})";
-    diff.run = [open, options](std::string_view arguments) {
+    diff.run = [open, review_of](std::string_view arguments) {
         return guarded(arguments, "{}", [&](const Arguments& args) {
             const Git git = open(args);
+            const ReviewDefaults review = review_of();
             const std::string file = args.string("file");
             if (!file.empty() && file.starts_with("-")) {
                 throw GitError("file must be a path, not an option");
@@ -318,20 +342,20 @@ void register_git_tools(agent::ToolRegistry& registry, const GitOptions& options
             // flags -- plain parameters, never an environment side channel.
             std::string head = args.string("head");
             std::string base = args.string("base");
-            if (head.empty() && base.empty() && options.review.active()) {
-                head = options.review.head;
-                base = options.review.base;
+            if (head.empty() && base.empty() && review.active()) {
+                head = review.head;
+                base = review.base;
             }
             std::string spec;
             std::string header;
             if (!head.empty() || !base.empty()) {
                 std::string remote = args.string("remote");
                 if (remote.empty()) {
-                    remote = options.review.remote.empty() ? "origin" : options.review.remote;
+                    remote = review.remote.empty() ? "origin" : review.remote;
                 }
                 std::string fetch = args.string("fetch");
                 if (fetch.empty()) {
-                    fetch = options.review.fetch.empty() ? "auto" : options.review.fetch;
+                    fetch = review.fetch.empty() ? "auto" : review.fetch;
                 }
                 if (fetch != "auto" && fetch != "always" && fetch != "never") {
                     throw GitError("fetch must be auto, always, or never");

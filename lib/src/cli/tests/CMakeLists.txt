@@ -108,6 +108,15 @@ add_executable(apogee_tests
     mcp/registry_test.cpp
     mcp/serve_stdio_test.cpp
     scaffold/mcp_server_test.cpp
+    scaffold/agent_test.cpp
+    agentloop/structured_test.cpp
+    agentloop/review_context_test.cpp
+    render/json_report_test.cpp
+    harness/assets_test.cpp
+    bundled_agents_test.cpp
+    commands/analyze_test.cpp
+    commands/agents_test.cpp
+    httpserver/admin_agents_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h
@@ -352,6 +361,17 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/mcp-e2e-home
     )
     set_tests_properties(cli.mcp_lifecycle PROPERTIES TIMEOUT 120)
+
+    # `analyze` on the real binary: the bundled agents on the mock backend
+    # against a fixture repository -- a ref reviewed without being checked out,
+    # the refs decided by flags, the report rendered and saved, the validator's
+    # retry and its honest flag, a vendor CLI refused, and chat's --branch.
+    add_test(NAME cli.analyze_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/analyze_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/analyze-e2e
+    )
+    set_tests_properties(cli.analyze_lifecycle PROPERTIES TIMEOUT 120)
 endif()
 
 # Startup output discipline, under a real pseudo-terminal.

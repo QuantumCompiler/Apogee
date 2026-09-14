@@ -155,8 +155,31 @@ bool names_a_configured_backend(const harness::Config& config, std::string_view 
     return !configured_backend_key(config, model).empty();
 }
 
+agent::ToolRegistry apply_tool_policy(const agent::ToolRegistry& registry,
+                                      harness::AgentToolPolicy policy) {
+    if (policy == harness::AgentToolPolicy::All) {
+        return registry;
+    }
+    agent::ToolRegistry filtered;
+    if (policy == harness::AgentToolPolicy::None) {
+        return filtered;
+    }
+    for (const std::string& name : registry.names()) {
+        const agent::Tool* tool = registry.find(name);
+        if (tool != nullptr && !tool->writes) {
+            filtered.add(*tool);
+        }
+    }
+    return filtered;
+}
+
 agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
     agent::ToolRegistry registry;
+    if (options.policy == harness::AgentToolPolicy::None) {
+        // Nothing to register and no server to dial: a `none` agent costs
+        // no child process either.
+        return registry;
+    }
 
     auto client =
         std::make_shared<backends::HttpClient>(std::make_unique<backends::CurlTransport>());
@@ -181,6 +204,7 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
     toolsets.harness = options.harness;
     toolsets.config = options.config;
     toolsets.review = options.review;
+    toolsets.live_review = options.live_review;
     if (options.config != nullptr) {
         toolsets.fs_root = harness::expand_env(options.config->tools.fs_root);
         toolsets.disabled = options.config->tools.disabled;
@@ -192,20 +216,40 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
     if (options.mcp != nullptr && options.config != nullptr &&
         !options.config->mcp_servers.empty()) {
         std::vector<mcp::ServerSpec> specs;
-        for (const auto& [name, server] : options.config->mcp_servers) {
-            specs.push_back(
-                mcp::ServerSpec{name, server.command, server.args, server.env, server.enabled});
+        if (options.mcp_servers.has_value()) {
+            // Only what the agent named, in the config's own spelling.
+            for (const std::string& wanted : *options.mcp_servers) {
+                const auto it = options.config->mcp_servers.find(wanted);
+                if (it == options.config->mcp_servers.end()) {
+                    if (options.mcp_status) {
+                        options.mcp_status("[mcp] warning: no server named '" + wanted +
+                                           "' in mcp_servers (skipped)");
+                    }
+                    continue;
+                }
+                specs.push_back(mcp::ServerSpec{it->first, it->second.command, it->second.args,
+                                                it->second.env, it->second.enabled});
+            }
+        } else {
+            for (const auto& [name, server] : options.config->mcp_servers) {
+                specs.push_back(
+                    mcp::ServerSpec{name, server.command, server.args, server.env, server.enabled});
+            }
         }
         mcp::RegistryOptions mcp_options;
         mcp_options.status = options.mcp_status;
         mcp_options.server_log = options.mcp_server_log;
         mcp_options.spawn = options.mcp_spawn;
         mcp_options.client_version = std::string{version::semantic()};
-        options.mcp->connect_all(specs, mcp_options);
-        options.mcp->register_into(registry);
+        if (!specs.empty()) {
+            options.mcp->connect_all(specs, mcp_options);
+            options.mcp->register_into(registry);
+        }
     }
 
-    return registry;
+    // The policy last, over everything registered -- native, fetch_url and
+    // MCP alike -- so what the loop advertises IS the policy.
+    return apply_tool_policy(registry, options.policy);
 }
 
 std::function<void(std::string_view)> mcp_status_line(StatusLine& status) {

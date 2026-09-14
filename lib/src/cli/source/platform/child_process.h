@@ -111,6 +111,17 @@ public:
 /// Whether this build can spawn a child process at all.
 [[nodiscard]] bool supports_child_processes() noexcept;
 
+/// Runs `command` in the FOREGROUND -- the terminal's stdin, stdout and
+/// stderr inherited -- and waits for it. Returns its exit status, or nullopt
+/// with `error` filled when it could not start (or on Windows).
+///
+/// The one deliberate exception to "a child's stderr is captured, never
+/// inherited": the child is the user's own program -- their `$EDITOR`,
+/// opened by `apogee agents edit` at their request -- and Apogee is not
+/// running a turn while it has the screen, so there is nothing of Apogee's
+/// on the terminal to protect. Nothing on an inference path may call this.
+[[nodiscard]] std::optional<int> run_foreground(const ChildCommand& command, std::string& error);
+
 /// Absolute path of `program` if it is executable on PATH, else empty.
 ///
 /// Used to fail early with a message naming what was not found, rather than

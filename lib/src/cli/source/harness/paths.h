@@ -43,4 +43,11 @@ inline constexpr const char* kHomeEnvVar = "APOGEE_HOME";
 /// otherwise default_config_path().
 [[nodiscard]] std::filesystem::path resolve_config_path(const std::string& flag_value);
 
+/// The data directory a config file lives in: the parent of its `config/`
+/// directory. `~/.apogee/config/config.yaml` gives `~/.apogee`; a `--config`
+/// temp tree gives that tree, which is what keeps every path derived from
+/// it hermetic in tests. The scaffold cores and the agent loader use this
+/// rather than `apogee_home()` for that reason.
+[[nodiscard]] std::filesystem::path home_for_config(const std::filesystem::path& config_path);
+
 }  // namespace apogee::harness

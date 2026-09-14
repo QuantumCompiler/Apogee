@@ -37,4 +37,8 @@ std::filesystem::path resolve_config_path(const std::string& flag_value) {
     return default_config_path();
 }
 
+std::filesystem::path home_for_config(const std::filesystem::path& config_path) {
+    return config_path.parent_path().parent_path();
+}
+
 }  // namespace apogee::harness

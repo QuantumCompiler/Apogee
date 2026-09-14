@@ -202,20 +202,9 @@ std::string_view openai_finish_reason(harness::FinishReason reason) noexcept {
 }
 
 bool is_vendor_cli(harness::BackendType type) noexcept {
-    switch (type) {
-        case harness::BackendType::ClaudeCli:
-        case harness::BackendType::CodexCli:
-        case harness::BackendType::GeminiCli:
-        case harness::BackendType::OllamaCli:
-            return true;
-        case harness::BackendType::Anthropic:
-        case harness::BackendType::OpenAI:
-        case harness::BackendType::Google:
-        case harness::BackendType::LlamaCpp:
-        case harness::BackendType::Mock:
-            return false;
-    }
-    return false;
+    // The one predicate lives in the harness, shared with `analyze`; this
+    // name stays so the handler's callers and tests read unchanged.
+    return harness::is_vendor_cli(type);
 }
 
 // ---------------------------------------------------------------------------
@@ -299,7 +288,7 @@ std::string Handler::resolve_served(std::string_view model) const {
     }
 
     if (const harness::BackendConfig* entry = config.find_backend(key);
-        entry != nullptr && is_vendor_cli(entry->type)) {
+        entry != nullptr && httpserver::is_vendor_cli(entry->type)) {
         throw HttpError{.message = "backend '" + key +
                                    "' runs through a vendor CLI on a personal subscription "
                                    "and is not served over HTTP; serve dispatches to "

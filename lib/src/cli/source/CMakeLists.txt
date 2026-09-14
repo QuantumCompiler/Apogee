@@ -91,6 +91,10 @@ add_library(apogee_core STATIC
     commands/permissions.cpp
     commands/auth_cmd.h
     commands/auth_cmd.cpp
+    commands/analyze.h
+    commands/analyze.cpp
+    commands/agents_cmd.h
+    commands/agents_cmd.cpp
     commands/chat.h
     commands/chat.cpp
     commands/chat_history.h
@@ -119,6 +123,8 @@ add_library(apogee_core STATIC
     harness/config_template.cpp
     harness/config_edit.h
     harness/config_edit.cpp
+    harness/assets.h
+    harness/assets.cpp
     harness/errors.h
     harness/errors.cpp
     harness/cancellation.h
@@ -220,6 +226,12 @@ add_library(apogee_core STATIC
     agentloop/content.cpp
     agentloop/question.h
     agentloop/question.cpp
+    agentloop/structured.h
+    agentloop/structured.cpp
+    agentloop/review_context.h
+    agentloop/review_context.cpp
+    render/json_report.h
+    render/json_report.cpp
 
     # A leaf: includes nothing else from the project, so anything may publish.
     events/bus.h
@@ -261,6 +273,8 @@ add_library(apogee_core STATIC
     mcp/serve_stdio.cpp
     scaffold/mcp_server.h
     scaffold/mcp_server.cpp
+    scaffold/agent.h
+    scaffold/agent.cpp
 
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and
@@ -299,6 +313,8 @@ add_library(apogee_core STATIC
     httpserver/admin_events.cpp
     httpserver/admin_config.h
     httpserver/admin_config.cpp
+    httpserver/admin_agents.h
+    httpserver/admin_agents.cpp
     httpserver/admin.h
     httpserver/admin.cpp
     httpserver/admin_auth_routes.h
@@ -320,7 +336,8 @@ target_compile_definitions(apogee_core PRIVATE
 )
 
 target_link_libraries(apogee_core PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp
-                      PRIVATE CURL::libcurl replxx::replxx apogee_sqlite3 httplib::httplib)
+                      PRIVATE CURL::libcurl replxx::replxx apogee_sqlite3 httplib::httplib
+                              nlohmann_json_schema_validator::validator)
 
 # Local inference is opt-in at build time. When it is off, backends/llama_real.cpp
 # compiles to the "not built in" answer and never includes llama.h -- so the

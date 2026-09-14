@@ -14,6 +14,7 @@
 #include "agentloop/rag.h"
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
+#include "agentloop/review_context.h"
 #include "ansi/ansi.h"
 #include "backends/factory.h"
 #include "commands/ask_prompt.h"
@@ -34,6 +35,7 @@
 #include "logger/operational.h"
 #include "mcp/registry.h"
 #include "platform/platform.h"
+#include "tools/git.h"
 
 namespace apogee::commands {
 namespace {
@@ -60,8 +62,8 @@ std::string trim(std::string_view text) {
 /// and then rejected -- or added and silently left uncompletable.
 const std::vector<std::string>& slash_commands() {
     static const std::vector<std::string> commands{
-        "/help",       "/model",   "/models", "/system", "/temperature",
-        "/max-tokens", "/compact", "/title",  "/exit",   "/quit",
+        "/help",    "/model", "/models", "/system", "/temperature", "/max-tokens",
+        "/compact", "/title", "/branch", "/exit",   "/quit",
     };
     return commands;
 }
@@ -88,6 +90,13 @@ struct ChatFlags {
     bool verbose = false;
     std::string resume;
     bool cont = false;
+    /// The arbitrary-branch review: the git tools' defaults and a system
+    /// note, from flags -- and re-pointed by `/branch` mid-session.
+    std::string branch;
+    std::string base;
+    std::string remote = "origin";
+    bool fetch = false;
+    bool no_fetch = false;
 
     CLI::Option* temperature_option = nullptr;
     CLI::Option* max_tokens_option = nullptr;
@@ -154,7 +163,8 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
                    const std::string& input, std::vector<harness::ContentPart>& attachments,
                    agent::ToolRegistry* tools, const agentloop::AskFn& ask, const ToolGate& gate,
                    agentloop::Reporter& reporter,
-                   const std::function<void(const std::string&)>& notice, const RagSettings& rag) {
+                   const std::function<void(const std::string&)>& notice, const RagSettings& rag,
+                   const std::string& review_note) {
     std::vector<harness::ContentPart> turn_attachments;
     turn_attachments.swap(attachments);  // first message only
 
@@ -235,6 +245,13 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
             loop_options.transient_prefix = retrieved.prefix;
         }
         notice(describe_retrieval(rag_choice, retrieved));
+    }
+    if (!review_note.empty()) {
+        // The review note rides the transient prefix, never the transcript:
+        // `/branch` can change it between turns, and a resumed session gets
+        // whatever ITS flags say rather than a stale note from last time.
+        loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(),
+                                             harness::ChatMessage::system(review_note));
     }
 
     try {
@@ -341,6 +358,12 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("-v,--verbose", flags->verbose, "Print progress notes");
     cmd->add_option("--resume", flags->resume, "Resume a saved conversation by id or name");
     cmd->add_flag("-c,--continue", flags->cont, "Resume the most recent conversation");
+    cmd->add_option("--branch", flags->branch,
+                    "Branch under review for the git tools (the head); never checked out");
+    cmd->add_option("--base", flags->base, "Ref to compare against (default: the default branch)");
+    cmd->add_option("--remote", flags->remote, "Remote to resolve refs against (default origin)");
+    cmd->add_flag("--fetch", flags->fetch, "Always fetch the refs before diffing");
+    cmd->add_flag("--no-fetch", flags->no_fetch, "Never fetch; refuse a ref that is absent");
 
     cmd->callback([&context, flags]() {
         const bool decorate = platform::is_terminal(platform::StandardStream::Out);
@@ -452,6 +475,27 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         logger::log(logger::Level::Info, "chat",
                     "session " + session.chat_id + " on backend " + model);
 
+        // --- the review context, from flags -----------------------------------
+        if (flags->fetch && flags->no_fetch) {
+            fail_user("--fetch and --no-fetch are mutually exclusive");
+        }
+        agentloop::ReviewContext review;
+        review.head = flags->branch;
+        review.base = flags->base;
+        review.remote = flags->remote.empty() ? "origin" : flags->remote;
+        review.fetch = flags->fetch ? "always" : flags->no_fetch ? "never" : "auto";
+        // Shared with the git tools and read at call time, so `/branch`
+        // re-points them without rebuilding the registry.
+        const auto live_review = std::make_shared<tools::ReviewDefaults>();
+        const auto sync_review = [&]() {
+            live_review->head = review.head;
+            live_review->base = review.base;
+            live_review->remote = review.remote;
+            live_review->fetch = review.fetch;
+        };
+        sync_review();
+        std::string review_note = agentloop::review_note(review);
+
         // --- tools ----------------------------------------------------------
         agent::ToolRegistry registry;
         const auto mcp_registry = std::make_shared<mcp::Registry>();
@@ -459,6 +503,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             registry = make_built_in_tools(BuiltInToolOptions{
                 .config = &config,
                 .harness = &harness,
+                .review = *live_review,
+                .live_review = live_review,
                 .mcp = mcp_registry,
                 .mcp_status = mcp_status_line(reporter.status()),
                 // A server's stderr never reaches the terminal unless asked
@@ -579,7 +625,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                                                       machine_reporter, std::cin,
                                                                       config_path, approvals)
                                                                 : agent::ConfirmFn{}},
-                              machine_reporter, machine_notice, rag_settings);
+                              machine_reporter, machine_notice, rag_settings, review_note);
 
                 harness::ChatResponse response;
                 response.message = session.messages.empty() ? harness::ChatMessage::assistant("")
@@ -664,6 +710,24 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                         session.backend = argument;
                         reporter.status().print_line(style.tag(ansi::Role::Apogee) +
                                                      " switched to " + argument);
+                    }
+                } else if (verb == "branch") {
+                    if (argument.empty()) {
+                        reporter.status().print_line(
+                            style.tag(ansi::Role::Apogee) + " review: " +
+                            (review.active() ? agentloop::review_summary(review)
+                                             : "off -- /branch <head>, <base>..<head>, or off"));
+                    } else {
+                        // Deterministic from the argument: the tools' defaults
+                        // and the note change together, the transcript not at
+                        // all. Free text in the next question changes nothing
+                        // about which diff the tools compare.
+                        review = agentloop::parse_branch_arg(argument, review);
+                        sync_review();
+                        review_note = agentloop::review_note(review);
+                        reporter.status().print_line(
+                            style.tag(ansi::Role::Apogee) + " review " +
+                            (review.active() ? agentloop::review_summary(review) : "off"));
                     }
                 } else if (verb == "system") {
                     session.params.system_prompt = argument;
@@ -756,7 +820,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 [&reporter, &style](const std::string& message) {
                     reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
-                rag_settings);
+                rag_settings, review_note);
         }
 
         logger::save(session);
