@@ -972,3 +972,71 @@ TEST_CASE("the mux answers 404 and 405 in the error shape", "[httpserver][mux]")
     CHECK(wrong_method.headers.at("Allow") == "POST");
     CHECK(parsed(wrong_method)["error"]["type"] == "invalid_request_error");
 }
+
+TEST_CASE("a served destructive tool runs only when the config allows it; ask is deny",
+          "[httpserver][tools][permission]") {
+    // Nobody is attached to a served request, so there is no confirm function
+    // and `ask` -- the default for every destructive tool -- denies. `allow`
+    // in the config, carried in as the handler's permission checker, is the
+    // only way such a tool runs here.
+    ToolCall call;
+    call.id = "call_w";
+    call.name = "writer";
+    call.arguments = R"({"path":"x"})";
+    const auto writer = [](bool* ran) {
+        Tool tool;
+        tool.name = "writer";
+        tool.description = "destructive";
+        tool.writes = true;
+        tool.run = [ran](std::string_view) {
+            *ran = true;
+            return ToolOutcome{"written", false};
+        };
+        return tool;
+    };
+    const auto tool_result_text = [](const Fixture& fixture) {
+        std::string text;
+        for (const auto& request : fixture.provider->requests()) {
+            for (const ChatMessage& message : request.messages) {
+                if (message.role == Role::Tool) {
+                    text += message.content.plain_text();
+                }
+            }
+        }
+        return text;
+    };
+
+    SECTION("no checker: denied, and the model is told") {
+        bool ran = false;
+        Fixture fixture{{tool_turn({call}), text_turn("after")}, served_default(), true};
+        fixture.registry.add(writer(&ran));
+        const HttpResponse response =
+            fixture.send(post("/v1/chat/completions", chat_body("write it")));
+        REQUIRE(response.status == 200);
+        CHECK_FALSE(ran);
+        CHECK(tool_result_text(fixture).find("denied permission") != std::string::npos);
+    }
+    SECTION("the config's allow, as the checker: it runs") {
+        bool ran = false;
+        HandlerOptions options = served_default();
+        options.permission = [](std::string_view, std::string_view) {
+            return apogee::agent::Permission::Allow;
+        };
+        Fixture fixture{{tool_turn({call}), text_turn("after")}, std::move(options), true};
+        fixture.registry.add(writer(&ran));
+        REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("write it"))).status == 200);
+        CHECK(ran);
+        CHECK(tool_result_text(fixture).find("written") != std::string::npos);
+    }
+    SECTION("the config's ask, as the checker: still denied -- nobody can answer") {
+        bool ran = false;
+        HandlerOptions options = served_default();
+        options.permission = [](std::string_view, std::string_view) {
+            return apogee::agent::Permission::Ask;
+        };
+        Fixture fixture{{tool_turn({call}), text_turn("after")}, std::move(options), true};
+        fixture.registry.add(writer(&ran));
+        REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("write it"))).status == 200);
+        CHECK_FALSE(ran);
+    }
+}

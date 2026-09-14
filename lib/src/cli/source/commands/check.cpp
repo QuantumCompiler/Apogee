@@ -5,9 +5,11 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <span>
 #include <sstream>
 #include <system_error>
 
@@ -19,9 +21,11 @@
 #include "harness/paths.h"
 #include "httpserver/admin_auth.h"
 #include "models/gguf_inspect.h"
+#include "platform/child_process.h"
 #include "platform/platform.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
+#include "tools/toolsets.h"
 #include "version/version.h"
 
 namespace apogee::commands {
@@ -415,10 +419,82 @@ void check_credential_store(CheckReport& report, const CheckInputs& inputs) {
         "present, private (0600), " + std::to_string(slots) + " key(s) stored");
 }
 
+/// The native toolsets: the permission keys, the sandbox root, the toolset
+/// switches, and whether `git` is there to be spawned. Warnings, never
+/// failures -- a keyless, toolless install is valid.
+void check_tools(CheckReport& report, const CheckInputs& inputs) {
+    if (inputs.config_missing || !inputs.config_error.empty()) {
+        return;
+    }
+    const harness::Config& config = inputs.config;
+    const std::span<const std::string_view> destructive = tools::destructive_tool_names();
+    for (const auto& [tool, level] : config.permissions.levels) {
+        const bool known =
+            std::find(destructive.begin(), destructive.end(), tool) != destructive.end();
+        const bool namespaced = tool.starts_with("mcp__");
+        if (!known && !namespaced) {
+            std::string names;
+            for (const std::string_view name : destructive) {
+                names += names.empty() ? "" : ", ";
+                names += name;
+            }
+            add(report, Status::Warn, "Tools", "permissions." + tool,
+                "not a native destructive tool (they are: " + names + ")",
+                "remove the key, or check its spelling");
+            continue;
+        }
+        add(report, Status::Ok, "Tools", "permissions." + tool,
+            std::string{harness::to_string(level)});
+    }
+    for (const std::string_view tool : destructive) {
+        if (!config.permissions.levels.contains(tool)) {
+            add(report, Status::Ok, "Tools", "permissions." + std::string{tool},
+                "ask (not listed; the default)");
+        }
+    }
+
+    const std::string root = harness::expand_env(config.tools.fs_root);
+    std::error_code code;
+    if (root.empty()) {
+        add(report, Status::Ok, "Tools", "fs_root", "unset -- the home directory");
+    } else if (!std::filesystem::is_directory(root, code)) {
+        add(report, Status::Warn, "Tools", "fs_root", root + " is not a directory",
+            "set tools.fs_root to an existing directory, or remove it");
+    } else {
+        add(report, Status::Ok, "Tools", "fs_root", root);
+    }
+
+    const std::span<const std::string_view> toolsets = tools::toolset_names();
+    for (const std::string& name : config.tools.disabled) {
+        if (std::find(toolsets.begin(), toolsets.end(), name) == toolsets.end()) {
+            std::string names;
+            for (const std::string_view toolset : toolsets) {
+                names += names.empty() ? "" : ", ";
+                names += toolset;
+            }
+            add(report, Status::Warn, "Tools", "tools.disabled",
+                "'" + name + "' is not a toolset (they are: " + names + ")");
+        } else {
+            add(report, Status::Ok, "Tools", "tools.disabled", name + " -- switched off");
+        }
+    }
+
+    if (!config.tools.is_disabled("git")) {
+        if (platform::find_on_path("git").empty()) {
+            add(report, Status::Warn, "Tools", "git",
+                "not found on PATH -- the git tools will fail",
+                "install git, or add git to tools.disabled");
+        } else {
+            add(report, Status::Ok, "Tools", "git", "found on PATH");
+        }
+    }
+}
+
 CheckReport run_checks(const CheckInputs& inputs) {
     CheckReport report;
     check_version(report, inputs);
     check_config(report, inputs);
+    check_tools(report, inputs);
     check_filesystem(report, inputs);
     check_secrets(report, inputs);
     check_credential_store(report, inputs);

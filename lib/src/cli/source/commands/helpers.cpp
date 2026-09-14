@@ -154,7 +154,7 @@ bool names_a_configured_backend(const harness::Config& config, std::string_view 
     return !configured_backend_key(config, model).empty();
 }
 
-agent::ToolRegistry make_built_in_tools() {
+agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
     agent::ToolRegistry registry;
 
     auto client =
@@ -175,6 +175,16 @@ agent::ToolRegistry make_built_in_tools() {
         }
         return result;
     }));
+
+    tools::ToolsetOptions toolsets;
+    toolsets.harness = options.harness;
+    toolsets.config = options.config;
+    toolsets.review = options.review;
+    if (options.config != nullptr) {
+        toolsets.fs_root = harness::expand_env(options.config->tools.fs_root);
+        toolsets.disabled = options.config->tools.disabled;
+    }
+    tools::register_native_toolsets(registry, toolsets);
 
     return registry;
 }

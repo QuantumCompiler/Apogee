@@ -124,6 +124,25 @@ void JsonReporter::emit_question(const agentloop::QuestionRequest& request) {
     write(object.dump());
 }
 
+void JsonReporter::emit_permission_question(std::string_view tool, std::string_view target) {
+    nlohmann::json object = event("question");
+    object["kind"] = "permission";
+    object["tool"] = std::string{tool};
+    object["target"] = std::string{target};
+    nlohmann::json entry;
+    entry["header"] = "Permission";
+    entry["question"] =
+        "Allow " + std::string{tool} + (target.empty() ? "" : " on " + std::string{target}) + "?";
+    entry["multi_select"] = false;
+    entry["options"] = nlohmann::json::array(
+        {{{"label", "yes"}, {"description", "Allow this once"}},
+         {{"label", "no"}, {"description", "Deny"}},
+         {{"label", "always"}, {"description", "Allow, and remember it in the config"}},
+         {{"label", "session"}, {"description", "Allow for the rest of this session"}}});
+    object["questions"] = nlohmann::json::array({std::move(entry)});
+    write(object.dump());
+}
+
 void JsonReporter::emit_error(std::string_view message) {
     nlohmann::json object = event("error");
     object["message"] = std::string{message};

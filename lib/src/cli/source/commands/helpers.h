@@ -13,6 +13,7 @@
 #include "harness/config.h"
 #include "harness/harness.h"
 #include "harness/types.h"
+#include "tools/toolsets.h"
 
 /// Shared plumbing for the CLI commands.
 ///
@@ -143,7 +144,19 @@ struct RagChoice {
 /// later. **One function, three callers**: `complete`, `chat`, and `serve`
 /// build the same registry, so a tool added here reaches every surface at
 /// once rather than the one someone remembered to edit.
-[[nodiscard]] agent::ToolRegistry make_built_in_tools();
+/// What the built-in registry is built from.
+struct BuiltInToolOptions {
+    /// `permissions:` and `tools:`; null means every default.
+    const harness::Config* config = nullptr;
+    /// For the RAG tools' embedder; null means lexical-only searches.
+    const harness::Harness* harness = nullptr;
+    /// The review defaults `git_diff` falls back to, set by flags.
+    tools::ReviewDefaults review;
+};
+
+/// `fetch_url` plus the native toolsets, honouring `tools.disabled`. The one
+/// place that decides which tools a `--tools` run has.
+[[nodiscard]] agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options);
 
 /// Reads all of standard input. Used when no prompt argument was given.
 [[nodiscard]] std::string read_stdin();

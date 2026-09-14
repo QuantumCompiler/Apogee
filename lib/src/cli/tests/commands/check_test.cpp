@@ -632,3 +632,61 @@ TEST_CASE("the doctor reports the credential store: absent is fine, present must
     CHECK(store_row().status == Status::Warn);
     CHECK(store_row().detail.find("credentials.json") != std::string::npos);
 }
+
+TEST_CASE("the doctor's Tools section: keys, the root, the switches, and git",
+          "[commands][check][tools]") {
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml",
+                  "permissions:\n  write_file: allow\n  wrte_file: deny\n"
+                  "  mcp__srv__tool: allow\n"
+                  "tools:\n  fs_root: /nonexistent/sandbox\n  disabled: [shell, teleport]\n");
+    load_into(inputs);
+    const CheckReport report = run_checks(inputs);
+
+    const auto* known = row_with(report, "permissions.write_file");
+    REQUIRE(known != nullptr);
+    CHECK(known->status == Status::Ok);
+    CHECK(known->detail == "allow");
+    const auto* typo = row_with(report, "permissions.wrte_file");
+    REQUIRE(typo != nullptr);
+    CHECK(typo->status == Status::Warn);
+    CHECK(typo->detail.find("not a native destructive tool") != std::string::npos);
+    const auto* namespaced = row_with(report, "permissions.mcp__srv__tool");
+    REQUIRE(namespaced != nullptr);
+    CHECK(namespaced->status == Status::Ok);  // a future MCP tool's key is not a typo
+    const auto* unlisted = row_with(report, "permissions.delete_file");
+    REQUIRE(unlisted != nullptr);
+    CHECK(unlisted->detail.find("default") != std::string::npos);
+
+    const auto* root = row_with(report, "fs_root");
+    REQUIRE(root != nullptr);
+    CHECK(root->status == Status::Warn);
+    CHECK(root->detail.find("/nonexistent/sandbox") != std::string::npos);
+
+    int disabled_rows = 0;
+    bool teleport_warned = false;
+    for (const apogee::commands::CheckRow& row : report.rows) {
+        if (row.name == "tools.disabled") {
+            ++disabled_rows;
+            if (row.detail.find("teleport") != std::string::npos) {
+                teleport_warned = row.status == Status::Warn;
+            }
+        }
+    }
+    CHECK(disabled_rows == 2);
+    CHECK(teleport_warned);
+    // Warnings only: a toolless install still passes.
+    CHECK(report.passed());
+
+    // Every default is an Ok row and the shipped template has no warnings here.
+    install.write("config/config.yaml", apogee::harness::config_template());
+    load_into(inputs);
+    for (const apogee::commands::CheckRow& row : run_checks(inputs).rows) {
+        if (row.section == "Tools") {
+            INFO(row.name << ": " << row.detail);
+            CHECK(row.status != Status::Warn);
+        }
+    }
+}

@@ -24,6 +24,7 @@
 #include "commands/input_gate.h"
 #include "commands/json_reporter.h"
 #include "commands/line_reader.h"
+#include "commands/permissions.h"
 #include "commands/terminal.h"
 #include "harness/config.h"
 #include "harness/context_windows.h"
@@ -150,7 +151,7 @@ struct RagSettings {
 
 void run_chat_turn(const harness::Harness& harness, logger::Session& session,
                    const std::string& input, std::vector<harness::ContentPart>& attachments,
-                   agent::ToolRegistry* tools, const agentloop::AskFn& ask,
+                   agent::ToolRegistry* tools, const agentloop::AskFn& ask, const ToolGate& gate,
                    agentloop::Reporter& reporter,
                    const std::function<void(const std::string&)>& notice, const RagSettings& rag) {
     std::vector<harness::ContentPart> turn_attachments;
@@ -193,6 +194,8 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     if (tools != nullptr) {
         loop_options.tools = tools;
         loop_options.ask = ask;
+        loop_options.permission = gate.permission;
+        loop_options.confirm = gate.confirm;
     }
 
     // Retrieval runs PER TURN, against what the user just asked -- which is the
@@ -451,8 +454,13 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         // --- tools ----------------------------------------------------------
         agent::ToolRegistry registry;
         if (flags->tools) {
-            registry = make_built_in_tools();
+            registry =
+                make_built_in_tools(BuiltInToolOptions{.config = &config, .harness = &harness});
         }
+        // The gate: config levels, then what the user answers for this
+        // session. The prompt half is chosen per surface below.
+        const auto approvals = std::make_shared<SessionApprovals>();
+        const agent::PermissionChecker permission = make_permission_checker(config, approvals);
 
         // --- attachments, for the first message only -------------------------
         std::vector<harness::ContentPart> attachments;
@@ -553,8 +561,12 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 // answer a question -- the loop's "nil AskFn <=> never
                 // advertised" rule is satisfied rather than sidestepped.
                 run_chat_turn(harness, session, message.text, attachments,
-                              flags->tools ? &registry : nullptr, driver_ask, machine_reporter,
-                              machine_notice, rag_settings);
+                              flags->tools ? &registry : nullptr, driver_ask,
+                              ToolGate{permission, flags->tools ? make_driver_confirm_fn(
+                                                                      machine_reporter, std::cin,
+                                                                      config_path, approvals)
+                                                                : agent::ConfirmFn{}},
+                              machine_reporter, machine_notice, rag_settings);
 
                 harness::ChatResponse response;
                 response.message = session.messages.empty() ? harness::ChatMessage::assistant("")
@@ -724,6 +736,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             run_chat_turn(
                 harness, session, input, attachments, flags->tools ? &registry : nullptr,
                 flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
+                ToolGate{permission, flags->tools ? terminal_confirm_fn(reporter.status(), style,
+                                                                        config_path, approvals)
+                                                  : agent::ConfirmFn{}},
                 reporter,
                 [&reporter, &style](const std::string& message) {
                     reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + message);

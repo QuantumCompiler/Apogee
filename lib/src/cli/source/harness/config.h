@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <span>
@@ -207,6 +208,46 @@ struct PathsConfig {
     std::string embeddings_dir;
 };
 
+/// What the permission gate does before a destructive tool runs.
+///
+/// Three words, from Ommi's `fs_permissions`: `ask` prompts the user every
+/// time and is the default when a tool is not listed; `allow` never prompts;
+/// `deny` never runs. Kept as an enum in the harness rather than a string so
+/// an unrecognised value fails at load -- a typo that read as "not allow" and
+/// silently meant ask would be the wrong kind of forgiving.
+enum class PermissionLevel : std::uint8_t { Ask, Allow, Deny };
+
+[[nodiscard]] std::string_view to_string(PermissionLevel level) noexcept;
+[[nodiscard]] std::optional<PermissionLevel> permission_level_from_string(
+    std::string_view name) noexcept;
+
+/// The `permissions:` section: one level per **tool name**.
+///
+/// Keyed by tool name rather than by a fixed pair of fields (Ommi gated
+/// exactly `write_file` and `delete_file`) so the shell tool, the notes tools,
+/// and a namespaced MCP tool all fit the same schema without a new key each.
+/// Every destructive tool consults it through one checker; a read-only tool
+/// never does, because prompting for reads trains the user to say yes.
+struct PermissionsConfig {
+    std::map<std::string, PermissionLevel, std::less<>> levels;
+
+    /// The level for `tool`; `Ask` when it is not listed.
+    [[nodiscard]] PermissionLevel level(std::string_view tool) const noexcept;
+};
+
+/// The `tools:` section: where the native toolsets operate.
+struct ToolsConfig {
+    /// The directory the filesystem tools are sandboxed to. Empty means the
+    /// user's home directory. `${ENV_VAR}` references are expanded.
+    std::string fs_root;
+
+    /// Toolsets switched off by name (`fs`, `shell`, `git`, `notes`, `rag`).
+    /// Enablement, not safety: the permission gate is the safety.
+    std::vector<std::string> disabled;
+
+    [[nodiscard]] bool is_disabled(std::string_view toolset) const noexcept;
+};
+
 /// How operational status output is displayed. Consumed by the terminal UX
 /// layer (chat-cli); parsed here so an invalid value fails at load rather than
 /// three commands later.
@@ -256,6 +297,9 @@ struct Config {
     /// `embeddings:` -- retrieval never depended on registration and does not
     /// start to here.
     std::string auto_rag;
+
+    PermissionsConfig permissions;
+    ToolsConfig tools;
 
     StatusMode status_mode = StatusMode::Line;
     bool color = true;

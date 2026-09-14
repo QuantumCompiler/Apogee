@@ -170,6 +170,26 @@ if(NOT stripped_tools STREQUAL "mock response")
     message(FATAL_ERROR "--tools leaked decoration into piped output: '${stripped_tools}'")
 endif()
 
+# The native toolsets ride the same flag. On a pipe there is nobody to answer
+# a permission prompt, so the doctor's Tools section and the config round trip
+# are what a shell can assert; the gate itself is unit-tested through the loop.
+# (--fix first: the throwaway home has none of the layout yet, and this is not
+# the install-parity test.)
+apogee_run(0 check --fix)
+expect_contains("${APOGEE_OUT}" "permissions.write_file" "the doctor reports the permission keys")
+expect_contains("${APOGEE_OUT}" "fs_root" "the doctor reports the sandbox root")
+apogee_run(0 config set-permission run_command deny)
+apogee_run(0 config get permissions.run_command)
+string(STRIP "${APOGEE_OUT}" permission_level)
+if(NOT permission_level STREQUAL "deny")
+    message(FATAL_ERROR "set-permission did not round-trip through config get: '${permission_level}'")
+endif()
+# A level outside the three is refused by the parser (CLI11 exits 105 on a
+# validation failure), before anything touches the file.
+apogee_run(105 config set-permission run_command sometimes)
+apogee_run(0 config set-permission run_command ask)
+apogee_run(0 complete --tools "hi")
+
 # --search enables the provider's own server-side tool where it has one; the
 # mock has none and must simply ignore it rather than failing.
 apogee_run(0 complete --search "hi")

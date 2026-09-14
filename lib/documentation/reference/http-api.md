@@ -316,6 +316,28 @@ Every one of these writes goes through the same comment-preserving edit the
 CLI uses, so a file edited here is **byte-identical** to one edited from the
 terminal.
 
+### `GET /v1/admin/permissions`
+
+What the permission gate does for each destructive native tool — `ask`,
+`allow`, or `deny` — as `{"object":"list","data":[{tool, level}]}`: every tool
+that declares itself destructive (`write_file`, `delete_file`, `run_command`,
+`write_note`, `delete_note`) at its effective level, `ask` when the config does
+not list it, plus any other key the config carries (a namespaced MCP tool, once
+the MCP client lands).
+
+### `PUT /v1/admin/permissions/{id}`
+
+The twin of `apogee config set-permission <tool> <level>`. `{id}` is a tool
+name; body `{"level": "ask" | "allow" | "deny"}`. `200 {tool, level,
+restart_required}`; `400` on an unknown level or a name that is not a tool
+name. A served run reads its levels once at startup, so `restart_required` is
+`true` when the level now differs from what this server started with. Read-only
+tools have no level: they never prompt, and `permissions.read_file` is not a
+key.
+
+On a served request nobody can answer a prompt, so `ask` means deny there:
+`allow` in the config is the only way a destructive tool runs under `serve`.
+
 ### `GET /v1/admin/auth`
 
 The stored provider credentials as **metadata** — `{"object":"list","data":[{provider, stored_at}]}` — plus

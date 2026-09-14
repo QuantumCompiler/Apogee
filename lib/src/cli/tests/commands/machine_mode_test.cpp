@@ -391,3 +391,23 @@ TEST_CASE("the input format parses independently of the output one", "[commands]
     CHECK(to_string(InputFormat::StreamJson) == "stream-json");
     CHECK(to_string(InputFormat::Text) == "text");
 }
+
+TEST_CASE("a permission prompt is a question event with kind, tool and target",
+          "[commands][machine][permission]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.emit_permission_question("run_command", "rm -rf build");
+    const nlohmann::json event = nlohmann::json::parse(out.str());
+    CHECK(event["type"] == "question");
+    CHECK(event["kind"] == "permission");
+    CHECK(event["tool"] == "run_command");
+    CHECK(event["target"] == "rm -rf build");
+    REQUIRE(event["questions"].size() == 1);
+    CHECK(event["questions"][0]["header"] == "Permission");
+    CHECK(event["questions"][0]["multi_select"] == false);
+    std::vector<std::string> labels;
+    for (const nlohmann::json& option : event["questions"][0]["options"]) {
+        labels.push_back(option["label"].get<std::string>());
+    }
+    CHECK(labels == std::vector<std::string>{"yes", "no", "always", "session"});
+}

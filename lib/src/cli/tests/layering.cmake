@@ -25,7 +25,7 @@ if(NOT DEFINED APOGEE_SOURCE_DIR)
     message(FATAL_ERROR "APOGEE_SOURCE_DIR must be set")
 endif()
 
-set(GUARDED_PACKAGES harness agentloop agent secrets)
+set(GUARDED_PACKAGES harness agentloop agent secrets tools)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)

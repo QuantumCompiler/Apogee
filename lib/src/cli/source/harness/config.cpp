@@ -174,6 +174,45 @@ std::span<const std::string_view> backend_type_names() noexcept {
     return names;
 }
 
+std::string_view to_string(PermissionLevel level) noexcept {
+    switch (level) {
+        case PermissionLevel::Ask:
+            return "ask";
+        case PermissionLevel::Allow:
+            return "allow";
+        case PermissionLevel::Deny:
+            return "deny";
+    }
+    return "ask";
+}
+
+std::optional<PermissionLevel> permission_level_from_string(std::string_view name) noexcept {
+    if (name == "ask") {
+        return PermissionLevel::Ask;
+    }
+    if (name == "allow") {
+        return PermissionLevel::Allow;
+    }
+    if (name == "deny") {
+        return PermissionLevel::Deny;
+    }
+    return std::nullopt;
+}
+
+PermissionLevel PermissionsConfig::level(std::string_view tool) const noexcept {
+    const auto it = levels.find(tool);
+    return it == levels.end() ? PermissionLevel::Ask : it->second;
+}
+
+bool ToolsConfig::is_disabled(std::string_view toolset) const noexcept {
+    for (const std::string& name : disabled) {
+        if (name == toolset) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::string_view to_string(StatusMode value) noexcept {
     for (const auto& [name, mode] : kStatusModeNames) {
         if (mode == value) {
@@ -362,6 +401,42 @@ Config parse_config(std::string_view content, std::string_view origin) {
 
     if (const YAML::Node auto_rag = root["auto_rag"]; auto_rag.IsDefined() && !auto_rag.IsNull()) {
         config.auto_rag = scalar(auto_rag, origin, "auto_rag");
+    }
+
+    if (const YAML::Node permissions = root["permissions"];
+        permissions.IsDefined() && !permissions.IsNull()) {
+        if (!permissions.IsMap()) {
+            fail(origin, "permissions: expected a mapping of tool name -> ask | allow | deny");
+        }
+        for (const auto& entry : permissions) {
+            const std::string tool = entry.first.Scalar();
+            if (tool.empty()) {
+                fail(origin, "permissions: an entry has an empty tool name");
+            }
+            const std::string value = scalar(entry.second, origin, "permissions." + tool);
+            const std::optional<PermissionLevel> level = permission_level_from_string(value);
+            if (!level.has_value()) {
+                fail(origin, "permissions." + tool + ": '" + value +
+                                 "' is not a permission level (accepted: ask, allow, deny)");
+            }
+            config.permissions.levels[tool] = *level;
+        }
+    }
+
+    if (const YAML::Node tools = root["tools"]; tools.IsDefined() && !tools.IsNull()) {
+        if (!tools.IsMap()) {
+            fail(origin, "tools: expected a mapping");
+        }
+        config.tools.fs_root = scalar(tools["fs_root"], origin, "tools.fs_root");
+        if (const YAML::Node disabled = tools["disabled"];
+            disabled.IsDefined() && !disabled.IsNull()) {
+            if (!disabled.IsSequence()) {
+                fail(origin, "tools.disabled: expected a list of toolset names");
+            }
+            for (const YAML::Node& item : disabled) {
+                config.tools.disabled.push_back(scalar(item, origin, "tools.disabled[]"));
+            }
+        }
     }
 
     if (const YAML::Node mode = root["status_mode"]; mode.IsDefined() && !mode.IsNull()) {

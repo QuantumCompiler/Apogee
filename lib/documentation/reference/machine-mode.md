@@ -109,6 +109,29 @@ stdin an answer would be indistinguishable from the next user turn, and the
 harness rule is that the tool is advertised **if and only if** there is someone
 to answer it.
 
+### Answering a permission prompt
+
+The same event carries the permission gate's question. When the model calls a
+destructive tool — `write_file`, `delete_file`, `run_command`, `write_note`,
+`delete_note` — whose level in `permissions:` is `ask`, the child emits a
+`question` with `"kind": "permission"`, the `tool` and its `target` (the path,
+the command), and **blocks until answered**:
+
+```jsonl
+{"type":"question","kind":"permission","tool":"write_file","target":"notes/todo.md","questions":[{"header":"Permission","question":"Allow write_file on notes/todo.md?","multi_select":false,"options":[{"label":"yes","description":"Allow this once"},{"label":"no","description":"Deny"},{"label":"always","description":"Allow, and remember it in the config"},{"label":"session","description":"Allow for the rest of this session"}]}]}
+```
+
+Reply with one `{"type":"answer","text":"…"}` line: `yes` allows this once,
+`session` allows the tool for the rest of the run, `always` allows it and
+writes `permissions.<tool>: allow` to the config through the same editor the
+CLI uses, and anything else denies. A denial is a **tool result** the model
+reads, not an error; the turn continues. A driver that closes stdin with a
+prompt outstanding fails the turn, exactly as with an unanswered question.
+
+Where there is no driver — `complete --output-format stream-json` is one-shot
+and cannot be asked — `ask` resolves to deny, and only `allow` in the config
+lets a destructive tool run.
+
 ## Everything else is a CLI command
 
 There is no second protocol for mutations. A driving GUI shells out to the same

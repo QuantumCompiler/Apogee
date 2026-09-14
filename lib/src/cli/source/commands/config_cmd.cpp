@@ -126,6 +126,30 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     if (key == "auto_rag") {
         return render(config.auto_rag);
     }
+    if (key == "permissions") {
+        std::string out;
+        for (const auto& [tool, level] : config.permissions.levels) {
+            out += out.empty() ? "" : "\n";
+            out += tool + ": " + std::string{harness::to_string(level)};
+        }
+        return out;
+    }
+    if (key.starts_with("permissions.")) {
+        const std::string_view tool = key.substr(std::string_view{"permissions."}.size());
+        // Unlisted is `ask`, which is an answer, not a missing key.
+        return std::string{harness::to_string(config.permissions.level(tool))};
+    }
+    if (key == "tools.fs_root") {
+        return render(config.tools.fs_root);
+    }
+    if (key == "tools.disabled") {
+        std::string out;
+        for (const std::string& name : config.tools.disabled) {
+            out += out.empty() ? "" : "\n";
+            out += name;
+        }
+        return out;
+    }
     if (key == "embeddings") {
         std::string out;
         for (const std::string& name : config.embedding_names()) {
@@ -389,6 +413,24 @@ void bind_set_role(CLI::App& parent, const RootContext& context, const std::stri
     });
 }
 
+void bind_set_permission(CLI::App& parent, const RootContext& context) {
+    auto tool = std::make_shared<std::string>();
+    auto level = std::make_shared<std::string>();
+    CLI::App* cmd = parent.add_subcommand(
+        "set-permission", "Set what the permission gate does for a tool: ask, allow, or deny");
+    cmd->add_option("tool", *tool, "Tool name, e.g. write_file or run_command")->required();
+    cmd->add_option("level", *level, "ask | allow | deny")
+        ->required()
+        ->check(CLI::IsMember({"ask", "allow", "deny"}));
+    cmd->callback([&context, tool, level]() {
+        const std::filesystem::path path = config_path_for(context);
+        apply_edit(path, [tool, level](std::string_view content) {
+            return harness::set_permission(content, *tool, *level);
+        });
+        std::cout << "permissions." << *tool << " = " << *level << "\n";
+    });
+}
+
 void bind_get(CLI::App& parent, const RootContext& context) {
     auto key = std::make_shared<std::string>();
     auto reveal = std::make_shared<bool>(false);
@@ -447,6 +489,7 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
                   "Set the backend used for embeddings");
     bind_set_role(*cmd, context, "set-default-extraction", "default_extraction",
                   "Set the backend used for structured extraction");
+    bind_set_permission(*cmd, context);
     bind_get(*cmd, context);
     bind_format(*cmd, context);
 }

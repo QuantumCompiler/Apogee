@@ -85,6 +85,8 @@ add_library(apogee_core STATIC
 
     commands/serve_cmd.h
     commands/serve_cmd.cpp
+    commands/permissions.h
+    commands/permissions.cpp
     commands/auth_cmd.h
     commands/auth_cmd.cpp
     commands/chat.h
@@ -228,6 +230,23 @@ add_library(apogee_core STATIC
     secrets/store.cpp
     secrets/resolve.h
     secrets/resolve.cpp
+    tools/tools.h
+    tools/args.h
+    tools/args.cpp
+    tools/process.h
+    tools/process.cpp
+    tools/fs.h
+    tools/fs.cpp
+    tools/shell.h
+    tools/shell.cpp
+    tools/git.h
+    tools/git.cpp
+    tools/notes.h
+    tools/notes.cpp
+    tools/rag_query.h
+    tools/rag_query.cpp
+    tools/toolsets.h
+    tools/toolsets.cpp
 
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and

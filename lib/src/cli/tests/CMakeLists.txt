@@ -95,6 +95,13 @@ add_executable(apogee_tests
     secrets/resolve_test.cpp
     secrets/leak_test.cpp
     httpserver/admin_auth_routes_test.cpp
+    tools/fs_test.cpp
+    tools/shell_test.cpp
+    tools/notes_test.cpp
+    tools/git_test.cpp
+    tools/rag_query_test.cpp
+    tools/gate_test.cpp
+    commands/permissions_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h

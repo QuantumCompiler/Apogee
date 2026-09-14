@@ -354,3 +354,38 @@ TEST_CASE("a collection's backend, retriever and rerank pins parse as written",
               .find_embedding("a")
               ->retriever == "hybird");
 }
+
+TEST_CASE("permissions: and tools: parse, and a bad level fails at load",
+          "[config][permissions][tools]") {
+    const Config config = load_text(
+        "permissions:\n  write_file: allow\n  run_command: deny\n"
+        "tools:\n  fs_root: /srv/work\n  disabled: [shell, rag]\n");
+    CHECK(config.permissions.level("write_file") == apogee::harness::PermissionLevel::Allow);
+    CHECK(config.permissions.level("run_command") == apogee::harness::PermissionLevel::Deny);
+    CHECK(config.permissions.level("delete_file") == apogee::harness::PermissionLevel::Ask);
+    CHECK(config.tools.fs_root == "/srv/work");
+    CHECK(config.tools.is_disabled("shell"));
+    CHECK(config.tools.is_disabled("rag"));
+    CHECK_FALSE(config.tools.is_disabled("git"));
+
+    // A level that is not one of the three is refused, naming them -- a
+    // typo must not silently read as "not allow".
+    CHECK_THROWS_AS(load_text("permissions:\n  write_file: yes\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("permissions: allow\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("tools:\n  disabled: shell\n"), ConfigError);
+    CHECK(apogee::harness::permission_level_from_string("allow") ==
+          apogee::harness::PermissionLevel::Allow);
+    CHECK_FALSE(apogee::harness::permission_level_from_string("Allow").has_value());
+    CHECK(apogee::harness::to_string(apogee::harness::PermissionLevel::Deny) == "deny");
+
+    // The shipped template lists every destructive tool at ask.
+    const Config shipped = load_text(apogee::harness::config_template());
+    for (const char* tool :
+         {"write_file", "delete_file", "run_command", "write_note", "delete_note"}) {
+        INFO(tool);
+        CHECK(shipped.permissions.levels.contains(tool));
+        CHECK(shipped.permissions.level(tool) == apogee::harness::PermissionLevel::Ask);
+    }
+    CHECK(shipped.tools.fs_root.empty());
+    CHECK(shipped.tools.disabled.empty());
+}

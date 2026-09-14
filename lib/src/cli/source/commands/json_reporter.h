@@ -108,6 +108,11 @@ public:
     /// force.
     void emit_question(const agentloop::QuestionRequest& request);
 
+    /// A `question` event with `"kind": "permission"`, `tool` and `target`:
+    /// the permission gate asking the driver. Answered like any question,
+    /// with one `answer` line -- `yes`, `no`, `always`, or `session`.
+    void emit_permission_question(std::string_view tool, std::string_view target);
+
     /// Emits an `error` event. Diagnostics also go to stderr; this is the
     /// machine-readable half, so a driver need not scrape prose.
     void emit_error(std::string_view message);

@@ -124,6 +124,16 @@ public:
 [[nodiscard]] std::string set_models_role(std::string_view content, std::string_view field,
                                           std::string_view value);
 
+/// Sets `permissions.<tool>` to `level` (`ask`, `allow`, or `deny`),
+/// replacing the existing line (keeping any trailing comment) or inserting
+/// one, creating `permissions:` if needed. The one path by which the
+/// `[a]lways` answer, `config set-permission`, and the admin twin write.
+///
+/// `tool` is a tool name (`write_file`, `mcp__server__tool`): letters, digits
+/// and underscores. Anything else is refused before the file is touched.
+[[nodiscard]] std::string set_permission(std::string_view content, std::string_view tool,
+                                         std::string_view level);
+
 /// Tidies whitespace without touching content: strips trailing spaces, folds
 /// runs of blank lines down to one, and ends the file with exactly one
 /// newline.

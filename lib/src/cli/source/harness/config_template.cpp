@@ -62,6 +62,26 @@ paths:
   mcp_dir:         # local MCP server scripts
   embeddings_dir:  # embedding database files
 
+# What the model may do with the native tools (`--tools`). Every destructive
+# tool is listed here with one of:
+#   ask     prompt each time -- the default for anything not listed. Where
+#           nobody can answer (a pipe, `serve`) ask means deny.
+#   allow   never prompt
+#   deny    never run
+# The prompt's [a]lways answer rewrites the tool's line here to `allow`.
+# Read-only tools (read_file, git_diff, search_documents, ...) never prompt.
+permissions:
+  write_file: ask
+  delete_file: ask
+  run_command: ask
+  write_note: ask
+  delete_note: ask
+
+# Where the native toolsets operate.
+# tools:
+#   fs_root: ~            # the filesystem tools cannot leave this directory
+#   disabled: [shell]     # switch a whole toolset off: fs, shell, git, notes, rag
+
 backends:
 
   # ── Anthropic (API billing plan) ────────────────────────────────────────────

@@ -16,6 +16,7 @@
 #include "agentloop/retriever.h"
 #include "backends/factory.h"
 #include "commands/helpers.h"
+#include "commands/permissions.h"
 #include "events/bus.h"
 #include "harness/config.h"
 #include "harness/errors.h"
@@ -235,7 +236,11 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
 
         agent::ToolRegistry registry;
         if (flags->tools) {
-            registry = make_built_in_tools();
+            registry =
+                make_built_in_tools(BuiltInToolOptions{.config = &config, .harness = &harness});
+            // Nobody is attached to a served request: the config's levels
+            // decide, and ask is deny.
+            options.permission = make_permission_checker(config, nullptr);
         }
 
         httpserver::Handler handler{harness, options, flags->tools ? &registry : nullptr};

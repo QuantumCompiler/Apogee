@@ -85,6 +85,11 @@ struct HandlerOptions {
     std::string rerank;
 
     std::chrono::minutes session_ttl{60};
+
+    /// The permission gate's config half. No confirm function exists on a
+    /// served request, so `ask` resolves to deny; `allow` in the config is
+    /// the only way a destructive tool runs here.
+    agent::PermissionChecker permission;
 };
 
 class Handler {

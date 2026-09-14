@@ -25,6 +25,8 @@ using apogee::httpserver::admin_create_backend;
 using apogee::httpserver::admin_delete_backend;
 using apogee::httpserver::admin_get_backend;
 using apogee::httpserver::admin_list_backends;
+using apogee::httpserver::admin_list_permissions;
+using apogee::httpserver::admin_put_permission;
 using apogee::httpserver::admin_set_role;
 using apogee::httpserver::AdminConfigContext;
 using apogee::httpserver::HttpRequest;
@@ -233,4 +235,47 @@ TEST_CASE("is_literal_api_key tells a secret from a reference", "[httpserver][ad
     CHECK_FALSE(apogee::httpserver::is_literal_api_key("${OPENAI_API_KEY}"));
     CHECK_FALSE(apogee::httpserver::is_literal_api_key(""));
     CHECK(apogee::httpserver::is_literal_api_key("${unterminated"));
+}
+
+TEST_CASE("the permissions twin edits the same line the CLI edits, byte for byte",
+          "[httpserver][admin][permissions]") {
+    const Fixture fixture;
+    // The listing: every destructive tool at its shipped level.
+    const HttpResponse listed = admin_list_permissions(fixture.context());
+    REQUIRE(listed.status == 200);
+    const nlohmann::json data = nlohmann::json::parse(listed.body)["data"];
+    REQUIRE(data.size() == 5);
+    bool saw_write = false;
+    for (const nlohmann::json& row : data) {
+        if (row["tool"] == "write_file") {
+            saw_write = true;
+            CHECK(row["level"] == "ask");
+        }
+    }
+    CHECK(saw_write);
+
+    HttpRequest put;
+    put.method = "PUT";
+    put.body = R"({"level":"allow"})";
+    const HttpResponse changed = admin_put_permission(fixture.context(), "write_file", put);
+    REQUIRE(changed.status == 200);
+    const nlohmann::json body = nlohmann::json::parse(changed.body);
+    CHECK(body["tool"] == "write_file");
+    CHECK(body["level"] == "allow");
+    CHECK(body["restart_required"] == true);  // the server read `ask` at startup
+
+    fixture.cli({"config", "set-permission", "write_file", "allow"});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+
+    // The refusals the CLI makes, in the envelope.
+    put.body = R"({"level":"sometimes"})";
+    CHECK(admin_put_permission(fixture.context(), "write_file", put).status == 400);
+    put.body = R"({"level":"allow"})";
+    CHECK(admin_put_permission(fixture.context(), "write file", put).status == 400);
+    put.body = "nope";
+    CHECK(admin_put_permission(fixture.context(), "write_file", put).status == 400);
+    // Setting the same level back reports no restart.
+    put.body = R"({"level":"ask"})";
+    CHECK(nlohmann::json::parse(admin_put_permission(fixture.context(), "write_file", put)
+                                    .body)["restart_required"] == false);
 }

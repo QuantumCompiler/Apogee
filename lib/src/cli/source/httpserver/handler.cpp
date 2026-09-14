@@ -447,6 +447,7 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
     loop_options.cancellation = cancellation;
     if (tools_ != nullptr && plan.tool_mode == ToolMode::All && !tools_->empty()) {
         loop_options.tools = tools_;
+        loop_options.permission = options_.permission;
         // No AskFn, ever: nobody is attached to a served request, so the
         // loop's rule leaves ask_user out of the request entirely. And no
         // confirm function, so a destructive tool that asks resolves to deny.

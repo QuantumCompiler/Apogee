@@ -31,6 +31,14 @@ HttpResponse AdminHandler::delete_backend(const HttpRequest& /*request*/, std::s
     return admin_delete_backend(config_context(), name);
 }
 
+HttpResponse AdminHandler::list_permissions(const HttpRequest&) {
+    return admin_list_permissions(config_context());
+}
+
+HttpResponse AdminHandler::put_permission(const HttpRequest& request, std::string_view tool) {
+    return admin_put_permission(config_context(), tool, request);
+}
+
 HttpResponse AdminHandler::set_default(const HttpRequest& request) {
     return admin_set_role(config_context(), "default", request);
 }

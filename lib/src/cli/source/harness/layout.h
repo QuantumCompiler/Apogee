@@ -63,6 +63,9 @@ struct LayoutEntry {
 [[nodiscard]] std::filesystem::path logs_dir();
 [[nodiscard]] std::filesystem::path models_dir();
 [[nodiscard]] std::filesystem::path embeddings_dir();
+
+/// `<APOGEE_HOME>/notes` -- the notes toolset's directory.
+[[nodiscard]] std::filesystem::path notes_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 
 /// What `seed_data_directory()` did.

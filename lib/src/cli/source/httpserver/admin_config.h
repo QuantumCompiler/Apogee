@@ -49,6 +49,15 @@ struct AdminConfigContext {
 /// `GET /v1/admin/backends`.
 [[nodiscard]] HttpResponse admin_list_backends(const AdminConfigContext& context);
 
+/// `GET /v1/admin/permissions`: every destructive tool with its effective
+/// level, plus any other key the config carries.
+[[nodiscard]] HttpResponse admin_list_permissions(const AdminConfigContext& context);
+
+/// `PUT /v1/admin/permissions/{id}` -- the `config set-permission` twin.
+/// Body: `{"level": "ask" | "allow" | "deny"}`.
+[[nodiscard]] HttpResponse admin_put_permission(const AdminConfigContext& context,
+                                                std::string_view tool, const HttpRequest& request);
+
 /// `POST /v1/admin/backends` -- the `config add-backend` twin. `force` in the
 /// body is `--force`. A literal `api_key` is accepted from a loopback peer
 /// only (`403` otherwise): the `${ENV}` reference the CLI recommends is not a

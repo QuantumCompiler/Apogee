@@ -21,6 +21,7 @@
 #include "commands/embed.h"
 #include "commands/helpers.h"
 #include "commands/json_reporter.h"
+#include "commands/permissions.h"
 #include "commands/terminal.h"
 #include "harness/config.h"
 #include "harness/errors.h"
@@ -110,8 +111,8 @@ std::vector<harness::ContentPart> load_attachments(const CompleteFlags& flags) {
 /// Runs one prompt against one backend, streaming to stdout.
 /// Returns the finish reason so a caller can note truncation.
 harness::ChatResponse run_one(const harness::Harness& harness, const harness::Config& config,
-                              const CompleteFlags& flags, const std::string& model,
-                              const std::string& prompt,
+                              const std::filesystem::path& config_path, const CompleteFlags& flags,
+                              const std::string& model, const std::string& prompt,
                               const std::vector<harness::ContentPart>& attachments, bool decorate) {
     // The shared guard, not a private copy: the copy is what `chat` never got.
     if (const std::string refusal = attachment_refusal(harness, model, attachments);
@@ -149,8 +150,12 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
 
         agent::ToolRegistry machine_registry;
         if (flags.tools) {
-            machine_registry = make_built_in_tools();
+            machine_registry =
+                make_built_in_tools(BuiltInToolOptions{.config = &config, .harness = &harness});
             machine_options.tools = &machine_registry;
+            // The config's levels only: a one-shot driver cannot be asked, so
+            // ask resolves to deny, exactly as on a pipe.
+            machine_options.permission = make_permission_checker(config, nullptr);
             // No AskFn: a one-shot driver has no way to answer a question
             // mid-turn. The loop's rule then applies unchanged -- ask_user is
             // never advertised, rather than advertised and unanswerable.
@@ -237,11 +242,16 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
 
     agent::ToolRegistry registry;
     if (flags.tools) {
-        registry = make_built_in_tools();
+        registry = make_built_in_tools(BuiltInToolOptions{.config = &config, .harness = &harness});
         loop_options.tools = &registry;
         // Advertised only when there is a terminal to answer on. A null AskFn
-        // means the tool never appears in the request at all.
+        // means the tool never appears in the request at all -- and a null
+        // ConfirmFn, on a pipe, means a destructive tool's `ask` is a deny.
         loop_options.ask = terminal_ask_fn(reporter.status(), reporter_options.style);
+        const auto approvals = std::make_shared<SessionApprovals>();
+        loop_options.permission = make_permission_checker(config, approvals);
+        loop_options.confirm =
+            terminal_confirm_fn(reporter.status(), reporter_options.style, config_path, approvals);
     }
 
     std::vector<harness::ChatMessage> history = request.messages;
@@ -388,7 +398,8 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
             }
 
             const std::string model = harness::resolve_chat_backend(config, flags->model);
-            (void)run_one(harness, config, *flags, model, prompt, attachments, decorate);
+            (void)run_one(harness, config, config_path, *flags, model, prompt, attachments,
+                          decorate);
             return;
         }
 
@@ -404,7 +415,8 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
             }
             std::cout << "=== " << status.name << " ===\n";
             try {
-                (void)run_one(harness, config, *flags, status.name, prompt, attachments, decorate);
+                (void)run_one(harness, config, config_path, *flags, status.name, prompt,
+                              attachments, decorate);
                 any_succeeded = true;
             } catch (const CLI::RuntimeError&) {
                 // One backend failing must not abandon the rest -- comparing

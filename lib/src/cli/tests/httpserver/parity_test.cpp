@@ -73,6 +73,7 @@ const std::map<std::string, Classification>& table() {
         {"config set-default-embedding", twin("POST", "/v1/admin/backends/default-embedding")},
         {"config set-default-extraction", twin("POST", "/v1/admin/backends/default-extraction")},
         {"config format", twin("POST", "/v1/admin/config/format")},
+        {"config set-permission", twin("PUT", "/v1/admin/permissions/{id}")},
         {"auth add", twin("PUT", "/v1/admin/auth/{id}")},
         {"auth clear", twin("DELETE", "/v1/admin/auth/{id}")},
         // --- backfills: owned by the area that owns the CLI action ----------

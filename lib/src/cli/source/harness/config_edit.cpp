@@ -509,20 +509,20 @@ std::vector<std::string_view> models_role_fields() {
     return {"default", "default_embedding", "default_extraction"};
 }
 
-std::string set_models_role(std::string_view content, std::string_view field,
-                            std::string_view value) {
-    const std::vector<std::string_view> allowed = models_role_fields();
-    if (std::find(allowed.begin(), allowed.end(), field) == allowed.end()) {
-        throw ConfigEditError("unknown models field '" + std::string{field} +
-                              "' (accepted: default, default_embedding, default_extraction)");
-    }
+namespace {
 
+/// Sets `<section>.<field>` to `value` -- the shared body of every "one
+/// scalar under a top-level section" edit: replace the line in place keeping
+/// its trailing comment, else insert it at the end of the section, else
+/// append the section.
+std::string set_section_scalar(std::string_view content, std::string_view section_name,
+                               std::string_view field, std::string_view value) {
     Lines lines = split_lines(content);
     const std::string terminator = dominant_terminator(lines);
     const std::string new_line =
         std::string(kEntryIndent, ' ') + std::string{field} + ": " + yaml_scalar(value);
 
-    SectionRange section = find_section(lines, "models");
+    SectionRange section = find_section(lines, section_name);
 
     if (section.found) {
         std::size_t insert_at = section.begin;
@@ -591,9 +591,41 @@ std::string set_models_role(std::string_view content, std::string_view field,
             lines.push_back(terminator);
         }
     }
-    lines.push_back("models:" + terminator);
+    lines.push_back(std::string{section_name} + ":" + terminator);
     lines.push_back(new_line + terminator);
     return join_lines(lines);
+}
+
+}  // namespace
+
+std::string set_models_role(std::string_view content, std::string_view field,
+                            std::string_view value) {
+    const std::vector<std::string_view> allowed = models_role_fields();
+    if (std::find(allowed.begin(), allowed.end(), field) == allowed.end()) {
+        throw ConfigEditError("unknown models field '" + std::string{field} +
+                              "' (accepted: default, default_embedding, default_extraction)");
+    }
+    return set_section_scalar(content, "models", field, value);
+}
+
+std::string set_permission(std::string_view content, std::string_view tool,
+                           std::string_view level) {
+    if (tool.empty()) {
+        throw ConfigEditError("a permission needs a tool name");
+    }
+    for (const char c : tool) {
+        const bool ok =
+            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+        if (!ok) {
+            throw ConfigEditError("'" + std::string{tool} +
+                                  "' is not a tool name (letters, digits and underscores)");
+        }
+    }
+    if (level != "ask" && level != "allow" && level != "deny") {
+        throw ConfigEditError("'" + std::string{level} +
+                              "' is not a permission level (accepted: ask, allow, deny)");
+    }
+    return set_section_scalar(content, "permissions", tool, level);
 }
 
 std::string format_config(std::string_view content) {

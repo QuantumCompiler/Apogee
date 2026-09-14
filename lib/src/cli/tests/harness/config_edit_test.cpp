@@ -20,6 +20,7 @@ using apogee::harness::delete_embedding;
 using apogee::harness::EmbeddingConfig;
 using apogee::harness::format_config;
 using apogee::harness::set_models_role;
+using apogee::harness::set_permission;
 using apogee::testing::TempDir;
 
 namespace {
@@ -558,4 +559,46 @@ TEST_CASE("a collection's pins are written when set and round-trip", "[config_ed
     const auto parsed = apogee::harness::parse_config(added, "<t>");
     CHECK(parsed.find_embedding("notes")->retriever == "vector");
     CHECK(delete_embedding(added, "notes") == std::string{kCommented} + "\nembeddings:\n");
+}
+
+TEST_CASE("set_permission replaces a level in place, keeping the trailing comment",
+          "[config_edit][golden][permissions]") {
+    constexpr std::string_view kWithPermissions =
+        "# top\n"
+        "permissions:\n"
+        "  write_file: ask    # prompts each time\n"
+        "  run_command: ask\n"
+        "\nbackends:\n  a:\n    type: mock\n";
+    const std::string after = set_permission(kWithPermissions, "write_file", "allow");
+    require_parses(after);
+    CHECK(after.find("  write_file: allow    # prompts each time") != std::string::npos);
+    CHECK(after.find("  run_command: ask\n") != std::string::npos);
+    CHECK(after.find("# top") != std::string::npos);
+    // Exactly one line differs.
+    CHECK(after.size() == kWithPermissions.size() + 2);
+    CHECK(apogee::harness::parse_config(after, "<test>").permissions.level("write_file") ==
+          apogee::harness::PermissionLevel::Allow);
+
+    // Inserting a tool the section does not list yet.
+    const std::string inserted = set_permission(kWithPermissions, "delete_note", "deny");
+    require_parses(inserted);
+    CHECK(apogee::harness::parse_config(inserted, "<test>").permissions.level("delete_note") ==
+          apogee::harness::PermissionLevel::Deny);
+    CHECK(inserted.find("  write_file: ask    # prompts each time") != std::string::npos);
+}
+
+TEST_CASE("set_permission creates the section when absent and refuses bad input",
+          "[config_edit][permissions]") {
+    const std::string created = set_permission(kCommented, "run_command", "deny");
+    require_parses(created);
+    CHECK(apogee::harness::parse_config(created, "<test>").permissions.level("run_command") ==
+          apogee::harness::PermissionLevel::Deny);
+    CHECK(created.find("# ── Anthropic ─") != std::string::npos);
+
+    CHECK_THROWS_AS((void)set_permission(kCommented, "write_file", "yes"), ConfigEditError);
+    CHECK_THROWS_AS((void)set_permission(kCommented, "", "allow"), ConfigEditError);
+    CHECK_THROWS_AS((void)set_permission(kCommented, "write file", "allow"), ConfigEditError);
+    CHECK_THROWS_AS((void)set_permission(kCommented, "../x", "allow"), ConfigEditError);
+    // A namespaced MCP tool name is a valid key.
+    require_parses(set_permission(kCommented, "mcp__srv__tool", "allow"));
 }

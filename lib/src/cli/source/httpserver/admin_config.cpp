@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <utility>
@@ -9,6 +10,7 @@
 
 #include "harness/config_edit.h"
 #include "harness/roles.h"
+#include "tools/toolsets.h"
 
 namespace apogee::httpserver {
 namespace {
@@ -314,6 +316,74 @@ HttpResponse admin_format_config(const AdminConfigContext& context) {
     return json_response(
         200,
         nlohmann::json{{"formatted", true}, {"restart_required", drifted(context, *after.config)}});
+}
+
+namespace {
+
+nlohmann::json permissions_view(const harness::Config& config) {
+    nlohmann::json data = nlohmann::json::array();
+    std::vector<std::string> listed;
+    for (const std::string_view tool : tools::destructive_tool_names()) {
+        data.push_back(
+            {{"tool", std::string{tool}},
+             {"level", std::string{harness::to_string(config.permissions.level(tool))}}});
+        listed.emplace_back(tool);
+    }
+    for (const auto& [tool, level] : config.permissions.levels) {
+        if (std::find(listed.begin(), listed.end(), tool) == listed.end()) {
+            data.push_back({{"tool", tool}, {"level", std::string{harness::to_string(level)}}});
+        }
+    }
+    return data;
+}
+
+}  // namespace
+
+HttpResponse admin_list_permissions(const AdminConfigContext& context) {
+    const Loaded loaded = load_now(context);
+    if (!loaded.config.has_value()) {
+        return loaded.failure;
+    }
+    return json_response(
+        200, nlohmann::json{{"object", "list"}, {"data", permissions_view(*loaded.config)}});
+}
+
+HttpResponse admin_put_permission(const AdminConfigContext& context, std::string_view tool,
+                                  const HttpRequest& request) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+    if (body.is_discarded() || !body.is_object()) {
+        return error_response(400, "the request body must be a JSON object");
+    }
+    std::string error;
+    const std::string level = optional_string(body, "level", error).value_or("");
+    if (!error.empty()) {
+        return error_response(400, error);
+    }
+    if (!harness::permission_level_from_string(level).has_value()) {
+        return error_response(400, "level is required: ask, allow, or deny");
+    }
+    try {
+        harness::edit_config_file(context.config_path, [&](std::string_view content) {
+            return harness::set_permission(content, tool, level);
+        });
+    } catch (const harness::ConfigEditError& e) {
+        return error_response(400, e.what());
+    } catch (const harness::ConfigError& e) {
+        return error_response(400, e.what(), kConfigError);
+    }
+    const Loaded after = load_now(context);
+    if (!after.config.has_value()) {
+        return after.failure;
+    }
+    // A served run reads its levels once at startup, so a change here is
+    // honoured by the CLI now and by this server after a restart.
+    const bool restart = context.startup != nullptr && context.startup->permissions.level(tool) !=
+                                                           after.config->permissions.level(tool);
+    return json_response(
+        200, nlohmann::json{
+                 {"tool", std::string{tool}},
+                 {"level", std::string{harness::to_string(after.config->permissions.level(tool))}},
+                 {"restart_required", restart}});
 }
 
 HttpResponse admin_set_role(const AdminConfigContext& context, std::string_view field,

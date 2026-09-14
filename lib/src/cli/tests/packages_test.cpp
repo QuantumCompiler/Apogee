@@ -15,6 +15,7 @@
 #include "httpserver/httpserver.h"
 #include "mcp/mcp.h"
 #include "secrets/secrets.h"
+#include "tools/tools.h"
 
 TEST_CASE("reserved package headers are includable from the library target", "[packages]") {
     // Reaching this line is the assertion: the includes above resolved and

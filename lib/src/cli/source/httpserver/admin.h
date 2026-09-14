@@ -46,6 +46,9 @@ public:
     [[nodiscard]] HttpResponse set_default_extraction(const HttpRequest& request);
     [[nodiscard]] HttpResponse format_config(const HttpRequest& request);
 
+    [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
+    [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);
+
     [[nodiscard]] HttpResponse list_credentials(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_credential(const HttpRequest& request,
                                               std::string_view provider);
