@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Knowledge-graph chunk extraction",
+  "description": "Entities and directed relations extracted from one text chunk. Relations may only reference entities present in the entities list.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entities", "relations"],
+  "properties": {
+    "entities": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "type", "description"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Canonical display name as the text names it — full name, no pronouns, no leading articles."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["person", "organization", "system", "component", "location", "event", "concept", "artifact"]
+          },
+          "description": {
+            "type": "string",
+            "description": "One factual sentence about the entity drawn from this chunk only; empty when the chunk says nothing about it."
+          }
+        }
+      }
+    },
+    "relations": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "target", "relation", "description"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Name of an entity from the entities list, spelled exactly as listed."
+          },
+          "target": {
+            "type": "string",
+            "description": "Name of an entity from the entities list, spelled exactly as listed."
+          },
+          "relation": {
+            "type": "string",
+            "description": "Lowercase verb phrase of at most a few words, e.g. \"operates\", \"depends on\"."
+          },
+          "description": {
+            "type": "string",
+            "description": "One factual sentence of supporting context from the chunk, or empty."
+          }
+        }
+      }
+    }
+  }
+}

@@ -258,6 +258,7 @@ struct QueryFlags {
     std::string rerank;
     std::string db;
     bool json = false;
+    bool graph = false;
 };
 
 struct ListFlags {
@@ -529,6 +530,9 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                       "Backend that reorders the matches with one generation call, or off");
     query->add_option("--db", q->db, "The collection (default: knowledge.db, then 'knowledge')");
     query->add_flag("--json", q->json, "Print the result as JSON");
+    query->add_flag("--graph", q->graph,
+                    "Also walk the knowledge graph from the matched records: the entities their "
+                    "reasoning concerns, other decisions about the same things, supersedes chains");
     query->callback([&context, q]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_lenient(context, config_path);
@@ -568,6 +572,12 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
             }
             fail_user(result.error);
         }
+        // The walk from the matched records, through the same core the HTTP
+        // twin calls; a note only when no graph covers the collection.
+        std::optional<knowledge::RecordGraph> graph;
+        if (q->graph) {
+            graph = knowledge::graph_for_records(store, config, db, result, q->text);
+        }
         if (q->json) {
             nlohmann::json records = nlohmann::json::array();
             for (const knowledge::ScoredRecord& scored : result.records) {
@@ -578,6 +588,13 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                                {"reranked", result.reranked}};
             if (!result.notes.empty()) {
                 out["notes"] = result.notes;
+            }
+            if (graph.has_value()) {
+                nlohmann::json section{{"context", graph->context}, {"entities", graph->entities}};
+                if (!graph->note.empty()) {
+                    section["note"] = graph->note;
+                }
+                out["graph"] = std::move(section);
             }
             std::cout << out.dump(2) << "\n";
             return;
@@ -603,6 +620,28 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         for (const knowledge::ScoredRecord& scored : result.records) {
             std::cout << "\n[score " << four_places(scored.score) << "] ";
             print_summary(scored.record, "");
+        }
+        if (graph.has_value()) {
+            if (!graph->note.empty()) {
+                std::cout << "\n" << graph->note << "\n";
+            } else if (graph->context.empty()) {
+                std::cout << "\nNothing related in the knowledge graph.\n";
+            } else {
+                std::cout << "\nRelated (knowledge graph, " << graph->entities << " entities):\n";
+                std::size_t start = 0;
+                while (start <= graph->context.size()) {
+                    const std::size_t newline = graph->context.find('\n', start);
+                    std::cout << "  "
+                              << graph->context.substr(start, newline == std::string::npos
+                                                                  ? std::string::npos
+                                                                  : newline - start)
+                              << "\n";
+                    if (newline == std::string::npos) {
+                        break;
+                    }
+                    start = newline + 1;
+                }
+            }
         }
     });
 

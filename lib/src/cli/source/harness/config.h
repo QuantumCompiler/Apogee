@@ -169,6 +169,22 @@ struct ModelsConfig {
 /// pointer directly.
 [[nodiscard]] bool operator==(const ModelsConfig& lhs, const ModelsConfig& rhs) noexcept;
 
+/// The `graph:` block on an `embeddings:` entry -- the knowledge graph built
+/// over a collection's chunks and walked at retrieval time. Every field is
+/// optional; a bare `apogee graph build` needs none of them.
+struct GraphConfig {
+    /// Set by the first successful build, through the config editor. What
+    /// gates retrieval-time expansion on every surface.
+    bool enabled = false;
+    /// The backend `graph build` extracts with when `-m` is not given. Empty
+    /// means the extraction role, then the default.
+    std::string extract_backend;
+    /// Expansion depth at retrieval: 1 or 2 edge steps.
+    int hops = 1;
+    /// Neighbour entities an expansion injects, at most.
+    int max_entities = 8;
+};
+
 /// One entry under `embeddings:` -- a RAG collection the config knows about.
 ///
 /// A collection exists on disk the moment `apogee embed ingest` creates it,
@@ -205,6 +221,9 @@ struct EmbeddingConfig {
     /// The backend that reranks this collection's hits with one generation
     /// call, or `off`. Empty means no reranking.
     std::string rerank;
+
+    /// The knowledge graph over this collection, when one is configured.
+    GraphConfig graph;
 };
 
 /// One entry under `mcp_servers:` -- a stdio MCP server the loop connects

@@ -255,6 +255,18 @@ public:
     /// Models this provider can serve.
     [[nodiscard]] virtual std::vector<ModelInfo> list_models(
         const CancellationToken& cancellation) = 0;
+
+    /// Whether each generation call costs money.
+    ///
+    /// A fact the provider states about itself, never a list of types: the
+    /// graph build's cost policy (a whole collection is never extracted
+    /// through a metered backend on Apogee's initiative) reads this through
+    /// the Harness. **Unknown is metered** -- the default answers true, so a
+    /// new backend is assumed to cost until it says otherwise. Local weights
+    /// and the mock answer false.
+    [[nodiscard]] virtual bool generation_is_metered() const noexcept {
+        return true;
+    }
 };
 
 }  // namespace apogee::harness

@@ -686,6 +686,92 @@ std::vector<std::string_view> models_role_fields() {
     return {"default", "default_embedding", "default_extraction"};
 }
 
+std::string set_embedding_graph_enabled(std::string_view content, std::string_view collection,
+                                        bool enabled) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange range = find_section(lines, "embeddings");
+    if (!range.found) {
+        throw ConfigEditError("no 'embeddings:' section in this config");
+    }
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, collection);
+    if (!key_line.has_value()) {
+        throw ConfigEditError("collection '" + std::string{collection} + "' not found in config");
+    }
+    const auto [begin, end] = entry_extent(lines, *key_line, range.end);
+    const std::string value = enabled ? "true" : "false";
+    constexpr std::size_t kGraphFieldIndent = kFieldIndent + 2;
+
+    // The entry's `graph:` block, then its `enabled:` line inside it.
+    std::optional<std::size_t> graph_line;
+    std::size_t graph_end = end;
+    for (std::size_t i = begin + 1; i < end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        if (graph_line.has_value()) {
+            if (indent_of(line) <= kFieldIndent) {
+                graph_end = i;  // the next sibling field ends the block
+                break;
+            }
+            continue;
+        }
+        if (indent_of(line) == kFieldIndent && line.substr(kFieldIndent).starts_with("graph:")) {
+            graph_line = i;
+        }
+    }
+    if (graph_line.has_value()) {
+        for (std::size_t i = *graph_line + 1; i < graph_end; ++i) {
+            const std::string_view line = body(lines[i]);
+            if (is_blank(line) || is_comment(line) || indent_of(line) != kGraphFieldIndent ||
+                !line.substr(kGraphFieldIndent).starts_with("enabled:")) {
+                continue;
+            }
+            // Replace only the value token, keeping any trailing comment.
+            const std::string& original = lines[i];
+            const std::size_t key_colon = original.find(':', kGraphFieldIndent);
+            const std::size_t hash = original.find('#', key_colon);
+            const std::size_t limit = hash == std::string::npos ? original.size() : hash;
+            std::size_t value_start = key_colon + 1;
+            while (value_start < limit &&
+                   (original[value_start] == ' ' || original[value_start] == '\t')) {
+                ++value_start;
+            }
+            std::size_t value_end = limit;
+            while (value_end > value_start &&
+                   (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
+                    original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
+                --value_end;
+            }
+            std::string replacement = original.substr(0, value_start);
+            if (value_start == key_colon + 1) {
+                replacement += ' ';
+            }
+            replacement += value;
+            replacement += original.substr(value_end);
+            if (replacement.empty() || replacement.back() != '\n') {
+                replacement += terminator;
+            }
+            lines[i] = replacement;
+            return join_lines(lines);
+        }
+        // A `graph:` block with no `enabled:` line: the field goes first in it.
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(*graph_line + 1),
+                     std::string(kGraphFieldIndent, ' ') + "enabled: " + value + terminator);
+        return join_lines(lines);
+    }
+    // No block: one is appended after the entry's last field.
+    if (!lines[end - 1].empty() && lines[end - 1].back() != '\n') {
+        lines[end - 1] += terminator;
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(end),
+                 std::string(kFieldIndent, ' ') + "graph:" + terminator);
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(end + 1),
+                 std::string(kGraphFieldIndent, ' ') + "enabled: " + value + terminator);
+    return join_lines(lines);
+}
+
 namespace {
 
 /// Sets `<section>.<field>` to `value` -- the shared body of every "one

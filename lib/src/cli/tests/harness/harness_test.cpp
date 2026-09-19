@@ -322,6 +322,19 @@ TEST_CASE("can_embed is answerable without a cast at the call site", "[harness][
     CHECK(harness.embedder_for("chat-only") == nullptr);
 }
 
+TEST_CASE("generation_is_metered is a provider fact the harness discovers, and unknown is metered",
+          "[harness][capability][metered]") {
+    Harness harness{Config{}};
+    harness.register_provider("local", mock("local", "m"));
+    harness.register_provider("embedder", std::make_shared<MockEmbeddingProvider>("embedder", 8));
+    harness.use_default_router();
+    // The mock costs nothing; an unroutable name is treated as metered, so a
+    // spend policy is never unlocked by a name that resolves to nothing.
+    CHECK_FALSE(harness.generation_is_metered("local"));
+    CHECK_FALSE(harness.generation_is_metered("embedder"));
+    CHECK(harness.generation_is_metered("ghost"));
+}
+
 TEST_CASE("capability probes on an unroutable model answer no, not throw",
           "[harness][capability]") {
     // A caller asking about a capability should not have to handle a routing

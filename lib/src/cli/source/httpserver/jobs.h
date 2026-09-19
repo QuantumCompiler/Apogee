@@ -2,12 +2,16 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "events/bus.h"
@@ -110,6 +114,40 @@ private:
     JobRegistry* registry_;
     std::string id_;
     std::string buffer_;
+};
+
+/// The threads a route's async work runs on. **Destruction cancels, then
+/// joins**: every token handed out is fired first, so a worker blocked in a
+/// model call returns through the provider's own cancellation check, and no
+/// thread outlives the registry, the plane or the harness it works on.
+class JobWorkers {
+public:
+    JobWorkers() = default;
+    ~JobWorkers();
+
+    JobWorkers(const JobWorkers&) = delete;
+    JobWorkers& operator=(const JobWorkers&) = delete;
+    JobWorkers(JobWorkers&&) = delete;
+    JobWorkers& operator=(JobWorkers&&) = delete;
+
+    /// Runs `work` on its own thread. `cancellation` is the job's token, kept
+    /// so shutdown can fire it. Finished threads are reaped on the next call.
+    void run(harness::CancellationToken cancellation, std::function<void()> work);
+
+    /// Threads not yet joined -- for a test to wait on, never for logic.
+    [[nodiscard]] std::size_t active() const;
+
+private:
+    struct Worker {
+        harness::CancellationToken cancellation;
+        std::thread thread;
+        std::shared_ptr<std::atomic<bool>> done;
+    };
+
+    void reap_locked();
+
+    mutable std::mutex mutex_;
+    std::vector<Worker> workers_;
 };
 
 /// A fresh job id: `job_` plus twelve hex characters.

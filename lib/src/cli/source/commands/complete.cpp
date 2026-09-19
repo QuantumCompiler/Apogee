@@ -239,7 +239,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         // Otherwise a missing collection is reported, not fatal: answering
         // without retrieved context beats refusing to answer.
         const ansi::Role role = rag.error.empty() ? ansi::Role::Apogee : ansi::Role::Warning;
-        if (rag.error.empty() && rag.chunks > 0) {
+        // Whenever there is a prefix: the chunks, or the graph context that
+        // survived a judge dropping every chunk.
+        if (rag.error.empty() && !rag.prefix.empty()) {
             loop_options.transient_prefix = rag.prefix;
         }
         reporter.status().print_line(reporter_options.style.tag(role) + " " +

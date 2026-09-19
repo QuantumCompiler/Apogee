@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "backends/mock.h"
+#include "embedstore/graph.h"
 #include "embedstore/store.h"
 #include "harness/config.h"
 #include "harness/harness.h"
@@ -324,4 +325,59 @@ TEST_CASE(
     CHECK_FALSE(plain.reranked);
     CHECK(plain.records.size() == 2);
     CHECK(equipped.judge->requests().empty());
+}
+
+TEST_CASE(
+    "graph_for_records walks from the matched records, seeds by the question only on a "
+    "lexical result, and notes an uncovered collection",
+    "[knowledge][query][graph]") {
+    Scratch scratch;
+    apogee::knowledge::Store& records = scratch.store;
+    apogee::knowledge::Record record;
+    record.id = "kr-1";
+    record.intent = "we route readings through Atlas";
+    record.status = "shipped";
+    record.timestamp = "2026-09-19T12:00:00.000000Z";
+    records.put(record, {}, "");
+    apogee::embedstore::Store& store = records.chunks();
+    store.replace_source("docs.md", {"a ghost of a document"});
+    const std::int64_t record_chunk = *records.chunk_id("kr-1");
+    const std::int64_t docs_chunk = store.chunks_by_source("docs.md").front().id;
+    const std::int64_t atlas = store.upsert_node("Atlas", "system", "collects readings").id;
+    const std::int64_t ghost = store.upsert_node("Ghost", "concept", "an isolated entity").id;
+    (void)store.add_mention(atlas, record_chunk);
+    (void)store.add_mention(ghost, docs_chunk);
+
+    apogee::harness::Config config;
+    apogee::knowledge::QueryResult result;
+    apogee::knowledge::ScoredRecord scored;
+    scored.record = record;
+    scored.chunk_id = record_chunk;
+    result.records.push_back(scored);
+
+    // No graph covers the collection: the note, and nothing else.
+    apogee::knowledge::RecordGraph none =
+        apogee::knowledge::graph_for_records(records, config, "knowledge", result, "ghost");
+    CHECK(none.entities == 0);
+    CHECK(none.note.find("no knowledge graph covers collection \"knowledge\"") !=
+          std::string::npos);
+
+    apogee::harness::EmbeddingConfig entry;
+    entry.graph.enabled = true;
+    config.embeddings.emplace("knowledge", entry);
+    // A lexical result also seeds by the question's own terms: "ghost" names
+    // an entity no record chunk reaches.
+    result.retriever = apogee::agentloop::Retriever::Lexical;
+    const apogee::knowledge::RecordGraph lexical =
+        apogee::knowledge::graph_for_records(records, config, "knowledge", result, "ghost");
+    CHECK(lexical.note.empty());
+    CHECK(lexical.entities == 1);
+    CHECK(lexical.context.find("Ghost (concept)") != std::string::npos);
+    // A vector result seeds from the matched records alone.
+    result.retriever = apogee::agentloop::Retriever::Vector;
+    const apogee::knowledge::RecordGraph vector =
+        apogee::knowledge::graph_for_records(records, config, "knowledge", result, "ghost");
+    CHECK(vector.note.empty());
+    CHECK(vector.entities == 0);
+    CHECK(vector.context.empty());
 }

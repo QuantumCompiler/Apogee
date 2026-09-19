@@ -15,6 +15,7 @@
 #include "commands/complete_protocol.h"
 #include "commands/config_cmd.h"
 #include "commands/embed.h"
+#include "commands/graph.h"
 #include "commands/knowledge.h"
 #include "commands/mcp_cmd.h"
 #include "commands/models.h"
@@ -75,6 +76,7 @@ CommandRegistry default_registry() {
     registry.add(std::make_unique<CompleteCommand>());
     registry.add(std::make_unique<ConfigCommand>());
     registry.add(std::make_unique<EmbedCommand>());
+    registry.add(std::make_unique<GraphCommand>());
     registry.add(std::make_unique<KnowledgeCommand>());
     registry.add(std::make_unique<McpCommand>());
     registry.add(std::make_unique<ModelsCommand>());

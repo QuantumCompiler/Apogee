@@ -97,6 +97,8 @@ add_library(apogee_core STATIC
     commands/agents_cmd.cpp
     commands/knowledge_core.h
     commands/knowledge_core.cpp
+    commands/graph.h
+    commands/graph.cpp
     commands/knowledge.h
     commands/knowledge.cpp
     commands/chat.h
@@ -224,6 +226,8 @@ add_library(apogee_core STATIC
     agentloop/rerank.cpp
     agentloop/rag.h
     agentloop/rag.cpp
+    agentloop/graph_context.h
+    agentloop/graph_context.cpp
     agentloop/loop.h
     agentloop/loop.cpp
     agentloop/content.h
@@ -296,12 +300,27 @@ add_library(apogee_core STATIC
     knowledge/export.h
     knowledge/export.cpp
 
+    # The knowledge-graph layer over collections: the extraction contract
+    # (prompt and schema compiled in, validation in host code) and the
+    # resumable build with the record pass. Model-free: generation and
+    # embedding arrive as closures. Includes embedstore/, knowledge/,
+    # agentloop/, harness/ and platform/ only (tests/layering.cmake).
+    graph/extract.h
+    graph/extract.cpp
+    graph/build.h
+    graph/build.cpp
+
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and
     # so `#include "embedstore/embedstore.h"` compiles from the first day.
     embedstore/embedstore.h
     embedstore/store.h
     embedstore/store.cpp
+    embedstore/store_impl.h
+    embedstore/graph.h
+    embedstore/graph.cpp
+    embedstore/graph_search.h
+    embedstore/graph_search.cpp
     embedstore/fts.h
     embedstore/fts.cpp
     embedstore/chunk.h
@@ -337,6 +356,8 @@ add_library(apogee_core STATIC
     httpserver/admin_agents.cpp
     httpserver/admin_knowledge.h
     httpserver/admin_knowledge.cpp
+    httpserver/admin_graph.h
+    httpserver/admin_graph.cpp
     httpserver/admin.h
     httpserver/admin.cpp
     httpserver/admin_auth_routes.h

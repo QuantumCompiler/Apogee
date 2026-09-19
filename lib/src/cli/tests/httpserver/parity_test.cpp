@@ -88,6 +88,8 @@ const std::map<std::string, Classification>& table() {
         {"knowledge status", twin("PATCH", "/v1/admin/knowledge/{id}")},
         {"knowledge delete", twin("DELETE", "/v1/admin/knowledge/{id}")},
         {"knowledge reindex", twin("POST", "/v1/admin/knowledge/reindex")},
+        {"graph build", twin("POST", "/v1/admin/graph/{id}/build")},
+        {"graph delete", twin("DELETE", "/v1/admin/graph/{id}")},
         // --- backfills: owned by the area that owns the CLI action ----------
         {"embed ingest", backfill("embedstore: the embeddings data plane, an async job")},
         {"embed delete", backfill("embedstore: the embeddings data plane")},
@@ -109,6 +111,8 @@ const std::map<std::string, Classification>& table() {
         {"complete", read_only()},
         {"analyze", read_only()},
         {"agents list", read_only()},
+        {"graph stats", read_only()},
+        {"graph show", read_only()},
         {"version", read_only()},
         {"__complete", read_only()},
         {"config get", read_only()},

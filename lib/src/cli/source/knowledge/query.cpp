@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "agentloop/embed_func.h"
+#include "agentloop/graph_context.h"
 #include "agentloop/rerank.h"
 #include "harness/errors.h"
 
@@ -145,6 +146,36 @@ QueryResult query(const Store& store, const harness::Harness& harness,
             continue;
         }
         out.records.push_back(ScoredRecord{std::move(*record), hit.score, hit.chunk.id});
+    }
+    return out;
+}
+
+RecordGraph graph_for_records(const Store& store, const harness::Config& config,
+                              std::string_view collection, const QueryResult& result,
+                              std::string_view question) {
+    RecordGraph out;
+    const harness::EmbeddingConfig* entry = config.find_embedding(collection);
+    if (entry == nullptr || !entry->graph.enabled) {
+        out.note = "no knowledge graph covers collection \"" + std::string{collection} +
+                   "\" -- build one with `apogee graph build " + std::string{collection} + "`";
+        return out;
+    }
+    std::vector<std::int64_t> seeds;
+    for (const ScoredRecord& scored : result.records) {
+        if (scored.chunk_id != 0) {
+            seeds.push_back(scored.chunk_id);
+        }
+    }
+    const std::string_view lexical_query =
+        result.retriever == agentloop::Retriever::Vector ? std::string_view{} : question;
+    try {
+        const agentloop::GraphSection section =
+            agentloop::build_graph_section(store.chunks(), collection, seeds, lexical_query,
+                                           entry->graph.hops, entry->graph.max_entities);
+        out.context = section.text;
+        out.entities = section.entities;
+    } catch (const std::exception& e) {
+        out.note = std::string{"graph expansion failed: "} + e.what();
     }
     return out;
 }

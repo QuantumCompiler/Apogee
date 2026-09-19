@@ -19,7 +19,10 @@
 #include "commands/registry.h"
 #include "commands/root.h"
 #include "events/bus.h"
+#include "graph/build.h"
+#include "graph/extract.h"
 #include "harness/config.h"
+#include "harness/config_edit.h"
 #include "harness/harness.h"
 #include "httpserver/admin.h"
 #include "httpserver/handler.h"
@@ -454,6 +457,45 @@ TEST_CASE(
           std::string::npos);
     CHECK(parsed(fixture.list({{"q", "cancel"}, {"retriever", "hybrid"}}))["retriever"] ==
           "lexical");
+
+    // ?graph=true: opt-in, a note before any graph exists, the walk after
+    // one is built, and it composes with ?anonymize=.
+    CHECK_FALSE(parsed(fixture.list({{"q", "cancel"}})).contains("graph"));
+    body = parsed(fixture.list({{"q", "cancel"}, {"graph", "true"}}));
+    REQUIRE(body.contains("graph"));
+    CHECK(body["graph"]["entities"] == 0);
+    CHECK(body["graph"]["note"].get<std::string>().find("no knowledge graph covers") !=
+          std::string::npos);
+    {
+        Store store = fixture.store();
+        const apogee::graph::ExtractFn extract = [](std::string_view text,
+                                                    const apogee::harness::CancellationToken&) {
+            apogee::graph::ExtractOutcome outcome;
+            apogee::graph::ExtractResult result;
+            if (text.find("cancel") != std::string_view::npos) {
+                result.entities.push_back(apogee::graph::Entity{
+                    .name = "cancel button", .type = "component", .description = "the control"});
+            }
+            outcome.result = std::move(result);
+            return outcome;
+        };
+        apogee::graph::BuildOptions options;
+        options.model = "fake";
+        REQUIRE(apogee::graph::build(store.chunks(), extract, nullptr, options).record_nodes == 2);
+        apogee::harness::edit_config_file(fixture.config_path, [](std::string_view content) {
+            return apogee::harness::set_embedding_graph_enabled(content, "knowledge", true);
+        });
+    }
+    body = parsed(fixture.list(
+        {{"q", "cancel"}, {"graph", "true"}, {"anonymize", "true"}, {"status", "shipped"}}));
+    REQUIRE(body["data"].size() == 1);
+    CHECK_FALSE(body["data"][0]["record"]["provenance"].contains("attribution"));
+    CHECK(body["graph"]["entities"].get<int>() > 0);
+    CHECK(body["graph"]["context"].get<std::string>().find("[Knowledge graph: knowledge]") == 0);
+    CHECK(body["graph"]["context"].get<std::string>().find("cancel button (component)") !=
+          std::string::npos);
+    CHECK(body["graph"]["context"].get<std::string>().find("Lovelace") == std::string::npos);
+    CHECK_FALSE(body["graph"].contains("note"));
 }
 
 TEST_CASE(

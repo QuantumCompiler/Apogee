@@ -149,7 +149,7 @@ indicator. The vocabulary is the same one the terminal status line shows.
 |---|---|---|---|
 | `context_warning` | `start` | `name` (`warn` or `compact`), `used_tokens`, `context_size`, `usage_percent`, `detail: "estimated"` when the count is one | The prompt is at 80% (`warn`) or 90% (`compact`) of the window. A session is compacted before the turn; a stateless request is only warned. |
 | `rag_search` | `start` / `done` | `name` = collection | Retrieval is running / has returned. |
-| `rag_result` | `done` | `collection`, `chunks_found`, `top_score`, `retriever`, `reranked`, `detail` (notes) | What was injected. `retriever` sets `top_score`'s scale — lexical and vector scores are not comparable. |
+| `rag_result` | `done` | `collection`, `chunks_found`, `top_score`, `retriever`, `reranked`, `graph_entities` (when the collection's knowledge graph expanded the chunks), `detail` (notes) | What was injected. `retriever` sets `top_score`'s scale — lexical and vector scores are not comparable. |
 | `model_loading` / `model_ready` | `start` / `done` | `name` = backend | A local model is loading; loading finished. |
 | `thinking` | `start` | — | The model is working: the top of each loop iteration. |
 | `tool_call` | `start` / `done` | `name` = tool | A server-side tool call. |
@@ -511,6 +511,17 @@ explicit ask the resolver refuses; `501` for `retriever=vector` on a server
 with no embedding backend, naming `?retriever=lexical` as the way out; `502`
 when the embedder failed.
 
+**`?graph=true`** -- the twin of `knowledge query --graph`: the knowledge
+graph covering the collection is walked from the matched records (each record
+is a chunk, and its `decision` node plus the entities extracted from its text
+are that chunk's mentions), exactly what a `--rag` turn over the collection
+would inject. Opt-in; the envelope gains
+`"graph": {"context": "[Knowledge graph: knowledge]\n…", "entities": N}`, with
+`context` empty when nothing related was found and a `note` **only** when no
+graph covers the collection (build one with `POST /v1/admin/graph/{id}/build`),
+so "no graph" and "a graph, but nothing related" stay distinguishable.
+Composes with `?anonymize=true`; the section never carries a name.
+
 ### `GET /v1/admin/knowledge/{id}`
 
 One record (`?db=` selects the collection). `404` when the collection or the
@@ -545,6 +556,74 @@ records that were deliberately captured lexically. `404` for a collection or
 record that does not exist; `501` for a collection that holds vectors on a
 server with no embedding backend to rebuild them; `502` when the embedder
 failed.
+
+### `POST /v1/admin/graph/{id}/build`
+
+The twin of `apogee graph build {id}`: the extraction clerk over every stale
+chunk of collection `{id}`, into the `kg_*` tables inside the collection's own
+database. One generation call per chunk, so it is an **async job**: `202
+{"job_id": "job_…"}` at once, progress as `admin.job.*` events on
+`GET /v1/admin/events`, and the finished counts at `GET /v1/admin/jobs/{id}`
+(`files_planned`, `files_extracted`, `chunks_extracted`, `chunks_failed`,
+`nodes_upserted`, `edges_upserted`, `mentions_added`, `entities_embedded`,
+`record_nodes`, `supersedes_edges`, `supersedes_skipped`, `limit_hit`, an
+`embed_error` when entity vectors stopped early, and `enabled: true` the first
+time the build set `graph.enabled` on the collection's `embeddings:` entry --
+through the same config editor the CLI uses, byte-identical; a `config_warning`
+when it could not). `DELETE /v1/admin/jobs/{id}` cancels between chunks; what
+finished stays, and the next build resumes.
+
+Body, every field optional: `model` (the extraction backend), `force`
+(re-extract every source), `limit` (stop after N chunks). The backend resolves
+as the CLI resolves it -- `model` > the collection's `graph.extract_backend`
+> the extraction role > the default -- and must be a served backend. **A full
+build never runs on a metered backend on Apogee's initiative**: a fall-through
+to a metered default is a `400` naming the three ways to say so. `400` for a
+vendor-CLI or unserved backend (as a chat request's `model` would get), `404`
+when the collection has no data, `501` when the server serves no generation
+backend. Entity vectors follow the embedding spend rule: embedded through the
+collection's embedder when it is unmetered or the collection pins `retriever:
+vector`, otherwise the graph is full-text searchable and complete.
+
+Builds are incremental and resumable: a source is re-extracted only when it
+is stale -- no state row, its chunk count changed, its highest chunk id moved
+(a same-count re-ingest is still caught), or the extraction model changed.
+`--dry-run` is CLI-only. Every knowledge record in the collection is
+materialised as a `decision` node on every build, deterministically.
+
+### `GET /v1/admin/graph/{id}/stats`
+
+`200` with `{nodes, edges, mentions, nodes_by_type, nodes_with_vectors,
+total_chunks, chunks_with_mentions, stale_files, failed_chunks[,
+extract_model]}`. An unbuilt graph, or a collection with no data yet, reports
+zeros -- never an error, so a client polling an empty layer sees a shape.
+
+### `GET /v1/admin/graph/{id}/entity`
+
+`?name=` (required) resolves an entity by normalised name -- exact first, one
+per type sharing the name -- then, when nothing matches exactly, the top
+full-text hit with `"fuzzy": true` and `also_matched` naming the runners-up.
+`200 {"data": [{name, type, description?, mentions, dim, status?, discipline?,
+relations: [{relation, direction: "out" | "in", peer, peer_type, weight,
+description?}], chunks: [{source, chunk, text}]}], "fuzzy": bool}`; a
+`decision` node carries its record's `status` and `discipline`. `400` without
+a name; `404` when the collection has no data or nothing matches.
+
+### `DELETE /v1/admin/graph/{id}`
+
+Clears every graph row of the collection -- nodes, edges, mentions, state --
+and returns `{"deleted": {nodes, edges, mentions}}`. The chunks, their
+vectors and the config entry are untouched; the next build starts from
+scratch. `404` when the collection has no data.
+
+### `PUT /v1/admin/embeddings/{id}/graph`
+
+The twin of the build's auto-enable write. Body `{"enabled": true | false}`;
+sets `embeddings.{id}.graph.enabled` through the one config editor -- the
+value replaced in place or a `graph:` block appended to the entry, every
+other byte kept -- and answers `{"collection", "enabled"}`. What gates
+retrieval-time expansion on every surface. `404` when the entry does not
+exist under `embeddings:`; `400` for a body without the boolean.
 
 ### `POST /v1/admin/knowledge`
 
@@ -651,9 +730,8 @@ Cancels a running job and returns its record. A cancelled job stays cancelled:
 a worker that dies afterwards cannot turn it into `failed`. Idempotent on a
 finished job; `404` when unknown.
 
-No route starts a job yet: the substrate ships with the plane, and the first
-job kinds — a server-local ingest, a model pull — arrive with the routes that
-own them.
+The first job kind is `graph-build` (`POST /v1/admin/graph/{id}/build`); a
+server-local ingest and a model pull arrive with the routes that own them.
 
 ## What this server does not do
 

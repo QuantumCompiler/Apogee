@@ -711,6 +711,66 @@ void check_knowledge(CheckReport& report, const CheckInputs& inputs) {
         "private (0700), " + std::to_string(files) + " conversation(s)");
 }
 
+/// The `Graph` section: every collection whose `graph:` block says anything
+/// -- `extract_backend` must name a configured backend, and an enabled graph
+/// should exist on disk. Hops and the entity cap are validated at load.
+void check_graphs(CheckReport& report, const CheckInputs& inputs) {
+    if (inputs.config_missing || !inputs.config_error.empty()) {
+        return;
+    }
+    std::error_code code;
+    for (const auto& [name, collection] : inputs.config.embeddings) {
+        const harness::GraphConfig& graph = collection.graph;
+        if (!graph.enabled && graph.extract_backend.empty()) {
+            continue;
+        }
+        const std::string label = "graph: " + name;
+        if (!graph.extract_backend.empty() &&
+            inputs.config.find_backend(graph.extract_backend) == nullptr) {
+            add(report, Status::Fail, "Graph", label,
+                "extract_backend names a backend that is not configured: '" +
+                    graph.extract_backend + "'",
+                "set graph.extract_backend to a configured backend, or remove it to use the "
+                "extraction role");
+            continue;
+        }
+        std::string detail = "hops " + std::to_string(graph.hops) + ", max_entities " +
+                             std::to_string(graph.max_entities) + ", extractor " +
+                             (graph.extract_backend.empty() ? std::string{"(the extraction role)"}
+                                                            : graph.extract_backend);
+        const std::filesystem::path db = inputs.home / "embeddings" / (name + ".db");
+        if (!std::filesystem::exists(db, code)) {
+            add(report, graph.enabled ? Status::Warn : Status::Ok, "Graph", label,
+                detail + "; no collection on disk yet",
+                graph.enabled
+                    ? "apogee embed ingest ... --db " + name + ", then apogee graph build " + name
+                    : std::string{});
+            continue;
+        }
+        try {
+            const embedstore::Store store{db};
+            const embedstore::GraphStats stats = store.graph_stats();
+            if (!stats.built()) {
+                add(report, graph.enabled ? Status::Warn : Status::Ok, "Graph", label,
+                    detail + "; not built",
+                    graph.enabled ? "apogee graph build " + name : std::string{});
+                continue;
+            }
+            detail += "; built: " + std::to_string(stats.nodes) + " node(s), " +
+                      std::to_string(stats.edges) + " edge(s)";
+            if (stats.stale_files > 0) {
+                detail += ", " + std::to_string(stats.stale_files) + " stale source(s)";
+            }
+            if (!graph.enabled) {
+                detail += "; enabled: false -- retrieval does not expand through it";
+            }
+            add(report, Status::Ok, "Graph", label, detail);
+        } catch (const std::exception& e) {
+            add(report, Status::Fail, "Graph", label, std::string{"unreadable -- "} + e.what());
+        }
+    }
+}
+
 CheckReport run_checks(const CheckInputs& inputs) {
     CheckReport report;
     check_version(report, inputs);
@@ -719,6 +779,7 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_mcp(report, inputs);
     check_agents(report, inputs);
     check_knowledge(report, inputs);
+    check_graphs(report, inputs);
     check_filesystem(report, inputs);
     check_secrets(report, inputs);
     check_credential_store(report, inputs);

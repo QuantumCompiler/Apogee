@@ -266,6 +266,14 @@ std::optional<std::int64_t> Harness::count_prompt_tokens(
     }
 }
 
+bool Harness::generation_is_metered(std::string_view model) const noexcept {
+    try {
+        return route(model).generation_is_metered();
+    } catch (const HarnessError&) {
+        return true;
+    }
+}
+
 bool Harness::accepts_images(std::string_view model) const noexcept {
     try {
         const auto* vision = dynamic_cast<const VisionCapable*>(&route(model));

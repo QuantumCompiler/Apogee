@@ -116,6 +116,15 @@ std::vector<MockTurn> load_mock_script(const std::filesystem::path& path) {
     return parse_mock_script(parsed);
 }
 
+bool load_mock_script_metered(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        return false;
+    }
+    const nlohmann::json script = nlohmann::json::parse(in, nullptr, false);
+    return script.is_object() && script.value("metered", false);
+}
+
 // ---------------------------------------------------------------------------
 // MockProvider
 // ---------------------------------------------------------------------------

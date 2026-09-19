@@ -214,4 +214,60 @@ void JobWriter::flush() {
     }
 }
 
+JobWorkers::~JobWorkers() {
+    std::vector<Worker> workers;
+    {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        workers.swap(workers_);
+    }
+    // Cancel every job first, THEN join: a worker blocked in a model call
+    // returns through the provider's own cancellation check rather than
+    // holding shutdown for the whole call.
+    for (const Worker& worker : workers) {
+        worker.cancellation.cancel();
+    }
+    for (Worker& worker : workers) {
+        if (worker.thread.joinable()) {
+            worker.thread.join();
+        }
+    }
+}
+
+void JobWorkers::run(harness::CancellationToken cancellation, std::function<void()> work) {
+    const std::lock_guard<std::mutex> lock{mutex_};
+    reap_locked();
+    Worker worker;
+    worker.cancellation = std::move(cancellation);
+    worker.done = std::make_shared<std::atomic<bool>>(false);
+    worker.thread = std::thread{[done = worker.done, work = std::move(work)] {
+        work();
+        done->store(true);
+    }};
+    workers_.push_back(std::move(worker));
+}
+
+std::size_t JobWorkers::active() const {
+    const std::lock_guard<std::mutex> lock{mutex_};
+    std::size_t count = 0;
+    for (const Worker& worker : workers_) {
+        if (!worker.done->load()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+void JobWorkers::reap_locked() {
+    for (auto it = workers_.begin(); it != workers_.end();) {
+        if (it->done->load()) {
+            if (it->thread.joinable()) {
+                it->thread.join();
+            }
+            it = workers_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 }  // namespace apogee::httpserver

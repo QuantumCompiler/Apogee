@@ -2,7 +2,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <sqlite3.h>
+
 #include <filesystem>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -33,8 +36,12 @@ using apogee::agentloop::render_rag_context;
 using apogee::embedstore::Store;
 
 struct Scratch {
+    // Named by a random draw, not a per-process counter: ctest runs these
+    // cases as parallel PROCESSES, and a counter produced the same path in
+    // several of them at once -- each deleting the others' directories.
     std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / ("apogee-rag-" + std::to_string(counter()));
+        std::filesystem::temp_directory_path() /
+        ("apogee-rag-" + std::to_string(std::random_device{}()) + "-" + std::to_string(counter()));
 
     Scratch() {
         std::error_code code;
@@ -430,6 +437,187 @@ TEST_CASE("context from a vector turn never reaches persisted history either",
     }
     CHECK(persisted.find(kSecret) == std::string::npos);
     CHECK(persisted.find("answered") != std::string::npos);
+}
+
+namespace {
+
+/// A graph over the seeded collection: the secret chunk mentions Zarquon,
+/// the unrelated chunk mentions the Widget Factory, and one edge links them.
+/// Neither entity's text appears in the secret chunk.
+void seed_graph(const Scratch& scratch) {
+    Store store{scratch.db()};
+    const std::vector<apogee::embedstore::Chunk> chunks = store.chunks_by_source("notes.md");
+    REQUIRE(chunks.size() == 2);
+    const std::int64_t zarquon = store.upsert_node("Zarquon", "concept", "a protocol").id;
+    const std::int64_t factory =
+        store.upsert_node("Widget Factory", "organization", "makes the widgets").id;
+    (void)store.add_mention(zarquon, chunks.front().id);
+    (void)store.add_mention(factory, chunks.back().id);
+    store.upsert_edge(zarquon, factory, "is supplied by", "");
+}
+
+}  // namespace
+
+TEST_CASE(
+    "an enabled graph expands the retrieved chunks, rides the transient prefix, and is "
+    "counted",
+    "[agentloop][rag][graph]") {
+    const Scratch scratch;
+    seed(scratch);
+    seed_graph(scratch);
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon protocol");
+    // Off by default: the graph exists but the collection's block does not
+    // enable it, so nothing is expanded and nothing is claimed.
+    const RagResult plain = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK(plain.chunks == 1);
+    CHECK(plain.graph_entities == 0);
+    CHECK(plain.prefix.front().content.plain_text().find("Knowledge graph") == std::string::npos);
+
+    turn.collection = "notes";
+    turn.graph_enabled = true;
+    const RagResult expanded = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK(expanded.chunks == 1);
+    // Two: the Widget Factory reached by the edge, and Zarquon itself -- a
+    // lexical turn seeds by the query's own terms, and "zarquon" names it.
+    CHECK(expanded.graph_entities == 2);
+    REQUIRE(expanded.prefix.size() == 1);
+    const std::string sent = expanded.prefix.front().content.plain_text();
+    CHECK(sent.find(kSecret) != std::string::npos);
+    CHECK(sent.find("[Knowledge graph: notes]") != std::string::npos);
+    CHECK(sent.find("Zarquon (concept): a protocol") != std::string::npos);
+    CHECK(sent.find("Widget Factory (organization): makes the widgets") != std::string::npos);
+    CHECK(sent.find("Zarquon —[is supplied by]→ Widget Factory") != std::string::npos);
+    // The section follows the excerpts, never precedes them.
+    CHECK(sent.find("--- excerpt 1 ---") < sent.find("[Knowledge graph: notes]"));
+    CHECK(expanded.notes.empty());
+
+    // Transient: the section reaches the request and never persisted history.
+    apogee::backends::MockProvider::Options options;
+    options.backend_name = "mock";
+    options.turns = {apogee::backends::MockTurn{.text = "answered"}};
+    std::vector<apogee::harness::ChatRequest> seen;
+    options.on_request = [&seen](const apogee::harness::ChatRequest& request) {
+        seen.push_back(request);
+    };
+    apogee::harness::Harness harness{apogee::harness::Config{}};
+    harness.register_provider("mock",
+                              std::make_shared<apogee::backends::MockProvider>(std::move(options)));
+    harness.use_default_router();
+    std::vector<apogee::harness::ChatMessage> history{
+        apogee::harness::ChatMessage::user("who supplies it?")};
+    apogee::agentloop::Options loop;
+    loop.model = "mock";
+    loop.transient_prefix = expanded.prefix;
+    loop.stream_answer = false;
+    apogee::agentloop::NullReporter reporter;
+    (void)apogee::agentloop::run(harness, history, loop, reporter);
+    REQUIRE(seen.size() == 1);
+    std::string wire;
+    for (const apogee::harness::ChatMessage& message : seen.front().messages) {
+        wire += message.content.plain_text();
+    }
+    CHECK(wire.find("Widget Factory") != std::string::npos);
+    std::string persisted;
+    for (const apogee::harness::ChatMessage& message : history) {
+        persisted += message.content.plain_text();
+    }
+    CHECK(persisted.find("Widget Factory") == std::string::npos);
+    CHECK(persisted.find("Knowledge graph") == std::string::npos);
+    CHECK(persisted.find("who supplies it?") != std::string::npos);
+}
+
+TEST_CASE(
+    "the graph is seeded BEFORE the judge, so a judge that drops every chunk keeps the section",
+    "[agentloop][rag][graph][rerank]") {
+    const Scratch scratch;
+    seed(scratch);
+    seed_graph(scratch);
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig mock;
+    mock.type = apogee::harness::BackendType::Mock;
+    config.backends.emplace("judge", mock);
+    // A verdict that keeps nothing: every retrieved chunk is dropped.
+    apogee::backends::MockProvider::Options options;
+    options.backend_name = "judge";
+    options.turns = {apogee::backends::MockTurn{.text = "[]"}};
+    apogee::harness::Harness harness{config};
+    harness.register_provider("judge",
+                              std::make_shared<apogee::backends::MockProvider>(std::move(options)));
+    harness.use_default_router();
+
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon widgets chunk");
+    turn.rerank_flag = "judge";
+    turn.harness = &harness;
+    turn.config = &config;
+    turn.collection = "notes";
+    turn.graph_enabled = true;
+    const RagResult judged = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK(judged.reranked);
+    CHECK(judged.chunks == 0);
+    CHECK(judged.top_score == 0.0);
+    // Both chunks seeded the walk before the judge ran; each entity is a
+    // seed, so what remains to inject is the relation between them.
+    REQUIRE(judged.prefix.size() == 1);
+    const std::string sent = judged.prefix.front().content.plain_text();
+    CHECK(sent.find(kSecret) == std::string::npos);
+    CHECK(sent.find("knowledge-graph context") != std::string::npos);
+    CHECK(sent.find("Zarquon —[is supplied by]→ Widget Factory") != std::string::npos);
+}
+
+TEST_CASE("a vector turn seeds the graph from its chunks alone, never from the query's terms",
+          "[agentloop][rag][graph][vector]") {
+    const Scratch scratch;
+    const auto embedder = toy_embedder("toy-v1");
+    seed_vectors(scratch, embedder);
+    seed_graph(scratch);
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon");
+    turn.embedder = embedder;
+    turn.limit = 1;  // the secret chunk alone
+    turn.collection = "notes";
+    turn.graph_enabled = true;
+    const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK(result.retriever == "vector");
+    CHECK(result.chunks == 1);
+    // Zarquon is a seed (mentioned by the retrieved chunk) and is not
+    // re-listed; the query naming it does not make it a hop-0 entity on a
+    // vector turn. The Widget Factory arrives by the edge.
+    CHECK(result.graph_entities == 1);
+    const std::string sent = result.prefix.front().content.plain_text();
+    CHECK(sent.find("Widget Factory (organization)") != std::string::npos);
+    CHECK(sent.find("Zarquon (concept)") == std::string::npos);
+}
+
+TEST_CASE("a graph the store cannot read is a note, never the reason a turn loses its chunks",
+          "[agentloop][rag][graph][failure]") {
+    const Scratch scratch;
+    seed(scratch);
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon protocol");
+    turn.collection = "notes";
+    turn.graph_enabled = true;
+    // An enabled block over a collection with no graph: nothing related,
+    // nothing claimed, no note -- the ordinary quiet case.
+    const RagResult empty = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK(empty.chunks == 1);
+    CHECK(empty.graph_entities == 0);
+    CHECK(empty.notes.empty());
+
+    // The entity index replaced out of band by a plain table: the walk
+    // throws on its first query. The turn keeps its chunks and says so.
+    seed_graph(scratch);
+    {
+        sqlite3* raw = nullptr;
+        REQUIRE(sqlite3_open(scratch.db().string().c_str(), &raw) == SQLITE_OK);
+        REQUIRE(sqlite3_exec(raw, "DROP TABLE kg_nodes_fts; CREATE TABLE kg_nodes_fts(x)", nullptr,
+                             nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(raw);
+    }
+    const RagResult broken = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK(broken.error.empty());
+    CHECK(broken.chunks == 1);
+    CHECK(broken.graph_entities == 0);
+    CHECK(broken.prefix.front().content.plain_text().find(kSecret) != std::string::npos);
+    REQUIRE_FALSE(broken.notes.empty());
+    CHECK(broken.notes.back().find("graph expansion failed") != std::string::npos);
 }
 
 TEST_CASE("a judge on the turn is reported as applied only when its ranking was used",

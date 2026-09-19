@@ -182,6 +182,13 @@ public:
     /// give a better error than we can invent.
     [[nodiscard]] bool accepts_images(std::string_view model) const noexcept;
 
+    /// Whether generation on the backend serving `model` is billed per call.
+    ///
+    /// **True for an unroutable model**: unknown is metered, and a policy
+    /// that spends on Apogee's initiative must never be unlocked by a name
+    /// that resolves to nothing.
+    [[nodiscard]] bool generation_is_metered(std::string_view model) const noexcept;
+
     /// The behavior profile for `model`, or the permissive zero value.
     [[nodiscard]] ModelBehavior model_behavior_for(std::string_view model) const;
 

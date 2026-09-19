@@ -25,7 +25,7 @@ if(NOT DEFINED APOGEE_SOURCE_DIR)
     message(FATAL_ERROR "APOGEE_SOURCE_DIR must be set")
 endif()
 
-set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge)
+set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
@@ -142,6 +142,33 @@ if(NOT VIOLATIONS STREQUAL "")
     message(FATAL_ERROR "the knowledge package includes a surface:\n${pretty}\n"
                         "knowledge/ may include only embedstore/, agentloop/, agent/, harness/, "
                         "platform/ and itself.")
+endif()
+
+# `graph/` is a domain core like `knowledge/`: the extraction contract and
+# the build loop every surface shares. It may include the chunk store, the
+# records it materialises, the loop (for the one OUTPUT FORMAT wording and
+# `run_structured`), the harness, the platform seam and itself -- never a
+# surface, and never a backend: generation and embedding arrive as closures.
+file(GLOB_RECURSE graph_sources "${APOGEE_SOURCE_DIR}/graph/*.h"
+                                "${APOGEE_SOURCE_DIR}/graph/*.cpp")
+if(graph_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/graph — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS graph_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(graph|embedstore|knowledge|agentloop|agent|harness|platform)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  graph/${name} reaches a surface: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the graph package includes a surface:\n${pretty}\n"
+                        "graph/ may include only embedstore/, knowledge/, agentloop/, agent/, "
+                        "harness/, platform/ and itself.")
 endif()
 
 list(LENGTH ALL_SOURCES count)

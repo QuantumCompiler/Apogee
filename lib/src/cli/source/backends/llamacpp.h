@@ -98,6 +98,11 @@ public:
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;
 
+    /// Costs nothing per call.
+    [[nodiscard]] bool generation_is_metered() const noexcept override {
+        return false;
+    }
+
     [[nodiscard]] harness::ChatResponse chat(
         const harness::ChatRequest& request,
         const harness::CancellationToken& cancellation) override;

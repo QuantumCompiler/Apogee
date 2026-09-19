@@ -149,6 +149,28 @@ HttpResponse AdminHandler::events_stream(const HttpRequest& /*request*/) {
     return event_stream(*bus_, options_.events);
 }
 
+HttpResponse AdminHandler::build_graph(Handler& plane, const HttpRequest& request,
+                                       std::string_view collection) {
+    return admin_build_graph(config_context(), plane, *jobs_, workers_, collection, request);
+}
+
+HttpResponse AdminHandler::graph_stats(const HttpRequest& request, std::string_view collection) {
+    return admin_graph_stats(config_context(), collection, request);
+}
+
+HttpResponse AdminHandler::graph_entity(const HttpRequest& request, std::string_view collection) {
+    return admin_graph_entity(config_context(), collection, request);
+}
+
+HttpResponse AdminHandler::delete_graph(const HttpRequest& request, std::string_view collection) {
+    return admin_delete_graph(config_context(), collection, request);
+}
+
+HttpResponse AdminHandler::set_graph_enabled(const HttpRequest& request,
+                                             std::string_view collection) {
+    return admin_set_graph_enabled(config_context(), collection, request);
+}
+
 HttpResponse AdminHandler::list_jobs(const HttpRequest& /*request*/) {
     nlohmann::json data = nlohmann::json::array();
     for (const JobRecord& record : jobs_->list()) {

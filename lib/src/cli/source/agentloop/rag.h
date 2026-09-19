@@ -59,6 +59,10 @@ struct RagResult {
     /// Things worth saying once: why auto fell back, why hybrid ran lexical,
     /// why a collection was excluded, why the judge was not used.
     std::vector<std::string> notes;
+
+    /// Entities the knowledge-graph expansion injected beside the chunks;
+    /// 0 when the collection has no enabled graph or nothing was related.
+    int graph_entities = 0;
 };
 
 /// Everything one turn's retrieval needs, gathered by the surface.
@@ -82,6 +86,15 @@ struct RagTurn {
     const harness::Harness* harness = nullptr;
     const harness::Config* config = nullptr;
     harness::CancellationToken cancellation;
+
+    /// The collection's name, for the graph section's header.
+    std::string collection;
+    /// The collection's `graph:` block: expansion runs only when enabled,
+    /// seeded from the retrieved top-k BEFORE the judge, and rendered under
+    /// the budget after the chunk list. Best-effort: a failure is a note.
+    bool graph_enabled = false;
+    int graph_hops = 1;
+    int graph_max_entities = 8;
 };
 
 /// The full retrieval matrix for one turn: resolve the retriever ONCE, run it,
@@ -108,5 +121,12 @@ struct RagTurn {
 /// injected document as the user's own words and answers about it instead of
 /// about the question.
 [[nodiscard]] std::string render_rag_context(const std::vector<std::string>& chunks);
+
+/// The same, with the knowledge-graph section appended after the excerpts.
+/// With no chunks and a section, the section is framed on its own -- a judge
+/// that dropped every chunk must not drop the graph context captured before
+/// it ran.
+[[nodiscard]] std::string render_rag_context(const std::vector<std::string>& chunks,
+                                             std::string_view graph_section);
 
 }  // namespace apogee::agentloop

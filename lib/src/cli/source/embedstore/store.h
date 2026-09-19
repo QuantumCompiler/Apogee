@@ -2,11 +2,15 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "embedstore/graph.h"
+#include "embedstore/graph_search.h"
 
 /// The chunk store: SQLite with an FTS5 index, one database per collection.
 ///
@@ -201,6 +205,124 @@ public:
     /// The schema version the file carries.
     [[nodiscard]] int schema_version() const;
 
+    // --- The knowledge graph: mutation (embedstore/graph.cpp) ---------------
+    //
+    // Entities and relations live in `kg_*` tables beside the chunks (schema
+    // v4). See graph.h for the identity and merge rules. Storage only: the
+    // build loop that fills these is `graph/build`.
+
+    /// Inserts an entity or merges it into the node with the same (normalised
+    /// name, type): first casing kept, first non-empty description wins, a
+    /// description change clears the stored vector. `mutated` reports a new
+    /// node or a changed description.
+    [[nodiscard]] UpsertResult upsert_node(std::string_view name, std::string_view type,
+                                           std::string_view description);
+
+    /// Inserts a directed relation, or -- when the (source, target, relation)
+    /// triple exists -- increments its weight: each re-extraction from another
+    /// chunk is corroboration. Descriptions merge first-non-empty-wins.
+    void upsert_edge(std::int64_t source_id, std::int64_t target_id, std::string_view relation,
+                     std::string_view description);
+
+    /// Inserts or refreshes a knowledge record's decision node (type
+    /// `kNodeTypeDecision`, name = the record id). Unlike `upsert_node`, the
+    /// description and metadata are REPLACED on every call -- the record is
+    /// the source of truth and its status legitimately changes after capture.
+    /// A description change clears the vector; a metadata-only change does
+    /// not, and is not `mutated`.
+    [[nodiscard]] UpsertResult upsert_decision_node(std::string_view record_id,
+                                                    std::string_view description,
+                                                    std::string_view metadata);
+
+    /// Inserts a directed relation if absent and leaves an existing one
+    /// untouched -- weight stays 1. The upsert for DETERMINISTIC edges
+    /// (`concerns`, `supersedes`), which the build re-derives on every run:
+    /// facts, not corroborations. Returns whether a row was inserted.
+    [[nodiscard]] bool ensure_edge(std::int64_t source_id, std::int64_t target_id,
+                                   std::string_view relation, std::string_view description);
+
+    /// Links a node to a chunk it was extracted from, maintaining
+    /// `mention_count`. Re-linking an existing pair is a no-op, so a
+    /// re-extraction cannot inflate the count. Returns whether it was new.
+    [[nodiscard]] bool add_mention(std::int64_t node_id, std::int64_t chunk_id);
+
+    /// Stores the entity vector for a node; empty returns it to lexical-only.
+    void update_node_embedding(std::int64_t node_id, const std::vector<float>& vector);
+
+    /// The stored entity vector, or empty when the node has none.
+    [[nodiscard]] std::vector<float> node_vector(std::int64_t node_id) const;
+
+    /// Records that `source`'s chunks were fully extracted: the fingerprint
+    /// (count, highest chunk id) and the model, stamped now. The build writes
+    /// this only after every chunk of the file finished, so a crash mid-file
+    /// leaves no row and the file re-extracts on resume.
+    void set_source_state(std::string_view source, std::int64_t chunk_count,
+                          std::int64_t max_chunk_id, std::string_view model);
+
+    /// Every source's extraction bookkeeping, keyed by source. Empty for an
+    /// unbuilt graph.
+    [[nodiscard]] std::map<std::string, SourceState> source_states() const;
+
+    /// Every source's live fingerprint -- what the planner compares against
+    /// `source_states`.
+    [[nodiscard]] std::map<std::string, ChunkSpan> source_chunk_spans() const;
+
+    /// A source's chunks in ordinal order -- the extraction unit.
+    [[nodiscard]] std::vector<Chunk> chunks_by_source(std::string_view source) const;
+
+    /// Prunes what chunk churn orphaned: mentions whose chunk no longer
+    /// exists, state rows for vanished sources, then -- after recomputing
+    /// every `mention_count` from the surviving mentions -- zero-mention nodes
+    /// and their edges. One transaction. Runs first on every build; safe at
+    /// any time.
+    [[nodiscard]] ReconcileResult reconcile_graph();
+
+    /// Clears every graph row -- nodes, edges, mentions, state, meta. The
+    /// tables stay; chunks are untouched.
+    void delete_graph();
+
+    /// One `graph_meta` key. `graph_meta` returns empty when unset.
+    void set_graph_meta(std::string_view key, std::string_view value);
+    [[nodiscard]] std::string graph_meta(std::string_view key) const;
+
+    // --- The knowledge graph: reads (embedstore/graph_search.cpp) -----------
+
+    [[nodiscard]] GraphStats graph_stats() const;
+
+    /// Every node whose normalised name equals `name` -- one per type sharing
+    /// it -- most-mentioned first. Empty for an unknown name, never an error.
+    [[nodiscard]] std::vector<GraphNode> find_nodes(std::string_view name) const;
+
+    /// The top `limit` entities by BM25 over names and descriptions -- the
+    /// fallback when an exact lookup misses, and the model-free seed for a
+    /// lexical turn's expansion. Natural language in, through the same guard
+    /// as `search`; 0 or less returns every match.
+    [[nodiscard]] std::vector<NodeResult> search_nodes(std::string_view query, int limit) const;
+
+    /// Nodes by id, in ascending id order; unknown ids skipped.
+    [[nodiscard]] std::vector<GraphNode> nodes_by_ids(const std::vector<std::int64_t>& ids) const;
+
+    /// Every edge incident to a node, both directions, ordered by relation
+    /// then descending weight -- ready to group by relation.
+    [[nodiscard]] std::vector<Neighbor> node_neighbors(std::int64_t node_id) const;
+
+    /// The chunks a node was extracted from, in source and ordinal order.
+    /// `limit` 0 or less returns all.
+    [[nodiscard]] std::vector<Chunk> node_chunks(std::int64_t node_id, int limit) const;
+
+    /// Expands a retrieval turn through the graph. The seed set is the union
+    /// of the entities mentioned by `seed_chunks` (the turn's retrieved
+    /// chunks) and `seed_nodes` (query-term entity hits from `search_nodes`).
+    /// It walks `hops` (clamped to 1..2) edge steps outward and returns up to
+    /// `max_entities` neighbour entities ordered by hop then score, plus
+    /// every relation among the traversed neighbourhood. Entities reached
+    /// only through the seed chunks are not re-listed (their text is already
+    /// injected); hop-0 seed nodes are, since nothing else carries their
+    /// descriptions. Empty seeds give an empty expansion, never an error.
+    [[nodiscard]] Expansion graph_expand(const std::vector<std::int64_t>& seed_chunks,
+                                         const std::vector<std::int64_t>& seed_nodes, int hops,
+                                         int max_entities) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -209,7 +331,8 @@ private:
 /// The current schema version. Bumped when a migration is added.
 /// v2 added `chunks.embedding` and `chunks.dim`, and the `embed_model` /
 /// `embed_dim` keys in `store_meta`. v3 added the nullable `chunks.metadata`
-/// column (knowledge records). A v1 or v2 store gains the columns on open.
-inline constexpr int kSchemaVersion = 3;
+/// column (knowledge records). v4 added the knowledge-graph tables (`kg_*`,
+/// `graph_meta`, the entity FTS index). An older store gains them on open.
+inline constexpr int kSchemaVersion = 4;
 
 }  // namespace apogee::embedstore

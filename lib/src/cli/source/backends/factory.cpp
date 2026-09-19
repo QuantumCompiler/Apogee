@@ -110,6 +110,7 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
                 // tools.
                 try {
                     options.turns = load_mock_script(config.model_path);
+                    options.metered = load_mock_script_metered(config.model_path);
                 } catch (const std::exception& e) {
                     reason = e.what();
                     return nullptr;

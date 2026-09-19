@@ -564,6 +564,77 @@ TEST_CASE("a collection's pins are written when set and round-trip", "[config_ed
     CHECK(delete_embedding(added, "notes") == std::string{kCommented} + "\nembeddings:\n");
 }
 
+TEST_CASE(
+    "set_embedding_graph_enabled appends a block, replaces in place keeping the comment, "
+    "and stays inside the embeddings section",
+    "[config_edit][golden][graph]") {
+    constexpr std::string_view kBase =
+        "# top\n"
+        "backends:\n"
+        "  notes:\n"
+        "    type: mock\n"
+        "\nembeddings:\n"
+        "  notes:\n"
+        "    chunk_size: 512    # per chunk\n"
+        "  other:\n"
+        "    retriever: lexical\n";
+    // No block yet: one is appended after the entry's last field, and the
+    // same-named backend is never touched.
+    const std::string appended = apogee::harness::set_embedding_graph_enabled(kBase, "notes", true);
+    require_parses(appended);
+    CHECK(appended ==
+          "# top\n"
+          "backends:\n"
+          "  notes:\n"
+          "    type: mock\n"
+          "\nembeddings:\n"
+          "  notes:\n"
+          "    chunk_size: 512    # per chunk\n"
+          "    graph:\n"
+          "      enabled: true\n"
+          "  other:\n"
+          "    retriever: lexical\n");
+    CHECK(apogee::harness::parse_config(appended, "<test>").find_embedding("notes")->graph.enabled);
+    CHECK_FALSE(
+        apogee::harness::parse_config(appended, "<test>").find_embedding("other")->graph.enabled);
+
+    // In place: only the value token changes, the trailing comment stays,
+    // and a sibling field after the block is left where it was.
+    constexpr std::string_view kWithBlock =
+        "embeddings:\n"
+        "  notes:\n"
+        "    graph:\n"
+        "      extract_backend: local\n"
+        "      enabled: false   # flipped by the first build\n"
+        "      hops: 2\n"
+        "    rerank: off\n";
+    const std::string replaced =
+        apogee::harness::set_embedding_graph_enabled(kWithBlock, "notes", true);
+    require_parses(replaced);
+    CHECK(replaced ==
+          "embeddings:\n"
+          "  notes:\n"
+          "    graph:\n"
+          "      extract_backend: local\n"
+          "      enabled: true   # flipped by the first build\n"
+          "      hops: 2\n"
+          "    rerank: off\n");
+    CHECK(apogee::harness::set_embedding_graph_enabled(replaced, "NOTES", false) ==
+          std::string{kWithBlock});
+
+    // A block without the field gains it first.
+    constexpr std::string_view kBlockNoField = "embeddings:\n  notes:\n    graph:\n      hops: 2\n";
+    CHECK(apogee::harness::set_embedding_graph_enabled(kBlockNoField, "notes", true) ==
+          "embeddings:\n  notes:\n    graph:\n      enabled: true\n      hops: 2\n");
+
+    // Missing section or entry: refused, nothing written.
+    CHECK_THROWS_AS(apogee::harness::set_embedding_graph_enabled(
+                        "backends:\n  a:\n    type: mock\n", "a", true),
+                    apogee::harness::ConfigEditError);
+    CHECK_THROWS_AS(apogee::harness::set_embedding_graph_enabled(kBase, "ghost", true),
+                    apogee::harness::ConfigEditError);
+}
+
 TEST_CASE("set_permission replaces a level in place, keeping the trailing comment",
           "[config_edit][golden][permissions]") {
     constexpr std::string_view kWithPermissions =

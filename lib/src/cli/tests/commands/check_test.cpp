@@ -6,6 +6,7 @@
 #include <fstream>
 #include <string>
 
+#include "embedstore/store.h"
 #include "harness/config.h"
 #include "harness/layout.h"
 #include "httpserver/admin_auth.h"
@@ -457,6 +458,59 @@ TEST_CASE("check rejects a retriever typo on a collection", "[commands][check][e
     CHECK(row->status == Status::Fail);
     CHECK(row->detail.find("hybird") != std::string::npos);
     CHECK(row->detail.find("lexical, vector, hybrid, auto") != std::string::npos);
+}
+
+TEST_CASE(
+    "the doctor's Graph section: an unconfigured extractor fails, an enabled graph that is "
+    "not built warns, a built one reports its shape",
+    "[commands][check][graph]") {
+    const Install install;
+    const CheckReport bad =
+        run_checks(inputs_with_config(install,
+                                      "backends:\n  mock:\n    type: mock\nembeddings:\n  notes:\n "
+                                      "   graph:\n      extract_backend: ghost\n"));
+    REQUIRE(row_with(bad, "graph: notes") != nullptr);
+    CHECK(row_with(bad, "graph: notes")->status == Status::Fail);
+    CHECK(row_with(bad, "graph: notes")->detail.find("ghost") != std::string::npos);
+
+    // Nothing said about the graph: no row at all.
+    const CheckReport quiet = run_checks(inputs_with_config(
+        install,
+        "backends:\n  mock:\n    type: mock\nembeddings:\n  notes:\n    chunk_size: 512\n"));
+    CHECK(row_with(quiet, "graph: notes") == nullptr);
+
+    const std::string enabled =
+        "backends:\n  mock:\n    type: mock\nembeddings:\n  notes:\n    graph:\n      enabled: "
+        "true\n      hops: 2\n";
+    const CheckReport unbuilt = run_checks(inputs_with_config(install, enabled));
+    REQUIRE(row_with(unbuilt, "graph: notes") != nullptr);
+    CHECK(row_with(unbuilt, "graph: notes")->status == Status::Warn);
+    CHECK(row_with(unbuilt, "graph: notes")->detail.find("hops 2") != std::string::npos);
+    CHECK(row_with(unbuilt, "graph: notes")->detail.find("no collection on disk yet") !=
+          std::string::npos);
+
+    // The collection on disk but no graph built yet: still a warning.
+    {
+        apogee::embedstore::Store store{install.root / "embeddings" / "notes.db"};
+        store.replace_source("a.md", {"alpha"});
+    }
+    const CheckReport data_only = run_checks(inputs_with_config(install, enabled));
+    REQUIRE(row_with(data_only, "graph: notes") != nullptr);
+    CHECK(row_with(data_only, "graph: notes")->status == Status::Warn);
+    CHECK(row_with(data_only, "graph: notes")->detail.find("not built") != std::string::npos);
+
+    // A built graph on disk: the shape, as OK.
+    {
+        apogee::embedstore::Store store{install.root / "embeddings" / "notes.db"};
+        const std::int64_t node = store.upsert_node("Atlas", "system", "").id;
+        (void)store.add_mention(node, store.chunks_by_source("a.md").front().id);
+    }
+    const CheckReport built = run_checks(inputs_with_config(install, enabled));
+    REQUIRE(row_with(built, "graph: notes") != nullptr);
+    CHECK(row_with(built, "graph: notes")->status == Status::Ok);
+    CHECK(row_with(built, "graph: notes")->detail.find("built: 1 node(s), 0 edge(s)") !=
+          std::string::npos);
+    CHECK(row_with(built, "graph: notes")->detail.find("1 stale source(s)") != std::string::npos);
 }
 
 TEST_CASE("check rejects a rerank or backend pin naming a backend that is not configured",

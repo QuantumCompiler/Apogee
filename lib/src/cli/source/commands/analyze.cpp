@@ -640,7 +640,7 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                 if (!rag.error.empty() && !flags->retriever.empty()) {
                     fail_user(rag.error);
                 }
-                if (rag.error.empty() && rag.chunks > 0) {
+                if (rag.error.empty() && !rag.prefix.empty()) {
                     options.transient_prefix = rag.prefix;
                 }
                 note(describe_retrieval(rag_choice, rag), !rag.error.empty());

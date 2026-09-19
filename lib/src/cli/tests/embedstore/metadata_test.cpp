@@ -85,7 +85,7 @@ TEST_CASE(
     {
         Store store{scratch.db()};
         CHECK(store.schema_version() == apogee::embedstore::kSchemaVersion);
-        CHECK(apogee::embedstore::kSchemaVersion == 3);
+        CHECK(apogee::embedstore::kSchemaVersion == 4);
         // The old row reads as an ordinary chunk with no metadata.
         const std::optional<Chunk> chunk = store.chunk_by_id(1);
         REQUIRE(chunk.has_value());
@@ -103,9 +103,16 @@ TEST_CASE(
     }
     // Idempotent: a second open finds the column and adds nothing.
     Store again{scratch.db()};
-    CHECK(again.schema_version() == 3);
+    CHECK(again.schema_version() == apogee::embedstore::kSchemaVersion);
     CHECK(again.chunk_by_id(1)->text == "the old corpus talks about tulips");
     CHECK(again.chunk_vector(1) == vector);
+    // The migrated table never reuses an id either: re-ingesting the old
+    // source with the same count moves its highest chunk id.
+    {
+        const std::int64_t before = again.source_chunk_spans().at("legacy.md").max_id;
+        again.replace_source("legacy.md", {"the old corpus, re-ingested"});
+        CHECK(again.source_chunk_spans().at("legacy.md").max_id > before);
+    }
 }
 
 TEST_CASE(

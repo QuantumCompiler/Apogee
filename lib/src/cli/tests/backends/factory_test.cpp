@@ -211,6 +211,14 @@ TEST_CASE("embedding is a per-entry capability the harness discovers, and Anthro
     CHECK_FALSE(harness.can_embed("mock"));
     CHECK(harness.can_embed("gpt"));
     CHECK(harness.can_embed("gemini"));
+
+    // Metered generation is stated by the BUILT providers too: every
+    // API-billing vendor answers yes, the mock no, and nothing here names a
+    // type. (The local backend answers no as well; it needs the llama build.)
+    CHECK(harness.generation_is_metered("claude"));
+    CHECK(harness.generation_is_metered("gpt"));
+    CHECK(harness.generation_is_metered("gemini"));
+    CHECK_FALSE(harness.generation_is_metered("mock"));
 }
 
 TEST_CASE("the factory resolves through the store and the environment, config first",

@@ -300,6 +300,51 @@ embeddings:
     CHECK(config.find_embedding("nope") == nullptr);
 }
 
+TEST_CASE("a collection's graph block parses, defaults, and validates hops at load",
+          "[config][embeddings][graph]") {
+    const auto config = apogee::harness::parse_config(R"YAML(
+embeddings:
+  adrs:
+    graph:
+      enabled: true
+      extract_backend: local
+      hops: 2
+      max_entities: 4
+  notes:
+    chunk_size: 512
+)YAML",
+                                                      "<test>");
+    const apogee::harness::EmbeddingConfig* adrs = config.find_embedding("adrs");
+    REQUIRE(adrs != nullptr);
+    CHECK(adrs->graph.enabled);
+    CHECK(adrs->graph.extract_backend == "local");
+    CHECK(adrs->graph.hops == 2);
+    CHECK(adrs->graph.max_entities == 4);
+    // Absent: off, the role, 1 hop, 8 entities.
+    const apogee::harness::EmbeddingConfig* notes = config.find_embedding("notes");
+    REQUIRE(notes != nullptr);
+    CHECK_FALSE(notes->graph.enabled);
+    CHECK(notes->graph.extract_backend.empty());
+    CHECK(notes->graph.hops == 1);
+    CHECK(notes->graph.max_entities == 8);
+
+    // Out of range is a load failure naming the key, never a silent clamp.
+    CHECK_THROWS_WITH(
+        apogee::harness::parse_config("embeddings:\n  a:\n    graph:\n      hops: 3\n", "<t>"),
+        Catch::Matchers::ContainsSubstring("embeddings.a.graph.hops"));
+    CHECK_THROWS_WITH(
+        apogee::harness::parse_config("embeddings:\n  a:\n    graph:\n      hops: 0\n", "<t>"),
+        Catch::Matchers::ContainsSubstring("out of range"));
+    CHECK_THROWS_WITH(apogee::harness::parse_config(
+                          "embeddings:\n  a:\n    graph:\n      max_entities: 0\n", "<t>"),
+                      Catch::Matchers::ContainsSubstring("max_entities"));
+    CHECK_THROWS_WITH(apogee::harness::parse_config(
+                          "embeddings:\n  a:\n    graph:\n      enabled: maybe\n", "<t>"),
+                      Catch::Matchers::ContainsSubstring("enabled"));
+    CHECK_THROWS_WITH(apogee::harness::parse_config("embeddings:\n  a:\n    graph: yes\n", "<t>"),
+                      Catch::Matchers::ContainsSubstring("expected a mapping"));
+}
+
 TEST_CASE("collection names are looked up and collide case-insensitively", "[config][embeddings]") {
     // The same rule as backends: two names that fold together would be the
     // same file on a case-insensitive filesystem, so the loader names both

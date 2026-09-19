@@ -2,10 +2,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
 
+#include "embedstore/store.h"
 #include "harness/config.h"
 #include "support/env_guard.h"
 
@@ -203,6 +206,45 @@ TEST_CASE("the flag beats auto_rag, and an empty flag switches it off",
     }
 }
 
+TEST_CASE(
+    "retrieve_for_collection carries the collection's graph knobs from the config into "
+    "the turn",
+    "[commands][helpers][rag][graph]") {
+    const apogee::testing::TempDir home{"helpers-graph-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    {
+        apogee::embedstore::Store store{home.path() / "embeddings" / "notes.db"};
+        store.replace_source("notes.md", {"the zarquon protocol requires seventeen widgets",
+                                          "an unrelated second chunk"});
+        const auto chunks = store.chunks_by_source("notes.md");
+        const std::int64_t zarquon = store.upsert_node("Zarquon", "concept", "a protocol").id;
+        const std::int64_t factory =
+            store.upsert_node("Widget Factory", "organization", "makes the widgets").id;
+        (void)store.add_mention(zarquon, chunks.front().id);
+        (void)store.add_mention(factory, chunks.back().id);
+        store.upsert_edge(zarquon, factory, "is supplied by", "");
+    }
+    apogee::harness::Config config;
+    apogee::harness::EmbeddingConfig entry;
+    entry.graph.enabled = true;
+    entry.graph.max_entities = 1;
+    config.embeddings.emplace("notes", entry);
+    const apogee::harness::Harness harness{config};
+
+    const apogee::agentloop::RagResult expanded = apogee::commands::retrieve_for_collection(
+        harness, config, "notes", "zarquon protocol", 4, "", "", {});
+    CHECK(expanded.chunks == 1);
+    CHECK(expanded.graph_entities == 1);  // the cap travelled too
+    CHECK(expanded.prefix.front().content.plain_text().find("[Knowledge graph: notes]") !=
+          std::string::npos);
+
+    config.embeddings.at("notes").graph.enabled = false;
+    const apogee::agentloop::RagResult plain = apogee::commands::retrieve_for_collection(
+        harness, config, "notes", "zarquon protocol", 4, "", "", {});
+    CHECK(plain.chunks == 1);
+    CHECK(plain.graph_entities == 0);
+}
+
 TEST_CASE("the retrieval line names chunks, score, retriever, and its origin",
           "[commands][helpers][rag]") {
     apogee::agentloop::RagResult result;
@@ -234,6 +276,21 @@ TEST_CASE("the retrieval line names chunks, score, retriever, and its origin",
     CHECK(describe_retrieval(from_config, nothing).find("no matching context") !=
           std::string::npos);
     CHECK(describe_retrieval(from_config, nothing).find("(auto_rag)") != std::string::npos);
+
+    // The graph's contribution is always named, with or without chunks --
+    // entities injected beside the chunks are context the user never saw
+    // retrieved.
+    apogee::agentloop::RagResult expanded = result;
+    expanded.graph_entities = 4;
+    CHECK(describe_retrieval(from_flag, expanded).find("[lexical] +4 graph entities") !=
+          std::string::npos);
+    apogee::agentloop::RagResult graph_only;
+    graph_only.retriever = "lexical";
+    graph_only.graph_entities = 2;
+    CHECK(describe_retrieval(from_flag, graph_only).find("no matching context") !=
+          std::string::npos);
+    CHECK(describe_retrieval(from_flag, graph_only).find("+2 graph entities") != std::string::npos);
+    CHECK(describe_retrieval(from_flag, result).find("graph entities") == std::string::npos);
 
     apogee::agentloop::RagResult broken;
     broken.error = "no collection at /x";

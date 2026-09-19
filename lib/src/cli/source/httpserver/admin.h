@@ -9,6 +9,7 @@
 #include "httpserver/admin_auth_routes.h"
 #include "httpserver/admin_config.h"
 #include "httpserver/admin_events.h"
+#include "httpserver/admin_graph.h"
 #include "httpserver/admin_knowledge.h"
 #include "httpserver/http_types.h"
 #include "httpserver/jobs.h"
@@ -74,6 +75,17 @@ public:
     [[nodiscard]] HttpResponse patch_knowledge(const HttpRequest& request, std::string_view id);
     [[nodiscard]] HttpResponse delete_knowledge(const HttpRequest& request, std::string_view id);
 
+    /// The graph routes: the build is an async job on the plane's harness.
+    [[nodiscard]] HttpResponse build_graph(Handler& plane, const HttpRequest& request,
+                                           std::string_view collection);
+    [[nodiscard]] HttpResponse graph_stats(const HttpRequest& request, std::string_view collection);
+    [[nodiscard]] HttpResponse graph_entity(const HttpRequest& request,
+                                            std::string_view collection);
+    [[nodiscard]] HttpResponse delete_graph(const HttpRequest& request,
+                                            std::string_view collection);
+    [[nodiscard]] HttpResponse set_graph_enabled(const HttpRequest& request,
+                                                 std::string_view collection);
+
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);
 
@@ -93,6 +105,12 @@ public:
         return *jobs_;
     }
 
+    /// The threads async jobs run on; joined -- after cancelling -- when the
+    /// handler goes, so no job outlives the plane it works on.
+    [[nodiscard]] JobWorkers& workers() noexcept {
+        return workers_;
+    }
+
     [[nodiscard]] const AdminOptions& options() const noexcept {
         return options_;
     }
@@ -103,6 +121,7 @@ private:
     AdminOptions options_;
     JobRegistry* jobs_;
     events::Bus* bus_;
+    JobWorkers workers_;
 };
 
 }  // namespace apogee::httpserver

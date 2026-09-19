@@ -54,6 +54,10 @@ struct MockTurn {
 /// end, tool calls and all, with nothing installed.
 [[nodiscard]] std::vector<MockTurn> load_mock_script(const std::filesystem::path& path);
 
+/// Whether a script file carries a top-level `"metered": true`. False for a
+/// bare list of turns or an absent key.
+[[nodiscard]] bool load_mock_script_metered(const std::filesystem::path& path);
+
 /// `text` with its placeholders expanded against `request`.
 [[nodiscard]] std::string expand_mock_text(std::string_view text,
                                            const harness::ChatRequest& request);
@@ -82,11 +86,22 @@ public:
         /// harness handed the provider — the assertion point for transient
         /// regions, tool definitions, and routing.
         std::function<void(const harness::ChatRequest&)> on_request;
+
+        /// Whether the mock claims each generation call costs money. Off by
+        /// default; a script file sets it with a top-level `"metered": true`,
+        /// so the spend policies are testable end to end with nothing
+        /// installed and no network.
+        bool metered = false;
     };
 
     explicit MockProvider(Options options);
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;
+
+    /// Costs nothing per call unless the script says otherwise.
+    [[nodiscard]] bool generation_is_metered() const noexcept override {
+        return options_.metered;
+    }
 
     [[nodiscard]] harness::ChatResponse chat(
         const harness::ChatRequest& request,
@@ -132,6 +147,11 @@ public:
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;
 
+    /// Costs nothing per call.
+    [[nodiscard]] bool generation_is_metered() const noexcept override {
+        return false;
+    }
+
     [[nodiscard]] harness::ChatResponse chat(
         const harness::ChatRequest& request,
         const harness::CancellationToken& cancellation) override;
@@ -154,18 +174,25 @@ public:
         return model_name_;
     }
 
+    /// Free unless a test says otherwise -- the spend rules are testable
+    /// against a paid embedder with nothing installed.
     [[nodiscard]] bool embedding_is_metered() const noexcept override {
-        return false;
+        return metered_;
     }
 
     void set_model_name(std::string name) {
         model_name_ = std::move(name);
     }
 
+    void set_metered(bool metered) noexcept {
+        metered_ = metered;
+    }
+
 private:
     std::string backend_name_;
     std::size_t dimensions_;
     std::string model_name_ = "mock-embed";
+    bool metered_ = false;
 };
 
 }  // namespace apogee::backends

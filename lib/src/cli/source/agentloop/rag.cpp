@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <system_error>
 
+#include "agentloop/graph_context.h"
 #include "agentloop/rerank.h"
 #include "embedstore/store.h"
 
@@ -30,6 +31,20 @@ std::string render_rag_context(const std::vector<std::string>& chunks) {
         out += "\n";
     }
     return out;
+}
+
+std::string render_rag_context(const std::vector<std::string>& chunks,
+                               std::string_view graph_section) {
+    if (graph_section.empty()) {
+        return render_rag_context(chunks);
+    }
+    if (chunks.empty()) {
+        return "The following knowledge-graph context was retrieved from the user's documents "
+               "and may be relevant. Use it if it helps; ignore it if it does not, and do not "
+               "mention it unless it informed your answer.\n\n" +
+               std::string{graph_section} + "\n";
+    }
+    return render_rag_context(chunks) + "\n" + std::string{graph_section} + "\n";
 }
 
 RagResult build_rag_prefix(const std::filesystem::path& store_path, const std::string& question,
@@ -165,6 +180,35 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
         }
     }
 
+    // --- the graph, seeded BEFORE the judge -----------------------------------
+    //
+    // The seeds are the retrieval-ordered top-k, captured here so graph
+    // context survives a judge that drops every chunk. Best-effort: a
+    // failure is a note, never the reason the turn loses its chunks.
+    std::string graph_section;
+    if (turn.graph_enabled) {
+        std::vector<std::int64_t> seeds;
+        for (const embedstore::SearchHit& hit : hits) {
+            if (turn.limit > 0 && seeds.size() >= static_cast<std::size_t>(turn.limit)) {
+                break;
+            }
+            seeds.push_back(hit.chunk.id);
+        }
+        // A lexical (or degraded, or hybrid) turn also seeds by the query's
+        // own terms through the entity index; a vector turn does not.
+        const std::string_view lexical_query = result.retriever == "vector" ? "" : turn.question;
+        try {
+            const GraphSection section =
+                build_graph_section(*store, turn.collection, seeds, lexical_query, turn.graph_hops,
+                                    turn.graph_max_entities);
+            graph_section = section.text;
+            result.graph_entities = section.entities;
+        } catch (const std::exception& e) {
+            result.notes.push_back(std::string{"graph expansion failed ("} + e.what() +
+                                   ") -- the chunks stand alone");
+        }
+    }
+
     if (!judge.backend.empty()) {
         const RerankOutcome judged = rerank(*turn.harness, judge.backend, turn.question, hits,
                                             turn.limit, turn.cancellation);
@@ -177,7 +221,7 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
         hits.resize(static_cast<std::size_t>(turn.limit));
     }
 
-    if (hits.empty()) {
+    if (hits.empty() && graph_section.empty()) {
         return result;
     }
     std::vector<std::string> texts;
@@ -186,10 +230,12 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
         texts.push_back(hit.chunk.text);
     }
     result.chunks = static_cast<std::int64_t>(hits.size());
-    result.top_score = hits.front().score;
+    result.top_score = hits.empty() ? 0.0 : hits.front().score;
     // The retriever that RAN, which on a hybrid turn is hybrid and its scores
     // RRF -- small numbers are normal there, and the label says which scale.
-    result.prefix.push_back(harness::ChatMessage::system(render_rag_context(texts)));
+    // The graph section rides after the chunk list, in the same transient
+    // message, so it augments them and never crowds them out.
+    result.prefix.push_back(harness::ChatMessage::system(render_rag_context(texts, graph_section)));
     return result;
 }
 

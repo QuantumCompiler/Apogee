@@ -244,7 +244,7 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         const agentloop::RagResult retrieved =
             retrieve_for_collection(harness, config, rag_choice.collection, input, rag.limit,
                                     session.retriever, session.rerank, {});
-        if (retrieved.error.empty() && retrieved.chunks > 0) {
+        if (retrieved.error.empty() && !retrieved.prefix.empty()) {
             loop_options.transient_prefix = retrieved.prefix;
         }
         notice(describe_retrieval(rag_choice, retrieved));

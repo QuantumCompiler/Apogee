@@ -85,4 +85,25 @@ struct QueryResult {
                                 const harness::Config& config, std::string_view collection,
                                 const QueryOptions& options);
 
+/// What `query --graph` / `?graph=true` add: the knowledge graph walked from
+/// the matched records. `note` is set ONLY when no graph covers the
+/// collection -- so "no graph" and "a graph, but nothing related" stay
+/// distinguishable -- or when the walk failed.
+struct RecordGraph {
+    /// The rendered section, empty when nothing related was found.
+    std::string context;
+    int entities = 0;
+    std::string note;
+};
+
+/// Walks the collection's graph from `result`'s records: each record is a
+/// chunk, and its decision node plus the entities extracted from its text
+/// are that chunk's mentions, so the walk is exactly what a `--rag` turn
+/// over the collection would inject. Gated by the collection's
+/// `graph.enabled`; on a lexical or hybrid query the question's own terms
+/// seed too.
+[[nodiscard]] RecordGraph graph_for_records(const Store& store, const harness::Config& config,
+                                            std::string_view collection, const QueryResult& result,
+                                            std::string_view question);
+
 }  // namespace apogee::knowledge

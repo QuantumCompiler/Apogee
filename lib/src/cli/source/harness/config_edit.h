@@ -114,6 +114,17 @@ public:
 /// the same documented exception for a file that did not end in a newline.
 [[nodiscard]] std::string delete_embedding(std::string_view content, std::string_view name);
 
+/// Sets `embeddings.<collection>.graph.enabled`, replacing the value in
+/// place (keeping any trailing comment) or inserting a `graph:` block with
+/// the one field at the end of the entry. Scoped to the `embeddings:`
+/// section: the same name under `backends:` is never touched. The one path
+/// by which the first successful `graph build` -- CLI or HTTP -- records
+/// that a collection's graph exists, so the two are byte-identical.
+///
+/// Throws ConfigEditError when the section or the entry is missing.
+[[nodiscard]] std::string set_embedding_graph_enabled(std::string_view content,
+                                                      std::string_view collection, bool enabled);
+
 /// Field names accepted by set_models_role.
 [[nodiscard]] std::vector<std::string_view> models_role_fields();
 

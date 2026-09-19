@@ -8,99 +8,62 @@
 #include <utility>
 
 #include "embedstore/fts.h"
+#include "embedstore/store_impl.h"
 #include "embedstore/vector.h"
 
 namespace apogee::embedstore {
+
+using detail::bind_text;
+using detail::column_text;
+using detail::exec;
+using detail::fail;
+using detail::has_column;
+using detail::in_transaction;
+using detail::prepare;
+using detail::StatementPtr;
+
 namespace {
 
-struct ConnectionDeleter {
-    void operator()(sqlite3* handle) const noexcept {
-        sqlite3_close(handle);
+/// Whether `chunks` was created without AUTOINCREMENT -- the shape every
+/// store before schema v4 has.
+[[nodiscard]] bool chunk_ids_reusable(sqlite3* handle) {
+    StatementPtr select =
+        prepare(handle, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'chunks'");
+    if (sqlite3_step(select.get()) != SQLITE_ROW) {
+        return false;
     }
-};
-
-using ConnectionPtr = std::unique_ptr<sqlite3, ConnectionDeleter>;
-
-struct StatementDeleter {
-    void operator()(sqlite3_stmt* statement) const noexcept {
-        sqlite3_finalize(statement);
-    }
-};
-
-using StatementPtr = std::unique_ptr<sqlite3_stmt, StatementDeleter>;
-
-[[noreturn]] void fail(sqlite3* handle, std::string_view what) {
-    throw std::runtime_error(std::string{what} + ": " + sqlite3_errmsg(handle));
+    return column_text(select.get(), 0).find("AUTOINCREMENT") == std::string::npos;
 }
 
-void exec(sqlite3* handle, const char* sql) {
-    char* message = nullptr;
-    if (sqlite3_exec(handle, sql, nullptr, nullptr, &message) != SQLITE_OK) {
-        // sqlite3_free, not delete: the message is SQLite's allocation.
-        const std::string detail = message == nullptr ? "unknown error" : message;
-        sqlite3_free(message);
-        throw std::runtime_error("database error: " + detail);
+/// Rebuilds a pre-v4 `chunks` table with AUTOINCREMENT, rowids preserved.
+/// The triggers reference the table by name and would follow the rename, so
+/// they are dropped first and re-created by the IF NOT EXISTS statements
+/// that follow in the constructor; the sequence picks up past the highest
+/// id ever stored, because inserting explicit ids records them.
+void ensure_chunk_ids_never_reused(sqlite3* handle) {
+    if (!chunk_ids_reusable(handle)) {
+        return;
     }
-}
-
-[[nodiscard]] StatementPtr prepare(sqlite3* handle, std::string_view sql) {
-    sqlite3_stmt* raw = nullptr;
-    if (sqlite3_prepare_v2(handle, sql.data(), static_cast<int>(sql.size()), &raw, nullptr) !=
-        SQLITE_OK) {
-        fail(handle, "could not prepare a statement");
+    for (const char* sql :
+         {"DROP TRIGGER IF EXISTS chunks_ai", "DROP TRIGGER IF EXISTS chunks_ad",
+          "DROP TRIGGER IF EXISTS chunks_au", "DROP INDEX IF EXISTS chunks_by_source",
+          "ALTER TABLE chunks RENAME TO chunks_old",
+          "CREATE TABLE chunks ("
+          "  id        INTEGER PRIMARY KEY AUTOINCREMENT,"
+          "  source    TEXT NOT NULL,"
+          "  ordinal   INTEGER NOT NULL,"
+          "  text      TEXT NOT NULL,"
+          "  embedding BLOB,"
+          "  dim       INTEGER NOT NULL DEFAULT 0,"
+          "  metadata  TEXT)",
+          "INSERT INTO chunks (id, source, ordinal, text, embedding, dim, metadata)"
+          " SELECT id, source, ordinal, text, embedding, dim, metadata FROM chunks_old",
+          "DROP TABLE chunks_old"}) {
+        exec(handle, sql);
     }
-    return StatementPtr{raw};
-}
-
-void bind_text(sqlite3_stmt* statement, int index, std::string_view value) {
-    // SQLITE_TRANSIENT: SQLite copies, so the caller's buffer need not outlive
-    // the step. The alternative is a dangling read that works until it does not.
-    sqlite3_bind_text(statement, index, value.data(), static_cast<int>(value.size()),
-                      SQLITE_TRANSIENT);
-}
-
-[[nodiscard]] std::string column_text(sqlite3_stmt* statement, int index) {
-    const auto* bytes = sqlite3_column_text(statement, index);
-    if (bytes == nullptr) {
-        return {};
-    }
-    // SQLite hands back unsigned char*; the same bytes as char* is what a
-    // std::string holds. There is no way to cross that without a cast.
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    return std::string{reinterpret_cast<const char*>(bytes),
-                       static_cast<std::size_t>(sqlite3_column_bytes(statement, index))};
-}
-
-/// Whether `table` already has `column` -- the guard a schema migration needs,
-/// since SQLite's ADD COLUMN has no IF NOT EXISTS.
-[[nodiscard]] bool has_column(sqlite3* handle, std::string_view table, std::string_view column) {
-    StatementPtr info = prepare(handle, "PRAGMA table_info(" + std::string{table} + ")");
-    while (sqlite3_step(info.get()) == SQLITE_ROW) {
-        if (column_text(info.get(), 1) == column) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/// Runs `body` inside a transaction, rolling back if it throws.
-template <typename Body>
-void in_transaction(sqlite3* handle, Body&& body) {
-    exec(handle, "BEGIN IMMEDIATE");
-    try {
-        body();
-    } catch (...) {
-        exec(handle, "ROLLBACK");
-        throw;
-    }
-    exec(handle, "COMMIT");
 }
 
 }  // namespace
-
-struct Store::Impl {
-    ConnectionPtr connection;
-};
 
 Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()} {
     std::error_code code;
@@ -108,7 +71,7 @@ Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()
 
     sqlite3* raw = nullptr;
     if (sqlite3_open(path.string().c_str(), &raw) != SQLITE_OK) {
-        ConnectionPtr owned{raw};
+        detail::ConnectionPtr owned{raw};
         throw std::runtime_error("could not open the chunk store at " + path.string() + ": " +
                                  (raw == nullptr ? "out of memory" : sqlite3_errmsg(raw)));
     }
@@ -134,13 +97,18 @@ Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()
              "  key TEXT PRIMARY KEY,"
              "  value TEXT NOT NULL)");
 
+        // AUTOINCREMENT, so a chunk id is NEVER reused: re-ingesting a
+        // source deletes and re-creates its rows, and the graph's staleness
+        // fingerprint reads the highest id to catch a same-count re-ingest.
+        // A plain INTEGER PRIMARY KEY hands the deleted maximum straight
+        // back to the next insert, and the fingerprint would miss exactly
+        // the case it exists for.
         exec(handle,
              "CREATE TABLE IF NOT EXISTS chunks ("
-             "  id      INTEGER PRIMARY KEY,"
+             "  id      INTEGER PRIMARY KEY AUTOINCREMENT,"
              "  source  TEXT NOT NULL,"
              "  ordinal INTEGER NOT NULL,"
              "  text    TEXT NOT NULL)");
-        exec(handle, "CREATE INDEX IF NOT EXISTS chunks_by_source ON chunks(source, ordinal)");
 
         // v1 -> v2: vectors beside the text. Guarded, because a store made by
         // this build already has them and ADD COLUMN cannot say IF NOT EXISTS.
@@ -161,6 +129,13 @@ Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()
         if (!has_column(handle, "chunks", "metadata")) {
             exec(handle, "ALTER TABLE chunks ADD COLUMN metadata TEXT");
         }
+
+        // v3 -> v4: ids never reused (see the CREATE above). A table made
+        // by an earlier build is rebuilt in place -- rowids preserved, so
+        // the external-content FTS index stays valid -- and the sequence
+        // picks up past the highest id ever stored.
+        ensure_chunk_ids_never_reused(handle);
+        exec(handle, "CREATE INDEX IF NOT EXISTS chunks_by_source ON chunks(source, ordinal)");
 
         // An EXTERNAL-CONTENT index: the text lives once, in `chunks`, and FTS5
         // holds only the inverted index over it. Storing it twice would double
@@ -190,6 +165,10 @@ Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()
             "  INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);"
             "  INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);"
             "END");
+
+        // v3 -> v4: the knowledge-graph tables beside the chunks, and the
+        // entity full-text index. Empty until `apogee graph build` fills them.
+        detail::ensure_graph_schema(handle);
 
         StatementPtr set = prepare(handle,
                                    "INSERT INTO store_meta(key, value) VALUES('schema_version', ?)"

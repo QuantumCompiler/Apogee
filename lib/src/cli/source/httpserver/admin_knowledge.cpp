@@ -434,6 +434,18 @@ HttpResponse admin_list_knowledge(const AdminConfigContext& context, Handler& pl
         }
         out["note"] = note;
     }
+    if (request.query_value("graph") == "true") {
+        // The twin of `knowledge query --graph`: the same walk, from the
+        // same records, opt-in. A collection with no graph gets a note that
+        // says how to build one -- distinct from "a graph, nothing related".
+        const knowledge::RecordGraph graph =
+            knowledge::graph_for_records(*store, *loaded.config, db, result, question);
+        nlohmann::json section{{"context", graph.context}, {"entities", graph.entities}};
+        if (!graph.note.empty()) {
+            section["note"] = graph.note;
+        }
+        out["graph"] = std::move(section);
+    }
     return json_response(200, out);
 }
 

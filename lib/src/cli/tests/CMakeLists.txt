@@ -126,6 +126,14 @@ add_executable(apogee_tests
     embedstore/metadata_test.cpp
     commands/knowledge_test.cpp
     httpserver/admin_knowledge_test.cpp
+    embedstore/graph_test.cpp
+    embedstore/graph_search_test.cpp
+    graph/extract_test.cpp
+    graph/build_test.cpp
+    graph/records_test.cpp
+    agentloop/graph_context_test.cpp
+    commands/graph_test.cpp
+    httpserver/admin_graph_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h
@@ -395,6 +403,19 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/knowledge-e2e
     )
     set_tests_properties(cli.knowledge_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The knowledge graph on the real binary: a build over an ingested
+    # collection on the scripted mock as extractor, --dry-run's zero
+    # footprint, the enable write through the one editor, a --rag turn whose
+    # status line counts the graph entities while the answer carries the
+    # entity of a chunk the query never matched, a captured record as a
+    # decision node, `knowledge query --graph`, and delete.
+    add_test(NAME cli.graph_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/graph_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/graph-e2e
+    )
+    set_tests_properties(cli.graph_lifecycle PROPERTIES TIMEOUT 120)
 endif()
 
 # Startup output discipline, under a real pseudo-terminal.

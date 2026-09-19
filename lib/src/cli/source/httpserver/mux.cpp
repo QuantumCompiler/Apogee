@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 43> kRoutes{{
+constexpr std::array<Route, 48> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -164,6 +164,29 @@ constexpr std::array<Route, 43> kRoutes{{
     {"DELETE", "/v1/admin/knowledge/{id}", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->delete_knowledge(r, id);
+     }},
+    // The knowledge graph over a collection. `{id}` sits mid-path, which the
+    // matcher handles segment by segment; the fixed tails keep `build`,
+    // `stats` and `entity` distinct from the bare `DELETE`.
+    {"POST", "/v1/admin/graph/{id}/build", true,
+     +[](Handler& h, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->build_graph(h, r, id);
+     }},
+    {"GET", "/v1/admin/graph/{id}/stats", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->graph_stats(r, id);
+     }},
+    {"GET", "/v1/admin/graph/{id}/entity", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->graph_entity(r, id);
+     }},
+    {"DELETE", "/v1/admin/graph/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->delete_graph(r, id);
+     }},
+    {"PUT", "/v1/admin/embeddings/{id}/graph", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->set_graph_enabled(r, id);
      }},
     {"GET", "/v1/admin/permissions", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {

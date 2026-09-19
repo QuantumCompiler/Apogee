@@ -442,7 +442,7 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
         if (!rag.error.empty() && plan.explicit_retriever) {
             throw HttpError{.message = rag.error};
         }
-        if (rag.error.empty() && rag.chunks > 0) {
+        if (rag.error.empty() && !rag.prefix.empty()) {
             // Spliced into the OUTGOING request only; never into the history
             // the session persists.
             loop_options.transient_prefix = rag.prefix;
@@ -457,6 +457,7 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
             meta.top_score = rag.top_score;
             meta.retriever = rag.retriever;
             meta.reranked = rag.reranked;
+            meta.graph_entities = rag.graph_entities;
             result.rag = meta;
             result.detail = rag.error.empty() ? join(rag.notes, "; ") : rag.error;
             sse->emit_meta(result);

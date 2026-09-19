@@ -571,6 +571,35 @@ Config parse_config(std::string_view content, std::string_view origin) {
                 collection.backend = scalar(node["backend"], origin, where + ".backend");
                 collection.retriever = scalar(node["retriever"], origin, where + ".retriever");
                 collection.rerank = scalar(node["rerank"], origin, where + ".rerank");
+                if (const YAML::Node graph = node["graph"]; graph.IsDefined() && !graph.IsNull()) {
+                    if (!graph.IsMap()) {
+                        fail(origin, where + ".graph: expected a mapping");
+                    }
+                    collection.graph.enabled =
+                        boolean(graph["enabled"], origin, where + ".graph.enabled", false);
+                    collection.graph.extract_backend =
+                        scalar(graph["extract_backend"], origin, where + ".graph.extract_backend");
+                    // Validated here rather than at the point of use: an
+                    // out-of-range depth would otherwise be clamped silently
+                    // on every turn, and a config that says 3 means it.
+                    if (const std::optional<std::int64_t> hops =
+                            integer(graph["hops"], origin, where + ".graph.hops");
+                        hops.has_value()) {
+                        if (*hops < 1 || *hops > 2) {
+                            fail(origin, where + ".graph.hops: " + std::to_string(*hops) +
+                                             " is out of range (1 or 2)");
+                        }
+                        collection.graph.hops = static_cast<int>(*hops);
+                    }
+                    if (const std::optional<std::int64_t> max_entities =
+                            integer(graph["max_entities"], origin, where + ".graph.max_entities");
+                        max_entities.has_value()) {
+                        if (*max_entities < 1) {
+                            fail(origin, where + ".graph.max_entities: must be at least 1");
+                        }
+                        collection.graph.max_entities = static_cast<int>(*max_entities);
+                    }
+                }
             }
             const auto [it, inserted] = config.embeddings.emplace(name, std::move(collection));
             if (!inserted) {

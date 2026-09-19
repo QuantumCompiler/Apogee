@@ -16,7 +16,10 @@
 #include "commands/registry.h"
 #include "commands/root.h"
 #include "embedstore/store.h"
+#include "graph/build.h"
+#include "graph/extract.h"
 #include "harness/config.h"
+#include "harness/config_edit.h"
 #include "harness/types.h"
 #include "knowledge/record.h"
 #include "knowledge/store.h"
@@ -538,6 +541,60 @@ TEST_CASE(
     CHECK(err.find("lexical") != std::string::npos);
     CHECK(fixture.run({"knowledge", "query", "--status", "maybe", "cancel"}, &out, &err) != 0);
     CHECK(fixture.run({"knowledge", "query", "--rerank", "nope", "cancel"}, &out, &err) == 1);
+
+    // --graph with no graph covering the collection: a note that says how to
+    // build one, distinct from "nothing related".
+    REQUIRE(fixture.run({"knowledge", "query", "--graph", "cancel button"}, &out) == 0);
+    CHECK(out.find("no knowledge graph covers collection \"knowledge\"") != std::string::npos);
+    CHECK(out.find("apogee graph build knowledge") != std::string::npos);
+    REQUIRE(fixture.run({"knowledge", "query", "--graph", "--json", "cancel button"}, &out) == 0);
+    CHECK(nlohmann::json::parse(out)["graph"]["entities"] == 0);
+    CHECK(nlohmann::json::parse(out)["graph"]["note"].get<std::string>().find(
+              "no knowledge graph") != std::string::npos);
+    CHECK_FALSE(
+        nlohmann::json::parse(
+            fixture.run({"knowledge", "query", "--json", "cancel button"}, &out) == 0 ? out : "{}")
+            .contains("graph"));
+
+    // A built graph: the walk from the matched record reaches the entity its
+    // reasoning concerns and the other decision about the same thing.
+    {
+        Store store = fixture.store();
+        const apogee::graph::ExtractFn extract = [](std::string_view text,
+                                                    const apogee::harness::CancellationToken&) {
+            apogee::graph::ExtractOutcome outcome;
+            apogee::graph::ExtractResult result;
+            if (text.find("cancel") != std::string_view::npos) {
+                result.entities.push_back(apogee::graph::Entity{
+                    .name = "cancel button", .type = "component", .description = "the control"});
+            }
+            outcome.result = std::move(result);
+            return outcome;
+        };
+        apogee::graph::BuildOptions options;
+        options.model = "fake";
+        REQUIRE(apogee::graph::build(store.chunks(), extract, nullptr, options).record_nodes == 7);
+        // The records went in through the store, so nothing registered the
+        // collection: the entry first, then the enable write the build makes.
+        apogee::harness::edit_config_file(fixture.config_path, [](std::string_view content) {
+            return apogee::harness::set_embedding_graph_enabled(
+                apogee::harness::append_embedding(content, "knowledge",
+                                                  apogee::harness::EmbeddingConfig{}, false),
+                "knowledge", true);
+        });
+    }
+    REQUIRE(fixture.run({"knowledge", "query", "-n", "1", "--graph", "cancel button"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("Related (knowledge graph, ") != std::string::npos);
+    CHECK(out.find("  [Knowledge graph: knowledge]") != std::string::npos);
+    CHECK(out.find("cancel button (component): the control") != std::string::npos);
+    CHECK(out.find("(decision, rejected): ") != std::string::npos);  // a sibling decision, marked
+    REQUIRE(fixture.run({"knowledge", "query", "-n", "1", "--graph", "--json", "cancel button"},
+                        &out) == 0);
+    json = nlohmann::json::parse(out);
+    CHECK(json["graph"]["entities"].get<int>() > 0);
+    CHECK(json["graph"]["context"].get<std::string>().find("[Knowledge graph: knowledge]") == 0);
+    CHECK_FALSE(json["graph"].contains("note"));
 }
 
 TEST_CASE(

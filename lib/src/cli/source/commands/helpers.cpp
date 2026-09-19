@@ -77,11 +77,17 @@ agentloop::RagResult retrieve_for_collection(
     turn.limit = limit;
     turn.retriever_flag = std::string{retriever_flag};
     turn.rerank_flag = std::string{rerank_flag};
+    turn.collection = std::string{collection};
     std::string collection_backend;
     if (const harness::EmbeddingConfig* pin = config.find_embedding(collection); pin != nullptr) {
         turn.retriever_pin = pin->retriever;
         turn.rerank_pin = pin->rerank;
         collection_backend = pin->backend;
+        // The graph's knobs travel with the pins: expansion runs on every
+        // surface exactly when the collection's block says so.
+        turn.graph_enabled = pin->graph.enabled;
+        turn.graph_hops = pin->graph.hops;
+        turn.graph_max_entities = pin->graph.max_entities;
     }
     turn.embedder =
         agentloop::resolve_embedder(harness, config, collection_backend, turn.embedder_reason);
@@ -116,16 +122,22 @@ std::string describe_retrieval(const RagChoice& choice, const agentloop::RagResu
     if (!result.error.empty()) {
         return "retrieval unavailable -- " + result.error + origin + notes;
     }
+    // The graph's contribution, always named: entities injected beside the
+    // chunks are context the user did not see retrieved.
+    const std::string graph = result.graph_entities > 0
+                                  ? " +" + std::to_string(result.graph_entities) + " graph entities"
+                                  : "";
     if (result.chunks == 0) {
         return "no matching context in '" + choice.collection + "' [" + result.retriever + "]" +
-               origin + notes;
+               graph + origin + notes;
     }
     // Chunks, top score, and the retriever that produced it -- the last because
     // lexical, vector and RRF scales are incomparable -- and whether a judge's
     // ranking was actually applied, from the same place as the ranking.
     std::string line = std::to_string(result.chunks) + " chunk(s) from '" + choice.collection +
                        "', top " + std::to_string(result.top_score).substr(0, 5) + " [" +
-                       result.retriever + (result.reranked ? ", reranked" : "") + "]" + origin;
+                       result.retriever + (result.reranked ? ", reranked" : "") + "]" + graph +
+                       origin;
     for (const std::string& note : result.notes) {
         line += " -- " + note;
     }
