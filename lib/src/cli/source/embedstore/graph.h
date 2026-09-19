@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <string_view>
 
@@ -21,9 +22,14 @@
 /// are facts and stay at weight 1.
 ///
 /// `kg_mentions.collection` and `kg_state.collection` carry the provenance
-/// column a named multi-collection graph keys on (the next item); a
-/// collection's own graph writes `''` there.
+/// column a **named multi-collection graph** keys on: its database lives
+/// under the embeddings directory's `graphs/` and every mention and state row
+/// names the member collection it came from. A collection's own graph writes
+/// `''` there -- the self reference -- so the two shapes are one schema and
+/// one set of queries, the label being the only difference.
 namespace apogee::embedstore {
+
+class Store;
 
 /// The reserved node type for an organizational knowledge record
 /// materialised as a first-class node. **Storage-only**: it is not in the
@@ -102,6 +108,33 @@ struct ChunkSpan {
     std::int64_t max_id = 0;
 };
 
+/// A chunk in a member collection -- the provenance a mention row carries.
+/// `collection` is `''` for a collection's own graph.
+struct ChunkRef {
+    std::string collection;
+    std::int64_t chunk_id = 0;
+
+    [[nodiscard]] bool operator==(const ChunkRef&) const noexcept = default;
+};
+
+/// One relation row as stored -- the community detector's input.
+struct GraphEdge {
+    std::int64_t id = 0;
+    std::int64_t source_id = 0;
+    std::int64_t target_id = 0;
+    std::string relation;
+    std::string description;
+    std::int64_t weight = 1;
+};
+
+/// A graph's member collections by label, each a read-only view of that
+/// collection's store. A **null** store is a member whose database is
+/// missing: it reads as empty, so everything it contributed reconciles away
+/// rather than wedging the graph. A collection's own graph is the
+/// single-member `{"": self}` case. Non-owning: the caller keeps the stores
+/// open for the duration of the call.
+using MemberStores = std::map<std::string, const Store*>;
+
 /// What a reconcile pass removed.
 struct ReconcileResult {
     /// Mention rows whose chunk no longer exists.
@@ -118,9 +151,14 @@ struct ReconcileResult {
     }
 };
 
-/// The `graph_meta` keys the build writes.
+/// The `graph_meta` keys the build writes. A named graph's database also
+/// records its own identity: the `graphs:` entry it was built for and the
+/// member set as built (a sorted JSON array), so `stats` can say when the
+/// config's membership has drifted since.
 inline constexpr std::string_view kGraphMetaExtractModel = "extract_model";
 inline constexpr std::string_view kGraphMetaFailedChunks = "failed_chunks";
 inline constexpr std::string_view kGraphMetaEmbedModel = "embed_model";
+inline constexpr std::string_view kGraphMetaGraphName = "graph_name";
+inline constexpr std::string_view kGraphMetaMembers = "members";
 
 }  // namespace apogee::embedstore

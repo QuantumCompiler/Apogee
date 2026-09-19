@@ -59,7 +59,9 @@ GraphStats Store::graph_stats() const {
     out.edges = count_of(handle, "SELECT COUNT(*) FROM kg_edges");
     out.mentions = count_of(handle, "SELECT COUNT(*) FROM kg_mentions");
     out.nodes_with_vectors = count_of(handle, "SELECT COUNT(*) FROM kg_nodes WHERE dim > 0");
-    out.total_chunks = count_of(handle, "SELECT COUNT(*) FROM chunks");
+    out.total_chunks =
+        count_of(handle, "SELECT COUNT(*) FROM chunks WHERE source NOT LIKE 'graph://%'");
+    out.communities = count_of(handle, "SELECT COUNT(*) FROM kg_communities");
     out.chunks_with_mentions =
         count_of(handle,
                  "SELECT COUNT(DISTINCT chunk_id) FROM kg_mentions"
@@ -87,6 +89,55 @@ GraphStats Store::graph_stats() const {
             (it->second.max_chunk_id != 0 && it->second.max_chunk_id != span.max_id)) {
             ++out.stale_files;
         }
+    }
+    return out;
+}
+
+GraphStatsMulti Store::graph_stats_multi(const MemberStores& members) const {
+    sqlite3* handle = impl_->connection.get();
+    GraphStatsMulti out;
+    out.totals = graph_stats();
+    // The own-chunks coverage reads zero on a graph database (its chunks
+    // table holds only pseudo-chunks); recompute it across the members.
+    out.totals.total_chunks = 0;
+    out.totals.chunks_with_mentions = 0;
+    out.totals.stale_files = 0;
+    for (const auto& [collection, member] : members) {
+        MemberStats stats;
+        stats.collection = collection;
+        stats.missing = member == nullptr;
+        {
+            StatementPtr select =
+                prepare(handle, "SELECT COUNT(*) FROM kg_mentions WHERE collection = ?");
+            bind_text(select.get(), 1, collection);
+            if (sqlite3_step(select.get()) == SQLITE_ROW) {
+                stats.mentions = sqlite3_column_int64(select.get(), 0);
+            }
+        }
+        {
+            StatementPtr select = prepare(
+                handle, "SELECT COUNT(DISTINCT chunk_id) FROM kg_mentions WHERE collection = ?");
+            bind_text(select.get(), 1, collection);
+            if (sqlite3_step(select.get()) == SQLITE_ROW) {
+                stats.chunks_with_mentions = sqlite3_column_int64(select.get(), 0);
+            }
+        }
+        if (member != nullptr) {
+            const std::map<std::string, SourceState> states = source_states(collection);
+            for (const auto& [source, span] : member->source_chunk_spans()) {
+                stats.total_chunks += span.count;
+                const auto it = states.find(source);
+                if (it == states.end() || it->second.chunk_count != span.count ||
+                    it->second.model != out.totals.extract_model ||
+                    (it->second.max_chunk_id != 0 && it->second.max_chunk_id != span.max_id)) {
+                    ++stats.stale_files;
+                }
+            }
+        }
+        out.totals.total_chunks += stats.total_chunks;
+        out.totals.chunks_with_mentions += stats.chunks_with_mentions;
+        out.totals.stale_files += stats.stale_files;
+        out.members.push_back(std::move(stats));
     }
     return out;
 }
@@ -197,9 +248,52 @@ std::vector<Chunk> Store::node_chunks(std::int64_t node_id, int limit) const {
     return out;
 }
 
+std::vector<ChunkRef> Store::node_mention_refs(std::int64_t node_id, int limit) const {
+    StatementPtr select = prepare(impl_->connection.get(),
+                                  "SELECT collection, chunk_id FROM kg_mentions"
+                                  " WHERE node_id = ? ORDER BY collection, chunk_id LIMIT ?");
+    sqlite3_bind_int64(select.get(), 1, node_id);
+    sqlite3_bind_int(select.get(), 2, limit > 0 ? limit : -1);
+    std::vector<ChunkRef> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out.push_back(ChunkRef{.collection = column_text(select.get(), 0),
+                               .chunk_id = sqlite3_column_int64(select.get(), 1)});
+    }
+    return out;
+}
+
+std::vector<GraphEdge> Store::all_edges() const {
+    StatementPtr select = prepare(impl_->connection.get(),
+                                  "SELECT id, source_id, target_id, relation, description, weight"
+                                  " FROM kg_edges ORDER BY id");
+    std::vector<GraphEdge> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        GraphEdge edge;
+        edge.id = sqlite3_column_int64(select.get(), 0);
+        edge.source_id = sqlite3_column_int64(select.get(), 1);
+        edge.target_id = sqlite3_column_int64(select.get(), 2);
+        edge.relation = column_text(select.get(), 3);
+        edge.description = column_text(select.get(), 4);
+        edge.weight = sqlite3_column_int64(select.get(), 5);
+        out.push_back(std::move(edge));
+    }
+    return out;
+}
+
 Expansion Store::graph_expand(const std::vector<std::int64_t>& seed_chunks,
                               const std::vector<std::int64_t>& seed_nodes, int hops,
                               int max_entities) const {
+    std::vector<ChunkRef> refs;
+    refs.reserve(seed_chunks.size());
+    for (const std::int64_t id : seed_chunks) {
+        refs.push_back(ChunkRef{.collection = "", .chunk_id = id});
+    }
+    return graph_expand_labelled(refs, seed_nodes, hops, max_entities);
+}
+
+Expansion Store::graph_expand_labelled(const std::vector<ChunkRef>& seed_chunks,
+                                       const std::vector<std::int64_t>& seed_nodes, int hops,
+                                       int max_entities) const {
     Expansion out;
     hops = std::clamp(hops < 1 ? kDefaultGraphHops : hops, 1, kMaxGraphHops);
     if (max_entities <= 0) {
@@ -207,15 +301,21 @@ Expansion Store::graph_expand(const std::vector<std::int64_t>& seed_chunks,
     }
     sqlite3* handle = impl_->connection.get();
 
-    // Seed nodes: entities mentioned by the retrieved chunks, plus any
-    // query-term hits handed in directly.
+    // Seed nodes: entities mentioned by the retrieved chunks -- per member
+    // collection, since a chunk id means nothing without its label -- plus
+    // any query-term hits handed in directly.
     std::set<std::int64_t> seeds;
-    if (!seed_chunks.empty()) {
+    std::map<std::string, std::vector<std::int64_t>> by_collection;
+    for (const ChunkRef& ref : seed_chunks) {
+        by_collection[ref.collection].push_back(ref.chunk_id);
+    }
+    for (const auto& [collection, ids] : by_collection) {
         StatementPtr select = prepare(handle,
                                       "SELECT DISTINCT node_id FROM kg_mentions"
-                                      " WHERE collection = '' AND chunk_id IN (" +
-                                          placeholders(seed_chunks.size()) + ")");
-        bind_ids(select.get(), 1, seed_chunks);
+                                      " WHERE collection = ? AND chunk_id IN (" +
+                                          placeholders(ids.size()) + ")");
+        bind_text(select.get(), 1, collection);
+        bind_ids(select.get(), 2, ids);
         while (sqlite3_step(select.get()) == SQLITE_ROW) {
             seeds.insert(sqlite3_column_int64(select.get(), 0));
         }
@@ -306,11 +406,12 @@ Expansion Store::graph_expand(const std::vector<std::int64_t>& seed_chunks,
     for (ExpandEntity& entity : out.entities) {
         // One evidencing chunk per selected entity; none is "no support".
         StatementPtr select = prepare(handle,
-                                      "SELECT chunk_id FROM kg_mentions WHERE node_id = ?"
-                                      " ORDER BY collection, chunk_id LIMIT 1");
+                                      "SELECT collection, chunk_id FROM kg_mentions"
+                                      " WHERE node_id = ? ORDER BY collection, chunk_id LIMIT 1");
         sqlite3_bind_int64(select.get(), 1, entity.node.id);
         if (sqlite3_step(select.get()) == SQLITE_ROW) {
-            entity.support_chunk = sqlite3_column_int64(select.get(), 0);
+            entity.support_collection = column_text(select.get(), 0);
+            entity.support_chunk = sqlite3_column_int64(select.get(), 1);
         }
     }
 

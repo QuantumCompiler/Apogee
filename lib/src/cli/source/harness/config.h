@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 /// The config engine's read path.
@@ -226,6 +227,28 @@ struct EmbeddingConfig {
     GraphConfig graph;
 };
 
+/// One entry under `graphs:` -- a **named knowledge graph spanning several
+/// collections**, keyed by name like every other section. Its database is
+/// derived data at `<embeddings_dir>/graphs/<name>.db`, created lazily by
+/// the first `apogee graph build <name>` -- never by an installer -- with
+/// one node per entity across every member, so expansion crosses collection
+/// boundaries. There is no `enabled`: building is the enablement, and a
+/// built named graph takes retrieval precedence for its members. A graph
+/// name must never collide with a collection name -- resolution is
+/// graphs-first everywhere, and `apogee check` fails the collision.
+struct NamedGraphConfig {
+    /// The member collections, each an `embeddings:` name. Removing one
+    /// converges on the next build -- its rows reconcile away.
+    std::vector<std::string> collections;
+    /// The backend `graph build <name>` extracts with when `-m` is not
+    /// given. Empty means the extraction role, then the default.
+    std::string extract_backend;
+    /// Expansion depth at retrieval: 1 or 2 edge steps.
+    int hops = 1;
+    /// Neighbour entities an expansion injects, at most.
+    int max_entities = 8;
+};
+
 /// One entry under `mcp_servers:` -- a stdio MCP server the loop connects
 /// to at startup and whose tools appear as `mcp__<name>__<tool>`.
 ///
@@ -437,6 +460,11 @@ struct Config {
     /// compiled in (see `harness/assets.h`) and a same-named entry wins.
     std::map<std::string, AgentConfig, CaseInsensitiveLess> agents;
 
+    /// Named multi-collection graphs keyed by name AS WRITTEN, compared
+    /// case-insensitively, in the file's order (the retrieval precedence
+    /// rule reads them first to last, so the order is the user's).
+    std::vector<std::pair<std::string, NamedGraphConfig>> graphs;
+
     StatusMode status_mode = StatusMode::Line;
     bool color = true;
 
@@ -465,6 +493,12 @@ struct Config {
 
     /// Agent names as written, in the map's (case-folded) order.
     [[nodiscard]] std::vector<std::string> agent_names() const;
+
+    /// Case-insensitive lookup of a `graphs:` entry. nullptr when absent.
+    [[nodiscard]] const NamedGraphConfig* find_graph(std::string_view name) const noexcept;
+
+    /// Graph names as written, in the file's order.
+    [[nodiscard]] std::vector<std::string> graph_names() const;
 };
 
 /// `expand_env`, then a leading `~` or `~/` replaced by the home directory.

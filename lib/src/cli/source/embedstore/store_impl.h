@@ -10,13 +10,14 @@
 #include "embedstore/store.h"
 
 /// Package-private: the connection and the statement helpers the store's
-/// translation units share (`store.cpp`, `graph.cpp`, `graph_search.cpp`).
+/// translation units share (`store.cpp`, `graph.cpp`, `graph_search.cpp`,
+/// `graph_communities.cpp`, `graph_dedupe.cpp`).
 ///
 /// The raw `sqlite3*` never leaves the package: it is wrapped in a
 /// `unique_ptr` here, no public accessor returns it, and only members of
 /// `Store` -- whichever file they are defined in -- can reach `impl_`. That
 /// is the Code Style rule for C APIs applied to a class whose implementation
-/// spans three files rather than one.
+/// spans five files rather than one.
 namespace apogee::embedstore::detail {
 
 struct ConnectionDeleter {
@@ -113,9 +114,10 @@ void in_transaction(sqlite3* handle, Body&& body) {
 }
 
 /// The knowledge-graph tables, the entity full-text index and its triggers
-/// (schema v4). Called from the store's constructor inside the one migration
-/// transaction; idempotent, with dropped triggers self-healing. Defined in
-/// `graph.cpp`, beside the code that writes those tables.
+/// (schema v4; the community tables since v5). Called from the store's
+/// constructor inside the one migration transaction; idempotent, with
+/// dropped triggers self-healing. Defined in `graph.cpp`, beside the code
+/// that writes those tables.
 void ensure_graph_schema(sqlite3* handle);
 
 }  // namespace apogee::embedstore::detail

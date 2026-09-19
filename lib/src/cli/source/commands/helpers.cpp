@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "agent/fetch_url.h"
+#include "agentloop/graph_context.h"
 #include "backends/http_client.h"
 #include "commands/embed.h"
 #include "harness/harness.h"
@@ -83,12 +84,17 @@ agentloop::RagResult retrieve_for_collection(
         turn.retriever_pin = pin->retriever;
         turn.rerank_pin = pin->rerank;
         collection_backend = pin->backend;
-        // The graph's knobs travel with the pins: expansion runs on every
-        // surface exactly when the collection's block says so.
-        turn.graph_enabled = pin->graph.enabled;
-        turn.graph_hops = pin->graph.hops;
-        turn.graph_max_entities = pin->graph.max_entities;
     }
+    // Which graph the turn walks -- a built named graph covering the
+    // collection first, else its own enabled block -- decided in ONE place
+    // for every surface, so the precedence rule cannot drift between them.
+    const agentloop::TurnGraph graph = agentloop::resolve_turn_graph(config, collection);
+    turn.graph_enabled = graph.enabled;
+    turn.graph_hops = graph.hops;
+    turn.graph_max_entities = graph.max_entities;
+    turn.graph_store_path = graph.store_path;
+    turn.graph_name = graph.name;
+    turn.graph_seed_collection = graph.seed_collection;
     turn.embedder =
         agentloop::resolve_embedder(harness, config, collection_backend, turn.embedder_reason);
     turn.harness = &harness;

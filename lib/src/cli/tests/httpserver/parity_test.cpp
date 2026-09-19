@@ -90,6 +90,10 @@ const std::map<std::string, Classification>& table() {
         {"knowledge reindex", twin("POST", "/v1/admin/knowledge/reindex")},
         {"graph build", twin("POST", "/v1/admin/graph/{id}/build")},
         {"graph delete", twin("DELETE", "/v1/admin/graph/{id}")},
+        {"graph communities", twin("POST", "/v1/admin/graph/{id}/communities")},
+        {"graph dedupe", twin("POST", "/v1/admin/graph/{id}/dedupe")},
+        {"config add-graph", twin("POST", "/v1/admin/graphs")},
+        {"config delete-graph", twin("DELETE", "/v1/admin/graphs/{id}")},
         // --- backfills: owned by the area that owns the CLI action ----------
         {"embed ingest", backfill("embedstore: the embeddings data plane, an async job")},
         {"embed delete", backfill("embedstore: the embeddings data plane")},

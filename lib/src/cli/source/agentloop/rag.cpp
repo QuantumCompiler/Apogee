@@ -187,20 +187,28 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
     // failure is a note, never the reason the turn loses its chunks.
     std::string graph_section;
     if (turn.graph_enabled) {
-        std::vector<std::int64_t> seeds;
+        std::vector<embedstore::ChunkRef> seeds;
         for (const embedstore::SearchHit& hit : hits) {
             if (turn.limit > 0 && seeds.size() >= static_cast<std::size_t>(turn.limit)) {
                 break;
             }
-            seeds.push_back(hit.chunk.id);
+            seeds.push_back(embedstore::ChunkRef{.collection = turn.graph_seed_collection,
+                                                 .chunk_id = hit.chunk.id});
         }
         // A lexical (or degraded, or hybrid) turn also seeds by the query's
         // own terms through the entity index; a vector turn does not.
         const std::string_view lexical_query = result.retriever == "vector" ? "" : turn.question;
+        const std::string header = turn.graph_name.empty() ? turn.collection : turn.graph_name;
         try {
-            const GraphSection section =
-                build_graph_section(*store, turn.collection, seeds, lexical_query, turn.graph_hops,
-                                    turn.graph_max_entities);
+            // The collection's own graph lives beside its chunks; a named
+            // graph's in its own database, opened for this walk alone.
+            const std::optional<embedstore::Store> named =
+                turn.graph_store_path.empty()
+                    ? std::nullopt
+                    : std::optional<embedstore::Store>{std::in_place, turn.graph_store_path};
+            const GraphSection section = build_graph_section_labelled(
+                named.has_value() ? *named : *store, header, seeds, lexical_query, turn.graph_hops,
+                turn.graph_max_entities);
             graph_section = section.text;
             result.graph_entities = section.entities;
         } catch (const std::exception& e) {

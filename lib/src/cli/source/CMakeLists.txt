@@ -309,6 +309,8 @@ add_library(apogee_core STATIC
     graph/extract.cpp
     graph/build.h
     graph/build.cpp
+    graph/communities.h
+    graph/communities.cpp
 
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and
@@ -321,6 +323,10 @@ add_library(apogee_core STATIC
     embedstore/graph.cpp
     embedstore/graph_search.h
     embedstore/graph_search.cpp
+    embedstore/graph_communities.h
+    embedstore/graph_communities.cpp
+    embedstore/graph_dedupe.h
+    embedstore/graph_dedupe.cpp
     embedstore/fts.h
     embedstore/fts.cpp
     embedstore/chunk.h
@@ -358,6 +364,8 @@ add_library(apogee_core STATIC
     httpserver/admin_knowledge.cpp
     httpserver/admin_graph.h
     httpserver/admin_graph.cpp
+    httpserver/admin_graphs.h
+    httpserver/admin_graphs.cpp
     httpserver/admin.h
     httpserver/admin.cpp
     httpserver/admin_auth_routes.h

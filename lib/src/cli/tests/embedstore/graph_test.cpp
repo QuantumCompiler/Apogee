@@ -62,14 +62,14 @@ TEST_CASE("the graph schema is v4, idempotent on reopen, and heals a dropped tri
     const Scratch scratch;
     {
         Store store{scratch.db()};
-        CHECK(store.schema_version() == 4);
+        CHECK(store.schema_version() == 5);
         CHECK(store.graph_stats().nodes == 0);
         (void)store.upsert_node("Atlas", "system", "");
     }
     // A second open changes nothing and loses nothing.
     {
         const Store again{scratch.db()};
-        CHECK(again.schema_version() == 4);
+        CHECK(again.schema_version() == 5);
         CHECK(again.graph_stats().nodes == 1);
     }
     // A dropped trigger comes back on open: an update after the reopen is

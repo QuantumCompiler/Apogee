@@ -2,11 +2,14 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <ctime>
+#include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "embedstore/store.h"
 #include "embedstore/store_impl.h"
@@ -19,6 +22,7 @@ using detail::column_text;
 using detail::exec;
 using detail::fail;
 using detail::in_transaction;
+using detail::placeholders;
 using detail::prepare;
 using detail::StatementPtr;
 
@@ -77,6 +81,22 @@ void ensure_graph_schema(sqlite3* handle) {
          "CREATE TABLE IF NOT EXISTS graph_meta ("
          "  key   TEXT PRIMARY KEY,"
          "  value TEXT NOT NULL)");
+    // v5: the global layer. A community's identity is its member key; the
+    // membership rows reference nodes so a merged or pruned node can never
+    // be listed as a member.
+    exec(handle,
+         "CREATE TABLE IF NOT EXISTS kg_communities ("
+         "  id            INTEGER PRIMARY KEY AUTOINCREMENT,"
+         "  member_key    TEXT    NOT NULL UNIQUE,"
+         "  size          INTEGER NOT NULL,"
+         "  summary       TEXT    NOT NULL DEFAULT '',"
+         "  model         TEXT    NOT NULL DEFAULT '',"
+         "  summarized_at TEXT    NOT NULL DEFAULT '')");
+    exec(handle,
+         "CREATE TABLE IF NOT EXISTS kg_community_members ("
+         "  community_id INTEGER NOT NULL REFERENCES kg_communities(id) ON DELETE CASCADE,"
+         "  node_id      INTEGER NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,"
+         "  PRIMARY KEY (community_id, node_id))");
 
     // The entity index: external-content FTS5 over name and description, the
     // same tokenizer as the chunk index so `fts_match_query` serves both.
@@ -317,14 +337,19 @@ bool Store::ensure_edge(std::int64_t source_id, std::int64_t target_id, std::str
 }
 
 bool Store::add_mention(std::int64_t node_id, std::int64_t chunk_id) {
+    return add_mention(node_id, "", chunk_id);
+}
+
+bool Store::add_mention(std::int64_t node_id, std::string_view collection, std::int64_t chunk_id) {
     sqlite3* handle = impl_->connection.get();
     bool inserted = false;
     in_transaction(handle, [&] {
         StatementPtr insert = prepare(handle,
                                       "INSERT OR IGNORE INTO kg_mentions (node_id, collection,"
-                                      " chunk_id) VALUES (?, '', ?)");
+                                      " chunk_id) VALUES (?, ?, ?)");
         sqlite3_bind_int64(insert.get(), 1, node_id);
-        sqlite3_bind_int64(insert.get(), 2, chunk_id);
+        bind_text(insert.get(), 2, collection);
+        sqlite3_bind_int64(insert.get(), 3, chunk_id);
         if (sqlite3_step(insert.get()) != SQLITE_DONE) {
             fail(handle, "could not add a graph mention");
         }
@@ -378,29 +403,41 @@ std::vector<float> Store::node_vector(std::int64_t node_id) const {
 
 void Store::set_source_state(std::string_view source, std::int64_t chunk_count,
                              std::int64_t max_chunk_id, std::string_view model) {
+    set_source_state("", source, chunk_count, max_chunk_id, model);
+}
+
+void Store::set_source_state(std::string_view collection, std::string_view source,
+                             std::int64_t chunk_count, std::int64_t max_chunk_id,
+                             std::string_view model) {
     sqlite3* handle = impl_->connection.get();
     StatementPtr upsert = prepare(handle,
                                   "INSERT INTO kg_state (collection, source_file, chunk_count,"
-                                  " max_chunk_id, extracted_at, model) VALUES ('', ?, ?, ?, ?, ?)"
+                                  " max_chunk_id, extracted_at, model) VALUES (?, ?, ?, ?, ?, ?)"
                                   " ON CONFLICT(collection, source_file) DO UPDATE SET"
                                   "   chunk_count = excluded.chunk_count,"
                                   "   max_chunk_id = excluded.max_chunk_id,"
                                   "   extracted_at = excluded.extracted_at,"
                                   "   model = excluded.model");
-    bind_text(upsert.get(), 1, source);
-    sqlite3_bind_int64(upsert.get(), 2, chunk_count);
-    sqlite3_bind_int64(upsert.get(), 3, max_chunk_id);
-    bind_text(upsert.get(), 4, now_rfc3339());
-    bind_text(upsert.get(), 5, model);
+    bind_text(upsert.get(), 1, collection);
+    bind_text(upsert.get(), 2, source);
+    sqlite3_bind_int64(upsert.get(), 3, chunk_count);
+    sqlite3_bind_int64(upsert.get(), 4, max_chunk_id);
+    bind_text(upsert.get(), 5, now_rfc3339());
+    bind_text(upsert.get(), 6, model);
     if (sqlite3_step(upsert.get()) != SQLITE_DONE) {
         fail(handle, "could not record a source's extraction state");
     }
 }
 
 std::map<std::string, SourceState> Store::source_states() const {
+    return source_states("");
+}
+
+std::map<std::string, SourceState> Store::source_states(std::string_view collection) const {
     StatementPtr select = prepare(impl_->connection.get(),
                                   "SELECT source_file, chunk_count, max_chunk_id, extracted_at,"
-                                  " model FROM kg_state WHERE collection = ''");
+                                  " model FROM kg_state WHERE collection = ?");
+    bind_text(select.get(), 1, collection);
     std::map<std::string, SourceState> out;
     while (sqlite3_step(select.get()) == SQLITE_ROW) {
         SourceState state;
@@ -415,8 +452,10 @@ std::map<std::string, SourceState> Store::source_states() const {
 }
 
 std::map<std::string, ChunkSpan> Store::source_chunk_spans() const {
+    // Community pseudo-chunks are graph output: never planned, never stale.
     StatementPtr select = prepare(impl_->connection.get(),
-                                  "SELECT source, COUNT(*), MAX(id) FROM chunks GROUP BY source");
+                                  "SELECT source, COUNT(*), MAX(id) FROM chunks"
+                                  " WHERE source NOT LIKE 'graph://%' GROUP BY source");
     std::map<std::string, ChunkSpan> out;
     while (sqlite3_step(select.get()) == SQLITE_ROW) {
         ChunkSpan span;
@@ -446,31 +485,131 @@ std::vector<Chunk> Store::chunks_by_source(std::string_view source) const {
 }
 
 ReconcileResult Store::reconcile_graph() {
+    return reconcile_graph_multi(MemberStores{{"", this}});
+}
+
+std::set<std::int64_t> Store::chunk_ids_existing(const std::vector<std::int64_t>& ids) const {
+    // Batched well under SQLite's bound-parameter limit.
+    constexpr std::size_t kBatch = 500;
+    std::set<std::int64_t> out;
+    for (std::size_t start = 0; start < ids.size(); start += kBatch) {
+        const std::size_t end = std::min(start + kBatch, ids.size());
+        StatementPtr select =
+            prepare(impl_->connection.get(),
+                    "SELECT id FROM chunks WHERE id IN (" + placeholders(end - start) + ")");
+        for (std::size_t i = start; i < end; ++i) {
+            sqlite3_bind_int64(select.get(), static_cast<int>(i - start) + 1, ids[i]);
+        }
+        while (sqlite3_step(select.get()) == SQLITE_ROW) {
+            out.insert(sqlite3_column_int64(select.get(), 0));
+        }
+    }
+    return out;
+}
+
+ReconcileResult Store::reconcile_graph_multi(const MemberStores& members) {
     sqlite3* handle = impl_->connection.get();
     ReconcileResult out;
+
+    // Cross-database reads BEFORE the write transaction: per member, which
+    // mentioned chunk ids are dead and which recorded sources vanished.
+    std::map<std::string, std::vector<std::int64_t>> dead_chunks;
+    std::map<std::string, std::vector<std::string>> dead_sources;
+    for (const auto& [collection, member] : members) {
+        std::vector<std::int64_t> mentioned;
+        {
+            StatementPtr select =
+                prepare(handle, "SELECT DISTINCT chunk_id FROM kg_mentions WHERE collection = ?");
+            bind_text(select.get(), 1, collection);
+            while (sqlite3_step(select.get()) == SQLITE_ROW) {
+                mentioned.push_back(sqlite3_column_int64(select.get(), 0));
+            }
+        }
+        const std::map<std::string, SourceState> states = source_states(collection);
+        if (member == nullptr) {
+            // A missing member is an empty one: everything it contributed
+            // goes, which is how deleting a collection's data converges.
+            dead_chunks[collection] = std::move(mentioned);
+            for (const auto& [source, unused] : states) {
+                dead_sources[collection].push_back(source);
+            }
+            continue;
+        }
+        const std::set<std::int64_t> exists = member->chunk_ids_existing(mentioned);
+        for (const std::int64_t id : mentioned) {
+            if (!exists.contains(id)) {
+                dead_chunks[collection].push_back(id);
+            }
+        }
+        const std::map<std::string, ChunkSpan> spans = member->source_chunk_spans();
+        for (const auto& [source, unused] : states) {
+            if (!spans.contains(source)) {
+                dead_sources[collection].push_back(source);
+            }
+        }
+    }
+
     in_transaction(handle, [&] {
-        const auto run = [&](const char* sql, std::int64_t& counter) {
-            exec(handle, sql);
+        const auto count = [&](StatementPtr statement, std::int64_t& counter, const char* what) {
+            if (sqlite3_step(statement.get()) != SQLITE_DONE) {
+                fail(handle, what);
+            }
             counter += changes_of(handle);
         };
-        // Mentions whose chunk is gone: re-ingesting a source deletes and
-        // re-creates its rows, so this is routine, not exceptional.
-        run("DELETE FROM kg_mentions WHERE collection = ''"
-            " AND chunk_id NOT IN (SELECT id FROM chunks)",
-            out.mentions_pruned);
-        run("DELETE FROM kg_state WHERE collection = ''"
-            " AND source_file NOT IN (SELECT DISTINCT source FROM chunks)",
-            out.states_pruned);
+        // Rows from collections that are no longer members.
+        {
+            StatementPtr mentions =
+                prepare(handle, "DELETE FROM kg_mentions WHERE collection NOT IN (" +
+                                    placeholders(members.size()) + ")");
+            StatementPtr states = prepare(handle, "DELETE FROM kg_state WHERE collection NOT IN (" +
+                                                      placeholders(members.size()) + ")");
+            int index = 1;
+            for (const auto& [collection, unused] : members) {
+                bind_text(mentions.get(), index, collection);
+                bind_text(states.get(), index, collection);
+                ++index;
+            }
+            count(std::move(mentions), out.mentions_pruned,
+                  "could not prune an ex-member's mentions");
+            count(std::move(states), out.states_pruned, "could not prune an ex-member's states");
+        }
+        // Dead rows within surviving members: re-ingesting a source deletes
+        // and re-creates its chunks, so this is routine, not exceptional.
+        constexpr std::size_t kBatch = 500;
+        for (const auto& [collection, ids] : dead_chunks) {
+            for (std::size_t start = 0; start < ids.size(); start += kBatch) {
+                const std::size_t end = std::min(start + kBatch, ids.size());
+                StatementPtr remove = prepare(
+                    handle, "DELETE FROM kg_mentions WHERE collection = ? AND chunk_id IN (" +
+                                placeholders(end - start) + ")");
+                bind_text(remove.get(), 1, collection);
+                for (std::size_t i = start; i < end; ++i) {
+                    sqlite3_bind_int64(remove.get(), static_cast<int>(i - start) + 2, ids[i]);
+                }
+                count(std::move(remove), out.mentions_pruned, "could not prune dead mentions");
+            }
+        }
+        for (const auto& [collection, sources] : dead_sources) {
+            for (const std::string& source : sources) {
+                StatementPtr remove = prepare(
+                    handle, "DELETE FROM kg_state WHERE collection = ? AND source_file = ?");
+                bind_text(remove.get(), 1, collection);
+                bind_text(remove.get(), 2, source);
+                count(std::move(remove), out.states_pruned, "could not prune a vanished source");
+            }
+        }
         // Recompute rather than decrement: this also self-heals a count that
         // drifted for any other reason.
         exec(handle,
              "UPDATE kg_nodes SET mention_count ="
              " (SELECT COUNT(*) FROM kg_mentions WHERE node_id = kg_nodes.id)");
-        run("DELETE FROM kg_edges WHERE"
-            "   source_id IN (SELECT id FROM kg_nodes WHERE mention_count = 0)"
-            " OR target_id IN (SELECT id FROM kg_nodes WHERE mention_count = 0)",
-            out.edges_pruned);
-        run("DELETE FROM kg_nodes WHERE mention_count = 0", out.nodes_pruned);
+        count(prepare(handle,
+                      "DELETE FROM kg_edges WHERE"
+                      "   source_id IN (SELECT id FROM kg_nodes WHERE mention_count = 0)"
+                      " OR target_id IN (SELECT id FROM kg_nodes WHERE mention_count = 0)"),
+              out.edges_pruned, "could not prune orphaned edges");
+        count(prepare(handle, "DELETE FROM kg_nodes WHERE mention_count = 0"), out.nodes_pruned,
+              "could not prune orphaned nodes");
     });
     return out;
 }
@@ -479,9 +618,12 @@ void Store::delete_graph() {
     sqlite3* handle = impl_->connection.get();
     in_transaction(handle, [&] {
         // Nodes go through the FTS delete trigger, keeping the entity index
-        // in sync without a rebuild. Chunks are untouched.
+        // in sync without a rebuild. Community pseudo-chunks are graph
+        // content too, so they go with the graph; real chunks are untouched.
         for (const char* sql :
-             {"DELETE FROM kg_mentions", "DELETE FROM kg_edges", "DELETE FROM kg_nodes",
+             {"DELETE FROM kg_community_members", "DELETE FROM kg_communities",
+              "DELETE FROM chunks WHERE source LIKE 'graph://community/%'",
+              "DELETE FROM kg_mentions", "DELETE FROM kg_edges", "DELETE FROM kg_nodes",
               "DELETE FROM kg_state", "DELETE FROM graph_meta"}) {
             exec(handle, sql);
         }
@@ -508,6 +650,30 @@ std::string Store::graph_meta(std::string_view key) const {
         return {};
     }
     return column_text(select.get(), 0);
+}
+
+void Store::set_graph_members(const std::vector<std::string>& members) {
+    std::vector<std::string> sorted = members;
+    std::ranges::sort(sorted);
+    set_graph_meta(kGraphMetaMembers, nlohmann::json(sorted).dump());
+}
+
+std::vector<std::string> Store::graph_members() const {
+    const std::string recorded = graph_meta(kGraphMetaMembers);
+    if (recorded.empty()) {
+        return {};
+    }
+    const nlohmann::json parsed = nlohmann::json::parse(recorded, nullptr, false);
+    if (parsed.is_discarded() || !parsed.is_array()) {
+        return {};
+    }
+    std::vector<std::string> out;
+    for (const nlohmann::json& item : parsed) {
+        if (item.is_string()) {
+            out.push_back(item.get<std::string>());
+        }
+    }
+    return out;
 }
 
 }  // namespace apogee::embedstore

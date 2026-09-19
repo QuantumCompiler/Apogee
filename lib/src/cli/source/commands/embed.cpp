@@ -11,9 +11,11 @@
 #include <system_error>
 
 #include "agentloop/embed_func.h"
+#include "agentloop/graph_context.h"
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
 #include "backends/factory.h"
+#include "commands/graph.h"
 #include "embedstore/ingest.h"
 #include "embedstore/store.h"
 #include "harness/config.h"
@@ -158,7 +160,12 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
                        : agentloop::retriever_values_message("", value);
         });
 
-    ingest->callback([&context, in_collection, in_path, in_size, in_overlap, in_retriever,
+    auto in_graph = std::make_shared<bool>(false);
+    ingest->add_flag("--graph", *in_graph,
+                     "After a successful ingest, build the knowledge graph covering this "
+                     "collection (a named graph listing it, else its own)");
+
+    ingest->callback([&context, in_collection, in_path, in_size, in_overlap, in_retriever, in_graph,
                       size_option, overlap_option]() {
         require_plain_name(*in_collection);
 
@@ -300,6 +307,32 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
                 std::cerr << "apogee embed: could not register '" << *in_collection
                           << "' in config -- " << e.what() << "\n";
             }
+        }
+
+        // --graph: one command from documents to a queryable graph. The
+        // chain runs only after a successful ingest (a failure above threw),
+        // targets whichever graph covers the collection -- the first graphs:
+        // entry listing it by config membership alone, since the first
+        // chained build is what creates that graph's database -- else the
+        // collection's own, and loads a fresh config so it sees the entry
+        // the registration just wrote. Ingest's -m stays the embedding
+        // override; the extractor resolves as `graph build` resolves it.
+        if (*in_graph) {
+            GraphBuildRequest request;
+            request.name = *in_collection;
+            try {
+                const harness::Config fresh = harness::load_config(config_path);
+                if (const std::optional<agentloop::CoveringGraph> covering =
+                        agentloop::named_graph_covering(fresh, *in_collection,
+                                                        /*built_only=*/false);
+                    covering.has_value()) {
+                    request.name = covering->name;
+                }
+            } catch (const std::exception& e) {
+                fail(std::string{"--graph: the config cannot be read: "} + e.what());
+            }
+            std::cout << "\n";
+            run_graph_build(context, request);
         }
     });
 

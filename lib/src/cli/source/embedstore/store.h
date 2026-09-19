@@ -5,11 +5,14 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "embedstore/graph.h"
+#include "embedstore/graph_communities.h"
+#include "embedstore/graph_dedupe.h"
 #include "embedstore/graph_search.h"
 
 /// The chunk store: SQLite with an FTS5 index, one database per collection.
@@ -244,7 +247,13 @@ public:
     /// Links a node to a chunk it was extracted from, maintaining
     /// `mention_count`. Re-linking an existing pair is a no-op, so a
     /// re-extraction cannot inflate the count. Returns whether it was new.
+    /// The chunk is the collection's own (`collection = ''`).
     [[nodiscard]] bool add_mention(std::int64_t node_id, std::int64_t chunk_id);
+
+    /// The same, for a chunk in the member collection `collection` -- the
+    /// row a named graph writes. `''` is the collection's own graph.
+    [[nodiscard]] bool add_mention(std::int64_t node_id, std::string_view collection,
+                                   std::int64_t chunk_id);
 
     /// Stores the entity vector for a node; empty returns it to lexical-only.
     void update_node_embedding(std::int64_t node_id, const std::vector<float>& vector);
@@ -259,13 +268,29 @@ public:
     void set_source_state(std::string_view source, std::int64_t chunk_count,
                           std::int64_t max_chunk_id, std::string_view model);
 
+    /// The same, keyed under the member collection `collection`.
+    void set_source_state(std::string_view collection, std::string_view source,
+                          std::int64_t chunk_count, std::int64_t max_chunk_id,
+                          std::string_view model);
+
     /// Every source's extraction bookkeeping, keyed by source. Empty for an
-    /// unbuilt graph.
+    /// unbuilt graph. The collection's own rows (`''`).
     [[nodiscard]] std::map<std::string, SourceState> source_states() const;
 
+    /// The rows recorded under the member collection `collection`.
+    [[nodiscard]] std::map<std::string, SourceState> source_states(
+        std::string_view collection) const;
+
     /// Every source's live fingerprint -- what the planner compares against
-    /// `source_states`.
+    /// `source_states`. Community pseudo-chunks (`graph://` sources) are
+    /// left out: they are graph output, never extraction input.
     [[nodiscard]] std::map<std::string, ChunkSpan> source_chunk_spans() const;
+
+    /// Which of `ids` exist in this store's chunks table -- the
+    /// cross-database half of a named graph's reconcile, batched under the
+    /// bound-parameter limit.
+    [[nodiscard]] std::set<std::int64_t> chunk_ids_existing(
+        const std::vector<std::int64_t>& ids) const;
 
     /// A source's chunks in ordinal order -- the extraction unit.
     [[nodiscard]] std::vector<Chunk> chunks_by_source(std::string_view source) const;
@@ -274,20 +299,89 @@ public:
     /// exists, state rows for vanished sources, then -- after recomputing
     /// every `mention_count` from the surviving mentions -- zero-mention nodes
     /// and their edges. One transaction. Runs first on every build; safe at
-    /// any time.
+    /// any time. The single-member form of `reconcile_graph_multi`.
     [[nodiscard]] ReconcileResult reconcile_graph();
 
-    /// Clears every graph row -- nodes, edges, mentions, state, meta. The
-    /// tables stay; chunks are untouched.
+    /// The reconcile pass for a graph whose provenance spans member
+    /// collections: rows whose collection is no longer a member die (so a
+    /// member dropped from the config converges on the next build with no
+    /// special case), mentions whose chunk no longer exists in its member's
+    /// store and state rows for vanished sources are pruned per member, then
+    /// the usual recount and sweep. A null member reads as empty. Reads
+    /// across databases happen before the one write transaction.
+    [[nodiscard]] ReconcileResult reconcile_graph_multi(const MemberStores& members);
+
+    /// Clears every graph row -- nodes, edges, mentions, state, communities
+    /// and their pseudo-chunks, meta. The tables stay; real chunks are
+    /// untouched.
     void delete_graph();
 
     /// One `graph_meta` key. `graph_meta` returns empty when unset.
     void set_graph_meta(std::string_view key, std::string_view value);
     [[nodiscard]] std::string graph_meta(std::string_view key) const;
 
+    /// The member set a named graph was last built over, recorded sorted so
+    /// `stats` can compare it with the config's current list. Empty when
+    /// never built as a named graph.
+    void set_graph_members(const std::vector<std::string>& members);
+    [[nodiscard]] std::vector<std::string> graph_members() const;
+
+    // --- The knowledge graph: communities (embedstore/graph_communities.cpp)
+
+    /// Every stored community, largest first.
+    [[nodiscard]] std::vector<GraphCommunity> graph_communities() const;
+
+    /// A community's member nodes, most-mentioned first.
+    [[nodiscard]] std::vector<GraphNode> community_members(std::int64_t community_id) const;
+
+    /// Stores a freshly summarised community: an existing row with the same
+    /// key (a forced regeneration) is removed first, then the row, its
+    /// membership and its lexical pseudo-chunk are written in one
+    /// transaction. The summary is searchable at once through the chunk
+    /// index; its vector arrives later through `update_community_embedding`,
+    /// mirroring the build's batched embed phase. Returns the community id.
+    [[nodiscard]] std::int64_t replace_community(std::string_view member_key,
+                                                 const std::vector<std::int64_t>& members,
+                                                 std::string_view summary, std::string_view model);
+
+    /// Vectorises a community's pseudo-chunk so the summary is reachable by
+    /// vector search too. The chunk is re-written rather than updated in
+    /// place: `replace_source` is the one chunk write path.
+    void update_community_embedding(std::int64_t community_id, const std::vector<float>& vector);
+
+    /// Removes every stored community whose key is not in `keep` -- the
+    /// exact-staleness sweep -- with its membership and pseudo-chunk.
+    /// Returns how many went.
+    [[nodiscard]] std::int64_t prune_communities(const std::set<std::string>& keep);
+
+    /// Communities whose pseudo-chunk holds no vector, so a run with an
+    /// embedder can heal an earlier embed failure instead of needing a
+    /// forced regeneration.
+    [[nodiscard]] std::vector<std::int64_t> communities_without_vectors() const;
+
+    // --- The knowledge graph: dedupe (embedstore/graph_dedupe.cpp) ---------
+
+    /// Merges same-type nodes whose entity vectors exceed `threshold` cosine
+    /// similarity, union-find per type. Within each cluster the earliest node
+    /// (lowest id, the first extracted) survives: edges are repointed to it
+    /// (weights summed when the repoint collides with an existing edge,
+    /// would-be self-loops dropped), mentions are unioned and recounted, the
+    /// description merges first-non-empty (the survivor's vector cleared on
+    /// a text change), and the merged nodes' community memberships are
+    /// removed (derived; the next communities run recomputes). Nodes without
+    /// a vector and `decision` nodes are never considered. `dry_run` computes
+    /// the groups and writes nothing. One transaction.
+    [[nodiscard]] std::vector<MergeGroup> dedupe_nodes(double threshold, bool dry_run);
+
     // --- The knowledge graph: reads (embedstore/graph_search.cpp) -----------
 
     [[nodiscard]] GraphStats graph_stats() const;
+
+    /// `graph_stats` for a named graph, whose chunk coverage lives in its
+    /// member stores rather than its own chunks table: the totals summed over
+    /// members, with a per-member breakdown. A null member reports zero
+    /// chunks and is flagged missing.
+    [[nodiscard]] GraphStatsMulti graph_stats_multi(const MemberStores& members) const;
 
     /// Every node whose normalised name equals `name` -- one per type sharing
     /// it -- most-mentioned first. Empty for an unknown name, never an error.
@@ -306,9 +400,18 @@ public:
     /// then descending weight -- ready to group by relation.
     [[nodiscard]] std::vector<Neighbor> node_neighbors(std::int64_t node_id) const;
 
-    /// The chunks a node was extracted from, in source and ordinal order.
-    /// `limit` 0 or less returns all.
+    /// The chunks a node was extracted from, in source and ordinal order --
+    /// the collection's own (`''`). `limit` 0 or less returns all.
     [[nodiscard]] std::vector<Chunk> node_chunks(std::int64_t node_id, int limit) const;
+
+    /// The (collection, chunk) pairs a node was extracted from, by collection
+    /// then chunk id -- the named-graph counterpart of `node_chunks`, resolved
+    /// to text through the member stores by the caller. `limit` 0 or less
+    /// returns all.
+    [[nodiscard]] std::vector<ChunkRef> node_mention_refs(std::int64_t node_id, int limit) const;
+
+    /// The whole edge set -- the community detector's input.
+    [[nodiscard]] std::vector<GraphEdge> all_edges() const;
 
     /// Expands a retrieval turn through the graph. The seed set is the union
     /// of the entities mentioned by `seed_chunks` (the turn's retrieved
@@ -323,6 +426,13 @@ public:
                                          const std::vector<std::int64_t>& seed_nodes, int hops,
                                          int max_entities) const;
 
+    /// The same, with the seed chunks named by (collection, chunk) -- how a
+    /// named graph is seeded from a member's retrieval. The plain form is
+    /// this with every seed labelled `''`.
+    [[nodiscard]] Expansion graph_expand_labelled(const std::vector<ChunkRef>& seed_chunks,
+                                                  const std::vector<std::int64_t>& seed_nodes,
+                                                  int hops, int max_entities) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -332,7 +442,9 @@ private:
 /// v2 added `chunks.embedding` and `chunks.dim`, and the `embed_model` /
 /// `embed_dim` keys in `store_meta`. v3 added the nullable `chunks.metadata`
 /// column (knowledge records). v4 added the knowledge-graph tables (`kg_*`,
-/// `graph_meta`, the entity FTS index). An older store gains them on open.
-inline constexpr int kSchemaVersion = 4;
+/// `graph_meta`, the entity FTS index) and made chunk ids AUTOINCREMENT. v5
+/// added the community tables (`kg_communities`, `kg_community_members`). An
+/// older store gains them on open.
+inline constexpr int kSchemaVersion = 5;
 
 }  // namespace apogee::embedstore

@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 
+#include "agentloop/graph_context.h"
 #include "backends/mock.h"
 #include "embedstore/store.h"
 #include "events/bus.h"
@@ -159,6 +160,26 @@ struct Fixture {
                                       const nlohmann::json& body) const {
         return apogee::httpserver::admin_set_graph_enabled(context(), collection,
                                                            request("PUT", body));
+    }
+
+    [[nodiscard]] HttpResponse communities(std::string_view name, const nlohmann::json& body = {}) {
+        return apogee::httpserver::admin_build_communities(context(), *handler, jobs, workers, name,
+                                                           request("POST", body));
+    }
+
+    [[nodiscard]] HttpResponse list_communities(std::string_view name) const {
+        return apogee::httpserver::admin_list_communities(context(), name, request("GET"));
+    }
+
+    [[nodiscard]] HttpResponse dedupe(std::string_view name,
+                                      const nlohmann::json& body = {}) const {
+        return apogee::httpserver::admin_dedupe_graph(context(), name, request("POST", body));
+    }
+
+    /// A second member collection for a named graph.
+    void ingest_meetings() const {
+        Store store{home.path() / "embeddings" / "meetings.db"};
+        store.replace_source("c.md", {"Atlas was discussed at the Monday meeting."});
     }
 
     /// Waits for the job to leave `running`; a test never asserts on a
@@ -431,4 +452,245 @@ TEST_CASE("the graph routes sit behind the gate and dispatch through the mux",
     });
     CHECK(mux.dispatch(enable).status == 200);
     CHECK(apogee::harness::load_config(fixture.config_path).find_embedding("notes")->graph.enabled);
+}
+
+TEST_CASE(
+    "the graph routes resolve a graphs: entry first: a named build into its own database, "
+    "stats per member, an entity's chunks by collection, delete removing the file",
+    "[httpserver][admin][graph][named]") {
+    Fixture fixture{{MockTurn{std::string{kExtraction}}},
+                    true,
+                    false,
+                    "graphs:\n  work:\n    collections: [notes, meetings, absent]\n"};
+    // Unbuilt: stats are zeros with the graph's shape; the rest is 404.
+    HttpResponse response = fixture.stats("work");
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["nodes"] == 0);
+    CHECK(parsed(response)["graph"] == "work");
+    CHECK(parsed(response)["collections"].size() == 3);
+    CHECK(fixture.entity("work", "atlas").status == 404);
+    CHECK(fixture.remove("work").status == 404);
+    CHECK(fixture.build("work").status == 404);  // no member has data
+    fixture.ingest();
+    fixture.ingest_meetings();
+    const std::string config_before = bytes(fixture.config_path);
+    response = fixture.build("work");
+    REQUIRE(response.status == 202);
+    const apogee::httpserver::JobRecord done =
+        fixture.wait(parsed(response)["job_id"].get<std::string>());
+    INFO(done.error);
+    CHECK(done.status == JobStatus::Succeeded);
+    CHECK(done.result["graph"] == "work");
+    CHECK(done.result["collections"].size() == 3);
+    CHECK(done.result["files_planned"] == 3);
+    CHECK(done.result["nodes_upserted"] == 2);
+    CHECK(done.result["mentions_added"] == 6);
+    CHECK_FALSE(done.result.contains("enabled"));  // nothing to enable
+    CHECK(bytes(fixture.config_path) == config_before);
+    CHECK(std::filesystem::exists(apogee::agentloop::graph_db_path("work")));
+    CHECK(fixture.store().graph_stats().nodes == 0);  // the member was never written
+
+    response = fixture.stats("work");
+    REQUIRE(response.status == 200);
+    const nlohmann::json stats = parsed(response);
+    CHECK(stats["nodes"] == 2);
+    CHECK(stats["mentions"] == 6);
+    CHECK(stats["total_chunks"] == 3);
+    CHECK(stats["chunks_with_mentions"] == 3);
+    REQUIRE(stats["members"].size() == 3);
+    CHECK(stats["members"][0]["collection"] == "absent");
+    CHECK(stats["members"][0]["missing"] == true);
+    CHECK(stats["members"][1]["collection"] == "meetings");
+    CHECK(stats["members"][1]["mentions"] == 2);
+    CHECK(stats["members"][2]["collection"] == "notes");
+    CHECK(stats["members"][2]["chunks_with_mentions"] == 2);
+
+    response = fixture.entity("work", "atlas");
+    REQUIRE(response.status == 200);
+    const nlohmann::json atlas = parsed(response)["data"][0];
+    CHECK(atlas["mentions"] == 3);
+    REQUIRE(atlas["chunks"].size() == 3);
+    CHECK(atlas["chunks"][0]["collection"] == "meetings");
+    CHECK(atlas["chunks"][1]["collection"] == "notes");
+    CHECK(atlas["chunks"][1]["source"] == "a.md");
+
+    response = fixture.remove("work");
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["deleted"]["nodes"] == 2);
+    CHECK_FALSE(std::filesystem::exists(apogee::agentloop::graph_db_path("work")));
+    CHECK(apogee::harness::load_config(fixture.config_path).find_graph("work") != nullptr);
+}
+
+TEST_CASE(
+    "under a hand-made collision the routes resolve the graphs: entry first, as the CLI "
+    "does",
+    "[httpserver][admin][graph][named][collision]") {
+    // The ban keeps this from being written; a hand-edited config can still
+    // say it, and the rule is then what makes `check` right to fail it.
+    Fixture fixture{{MockTurn{std::string{kExtraction}}},
+                    true,
+                    false,
+                    "graphs:\n  notes:\n    collections: [meetings]\n"};
+    fixture.ingest();
+    const HttpResponse stats = fixture.stats("notes");
+    REQUIRE(stats.status == 200);
+    CHECK(parsed(stats)["graph"] == "notes");  // the graph, not the collection's own
+    CHECK(parsed(stats)["nodes"] == 0);
+    CHECK(fixture.entity("notes", "atlas").status == 404);  // unbuilt graph, not the store
+}
+
+TEST_CASE(
+    "POST /graph/{name}/communities runs the summariser as a job; GET lists; the "
+    "refusals",
+    "[httpserver][admin][graph][communities]") {
+    Fixture fixture;
+    CHECK(fixture.communities("notes").status == 404);  // no data
+    CHECK(fixture.list_communities("notes").status == 200);
+    CHECK(parsed(fixture.list_communities("notes"))["data"].empty());
+    fixture.ingest();
+    CHECK(fixture.communities("notes", nlohmann::json{{"min_size", -1}}).status == 400);
+    CHECK(fixture.communities("notes", nlohmann::json{{"model", "vendor"}}).status == 400);
+    CHECK(fixture.communities("../x").status == 400);
+    HttpResponse response = fixture.build("notes");
+    REQUIRE(response.status == 202);
+    REQUIRE(fixture.wait(parsed(response)["job_id"].get<std::string>()).status ==
+            JobStatus::Succeeded);
+    // The mock answers the extraction text as its "summary" -- prose enough.
+    response = fixture.communities("notes", nlohmann::json{{"min_size", 2}});
+    REQUIRE(response.status == 202);
+    const apogee::httpserver::JobRecord done =
+        fixture.wait(parsed(response)["job_id"].get<std::string>());
+    INFO(done.error);
+    CHECK(done.status == JobStatus::Succeeded);
+    CHECK(done.kind == "graph-communities");
+    CHECK(done.result["detected"] == 1);
+    CHECK(done.result["summarized"] == 1);
+    CHECK(done.result["unchanged"] == 0);
+    CHECK(done.result["embedded"] == 0);
+    // One plain call, a side request, the community prompt as the system
+    // message and no schema: prose, not JSON.
+    REQUIRE(fixture.provider->requests().size() == 3);  // two chunks, one summary
+    const apogee::harness::ChatRequest& summary = fixture.provider->requests().back();
+    CHECK(summary.transient.side_request);
+    CHECK(summary.transient.response_schema.empty());
+    CHECK(summary.messages.front().content.plain_text().find("corpus analyst") !=
+          std::string::npos);
+    response = fixture.list_communities("notes");
+    REQUIRE(response.status == 200);
+    const nlohmann::json listed = parsed(response)["data"];
+    REQUIRE(listed.size() == 1);
+    CHECK(listed[0]["size"] == 2);
+    CHECK(listed[0]["top_members"] == nlohmann::json({"Atlas", "Vault"}));
+    CHECK(listed[0]["summary"].get<std::string>().find("Atlas") != std::string::npos);
+    CHECK(fixture.store().graph_stats().communities == 1);
+    // Unchanged on a second run; forced regenerates.
+    response = fixture.communities("notes", nlohmann::json{{"min_size", 2}});
+    CHECK(fixture.wait(parsed(response)["job_id"].get<std::string>()).result["unchanged"] == 1);
+    response = fixture.communities("notes", nlohmann::json{{"min_size", 2}, {"force", true}});
+    CHECK(fixture.wait(parsed(response)["job_id"].get<std::string>()).result["summarized"] == 1);
+    // The metered default is refused by fall-through here too; 501 unserved.
+    Fixture metered{{MockTurn{std::string{kExtraction}}}, true, true};
+    metered.ingest();
+    response = metered.build("notes", nlohmann::json{{"model", "mock"}});
+    REQUIRE(response.status == 202);
+    REQUIRE(metered.wait(parsed(response)["job_id"].get<std::string>()).status ==
+            JobStatus::Succeeded);
+    const HttpResponse refused = metered.communities("notes");
+    CHECK(refused.status == 400);
+    CHECK(parsed(refused)["error"]["message"].get<std::string>().find("metered") !=
+          std::string::npos);
+    CHECK(metered.communities("notes", nlohmann::json{{"model", "mock"}}).status == 202);
+    Fixture unserved{{MockTurn{std::string{kExtraction}}}, /*serve=*/false};
+    unserved.ingest();
+    CHECK(unserved.communities("notes").status == 501);
+}
+
+TEST_CASE("POST /graph/{name}/dedupe merges synchronously, previews with dry_run, and validates",
+          "[httpserver][admin][graph][dedupe]") {
+    Fixture fixture;
+    CHECK(fixture.dedupe("notes").status == 404);
+    fixture.ingest();
+    CHECK(fixture.dedupe("notes", nlohmann::json{{"threshold", 0}}).status == 400);
+    CHECK(fixture.dedupe("notes", nlohmann::json{{"threshold", "x"}}).status == 400);
+    CHECK(fixture.dedupe("notes", nlohmann::json{{"dry_run", 1}}).status == 400);
+    HttpResponse response = fixture.build("notes");
+    REQUIRE(response.status == 202);
+    REQUIRE(fixture.wait(parsed(response)["job_id"].get<std::string>()).status ==
+            JobStatus::Succeeded);
+    {
+        Store store = fixture.store();
+        const std::int64_t atlas = store.find_nodes("Atlas").front().id;
+        store.update_node_embedding(atlas, {1.0F, 0.0F, 0.0F});
+        const std::int64_t twin = store.upsert_node("Atlas Prime", "system", "the twin").id;
+        store.update_node_embedding(twin, {0.99F, 0.1F, 0.0F});
+        (void)store.add_mention(twin, store.chunks_by_source("b.md").front().id);
+    }
+    response = fixture.dedupe("notes", nlohmann::json{{"dry_run", true}});
+    REQUIRE(response.status == 200);
+    nlohmann::json report = parsed(response);
+    CHECK(report["dry_run"] == true);
+    CHECK(report["threshold"] == 0.92);
+    CHECK(report["merged_nodes"] == 1);
+    REQUIRE(report["groups"].size() == 1);
+    CHECK(report["groups"][0]["kept"] == "Atlas");
+    CHECK(report["groups"][0]["kept_type"] == "system");
+    CHECK(report["groups"][0]["merged"] == nlohmann::json({"Atlas Prime"}));
+    CHECK(fixture.store().find_nodes("Atlas Prime").size() == 1);
+    response = fixture.dedupe("notes", nlohmann::json{{"threshold", 0.9}});
+    REQUIRE(response.status == 200);
+    report = parsed(response);
+    CHECK(report["dry_run"] == false);
+    CHECK(report["merged_nodes"] == 1);
+    CHECK(fixture.store().find_nodes("Atlas Prime").empty());
+    CHECK(parsed(fixture.dedupe("notes"))["merged_nodes"] == 0);
+}
+
+TEST_CASE("the new graph routes sit behind the gate and dispatch through the mux",
+          "[httpserver][admin][graph][mux][global]") {
+    Fixture fixture;
+    apogee::httpserver::AdminOptions options;
+    options.config_path = fixture.config_path;
+    options.startup = fixture.config;
+    apogee::httpserver::AdminHandler admin{options, fixture.jobs, fixture.bus};
+    const apogee::httpserver::Mux mux{*fixture.handler, admin, "secret"};
+
+    HttpRequest anonymous;
+    anonymous.method = "GET";
+    anonymous.path = "/v1/admin/graphs";
+    CHECK(mux.dispatch(anonymous).status == 401);
+    HttpRequest graphs = anonymous;
+    graphs.headers["authorization"] = "Bearer secret";
+    HttpResponse response = mux.dispatch(graphs);
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["data"].empty());
+
+    HttpRequest create = graphs;
+    create.method = "POST";
+    create.body = R"({"name": "work", "collections": ["notes"]})";
+    CHECK(mux.dispatch(create).status == 201);
+    HttpRequest one = graphs;
+    one.path = "/v1/admin/graphs/work";
+    CHECK(mux.dispatch(one).status == 200);
+    one.method = "PUT";
+    one.body = R"({"collections": ["notes", "meetings"]})";
+    CHECK(mux.dispatch(one).status == 200);
+    one.method = "PATCH";
+    CHECK(mux.dispatch(one).status == 405);
+
+    // The data routes, named-aware: `work` resolves as the graph.
+    HttpRequest communities = graphs;
+    communities.path = "/v1/admin/graph/work/communities";
+    CHECK(mux.dispatch(communities).status == 200);  // the list: empty, unbuilt
+    communities.method = "POST";
+    CHECK(mux.dispatch(communities).status == 404);  // unbuilt
+    HttpRequest dedupe = communities;
+    dedupe.path = "/v1/admin/graph/work/dedupe";
+    CHECK(mux.dispatch(dedupe).status == 404);
+    dedupe.method = "GET";
+    CHECK(mux.dispatch(dedupe).status == 405);
+
+    one.method = "DELETE";
+    one.body.clear();
+    CHECK(mux.dispatch(one).status == 200);
+    CHECK(mux.dispatch(one).status == 404);
 }

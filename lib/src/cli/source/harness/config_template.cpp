@@ -308,6 +308,24 @@ backends:
 #     #   hops: 1              # expansion depth at retrieval (1 or 2)
 #     #   max_entities: 8      # neighbour entities an expansion injects, at most
 
+# ── Named graphs (one knowledge graph over several collections) ──────────────
+# A per-collection graph cannot see across collection boundaries: the same
+# person, system or project mentioned in `docs`, `meetings` and `tickets`
+# becomes three disconnected twins. A named graph spans its member
+# collections into ONE node per entity, in its own database under
+# embeddings/graphs/, built by `apogee graph build <name>` (the first build
+# creates it -- an installer never does). A built named graph takes retrieval
+# precedence for its members; their own graph: blocks are left as they are.
+# Managed by `apogee config add-graph` / `delete-graph`. A graph's name must
+# not collide with a collection's -- `apogee check` fails the collision.
+#
+# graphs:
+#   work:
+#     collections: [docs, meetings]   # the member collections
+#     # extract_backend: local        # the backend `graph build work` extracts with
+#     # hops: 1                       # expansion depth at retrieval (1 or 2)
+#     # max_entities: 8               # neighbour entities an expansion injects, at most
+
 # ── Knowledge (captured decisions) ───────────────────────────────────────────
 # `apogee knowledge capture` distils a conversation into one canonical record
 # -- the why behind a decision, what was chosen, whether it shipped -- and

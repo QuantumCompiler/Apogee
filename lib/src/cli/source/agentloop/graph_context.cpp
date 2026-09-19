@@ -1,6 +1,9 @@
 #include "agentloop/graph_context.h"
 
+#include <system_error>
 #include <utility>
+
+#include "harness/layout.h"
 
 namespace apogee::agentloop {
 namespace {
@@ -37,6 +40,18 @@ std::string entity_line(const embedstore::GraphNode& node) {
 GraphSection build_graph_section(const embedstore::Store& store, std::string_view collection,
                                  const std::vector<std::int64_t>& seed_chunks,
                                  std::string_view lexical_query, int hops, int max_entities) {
+    std::vector<embedstore::ChunkRef> refs;
+    refs.reserve(seed_chunks.size());
+    for (const std::int64_t id : seed_chunks) {
+        refs.push_back(embedstore::ChunkRef{.collection = "", .chunk_id = id});
+    }
+    return build_graph_section_labelled(store, collection, refs, lexical_query, hops, max_entities);
+}
+
+GraphSection build_graph_section_labelled(const embedstore::Store& store, std::string_view header,
+                                          const std::vector<embedstore::ChunkRef>& seed_chunks,
+                                          std::string_view lexical_query, int hops,
+                                          int max_entities) {
     GraphSection section;
     std::vector<std::int64_t> seed_nodes;
     if (!lexical_query.empty()) {
@@ -49,7 +64,7 @@ GraphSection build_graph_section(const embedstore::Store& store, std::string_vie
         return section;
     }
     const embedstore::Expansion expansion =
-        store.graph_expand(seed_chunks, seed_nodes, hops, max_entities);
+        store.graph_expand_labelled(seed_chunks, seed_nodes, hops, max_entities);
     if (expansion.empty()) {
         return section;
     }
@@ -69,7 +84,7 @@ GraphSection build_graph_section(const embedstore::Store& store, std::string_vie
         out += '\n';
         return true;
     };
-    if (!append("[Knowledge graph: " + std::string{collection} + "]")) {
+    if (!append("[Knowledge graph: " + std::string{header} + "]")) {
         return section;
     }
     bool truncated = false;
@@ -99,6 +114,59 @@ GraphSection build_graph_section(const embedstore::Store& store, std::string_vie
     }
     section.text = std::move(out);
     return section;
+}
+
+std::filesystem::path graph_db_path(std::string_view name) {
+    return harness::embeddings_dir() / "graphs" / (std::string{name} + ".db");
+}
+
+std::optional<CoveringGraph> named_graph_covering(const harness::Config& config,
+                                                  std::string_view collection, bool built_only) {
+    for (const auto& [name, graph] : config.graphs) {
+        const harness::CaseInsensitiveLess less;
+        bool member = false;
+        for (const std::string& candidate : graph.collections) {
+            if (!less(candidate, collection) && !less(collection, candidate)) {
+                member = true;
+                break;
+            }
+        }
+        if (!member) {
+            continue;
+        }
+        if (built_only) {
+            std::error_code code;
+            if (!std::filesystem::exists(graph_db_path(name), code)) {
+                continue;  // never built: the member keeps its own graph
+            }
+        }
+        return CoveringGraph{.name = name, .config = &graph};
+    }
+    return std::nullopt;
+}
+
+TurnGraph resolve_turn_graph(const harness::Config& config, std::string_view collection) {
+    TurnGraph out;
+    if (const std::optional<CoveringGraph> named =
+            named_graph_covering(config, collection, /*built_only=*/true);
+        named.has_value()) {
+        out.enabled = true;
+        out.store_path = graph_db_path(named->name);
+        out.name = named->name;
+        out.seed_collection = std::string{collection};
+        out.hops = named->config->hops;
+        out.max_entities = named->config->max_entities;
+        return out;
+    }
+    const harness::EmbeddingConfig* entry = config.find_embedding(collection);
+    if (entry == nullptr || !entry->graph.enabled) {
+        return out;
+    }
+    out.enabled = true;
+    out.name = std::string{collection};
+    out.hops = entry->graph.hops;
+    out.max_entities = entry->graph.max_entities;
+    return out;
 }
 
 }  // namespace apogee::agentloop

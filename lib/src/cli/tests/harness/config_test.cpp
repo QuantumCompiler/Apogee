@@ -564,3 +564,50 @@ TEST_CASE("knowledge: parses auto_capture and db, defaults the collection, and r
     CHECK(std::string{apogee::harness::config_template()}.find("#   auto_capture: false") !=
           std::string::npos);
 }
+
+TEST_CASE(
+    "a graphs: section parses in file order, defaults, validates, and refuses a fold "
+    "collision",
+    "[config][graphs]") {
+    const auto config = apogee::harness::parse_config(R"YAML(
+graphs:
+  work:
+    collections: [docs, meetings]
+    extract_backend: local
+    hops: 2
+    max_entities: 4
+  bare:
+    collections: [tickets]
+)YAML",
+                                                      "<test>");
+    REQUIRE(config.graphs.size() == 2);
+    CHECK(config.graph_names() == std::vector<std::string>{"work", "bare"});
+    const apogee::harness::NamedGraphConfig* work = config.find_graph("WORK");
+    REQUIRE(work != nullptr);
+    CHECK(work->collections == std::vector<std::string>{"docs", "meetings"});
+    CHECK(work->extract_backend == "local");
+    CHECK(work->hops == 2);
+    CHECK(work->max_entities == 4);
+    const apogee::harness::NamedGraphConfig* bare = config.find_graph("bare");
+    REQUIRE(bare != nullptr);
+    CHECK(bare->extract_backend.empty());
+    CHECK(bare->hops == 1);
+    CHECK(bare->max_entities == 8);
+    CHECK(config.find_graph("nope") == nullptr);
+    CHECK(apogee::harness::parse_config("", "<test>").graphs.empty());
+
+    CHECK_THROWS_AS(apogee::harness::parse_config("graphs:\n  w:\n    hops: 3\n", "<test>"),
+                    apogee::harness::ConfigError);
+    CHECK_THROWS_AS(apogee::harness::parse_config("graphs:\n  w:\n    max_entities: 0\n", "<test>"),
+                    apogee::harness::ConfigError);
+    CHECK_THROWS_AS(
+        apogee::harness::parse_config("graphs:\n  w:\n    collections: docs\n", "<test>"),
+        apogee::harness::ConfigError);
+    CHECK_THROWS_AS(
+        apogee::harness::parse_config("graphs:\n  Work:\n    collections: [a]\n  work:\n"
+                                      "    collections: [b]\n",
+                                      "<test>"),
+        apogee::harness::ConfigError);
+    // The shipped template ships the section commented out.
+    CHECK(load_text(apogee::harness::config_template()).graphs.empty());
+}

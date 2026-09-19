@@ -560,43 +560,60 @@ failed.
 ### `POST /v1/admin/graph/{id}/build`
 
 The twin of `apogee graph build {id}`: the extraction clerk over every stale
-chunk of collection `{id}`, into the `kg_*` tables inside the collection's own
-database. One generation call per chunk, so it is an **async job**: `202
-{"job_id": "job_…"}` at once, progress as `admin.job.*` events on
-`GET /v1/admin/events`, and the finished counts at `GET /v1/admin/jobs/{id}`
-(`files_planned`, `files_extracted`, `chunks_extracted`, `chunks_failed`,
-`nodes_upserted`, `edges_upserted`, `mentions_added`, `entities_embedded`,
-`record_nodes`, `supersedes_edges`, `supersedes_skipped`, `limit_hit`, an
-`embed_error` when entity vectors stopped early, and `enabled: true` the first
-time the build set `graph.enabled` on the collection's `embeddings:` entry --
-through the same config editor the CLI uses, byte-identical; a `config_warning`
-when it could not). `DELETE /v1/admin/jobs/{id}` cancels between chunks; what
-finished stays, and the next build resumes.
+chunk, into the `kg_*` tables. `{id}` is resolved **graphs-first**, exactly
+as the CLI resolves it: a `graphs:` entry names a named multi-collection
+graph (see `/v1/admin/graphs`), built over its member collections into the
+graph's own database under `embeddings/graphs/`; anything else is a
+collection, built into that collection's own database. One generation call
+per chunk, so it is an **async job**: `202 {"job_id": "job_…"}` at once,
+progress as `admin.job.*` events on `GET /v1/admin/events` (a named build's
+progress names the member being extracted), and the finished counts at
+`GET /v1/admin/jobs/{id}` (`files_planned`, `files_extracted`,
+`chunks_extracted`, `chunks_failed`, `nodes_upserted`, `edges_upserted`,
+`mentions_added`, `entities_embedded`, `record_nodes`, `supersedes_edges`,
+`supersedes_skipped`, `limit_hit`, an `embed_error` when entity vectors
+stopped early; for a collection `collection` and `enabled: true` the first
+time the build set `graph.enabled` on its `embeddings:` entry -- through the
+same config editor the CLI uses, byte-identical; a `config_warning` when it
+could not; for a named graph `graph` and `collections`, and nothing enabled:
+the entry is the enablement). `DELETE /v1/admin/jobs/{id}` cancels between
+chunks; what finished stays, and the next build resumes.
 
 Body, every field optional: `model` (the extraction backend), `force`
 (re-extract every source), `limit` (stop after N chunks). The backend resolves
-as the CLI resolves it -- `model` > the collection's `graph.extract_backend`
-> the extraction role > the default -- and must be a served backend. **A full
-build never runs on a metered backend on Apogee's initiative**: a fall-through
-to a metered default is a `400` naming the three ways to say so. `400` for a
-vendor-CLI or unserved backend (as a chat request's `model` would get), `404`
-when the collection has no data, `501` when the server serves no generation
-backend. Entity vectors follow the embedding spend rule: embedded through the
-collection's embedder when it is unmetered or the collection pins `retriever:
-vector`, otherwise the graph is full-text searchable and complete.
+as the CLI resolves it -- `model` > the entry's `extract_backend` (a
+collection's `graph:` block, or a named graph's own) > the extraction role
+> the default -- and must be a served backend. **A full build never runs on
+a metered backend on Apogee's initiative**: a fall-through to a metered
+default is a `400` naming the three ways to say so. `400` for a vendor-CLI or
+unserved backend (as a chat request's `model` would get), `404` when the
+collection has no data or no member of a named graph has any, `501` when the
+server serves no generation backend. Entity vectors follow the embedding
+spend rule: a collection's through its own embedder when it is unmetered or
+the collection pins `retriever: vector`; a named graph's through the default
+chain -- its vectors are its own, whatever its members' chunk embedders --
+otherwise the graph is full-text searchable and complete.
 
 Builds are incremental and resumable: a source is re-extracted only when it
-is stale -- no state row, its chunk count changed, its highest chunk id moved
-(a same-count re-ingest is still caught), or the extraction model changed.
-`--dry-run` is CLI-only. Every knowledge record in the collection is
+is stale -- no state row under its collection, its chunk count changed, its
+highest chunk id moved (a same-count re-ingest is still caught), or the
+extraction model changed. A named graph **rebuilds, never absorbs**: a
+member's own graph is neither consulted nor migrated, and a member removed
+from the entry has its rows reconciled away on the next build. `--dry-run`
+is CLI-only. Every knowledge record in a collection -- or in any member -- is
 materialised as a `decision` node on every build, deterministically.
 
 ### `GET /v1/admin/graph/{id}/stats`
 
 `200` with `{nodes, edges, mentions, nodes_by_type, nodes_with_vectors,
-total_chunks, chunks_with_mentions, stale_files, failed_chunks[,
-extract_model]}`. An unbuilt graph, or a collection with no data yet, reports
-zeros -- never an error, so a client polling an empty layer sees a shape.
+total_chunks, chunks_with_mentions, stale_files, failed_chunks, communities[,
+extract_model]}`. For a named graph also `graph`, `collections`, the graph's
+own `embed_model` when entities were embedded, and `members`: one
+`{collection, mentions, total_chunks, chunks_with_mentions, stale_files[,
+missing: true]}` per member, coverage read from the member's own store, a
+missing member reporting zero chunks. An unbuilt graph, or a collection with
+no data yet, reports zeros -- never an error, so a client polling an empty
+layer sees a shape.
 
 ### `GET /v1/admin/graph/{id}/entity`
 
@@ -605,16 +622,73 @@ per type sharing the name -- then, when nothing matches exactly, the top
 full-text hit with `"fuzzy": true` and `also_matched` naming the runners-up.
 `200 {"data": [{name, type, description?, mentions, dim, status?, discipline?,
 relations: [{relation, direction: "out" | "in", peer, peer_type, weight,
-description?}], chunks: [{source, chunk, text}]}], "fuzzy": bool}`; a
-`decision` node carries its record's `status` and `discipline`. `400` without
-a name; `404` when the collection has no data or nothing matches.
+description?}], chunks: [{collection?, source, chunk, text}]}], "fuzzy":
+bool}`; a `decision` node carries its record's `status` and `discipline`; in
+a named graph each supporting chunk names the member `collection` it lives
+in, resolved through that member's store. `400` without a name; `404` when
+the graph is unbuilt, the collection has no data, or nothing matches.
+
+### `POST /v1/admin/graph/{id}/communities`
+
+The twin of `apogee graph communities {id}`: the graph's **global layer**.
+The nodes are partitioned into thematic clusters by deterministic weighted
+label propagation over the extracted relations -- no model in the detection
+-- and each cluster of at least `min_size` (default 3) entities is summarised
+with one generation call under a compiled-in prompt, the summary stored as
+an ordinary retrievable chunk under a `graph://community/<id>` source, so
+"what are the main themes?" is answered by plain retrieval on any
+retriever. A community's identity is its exact member set: an unchanged
+community costs nothing, a changed one is pruned and regenerated, `force`
+regenerates all. One call per new or changed cluster, so it is an **async
+job** (`graph-communities`): `202 {"job_id"}`, progress `summarising
+communities {done, total}`, and at `GET /v1/admin/jobs/{id}` the counts
+`{detected, summarized, unchanged, failed, pruned, embedded[, embed_error]}`
+-- a summariser failure is soft (the community is skipped and an existing
+summary kept). Summary vectors follow the same spend rule as the build's
+entity vectors, and a summary still without one is vectorised on the next
+run with an embedder.
+
+Body, every field optional: `model`, `force`, `min_size`. The summariser
+resolves exactly as the build's extractor does, with the same refusals:
+`400` for a metered default reached by fall-through, a vendor CLI, or an
+unserved backend; `404` for an unbuilt graph or a collection with no data;
+`501` when the server serves no generation backend. A named graph's
+summaries live in its own database and are listable here; they do not
+surface through its members' retrieval.
+
+### `GET /v1/admin/graph/{id}/communities`
+
+The stored communities, largest first: `200 {"object": "list", "data": [{id,
+size, summary, model?, top_members}]}` with the three most-mentioned member
+names. An unbuilt graph lists as empty, never an error.
+
+### `POST /v1/admin/graph/{id}/dedupe`
+
+The twin of `apogee graph dedupe {id}`: merges same-type entities whose
+entity vectors exceed `threshold` cosine similarity (default `0.92`) -- the
+"K8s" versus "Kubernetes" problem the exact name key cannot catch. The
+earliest-extracted node survives: edges are repointed to it (weights summed
+when they collide, would-be self-loops dropped), mentions unioned and
+recounted, descriptions merged first-non-empty (the survivor's vector
+cleared on a text change), and the merged nodes' community memberships
+removed (the next communities run recomputes). Entities without a vector are
+never considered, and **`decision` nodes are never merged**. Synchronous --
+storage and cosine, no generation -- and **never automatic**: `200
+{"groups": [{kept, kept_type, merged: [names]}], "merged_nodes", "threshold",
+"dry_run"}`; with `"dry_run": true` the groups are computed and nothing is
+written. `400` for a threshold outside `(0, 1]`; `404` for an unbuilt graph
+or a collection with no data.
 
 ### `DELETE /v1/admin/graph/{id}`
 
-Clears every graph row of the collection -- nodes, edges, mentions, state --
-and returns `{"deleted": {nodes, edges, mentions}}`. The chunks, their
-vectors and the config entry are untouched; the next build starts from
-scratch. `404` when the collection has no data.
+For a collection: clears every graph row -- nodes, edges, mentions, state,
+communities and their summary chunks -- and returns `{"deleted": {nodes,
+edges, mentions}}`; the real chunks, their vectors and the config entry are
+untouched, and the next build starts from scratch. For a named graph:
+removes the graph's own database file (everything in it is derived) and
+returns the same shape; the member collections and the `graphs:` entry are
+untouched -- `DELETE /v1/admin/graphs/{id}` removes the entry. `404` when
+there is nothing built.
 
 ### `PUT /v1/admin/embeddings/{id}/graph`
 
@@ -622,8 +696,54 @@ The twin of the build's auto-enable write. Body `{"enabled": true | false}`;
 sets `embeddings.{id}.graph.enabled` through the one config editor -- the
 value replaced in place or a `graph:` block appended to the entry, every
 other byte kept -- and answers `{"collection", "enabled"}`. What gates
-retrieval-time expansion on every surface. `404` when the entry does not
-exist under `embeddings:`; `400` for a body without the boolean.
+retrieval-time expansion through a collection's own graph on every surface.
+(A built named graph covering the collection takes precedence regardless;
+the block is left as it is and resumes the moment the collection leaves.)
+`404` when the entry does not exist under `embeddings:`; `400` for a body
+without the boolean.
+
+### `GET /v1/admin/graphs`
+
+The `graphs:` entries -- named graphs spanning several collections, the
+twins of `apogee config add-graph` / `delete-graph`. `200 {"object": "list",
+"data": [{name, collections, extract_backend?, hops, max_entities, built}]}`,
+`built` reporting whether the graph's database exists. Config only: the data
+routes are `/v1/admin/graph/{id}/*` above. A collection covered by a built
+entry expands through it at retrieval, cross-collection; the first entry
+listing a collection wins a double-listing, and an unbuilt entry covers
+nothing.
+
+### `POST /v1/admin/graphs`
+
+Adds an entry through the same comment-preserving transform the CLI uses,
+byte-identical. Body: `name` and `collections` (a non-empty list of
+collection names) required; `extract_backend`, `hops` (1 or 2),
+`max_entities` optional. The CLI's rules, answered as `400`: a plain name, at
+least one member, **no collision with a collection name** (resolution is
+graphs-first, so a collision would make the collection's own graph
+unreachable), a configured `extract_backend` when one is named, knobs in
+range. A member that is not configured yet is a `warnings` entry, never a
+refusal -- ingest registers collections on first use. `201 {"data": {…},
+"warnings"?: […]}`; `409` when the name exists -- `PUT` replaces.
+
+### `GET /v1/admin/graphs/{id}`
+
+One entry, `200 {"data": {…}}` in the shape above; `404` when not
+configured.
+
+### `PUT /v1/admin/graphs/{id}`
+
+Replaces the entry in place, under the same rules as `POST`; a body `name`,
+when present, must match the path (`400` otherwise). `200 {"data": {…}}`;
+`404` when not configured. The graph's database is untouched -- the next
+build converges on the new membership.
+
+### `DELETE /v1/admin/graphs/{id}`
+
+Removes the entry and answers `{"deleted": name}`. The graph's database is
+left on disk exactly as `apogee config delete-graph` leaves it --
+`DELETE /v1/admin/graph/{id}` while the entry still exists removes the data.
+`404` when not configured.
 
 ### `POST /v1/admin/knowledge`
 
@@ -730,8 +850,11 @@ Cancels a running job and returns its record. A cancelled job stays cancelled:
 a worker that dies afterwards cannot turn it into `failed`. Idempotent on a
 finished job; `404` when unknown.
 
-The first job kind is `graph-build` (`POST /v1/admin/graph/{id}/build`); a
-server-local ingest and a model pull arrive with the routes that own them.
+The job kinds are `graph-build` (`POST /v1/admin/graph/{id}/build`) and
+`graph-communities` (`POST /v1/admin/graph/{id}/communities`); a server-local
+ingest and a model pull arrive with the routes that own them -- and with the
+ingest route, `"graph": true` on its body to chain the covering graph's build
+after a successful ingest, the twin of `apogee embed ingest --graph`.
 
 ## What this server does not do
 

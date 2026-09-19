@@ -134,6 +134,13 @@ add_executable(apogee_tests
     agentloop/graph_context_test.cpp
     commands/graph_test.cpp
     httpserver/admin_graph_test.cpp
+    embedstore/graph_communities_test.cpp
+    embedstore/graph_dedupe_test.cpp
+    embedstore/graph_multi_test.cpp
+    graph/communities_test.cpp
+    graph/graph_multi_test.cpp
+    agentloop/graph_named_test.cpp
+    httpserver/admin_graphs_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h

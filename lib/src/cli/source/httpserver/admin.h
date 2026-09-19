@@ -10,6 +10,7 @@
 #include "httpserver/admin_config.h"
 #include "httpserver/admin_events.h"
 #include "httpserver/admin_graph.h"
+#include "httpserver/admin_graphs.h"
 #include "httpserver/admin_knowledge.h"
 #include "httpserver/http_types.h"
 #include "httpserver/jobs.h"
@@ -75,16 +76,28 @@ public:
     [[nodiscard]] HttpResponse patch_knowledge(const HttpRequest& request, std::string_view id);
     [[nodiscard]] HttpResponse delete_knowledge(const HttpRequest& request, std::string_view id);
 
-    /// The graph routes: the build is an async job on the plane's harness.
+    /// The graph routes: `{name}` graphs-first; the build and the community
+    /// summaries are async jobs on the plane's harness, dedupe synchronous.
     [[nodiscard]] HttpResponse build_graph(Handler& plane, const HttpRequest& request,
-                                           std::string_view collection);
-    [[nodiscard]] HttpResponse graph_stats(const HttpRequest& request, std::string_view collection);
-    [[nodiscard]] HttpResponse graph_entity(const HttpRequest& request,
-                                            std::string_view collection);
-    [[nodiscard]] HttpResponse delete_graph(const HttpRequest& request,
-                                            std::string_view collection);
+                                           std::string_view name);
+    [[nodiscard]] HttpResponse graph_stats(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse graph_entity(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse delete_graph(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse set_graph_enabled(const HttpRequest& request,
                                                  std::string_view collection);
+    [[nodiscard]] HttpResponse build_communities(Handler& plane, const HttpRequest& request,
+                                                 std::string_view name);
+    [[nodiscard]] HttpResponse list_communities(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse dedupe_graph(const HttpRequest& request, std::string_view name);
+
+    /// The `graphs:` config slice -- the twins of `config add-graph` /
+    /// `delete-graph`.
+    [[nodiscard]] HttpResponse list_graphs(const HttpRequest& request);
+    [[nodiscard]] HttpResponse create_graph(const HttpRequest& request);
+    [[nodiscard]] HttpResponse get_graph(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse put_graph(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse delete_graph_config(const HttpRequest& request,
+                                                   std::string_view name);
 
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);

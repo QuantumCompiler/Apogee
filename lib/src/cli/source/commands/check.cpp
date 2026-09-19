@@ -769,6 +769,68 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Fail, "Graph", label, std::string{"unreadable -- "} + e.what());
         }
     }
+
+    // Every graphs: entry: the collision ban (a failure -- resolution is
+    // graphs-first, so the collection's own graph becomes unreachable),
+    // members, the extractor, and whether it is built. check never edits
+    // config.
+    for (const auto& [name, graph] : inputs.config.graphs) {
+        const std::string label = "named graph: " + name;
+        const std::filesystem::path collection_db = inputs.home / "embeddings" / (name + ".db");
+        if (inputs.config.find_embedding(name) != nullptr ||
+            std::filesystem::exists(collection_db, code)) {
+            add(report, Status::Fail, "Graph", label,
+                "collides with a collection name -- the collection's own graph becomes "
+                "unreachable",
+                "rename the graph: apogee config delete-graph " + name + ", then add-graph");
+            continue;
+        }
+        if (graph.collections.empty()) {
+            add(report, Status::Fail, "Graph", label, "no member collections",
+                "apogee config add-graph " + name + " --collections <a,b> --force");
+            continue;
+        }
+        if (!graph.extract_backend.empty() &&
+            inputs.config.find_backend(graph.extract_backend) == nullptr) {
+            add(report, Status::Fail, "Graph", label,
+                "extract_backend names a backend that is not configured: '" +
+                    graph.extract_backend + "'",
+                "set extract_backend to a configured backend, or remove it to use the "
+                "extraction role");
+            continue;
+        }
+        bool members_ok = true;
+        for (const std::string& member : graph.collections) {
+            const std::filesystem::path member_db = inputs.home / "embeddings" / (member + ".db");
+            if (inputs.config.find_embedding(member) == nullptr &&
+                !std::filesystem::exists(member_db, code)) {
+                add(report, Status::Fail, "Graph", label,
+                    "member collection '" + member + "' does not exist",
+                    "apogee embed ingest " + member +
+                        " <path>, or remove it from the graph's collections");
+                members_ok = false;
+            }
+        }
+        if (!members_ok) {
+            continue;
+        }
+        std::string members;
+        for (const std::string& member : graph.collections) {
+            members += (members.empty() ? "" : ", ") + member;
+        }
+        const std::string detail =
+            "over [" + members + "]; hops " + std::to_string(graph.hops) + ", max_entities " +
+            std::to_string(graph.max_entities) + ", extractor " +
+            (graph.extract_backend.empty() ? std::string{"(the extraction role)"}
+                                           : graph.extract_backend);
+        const std::filesystem::path db = inputs.home / "embeddings" / "graphs" / (name + ".db");
+        if (std::filesystem::exists(db, code)) {
+            add(report, Status::Ok, "Graph", label, detail + "; built");
+        } else {
+            add(report, Status::Ok, "Graph", label, detail + "; not yet built",
+                "apogee graph build " + name);
+        }
+    }
 }
 
 CheckReport run_checks(const CheckInputs& inputs) {

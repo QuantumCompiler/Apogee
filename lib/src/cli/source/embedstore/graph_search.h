@@ -18,7 +18,8 @@
 namespace apogee::embedstore {
 
 /// Aggregate information about a collection's graph. Chunk totals and
-/// coverage count the collection's real chunks.
+/// coverage count the collection's real chunks -- community pseudo-chunks
+/// (`graph://` sources) are graph output, not corpus input.
 struct GraphStats {
     std::int64_t nodes = 0;
     std::int64_t edges = 0;
@@ -35,10 +36,31 @@ struct GraphStats {
     /// Chunks the last build failed to extract.
     std::int64_t failed_chunks = 0;
     std::string extract_model;
+    /// Stored label-propagation communities with summaries.
+    std::int64_t communities = 0;
 
     [[nodiscard]] bool built() const noexcept {
         return nodes > 0;
     }
+};
+
+/// One member collection's slice of a named graph's stats.
+struct MemberStats {
+    std::string collection;
+    std::int64_t mentions = 0;
+    /// Live chunks in the member store.
+    std::int64_t total_chunks = 0;
+    std::int64_t chunks_with_mentions = 0;
+    std::int64_t stale_files = 0;
+    /// The member's database is absent.
+    bool missing = false;
+};
+
+/// A named graph's stats: the totals over every member, and each member's
+/// share.
+struct GraphStatsMulti {
+    GraphStats totals;
+    std::vector<MemberStats> members;
 };
 
 /// A node with its BM25 relevance, normalised to (0, 1) exactly as a lexical
@@ -76,8 +98,10 @@ struct ExpandEntity {
     /// node's mention count. Corroborated, well-evidenced neighbours first.
     std::int64_t score = 0;
     /// One chunk evidencing the entity, 0 when none -- the pointer back to
-    /// source text.
+    /// source text -- and the member collection it lives in (`''` for the
+    /// collection's own graph).
     std::int64_t support_chunk = 0;
+    std::string support_collection;
 };
 
 /// One relation on the traversed neighbourhood, carrying display names so a

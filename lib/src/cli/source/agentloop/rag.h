@@ -89,12 +89,19 @@ struct RagTurn {
 
     /// The collection's name, for the graph section's header.
     std::string collection;
-    /// The collection's `graph:` block: expansion runs only when enabled,
-    /// seeded from the retrieved top-k BEFORE the judge, and rendered under
-    /// the budget after the chunk list. Best-effort: a failure is a note.
+    /// The graph the turn expands through (`graph_context::resolve_turn_graph`
+    /// decides which): expansion runs only when enabled, seeded from the
+    /// retrieved top-k BEFORE the judge, and rendered under the budget after
+    /// the chunk list. Best-effort: a failure is a note. The store is the
+    /// collection's own when `graph_store_path` is empty, else a named
+    /// graph's database -- whose seeds carry the collection's name as their
+    /// label and whose section carries the graph's name.
     bool graph_enabled = false;
     int graph_hops = 1;
     int graph_max_entities = 8;
+    std::filesystem::path graph_store_path;
+    std::string graph_name;
+    std::string graph_seed_collection;
 };
 
 /// The full retrieval matrix for one turn: resolve the retriever ONCE, run it,

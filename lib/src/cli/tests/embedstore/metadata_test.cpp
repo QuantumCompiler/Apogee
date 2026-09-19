@@ -85,7 +85,7 @@ TEST_CASE(
     {
         Store store{scratch.db()};
         CHECK(store.schema_version() == apogee::embedstore::kSchemaVersion);
-        CHECK(apogee::embedstore::kSchemaVersion == 4);
+        CHECK(apogee::embedstore::kSchemaVersion == 5);
         // The old row reads as an ordinary chunk with no metadata.
         const std::optional<Chunk> chunk = store.chunk_by_id(1);
         REQUIRE(chunk.has_value());

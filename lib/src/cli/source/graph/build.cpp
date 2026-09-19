@@ -57,35 +57,47 @@ struct RecordRef {
     std::string supersedes;
 };
 
-/// The build's deterministic record pass. Returns the decision node id per
-/// record chunk so extraction can hang `concerns` edges off it. In a dry run
-/// it only counts.
-std::map<std::int64_t, std::int64_t> materialize_records(embedstore::Store& store,
-                                                         std::set<std::int64_t>& mutated,
-                                                         BuildResult& out, bool dry_run) {
+/// A member's chunk, the key the record pass hands extraction.
+using ChunkKey = std::pair<std::string, std::int64_t>;
+
+/// The build's deterministic record pass, across every member: recognition
+/// is per chunk, so a record is a node in its collection's own graph and in
+/// any named graph listing the collection alike. Returns the decision node
+/// id per record chunk so extraction can hang `concerns` edges off it. In a
+/// dry run it only counts.
+std::map<ChunkKey, std::int64_t> materialize_records(embedstore::Store& target,
+                                                     const std::vector<Member>& members,
+                                                     std::set<std::int64_t>& mutated,
+                                                     BuildResult& out, bool dry_run) {
     std::map<std::string, RecordRef> by_record;
-    std::map<std::int64_t, std::int64_t> by_chunk;
-    for (const embedstore::Chunk& chunk : store.chunks_with_metadata()) {
-        std::string error;
-        const std::optional<knowledge::Record> record =
-            knowledge::record_from_metadata(chunk.source, chunk.metadata, error);
-        if (!record.has_value()) {
-            continue;  // metadata that is not a knowledge record -- not ours
-        }
-        ++out.record_nodes;
-        if (dry_run) {
+    std::map<ChunkKey, std::int64_t> by_chunk;
+    for (const Member& member : members) {
+        if (member.store == nullptr) {
             continue;
         }
-        const embedstore::UpsertResult upsert = store.upsert_decision_node(
-            record->id, decision_node_description(*record),
-            embedstore::decision_node_metadata_json(record->status, record->discipline));
-        if (upsert.mutated) {
-            mutated.insert(upsert.id);
-            ++out.nodes_upserted;
+        for (const embedstore::Chunk& chunk : member.store->chunks_with_metadata()) {
+            std::string error;
+            const std::optional<knowledge::Record> record =
+                knowledge::record_from_metadata(chunk.source, chunk.metadata, error);
+            if (!record.has_value()) {
+                continue;  // metadata that is not a knowledge record -- not ours
+            }
+            ++out.record_nodes;
+            if (dry_run) {
+                continue;
+            }
+            const embedstore::UpsertResult upsert = target.upsert_decision_node(
+                record->id, decision_node_description(*record),
+                embedstore::decision_node_metadata_json(record->status, record->discipline));
+            if (upsert.mutated) {
+                mutated.insert(upsert.id);
+                ++out.nodes_upserted;
+            }
+            (void)target.add_mention(upsert.id, member.collection, chunk.id);
+            by_record[record->id] =
+                RecordRef{.node_id = upsert.id, .supersedes = record->supersedes};
+            by_chunk[ChunkKey{member.collection, chunk.id}] = upsert.id;
         }
-        (void)store.add_mention(upsert.id, chunk.id);
-        by_record[record->id] = RecordRef{.node_id = upsert.id, .supersedes = record->supersedes};
-        by_chunk[chunk.id] = upsert.id;
     }
     if (dry_run) {
         return by_chunk;
@@ -96,12 +108,12 @@ std::map<std::int64_t, std::int64_t> materialize_records(embedstore::Store& stor
         if (ref.supersedes.empty()) {
             continue;
         }
-        const auto target = by_record.find(ref.supersedes);
-        if (target == by_record.end()) {
+        const auto found = by_record.find(ref.supersedes);
+        if (found == by_record.end()) {
             ++out.supersedes_skipped;
             continue;
         }
-        if (store.ensure_edge(ref.node_id, target->second.node_id, kRelationSupersedes, "")) {
+        if (target.ensure_edge(ref.node_id, found->second.node_id, kRelationSupersedes, "")) {
             ++out.edges_upserted;
         }
         ++out.supersedes_edges;
@@ -110,13 +122,14 @@ std::map<std::int64_t, std::int64_t> materialize_records(embedstore::Store& stor
 }
 
 /// Commits one chunk's normalised extraction: entities upserted, mentions
-/// linked, relations resolved by normalised name against this chunk's own
-/// entities (when two same-named entities of different types survive, the
-/// first listed wins the name), and -- for a record chunk -- a `concerns`
-/// edge from its decision node to every surviving entity.
-void store_extraction(embedstore::Store& store, std::int64_t chunk_id, std::int64_t decision_id,
-                      const ExtractResult& result, std::set<std::int64_t>& mutated,
-                      BuildResult& out) {
+/// linked under the chunk's member collection, relations resolved by
+/// normalised name against this chunk's own entities (when two same-named
+/// entities of different types survive, the first listed wins the name),
+/// and -- for a record chunk -- a `concerns` edge from its decision node to
+/// every surviving entity.
+void store_extraction(embedstore::Store& store, std::string_view collection, std::int64_t chunk_id,
+                      std::int64_t decision_id, const ExtractResult& result,
+                      std::set<std::int64_t>& mutated, BuildResult& out) {
     std::map<std::string, std::int64_t> by_name;
     for (const Entity& entity : result.entities) {
         const embedstore::UpsertResult upsert =
@@ -126,7 +139,7 @@ void store_extraction(embedstore::Store& store, std::int64_t chunk_id, std::int6
             ++out.nodes_upserted;
         }
         by_name.try_emplace(embedstore::normalize_entity_name(entity.name), upsert.id);
-        if (store.add_mention(upsert.id, chunk_id)) {
+        if (store.add_mention(upsert.id, collection, chunk_id)) {
             ++out.mentions_added;
         }
         if (decision_id != 0 && upsert.id != decision_id &&
@@ -203,16 +216,30 @@ bool source_stale(const embedstore::SourceState& state, const embedstore::ChunkS
 
 BuildResult build(embedstore::Store& store, const ExtractFn& extract, const EmbedFn& embed,
                   const BuildOptions& options) {
+    return build_multi(store, {Member{.collection = "", .store = &store}}, extract, embed, options);
+}
+
+BuildResult build_multi(embedstore::Store& target, const std::vector<Member>& members,
+                        const ExtractFn& extract, const EmbedFn& embed,
+                        const BuildOptions& options) {
     if (!extract) {
         throw std::invalid_argument("graph build needs an extraction function");
+    }
+    if (members.empty()) {
+        throw std::invalid_argument("graph build needs at least one member collection");
     }
     BuildResult out;
     out.dry_run = options.dry_run;
 
-    // 1. Reconcile: prune rows orphaned by chunk churn so this build never
-    // links against dead provenance. Skipped in a dry run (it writes).
+    // 1. Reconcile: prune rows orphaned by chunk churn or a membership change
+    // so this build never links against dead provenance. Skipped in a dry
+    // run (it writes).
     if (!options.dry_run) {
-        out.reconcile = store.reconcile_graph();
+        embedstore::MemberStores views;
+        for (const Member& member : members) {
+            views[member.collection] = member.store;
+        }
+        out.reconcile = target.reconcile_graph_multi(views);
     }
 
     // Node ids to (re)embed -- decision nodes from the record pass and
@@ -222,26 +249,35 @@ BuildResult build(embedstore::Store& store, const ExtractFn& extract, const Embe
     // 1b. Records as decision nodes, every build: after reconcile (a
     // re-captured record's old node was just pruned with its dead mention)
     // and before extraction (which links `concerns` edges from these nodes).
-    const std::map<std::int64_t, std::int64_t> decision_by_chunk =
-        materialize_records(store, mutated, out, options.dry_run);
+    const std::map<ChunkKey, std::int64_t> decision_by_chunk =
+        materialize_records(target, members, mutated, out, options.dry_run);
 
-    // 2. Plan: the stale sources, sorted, by the (count, max id, model)
-    // fingerprint.
-    const std::map<std::string, embedstore::SourceState> states = store.source_states();
-
+    // 2. Plan: the stale (collection, source) pairs -- members in the given
+    // order, sources sorted within each -- by the (count, max id, model)
+    // fingerprint. A missing member was reconciled away above and has
+    // nothing to extract.
     struct Planned {
+        const Member* member = nullptr;
         std::string source;
         std::int64_t chunks = 0;
     };
 
     std::vector<Planned> planned;
     int chunks_total = 0;
-    for (const auto& [source, span] : store.source_chunk_spans()) {
-        const auto state = states.find(source);
-        if (options.force || state == states.end() ||
-            source_stale(state->second, span, options.model)) {
-            planned.push_back(Planned{.source = source, .chunks = span.count});
-            chunks_total += static_cast<int>(span.count);
+    for (const Member& member : members) {
+        if (member.store == nullptr) {
+            continue;
+        }
+        const std::map<std::string, embedstore::SourceState> states =
+            target.source_states(member.collection);
+        for (const auto& [source, span] : member.store->source_chunk_spans()) {
+            const auto state = states.find(source);
+            if (options.force || state == states.end() ||
+                source_stale(state->second, span, options.model)) {
+                planned.push_back(
+                    Planned{.member = &member, .source = source, .chunks = span.count});
+                chunks_total += static_cast<int>(span.count);
+            }
         }
     }
     out.files_planned = static_cast<int>(planned.size());
@@ -253,7 +289,8 @@ BuildResult build(embedstore::Store& store, const ExtractFn& extract, const Embe
     bool stopped = false;
     for (std::size_t index = 0; index < planned.size() && !stopped; ++index) {
         const Planned& file = planned[index];
-        const std::vector<embedstore::Chunk> chunks = store.chunks_by_source(file.source);
+        const std::vector<embedstore::Chunk> chunks =
+            file.member->store->chunks_by_source(file.source);
         bool complete = true;
         for (const embedstore::Chunk& chunk : chunks) {
             if (options.cancellation.stop_requested()) {
@@ -269,6 +306,7 @@ BuildResult build(embedstore::Store& store, const ExtractFn& extract, const Embe
             if (options.on_progress) {
                 Progress progress;
                 progress.stage = Progress::Stage::Extract;
+                progress.collection = file.member->collection;
                 progress.file = file.source;
                 progress.file_index = static_cast<int>(index) + 1;
                 progress.file_count = out.files_planned;
@@ -306,8 +344,9 @@ BuildResult build(embedstore::Store& store, const ExtractFn& extract, const Embe
             if (options.dry_run) {
                 continue;
             }
-            const auto decision = decision_by_chunk.find(chunk.id);
-            store_extraction(store, chunk.id,
+            const auto decision =
+                decision_by_chunk.find(ChunkKey{file.member->collection, chunk.id});
+            store_extraction(target, file.member->collection, chunk.id,
                              decision == decision_by_chunk.end() ? 0 : decision->second, extracted,
                              mutated, out);
         }
@@ -318,23 +357,35 @@ BuildResult build(embedstore::Store& store, const ExtractFn& extract, const Embe
             for (const embedstore::Chunk& chunk : chunks) {
                 max_id = std::max(max_id, chunk.id);
             }
-            store.set_source_state(file.source, static_cast<std::int64_t>(chunks.size()), max_id,
-                                   options.model);
+            target.set_source_state(file.member->collection, file.source,
+                                    static_cast<std::int64_t>(chunks.size()), max_id,
+                                    options.model);
         }
         if (complete) {
             ++out.files_extracted;
         }
     }
     if (!options.dry_run) {
-        store.set_graph_meta(embedstore::kGraphMetaExtractModel, options.model);
-        store.set_graph_meta(embedstore::kGraphMetaFailedChunks, std::to_string(out.chunks_failed));
+        target.set_graph_meta(embedstore::kGraphMetaExtractModel, options.model);
+        target.set_graph_meta(embedstore::kGraphMetaFailedChunks,
+                              std::to_string(out.chunks_failed));
+        // A named graph's database records its own identity: the entry name
+        // and the member set as built.
+        if (!options.graph_name.empty()) {
+            target.set_graph_meta(embedstore::kGraphMetaGraphName, options.graph_name);
+            std::vector<std::string> labels;
+            for (const Member& member : members) {
+                labels.push_back(member.collection);
+            }
+            target.set_graph_members(labels);
+        }
     }
 
     // 4. Embed new or changed entities, batched at the end so a failed embed
     // never loses extraction work.
     if (embed && !options.dry_run && !mutated.empty()) {
         const std::vector<std::int64_t> ids(mutated.begin(), mutated.end());
-        const std::vector<embedstore::GraphNode> nodes = store.nodes_by_ids(ids);
+        const std::vector<embedstore::GraphNode> nodes = target.nodes_by_ids(ids);
         if (options.on_progress) {
             Progress progress;
             progress.stage = Progress::Stage::Embed;
@@ -367,13 +418,13 @@ BuildResult build(embedstore::Store& store, const ExtractFn& extract, const Embe
                 out.embed_error = "the embedder returned no vector";
                 break;
             }
-            store.update_node_embedding(node.id, vector);
+            target.update_node_embedding(node.id, vector);
             ++out.nodes_embedded;
         }
         // The graph's entity-vector model is recorded only when the phase ran
         // to completion -- a partial embed must not claim the model.
         if (out.embed_error.empty() && !options.embed_model.empty()) {
-            store.set_graph_meta(embedstore::kGraphMetaEmbedModel, options.embed_model);
+            target.set_graph_meta(embedstore::kGraphMetaEmbedModel, options.embed_model);
         }
     }
     return out;

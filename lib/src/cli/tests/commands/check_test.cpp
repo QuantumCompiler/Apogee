@@ -958,3 +958,54 @@ TEST_CASE(
     CHECK(rows_named(report, "raw archive").front().status == apogee::commands::Status::Ok);
 #endif
 }
+
+TEST_CASE(
+    "the doctor's Graph section validates every graphs: entry and reports whether it "
+    "is built",
+    "[commands][check][graphs]") {
+    const Install install;
+    const std::string backends = "backends:\n  mock:\n    type: mock\n";
+    // The collision ban is a failure: resolution is graphs-first.
+    const CheckReport collides = run_checks(inputs_with_config(
+        install, backends + "embeddings:\n  notes:\n    chunk_size: 512\ngraphs:\n  notes:\n"
+                            "    collections: [notes]\n"));
+    REQUIRE(row_with(collides, "named graph: notes") != nullptr);
+    CHECK(row_with(collides, "named graph: notes")->status == Status::Fail);
+    CHECK(row_with(collides, "named graph: notes")->detail.find("collides") != std::string::npos);
+
+    // No members, an unconfigured extractor, a member that does not exist.
+    const CheckReport bad = run_checks(inputs_with_config(
+        install, backends + "graphs:\n  empty:\n    collections: []\n  ghost:\n"
+                            "    collections: [notes]\n    extract_backend: ghost\n  orphan:\n"
+                            "    collections: [nowhere]\n"));
+    CHECK(row_with(bad, "named graph: empty")->status == Status::Fail);
+    CHECK(row_with(bad, "named graph: ghost")->status == Status::Fail);
+    CHECK(row_with(bad, "named graph: ghost")->detail.find("ghost") != std::string::npos);
+    CHECK(row_with(bad, "named graph: orphan")->status == Status::Fail);
+    CHECK(row_with(bad, "named graph: orphan")->remedy.find("apogee embed ingest nowhere") !=
+          std::string::npos);
+
+    // A healthy entry over a registered member and one on disk: not yet
+    // built, with the build as the remedy; then built.
+    {
+        apogee::embedstore::Store store{install.root / "embeddings" / "tickets.db"};
+        store.replace_source("a.md", {"alpha"});
+    }
+    const std::string healthy = backends +
+                                "embeddings:\n  notes:\n    chunk_size: 512\ngraphs:\n  work:\n"
+                                "    collections: [notes, tickets]\n    hops: 2\n";
+    const CheckReport unbuilt = run_checks(inputs_with_config(install, healthy));
+    REQUIRE(row_with(unbuilt, "named graph: work") != nullptr);
+    CHECK(row_with(unbuilt, "named graph: work")->status == Status::Ok);
+    CHECK(row_with(unbuilt, "named graph: work")->detail.find("not yet built") !=
+          std::string::npos);
+    CHECK(row_with(unbuilt, "named graph: work")->detail.find("hops 2") != std::string::npos);
+    CHECK(row_with(unbuilt, "named graph: work")->remedy == "apogee graph build work");
+    {
+        apogee::embedstore::Store graph{install.root / "embeddings" / "graphs" / "work.db"};
+    }
+    const CheckReport built = run_checks(inputs_with_config(install, healthy));
+    CHECK(row_with(built, "named graph: work")->status == Status::Ok);
+    CHECK(row_with(built, "named graph: work")->detail.find("; built") != std::string::npos);
+    CHECK(row_with(built, "named graph: work")->remedy.empty());
+}

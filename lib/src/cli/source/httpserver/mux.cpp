@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 48> kRoutes{{
+constexpr std::array<Route, 56> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -165,9 +165,10 @@ constexpr std::array<Route, 48> kRoutes{{
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->delete_knowledge(r, id);
      }},
-    // The knowledge graph over a collection. `{id}` sits mid-path, which the
-    // matcher handles segment by segment; the fixed tails keep `build`,
-    // `stats` and `entity` distinct from the bare `DELETE`.
+    // The knowledge graph over a collection or a named graph -- `{id}` is
+    // resolved graphs-first. It sits mid-path, which the matcher handles
+    // segment by segment; the fixed tails keep `build`, `stats`, `entity`,
+    // `communities` and `dedupe` distinct from the bare `DELETE`.
     {"POST", "/v1/admin/graph/{id}/build", true,
      +[](Handler& h, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->build_graph(h, r, id);
@@ -180,6 +181,18 @@ constexpr std::array<Route, 48> kRoutes{{
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->graph_entity(r, id);
      }},
+    {"POST", "/v1/admin/graph/{id}/communities", true,
+     +[](Handler& h, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->build_communities(h, r, id);
+     }},
+    {"GET", "/v1/admin/graph/{id}/communities", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->list_communities(r, id);
+     }},
+    {"POST", "/v1/admin/graph/{id}/dedupe", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->dedupe_graph(r, id);
+     }},
     {"DELETE", "/v1/admin/graph/{id}", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->delete_graph(r, id);
@@ -187,6 +200,28 @@ constexpr std::array<Route, 48> kRoutes{{
     {"PUT", "/v1/admin/embeddings/{id}/graph", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->set_graph_enabled(r, id);
+     }},
+    // The graphs: config slice -- named multi-collection graphs' entries;
+    // the data lives behind /v1/admin/graph/{id}/* above.
+    {"GET", "/v1/admin/graphs", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_graphs(r);
+     }},
+    {"POST", "/v1/admin/graphs", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->create_graph(r);
+     }},
+    {"GET", "/v1/admin/graphs/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->get_graph(r, id);
+     }},
+    {"PUT", "/v1/admin/graphs/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->put_graph(r, id);
+     }},
+    {"DELETE", "/v1/admin/graphs/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->delete_graph_config(r, id);
      }},
     {"GET", "/v1/admin/permissions", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {

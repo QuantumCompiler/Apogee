@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "embedstore/graph.h"
 #include "embedstore/store.h"
@@ -17,6 +18,21 @@
 /// The resumable build loop that turns a collection's chunks into its
 /// knowledge graph, and the deterministic pass that makes every knowledge
 /// record in the collection a first-class `decision` node.
+///
+/// ## One loop, over one member or several
+///
+/// `build_multi` (re)builds a graph over a list of **members** -- each a
+/// collection label and a read-only view of its store -- into a target
+/// store, stamping every mention and state row with the member it came
+/// from. A collection's own graph is the single-member `""` case (`build`),
+/// with its store as both target and member; a **named graph** is several
+/// members into its own database, where the same entity mentioned in
+/// `docs` and `meetings` is ONE node with aggregated salience. Every edge
+/// comes from one chunk's extraction, so cross-collection connectivity
+/// flows entirely through shared node identity -- which is exactly what one
+/// build-time store makes real. Membership converges: a member dropped from
+/// the list (or whose database is gone) has its rows reconciled away on the
+/// next build.
 ///
 /// ## Incremental and resumable by construction
 ///
@@ -85,10 +101,21 @@ struct EntityEmbedder {
 [[nodiscard]] bool source_stale(const embedstore::SourceState& state,
                                 const embedstore::ChunkSpan& span, std::string_view model);
 
+/// One collection a graph is built over: its label (the name recorded as
+/// mention and state provenance; `""` for a collection's own graph) and a
+/// read-only view of its store. A **null** store is a member whose database
+/// is missing: it contributes nothing and its earlier rows reconcile away.
+struct Member {
+    std::string collection;
+    const embedstore::Store* store = nullptr;
+};
+
 /// A build heartbeat -- the status-line / admin-job seam.
 struct Progress {
     enum class Stage : std::uint8_t { Extract, Embed };
     Stage stage = Stage::Extract;
+    /// The member being extracted (`""` in a per-collection build).
+    std::string collection;
     std::string file;
     /// 1-based, over the planned files.
     int file_index = 0;
@@ -108,6 +135,10 @@ struct BuildOptions {
     /// Recorded as the graph's entity-vector model after the embed phase
     /// completes without error; empty when no embedder resolves.
     std::string embed_model;
+    /// When non-empty, stamps a named graph's identity -- the entry name and
+    /// the member set as built -- into `graph_meta`. Empty for a
+    /// collection's own graph.
+    std::string graph_name;
     /// Marks every source stale regardless of its state row.
     bool force = false;
     /// Stops after N chunks (0 = no limit). A file interrupted by the limit
@@ -160,8 +191,19 @@ struct BuildResult {
 /// fingerprint → extract stale sources chunk by chunk with one retry → state
 /// row after a complete file only → embed mutated nodes last, so a failed
 /// embed never loses extraction work. Storage errors throw; a cancellation
-/// returns with `cancelled` set.
+/// returns with `cancelled` set. The single-member form of `build_multi`.
 [[nodiscard]] BuildResult build(embedstore::Store& store, const ExtractFn& extract,
                                 const EmbedFn& embed, const BuildOptions& options);
+
+/// The same loop over `members` into `target`: reconcile against the member
+/// set (ex-members' rows die), materialise every member's records, plan the
+/// stale (collection, source) pairs -- members in the given order, sources
+/// sorted within each -- extract into `target` with labelled mentions and
+/// per-member state rows (so a resume works across members), stamp the
+/// named graph's identity, then embed. Throws `std::invalid_argument` with
+/// no members.
+[[nodiscard]] BuildResult build_multi(embedstore::Store& target, const std::vector<Member>& members,
+                                      const ExtractFn& extract, const EmbedFn& embed,
+                                      const BuildOptions& options);
 
 }  // namespace apogee::graph

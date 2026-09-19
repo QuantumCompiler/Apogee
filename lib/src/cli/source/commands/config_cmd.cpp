@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "commands/graph.h"
 #include "harness/config.h"
 #include "harness/config_edit.h"
 #include "harness/paths.h"
@@ -462,6 +463,93 @@ void bind_delete_mcp_server(CLI::App& parent, const RootContext& context) {
     });
 }
 
+struct AddGraphFlags {
+    std::string name;
+    std::string collections;
+    std::string extract_backend;
+    int hops = 1;
+    int max_entities = 8;
+    bool force = false;
+};
+
+/// A named multi-collection graph's `graphs:` entry -- the config half; the
+/// data is `graph build`'s. The same rules as the admin twin, decided once
+/// in `validate_named_graph`.
+void bind_add_graph(CLI::App& parent, const RootContext& context) {
+    auto flags = std::make_shared<AddGraphFlags>();
+    CLI::App* cmd = parent.add_subcommand(
+        "add-graph", "Add a named knowledge graph spanning several collections");
+    cmd->add_option("name", flags->name, "Name for the graph (must not be a collection's name)")
+        ->required();
+    cmd->add_option("--collections", flags->collections,
+                    "The member collections, comma-separated (e.g. docs,meetings)")
+        ->required();
+    cmd->add_option("--extract-backend", flags->extract_backend,
+                    "The backend `graph build` extracts with (default: the extraction role)");
+    cmd->add_option("--hops", flags->hops, "Expansion depth at retrieval: 1 or 2 (default 1)");
+    cmd->add_option("--max-entities", flags->max_entities,
+                    "Neighbour entities an expansion injects, at most (default 8)");
+    cmd->add_flag("-f,--force", flags->force, "Replace an existing entry with this name");
+    cmd->callback([&context, flags]() {
+        const std::filesystem::path path = config_path_for(context);
+        harness::NamedGraphConfig graph;
+        std::size_t start = 0;
+        while (start <= flags->collections.size()) {
+            const std::size_t comma = flags->collections.find(',', start);
+            std::string item = flags->collections.substr(
+                start, comma == std::string::npos ? std::string::npos : comma - start);
+            const std::size_t first = item.find_first_not_of(" \t");
+            const std::size_t last = item.find_last_not_of(" \t");
+            item =
+                first == std::string::npos ? std::string{} : item.substr(first, last - first + 1);
+            if (!item.empty()) {
+                graph.collections.push_back(item);
+            }
+            if (comma == std::string::npos) {
+                break;
+            }
+            start = comma + 1;
+        }
+        graph.extract_backend = flags->extract_backend;
+        graph.hops = flags->hops;
+        graph.max_entities = flags->max_entities;
+        Config config;
+        try {
+            config = harness::load_config(path);
+        } catch (const ConfigError& e) {
+            fail(e.what());
+        }
+        const NamedGraphValidation validation = validate_named_graph(config, flags->name, graph);
+        if (!validation.error.empty()) {
+            fail("add-graph: " + validation.error);
+        }
+        for (const std::string& warning : validation.warnings) {
+            std::cerr << "apogee config: warning: " << warning << "\n";
+        }
+        apply_edit(path, [flags, &graph](std::string_view content) {
+            return harness::append_graph(content, flags->name, graph, flags->force);
+        });
+        std::cout << "added graph '" << flags->name << "' to " << path.string()
+                  << " -- build it with: apogee graph build " << flags->name << "\n";
+    });
+}
+
+void bind_delete_graph(CLI::App& parent, const RootContext& context) {
+    auto name = std::make_shared<std::string>();
+    CLI::App* cmd = parent.add_subcommand(
+        "delete-graph", "Remove a named graph's entry (its database is left alone)");
+    cmd->add_option("name", *name, "The graph's name")->required();
+    cmd->callback([&context, name]() {
+        const std::filesystem::path path = config_path_for(context);
+        apply_edit(path, [name](std::string_view content) {
+            return harness::delete_graph(content, *name);
+        });
+        std::cout << "removed graph '" << *name << "' from " << path.string()
+                  << " (its database, if built, stays: `apogee graph delete " << *name
+                  << "` removes it while the entry exists)\n";
+    });
+}
+
 void bind_set_permission(CLI::App& parent, const RootContext& context) {
     auto tool = std::make_shared<std::string>();
     auto level = std::make_shared<std::string>();
@@ -540,6 +628,8 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
                   "Set the backend used for structured extraction");
     bind_set_permission(*cmd, context);
     bind_delete_mcp_server(*cmd, context);
+    bind_add_graph(*cmd, context);
+    bind_delete_graph(*cmd, context);
     bind_get(*cmd, context);
     bind_format(*cmd, context);
 }

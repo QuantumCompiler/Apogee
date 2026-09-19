@@ -163,6 +163,20 @@ public:
 /// Removes the entry and its fields; the exact inverse of the append.
 [[nodiscard]] std::string delete_agent(std::string_view content, std::string_view name);
 
+/// Appends a `graphs:` entry -- a named multi-collection graph -- creating
+/// the section when absent: `collections` as a flow list, then
+/// `extract_backend` when set and `hops`/`max_entities` when not the
+/// default, so a defaulted entry is a bare name plus its members. Same
+/// collision and `force` rules as `append_backend`. Section-scoped end to
+/// end through the shared internals, so a graph sharing an agent's or a
+/// server's name can never touch the other section's entry.
+[[nodiscard]] std::string append_graph(std::string_view content, std::string_view name,
+                                       const NamedGraphConfig& graph, bool force);
+
+/// Removes the entry and its fields; the exact inverse of the append. The
+/// graph's database (its derived data) is not this function's business.
+[[nodiscard]] std::string delete_graph(std::string_view content, std::string_view name);
+
 /// Sets `permissions.<tool>` to `level` (`ask`, `allow`, or `deny`),
 /// replacing the existing line (keeping any trailing comment) or inserting
 /// one, creating `permissions:` if needed. The one path by which the

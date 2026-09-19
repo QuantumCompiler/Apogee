@@ -10,14 +10,17 @@
 #include "harness/config.h"
 #include "support/env_guard.h"
 
+using apogee::harness::append_agent;
 using apogee::harness::append_backend;
 using apogee::harness::append_embedding;
+using apogee::harness::append_graph;
 using apogee::harness::append_mcp_server;
 using apogee::harness::BackendConfig;
 using apogee::harness::BackendType;
 using apogee::harness::ConfigEditError;
 using apogee::harness::delete_backend;
 using apogee::harness::delete_embedding;
+using apogee::harness::delete_graph;
 using apogee::harness::delete_mcp_server;
 using apogee::harness::EmbeddingConfig;
 using apogee::harness::format_config;
@@ -783,4 +786,69 @@ TEST_CASE("an agent entry appends alphabetically with only what is set, and dele
     const std::string deleted = delete_agent(appended, "r");
     CHECK(deleted == std::string{kCommented} + "\nagents:\n");
     CHECK_THROWS_AS((void)delete_agent(kCommented, "r"), ConfigEditError);
+}
+
+TEST_CASE("a graphs: entry round-trips byte-exactly, with only what it says written",
+          "[config_edit][golden][graphs]") {
+    apogee::harness::NamedGraphConfig graph;
+    graph.collections = {"docs", "meetings"};
+    const std::string added = append_graph(kCommented, "work", graph, false);
+    require_parses(added);
+    CHECK(added.starts_with(std::string{kCommented}));
+    CHECK(added.ends_with("\ngraphs:\n  work:\n    collections: [docs, meetings]\n"));
+    // The inverse of the append -- the section header it created stays, as
+    // every section-creating helper leaves it (an empty section is valid
+    // and cheap to keep; deleting it would guess at ownership).
+    CHECK(delete_graph(added, "work") == std::string{kCommented} + "\ngraphs:\n");
+    const auto loaded = apogee::harness::parse_config(added, "<test>");
+    REQUIRE(loaded.find_graph("work") != nullptr);
+    CHECK(loaded.find_graph("work")->collections == graph.collections);
+
+    // Every knob, when it says something; the defaults stay implicit.
+    graph.extract_backend = "local";
+    graph.hops = 2;
+    graph.max_entities = 4;
+    const std::string full = append_graph("graphs:\n", "work", graph, false);
+    CHECK(full ==
+          "graphs:\n  work:\n    collections: [docs, meetings]\n    extract_backend: local\n"
+          "    hops: 2\n    max_entities: 4\n");
+    const auto knobs = apogee::harness::parse_config(full, "<test>");
+    CHECK(knobs.find_graph("work")->hops == 2);
+    CHECK(knobs.find_graph("work")->max_entities == 4);
+
+    // Collision rules as every other section's: the fold, the duplicate,
+    // the force replacing in place.
+    CHECK_THROWS_AS((void)append_graph(added, "Work", graph, false), ConfigEditError);
+    CHECK_THROWS_AS((void)append_graph(added, "work", graph, false), ConfigEditError);
+    const std::string replaced = append_graph(added, "work", graph, true);
+    CHECK(replaced.find("extract_backend: local") != std::string::npos);
+    CHECK(apogee::harness::section_entry_names(replaced, "graphs").size() == 1);
+    CHECK_THROWS_AS((void)delete_graph(kCommented, "work"), ConfigEditError);
+}
+
+TEST_CASE("graph helpers are section-scoped: a same-named agent and MCP server stay intact",
+          "[config_edit][graphs][scope]") {
+    apogee::harness::AgentConfig agent;
+    agent.description = "the agent";
+    apogee::harness::McpServerConfig server;
+    server.command = "python3";
+    apogee::harness::NamedGraphConfig graph;
+    graph.collections = {"docs"};
+    std::string content = append_agent(kCommented, "shared", agent, false);
+    content = append_mcp_server(content, "shared", server, false);
+    const std::string before = content;
+    content = append_graph(content, "shared", graph, false);
+    require_parses(content);
+    // Deleting the graph takes only the graphs: entry.
+    const std::string after = delete_graph(content, "shared");
+    CHECK(after == before + "\ngraphs:\n");
+    CHECK(apogee::harness::section_entry_names(after, "agents") ==
+          std::vector<std::string>{"shared"});
+    CHECK(apogee::harness::section_entry_names(after, "mcp_servers") ==
+          std::vector<std::string>{"shared"});
+    CHECK(apogee::harness::section_entry_names(after, "graphs").empty());
+    // And deleting the agent leaves the graph alone.
+    const std::string agent_gone = apogee::harness::delete_agent(content, "shared");
+    CHECK(apogee::harness::section_entry_names(agent_gone, "graphs") ==
+          std::vector<std::string>{"shared"});
 }

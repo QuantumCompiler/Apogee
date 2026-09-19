@@ -154,24 +154,31 @@ RecordGraph graph_for_records(const Store& store, const harness::Config& config,
                               std::string_view collection, const QueryResult& result,
                               std::string_view question) {
     RecordGraph out;
-    const harness::EmbeddingConfig* entry = config.find_embedding(collection);
-    if (entry == nullptr || !entry->graph.enabled) {
+    // The same decision a `--rag` turn makes: a built named graph covering
+    // the collection first, else its own enabled block.
+    const agentloop::TurnGraph graph = agentloop::resolve_turn_graph(config, collection);
+    if (!graph.enabled) {
         out.note = "no knowledge graph covers collection \"" + std::string{collection} +
                    "\" -- build one with `apogee graph build " + std::string{collection} + "`";
         return out;
     }
-    std::vector<std::int64_t> seeds;
+    std::vector<embedstore::ChunkRef> seeds;
     for (const ScoredRecord& scored : result.records) {
         if (scored.chunk_id != 0) {
-            seeds.push_back(scored.chunk_id);
+            seeds.push_back(embedstore::ChunkRef{.collection = graph.seed_collection,
+                                                 .chunk_id = scored.chunk_id});
         }
     }
     const std::string_view lexical_query =
         result.retriever == agentloop::Retriever::Vector ? std::string_view{} : question;
     try {
-        const agentloop::GraphSection section =
-            agentloop::build_graph_section(store.chunks(), collection, seeds, lexical_query,
-                                           entry->graph.hops, entry->graph.max_entities);
+        const std::optional<embedstore::Store> named =
+            graph.store_path.empty()
+                ? std::nullopt
+                : std::optional<embedstore::Store>{std::in_place, graph.store_path};
+        const agentloop::GraphSection section = agentloop::build_graph_section_labelled(
+            named.has_value() ? *named : store.chunks(), graph.name, seeds, lexical_query,
+            graph.hops, graph.max_entities);
         out.context = section.text;
         out.entities = section.entities;
     } catch (const std::exception& e) {

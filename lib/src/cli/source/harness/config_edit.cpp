@@ -670,6 +670,49 @@ std::string delete_agent(std::string_view content, std::string_view name) {
     return delete_entry(content, "agents", "agent", name);
 }
 
+namespace {
+
+Lines format_graph_entry(std::string_view name, const NamedGraphConfig& graph,
+                         std::string_view terminator) {
+    Lines out;
+    const std::string indent(kFieldIndent, ' ');
+    auto field = [&](std::string_view key, const std::string& value) {
+        out.push_back(indent + std::string{key} + ": " + value + std::string{terminator});
+    };
+    out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
+                  std::string{terminator});
+    std::string members = "[";
+    for (const std::string& collection : graph.collections) {
+        members += members.size() > 1 ? ", " : "";
+        members += yaml_scalar(collection);
+    }
+    members += "]";
+    field("collections", members);
+    if (!graph.extract_backend.empty()) {
+        field("extract_backend", yaml_scalar(graph.extract_backend));
+    }
+    if (graph.hops != NamedGraphConfig{}.hops) {
+        field("hops", std::to_string(graph.hops));
+    }
+    if (graph.max_entities != NamedGraphConfig{}.max_entities) {
+        field("max_entities", std::to_string(graph.max_entities));
+    }
+    return out;
+}
+
+}  // namespace
+
+std::string append_graph(std::string_view content, std::string_view name,
+                         const NamedGraphConfig& graph, bool force) {
+    const Lines lines = split_lines(content);
+    return append_entry(content, "graphs", "graph", name,
+                        format_graph_entry(name, graph, dominant_terminator(lines)), force);
+}
+
+std::string delete_graph(std::string_view content, std::string_view name) {
+    return delete_entry(content, "graphs", "graph", name);
+}
+
 std::string append_embedding(std::string_view content, std::string_view name,
                              const EmbeddingConfig& collection, bool force) {
     const Lines lines = split_lines(content);

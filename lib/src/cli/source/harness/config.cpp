@@ -306,6 +306,25 @@ std::optional<AgentOutputFormat> agent_output_format_from_string(std::string_vie
     return std::nullopt;
 }
 
+const NamedGraphConfig* Config::find_graph(std::string_view name) const noexcept {
+    const CaseInsensitiveLess less;
+    for (const auto& [key, graph] : graphs) {
+        if (!less(key, name) && !less(name, key)) {
+            return &graph;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<std::string> Config::graph_names() const {
+    std::vector<std::string> names;
+    names.reserve(graphs.size());
+    for (const auto& [name, unused] : graphs) {
+        names.push_back(name);
+    }
+    return names;
+}
+
 const AgentConfig* Config::find_agent(std::string_view name) const noexcept {
     const auto it = agents.find(name);
     return it == agents.end() ? nullptr : &it->second;
@@ -707,6 +726,54 @@ Config parse_config(std::string_view content, std::string_view origin) {
                                  "' -- agent names are compared case-insensitively, so these "
                                  "would be the same agent; rename one");
             }
+        }
+    }
+
+    if (const YAML::Node graphs = root["graphs"]; graphs.IsDefined() && !graphs.IsNull()) {
+        if (!graphs.IsMap()) {
+            fail(origin, "graphs: expected a mapping of graph name -> settings");
+        }
+        for (const auto& entry : graphs) {
+            const std::string name = entry.first.Scalar();
+            if (name.empty()) {
+                fail(origin, "graphs: an entry has an empty name");
+            }
+            const std::string where = "graphs." + name;
+            const YAML::Node node = entry.second;
+            NamedGraphConfig graph;
+            if (node.IsDefined() && !node.IsNull()) {
+                if (!node.IsMap()) {
+                    fail(origin, where + ": expected a mapping of settings");
+                }
+                graph.collections =
+                    string_list(node["collections"], origin, where + ".collections", false);
+                graph.extract_backend =
+                    scalar(node["extract_backend"], origin, where + ".extract_backend");
+                if (const std::optional<std::int64_t> hops =
+                        integer(node["hops"], origin, where + ".hops");
+                    hops.has_value()) {
+                    if (*hops < 1 || *hops > 2) {
+                        fail(origin, where + ".hops: " + std::to_string(*hops) +
+                                         " is out of range (1 or 2)");
+                    }
+                    graph.hops = static_cast<int>(*hops);
+                }
+                if (const std::optional<std::int64_t> max_entities =
+                        integer(node["max_entities"], origin, where + ".max_entities");
+                    max_entities.has_value()) {
+                    if (*max_entities < 1) {
+                        fail(origin, where + ".max_entities: must be at least 1");
+                    }
+                    graph.max_entities = static_cast<int>(*max_entities);
+                }
+            }
+            if (config.find_graph(name) != nullptr) {
+                fail(origin, "graphs: '" + name +
+                                 "' collides with an earlier entry -- graph names are compared "
+                                 "case-insensitively, so these would be the same graph; rename "
+                                 "one");
+            }
+            config.graphs.emplace_back(name, std::move(graph));
         }
     }
 

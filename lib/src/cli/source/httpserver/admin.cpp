@@ -171,6 +171,40 @@ HttpResponse AdminHandler::set_graph_enabled(const HttpRequest& request,
     return admin_set_graph_enabled(config_context(), collection, request);
 }
 
+HttpResponse AdminHandler::build_communities(Handler& plane, const HttpRequest& request,
+                                             std::string_view name) {
+    return admin_build_communities(config_context(), plane, *jobs_, workers_, name, request);
+}
+
+HttpResponse AdminHandler::list_communities(const HttpRequest& request, std::string_view name) {
+    return admin_list_communities(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::dedupe_graph(const HttpRequest& request, std::string_view name) {
+    return admin_dedupe_graph(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::list_graphs(const HttpRequest& /*request*/) {
+    return admin_list_graphs(config_context());
+}
+
+HttpResponse AdminHandler::create_graph(const HttpRequest& request) {
+    return admin_create_graph(config_context(), request);
+}
+
+HttpResponse AdminHandler::get_graph(const HttpRequest& /*request*/, std::string_view name) {
+    return admin_get_graph(config_context(), name);
+}
+
+HttpResponse AdminHandler::put_graph(const HttpRequest& request, std::string_view name) {
+    return admin_put_graph(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::delete_graph_config(const HttpRequest& /*request*/,
+                                               std::string_view name) {
+    return admin_delete_graph_config(config_context(), name);
+}
+
 HttpResponse AdminHandler::list_jobs(const HttpRequest& /*request*/) {
     nlohmann::json data = nlohmann::json::array();
     for (const JobRecord& record : jobs_->list()) {
