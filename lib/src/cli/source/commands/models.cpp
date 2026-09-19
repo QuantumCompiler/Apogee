@@ -17,6 +17,7 @@
 #include "harness/paths.h"
 #include "harness/roles.h"
 #include "models/sidecar.h"
+#include "models/snapshot.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 
@@ -232,6 +233,41 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                 row.note = "combined text+vision blob (" +
                            std::to_string(info.tensors - info.text_tensors) + " vision tensors)";
             }
+            rows.push_back(std::move(row));
+        }
+    }
+
+    // The third half: SafeTensors snapshots -- trainable, not runnable --
+    // under the models directory and under `paths.hf_dir` when it is set.
+    // Listed so a user can see what `models pull --safetensors` landed and
+    // what `apogee train` can take, without a backend ever pointing at one.
+    std::vector<std::filesystem::path> snapshot_roots;
+    if (!models_dir.empty()) {
+        snapshot_roots.push_back(models_dir);
+    }
+    if (!config.paths.hf_dir.empty()) {
+        const std::filesystem::path hf_dir{harness::expand_env_and_home(config.paths.hf_dir)};
+        if (hf_dir != models_dir) {
+            snapshot_roots.push_back(hf_dir);
+        }
+    }
+    for (const std::filesystem::path& root : snapshot_roots) {
+        for (const std::filesystem::path& dir : models::list_snapshots(root)) {
+            ModelRow row;
+            row.backend = "(not configured)";
+            row.type = "-";
+            row.model = dir.filename().string() + "/";
+            const std::optional<models::Snapshot> record = models::load_snapshot(dir);
+            row.provenance =
+                record.has_value() && !record->source.empty() ? record->source : "local";
+            const std::string architecture = models::snapshot_architecture(dir);
+            row.architecture = architecture.empty() ? "-" : architecture;
+            row.profile = "-";
+            row.state = "safetensors";
+            row.verified = record.has_value()
+                               ? std::to_string(record->files.size()) + " file(s) on record"
+                               : "no record";
+            row.note = "a full-weight snapshot: trainable with 'apogee train', not runnable";
             rows.push_back(std::move(row));
         }
     }
@@ -457,7 +493,7 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
 
     // The mutating verbs live in their own translation unit, so "what can this
     // command destroy?" has a short answer.
-    bind_model_mutations(*cmd, harness::models_dir());
+    bind_model_mutations(*cmd, harness::models_dir(), context);
 }
 
 }  // namespace apogee::commands

@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdlib>
+#include <functional>
 
 namespace apogee::models {
 namespace {
@@ -64,8 +65,119 @@ std::optional<HfRef> parse_hf_ref(std::string_view ref) {
 }
 
 std::string hf_download_url(const HfRef& ref) {
+    return hf_download_url(ref, HfRepoKind::Model);
+}
+
+std::string hf_download_url(const HfRef& ref, HfRepoKind kind) {
     const std::string revision = ref.revision.empty() ? "main" : ref.revision;
-    return std::string{kApiBase} + "/" + ref.repo_id() + "/resolve/" + revision + "/" + ref.file;
+    const std::string prefix = kind == HfRepoKind::Dataset ? "/datasets/" : "/";
+    return std::string{kApiBase} + prefix + ref.repo_id() + "/resolve/" + revision + "/" + ref.file;
+}
+
+HfTree list_repo_tree(backends::HttpClient& client, const HfRef& ref, HfRepoKind kind,
+                      std::string_view token, const harness::CancellationToken& cancellation) {
+    HfTree tree;
+    const std::string revision = ref.revision.empty() ? "main" : ref.revision;
+    backends::HttpRequest request;
+    request.method = "GET";
+    request.url = std::string{kApiBase} +
+                  (kind == HfRepoKind::Dataset ? "/api/datasets/" : "/api/models/") +
+                  ref.repo_id() + "/tree/" + revision + "?recursive=true";
+    request.headers = headers_for(token);
+    request.timeout = std::chrono::seconds{60};
+
+    backends::HttpResponse response;
+    try {
+        response = client.send(request, {}, cancellation);
+    } catch (const backends::HttpError& e) {
+        tree.error = std::string{"could not reach Hugging Face: "} + e.what();
+        return tree;
+    }
+    if (response.status == 401 || response.status == 403) {
+        tree.error = "cannot read '" + ref.repo_id() +
+                     "'. Check the spelling; if it is correct, the repository is gated or "
+                     "private -- accept its licence on huggingface.co and set HF_TOKEN";
+        return tree;
+    }
+    if (response.status == 404) {
+        tree.error =
+            "no such repository or revision: '" + ref.repo_id() + "' at '" + revision + "'";
+        return tree;
+    }
+    if (!response.ok()) {
+        tree.error = "Hugging Face returned status " + std::to_string(response.status);
+        return tree;
+    }
+    const nlohmann::json root = nlohmann::json::parse(response.body, nullptr, false);
+    if (root.is_discarded() || !root.is_array()) {
+        tree.error = "Hugging Face returned something that is not a file listing";
+        return tree;
+    }
+    for (const nlohmann::json& item : root) {
+        if (!item.is_object() || item.value("type", std::string{}) != "file") {
+            continue;
+        }
+        HfFile file;
+        file.path = item.value("path", std::string{});
+        if (file.path.empty()) {
+            continue;
+        }
+        if (const auto size = item.find("size"); size != item.end() && size->is_number_integer()) {
+            file.size = size->get<std::int64_t>();
+        }
+        if (const auto lfs = item.find("lfs"); lfs != item.end() && lfs->is_object()) {
+            // The LFS oid IS the sha256 of the bytes; the plain oid is a git
+            // blob hash, which is not, so it is deliberately not read.
+            file.sha256 = lfs->value("oid", std::string{});
+            if (const auto size = lfs->find("size");
+                size != lfs->end() && size->is_number_integer()) {
+                file.size = size->get<std::int64_t>();
+            }
+        }
+        tree.files.push_back(std::move(file));
+    }
+    tree.ok = true;
+    return tree;
+}
+
+bool snapshot_wanted(std::string_view path) noexcept {
+    const std::size_t slash = path.rfind('/');
+    const std::string_view name = slash == std::string_view::npos ? path : path.substr(slash + 1);
+    if (name.empty() || name.front() == '.') {
+        return false;
+    }
+    for (const std::string_view suffix :
+         {".safetensors", ".json", ".model", ".txt", ".py", ".tiktoken", ".jinja"}) {
+        if (name.ends_with(suffix)) {
+            return name != "README.md";
+        }
+    }
+    return false;
+}
+
+bool dataset_file_wanted(std::string_view path) noexcept {
+    const std::size_t slash = path.rfind('/');
+    const std::string_view name = slash == std::string_view::npos ? path : path.substr(slash + 1);
+    if (name.empty() || name.front() == '.') {
+        return false;
+    }
+    for (const std::string_view suffix :
+         {".parquet", ".jsonl", ".json", ".csv", ".arrow", ".txt"}) {
+        if (name.ends_with(suffix)) {
+            return name != "README.md";
+        }
+    }
+    return false;
+}
+
+std::string repo_directory_name(const HfRef& ref) {
+    std::string name = ref.owner + "--" + ref.repo;
+    for (char& c : name) {
+        if (c == '/' || c == ':' || c == '@' || c == ' ' || c == '\\') {
+            c = '-';
+        }
+    }
+    return name;
 }
 
 HfListing list_gguf_files(backends::HttpClient& client, const HfRef& ref, std::string_view token,
@@ -124,9 +236,10 @@ HfListing list_gguf_files(backends::HttpClient& client, const HfRef& ref, std::s
             if (name.size() > 5 && name.ends_with(".gguf")) {
                 listing.gguf_files.push_back(name);
             } else if (name.ends_with(".safetensors")) {
-                // Not downloaded, only NOTICED -- so the refusal above can name
-                // the conversion path instead of a generic "no .gguf".
+                // Noticed here so the GGUF refusal can name the next step;
+                // downloaded whole by `models pull --safetensors`.
                 listing.has_safetensors = true;
+                listing.safetensors_files.push_back(name);
             }
         }
     }
@@ -159,6 +272,11 @@ bool resolve_file(backends::HttpClient& client, HfRef& ref, std::string_view tok
                 "  python convert_hf_to_gguf.py --outfile model.gguf <the downloaded repo>\n"
                 "(that script ships with llama.cpp and needs Python with torch and "
                 "transformers)\n\n"
+                "To download the full-weight snapshot itself -- for fine-tuning -- pass "
+                "--safetensors:\n"
+                "  apogee models pull " +
+                ref.repo_id() +
+                " --safetensors\n\n"
                 "Or look for a community GGUF conversion -- searching the model's name with "
                 "\"GGUF\" usually finds one.";
         } else {
@@ -181,6 +299,55 @@ bool resolve_file(backends::HttpClient& client, HfRef& ref, std::string_view tok
 
     ref.file = listing.gguf_files.front();
     return true;
+}
+
+ByteSource http_source(backends::HttpClient& client, const HfRef& ref, HfRepoKind kind,
+                       const HfFile& file, std::string_view token,
+                       const harness::CancellationToken& cancellation, SourcePromise& promise) {
+    HfRef named = ref;
+    named.file = file.path;
+    ByteSource source = http_source(client, named, token, cancellation, promise);
+    promise.source_url = hf_download_url(named, kind);
+    promise.size = file.size;
+    promise.digest = file.sha256;
+    const std::string url = promise.source_url;
+    const std::string token_copy{token};
+    if (kind == HfRepoKind::Model) {
+        return source;
+    }
+    // A dataset file downloads from its own prefix; the rest of the source
+    // is the same request.
+    return [&client, url, token_copy, &cancellation](
+               const std::function<bool(std::string_view)>& write, std::string& error) {
+        backends::HttpRequest request;
+        request.method = "GET";
+        request.url = url;
+        request.headers = headers_for(token_copy);
+        request.timeout = std::chrono::seconds{0};
+        backends::HttpResponse response;
+        try {
+            response = client.send(
+                request, [&write](std::string_view chunk) { return write(chunk); }, cancellation);
+        } catch (const backends::HttpError& e) {
+            error = std::string{"the download failed: "} + e.what();
+            return false;
+        }
+        if (response.status == 401 || response.status == 403) {
+            error =
+                "access denied. The repository may be gated -- accept its licence on "
+                "huggingface.co and set HF_TOKEN";
+            return false;
+        }
+        if (response.status == 404) {
+            error = "no such file at " + url;
+            return false;
+        }
+        if (!response.ok()) {
+            error = "Hugging Face returned status " + std::to_string(response.status);
+            return false;
+        }
+        return true;
+    };
 }
 
 ByteSource http_source(backends::HttpClient& client, const HfRef& ref, std::string_view token,

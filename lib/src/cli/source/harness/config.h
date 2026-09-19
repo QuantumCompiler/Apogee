@@ -384,6 +384,16 @@ struct PermissionsConfig {
     [[nodiscard]] PermissionLevel level(std::string_view tool) const noexcept;
 };
 
+/// The `training:` section -- the training track's knobs. Declared field by
+/// field as the items that read them land: today the Python boundary alone.
+struct TrainingConfig {
+    /// The interpreter the training environment (`training/venv/`) is seeded
+    /// FROM by `apogee train setup`. `${ENV_VAR}` and a leading `~` are
+    /// expanded at use. Empty means `python3` on PATH. Never the interpreter
+    /// a script runs under -- that is always the environment's own.
+    std::string python;
+};
+
 /// The `tools:` section: where the native toolsets operate.
 struct ToolsConfig {
     /// The directory the filesystem tools are sandboxed to. Empty means the
@@ -450,6 +460,7 @@ struct Config {
     PermissionsConfig permissions;
     ToolsConfig tools;
     KnowledgeConfig knowledge;
+    TrainingConfig training;
 
     /// MCP servers keyed by name AS WRITTEN, compared case-insensitively
     /// for the same reason `backends` is.

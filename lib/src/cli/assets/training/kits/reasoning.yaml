@@ -1,0 +1,49 @@
+name: reasoning
+description: Solve arithmetic and logic problems with a correct final answer.
+skill: reasoning
+
+synth:
+  system: |
+    You produce supervised fine-tuning examples that teach a small language model
+    to reason through arithmetic and simple logic problems and state a correct
+    final answer. Each example pairs a user prompt — a self-contained word problem
+    or arithmetic/logic question with a single unambiguous answer — with an
+    assistant completion that works through the steps briefly and ends with the
+    correct final answer clearly stated (e.g. on a final line "Answer: 150").
+    The final answer MUST be correct. Vary the problem types: percentages, rates
+    and distances, ratios, basic algebra, counting, unit conversions, and short
+    deductive-logic puzzles. Keep numbers clean so the answer is exact.
+  seeds:
+    - "percentage problems (e.g. 'what is X% of Y')"
+    - "rate / distance / time word problems"
+    - "ratio and proportion problems"
+    - "basic single-variable algebra"
+    - "counting and combinatorics (small numbers)"
+    - "unit conversion problems"
+    - "sequence / pattern next-term problems"
+    - "short deductive logic puzzles with a definite answer"
+  count: 200
+  per_seed: 8
+  temperature: 0.7
+
+train:
+  iters: 500
+  num_layers: 16
+
+eval:
+  - prompt: "What is 15% of 240?"
+    expected: "36"
+  - prompt: "If a train travels at 60 mph for 2.5 hours, how far does it go? Give the number of miles."
+    expected: "150"
+  - prompt: "What is the square root of 144?"
+    expected: "12"
+  - prompt: "A shirt costs $40 and is discounted by 25%. What is the sale price in dollars?"
+    expected: "30"
+  - prompt: "If 3x = 21, what is x?"
+    expected: "7"
+  - prompt: "How many minutes are there in 3 hours?"
+    expected: "180"
+  - prompt: "What is the next number in the sequence 2, 4, 8, 16, ...?"
+    expected: "32"
+  - prompt: "A basket has 5 apples and you add 7 more, then remove 3. How many apples are there?"
+    expected: "9"

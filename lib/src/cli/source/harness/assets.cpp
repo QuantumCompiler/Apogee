@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iterator>
 #include <system_error>
+#include <vector>
 
 #include "harness/config_edit.h"
 
@@ -615,60 +616,84 @@ std::filesystem::path resolve_agent_path(const std::filesystem::path& home, std:
     return home / candidate;
 }
 
+std::string bundled_kit_relative_path(std::string_view name) {
+    return "training/kits/" + std::string{name} + ".yaml";
+}
+
+std::string bundled_script_relative_path(std::string_view name) {
+    return "training/scripts/" + std::string{name};
+}
+
+std::vector<BundledFile> bundled_files() {
+    std::vector<BundledFile> files;
+    for (const BundledAgent& agent : kBundled) {
+        files.push_back({bundled_prompt_relative_path(agent.name), agent.prompt});
+        files.push_back({bundled_schema_relative_path(agent.name), agent.schema});
+    }
+    for (const BundledKit& kit : bundled_kits()) {
+        files.push_back({bundled_kit_relative_path(kit.name), kit.text});
+    }
+    for (const BundledScript& script : bundled_training_scripts()) {
+        files.push_back({bundled_script_relative_path(script.name), script.text});
+    }
+    return files;
+}
+
 bool is_unmodified_bundled_asset(const std::filesystem::path& root,
                                  const std::filesystem::path& file) {
-    for (const BundledAgent& agent : kBundled) {
-        const std::pair<std::string, std::string_view> files[] = {
-            {bundled_prompt_relative_path(agent.name), agent.prompt},
-            {bundled_schema_relative_path(agent.name), agent.schema},
-        };
-        for (const auto& [relative, content] : files) {
-            std::error_code code;
-            if (!std::filesystem::equivalent(root / relative, file, code) || code) {
-                continue;
-            }
-            std::ifstream in(file, std::ios::binary);
-            if (!in) {
+    std::error_code code;
+    if (std::filesystem::is_directory(file, code)) {
+        // A directory is Apogee's only when everything in it is, and it holds
+        // something: an empty directory is nobody's and reads as user data
+        // no more than a seeded one would.
+        bool any = false;
+        for (const auto& item : std::filesystem::directory_iterator(file, code)) {
+            any = true;
+            if (!is_unmodified_bundled_asset(root, item.path())) {
                 return false;
             }
-            std::string bytes((std::istreambuf_iterator<char>(in)),
-                              std::istreambuf_iterator<char>());
-            return bytes == content;
         }
+        return any && !code;
+    }
+    for (const BundledFile& bundled : bundled_files()) {
+        if (!std::filesystem::equivalent(root / bundled.relative_path, file, code) || code) {
+            code.clear();
+            continue;
+        }
+        std::ifstream in(file, std::ios::binary);
+        if (!in) {
+            return false;
+        }
+        std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        return bytes == bundled.content;
     }
     return false;
 }
 
 AssetSeedResult seed_bundled_assets(const std::filesystem::path& root) {
     AssetSeedResult result;
-    for (const BundledAgent& agent : kBundled) {
-        const std::pair<std::string, std::string_view> files[] = {
-            {bundled_prompt_relative_path(agent.name), agent.prompt},
-            {bundled_schema_relative_path(agent.name), agent.schema},
-        };
-        for (const auto& [relative, content] : files) {
-            const std::filesystem::path path = root / relative;
-            std::error_code code;
-            if (std::filesystem::exists(path, code)) {
-                // Skip-if-present: the file is the user's once it exists.
-                // A re-seed after an edit reads the edit back, never the
-                // shipped text -- proven by a test.
-                continue;
-            }
-            std::filesystem::create_directories(path.parent_path(), code);
-            if (code) {
-                result.error =
-                    "could not create " + path.parent_path().string() + ": " + code.message();
-                return result;
-            }
-            try {
-                write_file_atomically(path, content);
-            } catch (const std::exception& e) {
-                result.error = e.what();
-                return result;
-            }
-            result.created.push_back(relative);
+    for (const BundledFile& bundled : bundled_files()) {
+        const std::filesystem::path path = root / bundled.relative_path;
+        std::error_code code;
+        if (std::filesystem::exists(path, code)) {
+            // Skip-if-present: the file is the user's once it exists. A
+            // re-seed after an edit reads the edit back, never the shipped
+            // text -- proven by a test.
+            continue;
         }
+        std::filesystem::create_directories(path.parent_path(), code);
+        if (code) {
+            result.error =
+                "could not create " + path.parent_path().string() + ": " + code.message();
+            return result;
+        }
+        try {
+            write_file_atomically(path, bundled.content);
+        } catch (const std::exception& e) {
+            result.error = e.what();
+            return result;
+        }
+        result.created.push_back(bundled.relative_path);
     }
     return result;
 }

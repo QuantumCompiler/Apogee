@@ -8,6 +8,7 @@
 #include "httpserver/admin_agents.h"
 #include "httpserver/admin_auth_routes.h"
 #include "httpserver/admin_config.h"
+#include "httpserver/admin_datasets.h"
 #include "httpserver/admin_events.h"
 #include "httpserver/admin_graph.h"
 #include "httpserver/admin_graphs.h"
@@ -98,6 +99,15 @@ public:
     [[nodiscard]] HttpResponse put_graph(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse delete_graph_config(const HttpRequest& request,
                                                    std::string_view name);
+
+    /// The datasets slice -- the twins of `apogee datasets`; synth is the
+    /// plane's third job kind (teacher inference, not training).
+    [[nodiscard]] HttpResponse list_datasets(const HttpRequest& request);
+    [[nodiscard]] HttpResponse create_dataset(const HttpRequest& request);
+    [[nodiscard]] HttpResponse get_dataset(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse delete_dataset(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse synth_dataset(Handler& plane, const HttpRequest& request);
+    [[nodiscard]] HttpResponse list_kits(const HttpRequest& request);
 
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);

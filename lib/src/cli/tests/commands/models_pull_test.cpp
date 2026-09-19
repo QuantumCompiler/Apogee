@@ -4,11 +4,13 @@
 
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
 #include <system_error>
 
 #include "models/acquire.h"
 #include "models/sidecar.h"
+#include "support/env_guard.h"
 #include "support/gguf_builder.h"
 
 /// The mutating verbs, and the boundary they must never cross.
@@ -205,4 +207,25 @@ TEST_CASE("repair on an unknown name yields nothing for the caller to report",
           "[commands][models][repair]") {
     Models models;
     CHECK(render_repair(models.root, "absent.gguf").empty());
+}
+
+TEST_CASE("a SafeTensors snapshot directory is planned whole, and never mistaken for a GGUF",
+          "[commands][models][delete][snapshot]") {
+    const apogee::testing::TempDir models{"models-snapshot-" +
+                                          std::to_string(std::random_device{}())};
+    const std::filesystem::path dir = models.path() / "owner--repo";
+    std::filesystem::create_directories(dir);
+    std::ofstream{dir / "config.json"} << R"({"architectures": ["LlamaForCausalLM"]})";
+    std::ofstream{dir / "model-00001-of-00002.safetensors"} << "weights";
+
+    const DeletePlan plan = plan_delete(models.path(), "owner--repo");
+    REQUIRE(plan.ok);
+    CHECK(plan.snapshot);
+    CHECK(plan.model == dir);
+    CHECK_FALSE(plan.has_sidecar);
+
+    // A directory that is not a snapshot is not a model either.
+    std::filesystem::create_directories(models.path() / "plain");
+    const DeletePlan plain = plan_delete(models.path(), "plain");
+    CHECK_FALSE(plain.ok);
 }

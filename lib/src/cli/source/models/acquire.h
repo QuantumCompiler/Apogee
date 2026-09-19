@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "models/sidecar.h"
 
@@ -102,6 +103,48 @@ struct AcquireResult {
 [[nodiscard]] AcquireResult acquire(const std::filesystem::path& destination,
                                     const SourcePromise& promise, const ByteSource& source,
                                     const ProgressFn& progress = {});
+
+/// The same ladder for a file that is not a GGUF -- a SafeTensors shard, a
+/// tokenizer, a dataset file: rungs 1-3 and 5, with the header rung skipped
+/// and the sidecar saying so (`header_checked` false, not a lie about a
+/// parse that never ran).
+[[nodiscard]] AcquireResult acquire_file(const std::filesystem::path& destination,
+                                         const SourcePromise& promise, const ByteSource& source,
+                                         const ProgressFn& progress = {});
+
+/// One file of a tree download, at `relative` under the destination.
+struct TreeItem {
+    std::string relative;
+    SourcePromise promise;
+    ByteSource source;
+};
+
+/// Progress over a tree: which file (1-based index of `total`), and its own
+/// bytes so far against its declared size (0 when unknown).
+using TreeProgressFn =
+    std::function<void(std::size_t index, std::size_t total, std::string_view relative,
+                       std::int64_t written, std::int64_t size)>;
+
+struct AcquireTreeResult {
+    bool ok = false;
+    std::string error;
+    /// The directory, once committed.
+    std::filesystem::path path;
+    std::size_t files = 0;
+    std::int64_t bytes = 0;
+    /// One record per file, in `items` order.
+    std::vector<Sidecar> sidecars;
+};
+
+/// A whole tree -- a SafeTensors snapshot, a dataset -- through the same
+/// rule: every file streams into a `.staging` directory beside the
+/// destination, each through `acquire_file`, and the directory is renamed
+/// into place as the last operation. A failure on any file removes the
+/// staging tree, so a half snapshot never appears under a plausible name.
+/// `destination` must not already exist.
+[[nodiscard]] AcquireTreeResult acquire_tree(const std::filesystem::path& destination,
+                                             const std::vector<TreeItem>& items,
+                                             const TreeProgressFn& progress = {});
 
 /// Re-runs verification against an already-acquired model and its sidecar.
 ///

@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "commands/command.h"
 #include "models/sidecar.h"
 
 namespace CLI {
@@ -37,6 +38,10 @@ struct DeletePlan {
     std::filesystem::path sidecar;
     bool has_sidecar = false;
 
+    /// A SafeTensors snapshot directory rather than a GGUF: removed whole,
+    /// with its record.
+    bool snapshot = false;
+
     /// Set when the model came from the user's Ollama store.
     ///
     /// **Ollama's blobs are shared between models**, so removing one by hand
@@ -68,6 +73,13 @@ struct DeletePlan {
 /// Takes no `Config`: nothing here reads one. A Hugging Face token comes from
 /// the environment at the point of use (`HF_TOKEN`), and the models directory
 /// is passed explicitly so a test can point it at a temporary tree.
-void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir);
+/// Where a SafeTensors snapshot lands and is looked for: `paths.hf_dir`
+/// when the config sets it, else the models directory. The template
+/// reserves `hf_dir` for exactly these directories.
+[[nodiscard]] std::filesystem::path snapshot_root(const std::filesystem::path& models_dir,
+                                                  const std::string& config_flag);
+
+void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,
+                          const RootContext& context);
 
 }  // namespace apogee::commands

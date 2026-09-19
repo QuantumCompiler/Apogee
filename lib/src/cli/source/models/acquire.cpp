@@ -77,8 +77,10 @@ bool is_known_unrunnable(std::string_view architecture) noexcept {
     });
 }
 
-AcquireResult acquire(const std::filesystem::path& destination, const SourcePromise& promise,
-                      const ByteSource& source, const ProgressFn& progress) {
+namespace {
+
+AcquireResult acquire_impl(const std::filesystem::path& destination, const SourcePromise& promise,
+                           const ByteSource& source, const ProgressFn& progress, bool expect_gguf) {
     AcquireResult result;
 
     std::error_code code;
@@ -174,14 +176,16 @@ AcquireResult acquire(const std::filesystem::path& destination, const SourceProm
         }
     }
 
-    // --- rung 4: the header actually parses ---------------------------------
-    const GgufInfo info = inspect_gguf(partial);
-    sidecar.verification.header_checked = true;
-    sidecar.verification.header_parsed = info.parsed;
-    if (!info.parsed) {
-        remove_quietly(partial);
-        result.error = "the downloaded file is not a readable GGUF -- " + info.parse_error;
-        return result;
+    // --- rung 4: the header actually parses (a GGUF only) --------------------
+    if (expect_gguf) {
+        const GgufInfo info = inspect_gguf(partial);
+        sidecar.verification.header_checked = true;
+        sidecar.verification.header_parsed = info.parsed;
+        if (!info.parsed) {
+            remove_quietly(partial);
+            result.error = "the downloaded file is not a readable GGUF -- " + info.parse_error;
+            return result;
+        }
     }
 
     // --- rung 5: commit ------------------------------------------------------
@@ -206,6 +210,79 @@ AcquireResult acquire(const std::filesystem::path& destination, const SourceProm
     result.ok = true;
     result.path = destination;
     result.sidecar = sidecar;
+    return result;
+}
+
+}  // namespace
+
+AcquireResult acquire(const std::filesystem::path& destination, const SourcePromise& promise,
+                      const ByteSource& source, const ProgressFn& progress) {
+    return acquire_impl(destination, promise, source, progress, true);
+}
+
+AcquireResult acquire_file(const std::filesystem::path& destination, const SourcePromise& promise,
+                           const ByteSource& source, const ProgressFn& progress) {
+    return acquire_impl(destination, promise, source, progress, false);
+}
+
+AcquireTreeResult acquire_tree(const std::filesystem::path& destination,
+                               const std::vector<TreeItem>& items, const TreeProgressFn& progress) {
+    AcquireTreeResult result;
+    std::error_code code;
+    if (std::filesystem::exists(destination, code)) {
+        result.error = "a directory already exists at " + destination.string() +
+                       " -- delete it first, or pull to a different name";
+        return result;
+    }
+    if (items.empty()) {
+        result.error = "nothing to download";
+        return result;
+    }
+    std::filesystem::path staging = destination;
+    staging += ".staging";
+    // A leftover staging tree from an interrupted run is of unknown
+    // provenance: exactly what the ladder exists to reject.
+    std::filesystem::remove_all(staging, code);
+    std::filesystem::create_directories(staging, code);
+    if (code) {
+        result.error = "could not create " + staging.string() + ": " + code.message();
+        return result;
+    }
+
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        const TreeItem& item = items[i];
+        if (item.relative.empty() || item.relative.find("..") != std::string::npos ||
+            item.relative.front() == '/') {
+            std::filesystem::remove_all(staging, code);
+            result.error = "refusing a file path that leaves the tree: '" + item.relative + "'";
+            return result;
+        }
+        const std::filesystem::path target = staging / item.relative;
+        const AcquireResult file =
+            acquire_file(target, item.promise, item.source,
+                         [&progress, i, &items, &item](std::int64_t written, std::int64_t size) {
+                             if (progress) {
+                                 progress(i + 1, items.size(), item.relative, written, size);
+                             }
+                         });
+        if (!file.ok) {
+            std::filesystem::remove_all(staging, code);
+            result.error = item.relative + ": " + file.error;
+            return result;
+        }
+        ++result.files;
+        result.bytes += file.sidecar.file_size;
+        result.sidecars.push_back(file.sidecar);
+    }
+
+    std::filesystem::rename(staging, destination, code);
+    if (code) {
+        std::filesystem::remove_all(staging, code);
+        result.error = "could not move the finished tree into place: " + code.message();
+        return result;
+    }
+    result.ok = true;
+    result.path = destination;
     return result;
 }
 

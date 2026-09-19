@@ -80,12 +80,52 @@ struct NamedAgent {
 [[nodiscard]] std::filesystem::path resolve_agent_path(const std::filesystem::path& home,
                                                        std::string_view path);
 
-/// Whether `file` under `root` is a bundled prompt or schema whose bytes are
-/// still exactly the shipped text -- Apogee's, not the user's. `uninstall`
-/// asks this so a fresh install's seeded files do not read as user data;
-/// an edited one does.
+/// Whether `file` under `root` is a bundled asset -- a prompt, a schema, a
+/// kit, a script -- whose bytes are still exactly the shipped text: Apogee's,
+/// not the user's. A DIRECTORY answers true when everything beneath it does
+/// (a fresh install's `training/kits/`). `uninstall` asks this so a fresh
+/// install's seeded files do not read as user data; an edited one does.
 [[nodiscard]] bool is_unmodified_bundled_asset(const std::filesystem::path& root,
                                                const std::filesystem::path& file);
+
+/// A bundled training kit -- one skill's teacher synthesis spec and inline
+/// eval suite -- compiled in like the agents, byte-identical to the shipped
+/// `assets/training/kits/<name>.yaml`, and seeded skip-if-present under
+/// `training/kits/`. Four ship; the two tool kits wait for the in-text tool
+/// protocol (user decision, 2026-09-19).
+struct BundledKit {
+    std::string_view name;
+    std::string_view text;
+};
+
+/// The four, in the order `apogee datasets kits` shows them.
+[[nodiscard]] std::span<const BundledKit> bundled_kits() noexcept;
+
+/// A bundled Python driver -- `prepare_dataset.py` today, the trainers with
+/// the run item -- compiled in, byte-identical to `assets/training/<name>`,
+/// and seeded skip-if-present under `training/scripts/` so a user's edit
+/// survives an update and `check` can show the drift.
+struct BundledScript {
+    std::string_view name;
+    std::string_view text;
+};
+
+[[nodiscard]] std::span<const BundledScript> bundled_training_scripts() noexcept;
+
+/// `training/kits/<name>.yaml` and `training/scripts/<name>`, relative to the
+/// data directory -- the paths seeding writes and the commands read.
+[[nodiscard]] std::string bundled_kit_relative_path(std::string_view name);
+[[nodiscard]] std::string bundled_script_relative_path(std::string_view name);
+
+/// Every file seeding materialises: the agents' prompts and schemas, the
+/// kits, the scripts. ONE list, so the seeder, the unmodified check and the
+/// doctor's drift row cannot disagree about what Apogee ships.
+struct BundledFile {
+    std::string relative_path;
+    std::string_view content;
+};
+
+[[nodiscard]] std::vector<BundledFile> bundled_files();
 
 struct AssetSeedResult {
     /// Files written, relative to the root. Absent files only.

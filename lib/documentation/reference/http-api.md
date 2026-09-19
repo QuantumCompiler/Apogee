@@ -757,6 +757,63 @@ are assigned when absent and kept when present. `201` with the same envelope
 as capture; `400` when the record does not validate. It needs no generation
 backend: only the embedder, when the retriever resolves to `vector`.
 
+### `GET /v1/admin/datasets`
+
+The datasets under `training/datasets/` -- what `apogee datasets list`
+shows: `200 {"object": "list", "data": [{name, path, lines, bytes, shape}]}`,
+sorted by name, `shape` one of `chat`, `flat`, `eval`, `mixed`, `empty`,
+`unknown`. An absent directory lists as empty.
+
+### `POST /v1/admin/datasets`
+
+The twin of `apogee datasets create`: `{"name", "from"?: "template" |
+"sessions" | "empty", "backend"?, "since"?, "until"?, "force"?, "lines"?:
+[{...}]}`. `from` defaults to `template` (two documented example lines);
+`sessions` mines the server's own persisted chats, one example per completed
+exchange, filtered by backend and `YYYY-MM-DD` dates; explicit `lines` (JSON
+objects, written one per line) override the source. `201 {name, path,
+examples[, sessions, skipped]}`; `400` for a bad name, a bad `from`, a bad
+date or a non-object line; `409` for an existing dataset without `force`.
+The file is byte-identical to the CLI's -- the same writer, the same
+`role`-before-`content` line shape.
+
+### `POST /v1/admin/datasets/synth`
+
+The twin of `apogee datasets synth`, as an **async job** (`datasets-synth`):
+`{"name", "teacher", "kit", "count"?, "topic"?, "temperature"?,
+"max_tokens"?, "parallel"?, "force"?}`. Synth is teacher inference, not
+training -- the distinction the training track's carve-out rests on -- so it
+is exposed exactly as the reference implementation exposed it. The teacher is
+named explicitly (never resolved from a role), must be served by this plane,
+and is never a vendor CLI; an API backend runs `parallel` batches in flight
+(default 4), a local one runs one. `202 {"job_id"}`; progress `synthesising
+examples {produced, target}`; the result `{name, path, examples, calls,
+failed_batches, retries}`. `400` for a missing field, an unknown kit, an
+unknown or vendor-CLI teacher; `409` for an existing dataset without `force`;
+`501` with no served backend. A teacher that produces nothing usable fails the
+job and writes nothing.
+
+### `GET /v1/admin/datasets/kits`
+
+The training kits installed under `training/kits/` -- the four bundled ones
+and any the user added: `200 {"object": "list", "data": [{name, path,
+description, eval_items[, error]}]}`, sorted by name; a kit that does not
+parse or validate carries `error` rather than being hidden.
+
+### `GET /v1/admin/datasets/{id}`
+
+One dataset: `200 {name, path, lines, bytes, shape}`; `404` when absent.
+
+### `DELETE /v1/admin/datasets/{id}`
+
+The twin of `apogee datasets delete`: removes the file. `200 {"deleted":
+name}`; `404` when absent.
+
+The literal `synth` and `kits` paths are matched before the `{id}` rows, so
+neither is ever read as a dataset name. `datasets prepare` (a server-side
+file conversion) and `datasets pull` (a download) are backfills of this
+plane, not routes yet.
+
 ### `GET /v1/admin/permissions`
 
 What the permission gate does for each destructive native tool — `ask`,
@@ -850,8 +907,9 @@ Cancels a running job and returns its record. A cancelled job stays cancelled:
 a worker that dies afterwards cannot turn it into `failed`. Idempotent on a
 finished job; `404` when unknown.
 
-The job kinds are `graph-build` (`POST /v1/admin/graph/{id}/build`) and
-`graph-communities` (`POST /v1/admin/graph/{id}/communities`); a server-local
+The job kinds are `graph-build` (`POST /v1/admin/graph/{id}/build`),
+`graph-communities` (`POST /v1/admin/graph/{id}/communities`) and
+`datasets-synth` (`POST /v1/admin/datasets/synth`); a server-local
 ingest and a model pull arrive with the routes that own them -- and with the
 ingest route, `"graph": true` on its body to chain the covering graph's build
 after a successful ingest, the twin of `apogee embed ingest --graph`.

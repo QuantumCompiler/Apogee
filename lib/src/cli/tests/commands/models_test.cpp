@@ -12,6 +12,7 @@
 
 #include "harness/roles.h"
 #include "models/sidecar.h"
+#include "models/snapshot.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
@@ -421,4 +422,52 @@ TEST_CASE("status on an empty config reports unset rather than a blank name",
           "[commands][models][roles]") {
     const std::string status = render_role_status(Config{});
     CHECK(status.find("(unset") != std::string::npos);
+}
+
+TEST_CASE(
+    "a SafeTensors snapshot is listed as trainable, not runnable, with its architecture "
+    "and record",
+    "[commands][models][listing][snapshot]") {
+    const RealModel model{"llama"};
+    const std::filesystem::path snapshot = model.dir / "owner--repo";
+    std::filesystem::create_directories(snapshot);
+    std::ofstream{snapshot / "config.json"} << R"({"architectures": ["Qwen2ForCausalLM"]})";
+    std::ofstream{snapshot / "model.safetensors"} << "weights";
+
+    std::vector<ModelRow> rows = build_model_rows(Config{}, model.dir);
+    auto match =
+        std::ranges::find_if(rows, [](const ModelRow& row) { return row.model == "owner--repo/"; });
+    REQUIRE(match != rows.end());
+    CHECK(match->backend == "(not configured)");
+    CHECK(match->state == "safetensors");
+    CHECK(match->architecture == "Qwen2");
+    CHECK(match->provenance == "local");
+    CHECK(match->verified == "no record");
+    CHECK(match->note.find("trainable") != std::string::npos);
+
+    apogee::models::Snapshot record;
+    record.ref = "owner/repo";
+    record.source = "huggingface";
+    record.files.push_back({"model.safetensors", 7, "abc"});
+    REQUIRE(apogee::models::write_snapshot(snapshot, record));
+    rows = build_model_rows(Config{}, model.dir);
+    match =
+        std::ranges::find_if(rows, [](const ModelRow& row) { return row.model == "owner--repo/"; });
+    REQUIRE(match != rows.end());
+    CHECK(match->provenance == "huggingface");
+    CHECK(match->verified == "1 file(s) on record");
+
+    // paths.hf_dir is a second root.
+    const apogee::testing::TempDir hf{"models-hf-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path other = hf.path() / "org--base";
+    std::filesystem::create_directories(other);
+    std::ofstream{other / "config.json"} << R"({"model_type": "gemma3"})";
+    std::ofstream{other / "w.safetensors"} << "w";
+    Config config;
+    config.paths.hf_dir = hf.path().string();
+    rows = build_model_rows(config, model.dir);
+    match =
+        std::ranges::find_if(rows, [](const ModelRow& row) { return row.model == "org--base/"; });
+    REQUIRE(match != rows.end());
+    CHECK(match->architecture == "gemma3");
 }

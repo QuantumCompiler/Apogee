@@ -32,6 +32,8 @@
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 #include "tools/toolsets.h"
+#include "training/kit.h"
+#include "training/python_env.h"
 #include "version/version.h"
 
 namespace apogee::commands {
@@ -833,6 +835,90 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
+/// The training track's install: the Python environment (created only on
+/// request, so its absence is a warning with the command that creates it),
+/// every seeded script against its compiled-in copy (a user's edit is kept
+/// and shown, a missing one is a failure `--fix` repairs), every installed
+/// kit parsing and validating, and `paths.hf_dir` when it is set.
+void check_training(CheckReport& report, const CheckInputs& inputs) {
+    std::error_code code;
+    const std::filesystem::path training = inputs.home / "training";
+
+    const training::PythonEnv env{training / "venv"};
+    const training::PythonEnvStatus status = env.status();
+    if (!status.exists) {
+        add(report, Status::Warn, "Training", "python env",
+            "not created -- 'datasets prepare' and the trainers need it (never the system Python)",
+            "apogee train setup");
+    } else if (!status.error.empty()) {
+        add(report, Status::Warn, "Training", "python env",
+            "exists at " + env.dir().string() + " but its record is unreadable: " + status.error,
+            "apogee train setup");
+    } else {
+        std::string sets;
+        for (const std::string& set : status.sets) {
+            sets += sets.empty() ? set : ", " + set;
+        }
+        add(report, Status::Ok, "Training", "python env",
+            "at " + env.dir().string() +
+                (sets.empty() ? std::string{"; no requirement sets installed"}
+                              : "; sets: " + sets));
+    }
+
+    for (const harness::BundledScript& script : harness::bundled_training_scripts()) {
+        const std::filesystem::path path =
+            inputs.home / harness::bundled_script_relative_path(script.name);
+        const std::string label = "script: " + std::string{script.name};
+        if (!std::filesystem::is_regular_file(path, code)) {
+            // A warning, not a failure: a fresh install passes, and the
+            // remedy is the doctor's own repair.
+            add(report, Status::Warn, "Training", label,
+                "missing from " + path.parent_path().string(), "apogee check --fix");
+            continue;
+        }
+        if (harness::is_unmodified_bundled_asset(inputs.home, path)) {
+            add(report, Status::Ok, "Training", label, "matches the shipped copy");
+        } else {
+            add(report, Status::Warn, "Training", label,
+                "differs from the shipped copy -- your edit is kept and runs; delete the file "
+                "and run 'apogee check --fix' to restore the shipped one");
+        }
+    }
+
+    const std::vector<training::KitSummary> kits = training::list_kits(training / "kits");
+    if (kits.empty()) {
+        add(report, Status::Warn, "Training", "kits",
+            "none installed under " + (training / "kits").string(), "apogee check --fix");
+    }
+    for (const training::KitSummary& kit : kits) {
+        const std::string label = "kit: " + kit.name;
+        if (!kit.error.empty()) {
+            add(report, Status::Fail, "Training", label, kit.error,
+                "fix " + kit.path.string() + ", or delete it");
+            continue;
+        }
+        add(report, Status::Ok, "Training", label,
+            std::to_string(kit.eval_items) + " eval item(s)" +
+                (kit.description.empty() ? std::string{} : " -- " + kit.description));
+    }
+
+    if (inputs.config_missing || !inputs.config_error.empty()) {
+        return;
+    }
+    if (!inputs.config.paths.hf_dir.empty()) {
+        const std::filesystem::path hf_dir{
+            harness::expand_env_and_home(inputs.config.paths.hf_dir)};
+        if (!std::filesystem::is_directory(hf_dir, code)) {
+            add(report, Status::Warn, "Training", "paths.hf_dir",
+                "names a directory that does not exist: " + hf_dir.string(),
+                "create it, or clear paths.hf_dir so snapshots land under models/");
+        } else {
+            add(report, Status::Ok, "Training", "paths.hf_dir",
+                "SafeTensors snapshots land under " + hf_dir.string());
+        }
+    }
+}
+
 CheckReport run_checks(const CheckInputs& inputs) {
     CheckReport report;
     check_version(report, inputs);
@@ -842,6 +928,7 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_agents(report, inputs);
     check_knowledge(report, inputs);
     check_graphs(report, inputs);
+    check_training(report, inputs);
     check_filesystem(report, inputs);
     check_secrets(report, inputs);
     check_credential_store(report, inputs);

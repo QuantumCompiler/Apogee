@@ -4,6 +4,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <random>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -32,8 +34,13 @@ using apogee::models::SourcePromise;
 
 /// A scratch directory that cleans itself up.
 struct Scratch {
+    // A per-process counter alone named the same path in two ctest processes
+    // running in parallel, and each deleted the other's directory (the flake
+    // class `commands/check_test.cpp` records); a random suffix makes the
+    // name this process's own.
     std::filesystem::path root =
-        std::filesystem::temp_directory_path() / ("apogee-acquire-" + std::to_string(counter()));
+        std::filesystem::temp_directory_path() / ("apogee-acquire-" + std::to_string(counter()) +
+                                                  "-" + std::to_string(std::random_device{}()));
 
     Scratch() {
         std::error_code code;
@@ -343,4 +350,96 @@ TEST_CASE("the unrunnable-architecture list is advisory and never consulted by a
 
     CHECK(result.ok);
     CHECK(std::filesystem::exists(scratch.destination()));
+}
+
+TEST_CASE("acquire_file skips the header rung and says so, while size and digest still count",
+          "[models][acquire][file]") {
+    Scratch scratch;
+    const std::string payload = "not a gguf at all";
+    SourcePromise promise;
+    promise.ref = "org/data:train.jsonl";
+    promise.source = "huggingface";
+    promise.size = static_cast<std::int64_t>(payload.size());
+    promise.digest = apogee::models::sha256_hex(payload);
+    const ByteSource source = [&payload](const std::function<bool(std::string_view)>& write,
+                                         std::string&) { return write(payload); };
+    const AcquireResult result =
+        apogee::models::acquire_file(scratch.root / "train.jsonl", promise, source);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    CHECK(result.sidecar.verification.size_checked);
+    CHECK(result.sidecar.verification.digest_matched);
+    CHECK_FALSE(result.sidecar.verification.header_checked);
+    CHECK(std::filesystem::exists(scratch.root / "train.jsonl"));
+
+    SourcePromise wrong = promise;
+    wrong.digest = std::string(64, 'f');
+    const AcquireResult failed =
+        apogee::models::acquire_file(scratch.root / "bad.jsonl", wrong, source);
+    CHECK_FALSE(failed.ok);
+    CHECK(failed.error.find("digest mismatch") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(scratch.root / "bad.jsonl"));
+    CHECK_FALSE(scratch.has_partial());
+}
+
+TEST_CASE("acquire_tree commits every file or nothing, and never leaves a staging tree",
+          "[models][acquire][tree]") {
+    Scratch scratch;
+    const auto item = [](std::string relative, std::string payload, bool fails = false) {
+        apogee::models::TreeItem out;
+        out.relative = std::move(relative);
+        out.promise.ref = "owner/repo:" + out.relative;
+        out.promise.source = "huggingface";
+        out.promise.size = static_cast<std::int64_t>(payload.size());
+        out.source = [payload, fails](const std::function<bool(std::string_view)>& write,
+                                      std::string& error) {
+            if (fails) {
+                error = "connection reset";
+                return false;
+            }
+            return write(payload);
+        };
+        return out;
+    };
+    const std::filesystem::path destination = scratch.root / "owner--repo";
+    std::vector<std::size_t> seen;
+    const apogee::models::AcquireTreeResult ok = apogee::models::acquire_tree(
+        destination, {item("config.json", "{}"), item("shards/model.safetensors", "weights")},
+        [&seen](std::size_t index, std::size_t total, std::string_view, std::int64_t,
+                std::int64_t) {
+            CHECK(total == 2);
+            seen.push_back(index);
+        });
+    INFO(ok.error);
+    REQUIRE(ok.ok);
+    CHECK(ok.files == 2);
+    CHECK(ok.bytes == 9);
+    CHECK(ok.path == destination);
+    CHECK(std::filesystem::exists(destination / "config.json"));
+    CHECK(std::filesystem::exists(destination / "shards" / "model.safetensors"));
+    CHECK(std::filesystem::exists(apogee::models::sidecar_path_for(destination / "config.json")));
+    CHECK_FALSE(std::filesystem::exists(scratch.root / "owner--repo.staging"));
+    CHECK(seen == std::vector<std::size_t>{1, 2});
+
+    // An existing destination is never overwritten.
+    const apogee::models::AcquireTreeResult again =
+        apogee::models::acquire_tree(destination, {item("config.json", "{}")});
+    CHECK_FALSE(again.ok);
+    CHECK(again.error.find("already exists") != std::string::npos);
+
+    // A failure on the second file leaves nothing visible.
+    const std::filesystem::path other = scratch.root / "other";
+    const apogee::models::AcquireTreeResult failed = apogee::models::acquire_tree(
+        other, {item("config.json", "{}"), item("model.safetensors", "w", true)});
+    CHECK_FALSE(failed.ok);
+    CHECK(failed.error.find("model.safetensors: connection reset") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(other));
+    CHECK_FALSE(std::filesystem::exists(scratch.root / "other.staging"));
+
+    // A path that leaves the tree is refused.
+    const apogee::models::AcquireTreeResult escape =
+        apogee::models::acquire_tree(scratch.root / "esc", {item("../out.json", "{}")});
+    CHECK_FALSE(escape.ok);
+    CHECK(escape.error.find("leaves the tree") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(scratch.root / "out.json"));
 }

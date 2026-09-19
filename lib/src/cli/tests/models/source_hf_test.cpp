@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "support/env_guard.h"
 #include "support/fake_transport.h"
@@ -188,4 +189,112 @@ TEST_CASE("the token comes from config, then the environment, then nowhere",
     const apogee::testing::EnvUnsetGuard no_token{"HF_TOKEN"};
     const apogee::testing::EnvUnsetGuard no_hub_token{"HUGGING_FACE_HUB_TOKEN"};
     CHECK(apogee::models::hf_token({}).empty());
+}
+
+TEST_CASE("the tree listing reads sizes and LFS digests, for models and datasets",
+          "[models][hf][tree]") {
+    const std::string tree = R"([
+        {"type": "file", "oid": "gitblob", "size": 12, "path": "config.json"},
+        {"type": "directory", "oid": "x", "path": "images"},
+        {"type": "file", "oid": "y", "size": 5, "path": "model.safetensors",
+         "lfs": {"oid": "abc123", "size": 4096, "pointerSize": 134}}
+    ])";
+    auto fake = std::make_unique<FakeTransport>(
+        std::vector<FakeTransport::Reply>{FakeTransport::Reply{.status = 200, .body = tree}});
+    FakeTransport* transport_ptr = fake.get();
+    HttpClient client{std::move(fake)};
+    const HfRef ref = *parse_hf_ref("owner/repo@dev");
+    const apogee::models::HfTree listed =
+        apogee::models::list_repo_tree(client, ref, apogee::models::HfRepoKind::Model, "tok", {});
+    REQUIRE(listed.ok);
+    REQUIRE(listed.files.size() == 2);
+    CHECK(listed.files[0].path == "config.json");
+    CHECK(listed.files[0].size == 12);
+    CHECK(listed.files[0].sha256.empty());  // a git blob hash is not a digest
+    CHECK(listed.files[1].path == "model.safetensors");
+    CHECK(listed.files[1].sha256 == "abc123");
+    CHECK(listed.files[1].size == 4096);  // the LFS size wins
+    const FakeTransport& transport = *transport_ptr;
+    REQUIRE(transport.requests().size() == 1);
+    CHECK(transport.requests()[0].url ==
+          "https://huggingface.co/api/models/owner/repo/tree/dev?recursive=true");
+    CHECK(transport.requests()[0].headers[0].value == "Bearer tok");
+
+    auto datasets_fake = std::make_unique<FakeTransport>(
+        std::vector<FakeTransport::Reply>{FakeTransport::Reply{.status = 200, .body = "[]"}});
+    const FakeTransport* datasets_ptr = datasets_fake.get();
+    HttpClient datasets{std::move(datasets_fake)};
+    (void)apogee::models::list_repo_tree(datasets, *parse_hf_ref("org/data"),
+                                         apogee::models::HfRepoKind::Dataset, "", {});
+    CHECK(datasets_ptr->requests()[0].url ==
+          "https://huggingface.co/api/datasets/org/data/tree/main?recursive=true");
+
+    auto missing = client_for({FakeTransport::Reply{.status = 404, .body = ""}});
+    const apogee::models::HfTree gone =
+        apogee::models::list_repo_tree(*missing, ref, apogee::models::HfRepoKind::Model, "", {});
+    CHECK_FALSE(gone.ok);
+    CHECK(gone.error.find("no such repository or revision") != std::string::npos);
+}
+
+TEST_CASE("dataset files download from the datasets prefix with the tree's promise",
+          "[models][hf][tree]") {
+    HfRef ref = *parse_hf_ref("org/data");
+    CHECK(apogee::models::hf_download_url(ref, apogee::models::HfRepoKind::Dataset)
+              .rfind("https://huggingface.co/datasets/org/data/resolve/main/", 0) == 0);
+    auto client = client_for({FakeTransport::Reply{.status = 200, .body = "bytes"}});
+    apogee::models::SourcePromise promise;
+    const apogee::models::HfFile file{"data/train.parquet", 5, "deadbeef"};
+    const apogee::models::ByteSource source = apogee::models::http_source(
+        *client, ref, apogee::models::HfRepoKind::Dataset, file, "", {}, promise);
+    CHECK(promise.size == 5);
+    CHECK(promise.digest == "deadbeef");
+    CHECK(promise.source_url ==
+          "https://huggingface.co/datasets/org/data/resolve/main/data/train.parquet");
+    std::string got;
+    std::string error;
+    REQUIRE(source(
+        [&got](std::string_view chunk) {
+            got += chunk;
+            return true;
+        },
+        error));
+    CHECK(got == "bytes");
+}
+
+TEST_CASE("snapshot and dataset file filters, and the directory name", "[models][hf][snapshot]") {
+    using apogee::models::dataset_file_wanted;
+    using apogee::models::snapshot_wanted;
+    CHECK(snapshot_wanted("model-00001-of-00002.safetensors"));
+    CHECK(snapshot_wanted("config.json"));
+    CHECK(snapshot_wanted("tokenizer.model"));
+    CHECK(snapshot_wanted("merges.txt"));
+    CHECK(snapshot_wanted("modeling_custom.py"));
+    CHECK_FALSE(snapshot_wanted("README.md"));
+    CHECK_FALSE(snapshot_wanted(".gitattributes"));
+    CHECK_FALSE(snapshot_wanted("model.gguf"));
+    CHECK_FALSE(snapshot_wanted("pytorch_model.bin"));
+    CHECK_FALSE(snapshot_wanted("banner.png"));
+    CHECK(dataset_file_wanted("data/train-00000.parquet"));
+    CHECK(dataset_file_wanted("train.jsonl"));
+    CHECK_FALSE(dataset_file_wanted("README.md"));
+    CHECK_FALSE(dataset_file_wanted(".gitattributes"));
+    CHECK(apogee::models::repo_directory_name(*parse_hf_ref("Owner/Repo-Name")) ==
+          "Owner--Repo-Name");
+}
+
+TEST_CASE("a GGUF-less SafeTensors repository names --safetensors beside the converter",
+          "[models][hf]") {
+    auto client = client_for({FakeTransport::Reply{
+        .status = 200, .body = repo_json({"config.json", "model.safetensors"})}});
+    HfRef ref = *parse_hf_ref("owner/repo");
+    std::string error;
+    CHECK_FALSE(apogee::models::resolve_file(*client, ref, "", {}, error));
+    CHECK(error.find("apogee models pull owner/repo --safetensors") != std::string::npos);
+    CHECK(error.find("convert_hf_to_gguf.py") != std::string::npos);
+    const apogee::models::HfListing listing = apogee::models::list_gguf_files(
+        *client_for({FakeTransport::Reply{.status = 200,
+                                          .body = repo_json({"a.safetensors", "b.safetensors"})}}),
+        ref, "", {});
+    REQUIRE(listing.ok);
+    CHECK(listing.safetensors_files == std::vector<std::string>{"a.safetensors", "b.safetensors"});
 }

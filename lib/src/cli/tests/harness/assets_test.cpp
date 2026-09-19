@@ -57,7 +57,8 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     const apogee::testing::TempDir root{"assets-seed-" + std::to_string(std::random_device{}())};
     const apogee::harness::AssetSeedResult first = seed_bundled_assets(root.path());
     REQUIRE(first.ok());
-    CHECK(first.created.size() == 6);
+    // Six agent files, four kits, one script.
+    CHECK(first.created.size() == 11);
     const std::filesystem::path prompt = root.path() / "prompts" / "security-review.txt";
     REQUIRE(std::filesystem::exists(prompt));
     CHECK(read(prompt) == find_bundled_agent("security-review")->prompt);
@@ -157,4 +158,49 @@ TEST_CASE("an unedited bundled file is Apogee's, an edited one is the user's",
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(),
                                                              root.path() / "prompts" / "mine.txt"));
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), root.path() / "nope"));
+}
+
+TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
+          "[harness][assets][training]") {
+    const std::filesystem::path assets{APOGEE_ASSETS_DIR};
+    REQUIRE(apogee::harness::bundled_kits().size() == 4);
+    for (const apogee::harness::BundledKit& kit : apogee::harness::bundled_kits()) {
+        INFO(kit.name);
+        CHECK(read(assets / "training" / "kits" / (std::string{kit.name} + ".yaml")) == kit.text);
+        CHECK(apogee::harness::bundled_kit_relative_path(kit.name) ==
+              "training/kits/" + std::string{kit.name} + ".yaml");
+    }
+    REQUIRE(apogee::harness::bundled_training_scripts().size() == 1);
+    const apogee::harness::BundledScript& script = apogee::harness::bundled_training_scripts()[0];
+    CHECK(script.name == "prepare_dataset.py");
+    CHECK(read(assets / "training" / "prepare_dataset.py") == script.text);
+    CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
+          "training/scripts/prepare_dataset.py");
+    CHECK(apogee::harness::bundled_files().size() == 11);
+}
+
+TEST_CASE(
+    "seeding materialises the kits and the script, and a seeded directory is Apogee's "
+    "until something in it is edited",
+    "[harness][assets][training][seed]") {
+    const apogee::testing::TempDir root{"assets-kits-" + std::to_string(std::random_device{}())};
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    const std::filesystem::path kits = root.path() / "training" / "kits";
+    const std::filesystem::path script =
+        root.path() / "training" / "scripts" / "prepare_dataset.py";
+    REQUIRE(std::filesystem::exists(kits / "reasoning.yaml"));
+    REQUIRE(std::filesystem::exists(script));
+    CHECK(apogee::harness::is_unmodified_bundled_asset(root.path(), script));
+    CHECK(apogee::harness::is_unmodified_bundled_asset(root.path(), kits));
+    CHECK(apogee::harness::is_unmodified_bundled_asset(root.path(),
+                                                       root.path() / "training" / "scripts"));
+    // An empty directory is nobody's, so it is not "Apogee's".
+    std::filesystem::create_directories(root.path() / "training" / "datasets");
+    CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(
+        root.path(), root.path() / "training" / "datasets"));
+    // One edited kit makes the directory the user's.
+    std::ofstream{kits / "reasoning.yaml", std::ios::binary} << "name: mine\n";
+    CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), kits));
+    CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), kits / "reasoning.yaml"));
+    CHECK(apogee::harness::is_unmodified_bundled_asset(root.path(), kits / "summarization.yaml"));
 }

@@ -14,7 +14,7 @@ namespace {
 /// Order matters only for readability -- `create_directories` handles nesting
 /// -- but keeping it stable keeps `apogee check` output stable, and diffing
 /// two installs is easier when both enumerate in the same order.
-constexpr std::array<LayoutEntry, 12> kDirectories{{
+constexpr std::array<LayoutEntry, 13> kDirectories{{
     // `config` is a row like any other, even though `config_dir()` is the
     // accessor callers use. Leaving it out was the first version, and it
     // immediately produced the bug this whole file exists to prevent: seeding
@@ -32,6 +32,10 @@ constexpr std::array<LayoutEntry, 12> kDirectories{{
     {"schemas", "agents' output schemas (JSON Schema), loaded beside the prompts", false, true},
     {"analyses", "reports saved by 'apogee analyze', one directory per agent", false, true},
     {"knowledge", "captured decision records' raw conversations (knowledge/raw)", true, true},
+    {"training",
+     "training datasets, kits, scripts and the Python environment ('apogee datasets' / 'apogee "
+     "train')",
+     true, true},
     {"cache", "downloads and scratch state, safe to delete", false, false},
 }};
 
@@ -67,6 +71,30 @@ std::filesystem::path mcp_servers_dir() {
 
 std::filesystem::path cache_dir() {
     return apogee_home() / "cache";
+}
+
+std::filesystem::path training_dir() {
+    return apogee_home() / "training";
+}
+
+std::filesystem::path training_datasets_dir() {
+    return training_dir() / "datasets";
+}
+
+std::filesystem::path training_raw_datasets_dir() {
+    return training_datasets_dir() / "raw";
+}
+
+std::filesystem::path training_kits_dir() {
+    return training_dir() / "kits";
+}
+
+std::filesystem::path training_scripts_dir() {
+    return training_dir() / "scripts";
+}
+
+std::filesystem::path training_venv_dir() {
+    return training_dir() / "venv";
 }
 
 std::filesystem::path prompts_dir() {

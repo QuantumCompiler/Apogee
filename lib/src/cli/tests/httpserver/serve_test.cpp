@@ -96,7 +96,13 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
         }
     }
     CHECK(public_rows == 8);
-    CHECK(admin_rows == 48);
+    CHECK(admin_rows == 54);
+    CHECK(has("GET", "/v1/admin/datasets"));
+    CHECK(has("POST", "/v1/admin/datasets"));
+    CHECK(has("POST", "/v1/admin/datasets/synth"));
+    CHECK(has("GET", "/v1/admin/datasets/kits"));
+    CHECK(has("GET", "/v1/admin/datasets/{id}"));
+    CHECK(has("DELETE", "/v1/admin/datasets/{id}"));
     CHECK(has("POST", "/v1/admin/graph/{id}/build"));
     CHECK(has("GET", "/v1/admin/graph/{id}/stats"));
     CHECK(has("GET", "/v1/admin/graph/{id}/entity"));

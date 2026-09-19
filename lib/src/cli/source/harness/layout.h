@@ -87,6 +87,23 @@ struct LayoutEntry {
 /// `<APOGEE_HOME>/knowledge/raw` -- one `<record id>.md` per archived
 /// conversation. Created by the first capture, never seeded, never exported.
 [[nodiscard]] std::filesystem::path knowledge_raw_dir();
+
+/// `<APOGEE_HOME>/training` -- the training track's own files: prepared
+/// datasets, the kits and Python drivers seeding materialises, and the
+/// virtual environment Apogee owns. Private: a dataset mined from the user's
+/// sessions holds their own words. The subdirectories are created by first
+/// use or by seeding, never restated as rows.
+[[nodiscard]] std::filesystem::path training_dir();
+/// `training/datasets` -- trainer-ready JSONL, one file per dataset.
+[[nodiscard]] std::filesystem::path training_datasets_dir();
+/// `training/datasets/raw` -- downloaded dataset files, for `prepare`.
+[[nodiscard]] std::filesystem::path training_raw_datasets_dir();
+/// `training/kits` -- the seeded training kits, plus the user's own.
+[[nodiscard]] std::filesystem::path training_kits_dir();
+/// `training/scripts` -- the seeded Python drivers.
+[[nodiscard]] std::filesystem::path training_scripts_dir();
+/// `training/venv` -- the Python environment `apogee train setup` creates.
+[[nodiscard]] std::filesystem::path training_venv_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 
 /// What `seed_data_directory()` did.

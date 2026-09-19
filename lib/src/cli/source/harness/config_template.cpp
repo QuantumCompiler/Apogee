@@ -340,6 +340,17 @@ backends:
 # knowledge:
 #   auto_capture: false
 #   db: knowledge          # the collection records go into
+
+# ── Training (fine-tuning local models) ──────────────────────────────────────
+# The training track runs its Python drivers -- dataset preparation today,
+# the trainers with the run item -- inside a virtual environment Apogee owns
+# under training/venv/, never the system Python. `apogee train setup` creates
+# it (or the first command that needs it asks, on a terminal). `python` names
+# the interpreter that environment is seeded FROM; empty means python3 on
+# PATH. Datasets live under training/datasets/ (`apogee datasets`), the
+# bundled kits under training/kits/.
+# training:
+#   python: /usr/bin/python3
 )APOGEE";
 
 }  // namespace

@@ -94,6 +94,9 @@ const std::map<std::string, Classification>& table() {
         {"graph dedupe", twin("POST", "/v1/admin/graph/{id}/dedupe")},
         {"config add-graph", twin("POST", "/v1/admin/graphs")},
         {"config delete-graph", twin("DELETE", "/v1/admin/graphs/{id}")},
+        {"datasets create", twin("POST", "/v1/admin/datasets")},
+        {"datasets synth", twin("POST", "/v1/admin/datasets/synth")},
+        {"datasets delete", twin("DELETE", "/v1/admin/datasets/{id}")},
         // --- backfills: owned by the area that owns the CLI action ----------
         {"embed ingest", backfill("embedstore: the embeddings data plane, an async job")},
         {"embed delete", backfill("embedstore: the embeddings data plane")},
@@ -101,6 +104,9 @@ const std::map<std::string, Classification>& table() {
         {"models delete", backfill("models: the models plane")},
         {"models repair", backfill("models: the models plane")},
         {"models quantize", backfill("models: the models plane, an async job")},
+        {"datasets prepare",
+         backfill("training: the datasets plane, a server-side conversion, an async job")},
+        {"datasets pull", backfill("training: the datasets plane, an async job")},
         {"chats title", backfill("sessions: transcripts on disk")},
         {"chats delete", backfill("sessions: transcripts on disk")},
         // --- carve-outs: host-local by nature ---------------------------------
@@ -108,6 +114,8 @@ const std::map<std::string, Classification>& table() {
         {"check", carve_out("--fix repairs the local install; host-local by nature")},
         {"uninstall", carve_out("removes the binary and the data directory; host-local")},
         {"serve", carve_out("it is the server")},
+        {"train setup",
+         carve_out("creates the Python environment on the host; training control is CLI-only")},
         {"__mcp-tools",
          carve_out("an MCP server on this process's own stdio, spawned by another client")},
         // --- read-only / interactive ------------------------------------------
@@ -136,6 +144,9 @@ const std::map<std::string, Classification>& table() {
         {"knowledge list", read_only()},
         {"knowledge info", read_only()},
         {"knowledge export", read_only()},
+        {"datasets kits", read_only()},
+        {"datasets list", read_only()},
+        {"datasets info", read_only()},
     };
     return rows;
 }

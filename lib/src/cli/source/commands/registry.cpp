@@ -14,12 +14,14 @@
 #include "commands/complete.h"
 #include "commands/complete_protocol.h"
 #include "commands/config_cmd.h"
+#include "commands/datasets.h"
 #include "commands/embed.h"
 #include "commands/graph.h"
 #include "commands/knowledge.h"
 #include "commands/mcp_cmd.h"
 #include "commands/models.h"
 #include "commands/serve_cmd.h"
+#include "commands/train.h"
 #include "commands/uninstall.h"
 #include "commands/version_command.h"
 
@@ -75,6 +77,7 @@ CommandRegistry default_registry() {
     registry.add(std::make_unique<ChatsCommand>());
     registry.add(std::make_unique<CompleteCommand>());
     registry.add(std::make_unique<ConfigCommand>());
+    registry.add(std::make_unique<DatasetsCommand>());
     registry.add(std::make_unique<EmbedCommand>());
     registry.add(std::make_unique<GraphCommand>());
     registry.add(std::make_unique<KnowledgeCommand>());
@@ -86,6 +89,7 @@ CommandRegistry default_registry() {
     // Hidden: the shell-completion protocol, not a user-facing command.
     registry.add(std::make_unique<CompleteProtocolCommand>());
     registry.add(std::make_unique<McpToolsServerCommand>());
+    registry.add(std::make_unique<TrainCommand>());
     return registry;
 }
 

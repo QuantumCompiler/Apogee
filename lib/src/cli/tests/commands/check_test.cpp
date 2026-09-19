@@ -7,6 +7,7 @@
 #include <string>
 
 #include "embedstore/store.h"
+#include "harness/assets.h"
 #include "harness/config.h"
 #include "harness/layout.h"
 #include "httpserver/admin_auth.h"
@@ -1008,4 +1009,68 @@ TEST_CASE(
     CHECK(row_with(built, "named graph: work")->status == Status::Ok);
     CHECK(row_with(built, "named graph: work")->detail.find("; built") != std::string::npos);
     CHECK(row_with(built, "named graph: work")->remedy.empty());
+}
+
+TEST_CASE(
+    "the training rows: the environment a warning with its command, seeded kits and the "
+    "script ok, an edited script kept, a broken kit a failure, a missing hf_dir a warning",
+    "[commands][check][training]") {
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+
+    CheckReport report = run_checks(inputs);
+    const apogee::commands::CheckRow* env = row_with(report, "python env");
+    REQUIRE(env != nullptr);
+    CHECK(env->status == Status::Warn);
+    CHECK(env->remedy == "apogee train setup");
+    const apogee::commands::CheckRow* missing = row_with(report, "script: prepare_dataset.py");
+    REQUIRE(missing != nullptr);
+    CHECK(missing->status == Status::Warn);
+    CHECK(missing->remedy == "apogee check --fix");
+    CHECK(report.passed());
+
+    // Seeded: the kits and the script are Apogee's.
+    REQUIRE(apogee::harness::seed_data_directory(install.root).ok());
+    report = run_checks(inputs);
+    const apogee::commands::CheckRow* script = row_with(report, "script: prepare_dataset.py");
+    REQUIRE(script != nullptr);
+    CHECK(script->status == Status::Ok);
+    const apogee::commands::CheckRow* kit = row_with(report, "kit: reasoning");
+    REQUIRE(kit != nullptr);
+    CHECK(kit->status == Status::Ok);
+    CHECK(kit->detail.find("8 eval item(s)") != std::string::npos);
+
+    // The environment exists: an Ok row naming its sets.
+    std::filesystem::create_directories(install.root / "training" / "venv" / "bin");
+    install.write("training/venv/bin/python", "#!fake");
+    install.write("training/venv/apogee.json",
+                  R"({"base_python": "/usr/bin/python3", "created_at": "x", "sets": ["prepare"]})");
+    report = run_checks(inputs);
+    env = row_with(report, "python env");
+    REQUIRE(env != nullptr);
+    CHECK(env->status == Status::Ok);
+    CHECK(env->detail.find("sets: prepare") != std::string::npos);
+
+    // An edited script is kept and shown; a broken kit is a failure by name.
+    install.write("training/scripts/prepare_dataset.py", "print('mine')\n");
+    install.write("training/kits/broken.yaml", "synth: [oops\n");
+    report = run_checks(inputs);
+    script = row_with(report, "script: prepare_dataset.py");
+    REQUIRE(script != nullptr);
+    CHECK(script->status == Status::Warn);
+    CHECK(script->detail.find("your edit is kept") != std::string::npos);
+    const apogee::commands::CheckRow* broken = row_with(report, "kit: broken");
+    REQUIRE(broken != nullptr);
+    CHECK(broken->status == Status::Fail);
+    CHECK_FALSE(report.passed());
+
+    // paths.hf_dir naming a directory that is not there.
+    install.write("config/config.yaml", "paths:\n  hf_dir: " + (install.root / "nowhere").string() +
+                                            "\nbackends:\n  local:\n    type: mock\n");
+    load_into(inputs);
+    report = run_checks(inputs);
+    const apogee::commands::CheckRow* hf = row_with(report, "paths.hf_dir");
+    REQUIRE(hf != nullptr);
+    CHECK(hf->status == Status::Warn);
 }

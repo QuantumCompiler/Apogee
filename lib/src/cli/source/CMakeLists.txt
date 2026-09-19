@@ -44,6 +44,19 @@ add_library(apogee_core STATIC
     models/source_ollama.cpp
     models/source_hf.h
     models/source_hf.cpp
+    models/snapshot.h
+    models/snapshot.cpp
+
+    training/python_env.h
+    training/python_env.cpp
+    training/script_runner.h
+    training/script_runner.cpp
+    training/kit.h
+    training/kit.cpp
+    training/synth.h
+    training/synth.cpp
+    training/datasets.h
+    training/datasets.cpp
     models/quantize.h
     models/quantize.cpp
     commands/models_pull.h
@@ -99,6 +112,10 @@ add_library(apogee_core STATIC
     commands/knowledge_core.cpp
     commands/graph.h
     commands/graph.cpp
+    commands/datasets.h
+    commands/datasets.cpp
+    commands/train.h
+    commands/train.cpp
     commands/knowledge.h
     commands/knowledge.cpp
     commands/chat.h
@@ -131,6 +148,7 @@ add_library(apogee_core STATIC
     harness/config_edit.cpp
     harness/assets.h
     harness/assets.cpp
+    harness/assets_training.cpp
     harness/errors.h
     harness/errors.cpp
     harness/cancellation.h
@@ -366,6 +384,8 @@ add_library(apogee_core STATIC
     httpserver/admin_graph.cpp
     httpserver/admin_graphs.h
     httpserver/admin_graphs.cpp
+    httpserver/admin_datasets.h
+    httpserver/admin_datasets.cpp
     httpserver/admin.h
     httpserver/admin.cpp
     httpserver/admin_auth_routes.h

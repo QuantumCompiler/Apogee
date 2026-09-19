@@ -176,6 +176,30 @@ HttpResponse AdminHandler::build_communities(Handler& plane, const HttpRequest& 
     return admin_build_communities(config_context(), plane, *jobs_, workers_, name, request);
 }
 
+HttpResponse AdminHandler::list_datasets(const HttpRequest& /*request*/) {
+    return admin_list_datasets(config_context());
+}
+
+HttpResponse AdminHandler::create_dataset(const HttpRequest& request) {
+    return admin_create_dataset(config_context(), request);
+}
+
+HttpResponse AdminHandler::get_dataset(const HttpRequest& /*request*/, std::string_view name) {
+    return admin_get_dataset(config_context(), name);
+}
+
+HttpResponse AdminHandler::delete_dataset(const HttpRequest& /*request*/, std::string_view name) {
+    return admin_delete_dataset(config_context(), name);
+}
+
+HttpResponse AdminHandler::synth_dataset(Handler& plane, const HttpRequest& request) {
+    return admin_synth_dataset(config_context(), plane, *jobs_, workers_, request);
+}
+
+HttpResponse AdminHandler::list_kits(const HttpRequest& /*request*/) {
+    return admin_list_kits(config_context());
+}
+
 HttpResponse AdminHandler::list_communities(const HttpRequest& request, std::string_view name) {
     return admin_list_communities(config_context(), name, request);
 }

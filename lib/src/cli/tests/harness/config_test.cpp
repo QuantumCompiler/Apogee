@@ -611,3 +611,15 @@ graphs:
     // The shipped template ships the section commented out.
     CHECK(load_text(apogee::harness::config_template()).graphs.empty());
 }
+
+TEST_CASE("the training section carries the interpreter the environment is seeded from",
+          "[harness][config][training]") {
+    const apogee::harness::Config config = apogee::harness::parse_config(
+        "training:\n  python: /opt/homebrew/bin/python3.12\n", "<test>");
+    CHECK(config.training.python == "/opt/homebrew/bin/python3.12");
+    CHECK(apogee::harness::parse_config("backends: {}\n", "<test>").training.python.empty());
+    CHECK_THROWS_AS(apogee::harness::parse_config("training: notamap\n", "<test>"),
+                    apogee::harness::ConfigError);
+    CHECK_THROWS_AS(apogee::harness::parse_config("training:\n  python: [a, b]\n", "<test>"),
+                    apogee::harness::ConfigError);
+}

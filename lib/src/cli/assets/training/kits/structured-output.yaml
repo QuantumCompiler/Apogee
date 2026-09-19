@@ -1,0 +1,48 @@
+name: structured-output
+description: Emit well-formed JSON that matches a requested shape.
+skill: structured-output
+
+synth:
+  system: |
+    You produce supervised fine-tuning examples that teach a small language model
+    to return well-formed, minimal JSON. Each example pairs a user prompt that asks
+    for information "as JSON" with a named set of fields, and an assistant
+    completion that is ONLY a single valid JSON object (or array) with exactly the
+    requested fields — no prose, no markdown fences, no trailing commentary. Keys
+    must match what the user asked for. Values must be plausible and correctly
+    typed (strings quoted, numbers bare, booleans lowercase). Vary the domains
+    (people, products, geography, events, configuration) and the field sets.
+  seeds:
+    - "object with fields: name (string), age (number)"
+    - "object describing a city: city, country, population (number)"
+    - "object with a boolean flag and a short reason string"
+    - "array of 3 objects, each {id, label}"
+    - "object with nested object (e.g. address with city and zip)"
+    - "object representing a product: name, price (number), in_stock (boolean)"
+    - "object with an array field (e.g. tags: [..])"
+    - "configuration object with mixed types"
+  count: 200
+  per_seed: 8
+  temperature: 0.8
+
+train:
+  iters: 400
+  num_layers: 16
+
+eval:
+  - prompt: "Return JSON with a single field \"status\" set to the string \"ok\". JSON only."
+    expected: "\"status\""
+  - prompt: "Give me a JSON object with field \"count\" set to the number 5. JSON only, no markdown."
+    expected: "\"count\""
+  - prompt: "Return a JSON object describing France with fields \"country\" and \"capital\". JSON only."
+    expected: "\"capital\""
+  - prompt: "Return JSON with a boolean field \"enabled\" set to true. JSON only."
+    expected: "true"
+  - prompt: "Return a JSON object with field \"name\" set to \"Ada\". JSON only."
+    expected: "\"name\""
+  - prompt: "Return a JSON array containing the three strings \"a\", \"b\", \"c\". JSON only."
+    expected: "["
+  - prompt: "Return JSON with field \"price\" set to the number 19. JSON only."
+    expected: "\"price\""
+  - prompt: "Return a JSON object with field \"ok\" set to the boolean false. JSON only."
+    expected: "false"

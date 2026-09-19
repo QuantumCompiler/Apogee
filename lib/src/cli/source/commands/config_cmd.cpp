@@ -175,6 +175,9 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
         }
         return std::nullopt;
     }
+    if (key == "training.python") {
+        return render(config.training.python);
+    }
     if (key == "tools.fs_root") {
         return render(config.tools.fs_root);
     }

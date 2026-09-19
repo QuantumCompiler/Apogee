@@ -811,6 +811,13 @@ Config parse_config(std::string_view content, std::string_view origin) {
         }
     }
 
+    if (const YAML::Node training = root["training"]; training.IsDefined() && !training.IsNull()) {
+        if (!training.IsMap()) {
+            fail(origin, "training: expected a mapping");
+        }
+        config.training.python = scalar(training["python"], origin, "training.python");
+    }
+
     if (const YAML::Node mode = root["status_mode"]; mode.IsDefined() && !mode.IsNull()) {
         const std::string name = scalar(mode, origin, "status_mode");
         const std::optional<StatusMode> parsed = status_mode_from_string(name);

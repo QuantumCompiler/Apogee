@@ -141,6 +141,15 @@ add_executable(apogee_tests
     graph/graph_multi_test.cpp
     agentloop/graph_named_test.cpp
     httpserver/admin_graphs_test.cpp
+    training/script_runner_test.cpp
+    training/python_env_test.cpp
+    training/kit_test.cpp
+    training/synth_test.cpp
+    training/datasets_test.cpp
+    training/prepare_script_test.cpp
+    commands/datasets_test.cpp
+    commands/train_test.cpp
+    httpserver/admin_datasets_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h
@@ -423,6 +432,18 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/graph-e2e
     )
     set_tests_properties(cli.graph_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The datasets floor on the real binary: the seeded kits, create, synth
+    # through the scripted mock, the Python boundary (the refusal on a pipe,
+    # `train setup` against the host's python3, `prepare` through the seeded
+    # script under the environment's interpreter), list, info, delete. Skips
+    # (77) where the host has no python3.
+    add_test(NAME cli.datasets_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/datasets_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/datasets-e2e
+    )
+    set_tests_properties(cli.datasets_lifecycle PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 endif()
 
 # Startup output discipline, under a real pseudo-terminal.

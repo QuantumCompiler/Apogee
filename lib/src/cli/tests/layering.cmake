@@ -25,7 +25,7 @@ if(NOT DEFINED APOGEE_SOURCE_DIR)
     message(FATAL_ERROR "APOGEE_SOURCE_DIR must be set")
 endif()
 
-set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph)
+set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph training)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
@@ -48,6 +48,13 @@ foreach(source IN LISTS ALL_SOURCES)
     # the first one exists to hold. Nothing else under `backends/` is
     # reachable from `mcp/`.
     if(source MATCHES "/mcp/")
+        list(FILTER offending EXCLUDE REGEX "backends/jsonl_framer\\.h")
+    endif()
+    # The same allowance for `training/`: its Python drivers speak JSONL over
+    # a child's stdout, and the one framer is the one that has been tested
+    # against every chunk boundary. Nothing else under `backends/` is
+    # reachable from `training/`.
+    if(source MATCHES "/training/")
         list(FILTER offending EXCLUDE REGEX "backends/jsonl_framer\\.h")
     endif()
     if(NOT offending STREQUAL "")
@@ -169,6 +176,36 @@ if(NOT VIOLATIONS STREQUAL "")
     message(FATAL_ERROR "the graph package includes a surface:\n${pretty}\n"
                         "graph/ may include only embedstore/, knowledge/, agentloop/, agent/, "
                         "harness/, platform/ and itself.")
+endif()
+
+# `training/` is a domain core like `graph/`: the Python boundary, the kits,
+# the synth core and the dataset store every surface shares. It may include
+# the harness, the platform seam, the loop's closures' types and itself --
+# never a surface, and never a backend beyond the framer allowance above:
+# generation arrives as a closure. `models/sha256.h` is a pure function the
+# run item's manifests will hash with, allowed by name.
+file(GLOB_RECURSE training_sources "${APOGEE_SOURCE_DIR}/training/*.h"
+                                   "${APOGEE_SOURCE_DIR}/training/*.cpp")
+if(training_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/training — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS training_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(training|harness|platform|agentloop|agent)/"
+           AND NOT line MATCHES "#[ \t]*include[ \t]*\"backends/jsonl_framer\\.h\""
+           AND NOT line MATCHES "#[ \t]*include[ \t]*\"models/sha256\\.h\"")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  training/${name} reaches a surface: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the training package includes a surface:\n${pretty}\n"
+                        "training/ may include only harness/, platform/, agentloop/, agent/, "
+                        "backends/jsonl_framer.h, models/sha256.h and itself.")
 endif()
 
 list(LENGTH ALL_SOURCES count)

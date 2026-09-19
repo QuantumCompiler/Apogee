@@ -4,12 +4,17 @@
 
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <system_error>
+#include <vector>
 
 #include "backends/http_client.h"
+#include "harness/config.h"
+#include "harness/paths.h"
 #include "models/acquire.h"
 #include "models/gguf_inspect.h"
 #include "models/quantize.h"
+#include "models/snapshot.h"
 #include "models/source_hf.h"
 #include "models/source_ollama.h"
 
@@ -58,6 +63,118 @@ namespace {
     return std::to_string(bytes / (1024LL * 1024 * 1024)) + " GiB";
 }
 
+/// `models pull <owner>/<repo> --safetensors`: the whole full-weight
+/// repository -- shards, configuration, tokenizer -- into one directory
+/// through the tree ladder, each shard checked against the sha256 Hugging
+/// Face publishes for it, the directory committed by rename so a half
+/// snapshot never appears. What the training track fine-tunes.
+void pull_snapshot(const std::string& ref, const std::filesystem::path& root) {
+    if (!looks_like_hf(ref)) {
+        fail("--safetensors takes a Hugging Face repository (owner/repo); '" + ref +
+             "' is not one");
+    }
+    const std::optional<models::HfRef> parsed = models::parse_hf_ref(ref);
+    if (!parsed.has_value()) {
+        fail("'" + ref + "' is not a Hugging Face ref (expected owner/repo[@revision])");
+    }
+    if (!parsed->file.empty()) {
+        fail("--safetensors downloads the whole repository; drop ':" + parsed->file + "'");
+    }
+    backends::HttpClient client{std::make_unique<backends::CurlTransport>()};
+    const std::string token = models::hf_token({});
+    const harness::CancellationToken cancellation;
+
+    const models::HfTree tree =
+        models::list_repo_tree(client, *parsed, models::HfRepoKind::Model, token, cancellation);
+    if (!tree.ok) {
+        fail(tree.error);
+    }
+    std::vector<models::HfFile> wanted;
+    bool any_shard = false;
+    std::int64_t total = 0;
+    for (const models::HfFile& file : tree.files) {
+        if (!models::snapshot_wanted(file.path)) {
+            continue;
+        }
+        any_shard = any_shard || file.path.ends_with(".safetensors");
+        total += file.size;
+        wanted.push_back(file);
+    }
+    if (!any_shard) {
+        fail("'" + parsed->repo_id() +
+             "' holds no .safetensors shards -- nothing to snapshot. For a GGUF, pull it "
+             "without --safetensors");
+    }
+
+    const std::filesystem::path destination = root / models::repo_directory_name(*parsed);
+    std::cout << "downloading " << wanted.size() << " file(s), " << human_size(total) << ", into "
+              << destination.string() << "\n";
+
+    std::vector<models::TreeItem> items;
+    std::vector<models::SourcePromise> promises;
+    promises.reserve(wanted.size());
+    for (const models::HfFile& file : wanted) {
+        promises.emplace_back();
+        models::TreeItem item;
+        item.relative = file.path;
+        item.source = models::http_source(client, *parsed, models::HfRepoKind::Model, file, token,
+                                          cancellation, promises.back());
+        item.promise = promises.back();
+        items.push_back(std::move(item));
+    }
+
+    std::size_t last_index = 0;
+    std::int64_t last_report = 0;
+    const models::AcquireTreeResult result = models::acquire_tree(
+        destination, items,
+        [&](std::size_t index, std::size_t count, std::string_view relative, std::int64_t written,
+            std::int64_t size) {
+            if (index != last_index) {
+                last_index = index;
+                last_report = 0;
+                std::cout << "  [" << index << "/" << count << "] " << relative << "\n";
+            }
+            if (written - last_report < 64LL * 1024 * 1024) {
+                return;
+            }
+            last_report = written;
+            std::cout << "      " << human_size(written);
+            if (size > 0) {
+                std::cout << " of " << human_size(size);
+            }
+            std::cout << "\n";
+        });
+    if (!result.ok) {
+        fail(result.error);
+    }
+
+    models::Snapshot record;
+    record.ref = parsed->repo_id();
+    record.revision = parsed->revision.empty() ? "main" : parsed->revision;
+    record.source = "huggingface";
+    record.pulled_at = result.sidecars.empty() ? std::string{} : result.sidecars.front().pulled_at;
+    for (std::size_t i = 0; i < wanted.size() && i < result.sidecars.size(); ++i) {
+        record.files.push_back(
+            {wanted[i].path, result.sidecars[i].file_size, result.sidecars[i].file_digest});
+    }
+    if (!models::write_snapshot(destination, record)) {
+        std::cout << "note: the snapshot landed but its record could not be written\n";
+    }
+
+    std::size_t digests = 0;
+    for (const models::Sidecar& sidecar : result.sidecars) {
+        if (sidecar.verification.digest_checked) {
+            ++digests;
+        }
+    }
+    std::cout << "\n"
+              << result.path.string() << "\n"
+              << "verified: " << result.files << " file(s), " << human_size(result.bytes) << ", "
+              << digests << " checked against a published sha256\n"
+              << "\nA full-weight snapshot: trainable with 'apogee train', not runnable. It "
+                 "appears in 'apogee models list' as safetensors.\n";
+}
+
 }  // namespace
 
 DeletePlan plan_delete(const std::filesystem::path& models_dir, std::string_view name) {
@@ -73,7 +190,10 @@ DeletePlan plan_delete(const std::filesystem::path& models_dir, std::string_view
     }
 
     std::filesystem::path candidate = models_dir / requested;
-    if (candidate.extension() != ".gguf") {
+    std::error_code snapshot_code;
+    const bool snapshot = std::filesystem::is_directory(candidate, snapshot_code) &&
+                          models::is_snapshot_dir(candidate);
+    if (!snapshot && candidate.extension() != ".gguf") {
         candidate += ".gguf";
     }
 
@@ -89,6 +209,15 @@ DeletePlan plan_delete(const std::filesystem::path& models_dir, std::string_view
 
     if (!std::filesystem::exists(candidate, code)) {
         plan.error = "no model named '" + std::string{name} + "' in " + models_dir.string();
+        return plan;
+    }
+
+    if (snapshot) {
+        // A SafeTensors snapshot: the whole directory and its record go
+        // together; there is no sidecar beside it to plan for.
+        plan.model = candidate;
+        plan.snapshot = true;
+        plan.ok = true;
         return plan;
     }
 
@@ -148,7 +277,28 @@ std::string render_repair(const std::filesystem::path& models_dir, std::string_v
     return out.str();
 }
 
-void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir) {
+std::filesystem::path snapshot_root(const std::filesystem::path& models_dir,
+                                    const std::string& config_flag) {
+    try {
+        const std::filesystem::path path = harness::resolve_config_path(config_flag);
+        std::error_code code;
+        if (!std::filesystem::exists(path, code)) {
+            return models_dir;
+        }
+        const harness::Config config = harness::load_config(path);
+        if (config.paths.hf_dir.empty()) {
+            return models_dir;
+        }
+        return std::filesystem::path{harness::expand_env_and_home(config.paths.hf_dir)};
+    } catch (const harness::ConfigError&) {
+        // A config that does not parse is `check`'s problem to report; a
+        // pull still has somewhere sensible to land.
+        return models_dir;
+    }
+}
+
+void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,
+                          const RootContext& context) {
     // ---- pull ---------------------------------------------------------------
     auto pull_ref = std::make_shared<std::string>();
     auto pull_yes = std::make_shared<bool>(false);
@@ -157,9 +307,17 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                      "owner/repo[:file.gguf] for Hugging Face, or name:tag for Ollama")
         ->required();
     pull->add_flag("-y,--yes", *pull_yes, "Do not stop for the unrunnable-architecture warning");
+    auto pull_safetensors = std::make_shared<bool>(false);
+    pull->add_flag("--safetensors", *pull_safetensors,
+                   "Download a Hugging Face repository's full-weight SafeTensors snapshot "
+                   "(trainable, not runnable) instead of a GGUF");
 
-    pull->callback([pull_ref, pull_yes, models_dir]() {
+    pull->callback([pull_ref, pull_yes, pull_safetensors, models_dir, &context]() {
         const std::string& ref = *pull_ref;
+        if (*pull_safetensors) {
+            pull_snapshot(ref, snapshot_root(models_dir, context.config_path));
+            return;
+        }
         const std::filesystem::path destination = models_dir / filename_for(ref);
 
         models::SourcePromise promise;
@@ -288,13 +446,24 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     remove->add_option("name", *delete_name, "Model file name")->required();
     remove->add_flag("-y,--yes", *delete_yes, "Do not ask for confirmation");
 
-    remove->callback([delete_name, delete_yes, models_dir]() {
-        const DeletePlan plan = plan_delete(models_dir, *delete_name);
+    remove->callback([delete_name, delete_yes, models_dir, &context]() {
+        DeletePlan plan = plan_delete(models_dir, *delete_name);
+        if (!plan.ok) {
+            // A snapshot may live under paths.hf_dir rather than models/.
+            const std::filesystem::path root = snapshot_root(models_dir, context.config_path);
+            if (root != models_dir) {
+                const DeletePlan under_hf = plan_delete(root, *delete_name);
+                if (under_hf.ok && under_hf.snapshot) {
+                    plan = under_hf;
+                }
+            }
+        }
         if (!plan.ok) {
             fail(plan.error);
         }
 
-        std::cout << "will remove:\n  " << plan.model.string() << "\n";
+        std::cout << "will remove:\n  " << plan.model.string()
+                  << (plan.snapshot ? " (a SafeTensors snapshot, whole)" : "") << "\n";
         if (plan.has_sidecar) {
             std::cout << "  " << plan.sidecar.string() << "\n";
         }
@@ -312,7 +481,11 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         }
 
         std::error_code code;
-        std::filesystem::remove(plan.model, code);
+        if (plan.snapshot) {
+            std::filesystem::remove_all(plan.model, code);
+        } else {
+            std::filesystem::remove(plan.model, code);
+        }
         if (code) {
             fail("could not remove " + plan.model.string() + ": " + code.message());
         }

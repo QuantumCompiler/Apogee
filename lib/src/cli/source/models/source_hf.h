@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "backends/http_client.h"
 #include "models/acquire.h"
@@ -69,13 +71,57 @@ struct HfListing {
     /// Every `.gguf` path in the repo, in the order the API returned them.
     std::vector<std::string> gguf_files;
 
-    /// Whether the repo holds SafeTensors instead.
-    ///
-    /// Noticed, not downloaded. SPEC lists SafeTensors in scope and this item's
-    /// residue still owes it; until then, knowing which kind of repository the
-    /// user named is what turns "no .gguf" from a dead end into a next step.
+    /// Whether the repo holds SafeTensors -- what `models pull --safetensors`
+    /// takes whole. Knowing which kind of repository the user named is what
+    /// turns "no .gguf" from a dead end into a next step.
     bool has_safetensors = false;
+    /// Every `.safetensors` path in the repo, in the order the API returned.
+    std::vector<std::string> safetensors_files;
 };
+
+/// Which kind of repository a ref names. Models and datasets live under
+/// different API prefixes and download URLs on Hugging Face.
+enum class HfRepoKind : std::uint8_t { Model, Dataset };
+
+/// One file in a repository's tree, as the `/tree` endpoint reports it.
+struct HfFile {
+    std::string path;
+    /// Declared size in bytes, or 0 when the API declared none.
+    std::int64_t size = 0;
+    /// The sha256 Hugging Face publishes for an LFS-stored file, hex; empty
+    /// for a small file stored in git, whose oid is a git blob hash and not
+    /// a digest of the bytes.
+    std::string sha256;
+};
+
+struct HfTree {
+    bool ok = false;
+    std::string error;
+    std::vector<HfFile> files;
+};
+
+/// Lists every file in the repository at the ref's revision, recursively,
+/// through `/api/{models|datasets}/<repo>/tree/<revision>?recursive=true`.
+/// The one endpoint that publishes a per-file sha256 (for LFS files), which
+/// is what makes a whole-snapshot download verifiable shard by shard.
+[[nodiscard]] HfTree list_repo_tree(backends::HttpClient& client, const HfRef& ref, HfRepoKind kind,
+                                    std::string_view token,
+                                    const harness::CancellationToken& cancellation);
+
+/// The download URL for `ref.file` in a repository of `kind`.
+[[nodiscard]] std::string hf_download_url(const HfRef& ref, HfRepoKind kind);
+
+/// Whether `path` belongs in a SafeTensors snapshot: the shards, the model
+/// and tokenizer configuration, the tokenizer's own files, and any custom
+/// code -- never a GGUF, a PyTorch checkpoint, an image or the repository's
+/// housekeeping.
+[[nodiscard]] bool snapshot_wanted(std::string_view path) noexcept;
+
+/// Whether `path` is a dataset data file worth downloading.
+[[nodiscard]] bool dataset_file_wanted(std::string_view path) noexcept;
+
+/// The directory a snapshot or a downloaded dataset lands in: `owner--repo`.
+[[nodiscard]] std::string repo_directory_name(const HfRef& ref);
 
 /// Lists a repository's GGUF files.
 [[nodiscard]] HfListing list_gguf_files(backends::HttpClient& client, const HfRef& ref,
@@ -101,6 +147,14 @@ struct HfListing {
 /// the day the transport exposes headers.
 [[nodiscard]] ByteSource http_source(backends::HttpClient& client, const HfRef& ref,
                                      std::string_view token,
+                                     const harness::CancellationToken& cancellation,
+                                     SourcePromise& promise);
+
+/// The same source for a file of `kind`, promising what the tree listing
+/// said about it -- its size, and its sha256 when it is an LFS file -- so
+/// the ladder can check both.
+[[nodiscard]] ByteSource http_source(backends::HttpClient& client, const HfRef& ref,
+                                     HfRepoKind kind, const HfFile& file, std::string_view token,
                                      const harness::CancellationToken& cancellation,
                                      SourcePromise& promise);
 
