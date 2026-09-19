@@ -84,6 +84,30 @@ public:
     /// Whether any record here carries a vector.
     [[nodiscard]] bool has_vectors() const;
 
+    /// How many records here carry no vector -- captured lexically, on
+    /// purpose or for want of an embedder. What a whole-collection reindex
+    /// discloses before it embeds them.
+    [[nodiscard]] std::size_t vectorless_count() const;
+
+    /// Text to vector, wired by the caller to an embedding backend -- the
+    /// store is model-free by design. Throws on failure.
+    using EmbedText = std::function<std::vector<float>(std::string_view text)>;
+
+    struct ReindexOutcome {
+        int reindexed = 0;
+        /// Non-empty when it stopped: an unknown id (before anything was
+        /// embedded), or an embedder failure naming the record.
+        std::string error;
+    };
+
+    /// Re-embeds records and rewrites their stored vectors -- every record
+    /// when `ids` is empty, else exactly those. The way to refresh the
+    /// vectors after an embedding-model change. **Vector-only by design**:
+    /// the text index is maintained on every write and needs nothing here.
+    /// The archive and `raw_ref` are left exactly as they are.
+    [[nodiscard]] ReindexOutcome reindex(const EmbedText& embed,
+                                         const std::vector<std::string>& ids);
+
 private:
     [[nodiscard]] std::optional<Record> update(std::string_view id,
                                                const std::function<void(Record&)>& mutate);

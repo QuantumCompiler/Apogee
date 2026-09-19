@@ -6,11 +6,13 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "backends/mock.h"
@@ -25,6 +27,7 @@
 #include "httpserver/jobs.h"
 #include "httpserver/mux.h"
 #include "knowledge/record.h"
+#include "knowledge/refine.h"
 #include "knowledge/store.h"
 #include "support/env_guard.h"
 
@@ -63,8 +66,10 @@ struct Fixture {
     std::shared_ptr<MockProvider> provider;
     std::unique_ptr<Handler> handler;
 
+    std::shared_ptr<apogee::backends::MockEmbeddingProvider> embedder;
+
     explicit Fixture(std::vector<MockTurn> turns = {MockTurn{std::string{kRecord}}},
-                     bool serve = true) {
+                     bool serve = true, bool with_embedder = false) {
         std::filesystem::create_directories(config_path.parent_path());
         // The CLI half of the parity proof builds ITS providers from this
         // file, so the mock entry carries the same script the in-memory
@@ -74,8 +79,11 @@ struct Fixture {
             << nlohmann::json{{"turns", nlohmann::json::array({{{"text", std::string{kRecord}}}})}}
                    .dump();
         std::ofstream{config_path, std::ios::binary}
-            << "models:\n  default: mock\nbackends:\n  mock:\n    type: mock\n    model_path: "
-            << script.string() << "\n  vendor:\n    type: claude-cli\n";
+            << "models:\n  default: mock\n"
+            << (with_embedder ? "  default_embedding: embed\n" : "")
+            << "backends:\n  mock:\n    type: mock\n    model_path: " << script.string()
+            << "\n  vendor:\n    type: claude-cli\n"
+            << (with_embedder ? "  embed:\n    type: mock\n    embedding_model: mock-space\n" : "");
         config = apogee::harness::load_config(config_path);
         harness = std::make_unique<apogee::harness::Harness>(config);
         MockProvider::Options options;
@@ -83,6 +91,11 @@ struct Fixture {
         options.turns = std::move(turns);
         provider = std::make_shared<MockProvider>(std::move(options));
         harness->register_provider("mock", provider);
+        if (with_embedder) {
+            embedder = std::make_shared<apogee::backends::MockEmbeddingProvider>("embed");
+            embedder->set_model_name("mock-space");
+            harness->register_provider("embed", embedder);
+        }
         harness->use_default_router();
         HandlerOptions served;
         if (serve) {
@@ -110,6 +123,58 @@ struct Fixture {
 
     [[nodiscard]] HttpResponse create(const nlohmann::json& body) const {
         return apogee::httpserver::admin_create_knowledge(context(), *handler, post(body));
+    }
+
+    [[nodiscard]] HttpResponse refine(const nlohmann::json& body) const {
+        return apogee::httpserver::admin_refine_knowledge(context(), *handler, post(body));
+    }
+
+    [[nodiscard]] HttpResponse reindex(const nlohmann::json& body) const {
+        return apogee::httpserver::admin_reindex_knowledge(context(), *handler, post(body));
+    }
+
+    [[nodiscard]] static HttpRequest get(const std::map<std::string, std::string>& query) {
+        HttpRequest request;
+        request.method = "GET";
+        request.query = query;
+        return request;
+    }
+
+    [[nodiscard]] HttpResponse list(const std::map<std::string, std::string>& query) const {
+        return apogee::httpserver::admin_list_knowledge(context(), *handler, get(query));
+    }
+
+    [[nodiscard]] HttpResponse fetch(const std::string& id,
+                                     const std::map<std::string, std::string>& query = {}) const {
+        return apogee::httpserver::admin_get_knowledge(context(), id, get(query));
+    }
+
+    [[nodiscard]] HttpResponse patch(const std::string& id, const nlohmann::json& body) const {
+        HttpRequest request = post(body);
+        request.method = "PATCH";
+        return apogee::httpserver::admin_patch_knowledge(context(), id, request);
+    }
+
+    [[nodiscard]] HttpResponse remove(const std::string& id,
+                                      const std::map<std::string, std::string>& query = {}) const {
+        HttpRequest request = get(query);
+        request.method = "DELETE";
+        return apogee::httpserver::admin_delete_knowledge(context(), id, request);
+    }
+
+    /// What a draft and a refine must not change.
+    struct Footprint {
+        bool collection = false;
+        bool archive = false;
+        std::string config;
+        bool operator==(const Footprint&) const = default;
+    };
+
+    [[nodiscard]] Footprint footprint() const {
+        std::error_code code;
+        return Footprint{std::filesystem::exists(home.path() / "embeddings" / "knowledge.db", code),
+                         std::filesystem::exists(home.path() / "knowledge" / "raw", code),
+                         bytes(config_path)};
     }
 
     [[nodiscard]] Store store(std::string_view db = "knowledge") const {
@@ -315,7 +380,302 @@ TEST_CASE("the knowledge routes sit behind the gate and dispatch through the mux
     CHECK(mux.dispatch(request).status == 201);
     request.path = "/v1/admin/knowledge";
     request.body = nlohmann::json{{"intent", "why"}, {"status", "shipped"}}.dump();
-    CHECK(mux.dispatch(request).status == 201);
+    const HttpResponse stored = mux.dispatch(request);
+    REQUIRE(stored.status == 201);
+    const std::string id = parsed(stored)["record"]["id"].get<std::string>();
     request.method = "GET";
+    CHECK(mux.dispatch(request).status == 200);
+    request.path = "/v1/admin/knowledge/" + id;
+    CHECK(mux.dispatch(request).status == 200);
+    request.method = "PATCH";
+    request.body = nlohmann::json{{"link", "PROJ-1"}}.dump();
+    CHECK(parsed(mux.dispatch(request))["downstream_link"] == "PROJ-1");
+    request.headers.erase("authorization");
+    CHECK(mux.dispatch(request).status == 401);
+    request.headers["authorization"] = "Bearer token";
+    request.method = "DELETE";
+    CHECK(mux.dispatch(request).status == 200);
+    request.method = "PUT";
     CHECK(mux.dispatch(request).status == 405);
+    // The literal paths are never read as record ids.
+    request.method = "POST";
+    request.path = "/v1/admin/knowledge/reindex";
+    request.body = "{}";
+    CHECK(mux.dispatch(request).status == 200);
+}
+
+TEST_CASE(
+    "GET /v1/admin/knowledge lists and queries: a missing collection is an empty list "
+    "that creates nothing, filters apply, and an explicit vector ask with no embedder "
+    "is a 501",
+    "[httpserver][admin][knowledge][list]") {
+    const Fixture fixture;
+    HttpResponse response = fixture.list({});
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["object"] == "list");
+    CHECK(parsed(response)["data"].empty());
+    CHECK_FALSE(fixture.footprint().collection);
+    CHECK(fixture.list({{"db", "../x"}}).status == 400);
+
+    REQUIRE(fixture.capture({{"raw", "Ada: drop it? Bob: yes"}}).status == 201);
+    REQUIRE(fixture.capture({{"raw", "second thoughts"}, {"status", "rejected"}}).status == 201);
+    response = fixture.list({});
+    REQUIRE(parsed(response)["data"].size() == 2);
+    CHECK(parsed(response)["data"][0]["status"] == "rejected");  // newest first
+    CHECK(parsed(response)["data"][0]["provenance"]["attribution"] == "Ada Lovelace");
+    CHECK(parsed(fixture.list({{"status", "shipped"}}))["data"].size() == 1);
+    CHECK(parsed(fixture.list({{"discipline", "eng"}}))["data"].empty());
+    const nlohmann::json shared = parsed(fixture.list({{"anonymize", "true"}}))["data"];
+    CHECK_FALSE(shared[0]["provenance"].contains("attribution"));
+    CHECK_FALSE(shared[0].contains("raw_ref"));
+
+    // A query: the envelope, the retriever, no default branch over HTTP.
+    response = fixture.list({{"q", "cancel button"}});
+    REQUIRE(response.status == 200);
+    nlohmann::json body = parsed(response);
+    CHECK(body["object"] == "list");
+    CHECK(body["retriever"] == "lexical");
+    CHECK(body["reranked"] == false);
+    REQUIRE(body["data"].size() == 2);
+    CHECK(body["data"][0]["record"]["id"].get<std::string>().starts_with("kr-"));
+    CHECK(body["data"][0]["score"].is_number());
+    CHECK(parsed(fixture.list({{"q", "cancel button"}, {"status", "shipped"}}))["data"].size() ==
+          1);
+    CHECK(parsed(fixture.list({{"q", "cancel button"}, {"limit", "1"}}))["data"].size() == 1);
+    CHECK_FALSE(parsed(fixture.list(
+        {{"q", "cancel"}, {"anonymize", "true"}}))["data"][0]["record"]["provenance"]
+                    .contains("attribution"));
+    CHECK(fixture.list({{"q", "x"}, {"limit", "many"}}).status == 400);
+    CHECK(fixture.list({{"q", "x"}, {"retriever", "sideways"}}).status == 400);
+    CHECK(fixture.list({{"q", "x"}, {"rerank", "nope"}}).status == 400);
+    response = fixture.list({{"q", "cancel"}, {"retriever", "vector"}});
+    CHECK(response.status == 501);
+    CHECK(parsed(response)["error"]["message"].get<std::string>().find("?retriever=lexical") !=
+          std::string::npos);
+    CHECK(parsed(fixture.list({{"q", "cancel"}, {"retriever", "hybrid"}}))["retriever"] ==
+          "lexical");
+}
+
+TEST_CASE(
+    "GET, PATCH and DELETE by id: one edit per call, a metadata edit that never re-embeds, "
+    "and honest 404s",
+    "[httpserver][admin][knowledge][edit]") {
+    const Fixture fixture{{MockTurn{std::string{kRecord}}}, true, /*with_embedder=*/true};
+    CHECK(fixture.fetch("kr-x").status == 404);
+    CHECK(fixture.remove("kr-x").status == 404);
+    CHECK(fixture.patch("kr-x", {{"link", "x"}}).status == 404);
+    REQUIRE(fixture.capture({{"raw", "Ada: drop it?"}, {"retriever", "vector"}}).status == 201);
+    const Store store = fixture.store();
+    const std::string id = store.list().front().id;
+    const std::int64_t chunk = *store.chunk_id(id);
+    const std::vector<float> vector = store.chunks().chunk_vector(chunk);
+    REQUIRE(vector.size() == 8);
+
+    HttpResponse response = fixture.fetch(id);
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["id"] == id);
+    CHECK(parsed(response)["raw_ref"].get<std::string>().ends_with(".md"));
+    CHECK(fixture.fetch("kr-nope").status == 404);
+    CHECK(fixture.fetch(id, {{"db", "other"}}).status == 404);
+
+    CHECK(fixture.patch(id, {{"link", "x"}, {"status", "shipped"}}).status == 400);
+    CHECK(fixture.patch(id, {{"db", "knowledge"}}).status == 400);
+    CHECK(fixture.patch(id, {{"status", "maybe"}}).status == 400);
+    CHECK(fixture.patch(id, {{"link", 7}}).status == 400);
+    response = fixture.patch(id, {{"link", "PROJ-9"}});
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["downstream_link"] == "PROJ-9");
+    response = fixture.patch(id, {{"status", "Abandoned"}});
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["status"] == "rejected");
+    CHECK(parsed(response)["downstream_link"] == "PROJ-9");
+    CHECK(store.chunks().chunk_vector(chunk) == vector);
+    CHECK(*store.chunk_id(id) == chunk);
+    CHECK(fixture.patch("kr-nope", {{"status", "shipped"}}).status == 404);
+
+    const std::string raw = store.get(id)->raw_ref;
+    REQUIRE(std::filesystem::exists(raw));
+    response = fixture.remove(id);
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["deleted"] == id);
+    CHECK_FALSE(std::filesystem::exists(raw));
+    CHECK(fixture.remove(id).status == 404);
+}
+
+TEST_CASE(
+    "capture with draft: true runs the clerk and stores nothing; refine runs one bounded "
+    "revision with its guards before the clerk and never stores",
+    "[httpserver][admin][knowledge][refine]") {
+    const Fixture fixture;
+    const Fixture::Footprint before = fixture.footprint();
+    HttpResponse response = fixture.capture({{"raw", "Ada: drop it?"}, {"draft", true}});
+    REQUIRE(response.status == 200);
+    nlohmann::json body = parsed(response);
+    CHECK(body["draft"] == true);
+    CHECK(body["record"]["id"] == "");
+    CHECK(body["record"]["timestamp"] == "");
+    CHECK_FALSE(body["record"].contains("raw_ref"));
+    CHECK(body["db"] == "knowledge");
+    CHECK(body["retriever"] == "lexical");
+    CHECK_FALSE(body.contains("registered"));
+    CHECK(fixture.footprint() == before);
+    CHECK(fixture.provider->requests().size() == 1);
+    CHECK(fixture.capture({{"raw", "x"}, {"draft", "yes"}}).status == 400);
+    // A dry run warns where a real run would refuse.
+    response = fixture.capture({{"raw", "x"}, {"draft", true}, {"retriever", "vector"}});
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["warning"].get<std::string>().find("vector ingest cannot run") !=
+          std::string::npos);
+    CHECK(fixture.footprint() == before);
+
+    // Refine's guards, before any clerk call.
+    const std::size_t calls = fixture.provider->requests().size();
+    nlohmann::json draft = body["record"];
+    CHECK(fixture.refine({{"instruction", "x"}}).status == 400);
+    CHECK(fixture.refine({{"record", "not an object"}, {"instruction", "x"}}).status == 400);
+    CHECK(fixture.refine({{"record", draft}, {"instruction", ""}}).status == 400);
+    CHECK(fixture.refine({{"record", draft}, {"instruction", std::string(2001, 'x')}}).status ==
+          400);
+    CHECK(fixture.refine({{"record", draft}, {"instruction", "x"}, {"model", "vendor"}}).status ==
+          400);
+    CHECK(fixture.provider->requests().size() == calls);
+    const Fixture unserved{{MockTurn{std::string{kRecord}}}, /*serve=*/false};
+    CHECK(unserved.refine({{"record", draft}, {"instruction", "x"}}).status == 501);
+    // The input guards come BEFORE the backend check: a bad request is a
+    // 400 even on a server that could not have run the clerk.
+    CHECK(unserved.refine({{"record", draft}, {"instruction", ""}}).status == 400);
+    CHECK(unserved.refine({{"instruction", "x"}}).status == 400);
+    CHECK(unserved.provider->requests().empty());
+
+    // A revision: the instruction applied by the clerk, supersedes carried,
+    // a dropped source kept -- and nothing stored.
+    draft["supersedes"] = "kr-old";
+    draft["provenance"]["source"] = "chat";
+    const Fixture reviser{{MockTurn{
+        R"({"intent": "We dropped the cancel button because testers kept mistaking it for back.", "decision": "Remove the cancel button.", "status": "rejected", "discipline": "ux", "downstream_link": "", "provenance": {"source": "", "attribution": "Ada Lovelace"}})"}}};
+    response = reviser.refine(
+        {{"record", draft}, {"instruction", "mark it rejected"}, {"raw", "Ada: drop it?"}});
+    REQUIRE(response.status == 200);
+    body = parsed(response);
+    CHECK(body["draft"] == true);
+    CHECK(body["record"]["status"] == "rejected");
+    CHECK(body["record"]["supersedes"] == "kr-old");
+    CHECK(body["record"]["provenance"]["source"] == "chat");
+    CHECK(body["record"]["id"] == "");
+    CHECK_FALSE(reviser.footprint().collection);
+    CHECK_FALSE(reviser.footprint().archive);
+    REQUIRE(reviser.provider->requests().size() == 1);
+    const apogee::harness::ChatRequest& seen = reviser.provider->requests().front();
+    CHECK(seen.messages.front().content.plain_text() == apogee::knowledge::refine_system_prompt());
+    CHECK(seen.messages.back().content.plain_text().find(
+              "REVIEWER INSTRUCTION\nmark it rejected") != std::string::npos);
+    CHECK(seen.transient.side_request);
+
+    // A revision that is not a record: 502, nothing stored.
+    const Fixture stubborn{{MockTurn{"no"}, MockTurn{"still no"}}};
+    response = stubborn.refine({{"record", draft}, {"instruction", "x"}});
+    CHECK(response.status == 502);
+    CHECK(parsed(response)["error"]["type"] == "backend_error");
+    CHECK_FALSE(stubborn.footprint().collection);
+}
+
+TEST_CASE(
+    "draft -> refine -> store lands the record a one-shot capture lands, with the clerk run "
+    "exactly twice and nothing written before the store",
+    "[httpserver][admin][knowledge][round-trip]") {
+    const Fixture fixture;
+    const std::string raw = "Ada: drop the cancel button? Bob: yes, testers mistake it for back";
+    const Fixture::Footprint before = fixture.footprint();
+
+    // 1. Draft.
+    HttpResponse response = fixture.capture({{"raw", raw}, {"draft", true}, {"link", "PROJ-42"}});
+    REQUIRE(response.status == 200);
+    nlohmann::json draft = parsed(response)["record"];
+    CHECK(fixture.footprint() == before);
+    CHECK(fixture.provider->requests().size() == 1);
+
+    // 2. Refine, with a no-op instruction the scripted clerk honours.
+    response = fixture.refine(
+        {{"record", draft}, {"instruction", "keep it exactly as it is"}, {"raw", raw}});
+    REQUIRE(response.status == 200);
+    nlohmann::json reviewed = parsed(response)["record"];
+    reviewed["downstream_link"] = "PROJ-42";  // the reviewer's own touch survives the store
+    CHECK(fixture.footprint() == before);
+    CHECK(fixture.provider->requests().size() == 2);
+
+    // 3. Store, through the ordinary finished-record route, raw attached.
+    reviewed["raw"] = raw;
+    response = fixture.create(reviewed);
+    REQUIRE(response.status == 201);
+    const std::string stored_id = parsed(response)["record"]["id"].get<std::string>();
+    CHECK(fixture.footprint() != before);
+    CHECK(fixture.provider->requests().size() == 2);
+
+    // The one-shot capture of the same raw, for comparison.
+    response = fixture.capture({{"raw", raw}, {"link", "PROJ-42"}});
+    REQUIRE(response.status == 201);
+    const std::string one_shot_id = parsed(response)["record"]["id"].get<std::string>();
+
+    const Store store = fixture.store();
+    const auto strip = [](Record record) {
+        record.id.clear();
+        record.timestamp.clear();
+        record.raw_ref.clear();
+        return nlohmann::json(record);
+    };
+    REQUIRE(store.get(stored_id).has_value());
+    REQUIRE(store.get(one_shot_id).has_value());
+    CHECK(strip(*store.get(stored_id)) == strip(*store.get(one_shot_id)));
+    CHECK(bytes(store.get(stored_id)->raw_ref) == bytes(store.get(one_shot_id)->raw_ref));
+    CHECK(store.chunks().chunk_by_id(*store.chunk_id(stored_id))->text ==
+          store.chunks().chunk_by_id(*store.chunk_id(one_shot_id))->text);
+}
+
+TEST_CASE(
+    "POST /v1/admin/knowledge/reindex: 404 for a missing collection, zero with a note for "
+    "a lexical one, 501 for vectors with no embedder, and the rewrite with one",
+    "[httpserver][admin][knowledge][reindex]") {
+    const Fixture lexical;
+    CHECK(lexical.reindex(nlohmann::json::object()).status == 404);
+    REQUIRE(lexical.capture({{"raw", "one"}}).status == 201);
+    HttpResponse response = lexical.reindex(nlohmann::json::object());
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["reindexed"] == 0);
+    CHECK(parsed(response)["note"].get<std::string>().find("no embedded records") !=
+          std::string::npos);
+    // Vectors present, no embedder to rebuild them with: 501.
+    {
+        Store store = lexical.store();
+        Record record = store.list().front();
+        store.put(record, {0.1F, 0.2F}, "");
+    }
+    response = lexical.reindex(nlohmann::json::object());
+    CHECK(response.status == 501);
+    CHECK(parsed(response)["error"]["type"] == "backend_unavailable");
+    HttpRequest empty_body;
+    empty_body.method = "POST";
+    CHECK(
+        apogee::httpserver::admin_reindex_knowledge(lexical.context(), *lexical.handler, empty_body)
+            .status == 501);
+
+    const Fixture fixture{{MockTurn{std::string{kRecord}}}, true, /*with_embedder=*/true};
+    REQUIRE(fixture.capture({{"raw", "one"}, {"retriever", "lexical"}}).status == 201);
+    REQUIRE(fixture.capture({{"raw", "two"}, {"retriever", "vector"}}).status == 201);
+    CHECK(fixture.store().vectorless_count() == 1);
+    response = fixture.reindex(nlohmann::json::object());
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["reindexed"] == 2);
+    CHECK(parsed(response)["note"].get<std::string>().find("1 of 2 record(s)") !=
+          std::string::npos);
+    CHECK(fixture.store().vectorless_count() == 0);
+    CHECK(fixture.store().chunks().embedding_model().model == "mock-space");
+    const std::string id = fixture.store().list().front().id;
+    response = fixture.reindex({{"id", id}});
+    REQUIRE(response.status == 200);
+    CHECK(parsed(response)["reindexed"] == 1);
+    CHECK_FALSE(parsed(response).contains("note"));
+    CHECK(fixture.reindex({{"id", "kr-nope"}}).status == 404);
+    CHECK(fixture.reindex({{"db", "../x"}}).status == 400);
+    CHECK(fixture.reindex(nlohmann::json{}).status == 400);  // `null` is not an object
+    CHECK(fixture.reindex({{"db", "other"}}).status == 404);
 }

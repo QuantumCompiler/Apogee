@@ -7,6 +7,7 @@
 #include <fstream>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -224,4 +225,68 @@ TEST_CASE("remove takes the chunk and the archived conversation with it", "[know
     CHECK(store.chunks().chunk_count() == 0);
     CHECK_FALSE(std::filesystem::exists(raw));
     CHECK_FALSE(store.remove(record.id));
+}
+
+TEST_CASE(
+    "reindex re-embeds the records, leaves the archive alone, refuses an unknown id before "
+    "embedding anything, and stops naming the record an embedder failed on",
+    "[knowledge][store][reindex]") {
+    const Scratch scratch;
+    Store store = scratch.open();
+    Record lexical_one = make("kr-20260913T120000Z-000011", "one", "2026-09-13T12:00:00.000000Z");
+    Record lexical_two = make("kr-20260913T120000Z-000012", "two", "2026-09-13T12:00:01.000000Z");
+    Record vectored = make("kr-20260913T120000Z-000013", "three", "2026-09-13T12:00:02.000000Z");
+    store.put(lexical_one, {}, "raw one");
+    store.put(lexical_two, {}, "raw two");
+    store.put(vectored, {0.5F, 0.5F}, "raw three");
+    CHECK(store.vectorless_count() == 2);
+    const std::string archive_before = bytes(scratch.raw() / (lexical_one.id + ".md"));
+
+    int calls = 0;
+    const Store::EmbedText embed = [&calls](std::string_view text) {
+        ++calls;
+        return std::vector<float>{static_cast<float>(text.size()), 1.0F};
+    };
+    const Store::ReindexOutcome all = store.reindex(embed, {});
+    CHECK(all.error.empty());
+    CHECK(all.reindexed == 3);
+    CHECK(calls == 3);
+    CHECK(store.vectorless_count() == 0);
+    CHECK(store.has_vectors());
+    CHECK(store.chunks().chunk_vector(*store.chunk_id(lexical_one.id)).size() == 2);
+    // The archive and the reference to it are exactly as they were.
+    CHECK(bytes(scratch.raw() / (lexical_one.id + ".md")) == archive_before);
+    CHECK(store.get(lexical_one.id)->raw_ref == lexical_one.raw_ref);
+    CHECK(store.get(lexical_one.id)->intent == "one");
+
+    // One record only.
+    calls = 0;
+    const Store::ReindexOutcome one = store.reindex(embed, {lexical_two.id});
+    CHECK(one.reindexed == 1);
+    CHECK(calls == 1);
+
+    // An unknown id is refused before any embedding is spent.
+    calls = 0;
+    const Store::ReindexOutcome unknown = store.reindex(embed, {lexical_two.id, "kr-nope"});
+    CHECK(unknown.reindexed == 0);
+    CHECK(unknown.error.find("kr-nope") != std::string::npos);
+    CHECK(calls == 0);
+
+    // A failing embedder stops the run naming the record, after what succeeded.
+    int seen = 0;
+    const Store::ReindexOutcome failed = store.reindex(
+        [&seen](std::string_view) -> std::vector<float> {
+            if (++seen == 2) {
+                throw std::runtime_error("the embedder fell over");
+            }
+            return {1.0F};
+        },
+        {});
+    CHECK(failed.reindexed == 1);
+    CHECK(failed.error.find("fell over") != std::string::npos);
+    CHECK(failed.error.find("kr-") != std::string::npos);
+    const Store::ReindexOutcome empty =
+        store.reindex([](std::string_view) { return std::vector<float>{}; }, {vectored.id});
+    CHECK(empty.reindexed == 0);
+    CHECK(empty.error.find("no vector") != std::string::npos);
 }

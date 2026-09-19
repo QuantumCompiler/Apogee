@@ -289,6 +289,12 @@ add_library(apogee_core STATIC
     knowledge/clerk.cpp
     knowledge/store.h
     knowledge/store.cpp
+    knowledge/query.h
+    knowledge/query.cpp
+    knowledge/refine.h
+    knowledge/refine.cpp
+    knowledge/export.h
+    knowledge/export.cpp
 
     # Package headers reserved for the items that fill them. They carry no code
     # yet -- they exist so every later backlog item has one obvious home, and

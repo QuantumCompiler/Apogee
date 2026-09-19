@@ -120,6 +120,9 @@ add_executable(apogee_tests
     knowledge/record_test.cpp
     knowledge/clerk_test.cpp
     knowledge/store_test.cpp
+    knowledge/query_test.cpp
+    knowledge/refine_test.cpp
+    knowledge/export_test.cpp
     embedstore/metadata_test.cpp
     commands/knowledge_test.cpp
     httpserver/admin_knowledge_test.cpp

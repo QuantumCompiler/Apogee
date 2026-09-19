@@ -156,4 +156,55 @@ bool Store::has_vectors() const {
     return chunks_.stats().dimension > 0;
 }
 
+std::size_t Store::vectorless_count() const {
+    std::size_t count = 0;
+    for (const embedstore::Chunk& chunk : chunks_.chunks_with_metadata()) {
+        std::string error;
+        if (!record_from_metadata(chunk.source, chunk.metadata, error).has_value()) {
+            continue;
+        }
+        if (chunks_.chunk_vector(chunk.id).empty()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+Store::ReindexOutcome Store::reindex(const EmbedText& embed, const std::vector<std::string>& ids) {
+    ReindexOutcome outcome;
+    std::vector<Record> targets;
+    if (ids.empty()) {
+        targets = list();
+    } else {
+        for (const std::string& id : ids) {
+            std::optional<Record> record = get(id);
+            if (!record.has_value()) {
+                // Refused before any embedding is spent.
+                outcome.error = "no record '" + id + "'";
+                return outcome;
+            }
+            targets.push_back(std::move(*record));
+        }
+    }
+    for (Record& record : targets) {
+        std::vector<float> vector;
+        try {
+            vector = embed(index_text(record));
+        } catch (const std::exception& e) {
+            outcome.error = "embedding '" + record.id + "' failed: " + e.what();
+            return outcome;
+        }
+        if (vector.empty()) {
+            outcome.error = "the embedder returned no vector for '" + record.id + "'";
+            return outcome;
+        }
+        // An empty raw rewrites the text, the vector and the metadata, and
+        // leaves the archive -- and the raw_ref the record already carries --
+        // untouched.
+        put(record, vector, "");
+        ++outcome.reindexed;
+    }
+    return outcome;
+}
+
 }  // namespace apogee::knowledge

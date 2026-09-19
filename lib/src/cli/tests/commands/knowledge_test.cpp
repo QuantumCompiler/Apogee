@@ -469,3 +469,227 @@ TEST_CASE("auto_capture distils the session on a clean exit, and only when switc
     REQUIRE(eager.run({"chat", "-m", "chatty"}, nullptr, &err, "") == 0);
     CHECK(eager.store().list().size() == 2);
 }
+
+TEST_CASE(
+    "query defaults to shipped, filters before the cut, crosses every branch on request, "
+    "and reports the retriever",
+    "[commands][knowledge][query]") {
+    const Fixture fixture;
+    std::string out;
+    std::string err;
+    // No collection yet: a read never creates one.
+    CHECK(fixture.run({"knowledge", "query", "cancel"}, &out, &err) == 1);
+    CHECK(err.find("no knowledge collection named 'knowledge'") != std::string::npos);
+    CHECK_FALSE(fixture.footprint().collection);
+
+    // Six rejected records that match hardest, one shipped that matches weakly.
+    {
+        Store store = fixture.store();
+        for (int i = 0; i < 6; ++i) {
+            Record record;
+            record.id = "kr-20260913T12000" + std::to_string(i) + "Z-00000" + std::to_string(i);
+            record.intent = "cancel button cancel button cancel button rejected idea";
+            record.status = "rejected";
+            record.discipline = "ux";
+            record.timestamp = "2026-09-13T12:00:0" + std::to_string(i) + ".000000Z";
+            store.put(record, {}, "raw");
+        }
+        Record shipped;
+        shipped.id = "kr-20260913T120010Z-00000a";
+        shipped.intent = "the cancel control was removed after testing";
+        shipped.decision = "remove it";
+        shipped.status = "shipped";
+        shipped.discipline = "eng";
+        shipped.timestamp = "2026-09-13T12:00:10.000000Z";
+        store.put(shipped, {}, "raw");
+    }
+    REQUIRE(fixture.run({"knowledge", "query", "-n", "1", "cancel button"}, &out, &err) == 0);
+    CHECK(out.find("Top 1 result(s) for \"cancel button\" in \"knowledge\" [lexical]:") !=
+          std::string::npos);
+    CHECK(out.find("kr-20260913T120010Z-00000a  [shipped · eng]") != std::string::npos);
+    CHECK(out.find("[score 0.") != std::string::npos);
+    CHECK(out.find("rejected idea") == std::string::npos);
+
+    REQUIRE(fixture.run({"knowledge", "query", "-n", "1", "--status", "", "cancel button"}, &out) ==
+            0);
+    CHECK(out.find("[rejected · ux]") != std::string::npos);
+    REQUIRE(fixture.run({"knowledge", "query", "--status", "rejected", "--json", "cancel button"},
+                        &out) == 0);
+    nlohmann::json json = nlohmann::json::parse(out);
+    CHECK(json["records"].size() == 5);
+    CHECK(json["retriever"] == "lexical");
+    CHECK(json["reranked"] == false);
+    CHECK(json["records"][0]["record"]["status"] == "rejected");
+    CHECK(json["records"][0]["score"].is_number());
+    REQUIRE(fixture.run({"knowledge", "query", "--status", "", "-n", "10", "--json", "cancel"},
+                        &out) == 0);
+    CHECK(nlohmann::json::parse(out)["records"].size() == 7);
+    REQUIRE(fixture.run(
+                {"knowledge", "query", "--discipline", "ux", "--status", "", "--json", "cancel"},
+                &out) == 0);
+    CHECK(nlohmann::json::parse(out)["records"].size() == 5);
+
+    // Nothing on the default branch says which branch it looked at.
+    REQUIRE(fixture.run({"knowledge", "query", "sqlite"}, &out) == 0);
+    CHECK(out.find("No matching records in \"knowledge\" [lexical].") != std::string::npos);
+    CHECK(out.find("pass --status \"\"") != std::string::npos);
+    // An explicit vector ask with nothing to run it is refused naming lexical.
+    CHECK(fixture.run({"knowledge", "query", "--retriever", "vector", "cancel"}, &out, &err) == 1);
+    CHECK(err.find("lexical") != std::string::npos);
+    CHECK(fixture.run({"knowledge", "query", "--status", "maybe", "cancel"}, &out, &err) != 0);
+    CHECK(fixture.run({"knowledge", "query", "--rerank", "nope", "cancel"}, &out, &err) == 1);
+}
+
+TEST_CASE(
+    "list, info --raw, link, status, delete: the lifecycle on the command line, and a "
+    "metadata edit that leaves the vector alone",
+    "[commands][knowledge][lifecycle]") {
+    const Fixture fixture{{}, /*embedder=*/true};
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"knowledge", "capture", "--json", "--retriever", "vector",
+                         "Ada: drop it? Bob: yes"},
+                        &out) == 0);
+    const std::string id = nlohmann::json::parse(out)["record"]["id"].get<std::string>();
+    REQUIRE(fixture.run({"knowledge", "capture", "--json", "--status", "rejected", "second"},
+                        &out) == 0);
+    const std::string second = nlohmann::json::parse(out)["record"]["id"].get<std::string>();
+
+    // list: newest first, filterable, JSON.
+    REQUIRE(fixture.run({"knowledge", "list"}, &out) == 0);
+    CHECK(out.find("2 record(s) in \"knowledge\":") != std::string::npos);
+    CHECK(out.find(second) < out.find(id));
+    CHECK(out.find("[rejected · ux]") != std::string::npos);
+    CHECK(out.find("-> -") != std::string::npos);
+    REQUIRE(fixture.run({"knowledge", "list", "--status", "shipped", "--json"}, &out) == 0);
+    nlohmann::json listed = nlohmann::json::parse(out);
+    REQUIRE(listed.size() == 1);
+    CHECK(listed[0]["id"] == id);
+    REQUIRE(fixture.run({"knowledge", "list", "--discipline", "eng"}, &out) == 0);
+    CHECK(out.find("No records in \"knowledge\".") != std::string::npos);
+
+    // info, with and without the archive.
+    REQUIRE(fixture.run({"knowledge", "info", id}, &out) == 0);
+    CHECK(out.find("ID:          " + id) != std::string::npos);
+    CHECK(out.find("Attribution: Ada Lovelace") != std::string::npos);
+    CHECK(out.find("Captured:    2") != std::string::npos);
+    CHECK(out.find("Raw conversation") == std::string::npos);
+    REQUIRE(fixture.run({"knowledge", "info", "--raw", id}, &out) == 0);
+    CHECK(out.find("-- Raw conversation --\nAda: drop it? Bob: yes") != std::string::npos);
+    REQUIRE(fixture.run({"knowledge", "info", "--json", id}, &out) == 0);
+    CHECK(nlohmann::json::parse(out)["id"] == id);
+    CHECK(fixture.run({"knowledge", "info", "kr-nope"}, &out, &err) == 1);
+    CHECK(err.find("no record 'kr-nope'") != std::string::npos);
+
+    // link and status edit the metadata and leave the vector's bytes alone.
+    const Store store = fixture.store();
+    const std::int64_t chunk = *store.chunk_id(id);
+    const std::vector<float> vector = store.chunks().chunk_vector(chunk);
+    REQUIRE(vector.size() == 8);
+    REQUIRE(fixture.run({"knowledge", "link", id, "PROJ-9"}, &out) == 0);
+    CHECK(out == "Linked " + id + " -> PROJ-9\n");
+    REQUIRE(fixture.run({"knowledge", "status", id, "Abandoned"}, &out) == 0);
+    CHECK(out == id + " is now rejected\n");
+    CHECK(store.get(id)->downstream_link == "PROJ-9");
+    CHECK(store.get(id)->status == "rejected");
+    CHECK(store.chunks().chunk_vector(chunk) == vector);
+    CHECK(*store.chunk_id(id) == chunk);
+    CHECK(fixture.run({"knowledge", "status", id, "maybe"}, &out, &err) != 0);
+    CHECK(fixture.run({"knowledge", "link", "kr-nope", "x"}, &out, &err) == 1);
+
+    // delete takes the archive with it.
+    const std::string raw = store.get(second)->raw_ref;
+    REQUIRE(std::filesystem::exists(raw));
+    REQUIRE(fixture.run({"knowledge", "delete", second}, &out) == 0);
+    CHECK(out == "Deleted " + second + "\n");
+    CHECK_FALSE(std::filesystem::exists(raw));
+    CHECK_FALSE(store.get(second).has_value());
+    CHECK(fixture.run({"knowledge", "delete", second}, &out, &err) == 1);
+}
+
+TEST_CASE(
+    "export shares a JSON array or a Markdown report, anonymized on request, to stdout "
+    "or a file",
+    "[commands][knowledge][export]") {
+    const Fixture fixture;
+    std::string out;
+    REQUIRE(fixture.run({"knowledge", "capture", "--link", "PROJ-1", "one"}, &out) == 0);
+    REQUIRE(fixture.run({"knowledge", "capture", "--status", "rejected", "two"}, &out) == 0);
+
+    REQUIRE(fixture.run({"knowledge", "export"}, &out) == 0);
+    nlohmann::json faithful = nlohmann::json::parse(out);
+    REQUIRE(faithful.is_array());
+    REQUIRE(faithful.size() == 2);
+    CHECK(faithful[0]["provenance"]["attribution"] == "Ada Lovelace");
+    CHECK(faithful[0].contains("raw_ref"));
+
+    REQUIRE(fixture.run({"knowledge", "export", "--anonymize"}, &out) == 0);
+    CHECK(out.find("Lovelace") == std::string::npos);
+    CHECK(out.find("raw_ref") == std::string::npos);
+    nlohmann::json shared = nlohmann::json::parse(out);
+    CHECK(shared[0]["provenance"]["source"] == "meeting");
+    CHECK(shared.size() == 2);
+    // The raw conversation is never in an export, anonymized or not: the
+    // record holds the archive's PATH at most, and the anonymized one not
+    // even that.
+    CHECK(out.find("\"raw\"") == std::string::npos);
+    const std::filesystem::path report = fixture.home.path() / "report.md";
+    REQUIRE(fixture.run({"knowledge", "export", "--format", "markdown", "--status", "shipped",
+                         "--out", report.string()},
+                        &out) == 0);
+    CHECK(out == "Exported 1 record(s) to " + report.string() + "\n");
+    const std::string markdown = bytes(report);
+    CHECK(markdown.starts_with("# Knowledge records\n\n1 record(s).\n"));
+    CHECK(markdown.find("## shipped (1)") != std::string::npos);
+    CHECK(markdown.find("- **Link:** PROJ-1") != std::string::npos);
+    CHECK(markdown.find("rejected") == std::string::npos);
+    CHECK(fixture.run({"knowledge", "export", "--format", "xml"}, &out) != 0);
+}
+
+TEST_CASE(
+    "reindex is vector-only: honest about a lexical collection, warns on a mixed one, "
+    "and rewrites the vectors under the embedder it resolves",
+    "[commands][knowledge][reindex]") {
+    std::string out;
+    std::string err;
+    {
+        const Fixture lexical;
+        CHECK(lexical.run({"knowledge", "reindex"}, &out, &err) == 1);
+        REQUIRE(lexical.run({"knowledge", "capture", "one"}, &out) == 0);
+        REQUIRE(lexical.run({"knowledge", "reindex"}, &out) == 0);
+        CHECK(out.find("holds 1 record(s), none embedded -- nothing to reindex") !=
+              std::string::npos);
+        CHECK_FALSE(lexical.store().has_vectors());
+    }
+    const Fixture fixture{{}, /*embedder=*/true};
+    REQUIRE(fixture.run({"knowledge", "capture", "--json", "--retriever", "lexical", "one"},
+                        &out) == 0);
+    const std::string first = nlohmann::json::parse(out)["record"]["id"].get<std::string>();
+    REQUIRE(fixture.run({"knowledge", "capture", "--json", "--retriever", "vector", "two"}, &out) ==
+            0);
+    REQUIRE(fixture.run({"knowledge", "capture", "--json", "--retriever", "lexical", "three"},
+                        &out) == 0);
+    CHECK(fixture.store().vectorless_count() == 2);
+    const std::string archive = bytes(fixture.store().get(first)->raw_ref);
+    // The binding is recorded by the reindex itself, not inherited from the
+    // capture that embedded 'two': a store that lost it gets it back.
+    fixture.store().chunks().clear_embedding_model();
+    REQUIRE_FALSE(fixture.store().chunks().embedding_model().recorded());
+
+    REQUIRE(fixture.run({"knowledge", "reindex"}, &out, &err) == 0);
+    INFO(err);
+    CHECK(out.find("Note: 2 of 3 record(s) in \"knowledge\" have no vectors") != std::string::npos);
+    CHECK(out.find("Reindexed 3 record(s) in \"knowledge\" [mock-space]") != std::string::npos);
+    const Store store = fixture.store();
+    CHECK(store.vectorless_count() == 0);
+    CHECK(store.chunks().embedding_model().model == "mock-space");
+    CHECK(store.chunks().stats().lexical_only == 0);
+    CHECK(bytes(store.get(first)->raw_ref) == archive);
+    // One record, no note; an unknown one refused; a bad -m refused.
+    REQUIRE(fixture.run({"knowledge", "reindex", first}, &out) == 0);
+    CHECK(out.find("Reindexed 1 record(s)") != std::string::npos);
+    CHECK(out.find("Note:") == std::string::npos);
+    CHECK(fixture.run({"knowledge", "reindex", "kr-nope"}, &out, &err) == 1);
+    CHECK(err.find("no record 'kr-nope'") != std::string::npos);
+    CHECK(fixture.run({"knowledge", "reindex", "-m", "nope"}, &out, &err) == 1);
+}

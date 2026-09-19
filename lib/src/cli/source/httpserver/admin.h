@@ -67,6 +67,12 @@ public:
     /// clerk, its served set decides which backend may.
     [[nodiscard]] HttpResponse capture_knowledge(Handler& plane, const HttpRequest& request);
     [[nodiscard]] HttpResponse create_knowledge(Handler& plane, const HttpRequest& request);
+    [[nodiscard]] HttpResponse refine_knowledge(Handler& plane, const HttpRequest& request);
+    [[nodiscard]] HttpResponse list_knowledge(Handler& plane, const HttpRequest& request);
+    [[nodiscard]] HttpResponse reindex_knowledge(Handler& plane, const HttpRequest& request);
+    [[nodiscard]] HttpResponse get_knowledge(const HttpRequest& request, std::string_view id);
+    [[nodiscard]] HttpResponse patch_knowledge(const HttpRequest& request, std::string_view id);
+    [[nodiscard]] HttpResponse delete_knowledge(const HttpRequest& request, std::string_view id);
 
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);

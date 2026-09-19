@@ -128,7 +128,8 @@ public:
     /// not re-embed left the bytes alone.
     [[nodiscard]] std::vector<float> chunk_vector(std::int64_t id) const;
 
-    /// Lexical search. `limit` caps the hits returned.
+    /// Lexical search. `limit` caps the hits returned; 0 or less returns every
+    /// match, for a caller that filters before it cuts.
     ///
     /// `query` is **natural language**, not FTS5 syntax: see
     /// `fts_match_query`. A user typing `AND` or a quote gets results, never a

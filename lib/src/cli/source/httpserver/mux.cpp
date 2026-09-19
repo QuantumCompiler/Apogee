@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 37> kRoutes{{
+constexpr std::array<Route, 43> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -138,6 +138,32 @@ constexpr std::array<Route, 37> kRoutes{{
     {"POST", "/v1/admin/knowledge/capture", true,
      +[](Handler& h, AdminHandler* a, const HttpRequest& r, const std::string&) {
          return a->capture_knowledge(h, r);
+     }},
+    {"POST", "/v1/admin/knowledge/refine", true,
+     +[](Handler& h, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->refine_knowledge(h, r);
+     }},
+    {"POST", "/v1/admin/knowledge/reindex", true,
+     +[](Handler& h, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->reindex_knowledge(h, r);
+     }},
+    {"GET", "/v1/admin/knowledge", true,
+     +[](Handler& h, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_knowledge(h, r);
+     }},
+    // The literal knowledge paths above are matched before the `{id}` rows,
+    // so `capture`, `refine` and `reindex` are never read as record ids.
+    {"GET", "/v1/admin/knowledge/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->get_knowledge(r, id);
+     }},
+    {"PATCH", "/v1/admin/knowledge/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->patch_knowledge(r, id);
+     }},
+    {"DELETE", "/v1/admin/knowledge/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->delete_knowledge(r, id);
      }},
     {"GET", "/v1/admin/permissions", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {

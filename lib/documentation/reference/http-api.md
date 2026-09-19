@@ -409,9 +409,9 @@ the config's `knowledge.db`, then `knowledge`), and the overrides that win
 over the clerk for their field: `status` (`shipped` | `rejected` |
 `superseded`, synonyms accepted), `discipline`, `source`, `link`,
 `supersedes` (the id of the record this one replaces, which is marked
-superseded), and `retriever` (`lexical` | `vector` | `auto`, resolved against
+superseded), `retriever` (`lexical` | `vector` | `auto`, resolved against
 the collection's pin through the same resolver `embed ingest` uses, under the
-same spend rule).
+same spend rule), and `draft` (below).
 
 `201` with:
 
@@ -431,6 +431,120 @@ that does not exist). The raw conversation is archived on the server under
 a bad retriever, or a resolver refusal (an explicit `vector` with no embedding
 backend); `501` when the server serves no generation backend; `502` when the
 clerk failed to produce a conforming record after its one retry.
+
+**`"draft": true`** runs the clerk, applies the overrides, normalises and
+validates -- and stores nothing: the HTTP twin of `capture --dry-run`, and
+the first step of the capture → review → store flow below. `200` with
+`{draft: true, record, db, retriever[, warning][, note]}`: the record has an
+empty `id` and `timestamp` and no `raw_ref` (only a store mints those), `db`
+and `retriever` are the store decision a real capture would make, and
+`warning` says what a real capture would fail on (an explicit `vector` with
+no embedding backend) rather than failing the preview. Nothing touches the
+store, the archive or the config.
+
+#### Capture → review → store
+
+A GUI usually wants a human look between the clerk and the store. The plane
+supports that as a **stateless** three-step flow: the server holds no draft
+between calls -- the draft lives with the client -- and nothing touches the
+store, the archive or the config until the last step.
+
+1. **Draft** -- `POST /v1/admin/knowledge/capture` with `"draft": true`.
+2. **Refine**, zero or more times -- `POST /v1/admin/knowledge/refine` with
+   the draft, one instruction and the raw conversation (below). A new draft
+   comes back; nothing is stored.
+3. **Store** -- `POST /v1/admin/knowledge` with the reviewed draft's fields as
+   the body, plus `raw` so the conversation is archived. The ordinary
+   finished-record route, with no separate "store this draft" path -- which
+   is what makes a draft → refine → store round trip land a record
+   field-equivalent to a one-shot capture of the same conversation.
+
+The refine loop is HTTP-only by design: a CLI user re-runs `capture --dry-run`
+with different flags or input.
+
+### `POST /v1/admin/knowledge/refine`
+
+One bounded revision pass over a client-held draft. Body: `record` (the draft
+as the client holds it, required), `instruction` (what to change, in the
+reviewer's words -- required, non-empty, at most 2000 characters: the source
+material belongs in `raw`, not here), `raw` (the conversation the draft was
+captured from -- optional but recommended, since it is the clerk's only
+grounding; without it the clerk is told to revise from the draft and the
+instruction alone and never invent), and `model` (the backend that runs the
+clerk, resolved as capture's is). The clerk applies the instruction, changes
+nothing else, and stays grounded in `raw`; the same schema as capture, so the
+result is storable through the finished-record route as-is. `supersedes` is
+not a clerk field and is carried through untouched; a `provenance.source` the
+clerk drops keeps the draft's value rather than a default.
+
+`200` with `{draft: true, record}` -- a new draft, never stored. `400` for a
+missing record or an empty or over-long instruction, checked **before** any
+clerk call; `501` when the server serves no generation backend; `502` when
+the revision is not a conforming record after the clerk's one retry.
+
+### `GET /v1/admin/knowledge`
+
+The records, newest first, or a query over them. Query parameters: `db` (the
+collection; default the config's `knowledge.db`, then `knowledge`), `status`
+and `discipline` (filters; **no default branch over HTTP** -- the CLI's
+`query` defaults to shipped, a listing route shows what a client asks for),
+`anonymize=true` (attribution and the local `raw_ref` stripped, the
+provenance chain kept -- the shareable shape), and, for a query, `q` (the
+question), `retriever` (`lexical` | `vector` | `hybrid` | `auto`), `rerank`
+(a backend, or `off`), and `limit` (default 20).
+
+A missing collection is `200` with an empty list -- never an error, and never
+a created file. Without `q`: `{"object": "list", "data": [record…]}`. With
+`q`, through the one retriever resolver every surface shares, the filters
+applied **before** the cut so an off-branch top hit never starves the
+result, and the judge under its never-fail contract:
+
+```json
+{"object": "list", "data": [{"record": {"id": "kr-…", "intent": "…", …}, "score": 0.61}],
+ "retriever": "lexical", "reranked": false, "note": "…"}
+```
+
+`retriever` sets the scale of every `score` (normalised BM25, cosine, or RRF
+-- not comparable across retrievers); `reranked` is set from the same place
+as the ordering. `400` on a bad retriever, an unknown `rerank` backend, or an
+explicit ask the resolver refuses; `501` for `retriever=vector` on a server
+with no embedding backend, naming `?retriever=lexical` as the way out; `502`
+when the embedder failed.
+
+### `GET /v1/admin/knowledge/{id}`
+
+One record (`?db=` selects the collection). `404` when the collection or the
+record does not exist.
+
+### `PATCH /v1/admin/knowledge/{id}`
+
+The twin of `apogee knowledge link` and `knowledge status`: a body with
+**exactly one** of `link` (the downstream artifact) or `status` (`shipped` |
+`rejected` | `superseded`, synonyms accepted), and optionally `db`. A
+metadata edit in place -- the search index is built only from the record's
+immutable reasoning, so a link or status change never re-embeds and never
+makes a stored vector stale. `200` with the record; `400` for neither or both
+fields, or a bad status; `404` when unknown.
+
+### `DELETE /v1/admin/knowledge/{id}`
+
+The twin of `apogee knowledge delete`: the record and its archived
+conversation (`?db=` selects the collection). `200 {"deleted": "<id>"}`;
+`404` when unknown.
+
+### `POST /v1/admin/knowledge/reindex`
+
+The twin of `apogee knowledge reindex`: re-embeds records and rewrites their
+stored vectors, after an embedding-model change. Body (optional): `{db?,
+id?}` -- one record, or every record when `id` is absent. **Vector-only by
+design**: the text index is maintained on every write, so a collection
+captured lexically needs nothing -- that case is `200 {"reindexed": 0,
+"note": …}` rather than an error, as is an empty collection. A mixed
+collection is reindexed whole and says so in `note`, because doing so embeds
+records that were deliberately captured lexically. `404` for a collection or
+record that does not exist; `501` for a collection that holds vectors on a
+server with no embedding backend to rebuild them; `502` when the embedder
+failed.
 
 ### `POST /v1/admin/knowledge`
 

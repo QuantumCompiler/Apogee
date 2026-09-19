@@ -5,7 +5,10 @@
 # leaving zero footprint; overrides winning over the clerk; a supersede; the
 # collection registered under embeddings: through the one config editor; the
 # doctor's rows; a vendor-CLI backend refused by type; --from-chat over a
-# saved session; and chat's /capture reaching the same core.
+# saved session; chat's /capture reaching the same core; then the lifecycle:
+# query shipped by default and every branch on request, list, info --raw,
+# link and status, an anonymized export and a Markdown report, reindex honest
+# about a lexical collection, and delete taking the archive with it.
 #
 # POSIX only, like the other shell checks.
 set -eu
@@ -112,5 +115,58 @@ grep -q '"source": "chat"' "$WORK_DIR/fromchat.json" || fail "--from-chat did no
 from_id="$(sed -n 's/.*"id": "\(kr-[0-9TZ]*-[0-9a-f]*\)".*/\1/p' "$WORK_DIR/fromchat.json" | head -1)"
 [ -n "$from_id" ] || fail "no id in the --from-chat result"
 grep -q "^User: should we drop the cancel button?" "$APOGEE_HOME/knowledge/raw/$from_id.md" || fail "the archived transcript is not the session's words: $(cat "$APOGEE_HOME/knowledge/raw/$from_id.md")"
+
+# --- query: shipped by default, every branch on request, the retriever named --
+"$APOGEE_BIN" knowledge query "cancel button testers" </dev/null >"$WORK_DIR/q.txt" 2>"$WORK_DIR/q.err" || fail "query: $(cat "$WORK_DIR/q.err")"
+grep -q 'result(s) for "cancel button testers" in "knowledge" \[lexical\]' "$WORK_DIR/q.txt" || fail "no query header: $(cat "$WORK_DIR/q.txt")"
+grep -q "\[shipped · " "$WORK_DIR/q.txt" || fail "no shipped record in the default query: $(cat "$WORK_DIR/q.txt")"
+grep -q "\[rejected · " "$WORK_DIR/q.txt" && fail "a rejected record surfaced on the default branch: $(cat "$WORK_DIR/q.txt")"
+"$APOGEE_BIN" knowledge query --status rejected "cancel button testers" </dev/null >"$WORK_DIR/qr.txt" 2>&1 || fail "query --status rejected"
+grep -q "\[rejected · " "$WORK_DIR/qr.txt" || fail "no rejected record on request: $(cat "$WORK_DIR/qr.txt")"
+grep -q "\[shipped · " "$WORK_DIR/qr.txt" && fail "a shipped record surfaced on the rejected branch"
+"$APOGEE_BIN" knowledge query --status "" --json "cancel button testers" </dev/null >"$WORK_DIR/qa.json" 2>&1 || fail "query --status ''"
+grep -q '"retriever": "lexical"' "$WORK_DIR/qa.json" || fail "the JSON envelope does not name the retriever: $(cat "$WORK_DIR/qa.json")"
+[ "$(grep -c '"score"' "$WORK_DIR/qa.json")" -ge 5 ] || fail "every branch was not searched: $(cat "$WORK_DIR/qa.json")"
+if "$APOGEE_BIN" knowledge query --retriever vector "x" </dev/null >/dev/null 2>"$WORK_DIR/qv.err"; then
+    fail "an explicit vector query with no embedder was accepted"
+fi
+grep -q "lexical" "$WORK_DIR/qv.err" || fail "the refusal did not name lexical: $(cat "$WORK_DIR/qv.err")"
+
+# --- list, info --raw, link, status: the lifecycle on the real binary ---------
+"$APOGEE_BIN" knowledge list </dev/null >"$WORK_DIR/list.txt" 2>&1 || fail "list"
+grep -q '^5 record(s) in "knowledge":' "$WORK_DIR/list.txt" || fail "list count: $(cat "$WORK_DIR/list.txt")"
+"$APOGEE_BIN" knowledge info --raw "$from_id" </dev/null >"$WORK_DIR/info.txt" 2>&1 || fail "info --raw"
+grep -q "^ID:          $from_id" "$WORK_DIR/info.txt" || fail "info lacks the id: $(cat "$WORK_DIR/info.txt")"
+grep -q "^-- Raw conversation --" "$WORK_DIR/info.txt" || fail "info --raw did not print the archive"
+grep -q "^User: should we drop the cancel button?" "$WORK_DIR/info.txt" || fail "the archive printed is not the session"
+"$APOGEE_BIN" knowledge link "$from_id" PROJ-77 </dev/null >"$WORK_DIR/link.txt" 2>&1 || fail "link"
+grep -q "^Linked $from_id -> PROJ-77" "$WORK_DIR/link.txt" || fail "link output: $(cat "$WORK_DIR/link.txt")"
+"$APOGEE_BIN" knowledge status "$from_id" rejected </dev/null >"$WORK_DIR/status.txt" 2>&1 || fail "status"
+grep -q "^$from_id is now rejected" "$WORK_DIR/status.txt" || fail "status output: $(cat "$WORK_DIR/status.txt")"
+"$APOGEE_BIN" knowledge info --json "$from_id" </dev/null >"$WORK_DIR/info.json" 2>&1 || fail "info --json"
+grep -q '"downstream_link": "PROJ-77"' "$WORK_DIR/info.json" || fail "the link did not land: $(cat "$WORK_DIR/info.json")"
+grep -q '"status": "rejected"' "$WORK_DIR/info.json" || fail "the status did not land"
+if "$APOGEE_BIN" knowledge info kr-nope </dev/null >/dev/null 2>&1; then fail "an unknown id was accepted"; fi
+
+# --- export: names off, chain on; a Markdown report to a file -----------------
+"$APOGEE_BIN" knowledge export --anonymize </dev/null >"$WORK_DIR/export.json" 2>&1 || fail "export --anonymize"
+grep -q "Lovelace" "$WORK_DIR/export.json" && fail "an anonymized export carries a name"
+grep -q "raw_ref" "$WORK_DIR/export.json" && fail "an anonymized export carries the archive path"
+grep -q '"source": "chat"' "$WORK_DIR/export.json" || fail "the provenance chain was not kept: $(cat "$WORK_DIR/export.json")"
+grep -q "should we drop the cancel button" "$WORK_DIR/export.json" && fail "a raw conversation reached the export"
+"$APOGEE_BIN" knowledge export --format markdown --out "$WORK_DIR/report.md" </dev/null >"$WORK_DIR/export.txt" 2>&1 || fail "export markdown: $(cat "$WORK_DIR/export.txt")"
+grep -q "^Exported 5 record(s) to " "$WORK_DIR/export.txt" || fail "export did not report: $(cat "$WORK_DIR/export.txt")"
+grep -q "^# Knowledge records" "$WORK_DIR/report.md" || fail "no report header"
+grep -q "^## shipped (" "$WORK_DIR/report.md" || fail "no shipped group"
+grep -q "^## rejected (" "$WORK_DIR/report.md" || fail "no rejected group"
+
+# --- reindex on a lexical collection is honest; delete takes the archive -------
+"$APOGEE_BIN" knowledge reindex </dev/null >"$WORK_DIR/reindex.txt" 2>&1 || fail "reindex: $(cat "$WORK_DIR/reindex.txt")"
+grep -q "none embedded -- nothing to reindex" "$WORK_DIR/reindex.txt" || fail "reindex was not honest about a lexical collection: $(cat "$WORK_DIR/reindex.txt")"
+"$APOGEE_BIN" knowledge delete "$from_id" </dev/null >"$WORK_DIR/delete.txt" 2>&1 || fail "delete"
+grep -q "^Deleted $from_id" "$WORK_DIR/delete.txt" || fail "delete output: $(cat "$WORK_DIR/delete.txt")"
+[ ! -e "$APOGEE_HOME/knowledge/raw/$from_id.md" ] || fail "delete left the archive behind"
+"$APOGEE_BIN" check </dev/null >"$WORK_DIR/check3.txt" 2>&1 || fail "check after delete"
+grep -q "collection: knowledge  4 record(s)" "$WORK_DIR/check3.txt" || fail "the doctor still counts the deleted record: $(cat "$WORK_DIR/check3.txt")"
 
 echo "apogee knowledge end-to-end: OK"

@@ -369,7 +369,8 @@ std::vector<SearchHit> Store::search(std::string_view query, int limit) const {
                                   " ORDER BY bm25(chunks_fts)"
                                   " LIMIT ?");
     bind_text(select.get(), 1, match);
-    sqlite3_bind_int(select.get(), 2, limit);
+    // SQLite reads a negative LIMIT as "no limit".
+    sqlite3_bind_int(select.get(), 2, limit > 0 ? limit : -1);
 
     std::vector<SearchHit> hits;
     while (sqlite3_step(select.get()) == SQLITE_ROW) {

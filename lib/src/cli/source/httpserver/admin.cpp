@@ -80,6 +80,30 @@ HttpResponse AdminHandler::create_knowledge(Handler& plane, const HttpRequest& r
     return admin_create_knowledge(config_context(), plane, request);
 }
 
+HttpResponse AdminHandler::refine_knowledge(Handler& plane, const HttpRequest& request) {
+    return admin_refine_knowledge(config_context(), plane, request);
+}
+
+HttpResponse AdminHandler::list_knowledge(Handler& plane, const HttpRequest& request) {
+    return admin_list_knowledge(config_context(), plane, request);
+}
+
+HttpResponse AdminHandler::reindex_knowledge(Handler& plane, const HttpRequest& request) {
+    return admin_reindex_knowledge(config_context(), plane, request);
+}
+
+HttpResponse AdminHandler::get_knowledge(const HttpRequest& request, std::string_view id) {
+    return admin_get_knowledge(config_context(), id, request);
+}
+
+HttpResponse AdminHandler::patch_knowledge(const HttpRequest& request, std::string_view id) {
+    return admin_patch_knowledge(config_context(), id, request);
+}
+
+HttpResponse AdminHandler::delete_knowledge(const HttpRequest& request, std::string_view id) {
+    return admin_delete_knowledge(config_context(), id, request);
+}
+
 HttpResponse AdminHandler::list_permissions(const HttpRequest&) {
     return admin_list_permissions(config_context());
 }
