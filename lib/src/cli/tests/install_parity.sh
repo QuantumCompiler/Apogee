@@ -21,9 +21,11 @@
 # written in shell. A shell script that created directories itself would be a
 # second declaration of the layout, which is the thing being prevented.
 #
-# POSIX only: `install.ps1` is verified on a Windows runner by the same
-# comparison expressed in PowerShell (see .github/workflows/ci.yml). Recorded
-# per-item skip on Windows for THIS script, not for the guarantee.
+# POSIX only: `install.ps1` has no runner job any more (CI is the builds
+# alone, user decision 2026-09-19); the guarantee it shares -- the binary,
+# not a script, owns the layout -- is what `cli.install_is_ours_only` and
+# this case pin on every POSIX build. Recorded per-item skip on Windows for
+# THIS script, not for the guarantee.
 set -euo pipefail
 
 APOGEE_BIN="${1:?usage: install_parity.sh <apogee-binary> <work-dir>}"

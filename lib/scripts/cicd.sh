@@ -6,8 +6,7 @@
 #
 #   linux-x64  linux-arm64  macos-arm64  windows-x64  windows-arm64
 #
-# A host can only natively compile the targets its own OS supports (macOS hosts
-# build both Mac architectures; Linux and Windows hosts build their own arch).
+# A host can only natively compile its own target (its OS and its architecture).
 # Requested targets this host cannot build are reported and DEFERRED to CI:
 # the GitHub Actions matrix runs one native runner per target, and each runner
 # invokes THIS script with its native --platform — one build path, everywhere.
@@ -19,6 +18,11 @@
 #
 # With --fresh it performs a CI-style clean-room build: clone the repo at the
 # current branch into a temp directory and build there.
+#
+# The CI pipeline (user decision, 2026-09-19) is three stages, and each one is
+# a call into this script: `--clone-llama` proves the llama.cpp pin resolves,
+# then one build per platform (`--platform T --no-defer`), then one test run
+# per platform on the build tree the build stage handed over (`--test-only`).
 #
 # Tab completion: source lib/scripts/cicd-completion.bash (see that file).
 set -euo pipefail
@@ -33,6 +37,8 @@ APPS=(cli)
 
 CLEAN=0
 RUN_TESTS=0
+TEST_ONLY=0
+CLONE_LLAMA=0
 FRESH=0
 NO_DEFER=0
 BRANCH=""
@@ -53,6 +59,12 @@ Options:
   -c, --clean          Remove the target's build directory before building
   -t, --test           Run the test suite (ctest) after a successful build
                        (host-native target only — cross-built binaries can't run here)
+      --test-only      Run the test suite on an EXISTING build directory, with
+                       no configure and no build: the third CI stage, on the
+                       tree the build stage handed over
+      --clone-llama    Clone llama.cpp at the commit the CLI's third_party
+                       build pins, prove it resolved, and stop: the first CI
+                       stage. Nothing else runs.
   -f, --fresh          CI-style clean-room build: clone ${REPO_URL}
                        at the current branch into a temp dir and build there
   -b, --branch NAME    Branch to build (implies --fresh; default: the branch
@@ -65,7 +77,7 @@ Options:
 
 Environment:
   APOGEE_CMAKE_ARGS    Extra arguments for the configure step, appended after
-                       the preset (e.g. a vcpkg toolchain file on Windows).
+                       the preset (e.g. a toolchain file for a cross-compile).
 EOF
 }
 
@@ -77,7 +89,11 @@ host_target() {
     case "$(uname -s)" in
         Darwin)                 os="macos" ;;
         Linux)                  os="linux" ;;
-        MINGW*|MSYS*|CYGWIN*)   os="windows" ;;
+        # Git for Windows' bash, and every MSYS2 environment: MINGW64_NT,
+        # UCRT64_NT, CLANG64_NT, CLANGARM64_NT, MSYS_NT. CI builds Windows in
+        # the MSYS2 shells (MinGW-w64 toolchains).
+        MINGW*|MSYS*|CYGWIN*|UCRT*|CLANG*)
+                                os="windows" ;;
         *)                      die "unsupported host OS: $(uname -s)" ;;
     esac
     # On Windows the shell (Git for Windows' bash) may itself be an x64 build
@@ -128,6 +144,8 @@ while [[ $# -gt 0 ]]; do
             shift ;;
         -c|--clean)  CLEAN=1 ;;
         -t|--test)   RUN_TESTS=1 ;;
+        --test-only) TEST_ONLY=1 ;;
+        --clone-llama) CLONE_LLAMA=1 ;;
         -f|--fresh)  FRESH=1 ;;
         --no-defer)  NO_DEFER=1 ;;
         -b|--branch) [[ $# -ge 2 ]] || die "--branch needs a name"; BRANCH="$2"; FRESH=1; shift ;;
@@ -140,6 +158,30 @@ done
 
 HOST="$(host_target)"
 [[ ${#PLATFORMS[@]} -gt 0 ]] || PLATFORMS=("$HOST")
+[[ $TEST_ONLY -eq 1 && $CLEAN -eq 1 ]] && die "--test-only tests an existing build; it cannot be combined with --clean"
+[[ $TEST_ONLY -eq 1 && $FRESH -eq 1 ]] && die "--test-only tests an existing build; it cannot be combined with --fresh"
+
+# Stage one of the CI pipeline: prove the llama.cpp pin resolves. The pin lives
+# in ONE place -- the FetchContent_Declare in the CLI's third_party build --
+# and is read from there, so this can never disagree with what the build
+# fetches. A shallow fetch of the one commit, checked out and compared.
+clone_llama() {
+    local decl="$1/lib/src/cli/third_party/CMakeLists.txt"
+    local repo sha dir head
+    repo="$(awk '/FetchContent_Declare\(llama_cpp/{f=1} f && /GIT_REPOSITORY/{print $2; exit}' "$decl")"
+    sha="$(awk '/FetchContent_Declare\(llama_cpp/{f=1} f && /GIT_TAG/{print $2; exit}' "$decl")"
+    [[ -n "$repo" && -n "$sha" ]] || die "could not read the llama.cpp pin from ${decl}"
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/apogee-llama.XXXXXX")"
+    log "cloning llama.cpp ${sha} from ${repo}"
+    git -C "$dir" init -q
+    git -C "$dir" remote add origin "$repo"
+    git -C "$dir" fetch --depth 1 origin "$sha"
+    git -C "$dir" checkout -q FETCH_HEAD
+    head="$(git -C "$dir" rev-parse HEAD)"
+    [[ "$head" == "$sha" ]] || die "llama.cpp clone resolved to ${head}, not the pinned ${sha}"
+    log "llama.cpp pin resolves: ${head} ($(git -C "$dir" log -1 --format='%cs %s' | cut -c1-72))"
+    rm -rf "$dir"
+}
 
 # Builds one application for one target, in the checkout at $1.
 # $3 is the app name; its build root is <root>/lib/src/<app>.
@@ -154,10 +196,26 @@ build_target() {
         return 0
     fi
 
+    # The third CI stage: the tree was built by the second and unpacked here.
+    if [[ $TEST_ONLY -eq 1 ]]; then
+        [[ -d "${build_dir}" ]] || die "[${app}/${target}] --test-only: no build directory at ${app_dir}/${build_dir}"
+        [[ "$target" == "$HOST" ]] || die "[${app}/${target}] --test-only: cross-built binaries can't run on ${HOST}"
+        log "[${app}/${target}] running tests on the existing build"
+        ctest --test-dir "${build_dir}" --output-on-failure
+        log "[${app}/${target}] done (branch '$(git -C "$root" rev-parse --abbrev-ref HEAD)')"
+        return 0
+    fi
+
     [[ $CLEAN -eq 1 ]] && { log "cleaning ${app_dir}/${build_dir}/"; rm -rf "${build_dir}"; }
 
-    # Extra configure arguments from the environment -- how a CI runner hands
-    # in a toolchain file without this script growing a per-platform branch.
+    # Extra configure arguments from the environment -- how a caller hands in
+    # a toolchain file without this script growing a per-platform branch.
+    #
+    # The arrays below expand as ${a[@]+"${a[@]}"}, not "${a[@]}": under
+    # `set -u`, bash 3.2 -- macOS's /bin/bash, and the bash on the macOS
+    # runners -- treats an EMPTY array's expansion as an unbound variable and
+    # exits. bash 4.4 lifted that, which is why the plain form works on Linux
+    # and in MSYS2 and failed only on the merge-blocking runner.
     local -a env_args=()
     if [[ -n "${APOGEE_CMAKE_ARGS:-}" ]]; then
         read -r -a env_args <<< "${APOGEE_CMAKE_ARGS}"
@@ -166,15 +224,14 @@ build_target() {
     # Each app ships one CMake preset per target, named exactly after it.
     if [[ -f CMakePresets.json ]] && cmake --list-presets 2>/dev/null | grep -q "\"${target}\""; then
         log "[${app}/${target}] configuring (cmake --preset ${target}${env_args[*]:+ ${env_args[*]}})"
-        cmake --preset "${target}" "${env_args[@]}"
+        cmake --preset "${target}" ${env_args[@]+"${env_args[@]}"}
     else
         local extra=()
         if [[ "${target%%-*}" == "macos" ]]; then
-            [[ "${target#macos-}" == "arm64" ]] && extra+=(-DCMAKE_OSX_ARCHITECTURES=arm64) \
-                                                || extra+=(-DCMAKE_OSX_ARCHITECTURES=x86_64)
+            extra+=(-DCMAKE_OSX_ARCHITECTURES=arm64)
         fi
         log "[${app}/${target}] configuring (cmake -S . -B ${build_dir})"
-        cmake -S . -B "${build_dir}" "${extra[@]}" "${env_args[@]}"
+        cmake -S . -B "${build_dir}" ${extra[@]+"${extra[@]}"} ${env_args[@]+"${env_args[@]}"}
     fi
 
     log "[${app}/${target}] building with ${JOBS} jobs"
@@ -215,6 +272,11 @@ build_all_requested() {
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository"
 current_branch="$(git -C "$repo_root" rev-parse --abbrev-ref HEAD)"
 [[ -n "$BRANCH" ]] || BRANCH="$current_branch"
+
+if [[ $CLONE_LLAMA -eq 1 ]]; then
+    clone_llama "$repo_root"
+    exit 0
+fi
 
 if [[ $FRESH -eq 1 ]]; then
     workdir="$(mktemp -d "${TMPDIR:-/tmp}/apogee-cicd.XXXXXX")"

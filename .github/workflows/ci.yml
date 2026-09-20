@@ -9,25 +9,48 @@
 # why it is the one build-related file not under lib/src/cli/. It stays a thin
 # caller for exactly that reason: the CLI's build lives with the CLI.
 #
-# Gating policy (user decision, 2026-08-24): macos-arm64 is the only
-# merge-blocking target for v0.1.0. The other five run informationally while
-# portability catches up, and get promoted to blocking as they stabilize —
-# promote one by deleting its `continue-on-error` line.
+# Gating policy (user decision, 2026-09-19, superseding 2026-08-24's
+# "macos-arm64 only"): EVERY job here is required for a pull request -- the
+# clone, all six builds, all six test runs. There is no `continue-on-error`
+# in this file and there must not be one; a platform that cannot pass is a
+# platform to fix, not to mark informational. GitHub enforces the requirement
+# through the branch protection rule on `stable`, which lists these checks by
+# their job names (`clone llama.cpp`, `build <name>`, `test <name>`) -- a
+# renamed job has to be renamed there too.
 #
-# Job policy (user decision, 2026-09-19): CI builds the executable for each
-# platform -- five of them, the Intel Mac having been dropped the same day --
-# plus the llama.cpp configuration that ships with the tool, and nothing else. Formatting, clang-tidy and install parity are LOCAL gates —
-# `make format-check`, `make lint`, and the `cli.install_parity` case the test
-# suite runs on every platform build — not jobs here; the dedicated jobs for
-# them were removed that day as work the build itself already covers.
+# Job policy (user decision, 2026-09-19): CI is the llama.cpp clone, then one
+# executable build per platform -- five of them, the Intel Mac having been
+# dropped the same day -- then one test run per platform, and nothing else. Formatting, clang-tidy, install
+# parity and the clean-room build are LOCAL gates — `make format-check`,
+# `make lint`, the `cli.install_parity` case the test suite runs on every
+# platform build, and `cicd.sh --fresh` — not jobs here; the dedicated jobs
+# for them were removed that day as work the build itself already covers.
+#
+# Shape (user decision, 2026-09-19): three stages, each a call into cicd.sh.
+#
+#   1. clone llama.cpp   -- prove the pin resolves. llama.cpp ships with the
+#                           tool, so a pin that no longer clones is a broken
+#                           product, and no platform is worth building on it.
+#   2. build <platform>  -- one job per platform (plus the macOS build with
+#                           llama.cpp linked); each hands its build tree to
+#                           stage three as an artifact.
+#   3. test <platform>   -- one job per platform, running the suite on the
+#                           tree stage two built, with nothing rebuilt.
+#
+# The `needs:` edges are those stages. The two matrices are the same list on
+# purpose (GitHub has no way to declare it once): a row added to one is added
+# to the other, and the artifact name ties a test row to its build row.
 #
 # What a runner needs beyond its image, per platform: the Linux images ship no
 # libcurl headers (`find_package(CURL REQUIRED)` is the first hard lookup, and
 # the whole configure fell over on it five seconds in); the Windows images ship
-# no libcurl at all, so it comes from the image's vcpkg as a static library on
-# a static-md triplet, handed to the script through APOGEE_CMAKE_ARGS; macOS
-# has curl in the SDK. Every runner passes --no-defer, so a misdetected host
-# is a failure rather than the silent "deferred to CI" success it once was.
+# MSYS2 pre-installed but off PATH, and the Windows build is a MinGW-w64 one
+# (user decision, 2026-09-19) -- GCC in the UCRT64 environment on x64, clang in
+# CLANGARM64 on arm64 -- so msys2/setup-msys2 puts the toolchain, cmake, ninja,
+# pkgconf and MSYS2's Schannel curl in that shell and the build and test
+# steps run inside it; macOS has curl in the SDK. Every runner passes --no-defer, so a
+# misdetected host is a failure rather than the silent "deferred to CI"
+# success it once was.
 
 name: CI
 
@@ -47,12 +70,6 @@ name: CI
 # `push` fires only for `stable`, which no topic branch is. (The combination
 # that double-fires is `push: ["**"]` with `pull_request`, which is what this
 # file used to have.)
-#
-# On `pull_request`, note what the ref is: GitHub checks out the PR's synthetic
-# merge ref and sets GITHUB_REF_NAME to `<number>/merge`. That is not a branch
-# on the remote, which is why the fresh-clone job below opts out of PR runs
-# rather than trying to clone it. It is also why the completed-merge half is a
-# push trigger and not `pull_request: [closed]`.
 #
 # Fork PRs run with a read-only token and no secrets. Nothing here needs a
 # secret, so they work -- keep it that way.
@@ -75,94 +92,210 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  clone-llama:
+    # Stage one. The script reads the pin from the CLI's third_party build --
+    # the one place it lives -- fetches that commit, and checks it resolved.
+    name: clone llama.cpp
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Clone llama.cpp at the pinned commit
+        run: lib/scripts/cicd.sh --clone-llama
+
   build:
-    name: build ${{ matrix.target }}
+    # Stage two. The `macos-arm64-llama` row is the local-inference
+    # configuration -- the one that ships with the tool -- built through the
+    # same script with the llama.cpp target enabled; its test row is the ONLY
+    # place the real LlamaRuntime's vendor calls are checked at all, since the
+    # default build compiles the "not built in" half of that file. Required
+    # like every other row (Gating policy, above); the Metal kernel build is
+    # slow, which is a reason for patience, not for an exemption.
+    #
+    # fail-fast is off so one failing row does not cancel the others: the PR
+    # is blocked either way, and the full picture is worth the runner time.
+    name: build ${{ matrix.name }}
+    needs: clone-llama
     runs-on: ${{ matrix.runner }}
-    continue-on-error: ${{ matrix.blocking != true }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: macos-arm64
+          - name: macos-arm64
+            target: macos-arm64
             runner: macos-14
-            blocking: true
-          - target: linux-x64
+          - name: macos-arm64-llama
+            target: macos-arm64
+            runner: macos-14
+            cmake_args: -DAPOGEE_ENABLE_LLAMA=ON
+          - name: linux-x64
+            target: linux-x64
             runner: ubuntu-24.04
-          - target: linux-arm64
+          - name: linux-arm64
+            target: linux-arm64
             runner: ubuntu-24.04-arm
-          - target: windows-x64
-            runner: windows-2022
-            triplet: x64-windows-static-md
-          - target: windows-arm64
+          - name: windows-x64
+            target: windows-x64
+            runner: windows-2025
+            msystem: UCRT64
+          - name: windows-arm64
+            target: windows-arm64
             runner: windows-11-arm
-            triplet: arm64-windows-static-md
+            msystem: CLANGARM64
+    env:
+      APOGEE_CMAKE_ARGS: ${{ matrix.cmake_args }}
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install libcurl headers and the venv module (Linux)
+      # lsof is not on the Ubuntu images, and the no-listen tests poll with
+      # it: without it they skip the socket check and pass having proven
+      # nothing, which on a runner is worse than failing.
+      - name: Install libcurl headers, the venv module and lsof (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev python3-venv
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev python3-venv lsof
 
-      - name: Install libcurl through vcpkg (Windows)
+      # `pacboy` prefixes each name for the environment: toolchain:p is
+      # mingw-w64-ucrt-x86_64-toolchain in UCRT64 and
+      # mingw-w64-clang-aarch64-toolchain in CLANGARM64. curl-winssl is curl
+      # built on Schannel -- the platform trust store, which is the whole
+      # reason curl is found rather than fetched (cmake/ApogeeDependencies).
+      - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
         if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          # git is MSYS2's own (unprefixed): the script opens with
+          # `git rev-parse`, and the shell's minimal PATH has no Git for Windows.
+          install: git
+          pacboy: >-
+            toolchain:p
+            cmake:p
+            ninja:p
+            pkgconf:p
+            curl-winssl:p
+
+      - name: Build
+        if: runner.os != 'Windows'
         shell: bash
-        # A static curl on the static-md triplet: the executable ships alone,
-        # and the CRT stays dynamic like the rest of the build.
+        run: lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer
+
+      # The same command, in the MSYS2 shell the toolchain lives in. The
+      # script sees a UCRT64_NT / CLANGARM64_NT host and maps it to Windows.
+      - name: Build (MSYS2 shell)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        # The checkout was made by Git for Windows under a different HOME, so
+        # MSYS2's git has to be told the tree is safe before the script's
+        # first `git rev-parse`.
+        run: |
+          git config --global --add safe.directory '*'
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer
+
+      # Handed over as a tar, not a directory: upload-artifact drops file
+      # modes, and a test binary without its execute bit is not a test. Object
+      # files stay behind -- stage three runs the suite, it does not link --
+      # and so do the dependencies' clone histories.
+      - name: Pack the build tree for the test stage
+        shell: bash
         run: |
           set -euo pipefail
-          root="${VCPKG_INSTALLATION_ROOT//\\//}"
-          "$root/vcpkg" install "curl:${{ matrix.triplet }}"
-          echo "APOGEE_CMAKE_ARGS=-DCMAKE_TOOLCHAIN_FILE=$root/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}" >> "$GITHUB_ENV"
+          cd lib/src/cli
+          tar -cf "build-${{ matrix.name }}.tar" --exclude='*.o' --exclude='*.obj' --exclude='.git' "build/${{ matrix.target }}"
 
-      - name: Build and test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.name }}
+          path: lib/src/cli/build-${{ matrix.name }}.tar
+          retention-days: 1
+          if-no-files-found: error
+
+  test:
+    # Stage three. The same matrix, the same runner image per row, the build
+    # tree from the row's stage-two job, and `--test-only`: ctest on that tree
+    # with no configure and no build. The workspace path is the same on every
+    # runner of an image, which is what lets the tree's absolute paths hold.
+    name: test ${{ matrix.name }}
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            target: macos-arm64
+            runner: macos-14
+          - name: macos-arm64-llama
+            target: macos-arm64
+            runner: macos-14
+          - name: linux-x64
+            target: linux-x64
+            runner: ubuntu-24.04
+          - name: linux-arm64
+            target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - name: windows-x64
+            target: windows-x64
+            runner: windows-2025
+            msystem: UCRT64
+          - name: windows-arm64
+            target: windows-arm64
+            runner: windows-11-arm
+            msystem: CLANGARM64
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # The suite needs what the build needed: python3's venv module on Linux
+      # (the training tests create one), and on Windows the MSYS2 shell with
+      # cmake (ctest), the toolchain's runtime, and curl.
+      # lsof is not on the Ubuntu images, and the no-listen tests poll with
+      # it: without it they skip the socket check and pass having proven
+      # nothing, which on a runner is worse than failing.
+      - name: Install libcurl headers, the venv module and lsof (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev python3-venv lsof
+
+      - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          # git is MSYS2's own (unprefixed): the script opens with
+          # `git rev-parse`, and the shell's minimal PATH has no Git for Windows.
+          install: git
+          pacboy: >-
+            toolchain:p
+            cmake:p
+            ninja:p
+            pkgconf:p
+            curl-winssl:p
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-${{ matrix.name }}
+          path: lib/src/cli
+
+      - name: Unpack the build tree
         shell: bash
-        run: lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer
-
-  llama:
-    # The local-inference configuration -- the one that ships with the tool.
-    # Non-blocking because the Metal/CUDA kernel build is slow; it catches a
-    # pin that stops compiling, and that the real LlamaRuntime still matches
-    # llama.cpp's API at the pinned commit. The default build compiles the
-    # "not built in" half of that file, so this job is the ONLY place the
-    # vendor calls are checked at all.
-    name: llama.cpp integration (non-blocking)
-    runs-on: macos-14
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v5
-      - name: Configure and build with llama.cpp enabled
-        working-directory: lib/src/cli
         run: |
-          cmake --preset macos-arm64 -DAPOGEE_ENABLE_LLAMA=ON
-          cmake --build build/macos-arm64 -j 3
-      - name: Test, including the no-listen invariant with llama.cpp linked
-        working-directory: lib/src/cli
-        # The invariant this configuration puts at risk: llama.cpp's code now
-        # runs INSIDE the binary that serves an interactive turn, so the symbol
-        # scan of the linked executable is the check that matters most here.
-        run: ctest --test-dir build/macos-arm64 --output-on-failure
+          set -euo pipefail
+          cd lib/src/cli
+          tar -xf "build-${{ matrix.name }}.tar"
+          rm -f "build-${{ matrix.name }}.tar"
 
-  fresh-clone:
-    # The scripted clean-room build, so the skeleton cannot silently rot: it
-    # clones the branch from scratch and builds it with nothing cached.
-    #
-    # It clones from the REMOTE, so it proves what is pushed, not what a runner
-    # checked out -- dispatching a branch with unpushed commits tests the older
-    # state, silently and successfully.
-    #
-    # Excluded from PR runs, and the exclusion is load-bearing rather than a
-    # cost saving: on `pull_request` GITHUB_REF_NAME is `<number>/merge`, and
-    # `cicd.sh --fresh --branch` hands that to `git clone --branch`, which
-    # resolves refs/heads and refs/tags only -- never refs/pull. Every PR run
-    # would fail here. A fork's head branch is not on this remote at all, which
-    # is the second reason. Written as != 'pull_request' so a dispatch still
-    # runs it; `== 'push'` would silently disable it for dispatches.
-    name: clean-room build (non-blocking)
-    if: github.event_name != 'pull_request'
-    runs-on: macos-14
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v5
-      - name: Fresh clone-and-build
-        run: lib/scripts/cicd.sh --fresh --branch "${GITHUB_REF_NAME}" --test --no-defer
+      - name: Test
+        if: runner.os != 'Windows'
+        shell: bash
+        run: lib/scripts/cicd.sh --platform ${{ matrix.target }} --test-only --no-defer
+
+      - name: Test (MSYS2 shell)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        # The checkout was made by Git for Windows under a different HOME, so
+        # MSYS2's git has to be told the tree is safe before the script's
+        # first `git rev-parse`.
+        run: |
+          git config --global --add safe.directory '*'
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test-only --no-defer

@@ -40,22 +40,25 @@
             "displayName": "Linux arm64"
         },
         {
-            "name": "windows-x64",
+            "name": "windows-mingw",
+            "hidden": true,
             "inherits": "base",
-            "displayName": "Windows x64",
-            "generator": "Visual Studio 17 2022",
-            "architecture": {
-                "value": "x64"
+            "description": "Windows builds use MinGW-w64 toolchains from MSYS2 (user decision, 2026-09-19): GCC in the UCRT64 environment on x64, clang in CLANGARM64 on arm64. Ninja, because the MSYS2 cmake drives the toolchain on PATH. The executable links -static so it ships alone -- no libstdc++, libgcc or winpthread DLL beside it -- and takes libcurl static for the same reason; cmake/ApogeeDependencies.cmake resolves curl's own static dependencies through pkg-config.",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_EXE_LINKER_FLAGS": "-static",
+                "CURL_USE_STATIC_LIBS": "ON"
             }
         },
         {
+            "name": "windows-x64",
+            "inherits": "windows-mingw",
+            "displayName": "Windows x64 (MinGW-w64, MSYS2 UCRT64)"
+        },
+        {
             "name": "windows-arm64",
-            "inherits": "base",
-            "displayName": "Windows arm64",
-            "generator": "Visual Studio 17 2022",
-            "architecture": {
-                "value": "ARM64"
-            }
+            "inherits": "windows-mingw",
+            "displayName": "Windows arm64 (MinGW-w64, MSYS2 CLANGARM64)"
         }
     ],
     "buildPresets": [

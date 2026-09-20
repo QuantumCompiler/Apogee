@@ -31,7 +31,7 @@ The one build-related file outside an app directory is `.github/workflows/ci.yml
 ```
 Apogee/
 ├── .github/
-│   └── workflows/ci.yml     — CI: five-target matrix + llama proof + clean-room build (nothing else, 2026-09-19)
+│   └── workflows/ci.yml     — CI: three stages — clone llama.cpp, build per platform, test per platform (nothing else, 2026-09-19)
 │                              (thin caller into cicd.sh; here only because GitHub requires it)
 ├── .claude/
 │   └── skills/
@@ -48,7 +48,8 @@ Apogee/
     │   ├── cicd.sh          — CI/CD entry point: builds every app for any of the five release
     │   │                      targets (--platform linux|windows × x64|arm64, macos-arm64, or all;
     │   │                      non-native targets defer to the CI matrix, or fail with --no-defer), --fresh = clean-room
-    │   │                      clone of github.com/QuantumCompiler/Apogee at that branch; --test, --clean
+    │   │                      clone of github.com/QuantumCompiler/Apogee at that branch; --test, --clean;
+    │   │                      --clone-llama and --test-only are the first and third CI stages
     │   └── cicd-completion.bash — Tab completion for cicd.sh's flags (source from your shell rc)
     └── src/                 — Application source, one self-contained project per app
         ├── cli/             — The CLI application
@@ -601,7 +602,7 @@ Six configure presets: `default` (host native — the developer bootstrap) plus 
 linux-x64   linux-arm64   macos-arm64   windows-x64   windows-arm64
 ```
 
-The macOS preset pins `CMAKE_OSX_ARCHITECTURES` to `arm64`; there is no Intel Mac target (dropped 2026-09-19). Windows presets use the Visual Studio 17 2022 generator; CMake hides them on hosts without it, and `cicd.sh` refuses non-native targets anyway, deferring them to the CI matrix.
+The macOS preset pins `CMAKE_OSX_ARCHITECTURES` to `arm64`; there is no Intel Mac target (dropped 2026-09-19). The Windows presets are **MinGW-w64** builds (user decision, 2026-09-19): Ninja over the toolchain on PATH in an MSYS2 shell — GCC in the UCRT64 environment on x64, clang in CLANGARM64 on arm64 — linked `-static` and against a static libcurl (`CURL_USE_STATIC_LIBS`; `cmake/ApogeeDependencies.cmake` reads curl's static dependency closure from pkg-config and puts it on the imported target, resolving the alias curl's own config file makes of it), so the executable ships alone with no runtime DLL beside it. `cicd.sh` refuses non-native targets, deferring them to the CI matrix, or failing on them with `--no-defer`; a macOS host can still cross-compile the x64 one for a compile check with Homebrew's `mingw-w64` and a toolchain file passed through `APOGEE_CMAKE_ARGS`.
 
 ### Commands
 
@@ -609,7 +610,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 
 | Command | Does |
 |---|---|
-| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — what CI runs. `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it), and `APOGEE_CMAKE_ARGS` appends configure flags (a runner's vcpkg toolchain on Windows). |
+| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — what CI runs. `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops, and `--test-only` runs ctest on an existing build tree with no configure or build (the first and third CI stages); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
 | `make test` | The same thing for the CLI alone (it calls `cicd.sh`). |
 | `make build [PRESET=…]` | Configure and build one preset. |
 | `make install [PREFIX=…]` | Build, then install the binary to `$PREFIX/bin` (default `~/.local`, so no sudo). |
@@ -627,7 +628,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 | Option | Default | Meaning |
 |---|---|---|
 | `APOGEE_BUILD_TESTS` | `ON` | Build the Catch2 suite. |
-| `APOGEE_ENABLE_LLAMA` | `OFF` | Build the pinned llama.cpp and the real `LlamaRuntime` behind it. Heavy (GPU kernels), so it stays off the merge-blocking path and a dedicated non-blocking CI job builds and tests it. With it OFF, `backends/llama_real.cpp` compiles to the "not built in" answer and the llamacpp backend refuses construction with a message saying how to enable it — everything else about the provider is still built and tested. |
+| `APOGEE_ENABLE_LLAMA` | `OFF` | Build the pinned llama.cpp and the real `LlamaRuntime` behind it. Heavy (GPU kernels), so the five platform builds leave it off and the `macos-arm64-llama` row of the CI matrix builds and tests it — required for a PR like every other row (2026-09-19). With it OFF, `backends/llama_real.cpp` compiles to the "not built in" answer and the llamacpp backend refuses construction with a message saying how to enable it — everything else about the provider is still built and tested. |
 
 ---
 
@@ -638,13 +639,13 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 | Concern | Pick | Status |
 |---|---|---|
 | JSON | nlohmann/json `v3.11.3` | Wired |
-| YAML | yaml-cpp `0.8.0` | Wired — **read path only.** The config engine never serializes through it (see `harness/`). Its CMakeLists predates a CMake policy removal, so `CMAKE_POLICY_VERSION_MINIMUM` is raised around its `FetchContent_MakeAvailable` and restored immediately; revisit when it cuts a release past 0.8.0. |
+| YAML | yaml-cpp `0.8.0` | Wired — **read path only.** The config engine never serializes through it (see `harness/`). Its CMakeLists predates a CMake policy removal, so `CMAKE_POLICY_VERSION_MINIMUM` is raised around its `FetchContent_MakeAvailable` and restored immediately, and its `emitterutils.cpp` uses `uint16_t` without `<cstdint>` (libstdc++ 13+ stops pulling it in; GCC 15/16 and the MinGW-w64 compilers fail on it), so the vendored target is compiled with `-include cstdint`; both are fixed on its master — revisit when it cuts a release past 0.8.0. |
 | CLI parsing + completions | CLI11 `v2.4.2` | Wired |
 | Chat line editing | replxx `release-0.0.4` | Wired. Used only by the chat REPL's interactive path; a piped run never constructs it. GNU readline was ruled out on licence grounds (GPL). |
 | Tests | Catch2 `v3.7.1` | Wired (only when `APOGEE_BUILD_TESTS`) |
 | HTTP client | libcurl (system) | Wired 2026-08-26. **Found, never fetched** — building it from source would mean choosing a TLS stack too, and the point of the platform-trust-store decision is to use the one the OS already manages. Note the trap recorded in `ApogeeDependencies.cmake`: `CURL_INCLUDE_DIRS` is the macOS SDK's own `/usr/include`, and propagating it as `-isystem` breaks any mixed-toolchain build (i.e. `make lint`); the redundant entry is stripped from the imported target. |
 | Local inference | llama.cpp, pinned to `549b9d84` | `third_party/`, off by default |
-| HTTP server | cpp-httplib `v0.56.0`, **fetched not found** | Wired 2026-09-13 for `apogee serve`. Header-only, included by `httpserver/serve.cpp` alone. Fetched deliberately, like SQLite: a system copy is a compiled library built with whatever TLS and compression options its packager chose, and the server must not gain a TLS stack on one machine and not another — so every optional integration (OpenSSL, zlib, brotli, zstd) is switched off explicitly and the binary's dependency set is the same on all six targets. Plain HTTP; a deployment terminates TLS in front of it. |
+| HTTP server | cpp-httplib `v0.56.0`, **fetched not found** | Wired 2026-09-13 for `apogee serve`. Header-only, included by `httpserver/serve.cpp` alone. Fetched deliberately, like SQLite: a system copy is a compiled library built with whatever TLS and compression options its packager chose, and the server must not gain a TLS stack on one machine and not another — so every optional integration (OpenSSL, zlib, brotli, zstd) is switched off explicitly and the binary's dependency set is the same on all five targets. Its non-blocking resolver is off too (2026-09-19): a per-platform code path that on Windows calls `GetAddrInfoExCancel`, which the MinGW-w64 headers do not declare, and that only httplib's *client* would use — Apogee's client is curl, and `serve` binds rather than resolves. Plain HTTP; a deployment terminates TLS in front of it. |
 | JSON Schema | pboettch/json-schema-validator `2.3.0`, fetched and pinned with `FIND_PACKAGE_ARGS` | Wired 2026-09-13 for structured agent output: draft-07 validation of a report on every provider, whatever native mode the wire also asked for. It sits on nlohmann/json — the project's JSON library — which is why it was picked over a second JSON stack; a hand-rolled validator would be a second draft-07. Included by `agentloop/structured.cpp` alone; its tests, examples and install rules are off. |
 | Chunk store + lexical search | SQLite `3.53.4` amalgamation, **fetched not found** | `third_party/`, wired 2026-09-07. Fetched deliberately, against the project's find-first default: Windows ships no SQLite at all, and **FTS5 is a compile-time flag** — a system copy built without it fails at the `CREATE VIRTUAL TABLE`, on the user's machine, after a corpus has been ingested. Built as `apogee_sqlite3` with `SQLITE_ENABLE_FTS5` and `SQLITE_DQS=0` (so a bare double-quoted string is an error, not a silent identifier). Adding a C amalgamation is why the top-level `project()` declares `LANGUAGES CXX C`. |
 

@@ -59,8 +59,39 @@ set(FETCHCONTENT_QUIET OFF)
 # and the whole point of the platform-trust-store decision (2026-08-25) is to
 # use the one the OS already manages -- an administrator's cert policy applies,
 # and revocations arrive without an Apogee release. Every target ships curl:
-# macOS and Linux have it, and Windows has had it in-box since 1803.
+# macOS and Linux have it, and Windows has had it in-box since 1803 -- though
+# the in-box copy is the tool alone, so a Windows BUILD takes MSYS2's
+# `curl-winssl` package (curl on Schannel, the OS trust store) and links it
+# statically, which is what lets the executable ship by itself.
 find_package(CURL REQUIRED)
+
+# The two adjustments below set properties on curl's imported target, and
+# CURL::libcurl is not always that target: curl's own CURLConfig.cmake (a curl
+# built with CMake, which some packagers ship) makes it an ALIAS of
+# CURL::libcurl_static or CURL::libcurl_shared, and an alias cannot carry
+# properties. Resolve it once, here.
+set(_apogee_curl_target CURL::libcurl)
+if(TARGET CURL::libcurl)
+    get_target_property(_apogee_curl_aliased CURL::libcurl ALIASED_TARGET)
+    if(_apogee_curl_aliased)
+        set(_apogee_curl_target "${_apogee_curl_aliased}")
+    endif()
+endif()
+
+# A static libcurl drags its own dependencies behind it (on MSYS2: zlib,
+# brotli, zstd, nghttp2, libpsl, libidn2, libssh2, and the Win32 libraries
+# Schannel and Winsock live in), and FindCURL's imported target names only the
+# library itself -- it fills the transitive list from pkg-config's SHARED
+# answer, and on the MinGW side adds nothing at all. The `--static` answer is
+# the closure, so read that one and put it on the target.
+if(MINGW AND CURL_USE_STATIC_LIBS AND TARGET CURL::libcurl)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(APOGEE_CURL_PC REQUIRED libcurl)
+    set_target_properties(${_apogee_curl_target} PROPERTIES
+        INTERFACE_LINK_LIBRARIES   "${APOGEE_CURL_PC_STATIC_LIBRARIES}"
+        INTERFACE_LINK_DIRECTORIES "${APOGEE_CURL_PC_STATIC_LIBRARY_DIRS}")
+    message(STATUS "Apogee: static libcurl on MinGW links ${APOGEE_CURL_PC_STATIC_LIBRARIES}")
+endif()
 
 # Drop a redundant system include directory from curl's imported target.
 #
@@ -76,7 +107,7 @@ find_package(CURL REQUIRED)
 # are in that same SDK. Only the mixed-toolchain case breaks, which is exactly
 # the lint job.
 if(TARGET CURL::libcurl)
-    get_target_property(_apogee_curl_includes CURL::libcurl INTERFACE_INCLUDE_DIRECTORIES)
+    get_target_property(_apogee_curl_includes ${_apogee_curl_target} INTERFACE_INCLUDE_DIRECTORIES)
     if(_apogee_curl_includes)
         set(_apogee_curl_kept "")
         foreach(dir IN LISTS _apogee_curl_includes)
@@ -84,7 +115,7 @@ if(TARGET CURL::libcurl)
                 list(APPEND _apogee_curl_kept "${dir}")
             endif()
         endforeach()
-        set_target_properties(CURL::libcurl PROPERTIES
+        set_target_properties(${_apogee_curl_target} PROPERTIES
             INTERFACE_INCLUDE_DIRECTORIES "${_apogee_curl_kept}")
     endif()
 endif()
@@ -172,6 +203,14 @@ set(HTTPLIB_REQUIRE_OPENSSL OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_COMPILE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_INSTALL OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_TEST OFF CACHE BOOL "" FORCE)
+# The non-blocking resolver is a per-platform code path (CFHost on macOS,
+# GetAddrInfoEx with overlapped I/O on Windows), and on Windows it calls
+# GetAddrInfoExCancel, which the MinGW-w64 headers do not declare -- the
+# header does not compile there. It only matters to httplib's CLIENT, and
+# Apogee's HTTP client is curl; `apogee serve` binds, it never resolves a
+# name. Off everywhere, so the header compiles to the same thing on all five
+# targets, which is the stance of everything else in this block.
+set(HTTPLIB_USE_NON_BLOCKING_GETADDRINFO OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(httplib)
 
 # yaml-cpp 0.8.0 (the newest release; tagged 2023) opens with
@@ -187,6 +226,16 @@ set(APOGEE_SAVED_POLICY_MINIMUM "${CMAKE_POLICY_VERSION_MINIMUM}")
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 FetchContent_MakeAvailable(yaml-cpp)
 set(CMAKE_POLICY_VERSION_MINIMUM "${APOGEE_SAVED_POLICY_MINIMUM}")
+
+# The same release's other age mark: emitterutils.cpp uses uint16_t without
+# including <cstdint>, which libstdc++ 13+ no longer pulls in transitively --
+# GCC 15/16, the MinGW-w64 compilers, stop on it (also fixed on yaml-cpp's
+# master, same revisit). Only when this build compiled yaml-cpp itself: a
+# found package is already built.
+if(yaml-cpp_SOURCE_DIR AND TARGET yaml-cpp)
+    target_compile_options(yaml-cpp PRIVATE
+        $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-include$<SEMICOLON>cstdint>)
+endif()
 
 if(APOGEE_BUILD_TESTS)
     FetchContent_Declare(Catch2
