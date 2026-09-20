@@ -15,19 +15,27 @@
 namespace apogee::httpserver {
 
 /// `GET /v1/admin/training/status`: `{runs, running[], versions[],
-/// active_pipeline, cycle_active}` -- the last two reserved for the
-/// pipelines item, `null` and `false` until then.
+/// pipelines, active_pipeline, cycle_active, cycle}` -- `active_pipeline`
+/// the id of the newest pipeline whose manifest says `running` (else
+/// `null`), `cycle_active` whether a cycle holds the lock now, and `cycle`
+/// the history's headline fields (`null` with no history).
 [[nodiscard]] HttpResponse admin_training_status(const AdminConfigContext& context);
 
-/// `GET /v1/admin/training/runs[?kind=run|pipeline]`: every run's summary,
-/// newest first; `data` is `[]` and never null.
+/// `GET /v1/admin/training/runs[?kind=run|pipeline]`: every run's and every
+/// pipeline run's summary, newest first, each tagged `kind`; the filter
+/// keeps one kind. `data` is `[]` and never null.
 [[nodiscard]] HttpResponse admin_list_training_runs(const AdminConfigContext& context,
                                                     const HttpRequest& request);
 
-/// `GET /v1/admin/training/runs/{id}`: `{kind: "run", run: <manifest>}`;
-/// `404` when unknown.
+/// `GET /v1/admin/training/runs/{id}`: `{kind: "run", run: <manifest>}` or
+/// `{kind: "pipeline", pipeline: <manifest>}`; `404` when neither.
 [[nodiscard]] HttpResponse admin_get_training_run(const AdminConfigContext& context,
                                                   std::string_view id);
+
+/// `GET /v1/admin/training/cycle`: the cycle history plus `active` (the
+/// lock is held); `404` with no history yet. `cycle run|halt|resume` have
+/// no route.
+[[nodiscard]] HttpResponse admin_training_cycle(const AdminConfigContext& context);
 
 /// `GET /v1/admin/training/versions[?backend=]`: one ledger (`404` when
 /// there is none), or every ledger as a list.

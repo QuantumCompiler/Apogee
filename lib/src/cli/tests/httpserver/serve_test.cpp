@@ -96,7 +96,7 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
         }
     }
     CHECK(public_rows == 8);
-    CHECK(admin_rows == 58);
+    CHECK(admin_rows == 59);
     CHECK(has("GET", "/v1/admin/training/status"));
     CHECK(has("GET", "/v1/admin/training/runs"));
     CHECK(has("GET", "/v1/admin/training/runs/{id}"));

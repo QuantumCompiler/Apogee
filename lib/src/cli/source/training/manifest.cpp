@@ -54,6 +54,12 @@ nlohmann::json manifest_to_json(const RunManifest& manifest) {
     if (manifest.eval.has_value()) {
         out["eval_results"] = eval_results_to_json(*manifest.eval);
     }
+    if (!manifest.parent_run.empty()) {
+        out["parent_run"] = manifest.parent_run;
+    }
+    if (!manifest.pipeline_run_id.empty()) {
+        out["pipeline_run_id"] = manifest.pipeline_run_id;
+    }
     return out;
 }
 
@@ -86,6 +92,8 @@ RunManifest manifest_from_json(const nlohmann::json& json) {
     if (const auto eval = json.find("eval_results"); eval != json.end() && !eval->is_null()) {
         manifest.eval = eval_results_from_json(*eval);
     }
+    manifest.parent_run = json.value("parent_run", std::string{});
+    manifest.pipeline_run_id = json.value("pipeline_run_id", std::string{});
     return manifest;
 }
 
@@ -129,8 +137,8 @@ std::optional<RunManifest> read_manifest(const std::filesystem::path& run_dir, s
 }
 
 std::string new_run_id(const std::filesystem::path& runs_dir,
-                       std::chrono::system_clock::time_point now) {
-    const std::string base = format_utc(now, "%Y%m%d-%H%M%S");
+                       std::chrono::system_clock::time_point now, std::string_view prefix) {
+    const std::string base = std::string{prefix} + format_utc(now, "%Y%m%d-%H%M%S");
     std::string id = base;
     std::error_code code;
     for (int suffix = 2; std::filesystem::exists(runs_dir / id, code); ++suffix) {

@@ -174,3 +174,30 @@ TEST_CASE("the dataset digest is the file's sha256 prefix, and empty for a missi
     CHECK(apogee::training::dataset_digest(root.path() / "a.jsonl") == "ba7816bf8f01");
     CHECK(apogee::training::dataset_digest(root.path() / "missing").empty());
 }
+
+TEST_CASE("a stage run's lineage round-trips and is absent from a plain run; a prefixed id",
+          "[training][manifest][pipeline]") {
+    RunManifest stage = sample();
+    stage.parent_run = "pipe-1-s0";
+    stage.pipeline_run_id = "pipe-1";
+    const nlohmann::json json = apogee::training::manifest_to_json(stage);
+    CHECK(json["parent_run"] == "pipe-1-s0");
+    CHECK(json["pipeline_run_id"] == "pipe-1");
+    const RunManifest back = apogee::training::manifest_from_json(json);
+    CHECK(back.parent_run == "pipe-1-s0");
+    CHECK(back.pipeline_run_id == "pipe-1");
+    const nlohmann::json plain = apogee::training::manifest_to_json(sample());
+    CHECK_FALSE(plain.contains("parent_run"));
+    CHECK_FALSE(plain.contains("pipeline_run_id"));
+    CHECK(apogee::training::manifest_from_json(plain).pipeline_run_id.empty());
+
+    const apogee::testing::TempDir root{"manifest-prefix-" +
+                                        std::to_string(std::random_device{}())};
+    const std::chrono::system_clock::time_point at =
+        std::chrono::system_clock::from_time_t(1789000000);
+    CHECK(apogee::training::new_run_id(root.path(), at, "pipe-") == "pipe-20260910-002640");
+    CHECK(apogee::training::new_run_id(root.path(), at, "cycle-") == "cycle-20260910-002640");
+    std::filesystem::create_directories(root.path() / "pipe-20260910-002640");
+    CHECK(apogee::training::new_run_id(root.path(), at, "pipe-") == "pipe-20260910-002640-2");
+    CHECK(apogee::training::valid_run_id("pipe-20260910-002640-2-s0"));
+}

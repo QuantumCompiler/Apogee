@@ -2,6 +2,7 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -37,6 +38,13 @@ namespace apogee::training {
 /// item on such a model. The rerank judge found the same live (gpt-oss at
 /// 256 never reached its final channel).
 inline constexpr int kJudgeMaxTokens = 1024;
+
+/// How a failed gate is treated: `Hard` refuses, `Soft` warns and goes on.
+/// Read by `promote` and by the pipeline's cumulative gate alike.
+enum class GateMode : std::uint8_t { Hard, Soft };
+
+/// `soft` → Soft; anything else (including empty) → Hard.
+[[nodiscard]] GateMode gate_mode_from_string(std::string_view name) noexcept;
 
 struct EvalItemResult {
     std::string prompt;

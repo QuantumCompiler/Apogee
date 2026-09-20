@@ -818,33 +818,46 @@ plane, not routes yet.
 
 The training track's state, read off the filesystem the CLI writes:
 `200 {"runs": N, "running": [run ids], "versions": [{backend,
-active_version, kept, total}], "active_pipeline": null, "cycle_active":
-false}`. The last two are reserved for the pipelines item and stay `null`
-and `false` until it ships.
+active_version, kept, total}], "pipelines": N, "active_pipeline": <id> |
+null, "cycle_active": bool, "cycle": {backend, halted, consecutive_fails,
+anchor_version, total_runs} | null}`. `active_pipeline` is the newest
+pipeline run whose manifest says `running`; `cycle_active` is whether a
+`train cycle run` holds the lock right now; `cycle` is the history's
+headline, `null` until the first cycle has run.
 
 **Training control is CLI-only, forever.** `apogee train run|eval|promote|
-rollback|setup` have no route: an expensive GPU job with live progress is
-not a control surface a remote client should be able to start, and a
-promotion changes what this server chats with. Each is a documented
-parity carve-out; what a remote client may do is read.
+rollback|setup`, `train pipeline run|resume`, `train regime run` and
+`train cycle run|halt|resume` have no route: an expensive GPU job with
+live progress is not a control surface a remote client should be able to
+start, and a promotion changes what this server chats with. Each is a
+documented parity carve-out (the reference implementation's
+`POST .../cycle/halt` is deliberately not ported); what a remote client may
+do is read.
 
 ### `GET /v1/admin/training/runs`
 
-Every fine-tuning run under `training/runs/`, newest first: `200
+Every fine-tuning run under `training/runs/` and every pipeline run under
+`training/pipelines/`, newest first by start time, each tagged: `200
 {"object": "list", "data": [{kind: "run", id, trainer, status, base_model,
 dataset, method, final_loss, iterations, started_at[, finished_at,
-eval_passed, eval_score]}]}` -- `data` is `[]` and never null. `status` is
-`running`, `complete`, `failed` or `cancelled`. `?kind=run|pipeline`
-filters (pipelines arrive with the next item; the filter answers `[]` for
-them until then); any other value is `400`.
+eval_passed, eval_score]} | {kind: "pipeline", id, spec_name, status,
+stages, passed, started_at[, completed_at]}]}` -- `data` is `[]` and never
+null. A run's `status` is `running`, `complete`, `failed` or `cancelled`; a
+pipeline's `running`, `complete`, `aborted` or `failed`. `?kind=run|pipeline`
+keeps one kind; any other value is `400`.
 
 ### `GET /v1/admin/training/runs/{id}`
 
 One run's full manifest: `200 {"kind": "run", "run": {run_id, trainer,
 base_model, dataset, dataset_hash, method, iters, batch_size, num_layers,
 grad_checkpoint, mask_prompt, final_loss, iterations, adapter_dir, status,
-started_at[, finished_at, error, eval_results]}}`; `404` when unknown,
-`400` for an id that is not a plain name.
+started_at[, finished_at, error, eval_results, parent_run,
+pipeline_run_id]}}` -- a pipeline's stage run carries the last two -- or one
+pipeline run's: `200 {"kind": "pipeline", "pipeline": {pipeline_run_id,
+spec_name, student, base_model, status, started_at[, completed_at], stages:
+[{index, name, run_id, base_model, dataset, adapter_dir, fused_dir, status,
+cumulative_score, cumulative_passed[, eval_results]}]}}`; `404` when
+neither, `400` for an id that is not a plain name.
 
 ### `GET /v1/admin/training/versions`
 
@@ -854,6 +867,17 @@ The version ledgers under `training/versions/`: `200 {"object": "list",
 versions: [{version, run_id, gguf_path, promoted_at[, eval_score,
 eval_passed, pruned_at]}]}` -- a pruned entry stays as history with the
 time retention removed its file.
+
+### `GET /v1/admin/training/cycle`
+
+The continuous cycle's history as `train cycle status` reads it, plus
+whether a pass holds the lock now: `200 {backend, anchor_version,
+anchor_score, consecutive_fails, total_runs, halted, halt_reason,
+sessions_until, runs: [{run_at, source, dataset_rows, pipeline_id, gate:
+"pass" | "fail" | "skipped", gate_reason, cycle_score, prev_score,
+anchor_score, promoted_version[, note]}], active: bool}`; `404` until the
+first `train cycle run` has written it. `cycle run`, `halt` and `resume`
+have no route.
 
 ### `GET /v1/admin/permissions`
 

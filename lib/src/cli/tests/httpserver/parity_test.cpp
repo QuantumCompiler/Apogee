@@ -124,6 +124,21 @@ const std::map<std::string, Classification>& table() {
          carve_out("changes what a served backend runs; training control is CLI-only")},
         {"train rollback",
          carve_out("changes what a served backend runs; training control is CLI-only")},
+        {"train pipeline run",
+         carve_out("a chain of GPU jobs with live progress; training control is CLI-only")},
+        {"train pipeline resume",
+         carve_out("a chain of GPU jobs with live progress; training control is CLI-only")},
+        {"train regime run",
+         carve_out("teacher calls, a chain of GPU jobs and a promotion; training control is "
+                   "CLI-only")},
+        {"train cycle run",
+         carve_out("the scheduler-invoked pass; a promotion changes what a served backend "
+                   "runs; training control is CLI-only")},
+        {"train cycle halt",
+         carve_out("edits the cycle's state on the host; training control is CLI-only -- the "
+                   "reference's POST .../cycle/halt is deliberately not ported")},
+        {"train cycle resume",
+         carve_out("edits the cycle's state on the host; training control is CLI-only")},
         {"__mcp-tools",
          carve_out("an MCP server on this process's own stdio, spawned by another client")},
         // --- read-only / interactive ------------------------------------------
@@ -157,6 +172,8 @@ const std::map<std::string, Classification>& table() {
         {"datasets info", read_only()},
         {"train versions", read_only()},
         {"train status", read_only()},
+        {"train pipeline status", read_only()},
+        {"train cycle status", read_only()},
     };
     return rows;
 }
@@ -260,7 +277,11 @@ TEST_CASE(
              {"/v1/admin/training/run", "/v1/admin/training/runs", "/v1/admin/training/runs/x",
               "/v1/admin/training/eval", "/v1/admin/training/promote",
               "/v1/admin/training/rollback", "/v1/admin/training/versions",
-              "/v1/admin/training/status", "/v1/admin/training/setup"}) {
+              "/v1/admin/training/status", "/v1/admin/training/setup", "/v1/admin/training/cycle",
+              "/v1/admin/training/cycle/halt", "/v1/admin/training/cycle/resume",
+              "/v1/admin/training/cycle/run", "/v1/admin/training/pipelines",
+              "/v1/admin/training/pipelines/x/resume", "/v1/admin/training/regime",
+              "/v1/admin/training/regime/run"}) {
             HttpRequest request;
             request.method = method;
             request.path = path;

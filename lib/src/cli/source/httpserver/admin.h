@@ -116,6 +116,7 @@ public:
     [[nodiscard]] HttpResponse list_training_runs(const HttpRequest& request);
     [[nodiscard]] HttpResponse get_training_run(const HttpRequest& request, std::string_view id);
     [[nodiscard]] HttpResponse list_training_versions(const HttpRequest& request);
+    [[nodiscard]] HttpResponse training_cycle(const HttpRequest& request);
 
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);

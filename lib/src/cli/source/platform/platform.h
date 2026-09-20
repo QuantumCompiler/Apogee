@@ -67,6 +67,17 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 /// path, and a wrong one there means uninstall removes the wrong file.
 [[nodiscard]] std::filesystem::path executable_path();
 
+/// This process's id, for a PID lock file (`train cycle`'s) and nothing
+/// else -- a number a person can `kill`, never an identity.
+[[nodiscard]] long current_process_id() noexcept;
+
+/// Creates `path` holding `content` only if it does not exist yet -- one
+/// atomic create-or-fail (`O_CREAT|O_EXCL`; `CREATE_NEW` on Windows), so two
+/// processes racing for a lock cannot both win. False when the file exists
+/// or cannot be made; `exists` says which.
+[[nodiscard]] bool create_exclusive_file(const std::filesystem::path& path,
+                                         std::string_view content, bool& exists);
+
 /// The three standard streams, for terminal detection.
 enum class StandardStream : std::uint8_t { In, Out, Err };
 

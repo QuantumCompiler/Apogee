@@ -185,6 +185,186 @@ std::vector<std::string> string_list(const YAML::Node& node, std::string_view or
     return out;
 }
 
+/// A whole number at `node` that must be zero or positive; `fallback` when
+/// absent.
+int non_negative(const YAML::Node& node, std::string_view origin, const std::string& key,
+                 int fallback) {
+    const std::optional<std::int64_t> value = integer(node, origin, key);
+    if (!value.has_value()) {
+        return fallback;
+    }
+    if (*value < 0) {
+        fail(origin, key + ": must be 0 or positive");
+    }
+    return static_cast<int>(*value);
+}
+
+/// A number in `[low, high]` at `node`; `fallback` when absent.
+double bounded(const YAML::Node& node, std::string_view origin, const std::string& key, double low,
+               double high, double fallback) {
+    const std::optional<double> value = number(node, origin, key);
+    if (!value.has_value()) {
+        return fallback;
+    }
+    if (*value < low || *value > high) {
+        fail(origin,
+             key + ": must be between " + std::to_string(low) + " and " + std::to_string(high));
+    }
+    return *value;
+}
+
+PipelineStageSpec parse_pipeline_stage(const YAML::Node& node, std::string_view origin,
+                                       const std::string& where) {
+    if (!node.IsMap()) {
+        fail(origin, where + ": expected a block of settings");
+    }
+    PipelineStageSpec stage;
+    stage.name = scalar(node["name"], origin, where + ".name");
+    if (stage.name.empty()) {
+        fail(origin, where + ": a stage needs a name");
+    }
+    stage.dataset = expand_env_and_home(scalar(node["dataset"], origin, where + ".dataset"));
+    if (stage.dataset.empty()) {
+        fail(origin, where + " ('" + stage.name + "'): a stage needs a dataset");
+    }
+    stage.eval_suite =
+        expand_env_and_home(scalar(node["eval_suite"], origin, where + ".eval_suite"));
+    if (stage.eval_suite.empty()) {
+        fail(origin, where + " ('" + stage.name +
+                         "'): a stage needs an eval_suite -- the cumulative gate is the "
+                         "pipeline's contract");
+    }
+    stage.method = scalar(node["method"], origin, where + ".method");
+    if (!stage.method.empty() && stage.method != "lora" && stage.method != "qlora") {
+        fail(origin,
+             where + ".method: unknown value '" + stage.method + "' (accepted: lora, qlora)");
+    }
+    stage.iters = non_negative(node["iters"], origin, where + ".iters", 0);
+    stage.batch_size = non_negative(node["batch_size"], origin, where + ".batch_size", 0);
+    stage.num_layers = non_negative(node["num_layers"], origin, where + ".num_layers", 0);
+    stage.grad_checkpoint =
+        boolean(node["grad_checkpoint"], origin, where + ".grad_checkpoint", false);
+    stage.mask_prompt = boolean(node["mask_prompt"], origin, where + ".mask_prompt", false);
+    stage.rehearsal_fraction =
+        bounded(node["rehearsal_fraction"], origin, where + ".rehearsal_fraction", 0.0, 1.0, 0.0);
+    return stage;
+}
+
+PipelineSpec parse_pipeline_node(const YAML::Node& node, std::string_view origin,
+                                 const std::string& where, std::string_view fallback_name) {
+    if (!node.IsDefined() || node.IsNull() || !node.IsMap()) {
+        fail(origin, where + ": expected a block of settings");
+    }
+    PipelineSpec spec;
+    spec.name = scalar(node["name"], origin, where + ".name");
+    if (spec.name.empty()) {
+        spec.name = std::string{fallback_name};
+    }
+    spec.student = expand_env_and_home(scalar(node["student"], origin, where + ".student"));
+    const YAML::Node stages = node["stages"];
+    if (!stages.IsDefined() || stages.IsNull() || !stages.IsSequence() || stages.size() == 0) {
+        fail(origin, where + ": a pipeline needs at least one stage under 'stages'");
+    }
+    int index = 0;
+    for (const YAML::Node& stage : stages) {
+        spec.stages.push_back(
+            parse_pipeline_stage(stage, origin, where + ".stages[" + std::to_string(index) + "]"));
+        ++index;
+    }
+    return spec;
+}
+
+RegimeSpec parse_regime_node(const YAML::Node& node, std::string_view origin,
+                             const std::string& where, std::string_view fallback_name) {
+    if (!node.IsDefined() || node.IsNull() || !node.IsMap()) {
+        fail(origin, where + ": expected a block of settings");
+    }
+    RegimeSpec spec;
+    spec.name = scalar(node["name"], origin, where + ".name");
+    if (spec.name.empty()) {
+        spec.name = std::string{fallback_name};
+    }
+    spec.teacher = scalar(node["teacher"], origin, where + ".teacher");
+    spec.student = expand_env_and_home(scalar(node["student"], origin, where + ".student"));
+    spec.kits = string_list(node["kits"], origin, where + ".kits", false);
+    for (const std::string& kit : spec.kits) {
+        if (kit.empty()) {
+            fail(origin, where + ".kits: an empty kit name");
+        }
+    }
+    spec.count = non_negative(node["count"], origin, where + ".count", 0);
+    spec.promote_as = scalar(node["promote_as"], origin, where + ".promote_as");
+    spec.iters = non_negative(node["iters"], origin, where + ".iters", 0);
+    spec.temperature = bounded(node["temperature"], origin, where + ".temperature", 0.0, 2.0, 0.0);
+    return spec;
+}
+
+CycleSourceConfig parse_cycle_source(const YAML::Node& node, std::string_view origin,
+                                     const std::string& where) {
+    if (!node.IsMap()) {
+        fail(origin, where + ": expected a block with a 'type'");
+    }
+    CycleSourceConfig source;
+    source.type = scalar(node["type"], origin, where + ".type");
+    if (source.type != "directory" && source.type != "sessions") {
+        fail(origin,
+             where + ".type: unknown value '" + source.type + "' (accepted: directory, sessions)");
+    }
+    source.dir = expand_env_and_home(scalar(node["dir"], origin, where + ".dir"));
+    source.log_consent = boolean(node["log_consent"], origin, where + ".log_consent", false);
+    source.backend = scalar(node["backend"], origin, where + ".backend");
+    source.since = scalar(node["since"], origin, where + ".since");
+    if (source.type == "sessions" && !source.log_consent) {
+        // The refusal names the key and the two risks, at load rather than
+        // at 3 a.m. under a scheduler.
+        fail(origin, where +
+                         ": a 'sessions' source needs 'log_consent: true' -- your chat "
+                         "sessions are your own data (privacy), and training a model on its "
+                         "own answers reinforces its mistakes (self-reinforcement); set the "
+                         "key only once you have read both");
+    }
+    if (!source.since.empty()) {
+        const bool shaped = source.since.size() == 10 && source.since[4] == '-' &&
+                            source.since[7] == '-' &&
+                            std::all_of(source.since.begin(), source.since.end(),
+                                        [](char c) { return c == '-' || (c >= '0' && c <= '9'); });
+        if (!shaped) {
+            fail(origin, where + ".since: '" + source.since + "' is not a YYYY-MM-DD date");
+        }
+    }
+    return source;
+}
+
+CycleConfig parse_cycle(const YAML::Node& node, std::string_view origin) {
+    const std::string where = "training.cycle";
+    if (!node.IsMap()) {
+        fail(origin, where + ": expected a block of settings");
+    }
+    CycleConfig cycle;
+    cycle.pipeline = expand_env_and_home(scalar(node["pipeline"], origin, where + ".pipeline"));
+    cycle.backend = scalar(node["backend"], origin, where + ".backend");
+    cycle.anchor_version =
+        non_negative(node["anchor_version"], origin, where + ".anchor_version", 0);
+    cycle.regression_threshold = bounded(node["regression_threshold"], origin,
+                                         where + ".regression_threshold", 0.0, 1.0, 0.0);
+    cycle.circuit_breaker_k =
+        non_negative(node["circuit_breaker_k"], origin, where + ".circuit_breaker_k",
+                     CycleConfig::kDefaultCircuitBreakerK);
+    cycle.judge_backend = scalar(node["judge_backend"], origin, where + ".judge_backend");
+    if (const YAML::Node sources = node["sources"]; sources.IsDefined() && !sources.IsNull()) {
+        if (!sources.IsSequence()) {
+            fail(origin, where + ".sources: expected a list of sources");
+        }
+        int index = 0;
+        for (const YAML::Node& source : sources) {
+            cycle.sources.push_back(parse_cycle_source(
+                source, origin, where + ".sources[" + std::to_string(index) + "]"));
+            ++index;
+        }
+    }
+    return cycle;
+}
+
 AgentConfig parse_agent(const YAML::Node& node, std::string_view origin, const std::string& name) {
     const std::string where = "agents." + name;
     AgentConfig agent;
@@ -842,6 +1022,39 @@ Config parse_config(std::string_view content, std::string_view origin) {
             fail(origin, "training.gate_mode: unknown value '" + config.training.gate_mode +
                              "' (accepted: hard, soft)");
         }
+        if (const YAML::Node pipelines = training["pipelines"];
+            pipelines.IsDefined() && !pipelines.IsNull()) {
+            if (!pipelines.IsMap()) {
+                fail(origin, "training.pipelines: expected a mapping of name -> pipeline");
+            }
+            for (const auto& entry : pipelines) {
+                const std::string name = entry.first.Scalar();
+                if (name.empty()) {
+                    fail(origin, "training.pipelines: an entry has an empty name");
+                }
+                config.training.pipelines.emplace(
+                    name,
+                    parse_pipeline_node(entry.second, origin, "training.pipelines." + name, name));
+            }
+        }
+        if (const YAML::Node regimes = training["regimes"];
+            regimes.IsDefined() && !regimes.IsNull()) {
+            if (!regimes.IsMap()) {
+                fail(origin, "training.regimes: expected a mapping of name -> regime");
+            }
+            for (const auto& entry : regimes) {
+                const std::string name = entry.first.Scalar();
+                if (name.empty()) {
+                    fail(origin, "training.regimes: an entry has an empty name");
+                }
+                config.training.regimes.emplace(
+                    name,
+                    parse_regime_node(entry.second, origin, "training.regimes." + name, name));
+            }
+        }
+        if (const YAML::Node cycle = training["cycle"]; cycle.IsDefined() && !cycle.IsNull()) {
+            config.training.cycle = parse_cycle(cycle, origin);
+        }
     }
 
     if (const YAML::Node mode = root["status_mode"]; mode.IsDefined() && !mode.IsNull()) {
@@ -863,6 +1076,28 @@ Config parse_config(std::string_view content, std::string_view origin) {
     }
 
     return config;
+}
+
+PipelineSpec parse_pipeline_spec(std::string_view content, std::string_view origin,
+                                 std::string_view fallback_name) {
+    YAML::Node root;
+    try {
+        root = YAML::Load(std::string{content});
+    } catch (const YAML::Exception& e) {
+        fail(origin, std::string{"not valid YAML: "} + e.what());
+    }
+    return parse_pipeline_node(root, origin, "pipeline", fallback_name);
+}
+
+RegimeSpec parse_regime_spec(std::string_view content, std::string_view origin,
+                             std::string_view fallback_name) {
+    YAML::Node root;
+    try {
+        root = YAML::Load(std::string{content});
+    } catch (const YAML::Exception& e) {
+        fail(origin, std::string{"not valid YAML: "} + e.what());
+    }
+    return parse_regime_node(root, origin, "regime", fallback_name);
 }
 
 Config load_config(const std::filesystem::path& path) {

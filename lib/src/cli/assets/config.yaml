@@ -336,6 +336,33 @@ backends:
 #   retain_versions  promoted GGUFs kept per backend (default 3; 0 keeps all)
 #   gate_mode        hard (default: promote refuses an unevaluated or failing
 #                    run) or soft (a warning instead)
+#   pipelines        named multi-stage pipelines (`apogee train pipeline run
+#                    --pipeline <name>`): a student snapshot and ordered stages,
+#                    each a fresh LoRA on the previous stage's fused weights,
+#                    gated on the union of every prior suite plus its own at
+#                    100%; a stage's dataset and eval_suite are names or paths
+#                    as `train run --dataset` and `train eval --suite` take
+#                    them; rehearsal_fraction mixes a deterministic sample of
+#                    the prior datasets into a stage (default 0)
+#   regimes          named regimes (`apogee train regime run <name>`): a
+#                    teacher distils a dataset per kit, the kits become one
+#                    gated pipeline over the student, the last passing stage
+#                    is promoted as promote_as; flags override every field
+#   cycle            the unattended loop `apogee train cycle run` performs one
+#                    gated pass of, from launchd or cron: the pipeline it runs
+#                    (every stage's dataset replaced by the merged sources),
+#                    the backend a pass promotes into, the sources -- a
+#                    `directory` queue of *.jsonl (default training/cycle/
+#                    queue/) and/or `sessions`, your own chats, ONLY with
+#                    log_consent: true (they are your data, and a model trained
+#                    on its own answers reinforces its mistakes), optionally
+#                    filtered by backend and since -- the anchor gate
+#                    (regression_threshold, default 0: strict no-regression
+#                    against the last passing cycle AND the pinned anchor;
+#                    anchor_version pins one, else the first passing cycle
+#                    sets it) and the circuit breaker (circuit_breaker_k,
+#                    default 3: consecutive failures that halt the loop until
+#                    `apogee train cycle resume`; 0 disables it)
 # training:
 #   python: /usr/bin/python3
 #   trainer: auto
@@ -343,3 +370,33 @@ backends:
 #   eval_suite_path: ~/.apogee/training/suites/mine.jsonl
 #   retain_versions: 3
 #   gate_mode: hard
+#   pipelines:
+#     skills:
+#       student: Qwen--Qwen2.5-0.5B
+#       stages:
+#         - name: instructions
+#           dataset: instructions           # training/datasets/instructions.jsonl
+#           eval_suite: instruction-following   # a kit's inline suite, a suites/ name, or a path
+#           iters: 500
+#         - name: reasoning
+#           dataset: maths
+#           eval_suite: reasoning
+#           iters: 500
+#           rehearsal_fraction: 0.1
+#   regimes:
+#     everything:
+#       teacher: paid
+#       student: Qwen--Qwen2.5-0.5B
+#       kits: [instruction-following, reasoning]
+#       promote_as: qwen-tuned
+#   cycle:
+#     pipeline: skills
+#     backend: qwen-nightly
+#     regression_threshold: 0.0
+#     circuit_breaker_k: 3
+#     sources:
+#       - type: directory                # training/cycle/queue/*.jsonl
+#       - type: sessions
+#         log_consent: true
+#         backend: qwen-nightly
+#         since: 2026-09-01

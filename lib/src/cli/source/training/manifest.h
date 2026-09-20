@@ -50,6 +50,10 @@ struct RunManifest {
     std::string started_at;
     std::string finished_at;
     std::optional<EvalResults> eval;
+    /// A pipeline stage's lineage: the stage run before it (empty for stage
+    /// 0 and for a plain run) and the pipeline run it belongs to.
+    std::string parent_run;
+    std::string pipeline_run_id;
 
     [[nodiscard]] bool complete() const noexcept {
         return status == kStatusComplete;
@@ -71,12 +75,14 @@ struct RunManifest {
 [[nodiscard]] std::optional<RunManifest> read_manifest(const std::filesystem::path& run_dir,
                                                        std::string& error);
 
-/// `YYYYMMDD-HHMMSS` in UTC, with `-2`, `-3`, … appended while a run of that
-/// id already exists under `runs_dir` -- two runs started in one second
-/// must not share a directory.
+/// `[<prefix>]YYYYMMDD-HHMMSS` in UTC, with `-2`, `-3`, … appended while a
+/// run of that id already exists under `runs_dir` -- two runs started in one
+/// second must not share a directory. The prefix (`pipe-`, `regime-`,
+/// `cycle-`) is what tells a pipeline run from a plain one at a glance.
 [[nodiscard]] std::string new_run_id(
     const std::filesystem::path& runs_dir,
-    std::chrono::system_clock::time_point now = std::chrono::system_clock::now());
+    std::chrono::system_clock::time_point now = std::chrono::system_clock::now(),
+    std::string_view prefix = {});
 
 /// Letters, digits, `-` and `_` only: a run id is a directory name and
 /// must never reach outside `runs/`.

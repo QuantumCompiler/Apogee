@@ -13,7 +13,8 @@ namespace {
 
 class EchoRunner final : public CandidateRunner {
 public:
-    explicit EchoRunner(std::string prefix) : prefix_{std::move(prefix)} {}
+    EchoRunner(std::string prefix, std::string answer)
+        : prefix_{std::move(prefix)}, answer_{std::move(answer)} {}
 
     [[nodiscard]] CandidateReply run(std::string_view prompt,
                                      const harness::CancellationToken& cancellation) override {
@@ -23,12 +24,13 @@ public:
             return reply;
         }
         reply.ok = true;
-        reply.text = prefix_ + std::string{prompt};
+        reply.text = answer_.empty() ? prefix_ + std::string{prompt} : answer_;
         return reply;
     }
 
 private:
     std::string prefix_;
+    std::string answer_;
 };
 
 template <typename Integer>
@@ -51,6 +53,20 @@ void append_u64(std::string& out, std::uint64_t value) {
 void append_text(std::string& out, std::string_view value) {
     append_u64(out, value.size());
     out.append(value);
+}
+
+/// The scripted `answer` an adapter's `adapter_config.json` or a fused
+/// checkpoint's `mock.json` carries, or empty.
+std::string scripted_answer(const std::filesystem::path& file) {
+    std::ifstream in{file};
+    if (!in) {
+        return {};
+    }
+    const nlohmann::json config = nlohmann::json::parse(in, nullptr, false);
+    if (config.is_object() && config.contains("answer") && config["answer"].is_string()) {
+        return config["answer"].get<std::string>();
+    }
+    return {};
 }
 
 /// The `{"mock": {...}}` object on the dataset's first line, or null.
@@ -106,6 +122,12 @@ TrainOutcome MockTrainer::train(const TrainRequest& request, const ProgressSink&
         options.error = script.value("error", options.error);
         options.fuse_error = script.value("fuse_error", options.fuse_error);
         options.iters = script.value("iters", options.iters);
+        options.answer = script.value("answer", options.answer);
+    }
+    if (options.answer.empty()) {
+        // A base that is itself a scripted fused checkpoint passes its
+        // answer on: the regression persists until a dataset overrides it.
+        options.answer = scripted_answer(request.model_dir / "mock.json");
     }
     const int iters = request.iters > 0 ? request.iters : options.iters;
     auto message = [&on_progress](std::string text) {
@@ -161,6 +183,9 @@ TrainOutcome MockTrainer::train(const TrainRequest& request, const ProgressSink&
         // promote builds its own mock and reads it from there.
         adapter["fuse_error"] = options.fuse_error;
     }
+    if (!options.answer.empty()) {
+        adapter["answer"] = options.answer;
+    }
     std::ofstream{outcome.adapter_dir / "adapter_config.json", std::ios::binary} << adapter.dump()
                                                                                  << "\n";
     std::ofstream{outcome.adapter_dir / "adapters.safetensors", std::ios::binary} << "mock";
@@ -198,6 +223,11 @@ std::string MockTrainer::fuse(const std::filesystem::path& base,
     }
     std::ofstream{out / "model.safetensors", std::ios::binary} << "mock fused from "
                                                                << adapter.string();
+    const std::string answer = scripted_answer(adapter / "adapter_config.json");
+    if (!answer.empty()) {
+        std::ofstream{out / "mock.json", std::ios::binary}
+            << nlohmann::json{{"answer", answer}}.dump() << "\n";
+    }
     if (on_message) {
         on_message("mock fuse: " + adapter.string() + " into " + base.string());
     }
@@ -205,8 +235,15 @@ std::string MockTrainer::fuse(const std::filesystem::path& base,
 }
 
 std::unique_ptr<CandidateRunner> MockTrainer::candidate_runner(
-    const std::filesystem::path&, const std::filesystem::path& adapter) {
-    return std::make_unique<EchoRunner>(adapter.empty() ? std::string{"base: "} : std::string{});
+    const std::filesystem::path& base, const std::filesystem::path& adapter) {
+    if (adapter.empty()) {
+        return std::make_unique<EchoRunner>(std::string{"base: "}, std::string{});
+    }
+    std::string answer = scripted_answer(adapter / "adapter_config.json");
+    if (answer.empty()) {
+        answer = scripted_answer(base / "mock.json");
+    }
+    return std::make_unique<EchoRunner>(std::string{}, std::move(answer));
 }
 
 std::string write_mock_gguf(const std::filesystem::path& fused_dir,

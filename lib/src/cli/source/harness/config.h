@@ -384,6 +384,103 @@ struct PermissionsConfig {
     [[nodiscard]] PermissionLevel level(std::string_view tool) const noexcept;
 };
 
+/// One stage of a training pipeline (`training.pipelines.<name>.stages[]`,
+/// or a stage in a spec file). The dataset and the suite are NAMES OR PATHS
+/// resolved the way `train run --dataset` and `train eval --suite` resolve
+/// theirs; zero means the driver's default, as on `train run`.
+struct PipelineStageSpec {
+    std::string name;
+    std::string dataset;
+    /// `lora` (the default when empty) or `qlora`.
+    std::string method;
+    int iters = 0;
+    int batch_size = 0;
+    int num_layers = 0;
+    bool grad_checkpoint = false;
+    bool mask_prompt = false;
+    /// Required: the stage's own suite, gated cumulatively with every prior
+    /// stage's.
+    std::string eval_suite;
+    /// A deterministic sample of each prior stage's dataset mixed into this
+    /// one, `0.1` for a tenth. 0 (the default) mixes nothing.
+    double rehearsal_fraction = 0.0;
+};
+
+/// A multi-stage pipeline: the student snapshot and the ordered stages, each
+/// a fresh LoRA on the previous stage's fused weights. From a YAML file or
+/// a `training.pipelines:` entry -- the same parser reads both.
+struct PipelineSpec {
+    std::string name;
+    /// The snapshot, as `train run` names one: a directory, or a name under
+    /// `paths.hf_dir` or `models/`.
+    std::string student;
+    std::vector<PipelineStageSpec> stages;
+};
+
+/// A regime: a teacher distilling a dataset per kit, the kits as one
+/// eval-gated pipeline over the student, the last passing stage promoted.
+/// From flags, a `training.regimes:` entry, or a spec file; flags win.
+struct RegimeSpec {
+    std::string name;
+    std::string teacher;
+    std::string student;
+    /// Ordered kit names; each becomes one stage.
+    std::vector<std::string> kits;
+    /// Examples per kit; 0 means each kit's own `synth.count`.
+    int count = 0;
+    /// The backend the last passing stage is promoted into; empty leaves
+    /// promotion manual.
+    std::string promote_as;
+    /// Per-stage iterations; 0 means each kit's `train.iters`.
+    int iters = 0;
+    /// The teacher's sampling temperature; 0 means each kit's.
+    double temperature = 0.0;
+};
+
+/// One source the cycle collects from.
+struct CycleSourceConfig {
+    /// `directory` or `sessions`.
+    std::string type;
+    /// `directory`: the queue scanned for `*.jsonl`; empty means
+    /// `training/cycle/queue/`.
+    std::string dir;
+    /// `sessions`: MUST be true. The user's own chats are user data, and
+    /// training a model on its own outputs reinforces its mistakes.
+    bool log_consent = false;
+    /// `sessions`: only chats that ran on this backend; empty means any.
+    std::string backend;
+    /// `sessions`: only chats on or after `YYYY-MM-DD`; empty means any.
+    std::string since;
+};
+
+/// The `training.cycle:` block -- the unattended, scheduler-invoked pass.
+struct CycleConfig {
+    /// A `training.pipelines:` name or a spec file path.
+    std::string pipeline;
+    /// The backend a passing cycle promotes into.
+    std::string backend;
+    /// The promoted version pinned as the anchor; 0 means the first passing
+    /// cycle's version becomes it.
+    int anchor_version = 0;
+    /// The score drop tolerated against the last passing cycle and against
+    /// the anchor, in `[0, 1]`. 0 is strict no-regression.
+    double regression_threshold = 0.0;
+    /// Consecutive failed cycles that halt the loop until `cycle resume`; 0
+    /// disables the breaker (not recommended unattended).
+    int circuit_breaker_k = kDefaultCircuitBreakerK;
+    std::vector<CycleSourceConfig> sources;
+    /// Overrides `training.judge_backend` for the cycle's evals.
+    std::string judge_backend;
+
+    static constexpr int kDefaultCircuitBreakerK = 3;
+
+    /// Whether the block says enough to run: a pipeline, a backend and at
+    /// least one source.
+    [[nodiscard]] bool configured() const noexcept {
+        return !pipeline.empty() && !backend.empty() && !sources.empty();
+    }
+};
+
 /// The `training:` section -- the training track's knobs. Declared field by
 /// field as the items that read them land: today the Python boundary alone.
 struct TrainingConfig {
@@ -415,6 +512,13 @@ struct TrainingConfig {
     /// has not passed. `soft`: the same is a warning. `--force` skips the
     /// gate either way.
     std::string gate_mode;
+
+    /// Named pipelines, `train pipeline run --pipeline <name>`.
+    std::map<std::string, PipelineSpec, std::less<>> pipelines;
+    /// Named regimes, `train regime run <name>`.
+    std::map<std::string, RegimeSpec, std::less<>> regimes;
+    /// The continuous cycle.
+    CycleConfig cycle;
 
     static constexpr int kDefaultRetainVersions = 3;
     static constexpr std::string_view kGateHard = "hard";
@@ -563,6 +667,18 @@ struct Config {
 /// `origin` names the source in error messages (a path, or something like
 /// "<edit result>").
 [[nodiscard]] Config parse_config(std::string_view content, std::string_view origin);
+
+/// A pipeline spec from YAML text -- the same parser and the same rules a
+/// `training.pipelines:` entry gets: at least one stage, every stage with a
+/// name, a dataset and an eval suite, a known method, numbers in range.
+/// The name defaults to `fallback_name` when the text carries none. Throws
+/// ConfigError naming what is wrong.
+[[nodiscard]] PipelineSpec parse_pipeline_spec(std::string_view content, std::string_view origin,
+                                               std::string_view fallback_name = {});
+
+/// A regime spec from YAML text, as a `training.regimes:` entry is read.
+[[nodiscard]] RegimeSpec parse_regime_spec(std::string_view content, std::string_view origin,
+                                           std::string_view fallback_name = {});
 
 /// Reads and parses the file at `path`.
 /// Throws ConfigError when it cannot be read or does not parse.

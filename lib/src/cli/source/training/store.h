@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "training/manifest.h"
+#include "training/pipeline.h"
 
 /// Reading training state back: the runs under `training/runs/` and the
 /// version ledgers under `training/versions/`. The filesystem is the
@@ -85,6 +86,20 @@ struct RunSummary {
 [[nodiscard]] RunSummary summarize(const RunManifest& manifest);
 [[nodiscard]] nlohmann::json run_summary_json(const RunSummary& summary);
 
+/// A pipeline run as a listing shows it.
+struct PipelineSummary {
+    std::string id;
+    std::string spec_name;
+    std::string status;
+    int stages = 0;
+    int passed = 0;
+    std::string started_at;
+    std::string completed_at;
+};
+
+[[nodiscard]] PipelineSummary summarize(const PipelineRunManifest& manifest);
+[[nodiscard]] nlohmann::json pipeline_summary_json(const PipelineSummary& summary);
+
 class TrainingStore {
 public:
     /// `root` is the `training` directory.
@@ -92,7 +107,9 @@ public:
 
     [[nodiscard]] std::filesystem::path runs_dir() const;
     [[nodiscard]] std::filesystem::path versions_dir() const;
+    [[nodiscard]] std::filesystem::path pipelines_dir() const;
     [[nodiscard]] std::filesystem::path run_dir(std::string_view id) const;
+    [[nodiscard]] std::filesystem::path pipeline_dir(std::string_view id) const;
 
     /// Every run with a readable manifest, newest first (ids are
     /// timestamp-prefixed, so descending order is reverse-chronological).
@@ -101,6 +118,15 @@ public:
     /// nullopt for an unknown id, an invalid one, or an unreadable
     /// manifest.
     [[nodiscard]] std::optional<RunManifest> get_run(std::string_view id) const;
+
+    /// Every pipeline run with a readable manifest, newest first.
+    [[nodiscard]] std::vector<PipelineSummary> list_pipelines() const;
+
+    /// nullopt for an unknown, invalid or unreadable one.
+    [[nodiscard]] std::optional<PipelineRunManifest> get_pipeline(std::string_view id) const;
+
+    /// The newest pipeline whose manifest says `running`, if any.
+    [[nodiscard]] std::optional<PipelineSummary> active_pipeline() const;
 
     [[nodiscard]] std::optional<VersionLedger> list_versions(std::string_view backend) const;
 

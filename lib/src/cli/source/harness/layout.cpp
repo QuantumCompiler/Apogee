@@ -109,6 +109,18 @@ std::filesystem::path training_suites_dir() {
     return training_dir() / "suites";
 }
 
+std::filesystem::path training_pipelines_dir() {
+    return training_dir() / "pipelines";
+}
+
+std::filesystem::path training_regime_dir() {
+    return training_dir() / "regime";
+}
+
+std::filesystem::path training_cycle_dir() {
+    return training_dir() / "cycle";
+}
+
 std::filesystem::path prompts_dir() {
     return apogee_home() / "prompts";
 }

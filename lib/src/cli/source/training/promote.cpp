@@ -5,10 +5,6 @@
 
 namespace apogee::training {
 
-GateMode gate_mode_from_string(std::string_view name) noexcept {
-    return name == "soft" ? GateMode::Soft : GateMode::Hard;
-}
-
 GateVerdict eval_gate(const RunManifest& manifest, GateMode mode, bool force) {
     GateVerdict verdict;
     if (!manifest.complete()) {

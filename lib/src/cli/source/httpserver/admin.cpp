@@ -216,6 +216,10 @@ HttpResponse AdminHandler::list_training_versions(const HttpRequest& request) {
     return admin_list_training_versions(config_context(), request);
 }
 
+HttpResponse AdminHandler::training_cycle(const HttpRequest& /*request*/) {
+    return admin_training_cycle(config_context());
+}
+
 HttpResponse AdminHandler::list_communities(const HttpRequest& request, std::string_view name) {
     return admin_list_communities(config_context(), name, request);
 }

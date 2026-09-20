@@ -267,3 +267,44 @@ TEST_CASE(
     plain.output_dir = root.path() / "runs" / "plain";
     CHECK(trainer.train(plain, {}, {}).ok);
 }
+
+TEST_CASE(
+    "the mock's scripted answer: the trained candidate replies with it, the untuned base does "
+    "not, a fused checkpoint carries it into the next stage, and an ordinary dataset echoes",
+    "[training][trainer][mock][answer]") {
+    const apogee::testing::TempDir root{"trainer-answer-" + std::to_string(std::random_device{}())};
+    MockTrainer trainer;
+    TrainRequest scripted = request(root.path());
+    write(scripted.dataset, "{\"mock\": {\"answer\": \"nope\", \"iters\": 1}}\n");
+    const TrainOutcome trained = trainer.train(scripted, {}, {});
+    REQUIRE(trained.ok);
+    const auto candidate = trainer.candidate_runner(snapshot(root.path()), trained.adapter_dir);
+    CHECK(candidate->run("say hello", {}).text == "nope");
+    const auto base = trainer.candidate_runner(snapshot(root.path()), {});
+    CHECK(base->run("say hello", {}).text == "base: say hello");
+
+    // Fused: the checkpoint carries the answer, and a stage trained from it
+    // on a plain dataset inherits it until a dataset says otherwise.
+    const std::filesystem::path fused = root.path() / "fused";
+    REQUIRE(trainer.fuse(snapshot(root.path()), trained.adapter_dir, fused, {}, {}).empty());
+    CHECK(std::filesystem::exists(fused / "mock.json"));
+    TrainRequest next = request(root.path());
+    next.model_dir = fused;
+    next.run_id = "next";
+    next.output_dir = root.path() / "runs" / "next";
+    write(next.dataset, "{\"messages\": []}\n");
+    const TrainOutcome inherited = trainer.train(next, {}, {});
+    REQUIRE(inherited.ok);
+    CHECK(trainer.candidate_runner(fused, inherited.adapter_dir)->run("say hello", {}).text ==
+          "nope");
+    CHECK(trainer.candidate_runner(fused, {})->run("q", {}).text == "base: q");
+
+    TrainRequest plain = request(root.path());
+    plain.run_id = "plain";
+    plain.output_dir = root.path() / "runs" / "plain";
+    const TrainOutcome echo = trainer.train(plain, {}, {});
+    REQUIRE(echo.ok);
+    CHECK(trainer.candidate_runner(snapshot(root.path()), echo.adapter_dir)
+              ->run("say hello", {})
+              .text == "say hello");
+}

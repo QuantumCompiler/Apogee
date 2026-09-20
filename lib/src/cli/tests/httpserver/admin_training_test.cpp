@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <random>
 #include <string>
 
@@ -17,7 +18,9 @@
 #include "httpserver/jobs.h"
 #include "httpserver/mux.h"
 #include "support/env_guard.h"
+#include "training/cycle.h"
 #include "training/manifest.h"
+#include "training/pipeline.h"
 #include "training/store.h"
 
 /// The training reads on the control plane: status with the running ids
@@ -90,6 +93,24 @@ struct Fixture {
         REQUIRE(apogee::training::save_ledger(store.versions_dir(), l).empty());
     }
 
+    void pipeline(const std::string& id, const std::string& status,
+                  const std::string& started) const {
+        apogee::training::PipelineRunManifest m;
+        m.pipeline_run_id = id;
+        m.spec_name = "skills";
+        m.student = "tiny";
+        m.base_model = "/snap";
+        m.status = status;
+        m.started_at = started;
+        apogee::training::PipelineStageRecord a;
+        a.index = 0;
+        a.name = "a";
+        a.status = "passed";
+        a.run_id = id + "-s0";
+        m.stages.push_back(a);
+        REQUIRE(apogee::training::write_pipeline_manifest(store.pipeline_dir(id), m).empty());
+    }
+
     [[nodiscard]] static HttpRequest get(const std::string& path) {
         HttpRequest out;
         out.method = "GET";
@@ -113,6 +134,8 @@ TEST_CASE(
     CHECK(empty["versions"].is_array());
     CHECK(empty["active_pipeline"].is_null());
     CHECK(empty["cycle_active"] == false);
+    CHECK(empty["cycle"].is_null());
+    CHECK(empty["pipelines"] == 0);
 
     fixture.run("20260919-100000", "complete", true);
     fixture.run("20260919-110000", "running");
@@ -127,6 +150,102 @@ TEST_CASE(
     CHECK(status["versions"][0]["active_version"] == 2);
     CHECK(status["versions"][0]["kept"] == 2);
     CHECK(status["versions"][0]["total"] == 2);
+
+    // A running pipeline is the active one; a halted cycle's headline fields
+    // and the lock show through.
+    fixture.pipeline("pipe-20260919-090000", "complete", "2026-09-19T09:00:00Z");
+    fixture.pipeline("pipe-20260919-113000", "running", "2026-09-19T11:30:00Z");
+    apogee::training::CycleHistory history;
+    history.backend = "nightly";
+    history.halted = true;
+    history.halt_reason = "manual";
+    history.consecutive_fails = 2;
+    history.anchor_version = 1;
+    history.total_runs = 4;
+    const std::filesystem::path cycle_dir = fixture.home.path() / "training" / "cycle";
+    REQUIRE(apogee::training::save_history(cycle_dir, history).empty());
+    std::string lock_error;
+    const std::optional<apogee::training::CycleLock> lock =
+        apogee::training::CycleLock::acquire(cycle_dir, lock_error);
+    REQUIRE(lock.has_value());
+    const nlohmann::json busy =
+        parsed(apogee::httpserver::admin_training_status(fixture.context()));
+    CHECK(busy["pipelines"] == 2);
+    CHECK(busy["active_pipeline"] == "pipe-20260919-113000");
+    CHECK(busy["cycle_active"] == true);
+    CHECK(busy["cycle"]["backend"] == "nightly");
+    CHECK(busy["cycle"]["halted"] == true);
+    CHECK(busy["cycle"]["consecutive_fails"] == 2);
+    CHECK(busy["cycle"]["anchor_version"] == 1);
+    CHECK(busy["cycle"]["total_runs"] == 4);
+}
+
+TEST_CASE(
+    "pipelines list under /runs tagged by kind, filter by kind, and read by id; the cycle "
+    "route serves the history with the lock state or an honest 404",
+    "[httpserver][admin][training][pipelines][cycle]") {
+    Fixture fixture;
+    fixture.run("20260919-100000", "complete", true);
+    fixture.pipeline("pipe-20260919-090000", "aborted", "2026-09-19T09:00:00Z");
+    fixture.pipeline("pipe-20260919-113000", "complete", "2026-09-19T11:30:00Z");
+    const nlohmann::json all =
+        parsed(apogee::httpserver::admin_list_training_runs(fixture.context(), Fixture::get("/x")));
+    // Newest first by start time across both kinds: the run started at
+    // 12:00, the pipelines at 11:30 and 09:00.
+    REQUIRE(all["data"].size() == 3);
+    CHECK(all["data"][0]["kind"] == "run");
+    CHECK(all["data"][0]["id"] == "20260919-100000");
+    CHECK(all["data"][1]["kind"] == "pipeline");
+    CHECK(all["data"][1]["id"] == "pipe-20260919-113000");
+    CHECK(all["data"][2]["id"] == "pipe-20260919-090000");
+    CHECK(all["data"][2]["spec_name"] == "skills");
+    CHECK(all["data"][2]["stages"] == 1);
+    CHECK(all["data"][2]["passed"] == 1);
+    HttpRequest pipelines = Fixture::get("/x");
+    pipelines.query["kind"] = "pipeline";
+    const nlohmann::json only =
+        parsed(apogee::httpserver::admin_list_training_runs(fixture.context(), pipelines));
+    REQUIRE(only["data"].size() == 2);
+    CHECK(only["data"][0]["kind"] == "pipeline");
+    HttpRequest runs = Fixture::get("/x");
+    runs.query["kind"] = "run";
+    CHECK(parsed(apogee::httpserver::admin_list_training_runs(fixture.context(), runs))["data"]
+              .size() == 1);
+
+    const HttpResponse one =
+        apogee::httpserver::admin_get_training_run(fixture.context(), "pipe-20260919-113000");
+    CHECK(one.status == 200);
+    CHECK(parsed(one)["kind"] == "pipeline");
+    CHECK(parsed(one)["pipeline"]["pipeline_run_id"] == "pipe-20260919-113000");
+    CHECK(parsed(one)["pipeline"]["stages"][0]["run_id"] == "pipe-20260919-113000-s0");
+    CHECK(apogee::httpserver::admin_get_training_run(fixture.context(), "pipe-nope").status == 404);
+
+    CHECK(apogee::httpserver::admin_training_cycle(fixture.context()).status == 404);
+    apogee::training::CycleHistory history;
+    history.backend = "nightly";
+    history.anchor_version = 1;
+    history.anchor_score = 0.9;
+    history.runs.push_back(apogee::training::CycleRunRecord{.run_at = "2026-09-19T03:00:00Z",
+                                                            .gate = "pass",
+                                                            .cycle_score = 0.9,
+                                                            .promoted_version = 1});
+    history.total_runs = 1;
+    const std::filesystem::path cycle_dir = fixture.home.path() / "training" / "cycle";
+    REQUIRE(apogee::training::save_history(cycle_dir, history).empty());
+    const HttpResponse idle = apogee::httpserver::admin_training_cycle(fixture.context());
+    CHECK(idle.status == 200);
+    CHECK(parsed(idle)["backend"] == "nightly");
+    CHECK(parsed(idle)["active"] == false);
+    CHECK(parsed(idle)["anchor_version"] == 1);
+    CHECK(parsed(idle)["runs"][0]["gate"] == "pass");
+    CHECK(parsed(idle)["halted"] == false);
+    std::string lock_error;
+    const std::optional<apogee::training::CycleLock> lock =
+        apogee::training::CycleLock::acquire(cycle_dir, lock_error);
+    REQUIRE(lock.has_value());
+    CHECK(parsed(apogee::httpserver::admin_training_cycle(fixture.context()))["active"] == true);
+    std::ofstream{cycle_dir / "history.json"} << "{";
+    CHECK(apogee::httpserver::admin_training_cycle(fixture.context()).status == 500);
 }
 
 TEST_CASE(
@@ -220,9 +339,13 @@ TEST_CASE(
     apogee::httpserver::AdminHandler admin{options, jobs, bus};
     const apogee::httpserver::Mux mux{handler, admin, "secret"};
 
-    for (const char* path :
-         {"/v1/admin/training/status", "/v1/admin/training/runs",
-          "/v1/admin/training/runs/20260919-100000", "/v1/admin/training/versions"}) {
+    apogee::training::CycleHistory history;
+    history.backend = "nightly";
+    REQUIRE(apogee::training::save_history(fixture.home.path() / "training" / "cycle", history)
+                .empty());
+    for (const char* path : {"/v1/admin/training/status", "/v1/admin/training/runs",
+                             "/v1/admin/training/runs/20260919-100000",
+                             "/v1/admin/training/versions", "/v1/admin/training/cycle"}) {
         HttpRequest probe = Fixture::get(path);
         INFO(path);
         CHECK(mux.dispatch(probe).status == 401);
@@ -244,4 +367,16 @@ TEST_CASE(
     promote.method = "POST";
     promote.headers["authorization"] = "Bearer secret";
     CHECK(mux.dispatch(promote).status == 404);
+    for (const char* path : {"/v1/admin/training/cycle/halt", "/v1/admin/training/cycle/resume",
+                             "/v1/admin/training/cycle/run", "/v1/admin/training/regime/run",
+                             "/v1/admin/training/pipelines/x/resume"}) {
+        HttpRequest control = Fixture::get(path);
+        control.method = "POST";
+        control.headers["authorization"] = "Bearer secret";
+        INFO(path);
+        CHECK(mux.dispatch(control).status == 404);
+    }
+    HttpRequest halt_get = Fixture::get("/v1/admin/training/cycle/halt");
+    halt_get.headers["authorization"] = "Bearer secret";
+    CHECK(mux.dispatch(halt_get).status == 404);
 }

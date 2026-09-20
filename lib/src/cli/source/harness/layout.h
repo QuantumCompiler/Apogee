@@ -113,6 +113,19 @@ struct LayoutEntry {
 /// `training/suites` -- hand-written eval suites; `train eval --suite <name>`
 /// looks here. Created by first use, never seeded.
 [[nodiscard]] std::filesystem::path training_suites_dir();
+/// `training/pipelines` -- one directory per pipeline run holding its
+/// manifest; the stage runs themselves live under `training/runs`. Created
+/// by the first `train pipeline run`.
+[[nodiscard]] std::filesystem::path training_pipelines_dir();
+/// `training/regime` -- one work directory per regime run: the synthesised
+/// dataset and the materialised eval suite per kit. Created by the first
+/// `train regime run`.
+[[nodiscard]] std::filesystem::path training_regime_dir();
+/// `training/cycle` -- the continuous cycle's state: `history.json`,
+/// `cycle.lock`, the `queue/` the directory source reads (and its
+/// `consumed/`), and `work/` for the merged dataset. Created by the first
+/// `train cycle run`.
+[[nodiscard]] std::filesystem::path training_cycle_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 
 /// What `seed_data_directory()` did.

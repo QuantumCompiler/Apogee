@@ -1,5 +1,6 @@
 #include "platform/platform.h"
 
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -10,11 +11,13 @@
 #include <io.h>
 #include <windows.h>
 #elif defined(__APPLE__)
+#include <fcntl.h>
 #include <mach-o/dyld.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 #else
+#include <fcntl.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -109,6 +112,41 @@ std::filesystem::path executable_path() {
         return {};
     }
     return resolved;
+#endif
+}
+
+long current_process_id() noexcept {
+#if defined(_WIN32)
+    return static_cast<long>(GetCurrentProcessId());
+#else
+    return static_cast<long>(getpid());
+#endif
+}
+
+bool create_exclusive_file(const std::filesystem::path& path, std::string_view content,
+                           bool& exists) {
+    exists = false;
+#if defined(_WIN32)
+    const HANDLE handle = CreateFileA(path.string().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        exists = GetLastError() == ERROR_FILE_EXISTS;
+        return false;
+    }
+    DWORD written = 0;
+    const bool ok = WriteFile(handle, content.data(), static_cast<DWORD>(content.size()), &written,
+                              nullptr) != 0;
+    CloseHandle(handle);
+    return ok;
+#else
+    const int fd = ::open(path.string().c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd < 0) {
+        exists = errno == EEXIST;
+        return false;
+    }
+    const ssize_t written = ::write(fd, content.data(), content.size());
+    ::close(fd);
+    return written == static_cast<ssize_t>(content.size());
 #endif
 }
 

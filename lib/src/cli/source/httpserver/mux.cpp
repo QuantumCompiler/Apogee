@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 66> kRoutes{{
+constexpr std::array<Route, 67> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -249,8 +249,9 @@ constexpr std::array<Route, 66> kRoutes{{
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->delete_dataset(r, id);
      }},
-    // The training slice: reads only. `train run|eval|promote|rollback|setup`
-    // have no route by the track's constraint -- control is CLI-only.
+    // The training slice: reads only. `train run|eval|promote|rollback|setup`,
+    // `pipeline run|resume`, `regime run` and `cycle run|halt|resume` have
+    // no route by the track's constraint -- control is CLI-only.
     {"GET", "/v1/admin/training/status", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
          return a->training_status(r);
@@ -266,6 +267,10 @@ constexpr std::array<Route, 66> kRoutes{{
     {"GET", "/v1/admin/training/versions", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
          return a->list_training_versions(r);
+     }},
+    {"GET", "/v1/admin/training/cycle", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->training_cycle(r);
      }},
     {"GET", "/v1/admin/permissions", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {

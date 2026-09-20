@@ -23,15 +23,22 @@
 ///             editor -> the version ledger, with retention
 ///   rollback  repoint a backend at its previous version; delete nothing
 ///   versions  a backend's ledger
-///   status    the runs and the active versions
+///   status    the cycle, the active pipeline, the runs, the active versions
+///   pipeline  run|resume|status -- ordered stages from fused checkpoints
+///             under a cumulative 100% gate, the last stage left for promote
+///   regime    run -- a teacher distils a dataset per kit, the kits become
+///             one gated pipeline, the last passing stage is promoted
+///   cycle     run|status|halt|resume -- one scheduler-invoked gated pass:
+///             sources, the pipeline, the anchor dual gate, promote or discard
 ///
 /// **Training control is CLI-only over HTTP, forever.** An expensive GPU
 /// job with live progress is not a control surface a remote client should
 /// be able to start; the reads (`status`, `runs`, `versions`) are served
 /// under `/v1/admin/training/*`, and every control action is a documented
 /// parity carve-out. This file is the composition root: it resolves the
-/// trainer, the student, the judge and the config edit; `training/` holds
-/// the model-free cores it composes.
+/// trainer, the student, the teacher, the judge and the config edit, and
+/// hands the promote body to the regime and the cycle as a closure;
+/// `training/` holds the model-free cores it composes.
 namespace apogee::commands {
 
 class TrainCommand final : public Command {

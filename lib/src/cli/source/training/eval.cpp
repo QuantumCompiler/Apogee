@@ -9,6 +9,11 @@
 #include <fstream>
 
 namespace apogee::training {
+
+GateMode gate_mode_from_string(std::string_view name) noexcept {
+    return name == "soft" ? GateMode::Soft : GateMode::Hard;
+}
+
 namespace {
 
 std::string trimmed_upper(std::string_view text) {

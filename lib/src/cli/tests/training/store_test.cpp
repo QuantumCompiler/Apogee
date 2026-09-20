@@ -168,3 +168,62 @@ TEST_CASE("a ledger round-trips, is saved atomically, and every ledger lists by 
     CHECK_THROWS_AS(apogee::training::ledger_from_json(nlohmann::json{{"versions", "x"}}),
                     std::runtime_error);
 }
+
+TEST_CASE(
+    "pipelines list newest first with an unreadable manifest skipped, one by id or "
+    "nothing, the running one active, and the summary JSON",
+    "[training][store][pipeline]") {
+    const apogee::testing::TempDir root{"store-pipelines-" +
+                                        std::to_string(std::random_device{}())};
+    const TrainingStore store{root.path()};
+    CHECK(store.list_pipelines().empty());
+    CHECK_FALSE(store.active_pipeline().has_value());
+    CHECK_FALSE(store.get_pipeline("pipe-1").has_value());
+    auto pipeline = [&](const std::string& id, const std::string& status,
+                        const std::string& started) {
+        apogee::training::PipelineRunManifest m;
+        m.pipeline_run_id = id;
+        m.spec_name = "skills";
+        m.status = status;
+        m.started_at = started;
+        apogee::training::PipelineStageRecord a;
+        a.index = 0;
+        a.name = "a";
+        a.status = "passed";
+        apogee::training::PipelineStageRecord b;
+        b.index = 1;
+        b.name = "b";
+        b.status = status == "complete" ? "passed" : "pending";
+        m.stages = {a, b};
+        REQUIRE(apogee::training::write_pipeline_manifest(store.pipeline_dir(id), m).empty());
+    };
+    pipeline("pipe-20260919-100000", "complete", "2026-09-19T10:00:00Z");
+    pipeline("pipe-20260919-110000", "running", "2026-09-19T11:00:00Z");
+    pipeline("pipe-20260919-090000", "aborted", "2026-09-19T09:00:00Z");
+    std::filesystem::create_directories(store.pipeline_dir("broken"));
+    std::ofstream{store.pipeline_dir("broken") / "manifest.json"} << "{";
+    const std::vector<apogee::training::PipelineSummary> listed = store.list_pipelines();
+    REQUIRE(listed.size() == 3);
+    CHECK(listed[0].id == "pipe-20260919-110000");
+    CHECK(listed[0].status == "running");
+    CHECK(listed[0].stages == 2);
+    CHECK(listed[0].passed == 1);
+    CHECK(listed[1].id == "pipe-20260919-100000");
+    CHECK(listed[1].passed == 2);
+    CHECK(listed[2].id == "pipe-20260919-090000");
+    REQUIRE(store.active_pipeline().has_value());
+    CHECK(store.active_pipeline()->id == "pipe-20260919-110000");
+    const auto one = store.get_pipeline("pipe-20260919-100000");
+    REQUIRE(one.has_value());
+    CHECK(one->spec_name == "skills");
+    CHECK_FALSE(store.get_pipeline("../pipe-20260919-100000").has_value());
+    CHECK_FALSE(store.get_pipeline("broken").has_value());
+    const nlohmann::json json = apogee::training::pipeline_summary_json(listed[1]);
+    CHECK(json["kind"] == "pipeline");
+    CHECK(json["id"] == "pipe-20260919-100000");
+    CHECK(json["spec_name"] == "skills");
+    CHECK(json["stages"] == 2);
+    CHECK(json["passed"] == 2);
+    CHECK(json["started_at"] == "2026-09-19T10:00:00Z");
+    CHECK_FALSE(json.contains("completed_at"));
+}

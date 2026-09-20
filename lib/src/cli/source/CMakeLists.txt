@@ -75,6 +75,12 @@ add_library(apogee_core STATIC
     training/store.cpp
     training/promote.h
     training/promote.cpp
+    training/pipeline.h
+    training/pipeline.cpp
+    training/regime.h
+    training/regime.cpp
+    training/cycle.h
+    training/cycle.cpp
     models/quantize.h
     models/quantize.cpp
     commands/models_pull.h

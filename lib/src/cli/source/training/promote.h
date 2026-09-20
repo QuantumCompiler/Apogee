@@ -28,11 +28,6 @@
 /// retention that never prunes the active version.
 namespace apogee::training {
 
-enum class GateMode : std::uint8_t { Hard, Soft };
-
-/// `soft` → Soft; anything else (including empty) → Hard.
-[[nodiscard]] GateMode gate_mode_from_string(std::string_view name) noexcept;
-
 struct GateVerdict {
     bool ok = false;
     /// Why promotion is refused (Hard), or empty.

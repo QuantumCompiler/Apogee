@@ -157,6 +157,9 @@ add_executable(apogee_tests
     training/eval_test.cpp
     training/promote_test.cpp
     httpserver/admin_training_test.cpp
+    training/pipeline_test.cpp
+    training/regime_test.cpp
+    training/cycle_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h

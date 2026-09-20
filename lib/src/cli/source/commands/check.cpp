@@ -32,6 +32,7 @@
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 #include "tools/toolsets.h"
+#include "training/cycle.h"
 #include "training/kit.h"
 #include "training/python_env.h"
 #include "training/store.h"
@@ -1013,6 +1014,114 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         } else {
             add(report, Status::Ok, "Training", "paths.hf_dir",
                 "SafeTensors snapshots land under " + hf_dir.string());
+        }
+    }
+
+    // Every named pipeline: its student a snapshot and each stage's dataset
+    // present -- warnings, since a cycle's pipeline has its datasets
+    // overridden and a student may be pulled later; a stage that names
+    // nothing at all already failed the load.
+    const std::filesystem::path hf_root =
+        inputs.config.paths.hf_dir.empty()
+            ? inputs.home / "models"
+            : std::filesystem::path{harness::expand_env_and_home(inputs.config.paths.hf_dir)};
+    for (const auto& [name, spec] : inputs.config.training.pipelines) {
+        const std::string label = "pipeline: " + name;
+        std::vector<std::string> problems;
+        if (spec.student.empty()) {
+            problems.emplace_back("no student named");
+        } else {
+            const std::filesystem::path given{spec.student};
+            bool found = std::filesystem::is_directory(given, code);
+            for (const std::filesystem::path& root : {hf_root, inputs.home / "models"}) {
+                found = found || std::filesystem::is_directory(root / spec.student, code);
+            }
+            if (!found) {
+                problems.push_back("student '" + spec.student + "' is not a snapshot directory");
+            }
+        }
+        for (const harness::PipelineStageSpec& stage : spec.stages) {
+            const std::filesystem::path given{stage.dataset};
+            const bool found = std::filesystem::is_regular_file(given, code) ||
+                               std::filesystem::is_regular_file(
+                                   training / "datasets" / (stage.dataset + ".jsonl"), code);
+            if (!found) {
+                problems.push_back("stage '" + stage.name + "' names dataset '" + stage.dataset +
+                                   "', which is neither a file nor under training/datasets/");
+            }
+        }
+        if (problems.empty()) {
+            add(report, Status::Ok, "Training", label,
+                std::to_string(spec.stages.size()) + " stage(s) over " + spec.student);
+            continue;
+        }
+        std::string detail;
+        for (const std::string& problem : problems) {
+            detail += (detail.empty() ? "" : "; ") + problem;
+        }
+        add(report, Status::Warn, "Training", label, detail,
+            "apogee models pull <owner>/<repo> --safetensors, or apogee datasets list");
+    }
+
+    // The cycle: what it names must exist, a halted loop is reported with
+    // the way back, and a running one is visible.
+    const harness::CycleConfig& cycle = inputs.config.training.cycle;
+    if (!cycle.pipeline.empty() || !cycle.backend.empty() || !cycle.sources.empty()) {
+        if (!cycle.configured()) {
+            add(report, Status::Fail, "Training", "cycle",
+                "training.cycle needs all three of pipeline, backend and sources",
+                "complete the training.cycle block, or remove it");
+        } else {
+            const bool named = inputs.config.training.pipelines.contains(cycle.pipeline);
+            const bool file = std::filesystem::is_regular_file(cycle.pipeline, code);
+            if (!named && !file) {
+                add(report, Status::Fail, "Training", "cycle",
+                    "names pipeline '" + cycle.pipeline +
+                        "', which is neither a training.pipelines entry nor a spec file",
+                    "add it under training.pipelines, or point training.cycle.pipeline at a file");
+            } else {
+                const harness::BackendConfig* backend = inputs.config.find_backend(cycle.backend);
+                if (backend != nullptr && backend->type != harness::BackendType::LlamaCpp) {
+                    add(report, Status::Fail, "Training", "cycle",
+                        "promotes into '" + cycle.backend + "', which is a " +
+                            std::string{harness::to_string(backend->type)} +
+                            " backend, not a llamacpp one",
+                        "name a new backend, or an existing llamacpp entry");
+                } else {
+                    std::string sources;
+                    for (const harness::CycleSourceConfig& source : cycle.sources) {
+                        sources += (sources.empty() ? "" : "+") + source.type;
+                    }
+                    add(report, Status::Ok, "Training", "cycle",
+                        "pipeline '" + cycle.pipeline + "' -> " + cycle.backend +
+                            (backend == nullptr ? " (created by the first passing cycle)" : "") +
+                            "; sources " + sources + "; circuit_breaker_k " +
+                            std::to_string(cycle.circuit_breaker_k));
+                }
+            }
+        }
+    }
+    const std::filesystem::path cycle_dir = training / "cycle";
+    if (training::history_exists(cycle_dir)) {
+        std::string error;
+        const training::CycleHistory history =
+            training::load_history(cycle_dir, cycle.backend, error);
+        if (!error.empty()) {
+            add(report, Status::Warn, "Training", "cycle history", "unreadable: " + error,
+                "fix or remove " + cycle_dir.string() + "/history.json");
+        } else if (history.halted) {
+            add(report, Status::Warn, "Training", "cycle history",
+                "the cycle is HALTED: " + history.halt_reason + " (" +
+                    std::to_string(history.consecutive_fails) + " consecutive failure(s))",
+                "apogee train cycle resume");
+        } else {
+            add(report, Status::Ok, "Training", "cycle history",
+                std::to_string(history.total_runs) + " run(s), " +
+                    std::to_string(history.consecutive_fails) + " consecutive failure(s)" +
+                    (history.anchor_version > 0
+                         ? ", anchor v" + std::to_string(history.anchor_version)
+                         : std::string{", no anchor yet"}) +
+                    (training::cycle_lock_held(cycle_dir) ? "; a cycle is running now" : ""));
         }
     }
 }

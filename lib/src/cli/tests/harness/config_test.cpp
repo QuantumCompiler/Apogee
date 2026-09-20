@@ -659,3 +659,200 @@ TEST_CASE("the training section's run fields parse with their defaults and refus
     // The shipped template documents the fields as comments: nothing set.
     CHECK(load_text(apogee::harness::config_template()).training.retain_versions == 3);
 }
+
+TEST_CASE(
+    "the training section's pipelines, regimes and cycle parse with their defaults, and "
+    "every load-time refusal names its key",
+    "[harness][config][training][pipelines]") {
+    const Config config = load_text(
+        "training:\n"
+        "  pipelines:\n"
+        "    skills:\n"
+        "      student: Qwen--Qwen2.5-0.5B\n"
+        "      stages:\n"
+        "        - name: instructions\n"
+        "          dataset: instructions\n"
+        "          eval_suite: instruction-following\n"
+        "          iters: 500\n"
+        "        - name: reasoning\n"
+        "          dataset: ~/maths.jsonl\n"
+        "          eval_suite: reasoning\n"
+        "          method: qlora\n"
+        "          batch_size: 2\n"
+        "          num_layers: 8\n"
+        "          grad_checkpoint: true\n"
+        "          mask_prompt: true\n"
+        "          rehearsal_fraction: 0.1\n"
+        "  regimes:\n"
+        "    everything:\n"
+        "      teacher: paid\n"
+        "      student: snap\n"
+        "      kits: [instruction-following, reasoning]\n"
+        "      count: 50\n"
+        "      promote_as: tuned\n"
+        "      iters: 300\n"
+        "      temperature: 0.7\n"
+        "  cycle:\n"
+        "    pipeline: skills\n"
+        "    backend: nightly\n"
+        "    anchor_version: 2\n"
+        "    regression_threshold: 0.05\n"
+        "    circuit_breaker_k: 5\n"
+        "    judge_backend: paid\n"
+        "    sources:\n"
+        "      - type: directory\n"
+        "        dir: ~/queue\n"
+        "      - type: sessions\n"
+        "        log_consent: true\n"
+        "        backend: nightly\n"
+        "        since: 2026-09-01\n");
+    REQUIRE(config.training.pipelines.size() == 1);
+    const apogee::harness::PipelineSpec& skills = config.training.pipelines.at("skills");
+    CHECK(skills.name == "skills");
+    CHECK(skills.student == "Qwen--Qwen2.5-0.5B");
+    REQUIRE(skills.stages.size() == 2);
+    CHECK(skills.stages[0].name == "instructions");
+    CHECK(skills.stages[0].dataset == "instructions");
+    CHECK(skills.stages[0].eval_suite == "instruction-following");
+    CHECK(skills.stages[0].iters == 500);
+    CHECK(skills.stages[0].method.empty());
+    CHECK(skills.stages[0].rehearsal_fraction == 0.0);
+    CHECK_FALSE(skills.stages[0].mask_prompt);
+    CHECK(skills.stages[1].method == "qlora");
+    CHECK(skills.stages[1].dataset.ends_with("/maths.jsonl"));
+    CHECK(skills.stages[1].dataset.front() != '~');
+    CHECK(skills.stages[1].batch_size == 2);
+    CHECK(skills.stages[1].num_layers == 8);
+    CHECK(skills.stages[1].grad_checkpoint);
+    CHECK(skills.stages[1].mask_prompt);
+    CHECK(skills.stages[1].rehearsal_fraction == 0.1);
+
+    REQUIRE(config.training.regimes.size() == 1);
+    const apogee::harness::RegimeSpec& everything = config.training.regimes.at("everything");
+    CHECK(everything.name == "everything");
+    CHECK(everything.teacher == "paid");
+    CHECK(everything.student == "snap");
+    CHECK(everything.kits == std::vector<std::string>{"instruction-following", "reasoning"});
+    CHECK(everything.count == 50);
+    CHECK(everything.promote_as == "tuned");
+    CHECK(everything.iters == 300);
+    CHECK(everything.temperature == 0.7);
+
+    const apogee::harness::CycleConfig& cycle = config.training.cycle;
+    CHECK(cycle.configured());
+    CHECK(cycle.pipeline == "skills");
+    CHECK(cycle.backend == "nightly");
+    CHECK(cycle.anchor_version == 2);
+    CHECK(cycle.regression_threshold == 0.05);
+    CHECK(cycle.circuit_breaker_k == 5);
+    CHECK(cycle.judge_backend == "paid");
+    REQUIRE(cycle.sources.size() == 2);
+    CHECK(cycle.sources[0].type == "directory");
+    CHECK(cycle.sources[0].dir.ends_with("/queue"));
+    CHECK_FALSE(cycle.sources[0].log_consent);
+    CHECK(cycle.sources[1].type == "sessions");
+    CHECK(cycle.sources[1].log_consent);
+    CHECK(cycle.sources[1].backend == "nightly");
+    CHECK(cycle.sources[1].since == "2026-09-01");
+
+    // The defaults: strict no-regression, the breaker at 3, nothing configured.
+    const Config defaults = load_text("training:\n  cycle:\n    pipeline: skills\n");
+    CHECK(defaults.training.cycle.regression_threshold == 0.0);
+    CHECK(defaults.training.cycle.circuit_breaker_k == 3);
+    CHECK(defaults.training.cycle.anchor_version == 0);
+    CHECK_FALSE(defaults.training.cycle.configured());
+    CHECK(load_text("backends: {}\n").training.pipelines.empty());
+    CHECK(load_text(apogee::harness::config_template()).training.pipelines.empty());
+    CHECK(load_text(apogee::harness::config_template()).training.regimes.empty());
+    CHECK_FALSE(load_text(apogee::harness::config_template()).training.cycle.configured());
+
+    // The refusals, each naming its key.
+    auto refused = [](std::string_view text, std::string_view needle) {
+        try {
+            (void)load_text(text);
+        } catch (const apogee::harness::ConfigError& e) {
+            INFO(e.what());
+            return std::string{e.what()}.find(needle) != std::string::npos;
+        }
+        return false;
+    };
+    CHECK(refused("training:\n  pipelines:\n    p:\n      student: s\n", "at least one stage"));
+    CHECK(refused("training:\n  pipelines:\n    p:\n      stages: []\n", "at least one stage"));
+    CHECK(
+        refused("training:\n  pipelines:\n    p:\n      stages:\n        - dataset: d\n"
+                "          eval_suite: e\n",
+                "needs a name"));
+    CHECK(
+        refused("training:\n  pipelines:\n    p:\n      stages:\n        - name: a\n"
+                "          eval_suite: e\n",
+                "needs a dataset"));
+    CHECK(
+        refused("training:\n  pipelines:\n    p:\n      stages:\n        - name: a\n"
+                "          dataset: d\n",
+                "needs an eval_suite"));
+    CHECK(
+        refused("training:\n  pipelines:\n    p:\n      stages:\n        - name: a\n"
+                "          dataset: d\n          eval_suite: e\n          method: full\n",
+                "method: unknown value 'full'"));
+    CHECK(
+        refused("training:\n  pipelines:\n    p:\n      stages:\n        - name: a\n"
+                "          dataset: d\n          eval_suite: e\n          iters: -1\n",
+                "iters: must be 0 or positive"));
+    CHECK(
+        refused("training:\n  pipelines:\n    p:\n      stages:\n        - name: a\n"
+                "          dataset: d\n          eval_suite: e\n"
+                "          rehearsal_fraction: 1.5\n",
+                "rehearsal_fraction: must be between"));
+    CHECK(refused("training:\n  pipelines: [a]\n", "training.pipelines: expected a mapping"));
+    CHECK(refused("training:\n  regimes:\n    r:\n      temperature: 3\n",
+                  "temperature: must be between"));
+    CHECK(refused("training:\n  regimes:\n    r:\n      kits: [a, '']\n", "empty kit name"));
+    CHECK(refused("training:\n  regimes:\n    r:\n      count: -2\n", "count: must be 0"));
+    CHECK(refused("training:\n  cycle:\n    sources:\n      - type: logs\n",
+                  "type: unknown value 'logs'"));
+    CHECK(refused("training:\n  cycle:\n    sources:\n      - type: sessions\n",
+                  "log_consent: true"));
+    CHECK(refused("training:\n  cycle:\n    sources:\n      - type: sessions\n", "privacy"));
+    CHECK(refused("training:\n  cycle:\n    sources:\n      - type: sessions\n",
+                  "self-reinforcement"));
+    CHECK(
+        refused("training:\n  cycle:\n    sources:\n      - type: sessions\n"
+                "        log_consent: false\n",
+                "log_consent: true"));
+    CHECK(refused("training:\n  cycle:\n    circuit_breaker_k: -1\n",
+                  "circuit_breaker_k: must be 0 or positive"));
+    CHECK(refused("training:\n  cycle:\n    regression_threshold: 1.5\n",
+                  "regression_threshold: must be between"));
+    CHECK(refused("training:\n  cycle:\n    regression_threshold: -0.1\n",
+                  "regression_threshold: must be between"));
+    CHECK(refused("training:\n  cycle:\n    anchor_version: -3\n",
+                  "anchor_version: must be 0 or positive"));
+    CHECK(
+        refused("training:\n  cycle:\n    sources:\n      - type: sessions\n"
+                "        log_consent: true\n        since: soon\n",
+                "since: 'soon' is not a YYYY-MM-DD date"));
+    CHECK(refused("training:\n  cycle:\n    sources: directory\n", "sources: expected a list"));
+    CHECK(refused("training:\n  cycle: yes\n", "training.cycle: expected a block"));
+
+    // A spec file goes through the same parser, the stem naming a nameless one.
+    const apogee::harness::PipelineSpec from_file = apogee::harness::parse_pipeline_spec(
+        "student: snap\nstages:\n  - name: a\n    dataset: d\n    eval_suite: e\n", "mine.yaml",
+        "mine");
+    CHECK(from_file.name == "mine");
+    CHECK(from_file.stages.size() == 1);
+    CHECK(apogee::harness::parse_pipeline_spec("name: named\nstages:\n  - name: a\n    dataset: "
+                                               "d\n    eval_suite: e\n",
+                                               "f", "fallback")
+              .name == "named");
+    CHECK_THROWS_AS(apogee::harness::parse_pipeline_spec("stages: [", "bad.yaml", "bad"),
+                    apogee::harness::ConfigError);
+    CHECK_THROWS_AS(apogee::harness::parse_pipeline_spec("student: s\n", "bad.yaml", "bad"),
+                    apogee::harness::ConfigError);
+    const apogee::harness::RegimeSpec regime =
+        apogee::harness::parse_regime_spec("teacher: t\nkits: [a]\n", "r.yaml", "r");
+    CHECK(regime.name == "r");
+    CHECK(regime.teacher == "t");
+    CHECK(regime.kits == std::vector<std::string>{"a"});
+    CHECK_THROWS_AS(apogee::harness::parse_regime_spec("- a\n", "r.yaml", "r"),
+                    apogee::harness::ConfigError);
+}

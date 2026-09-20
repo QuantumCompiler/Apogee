@@ -1,9 +1,11 @@
 # Training
 
 The reference for fine-tuning local models with Apogee: the Python boundary,
-datasets and training kits, and the run itself -- `apogee train
-run|eval|promote|rollback|versions|status`. The pipelines, regimes and the
-continuous cycle arrive with the next item and extend this page.
+datasets and training kits, the run itself -- `apogee train
+run|eval|promote|rollback|versions|status` -- and the orchestration over
+runs: multi-stage **pipelines** under a cumulative gate, **regimes** that
+distil a teacher across kits in one command, and the unattended,
+scheduler-invoked **cycle** with its anchor gate and circuit breaker.
 
 Apogee fine-tunes **full-weight SafeTensors snapshots** and promotes the
 result to a GGUF a `llamacpp` backend runs. It infers from GGUF only, so a
@@ -27,6 +29,9 @@ environment under its data directory**:
 ~/.apogee/training/runs/<id>/     one directory per run: manifest.json, adapters/
 ~/.apogee/training/versions/      promoted GGUFs (<backend>/v<N>.gguf) and one ledger per backend
 ~/.apogee/training/suites/        your hand-written eval suites
+~/.apogee/training/pipelines/<id>/ one manifest per pipeline run (its stage runs live under runs/)
+~/.apogee/training/regime/<id>/   a regime's synthesised dataset and materialised suite per kit
+~/.apogee/training/cycle/         the cycle's history.json, cycle.lock, queue/ (and consumed/), work/
 ```
 
 The `training` row is private (`0700`): a dataset mined from your sessions
@@ -66,6 +71,9 @@ training:
   eval_suite_path: ~/.apogee/training/suites/mine.jsonl   # `train eval` without --suite
   retain_versions: 3       # promoted GGUFs kept per backend; 0 keeps all
   gate_mode: hard          # hard: promote refuses an unevaluated/failing run; soft: warns
+  pipelines: {...}         # named pipelines -- see Pipelines
+  regimes: {...}           # named regimes -- see Regimes
+  cycle: {...}             # the unattended loop -- see The cycle
 ```
 
 `apogee check` reports the environment and its sets, every seeded script
@@ -73,7 +81,10 @@ against the shipped copy (an edit is kept and shown; a missing file is
 repaired by `--fix`), the vendored converter tree as one row, the trainer
 this host would use and whether its set is installed, the `convert` set,
 every installed kit, every version ledger's consistency (the active
-version's GGUF exists and the backend points at it), and `paths.hf_dir`
+version's GGUF exists and the backend points at it), every named
+pipeline's student and datasets, the cycle's configuration (the pipeline
+and backend it names must exist; a non-`llamacpp` backend fails), a halted
+cycle with `apogee train cycle resume` as the remedy, and `paths.hf_dir`
 when set.
 
 ### The script protocol
@@ -389,6 +400,200 @@ apogee train status                  # the runs (newest first, running ones coun
 one (not "active minus one": numbers have gaps after a prune) and **deletes
 nothing**; a pruned target, or one whose file is gone, is refused by name.
 The filesystem is the source of truth for all three: nothing is cached.
+`status` also rolls up the cycle (idle, running now, or halted with the
+reason; the anchor) and the pipelines (the running one, else the latest).
+
+## Pipelines
+
+```bash
+apogee train pipeline run --pipeline <spec.yaml|name> [--continue-on-fail] [--judge <backend>] [--trainer …]
+apogee train pipeline resume <pipeline-id> [--pipeline <spec>] [--continue-on-fail] [--judge …]
+apogee train pipeline status [<pipeline-id>]
+```
+
+A pipeline teaches several skills **in sequence without forgetting**. Its
+spec -- a YAML file, or a `training.pipelines:` entry, read by the same
+parser -- names the student snapshot and ordered stages:
+
+```yaml
+name: skills
+student: Qwen--Qwen2.5-0.5B             # as `train run` names one
+stages:
+  - name: instructions
+    dataset: instructions               # a dataset name, or a .jsonl path
+    eval_suite: instruction-following   # a kit's inline suite, a suites/ name, a prepared .eval, or a path
+    iters: 500
+  - name: reasoning
+    dataset: maths
+    eval_suite: reasoning
+    iters: 500
+    rehearsal_fraction: 0.1             # mix a tenth of each prior dataset into this stage
+```
+
+Each stage is a **fresh LoRA on top of the previous stage's fused
+weights**: stage 0 trains from the snapshot; every intermediate stage that
+ran is fused into a concrete SafeTensors checkpoint
+(`runs/<id>-s<N>/fused/`) the next stage trains from -- never a stack of
+raw adapters -- and **the final stage is left unfused** for `train promote`.
+A stage's fields are `train run`'s (`method`, `iters`, `batch_size`,
+`num_layers`, `grad_checkpoint`, `mask_prompt`); `rehearsal_fraction`
+mixes a deterministic sample of each prior stage's dataset into the stage's
+own (the mix is written beside the run as `rehearsal.jsonl`, and the
+stage's manifest records it as what trained).
+
+**The cumulative gate is the contract.** Stage N is evaluated on the union
+of suites 0..N at 100%, so a stage that improves its own task but regresses
+an earlier one fails. Under the default hard gate the run stops there --
+`aborted`, the stage `failed`, the later ones `pending` -- and the fix is
+`pipeline resume`, which continues from the first stage that has not
+passed, the passed ones untouched. `--continue-on-fail` (or `training.gate_mode:
+soft`) goes on instead, the failed stage still fused for the next; the
+summary shows the mixed statuses. A resume refuses a complete run, and a
+spec whose stage count changed (the passed stages did so under a different
+plan). Ctrl-C leaves the run `aborted` and resumable.
+
+Every stage is an ordinary run `<pipeline-id>-s<N>` under `training/runs/`
+carrying `parent_run` and `pipeline_run_id`, so `train eval` (which finds
+the cumulative results already recorded) and `train promote` take one
+directly; the pipeline's own manifest under `training/pipelines/<id>/` is
+rewritten on every transition (`pending` → `training` → `evaluating` →
+`fusing` → `passed` | `failed`; the run `running` → `complete` | `aborted`
+| `failed`). `pipeline status <id>` prints the table with the promote
+command for the last passing stage; without an id it lists the runs.
+
+## Regimes
+
+```bash
+apogee train regime run [<name>] [--teacher <backend>] [--student <snapshot>] [--kit <name> …] [--all-kits]
+                        [--as <backend>] [--count N] [--iters N] [--temperature T] [--max-tokens 4096]
+                        [--judge <backend>] [--no-promote] [--trainer …] [--regime <spec.yaml>]
+```
+
+The distillation workflow in one command. For each kit, in order, the
+**teacher** synthesises a dataset through the same core `datasets synth`
+uses (parallel batches for an API teacher, retries with backoff) into
+`training/regime/<id>/<kit>.jsonl`, and the kit's inline eval is
+materialised beside it; the kits then become **one eval-gated pipeline**
+over the student -- a stage per kit with the kit's `train:` block as its
+defaults (`--iters` overrides every kit's), the cumulative gate across
+skills -- and the last passing stage is promoted as `--as` unless
+`--no-promote`. A regime is ad hoc from flags, a `training.regimes:` entry
+by name, or a spec file, and **flags always win** over a loaded spec:
+
+```yaml
+training:
+  regimes:
+    everything:
+      teacher: paid
+      student: Qwen--Qwen2.5-0.5B
+      kits: [instruction-following, reasoning]   # ordered; each becomes one stage
+      count: 200            # examples per kit; unset = each kit's synth.count
+      promote_as: qwen-tuned
+      iters: 500            # per stage; unset = each kit's train.iters
+      temperature: 0.8      # the teacher's; unset = each kit's
+```
+
+`--all-kits` runs every installed kit alphabetically; an explicit `--kit`
+list wins, so the order can be curated. The teacher is named explicitly
+(the spend rule) and is never a vendor CLI. Every refusal -- the teacher,
+the student, the kits, the judge, the trainer, and for a promotion its
+converter -- comes before the first teacher call, and a regime that stops
+keeps its synthesised data and suites under its work directory.
+
+## The cycle
+
+```bash
+apogee train cycle run [--source <dir>]   # one gated pass, for launchd or cron
+apogee train cycle status                 # the history and the anchor
+apogee train cycle halt                   # every `cycle run` refuses until resume
+apogee train cycle resume                 # clear a halt (manual or the breaker) and the failure count
+```
+
+Unattended, scheduler-invoked training: one invocation is **one gated
+pass**, and there is no daemon and no `--watch` -- schedule it with
+launchd or cron. Configure it under `training.cycle:`:
+
+```yaml
+training:
+  cycle:
+    pipeline: skills              # a training.pipelines: name, or a spec file
+    backend: qwen-nightly         # where a passing cycle promotes
+    regression_threshold: 0.0     # tolerated drop against the last pass and the anchor
+    circuit_breaker_k: 3          # consecutive failures that halt the loop; 0 disables
+    sources:
+      - type: directory           # *.jsonl in training/cycle/queue/ (or `dir:`)
+      - type: sessions            # your own chats
+        log_consent: true         # REQUIRED for this source
+        backend: qwen-nightly     # only chats on this backend (optional)
+        since: 2026-09-01         # only chats from this date (optional)
+```
+
+One pass: the **lock** (`cycle/cycle.lock`, created exclusively; a second
+scheduler firing at once is refused naming it), the **circuit breaker**
+(halted, or `consecutive_fails ≥ circuit_breaker_k`, refused naming
+`cycle resume`), then the sources -- a `directory` queue of `*.jsonl`
+(`--source <dir>` replaces the first one for this run), and `sessions`,
+your persisted chats, mined one completed exchange at a time exactly as
+`datasets create --from sessions` does, **only with `log_consent: true`**
+(a source without it fails the config load, naming the two risks: the
+sessions are your own data, and a model trained on its own answers
+reinforces its mistakes) and **only sessions newer than the watermark** the
+last cycle recorded, so a conversation is never trained on twice. No data
+records `skipped`, counting no failure. Otherwise the sources are merged
+into `cycle/work/merged.jsonl` and the named pipeline runs with **every
+stage's dataset replaced by the merged file and its own suite kept**, then
+the **anchor-baseline dual gate**: the **final** stage's cumulative score
+must not regress beyond `regression_threshold` against the last passing
+cycle **and** against the pinned anchor -- set automatically on the first
+passing cycle, or `anchor_version` -- because per-cycle no-regression alone
+lets tiny regressions accumulate into drift. Under the default hard gate
+every stage of a complete pipeline scored 100%, so the dual gate is a
+formality there; it is under `training.gate_mode: soft`, where the
+per-stage gate is advisory and a stage may complete below 100%, that the
+dual gate is the one holding the line. (The reference implementation read
+the score from the last *passed* stage -- 100% by the gate's own
+definition -- so its anchor gate could never fail.) **Pass** promotes into
+`training.cycle.backend` through the same path `train promote` takes (its
+own gate runs again), moves the consumed queue files to `consumed/`,
+advances the sessions watermark and resets the failure count; **fail**
+discards the candidate -- **nothing reaches inference** -- counts toward
+the breaker, and at `k` halts the loop with the reason in the record. The
+history is `cycle/history.json`, written atomically at every outcome, and
+`cycle halt` / `cycle resume` are the two edits to it (the reference
+implementation had you edit the file by hand). A failed or refused pass
+exits non-zero, so a scheduler's log shows it.
+
+Schedule it with launchd:
+
+```xml
+<!-- ~/Library/LaunchAgents/com.apogee.cycle.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key> <string>com.apogee.cycle</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/apogee</string>
+    <string>train</string> <string>cycle</string> <string>run</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict> <key>Hour</key> <integer>3</integer> <key>Minute</key> <integer>0</integer> </dict>
+  <key>StandardOutPath</key> <string>/tmp/apogee-cycle.log</string>
+  <key>StandardErrorPath</key> <string>/tmp/apogee-cycle.log</string>
+</dict>
+</plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.apogee.cycle.plist
+```
+
+or with cron:
+
+```
+0 3 * * * /usr/local/bin/apogee train cycle run >> /tmp/apogee-cycle.log 2>&1
+```
 
 ## Over HTTP
 
@@ -399,9 +604,11 @@ job -- see [http-api.md](http-api.md). Synth is teacher inference, not
 training, which is why it is exposed.
 
 **Training itself is read-only over HTTP**: `GET /v1/admin/training/status`,
-`/runs`, `/runs/{id}` and `/versions` under the admin bearer serve the
-manifests and the ledgers the CLI writes. `train run|eval|promote|rollback|
-setup` have no route, forever -- an expensive GPU job with live progress is
-not a control surface a remote client should be able to start, and a
-promotion changes what the server chats with. Each is a documented parity
-carve-out.
+`/runs` (runs and pipeline runs, `?kind=` to keep one), `/runs/{id}`,
+`/versions` and `/cycle` under the admin bearer serve the manifests, the
+ledgers and the cycle history the CLI writes. `train run|eval|promote|
+rollback|setup`, `pipeline run|resume`, `regime run` and `cycle
+run|halt|resume` have no route, forever -- an expensive GPU job with live
+progress is not a control surface a remote client should be able to start,
+and a promotion changes what the server chats with. Each is a documented
+parity carve-out.

@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -601,4 +602,475 @@ TEST_CASE(
     CHECK(read_file(fixture.base.config_path) == before);
     CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
     CHECK_FALSE(std::filesystem::exists(fixture.training / "runs" / id / "fused"));
+}
+
+// ---------------------------------------------------------------------------
+// The pipelines item: `train pipeline run|resume|status`, `train regime run`
+// and `train cycle run|status|halt|resume` on the mock trainer, the mock
+// backend as teacher and judge, through the real command tree.
+// ---------------------------------------------------------------------------
+
+#include "logger/session.h"
+#include "training/cycle.h"
+#include "training/pipeline.h"
+
+namespace {
+
+constexpr std::string_view kKitTemplate =
+    "name: {name}\ndescription: a test kit\nsynth:\n  system: |\n    Make examples.\n  seeds:\n"
+    "    - greetings\n  count: 4\n  per_seed: 2\ntrain:\n  iters: 2\neval:\n  - prompt: please "
+    "say hello\n    expected: hello\n";
+
+std::string kit_text(const std::string& name) {
+    std::string text{kKitTemplate};
+    text.replace(text.find("{name}"), 6, name);
+    return text;
+}
+
+/// The run fixture plus a mock teacher scripted to answer a JSON array of
+/// examples, two custom kits whose suites the mock's echo passes, and the
+/// suites and datasets the pipeline cases use. `{home}` in the extra
+/// config is the fixture's home.
+struct PipelineFixture {
+    RunFixture base;
+    std::filesystem::path home = base.home;
+    std::filesystem::path training = base.training;
+
+    explicit PipelineFixture(std::string extra_config = {}) {
+        std::string config = read_file(base.base.config_path);
+        config.insert(config.find("  vendor:\n"), "  teacher:\n    type: mock\n    model_path: " +
+                                                      (home / "teacher.json").string() + "\n");
+        for (std::size_t at = extra_config.find("{home}"); at != std::string::npos;
+             at = extra_config.find("{home}")) {
+            extra_config.replace(at, 6, home.string());
+        }
+        write_file(base.base.config_path, config + extra_config);
+        write_file(
+            home / "teacher.json",
+            nlohmann::json{{"turns", nlohmann::json::array(
+                                         {{{"text",
+                                            "[{\"prompt\": \"say hello\", \"completion\": "
+                                            "\"hello\"}, {\"prompt\": \"say hi\", \"completion\": "
+                                            "\"hi\"}]"}}})}}
+                .dump());
+        write_file(training / "kits" / "alpha.yaml", kit_text("alpha"));
+        write_file(training / "kits" / "beta.yaml", kit_text("beta"));
+        write_file(training / "suites" / "hello.jsonl",
+                   "{\"prompt\": \"say hello\", \"expected\": \"hello\"}\n");
+        write_file(training / "suites" / "nope.jsonl",
+                   "{\"prompt\": \"say nope\", \"expected\": \"nope\"}\n");
+        write_file(training / "datasets" / "regress.jsonl", "{\"mock\": {\"answer\": \"nope\"}}\n");
+    }
+
+    int run(const std::vector<std::string>& args, std::string* out = nullptr,
+            std::string* err = nullptr) const {
+        return base.run(args, out, err);
+    }
+
+    [[nodiscard]] std::string spec_file(std::string_view second_dataset) const {
+        const std::filesystem::path path = home / "pipe.yaml";
+        write_file(path,
+                   "name: two\nstudent: tiny\nstages:\n  - name: a\n    dataset: starter\n"
+                   "    eval_suite: hello\n    iters: 2\n  - name: b\n    dataset: " +
+                       std::string{second_dataset} + "\n    eval_suite: nope\n    iters: 2\n");
+        return path.string();
+    }
+
+    [[nodiscard]] std::vector<apogee::training::PipelineSummary> pipelines() const {
+        return apogee::training::TrainingStore{training}.list_pipelines();
+    }
+
+    [[nodiscard]] apogee::training::PipelineRunManifest pipeline(const std::string& id) const {
+        const auto m = apogee::training::TrainingStore{training}.get_pipeline(id);
+        REQUIRE(m.has_value());
+        return *m;
+    }
+
+    /// The one pipeline run that was not there before -- two runs in one
+    /// second share a start time, so "newest" is by exclusion.
+    [[nodiscard]] std::string pipeline_since(
+        const std::vector<apogee::training::PipelineSummary>& before) const {
+        for (const apogee::training::PipelineSummary& candidate : pipelines()) {
+            bool seen = false;
+            for (const apogee::training::PipelineSummary& old : before) {
+                seen = seen || old.id == candidate.id;
+            }
+            if (!seen) {
+                return candidate.id;
+            }
+        }
+        FAIL("no new pipeline run");
+        return {};
+    }
+
+    void save_session(std::string started_at,
+                      std::vector<apogee::harness::ChatMessage> messages) const {
+        apogee::logger::Session session;
+        session.chat_id = apogee::logger::new_chat_id();
+        session.backend = "judge";
+        session.started_at = std::move(started_at);
+        session.messages = std::move(messages);
+        apogee::logger::save(session);
+    }
+};
+
+}  // namespace
+
+TEST_CASE(
+    "train pipeline run chains fused checkpoints under the cumulative gate, aborts on a "
+    "regression, resumes after the fix, prints status, and promotes a stage run; refusals",
+    "[commands][train][pipeline]") {
+    const PipelineFixture fixture;
+    std::string out;
+    std::string err;
+    const std::string spec = fixture.spec_file("regress");
+    CHECK(fixture.run({"train", "pipeline", "run", "--pipeline", spec, "--trainer", "mock"}, &out,
+                      &err) == 2);
+    CHECK(err.find("cumulative eval gate") != std::string::npos);
+    CHECK(err.find("[pipeline] two as pipe-") != std::string::npos);
+    CHECK(out.find("pipeline aborted") != std::string::npos);
+    REQUIRE(fixture.pipelines().size() == 1);
+    const std::string id = fixture.pipelines().front().id;
+    CHECK(id.starts_with("pipe-"));
+    apogee::training::PipelineRunManifest m = fixture.pipeline(id);
+    CHECK(m.status == "aborted");
+    CHECK(m.stages[0].status == "passed");
+    CHECK(m.stages[1].status == "failed");
+    CHECK(std::filesystem::exists(fixture.training / "runs" / (id + "-s0") / "fused"));
+    CHECK(fixture.base.manifest(id + "-s1").pipeline_run_id == id);
+    CHECK(fixture.base.manifest(id + "-s1").parent_run == id + "-s0");
+
+    REQUIRE(fixture.run({"train", "pipeline", "status", id}, &out, &err) == 0);
+    CHECK(out.find("status:  aborted") != std::string::npos);
+    CHECK(out.find("Resume from stage 2") != std::string::npos);
+    CHECK(out.find("apogee train promote " + id + "-s0") != std::string::npos);
+    REQUIRE(fixture.run({"train", "pipeline", "status"}, &out, &err) == 0);
+    CHECK(out.find(id) != std::string::npos);
+    CHECK(out.find("1/2") != std::string::npos);
+    REQUIRE(fixture.run({"train", "status"}, &out, &err) == 0);
+    CHECK(out.find("Pipeline: none in progress; 1 run(s), latest " + id + " aborted") !=
+          std::string::npos);
+    CHECK(out.find("Cycle: not configured") != std::string::npos);
+
+    // Fixed, resumed: only stage b runs, the run completes, the stage run
+    // is an ordinary run that eval and promote take.
+    write_file(fixture.training / "datasets" / "regress.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    const std::string s0_started = fixture.base.manifest(id + "-s0").started_at;
+    REQUIRE(
+        fixture.run({"train", "pipeline", "resume", id, "--pipeline", spec, "--trainer", "mock"},
+                    &out, &err) == 0);
+    CHECK(out.find("pipeline complete") != std::string::npos);
+    CHECK(out.find("apogee train promote " + id + "-s1") != std::string::npos);
+    CHECK(err.find("[pipeline] resuming") != std::string::npos);
+    m = fixture.pipeline(id);
+    CHECK(m.complete());
+    CHECK(m.stages[1].status == "passed");
+    CHECK(fixture.base.manifest(id + "-s0").started_at == s0_started);
+    REQUIRE(fixture.run({"train", "eval", id + "-s1", "--suite", "hello"}, &out, &err) == 0);
+    CHECK(out.find("already ran") != std::string::npos);
+    REQUIRE(fixture.run({"train", "promote", id + "-s1", "--as", "staged"}, &out, &err) == 0);
+    CHECK(std::filesystem::exists(fixture.training / "versions" / "staged" / "v1.gguf"));
+    CHECK(fixture.run({"train", "pipeline", "resume", id, "--pipeline", spec}, &out, &err) == 1);
+    CHECK(err.find("already complete") != std::string::npos);
+
+    // A named pipeline from the config; resume finds the spec by name.
+    write_file(fixture.base.base.config_path,
+               read_file(fixture.base.base.config_path) +
+                   "training:\n  trainer: mock\n  pipelines:\n    named:\n      student: tiny\n"
+                   "      stages:\n        - name: only\n          dataset: starter\n"
+                   "          eval_suite: hello\n          iters: 1\n");
+    REQUIRE(fixture.run({"train", "pipeline", "run", "--pipeline", "named"}, &out, &err) == 0);
+    CHECK(fixture.pipelines().size() == 2);
+    const std::string named = fixture.pipelines().front().id;
+    CHECK(fixture.pipeline(named).spec_name == "named");
+    CHECK(fixture.run({"train", "pipeline", "resume", named}, &out, &err) == 1);
+    CHECK(err.find("already complete") != std::string::npos);
+
+    // Refusals, each before a run directory exists.
+    const std::size_t before = fixture.pipelines().size();
+    CHECK(fixture.run({"train", "pipeline", "run", "--pipeline", "nowhere"}, &out, &err) == 1);
+    CHECK(err.find("no pipeline 'nowhere'") != std::string::npos);
+    CHECK(fixture.run({"train", "pipeline", "run", "--pipeline", "nowhere.yaml"}, &out, &err) == 1);
+    CHECK(err.find("no pipeline spec file") != std::string::npos);
+    const std::string missing = fixture.spec_file("missing");
+    CHECK(fixture.run({"train", "pipeline", "run", "--pipeline", missing}, &out, &err) == 1);
+    CHECK(err.find("stage 'b'") != std::string::npos);
+    CHECK(err.find("no dataset named 'missing'") != std::string::npos);
+    write_file(fixture.home / "bad.yaml", "student: tiny\nstages: []\n");
+    CHECK(fixture.run(
+              {"train", "pipeline", "run", "--pipeline", (fixture.home / "bad.yaml").string()},
+              &out, &err) == 1);
+    CHECK(err.find("at least one stage") != std::string::npos);
+    write_file(fixture.home / "nostudent.yaml",
+               "stages:\n  - name: a\n    dataset: starter\n    eval_suite: hello\n");
+    CHECK(fixture.run({"train", "pipeline", "run", "--pipeline",
+                       (fixture.home / "nostudent.yaml").string()},
+                      &out, &err) == 1);
+    CHECK(err.find("names no student") != std::string::npos);
+    CHECK(fixture.run({"train", "pipeline", "resume", "nope"}, &out, &err) == 1);
+    CHECK(err.find("no pipeline run 'nope'") != std::string::npos);
+    CHECK(fixture.run({"train", "pipeline", "resume", "../x"}, &out, &err) == 1);
+    CHECK(fixture.run({"train", "pipeline", "status", "nope"}, &out, &err) == 1);
+    CHECK(fixture.pipelines().size() == before);
+
+    // Judge items through a named judge; a lost verdict aborts.
+    write_file(fixture.training / "suites" / "free.jsonl", "{\"prompt\": \"free\"}\n");
+    write_file(fixture.home / "judged.yaml",
+               "student: tiny\nstages:\n  - name: a\n    dataset: starter\n    eval_suite: "
+               "free\n    iters: 1\n");
+    REQUIRE(fixture.run({"train", "pipeline", "run", "--pipeline",
+                         (fixture.home / "judged.yaml").string(), "--judge", "judge"},
+                        &out, &err) == 0);
+    CHECK(fixture.pipeline(fixture.pipelines().front().id).stages[0].eval->judge_backend ==
+          "judge");
+    CHECK(fixture.run({"train", "pipeline", "run", "--pipeline",
+                       (fixture.home / "judged.yaml").string(), "--judge", "vendor"},
+                      &out, &err) == 1);
+    CHECK(err.find("vendor-CLI") != std::string::npos);
+}
+
+TEST_CASE(
+    "train regime run distils through the teacher over the kits in order, promotes with --as "
+    "and stops with --no-promote; flags win over a named regime; every refusal comes first",
+    "[commands][train][regime]") {
+    const PipelineFixture fixture;
+    std::string out;
+    std::string err;
+    REQUIRE(
+        fixture.run({"train", "regime", "run", "--teacher", "teacher", "--student", "tiny", "--kit",
+                     "beta", "--kit", "alpha", "--count", "2", "--trainer", "mock", "--no-promote"},
+                    &out, &err) == 0);
+    CHECK(err.find("[regime] regime as regime-") != std::string::npos);
+    CHECK(err.find("kits beta -> alpha") != std::string::npos);
+    CHECK(out.find("kit beta: 2 example(s) in 1 call(s)") != std::string::npos);
+    CHECK(out.find("pipeline complete") != std::string::npos);
+    CHECK(out.find("Regime complete. Promote when ready") != std::string::npos);
+    REQUIRE(fixture.pipelines().size() == 1);
+    const std::string pipe = fixture.pipelines().front().id;
+    CHECK(pipe.starts_with("regime-"));
+    CHECK(pipe.ends_with("-pipe"));
+    const apogee::training::PipelineRunManifest m = fixture.pipeline(pipe);
+    CHECK(m.stages[0].name == "beta");
+    CHECK(m.stages[1].name == "alpha");
+    CHECK(m.complete());
+    const std::filesystem::path work =
+        fixture.training / "regime" / pipe.substr(0, pipe.size() - 5);
+    CHECK(std::filesystem::exists(work / "beta.jsonl"));
+    CHECK(std::filesystem::exists(work / "beta.eval.jsonl"));
+    CHECK(std::filesystem::exists(work / "alpha.jsonl"));
+    CHECK(fixture.base.manifest(pipe + "-s0").iters == 2);  // the kit's train.iters
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
+    // --no-promote wins over --as: the pipeline runs, nothing is promoted.
+    REQUIRE(
+        fixture.run({"train", "regime", "run", "--teacher", "teacher", "--student", "tiny", "--kit",
+                     "alpha", "--count", "2", "--trainer", "mock", "--as", "held", "--no-promote"},
+                    &out, &err) == 0);
+    CHECK(out.find("Promote when ready") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
+
+    // Promoted as a new backend, the ledger and the config written.
+    std::vector<apogee::training::PipelineSummary> seen = fixture.pipelines();
+    REQUIRE(
+        fixture.run({"train", "regime", "run", "--teacher", "teacher", "--student", "tiny", "--kit",
+                     "alpha", "--count", "2", "--trainer", "mock", "--as", "tuned", "--iters", "1"},
+                    &out, &err) == 0);
+    CHECK(out.find("regime regime complete -- tuned is now v1") != std::string::npos);
+    CHECK(std::filesystem::exists(fixture.training / "versions" / "tuned" / "v1.gguf"));
+    CHECK(read_file(fixture.base.base.config_path).find("  tuned:\n    type: llamacpp\n") !=
+          std::string::npos);
+    CHECK(fixture.base.manifest(fixture.pipeline_since(seen) + "-s0").iters == 1);
+
+    // A named regime, the flags winning field by field.
+    write_file(fixture.base.base.config_path,
+               read_file(fixture.base.base.config_path) +
+                   "training:\n  trainer: mock\n  regimes:\n    mine:\n      teacher: teacher\n"
+                   "      student: tiny\n      kits: [alpha, beta]\n      count: 2\n");
+    seen = fixture.pipelines();
+    REQUIRE(fixture.run({"train", "regime", "run", "mine", "--kit", "beta", "--no-promote"}, &out,
+                        &err) == 0);
+    CHECK(err.find("[regime] mine as") != std::string::npos);
+    const std::string named = fixture.pipeline_since(seen);
+    CHECK(fixture.pipeline(named).stages.size() == 1);
+    CHECK(fixture.pipeline(named).stages[0].name == "beta");
+    write_file(fixture.home / "spec.yaml",
+               "teacher: teacher\nstudent: tiny\nkits: [alpha]\ncount: 2\n");
+    REQUIRE(fixture.run({"train", "regime", "run", "--regime",
+                         (fixture.home / "spec.yaml").string(), "--no-promote"},
+                        &out, &err) == 0);
+    CHECK(err.find("[regime] spec as") != std::string::npos);
+
+    // The refusals, before any teacher call or work directory.
+    const std::size_t before = fixture.pipelines().size();
+    CHECK(fixture.run({"train", "regime", "run", "--student", "tiny", "--kit", "alpha"}, &out,
+                      &err) == 1);
+    CHECK(err.find("no teacher") != std::string::npos);
+    CHECK(fixture.run({"train", "regime", "run", "--teacher", "vendor", "--student", "tiny",
+                       "--kit", "alpha"},
+                      &out, &err) == 1);
+    CHECK(err.find("vendor-CLI") != std::string::npos);
+    CHECK(fixture.run({"train", "regime", "run", "--teacher", "teacher", "--kit", "alpha"}, &out,
+                      &err) == 1);
+    CHECK(err.find("no student") != std::string::npos);
+    CHECK(fixture.run({"train", "regime", "run", "--teacher", "teacher", "--student", "nope",
+                       "--kit", "alpha"},
+                      &out, &err) == 1);
+    CHECK(err.find("student:") != std::string::npos);
+    CHECK(fixture.run({"train", "regime", "run", "--teacher", "teacher", "--student", "tiny"}, &out,
+                      &err) == 1);
+    CHECK(err.find("no kits") != std::string::npos);
+    CHECK(fixture.run({"train", "regime", "run", "--teacher", "teacher", "--student", "tiny",
+                       "--kit", "nope"},
+                      &out, &err) == 1);
+    CHECK(err.find("kit 'nope'") != std::string::npos);
+    CHECK(fixture.run({"train", "regime", "run", "nowhere"}, &out, &err) == 1);
+    CHECK(err.find("no regime 'nowhere'") != std::string::npos);
+    CHECK(fixture.run({"train", "regime", "run", "--regime", "nowhere.yaml"}, &out, &err) == 1);
+    CHECK(fixture.run({"train", "regime", "run", "--teacher", "teacher", "--student", "tiny",
+                       "--kit", "alpha", "--as", "judge"},
+                      &out, &err) == 1);
+    CHECK(err.find("is a mock backend") != std::string::npos);
+    CHECK(fixture.run({"train", "regime", "run", "--teacher", "teacher", "--student", "tiny",
+                       "--kit", "alpha", "--max-tokens", "0"},
+                      &out, &err) == 1);
+    CHECK(fixture.pipelines().size() == before);
+}
+
+TEST_CASE(
+    "train cycle run: a pass promotes and sets the anchor, no data skips, a regression fails "
+    "and trips the breaker, halted refuses until resume; status, halt, --source; the sessions "
+    "source needs consent and is consumed once",
+    "[commands][train][cycle]") {
+    const std::string cycle_block =
+        "training:\n  trainer: mock\n  pipelines:\n    nightly:\n      student: tiny\n"
+        "      stages:\n        - name: base\n          dataset: starter\n"
+        "          eval_suite: hello\n          iters: 2\n  cycle:\n    pipeline: nightly\n"
+        "    backend: nightly-model\n    circuit_breaker_k: 1\n    sources:\n"
+        "      - type: directory\n        dir: {home}/queue\n";
+    const PipelineFixture fixture{cycle_block};
+    const std::filesystem::path queue = fixture.home / "queue";
+    const std::filesystem::path cycle_dir = fixture.training / "cycle";
+    std::string out;
+    std::string err;
+
+    REQUIRE(fixture.run({"train", "cycle", "status"}, &out, &err) == 0);
+    CHECK(out.find("no cycle runs yet") != std::string::npos);
+    REQUIRE(fixture.run({"train", "status"}, &out, &err) == 0);
+    CHECK(out.find("Cycle: configured (pipeline 'nightly' -> nightly-model), no runs yet") !=
+          std::string::npos);
+
+    REQUIRE(fixture.run({"train", "cycle", "run"}, &out, &err) == 0);
+    CHECK(out.find("cycle skipped") != std::string::npos);
+    CHECK(std::filesystem::is_directory(queue));
+    CHECK_FALSE(std::filesystem::exists(cycle_dir / "cycle.lock"));
+
+    write_file(queue / "day1.jsonl", read_file(fixture.training / "datasets" / "starter.jsonl"));
+    const std::string before = read_file(fixture.base.base.config_path);
+    REQUIRE(fixture.run({"train", "cycle", "run"}, &out, &err) == 0);
+    CHECK(out.find("cycle PASSED -- nightly-model promoted to v1") != std::string::npos);
+    CHECK(err.find("[cycle] anchor set to v1") != std::string::npos);
+    // The entry landed in the backends section through the one editor, and
+    // not a line of the config was removed.
+    const std::string after = read_file(fixture.base.base.config_path);
+    CHECK(after.find("  nightly-model:\n    type: llamacpp\n    model_path: " +
+                     (fixture.training / "versions" / "nightly-model" / "v1.gguf").string() +
+                     "\n") != std::string::npos);
+    CHECK(after.find("  nightly-model:") < after.find("training:"));
+    std::size_t cursor = 0;
+    std::istringstream lines{before};
+    for (std::string line; std::getline(lines, line);) {
+        cursor = after.find(line + "\n", cursor);
+        REQUIRE(cursor != std::string::npos);
+        cursor += line.size() + 1;
+    }
+    CHECK(std::filesystem::exists(queue / "consumed" / "day1.jsonl"));
+    CHECK_FALSE(std::filesystem::exists(queue / "day1.jsonl"));
+    std::string error;
+    apogee::training::CycleHistory history =
+        apogee::training::load_history(cycle_dir, "nightly-model", error);
+    CHECK(history.anchor_version == 1);
+    CHECK(history.total_runs == 2);
+    REQUIRE(fixture.pipelines().size() == 1);
+    CHECK(fixture.pipelines().front().id.starts_with("cycle-"));
+
+    REQUIRE(fixture.run({"train", "cycle", "status"}, &out, &err) == 0);
+    CHECK(out.find("anchor:            v1 (100%)") != std::string::npos);
+    CHECK(out.find("skipped") != std::string::npos);
+    CHECK(out.find("pass") != std::string::npos);
+    CHECK(out.find("state:             idle") != std::string::npos);
+    REQUIRE(fixture.run({"train", "status"}, &out, &err) == 0);
+    CHECK(out.find("Cycle: idle; backend nightly-model; 2 run(s), 0 consecutive failure(s); "
+                   "anchor v1 (100%)") != std::string::npos);
+
+    // A regression: the pipeline aborts, the cycle fails, the breaker at 1
+    // halts, nothing reached inference, the file stays queued.
+    write_file(queue / "day2.jsonl", "{\"mock\": {\"answer\": \"nope\"}}\n");
+    const std::string at_v1 = read_file(fixture.base.base.config_path);
+    CHECK(fixture.run({"train", "cycle", "run"}, &out, &err) == 2);
+    CHECK(out.find("cycle FAILED") != std::string::npos);
+    CHECK(out.find("nothing reached inference") != std::string::npos);
+    CHECK(out.find("the loop is halted") != std::string::npos);
+    CHECK(read_file(fixture.base.base.config_path) == at_v1);
+    CHECK(std::filesystem::exists(queue / "day2.jsonl"));
+    CHECK(fixture.run({"train", "cycle", "run"}, &out, &err) == 1);
+    CHECK(err.find("halted") != std::string::npos);
+    CHECK(err.find("apogee train cycle resume") != std::string::npos);
+    REQUIRE(fixture.run({"train", "status"}, &out, &err) == 0);
+    CHECK(out.find("Cycle: HALTED -- circuit breaker") != std::string::npos);
+    REQUIRE(fixture.run({"train", "cycle", "resume"}, &out, &err) == 0);
+    CHECK(out.find("cycle resumed") != std::string::npos);
+    history = apogee::training::load_history(cycle_dir, "nightly-model", error);
+    CHECK_FALSE(history.halted);
+    CHECK(history.consecutive_fails == 0);
+    REQUIRE(fixture.run({"train", "cycle", "halt"}, &out, &err) == 0);
+    CHECK(out.find("cycle halted") != std::string::npos);
+    REQUIRE(fixture.run({"train", "cycle", "halt"}, &out, &err) == 0);
+    CHECK(out.find("already halted") != std::string::npos);
+    CHECK(fixture.run({"train", "cycle", "run"}, &out, &err) == 1);
+    REQUIRE(fixture.run({"train", "cycle", "resume"}, &out, &err) == 0);
+    REQUIRE(fixture.run({"train", "cycle", "resume"}, &out, &err) == 0);
+    CHECK(out.find("was not halted") != std::string::npos);
+
+    // --source replaces the queue for one run; the pass repoints v1 -> v2.
+    std::filesystem::remove(queue / "day2.jsonl");
+    write_file(fixture.home / "elsewhere" / "x.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    REQUIRE(
+        fixture.run({"train", "cycle", "run", "--source", (fixture.home / "elsewhere").string()},
+                    &out, &err) == 0);
+    CHECK(out.find("promoted to v2") != std::string::npos);
+    CHECK(std::filesystem::exists(fixture.home / "elsewhere" / "consumed" / "x.jsonl"));
+    CHECK(apogee::training::load_history(cycle_dir, "nightly-model", error).anchor_version == 1);
+
+    // Unconfigured: refused naming the keys.
+    const RunFixture bare;
+    CHECK(bare.run({"train", "cycle", "run"}, &out, &err) == 1);
+    CHECK(err.find("training.cycle is not configured") != std::string::npos);
+    CHECK(bare.run({"train", "cycle", "resume"}, &out, &err) == 0);
+    CHECK(out.find("nothing to resume") != std::string::npos);
+
+    // Sessions: refused at load without consent; with it, consumed once.
+    const std::string sessions_block =
+        "training:\n  trainer: mock\n  pipelines:\n    nightly:\n      student: tiny\n"
+        "      stages:\n        - name: base\n          dataset: starter\n"
+        "          eval_suite: hello\n          iters: 2\n  cycle:\n    pipeline: nightly\n"
+        "    backend: nightly-model\n    sources:\n      - type: sessions\n";
+    const PipelineFixture refused{sessions_block};
+    CHECK(refused.run({"train", "cycle", "run"}, &out, &err) == 1);
+    CHECK(err.find("log_consent: true") != std::string::npos);
+    const PipelineFixture consented{sessions_block + "        log_consent: true\n"};
+    consented.save_session("2026-09-18T10:00:00Z",
+                           {apogee::harness::ChatMessage::user("say hello"),
+                            apogee::harness::ChatMessage::assistant("hello")});
+    consented.save_session("2026-09-19T10:00:00Z", {apogee::harness::ChatMessage::user("q"),
+                                                    apogee::harness::ChatMessage::assistant("a")});
+    REQUIRE(consented.run({"train", "cycle", "run"}, &out, &err) == 0);
+    CHECK(out.find("cycle PASSED") != std::string::npos);
+    CHECK(err.find("[cycle] sessions: 2 exchange(s) from 2 session(s)") != std::string::npos);
+    history = apogee::training::load_history(consented.training / "cycle", "nightly-model", error);
+    CHECK(history.sessions_until == "2026-09-19T10:00:00Z");
+    REQUIRE(consented.run({"train", "cycle", "run"}, &out, &err) == 0);
+    CHECK(out.find("cycle skipped") != std::string::npos);
+    REQUIRE(consented.run({"train", "cycle", "status"}, &out, &err) == 0);
+    CHECK(out.find("sessions consumed: through 2026-09-19T10:00:00Z") != std::string::npos);
 }

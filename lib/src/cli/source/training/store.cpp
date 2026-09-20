@@ -179,6 +179,36 @@ nlohmann::json run_summary_json(const RunSummary& summary) {
     return out;
 }
 
+PipelineSummary summarize(const PipelineRunManifest& manifest) {
+    PipelineSummary summary;
+    summary.id = manifest.pipeline_run_id;
+    summary.spec_name = manifest.spec_name;
+    summary.status = manifest.status;
+    summary.stages = static_cast<int>(manifest.stages.size());
+    for (const PipelineStageRecord& stage : manifest.stages) {
+        if (stage.status == kStagePassed) {
+            ++summary.passed;
+        }
+    }
+    summary.started_at = manifest.started_at;
+    summary.completed_at = manifest.completed_at;
+    return summary;
+}
+
+nlohmann::json pipeline_summary_json(const PipelineSummary& summary) {
+    nlohmann::json out{{"kind", "pipeline"},
+                       {"id", summary.id},
+                       {"spec_name", summary.spec_name},
+                       {"status", summary.status},
+                       {"stages", summary.stages},
+                       {"passed", summary.passed},
+                       {"started_at", summary.started_at}};
+    if (!summary.completed_at.empty()) {
+        out["completed_at"] = summary.completed_at;
+    }
+    return out;
+}
+
 TrainingStore::TrainingStore(std::filesystem::path root) : root_{std::move(root)} {}
 
 std::filesystem::path TrainingStore::runs_dir() const {
@@ -189,8 +219,16 @@ std::filesystem::path TrainingStore::versions_dir() const {
     return root_ / "versions";
 }
 
+std::filesystem::path TrainingStore::pipelines_dir() const {
+    return root_ / kPipelinesDirName;
+}
+
 std::filesystem::path TrainingStore::run_dir(std::string_view id) const {
     return runs_dir() / std::string{id};
+}
+
+std::filesystem::path TrainingStore::pipeline_dir(std::string_view id) const {
+    return pipelines_dir() / std::string{id};
 }
 
 std::vector<RunSummary> TrainingStore::list_runs() const {
@@ -216,6 +254,43 @@ std::optional<RunManifest> TrainingStore::get_run(std::string_view id) const {
     }
     std::string error;
     return read_manifest(run_dir(id), error);
+}
+
+std::vector<PipelineSummary> TrainingStore::list_pipelines() const {
+    std::vector<PipelineSummary> pipelines;
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(pipelines_dir(), code)) {
+        if (!entry.is_directory(code)) {
+            continue;
+        }
+        std::string error;
+        const std::optional<PipelineRunManifest> manifest =
+            read_pipeline_manifest(entry.path(), error);
+        if (manifest.has_value()) {
+            pipelines.push_back(summarize(*manifest));
+        }
+    }
+    std::ranges::sort(pipelines, [](const PipelineSummary& a, const PipelineSummary& b) {
+        return a.started_at != b.started_at ? a.started_at > b.started_at : a.id > b.id;
+    });
+    return pipelines;
+}
+
+std::optional<PipelineRunManifest> TrainingStore::get_pipeline(std::string_view id) const {
+    if (!valid_run_id(id)) {
+        return std::nullopt;
+    }
+    std::string error;
+    return read_pipeline_manifest(pipeline_dir(id), error);
+}
+
+std::optional<PipelineSummary> TrainingStore::active_pipeline() const {
+    for (const PipelineSummary& pipeline : list_pipelines()) {
+        if (pipeline.status == kPipelineRunning) {
+            return pipeline;
+        }
+    }
+    return std::nullopt;
 }
 
 std::optional<VersionLedger> TrainingStore::list_versions(std::string_view backend) const {

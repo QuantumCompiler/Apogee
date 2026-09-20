@@ -20,8 +20,12 @@
 /// file: when the dataset's first line is `{"mock": {...}}`, its `error`
 /// fails the run after the first iteration, its `fuse_error` fails the
 /// promote's fuse (carried in the adapter it wrote, so a later promote sees
-/// it), and its `iters` sets the count. That is what lets a failed run and
-/// a failed promote be driven through the real command line.
+/// it), its `iters` sets the count, and its `answer` is what the trained
+/// candidate replies to every prompt instead of echoing it (carried in the
+/// adapter too) -- which is how a pipeline stage that REGRESSES an earlier
+/// stage's suite is driven through the real command line. A fused
+/// checkpoint carries the answer forward, so a later stage trained from it
+/// inherits the regression until its own dataset says otherwise.
 namespace apogee::training {
 
 /// The key the dataset's first line scripts the mock with.
@@ -37,6 +41,8 @@ struct MockTrainerOptions {
     std::string error;
     /// When set, `fuse` fails with this.
     std::string fuse_error;
+    /// When set, the trained candidate answers this to every prompt.
+    std::string answer;
 };
 
 class MockTrainer final : public Trainer {
@@ -52,7 +58,8 @@ public:
                                    const std::filesystem::path& out, const MessageSink& on_message,
                                    const harness::CancellationToken& cancellation) override;
     /// Echoes the prompt; the untuned base (an empty adapter) prefixes it
-    /// with `base: `, so a judge test can tell the two apart.
+    /// with `base: `, so a judge test can tell the two apart. An adapter
+    /// (or a fused base) carrying a scripted `answer` replies with that.
     [[nodiscard]] std::unique_ptr<CandidateRunner> candidate_runner(
         const std::filesystem::path& base, const std::filesystem::path& adapter) override;
 

@@ -194,6 +194,24 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     if (key == "training.gate_mode") {
         return std::string{config.training.effective_gate_mode()};
     }
+    if (key == "training.cycle.pipeline") {
+        return render(config.training.cycle.pipeline);
+    }
+    if (key == "training.cycle.backend") {
+        return render(config.training.cycle.backend);
+    }
+    if (key == "training.cycle.anchor_version") {
+        return std::to_string(config.training.cycle.anchor_version);
+    }
+    if (key == "training.cycle.regression_threshold") {
+        return std::to_string(config.training.cycle.regression_threshold);
+    }
+    if (key == "training.cycle.circuit_breaker_k") {
+        return std::to_string(config.training.cycle.circuit_breaker_k);
+    }
+    if (key == "training.cycle.judge_backend") {
+        return render(config.training.cycle.judge_backend);
+    }
     if (key == "tools.fs_root") {
         return render(config.tools.fs_root);
     }

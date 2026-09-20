@@ -1192,3 +1192,105 @@ TEST_CASE(
     CHECK(row_with(report, "versions: tuned")->detail.find("does not hold") != std::string::npos);
     CHECK(report.passed());  // warnings only: the install is not broken
 }
+
+TEST_CASE(
+    "the pipelines item's rows: every named pipeline's student and datasets, the cycle's "
+    "configuration, and a halted history with resume as the remedy",
+    "[commands][check][training][cycle]") {
+    Install install;
+    install.seed();
+    install.write("models/tiny/config.json", "{}");
+    install.write("models/tiny/model.safetensors", "w");
+    install.write("training/datasets/present.jsonl", "{}\n");
+    CheckInputs inputs = inputs_for(install);
+
+    // A pipeline whose student and datasets exist; one whose do not.
+    install.write(
+        "config/config.yaml",
+        "backends:\n  local:\n    type: mock\n"
+        "training:\n  pipelines:\n"
+        "    good:\n      student: tiny\n      stages:\n"
+        "        - name: a\n          dataset: present\n          eval_suite: reasoning\n"
+        "    bad:\n      student: nope\n      stages:\n"
+        "        - name: a\n          dataset: missing\n          eval_suite: reasoning\n");
+    load_into(inputs);
+    CheckReport report = run_checks(inputs);
+    const apogee::commands::CheckRow* good = row_with(report, "pipeline: good");
+    REQUIRE(good != nullptr);
+    CHECK(good->status == Status::Ok);
+    CHECK(good->detail.find("1 stage(s) over tiny") != std::string::npos);
+    const apogee::commands::CheckRow* bad = row_with(report, "pipeline: bad");
+    REQUIRE(bad != nullptr);
+    CHECK(bad->status == Status::Warn);
+    CHECK(bad->detail.find("student 'nope'") != std::string::npos);
+    CHECK(bad->detail.find("dataset 'missing'") != std::string::npos);
+    CHECK(bad->remedy.find("--safetensors") != std::string::npos);
+    CHECK(row_with(report, "cycle") == nullptr);
+    CHECK(report.passed());
+
+    // The cycle: incomplete, an unknown pipeline, a non-llamacpp backend, ok.
+    auto cycle = [&](const std::string& block) {
+        install.write("config/config.yaml",
+                      "backends:\n  local:\n    type: mock\n"
+                      "training:\n  pipelines:\n    good:\n      student: tiny\n      stages:\n"
+                      "        - name: a\n          dataset: present\n          eval_suite: "
+                      "reasoning\n  cycle:\n" +
+                          block);
+        load_into(inputs);
+        report = run_checks(inputs);
+        const apogee::commands::CheckRow* row = row_with(report, "cycle");
+        REQUIRE(row != nullptr);
+        return row;
+    };
+    const apogee::commands::CheckRow* row = cycle("    pipeline: good\n");
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail.find("all three") != std::string::npos);
+    CHECK_FALSE(report.passed());
+    row = cycle(
+        "    pipeline: nowhere\n    backend: nightly\n    sources:\n      - type: "
+        "directory\n");
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail.find("pipeline 'nowhere'") != std::string::npos);
+    row = cycle("    pipeline: good\n    backend: local\n    sources:\n      - type: directory\n");
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail.find("mock backend") != std::string::npos);
+    row = cycle(
+        "    pipeline: good\n    backend: nightly\n    circuit_breaker_k: 2\n    "
+        "sources:\n      - type: directory\n      - type: sessions\n        log_consent: "
+        "true\n");
+    CHECK(row->status == Status::Ok);
+    CHECK(row->detail.find("pipeline 'good' -> nightly") != std::string::npos);
+    CHECK(row->detail.find("created by the first passing cycle") != std::string::npos);
+    CHECK(row->detail.find("directory+sessions") != std::string::npos);
+    CHECK(row->detail.find("circuit_breaker_k 2") != std::string::npos);
+    CHECK(report.passed());
+    CHECK(row_with(report, "cycle history") == nullptr);
+
+    // The history: halted warns with resume as the remedy; idle reports.
+    install.write("training/cycle/history.json",
+                  "{\"backend\": \"nightly\", \"halted\": true, \"halt_reason\": \"circuit "
+                  "breaker\", \"consecutive_fails\": 2, \"total_runs\": 3, \"runs\": []}\n");
+    report = run_checks(inputs);
+    const apogee::commands::CheckRow* history = row_with(report, "cycle history");
+    REQUIRE(history != nullptr);
+    CHECK(history->status == Status::Warn);
+    CHECK(history->detail.find("HALTED") != std::string::npos);
+    CHECK(history->detail.find("circuit breaker") != std::string::npos);
+    CHECK(history->remedy == "apogee train cycle resume");
+    CHECK(report.passed());
+    install.write("training/cycle/history.json",
+                  "{\"backend\": \"nightly\", \"halted\": false, \"anchor_version\": 2, "
+                  "\"consecutive_fails\": 0, \"total_runs\": 5, \"runs\": []}\n");
+    install.write("training/cycle/cycle.lock", "123\n");
+    report = run_checks(inputs);
+    history = row_with(report, "cycle history");
+    REQUIRE(history != nullptr);
+    CHECK(history->status == Status::Ok);
+    CHECK(history->detail.find("5 run(s)") != std::string::npos);
+    CHECK(history->detail.find("anchor v2") != std::string::npos);
+    CHECK(history->detail.find("running now") != std::string::npos);
+    install.write("training/cycle/history.json", "{");
+    report = run_checks(inputs);
+    CHECK(row_with(report, "cycle history")->status == Status::Warn);
+    CHECK(row_with(report, "cycle history")->detail.find("unreadable") != std::string::npos);
+}
