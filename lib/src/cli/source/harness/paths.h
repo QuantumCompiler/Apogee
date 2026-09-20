@@ -5,7 +5,7 @@
 
 /// Apogee's on-disk layout.
 ///
-/// One identical tree on all six targets (SPEC.md -> "One install contract:
+/// One identical tree on all five targets (SPEC.md -> "One install contract:
 /// identical on-disk layout from every install path"), rooted at `~/.apogee`:
 ///
 ///     ~/.apogee/

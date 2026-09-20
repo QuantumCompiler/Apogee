@@ -27,7 +27,7 @@
 // else asks this header instead. An unrecognized platform is a hard compile
 // error on purpose: silently degrading to "Unknown" would let an unsupported
 // target build and then misbehave at runtime, which is exactly the failure the
-// six-target matrix exists to prevent.
+// five-target matrix exists to prevent.
 
 namespace apogee::platform {
 

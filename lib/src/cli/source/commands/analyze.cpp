@@ -600,19 +600,21 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
         // only the servers they name, and keep only their read-only tools.
         const auto mcp_registry = std::make_shared<mcp::Registry>();
         const auto build_tools = [&](const std::function<void(std::string_view)>& status) {
+            // Designators in declaration order: C++20 requires it, and GCC
+            // enforces what Clang only warns about.
             return make_built_in_tools(BuiltInToolOptions{
                 .config = &config,
                 .harness = &harness,
                 .review = review_defaults,
+                .policy = policy,
+                .mcp_servers = std::optional<std::vector<std::string>>{loaded.config.mcp},
                 .mcp = mcp_registry,
                 .mcp_status = status,
                 .mcp_server_log = flags->verbose
                                       ? mcp::StderrTail::Sink{[](std::string_view bytes) {
                                             std::cerr << bytes << std::flush;
                                         }}
-                                      : mcp::StderrTail::Sink{},
-                .policy = policy,
-                .mcp_servers = std::optional<std::vector<std::string>>{loaded.config.mcp}});
+                                      : mcp::StderrTail::Sink{}});
         };
 
         std::vector<harness::ChatMessage> history;

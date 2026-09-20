@@ -2,9 +2,9 @@
 # cicd.sh — Apogee's CI/CD entry point.
 #
 # Builds the project from the branch the repo is currently on, for one or more
-# of the six release targets:
+# of the five release targets:
 #
-#   linux-x64  linux-arm64  macos-x64  macos-arm64  windows-x64  windows-arm64
+#   linux-x64  linux-arm64  macos-arm64  windows-x64  windows-arm64
 #
 # A host can only natively compile the targets its own OS supports (macOS hosts
 # build both Mac architectures; Linux and Windows hosts build their own arch).
@@ -24,7 +24,7 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/QuantumCompiler/Apogee"
-ALL_TARGETS=(linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64 windows-arm64)
+ALL_TARGETS=(linux-x64 linux-arm64 macos-arm64 windows-x64 windows-arm64)
 
 # Each application under lib/src/<app>/ owns its own self-contained CMake build
 # (presets, cmake helpers, third_party, style config). This script drives them;
@@ -34,6 +34,7 @@ APPS=(cli)
 CLEAN=0
 RUN_TESTS=0
 FRESH=0
+NO_DEFER=0
 BRANCH=""
 PLATFORMS=()
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
@@ -57,7 +58,14 @@ Options:
   -b, --branch NAME    Branch to build (implies --fresh; default: the branch
                        currently checked out)
   -j, --jobs N         Parallel build jobs (default: ${JOBS})
+      --no-defer       Fail instead of deferring a requested target this host
+                       cannot build natively. CI passes it: on a runner, a
+                       deferred target is a misdetected host, not a convenience.
   -h, --help           Show this help
+
+Environment:
+  APOGEE_CMAKE_ARGS    Extra arguments for the configure step, appended after
+                       the preset (e.g. a vcpkg toolchain file on Windows).
 EOF
 }
 
@@ -72,10 +80,21 @@ host_target() {
         MINGW*|MSYS*|CYGWIN*)   os="windows" ;;
         *)                      die "unsupported host OS: $(uname -s)" ;;
     esac
-    case "$(uname -m)" in
-        arm64|aarch64)  arch="arm64" ;;
-        x86_64|amd64)   arch="x64" ;;
-        *)              die "unsupported host arch: $(uname -m)" ;;
+    # On Windows the shell (Git for Windows' bash) may itself be an x64 build
+    # running under emulation on an ARM64 machine, and `uname -m` then reports
+    # the SHELL's architecture, not the machine's. The processor variables are
+    # the OS's own answer: PROCESSOR_ARCHITEW6432 is set for an emulated
+    # process and names the real machine; PROCESSOR_ARCHITECTURE otherwise.
+    local machine
+    if [[ "$os" == "windows" ]]; then
+        machine="${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-$(uname -m)}}"
+    else
+        machine="$(uname -m)"
+    fi
+    case "$machine" in
+        arm64|aarch64|ARM64)   arch="arm64" ;;
+        x86_64|amd64|AMD64)    arch="x64" ;;
+        *)                     die "unsupported host arch: ${machine}" ;;
     esac
     printf '%s-%s' "$os" "$arch"
 }
@@ -90,7 +109,7 @@ valid_target() {
 buildable_here() {
     local host="$1" target="$2"
     case "${host%%-*}" in
-        macos)   [[ "${target%%-*}" == "macos" ]] ;;   # both arches via CMAKE_OSX_ARCHITECTURES
+        macos)   [[ "$target" == "$host" ]] ;;
         linux)   [[ "$target" == "$host" ]] ;;
         windows) [[ "$target" == "$host" ]] ;;
     esac
@@ -110,6 +129,7 @@ while [[ $# -gt 0 ]]; do
         -c|--clean)  CLEAN=1 ;;
         -t|--test)   RUN_TESTS=1 ;;
         -f|--fresh)  FRESH=1 ;;
+        --no-defer)  NO_DEFER=1 ;;
         -b|--branch) [[ $# -ge 2 ]] || die "--branch needs a name"; BRANCH="$2"; FRESH=1; shift ;;
         -j|--jobs)   [[ $# -ge 2 ]] || die "--jobs needs a number"; JOBS="$2"; shift ;;
         -h|--help)   usage; exit 0 ;;
@@ -136,10 +156,17 @@ build_target() {
 
     [[ $CLEAN -eq 1 ]] && { log "cleaning ${app_dir}/${build_dir}/"; rm -rf "${build_dir}"; }
 
+    # Extra configure arguments from the environment -- how a CI runner hands
+    # in a toolchain file without this script growing a per-platform branch.
+    local -a env_args=()
+    if [[ -n "${APOGEE_CMAKE_ARGS:-}" ]]; then
+        read -r -a env_args <<< "${APOGEE_CMAKE_ARGS}"
+    fi
+
     # Each app ships one CMake preset per target, named exactly after it.
     if [[ -f CMakePresets.json ]] && cmake --list-presets 2>/dev/null | grep -q "\"${target}\""; then
-        log "[${app}/${target}] configuring (cmake --preset ${target})"
-        cmake --preset "${target}"
+        log "[${app}/${target}] configuring (cmake --preset ${target}${env_args[*]:+ ${env_args[*]}})"
+        cmake --preset "${target}" "${env_args[@]}"
     else
         local extra=()
         if [[ "${target%%-*}" == "macos" ]]; then
@@ -147,7 +174,7 @@ build_target() {
                                                 || extra+=(-DCMAKE_OSX_ARCHITECTURES=x86_64)
         fi
         log "[${app}/${target}] configuring (cmake -S . -B ${build_dir})"
-        cmake -S . -B "${build_dir}" "${extra[@]}"
+        cmake -S . -B "${build_dir}" "${extra[@]}" "${env_args[@]}"
     fi
 
     log "[${app}/${target}] building with ${JOBS} jobs"
@@ -177,6 +204,9 @@ build_all_requested() {
         fi
     done
     if [[ ${#deferred[@]} -gt 0 ]]; then
+        if [[ $NO_DEFER -eq 1 ]]; then
+            die "cannot build ${deferred[*]} natively on this host (${HOST}) and --no-defer was given"
+        fi
         log "deferred to CI (not natively buildable on ${HOST}): ${deferred[*]}"
         log "the GitHub Actions matrix builds these on their native runners via this same script"
     fi

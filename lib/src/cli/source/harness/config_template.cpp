@@ -8,7 +8,7 @@
 // The starter config, embedded.
 //
 // C++20 has no #embed (that is C++23, and the standard is pinned at 20 for
-// six-target reasons -- see CLAUDE.md -> Stack & environment), so the bytes
+// five-target reasons -- see CLAUDE.md -> Stack & environment), so the bytes
 // live in a raw string literal. They are GENERATED from
 // lib/src/cli/assets/config.yaml, and a test asserts the two are byte-identical
 // so the shipped sample and `apogee config init` can never drift apart. If you

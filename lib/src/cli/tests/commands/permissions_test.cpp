@@ -203,10 +203,10 @@ TEST_CASE("a read-only policy keeps only tools that never write, MCP included; n
     const auto mcp = std::make_shared<apogee::mcp::Registry>();
     const apogee::agent::ToolRegistry read_only = apogee::commands::make_built_in_tools(
         apogee::commands::BuiltInToolOptions{.config = &config,
-                                             .mcp = mcp,
-                                             .mcp_spawn = apogee::testing::fake_fleet(),
                                              .policy = apogee::harness::AgentToolPolicy::ReadOnly,
-                                             .mcp_servers = std::vector<std::string>{"srv"}});
+                                             .mcp_servers = std::vector<std::string>{"srv"},
+                                             .mcp = mcp,
+                                             .mcp_spawn = apogee::testing::fake_fleet()});
     // Nothing that writes is registered -- so nothing can ever prompt.
     for (const std::string& name : read_only.names()) {
         INFO(name);
@@ -233,10 +233,10 @@ TEST_CASE("a read-only policy keeps only tools that never write, MCP included; n
     const auto untouched = std::make_shared<apogee::mcp::Registry>();
     const apogee::agent::ToolRegistry none = apogee::commands::make_built_in_tools(
         apogee::commands::BuiltInToolOptions{.config = &config,
-                                             .mcp = untouched,
-                                             .mcp_spawn = apogee::testing::fake_fleet(),
                                              .policy = apogee::harness::AgentToolPolicy::None,
-                                             .mcp_servers = std::vector<std::string>{"srv"}});
+                                             .mcp_servers = std::vector<std::string>{"srv"},
+                                             .mcp = untouched,
+                                             .mcp_spawn = apogee::testing::fake_fleet()});
     CHECK(none.empty());
     CHECK(untouched->connected_count() == 0);
 
@@ -272,10 +272,10 @@ TEST_CASE("an agent names the servers it connects; an unknown name is reported a
     const apogee::agent::ToolRegistry registry =
         apogee::commands::make_built_in_tools(apogee::commands::BuiltInToolOptions{
             .config = &config,
+            .mcp_servers = std::vector<std::string>{"SRV", "ghost"},
             .mcp = mcp,
             .mcp_status = [&lines](std::string_view line) { lines.emplace_back(line); },
-            .mcp_spawn = apogee::testing::fake_fleet(),
-            .mcp_servers = std::vector<std::string>{"SRV", "ghost"}});
+            .mcp_spawn = apogee::testing::fake_fleet()});
     CHECK(registry.find("mcp__srv__echo") != nullptr);    // named, case-insensitively
     CHECK(registry.find("mcp__other__echo") == nullptr);  // configured but not named
     CHECK(mcp->connected_count() == 1);
@@ -288,9 +288,9 @@ TEST_CASE("an agent names the servers it connects; an unknown name is reported a
     const auto none = std::make_shared<apogee::mcp::Registry>();
     (void)apogee::commands::make_built_in_tools(
         apogee::commands::BuiltInToolOptions{.config = &config,
+                                             .mcp_servers = std::vector<std::string>{},
                                              .mcp = none,
-                                             .mcp_spawn = apogee::testing::fake_fleet(),
-                                             .mcp_servers = std::vector<std::string>{}});
+                                             .mcp_spawn = apogee::testing::fake_fleet()});
     CHECK(none->connected_count() == 0);
     const auto all = std::make_shared<apogee::mcp::Registry>();
     (void)apogee::commands::make_built_in_tools(apogee::commands::BuiltInToolOptions{

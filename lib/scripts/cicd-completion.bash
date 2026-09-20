@@ -13,7 +13,7 @@ _apogee_cicd() {
 
     case "$prev" in
         -p|--platform)
-            COMPREPLY=( $(compgen -W "linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64 windows-arm64 all" -- "$cur") )
+            COMPREPLY=( $(compgen -W "linux-x64 linux-arm64 macos-arm64 windows-x64 windows-arm64 all" -- "$cur") )
             return
             ;;
         -b|--branch)
@@ -27,7 +27,7 @@ _apogee_cicd() {
             ;;
     esac
 
-    COMPREPLY=( $(compgen -W "-p --platform -c --clean -t --test -f --fresh -b --branch -j --jobs -h --help" -- "$cur") )
+    COMPREPLY=( $(compgen -W "-p --platform -c --clean -t --test -f --fresh -b --branch -j --jobs --no-defer -h --help" -- "$cur") )
 }
 
 complete -F _apogee_cicd cicd.sh ./cicd.sh lib/scripts/cicd.sh ./lib/scripts/cicd.sh

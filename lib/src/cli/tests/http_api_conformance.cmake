@@ -10,6 +10,10 @@
 # Refuses to run against an empty list on either side, so it cannot pass
 # vacuously.
 
+# Script mode carries no cmake_minimum_required, so IN_LIST (CMP0057) needs
+# asking for by name: GNU/Linux CMake 3.28 refuses it otherwise.
+cmake_policy(SET CMP0057 NEW)
+
 if(NOT DEFINED MUX_SOURCE OR NOT DEFINED API_DOC)
     message(FATAL_ERROR "MUX_SOURCE and API_DOC must be set")
 endif()

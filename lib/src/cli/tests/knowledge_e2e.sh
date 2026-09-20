@@ -24,6 +24,13 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 fail() { echo "knowledge_e2e: $*" >&2; exit 1; }
 
+# The mode of a path as three octal digits, on either stat flavour: GNU stat
+# has no -f mode format (its -f is file-system status, which prints), BSD stat
+# has no -c.
+mode_of() {
+    if stat --version >/dev/null 2>&1; then stat -c '%a' "$1"; else stat -f '%Lp' "$1"; fi
+}
+
 # The clerk's answer: one conforming record, the attribution in its own field.
 cat > "$WORK_DIR/clerk.json" <<'JSON'
 {"turns": [{"text": "{\"intent\": \"We dropped the cancel button because testers kept mistaking it for back.\", \"decision\": \"Remove the cancel button from checkout.\", \"status\": \"shipped\", \"discipline\": \"ux\", \"downstream_link\": \"\", \"provenance\": {\"source\": \"meeting\", \"attribution\": \"Ada Lovelace\"}}"}]}
@@ -65,7 +72,7 @@ grep -q "^  knowledge:" "$CONFIG" || fail "no embeddings entry for knowledge in 
 [ -f "$APOGEE_HOME/embeddings/knowledge.db" ] || fail "no collection file"
 [ -f "$APOGEE_HOME/knowledge/raw/$id.md" ] || fail "no raw archive for $id"
 grep -q "Bob: yes, testers mistake it for back" "$APOGEE_HOME/knowledge/raw/$id.md" || fail "the archive is not the raw conversation"
-[ "$(stat -f '%Lp' "$APOGEE_HOME/knowledge/raw" 2>/dev/null || stat -c '%a' "$APOGEE_HOME/knowledge/raw")" = "700" ] || fail "the raw archive is not private"
+[ "$(mode_of "$APOGEE_HOME/knowledge/raw")" = "700" ] || fail "the raw archive is not private"
 # The text index holds the reasoning and not the name.
 "$APOGEE_BIN" embed query knowledge "why was the cancel button removed" </dev/null >"$WORK_DIR/query.txt" 2>&1 || fail "embed query: $(cat "$WORK_DIR/query.txt")"
 grep -q "$id" "$WORK_DIR/query.txt" || fail "the record is not findable by text: $(cat "$WORK_DIR/query.txt")"

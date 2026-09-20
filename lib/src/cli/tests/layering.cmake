@@ -19,7 +19,7 @@
 # mechanical and runs in CI: grep the harness sources for the edge that must not
 # exist.
 #
-# Driven with `cmake -P` so it runs on all six targets, Windows included.
+# Driven with `cmake -P` so it runs on all five targets, Windows included.
 
 if(NOT DEFINED APOGEE_SOURCE_DIR)
     message(FATAL_ERROR "APOGEE_SOURCE_DIR must be set")

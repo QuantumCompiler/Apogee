@@ -1,7 +1,7 @@
 # End-to-end test for the `apogee config` command family.
 #
 # Driven with `cmake -P` rather than a shell script so it runs identically on
-# all six targets -- a .sh here would silently skip on the Windows runners,
+# all five targets -- a .sh here would silently skip on the Windows runners,
 # which is where a path or line-ending bug would actually show up.
 #
 # It exercises the real binary through a full lifecycle: init, add, set a role,

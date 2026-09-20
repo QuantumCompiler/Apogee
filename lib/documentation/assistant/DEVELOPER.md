@@ -31,7 +31,7 @@ The one build-related file outside an app directory is `.github/workflows/ci.yml
 ```
 Apogee/
 ├── .github/
-│   └── workflows/ci.yml     — CI: six-target matrix + lint + llama proof + clean-room build
+│   └── workflows/ci.yml     — CI: five-target matrix + llama proof + clean-room build (nothing else, 2026-09-19)
 │                              (thin caller into cicd.sh; here only because GitHub requires it)
 ├── .claude/
 │   └── skills/
@@ -45,9 +45,9 @@ Apogee/
     │   ├── assistant/       — Contributor docs (CLAUDE, SPEC, ROADMAP, MILESTONES, this file)
     │   └── backlog/         — The work queue: pending work, one document per item (see its README)
     ├── scripts/             — Repo scripts
-    │   ├── cicd.sh          — CI/CD entry point: builds every app for any of the six release
-    │   │                      targets (--platform linux|macos|windows × x64|arm64, or all;
-    │   │                      non-native targets defer to the CI matrix), --fresh = clean-room
+    │   ├── cicd.sh          — CI/CD entry point: builds every app for any of the five release
+    │   │                      targets (--platform linux|windows × x64|arm64, macos-arm64, or all;
+    │   │                      non-native targets defer to the CI matrix, or fail with --no-defer), --fresh = clean-room
     │   │                      clone of github.com/QuantumCompiler/Apogee at that branch; --test, --clean
     │   └── cicd-completion.bash — Tab completion for cicd.sh's flags (source from your shell rc)
     └── src/                 — Application source, one self-contained project per app
@@ -386,7 +386,7 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 |---|---|
 | `smoke_test.cpp` | Version stamping and that dependencies are linked and usable. |
 | `packages_test.cpp` | Every reserved package header compiles and is includable. Since Milestone X also `render/`, `scaffold/agent.h` and `harness/assets.h`. |
-| `platform/platform_test.cpp` | Host detection and the six-target name vocabulary. |
+| `platform/platform_test.cpp` | Host detection and the five-target name vocabulary. |
 | `commands/registry_test.cpp` | Registration, lookup, ordering, duplicate and null rejection. |
 | `commands/root_test.cpp` | The real parsing path: help, subcommand dispatch, `--config`, unknown commands. |
 | `harness/config_test.cpp` | The loader: typed parsing, `${ENV}` expansion, case-collision rejection, the template byte-match, and a garbage-input battery asserting a message rather than a crash. Since Milestone X also `agents:` (every field, both enums validated, relative paths left for the loader, `${ENV}` and `~` expanded, collisions) and `is_vendor_cli`. Since Milestone Y also `knowledge:` — `auto_capture` and `db` parsed, the default collection, a non-boolean and a pathed name refused, the template documenting the section. `graphs:`: file order, defaults, the hops and max_entities validation, a list required, a fold collision refused, the template's section commented out. Since the training pipelines item `training.pipelines`, `training.regimes` and `training.cycle`: every field and default (strict no-regression, the breaker at 3), `~` and `${ENV}` expanded in the paths, `configured()`, the template documenting all three unset, and every load-time refusal naming its key -- a stage without a name, dataset or eval suite, a bad method, a negative count, a rehearsal fraction or threshold out of range, an unknown source type, a `sessions` source without `log_consent: true` (naming privacy and self-reinforcement), a bad `since` date; and the spec-file parsers with the stem as the fallback name and invalid YAML refused. |
@@ -595,13 +595,13 @@ CMake ≥ 3.25, C++20, one static library plus one executable. Build root: `lib/
 
 ### Presets
 
-Seven configure presets: `default` (host native — the developer bootstrap) plus one named after each release target. Each builds into `lib/src/cli/build/<preset>/`, which is the path `cicd.sh` and the Makefile expect.
+Six configure presets: `default` (host native — the developer bootstrap) plus one named after each release target. Each builds into `lib/src/cli/build/<preset>/`, which is the path `cicd.sh` and the Makefile expect.
 
 ```
-linux-x64   linux-arm64   macos-x64   macos-arm64   windows-x64   windows-arm64
+linux-x64   linux-arm64   macos-arm64   windows-x64   windows-arm64
 ```
 
-macOS presets select the architecture via `CMAKE_OSX_ARCHITECTURES`, so a Mac host builds both Mac targets. Windows presets use the Visual Studio 17 2022 generator; CMake hides them on hosts without it, and `cicd.sh` refuses non-native targets anyway, deferring them to the CI matrix.
+The macOS preset pins `CMAKE_OSX_ARCHITECTURES` to `arm64`; there is no Intel Mac target (dropped 2026-09-19). Windows presets use the Visual Studio 17 2022 generator; CMake hides them on hosts without it, and `cicd.sh` refuses non-native targets anyway, deferring them to the CI matrix.
 
 ### Commands
 
@@ -609,7 +609,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 
 | Command | Does |
 |---|---|
-| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — what CI runs. `--platform`, `--fresh`, `--clean`, `--jobs` too. |
+| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — what CI runs. `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it), and `APOGEE_CMAKE_ARGS` appends configure flags (a runner's vcpkg toolchain on Windows). |
 | `make test` | The same thing for the CLI alone (it calls `cicd.sh`). |
 | `make build [PRESET=…]` | Configure and build one preset. |
 | `make install [PREFIX=…]` | Build, then install the binary to `$PREFIX/bin` (default `~/.local`, so no sudo). |

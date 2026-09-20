@@ -317,7 +317,7 @@ ByteSource http_source(backends::HttpClient& client, const HfRef& ref, HfRepoKin
     }
     // A dataset file downloads from its own prefix; the rest of the source
     // is the same request.
-    return [&client, url, token_copy, &cancellation](
+    return [&client, url, token_copy, cancellation](
                const std::function<bool(std::string_view)>& write, std::string& error) {
         backends::HttpRequest request;
         request.method = "GET";
@@ -362,7 +362,7 @@ ByteSource http_source(backends::HttpClient& client, const HfRef& ref, std::stri
     // sometimes a sha256, so no digest is promised here. The ladder reports
     // "no digest published", which for this source is the truth.
 
-    return [&client, url, token_copy, &cancellation](
+    return [&client, url, token_copy, cancellation](
                const std::function<bool(std::string_view)>& write, std::string& error) {
         backends::HttpRequest request;
         request.method = "GET";

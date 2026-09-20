@@ -53,8 +53,8 @@ help:
 	@echo "  clean         Remove this preset's build directory"
 	@echo "  fresh         Clean-room clone-and-build of the current branch"
 	@echo ""
-	@echo "Presets are the six release targets plus 'default' (host native):"
-	@echo "  linux-x64  linux-arm64  macos-x64  macos-arm64  windows-x64  windows-arm64"
+	@echo "Presets are the five release targets plus 'default' (host native):"
+	@echo "  linux-x64  linux-arm64  macos-arm64  windows-x64  windows-arm64"
 	@echo ""
 	@echo "One-command bootstrap on a clean checkout:  make test"
 

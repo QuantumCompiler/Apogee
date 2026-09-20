@@ -44,7 +44,7 @@
 #                                  gain a TLS stack on one machine and not
 #                                  another. Every optional feature is switched
 #                                  off explicitly, so the binary's dependency
-#                                  set is the same on all six targets. Plain
+#                                  set is the same on all five targets. Plain
 #                                  HTTP only: a deployment terminates TLS in
 #                                  front of it, which is where certificates
 #                                  belong.

@@ -10,8 +10,8 @@
 # the moment a release grows its own build steps, a release binary can differ
 # from a tested one in ways nobody can reproduce locally.
 #
-# **All six targets ship from the first tag** (user decision, 2026-09-01),
-# Windows included. Recorded caveat, because it is real: Apogee's Windows
+# **Every target ships from the first tag** (user decision, 2026-09-01),
+# Windows included -- five since 2026-09-19, when the Intel Mac was dropped. Recorded caveat, because it is real: Apogee's Windows
 # portability work is incomplete -- the PTY tests, the tcflush typeahead flush,
 # the lsof no-listen poll, and 0600 file modes have no Windows equivalent yet,
 # and `apogee check` reports the mode rows as SKIPPED there rather than passing
@@ -53,9 +53,6 @@ jobs:
           - target: macos-arm64
             runner: macos-14
             blocking: true
-          - target: macos-x64
-            runner: macos-13
-            blocking: true
           - target: linux-x64
             runner: ubuntu-24.04
             blocking: true
@@ -64,17 +61,34 @@ jobs:
             blocking: true
           - target: windows-x64
             runner: windows-2022
+            triplet: x64-windows-static-md
           - target: windows-arm64
             runner: windows-11-arm
+            triplet: arm64-windows-static-md
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      # The same per-platform prerequisites as CI (ci.yml says why): libcurl
+      # headers on Linux, a static libcurl from the image's vcpkg on Windows.
+      - name: Install libcurl headers and the venv module (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev python3-venv
+
+      - name: Install libcurl through vcpkg (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${VCPKG_INSTALLATION_ROOT//\\//}"
+          "$root/vcpkg" install "curl:${{ matrix.triplet }}"
+          echo "APOGEE_CMAKE_ARGS=-DCMAKE_TOOLCHAIN_FILE=$root/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}" >> "$GITHUB_ENV"
 
       # Tests run before an artifact is produced. A release binary that was
       # never tested is the one thing a release pipeline must not emit.
       - name: Build and test
         shell: bash
-        run: lib/scripts/cicd.sh --platform ${{ matrix.target }} --test
+        run: lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer
 
       - name: Stage the archive
         shell: bash
@@ -131,7 +145,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags/v') && inputs.dry_run != true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/download-artifact@v4
         with:

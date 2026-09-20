@@ -14,12 +14,12 @@ namespace {
 // drift here means a preset the script cannot select, or a CI leg that builds
 // something other than what it claims.
 constexpr std::array<std::string_view, 6> kReleaseTargets{
-    "linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64", "windows-arm64",
+    "linux-x64", "linux-arm64", "macos-arm64", "windows-x64", "windows-arm64",
 };
 
 }  // namespace
 
-TEST_CASE("host_target is one of the six release targets", "[platform]") {
+TEST_CASE("host_target is one of the five release targets", "[platform]") {
     const std::string target = apogee::platform::host_target();
 
     const bool known = std::ranges::find(kReleaseTargets, target) != kReleaseTargets.end();

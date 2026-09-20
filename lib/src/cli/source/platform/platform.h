@@ -8,7 +8,8 @@
 
 /// The portability seam.
 ///
-/// Apogee ships six targets: linux/macos/windows x x64/arm64. OS-specific
+/// Apogee ships five targets: linux and windows on x64 and arm64, macOS on
+/// arm64 alone (the Intel Mac was dropped 2026-09-19). OS-specific
 /// mechanisms belong HERE, behind a first-party interface, rather than as
 /// `#ifdef` blocks sprinkled through feature code -- that is a Core constraint
 /// of the project skeleton, and it exists because the alternative is what
@@ -40,7 +41,7 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 
 /// This build's release-target name -- one of the exact six strings used by
 /// `lib/scripts/cicd.sh --platform`, the CMake presets, and the CI matrix:
-/// "linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64",
+/// "linux-x64", "linux-arm64", "macos-arm64", "windows-x64",
 /// "windows-arm64". One vocabulary across the build system and the binary, so
 /// a target name never means two slightly different things.
 [[nodiscard]] std::string host_target();

@@ -13,6 +13,21 @@
 # merge-blocking target for v0.1.0. The other five run informationally while
 # portability catches up, and get promoted to blocking as they stabilize —
 # promote one by deleting its `continue-on-error` line.
+#
+# Job policy (user decision, 2026-09-19): CI builds the executable for each
+# platform -- five of them, the Intel Mac having been dropped the same day --
+# plus the llama.cpp configuration that ships with the tool, and nothing else. Formatting, clang-tidy and install parity are LOCAL gates —
+# `make format-check`, `make lint`, and the `cli.install_parity` case the test
+# suite runs on every platform build — not jobs here; the dedicated jobs for
+# them were removed that day as work the build itself already covers.
+#
+# What a runner needs beyond its image, per platform: the Linux images ship no
+# libcurl headers (`find_package(CURL REQUIRED)` is the first hard lookup, and
+# the whole configure fell over on it five seconds in); the Windows images ship
+# no libcurl at all, so it comes from the image's vcpkg as a static library on
+# a static-md triplet, handed to the script through APOGEE_CMAKE_ARGS; macOS
+# has curl in the SDK. Every runner passes --no-defer, so a misdetected host
+# is a failure rather than the silent "deferred to CI" success it once was.
 
 name: CI
 
@@ -71,54 +86,51 @@ jobs:
           - target: macos-arm64
             runner: macos-14
             blocking: true
-          - target: macos-x64
-            runner: macos-13
           - target: linux-x64
             runner: ubuntu-24.04
           - target: linux-arm64
             runner: ubuntu-24.04-arm
           - target: windows-x64
             runner: windows-2022
+            triplet: x64-windows-static-md
           - target: windows-arm64
             runner: windows-11-arm
+            triplet: arm64-windows-static-md
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      - name: Install libcurl headers and the venv module (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev python3-venv
+
+      - name: Install libcurl through vcpkg (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        # A static curl on the static-md triplet: the executable ships alone,
+        # and the CRT stays dynamic like the rest of the build.
+        run: |
+          set -euo pipefail
+          root="${VCPKG_INSTALLATION_ROOT//\\//}"
+          "$root/vcpkg" install "curl:${{ matrix.triplet }}"
+          echo "APOGEE_CMAKE_ARGS=-DCMAKE_TOOLCHAIN_FILE=$root/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}" >> "$GITHUB_ENV"
 
       - name: Build and test
         shell: bash
-        run: lib/scripts/cicd.sh --platform ${{ matrix.target }} --test
-
-  lint:
-    name: format + clang-tidy
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install LLVM tooling
-        run: sudo apt-get update && sudo apt-get install -y clang clang-format clang-tidy
-
-      - name: Check formatting
-        run: make -C lib/src/cli format-check
-
-      # The ownership gate: this fails on a raw new/delete or an owning raw
-      # pointer anywhere in the CLI's source/ or tests/ (CLAUDE.md -> Code
-      # Style). third_party/ is out of scope by construction.
-      - name: Lint
-        run: make -C lib/src/cli lint
+        run: lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer
 
   llama:
-    # The local-inference configuration. Non-blocking because the Metal/CUDA
-    # kernel build is slow; it catches a pin that stops compiling, and — since
-    # llamacpp-backend shipped 2026-08-31 — that the real LlamaRuntime still
-    # matches llama.cpp's API at the pinned commit.
-    # The default build compiles the "not built in" half of that file, so this
-    # job is the ONLY place the vendor calls are checked at all.
+    # The local-inference configuration -- the one that ships with the tool.
+    # Non-blocking because the Metal/CUDA kernel build is slow; it catches a
+    # pin that stops compiling, and that the real LlamaRuntime still matches
+    # llama.cpp's API at the pinned commit. The default build compiles the
+    # "not built in" half of that file, so this job is the ONLY place the
+    # vendor calls are checked at all.
     name: llama.cpp integration (non-blocking)
     runs-on: macos-14
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Configure and build with llama.cpp enabled
         working-directory: lib/src/cli
         run: |
@@ -131,86 +143,8 @@ jobs:
         # scan of the linked executable is the check that matters most here.
         run: ctest --test-dir build/macos-arm64 --output-on-failure
 
-  install-parity:
-    # The install-parity gate on the platform whose installer is bash.
-    #
-    # Ommi's dominant early bug class was silent install drift: each install
-    # path seeded a slightly different tree and nothing failed loudly. The
-    # structural fix is one layout declaration (source/harness/layout.h); this
-    # job is what keeps it honest, and `tests/install_parity.sh` explains why
-    # every exception is where the next drift hides.
-    name: install parity (posix)
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: lib/scripts/cicd.sh --platform linux-x64
-      - name: Two installs, identical trees
-        run: |
-          lib/src/cli/tests/install_parity.sh \
-            lib/src/cli/build/linux-x64/source/apogee \
-            "$RUNNER_TEMP/install-parity"
-      - name: make install produces the same tree
-        # The developer path, end to end, against a throwaway prefix and home.
-        # `make install` finishes with `apogee check --fix`, so this asserts the
-        # whole chain rather than just the binary landing.
-        run: |
-          export APOGEE_HOME="$RUNNER_TEMP/make-home"
-          make -C lib/src/cli install PREFIX="$RUNNER_TEMP/prefix"
-          "$RUNNER_TEMP/prefix/bin/apogee" check
-          diff \
-            <(cd "$RUNNER_TEMP/make-home" && find . -type d | LC_ALL=C sort) \
-            <(cd "$RUNNER_TEMP/install-parity/a" && find . -type d | LC_ALL=C sort)
-
-  install-parity-windows:
-    # Windows ships binaries from the first tagged release (user decision,
-    # 2026-09-01), so its installer is a parity path like any other and gets the
-    # same comparison expressed in PowerShell.
-    #
-    # Non-blocking, and honestly so: Apogee's Windows portability work is
-    # incomplete -- the PTY tests, tcflush typeahead flush, lsof no-listen poll,
-    # and 0600 modes have no Windows equivalent yet, and `apogee check` reports
-    # the mode rows as SKIPPED there rather than passing them. A Windows install
-    # is therefore verified more weakly than a POSIX one, and that is visible in
-    # the check output rather than implied.
-    name: install parity (windows, non-blocking)
-    runs-on: windows-2022
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        shell: bash
-        run: lib/scripts/cicd.sh --platform windows-x64
-      - name: Two installs, identical trees
-        shell: pwsh
-        run: |
-          $exe = "lib/src/cli/build/windows-x64/source/apogee.exe"
-          if (-not (Test-Path $exe)) { $exe = "lib/src/cli/build/windows-x64/source/Release/apogee.exe" }
-          foreach ($root in @("$env:RUNNER_TEMP\pa", "$env:RUNNER_TEMP\pb")) {
-            Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
-            $env:APOGEE_HOME = $root
-            & $exe check --fix | Out-Null
-          }
-          $a = Get-ChildItem "$env:RUNNER_TEMP\pa" -Recurse -Directory |
-               ForEach-Object { $_.FullName.Replace("$env:RUNNER_TEMP\pa", '') } | Sort-Object
-          $b = Get-ChildItem "$env:RUNNER_TEMP\pb" -Recurse -Directory |
-               ForEach-Object { $_.FullName.Replace("$env:RUNNER_TEMP\pb", '') } | Sort-Object
-          if (Compare-Object $a $b) {
-            Write-Error "INSTALL PARITY VIOLATED: the two install paths produce different trees"
-            exit 1
-          }
-          if ($a.Count -lt 5) {
-            Write-Error "INSTALL PARITY: only $($a.Count) directories seeded -- would pass vacuously"
-            exit 1
-          }
-          # A freshly seeded install must pass its own doctor.
-          $env:APOGEE_HOME = "$env:RUNNER_TEMP\pa"
-          & $exe check
-          if ($LASTEXITCODE -ne 0) { Write-Error "a fresh install does not pass 'apogee check'"; exit 1 }
-          Write-Host "install parity: $($a.Count) directories, identical - OK"
-
   fresh-clone:
-    # The scripted clean-room check, so the skeleton cannot silently rot: it
+    # The scripted clean-room build, so the skeleton cannot silently rot: it
     # clones the branch from scratch and builds it with nothing cached.
     #
     # It clones from the REMOTE, so it proves what is pushed, not what a runner
@@ -229,6 +163,6 @@ jobs:
     runs-on: macos-14
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Fresh clone-and-build
-        run: lib/scripts/cicd.sh --fresh --branch "${GITHUB_REF_NAME}" --test
+        run: lib/scripts/cicd.sh --fresh --branch "${GITHUB_REF_NAME}" --test --no-defer

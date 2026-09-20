@@ -189,7 +189,7 @@ TEST_CASE("deleting something absent fails without touching the text", "[config_
 }
 
 TEST_CASE("CRLF files stay CRLF", "[config_edit][golden]") {
-    // Windows is one of the six targets. Normalising line endings would
+    // Windows is one of the five targets. Normalising line endings would
     // rewrite every line of a Windows user's config on their first edit, and
     // the diff would be the whole file.
     const std::string crlf = "backends:\r\n  a:\r\n    type: mock\r\n";

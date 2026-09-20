@@ -20,7 +20,7 @@
 /// normalisation, case-folding and character properties — none of which
 /// chunking needs. What chunking needs is "advance N codepoints", which is
 /// counting bytes that are not continuation bytes: `(b & 0xC0) != 0x80`. That
-/// is a handful of lines against a fetched dependency on six targets, and the
+/// is a handful of lines against a fetched dependency on five targets, and the
 /// same trade the GGUF reader and SHA-256 were decided on earlier in this
 /// project.
 ///

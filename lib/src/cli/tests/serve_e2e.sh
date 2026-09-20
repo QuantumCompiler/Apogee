@@ -36,6 +36,13 @@ trap cleanup EXIT
 
 fail() { echo "serve_e2e: $*" >&2; exit 1; }
 
+# The mode of a path as three octal digits, on either stat flavour: GNU stat
+# has no -f mode format (its -f is file-system status, which prints), BSD stat
+# has no -c.
+mode_of() {
+    if stat --version >/dev/null 2>&1; then stat -c '%a' "$1"; else stat -f '%Lp' "$1"; fi
+}
+
 "$APOGEE_BIN" config init >/dev/null || fail "config init"
 "$APOGEE_BIN" config add-backend mock --type mock --model mock-1 >/dev/null || fail "add-backend"
 "$APOGEE_BIN" config set-default mock >/dev/null || fail "set-default"
@@ -122,7 +129,7 @@ grep -q '"error":{' "$WORK_DIR/404.json" || fail "the 404 was not in the error s
 # --- the control plane: gated, and byte-identical to the CLI -----------------
 TOKEN="$("$APOGEE_BIN" serve --print-admin-token </dev/null 2>/dev/null)"
 [ -n "$TOKEN" ] || fail "--print-admin-token printed nothing"
-[ "$(stat -f '%Lp' "$WORK_DIR/config/admin-token" 2>/dev/null || stat -c '%a' "$WORK_DIR/config/admin-token")" = "600" ] \
+[ "$(mode_of "$WORK_DIR/config/admin-token")" = "600" ] \
     || fail "the admin token is not 0600"
 
 CODE="$(curl -s -o "$WORK_DIR/noauth.json" -w '%{http_code}' "$BASE/v1/admin/backends")"
@@ -167,7 +174,7 @@ grep -q "$TOKEN" "$WORK_DIR/events.txt" && fail "the token appeared in the event
 # --- the credential store: private, keyed by type, never echoed anywhere -----
 SECRET="sk-e2e-LEAKPROBE-$$-$(date +%s)"
 printf '%s\n' "$SECRET" | "$APOGEE_BIN" auth add openai --stdin >"$WORK_DIR/auth-add.txt" 2>&1 || fail "auth add openai --stdin: $(cat "$WORK_DIR/auth-add.txt")"
-[ "$(stat -f '%Lp' "$WORK_DIR/config/credentials.json" 2>/dev/null || stat -c '%a' "$WORK_DIR/config/credentials.json")" = "600" ] \
+[ "$(mode_of "$WORK_DIR/config/credentials.json")" = "600" ] \
     || fail "the credential store is not 0600"
 "$APOGEE_BIN" auth list </dev/null >"$WORK_DIR/auth-list.txt" 2>&1 || fail "auth list: $(cat "$WORK_DIR/auth-list.txt")"
 grep -q 'openai' "$WORK_DIR/auth-list.txt" || fail "auth list did not show the openai slot: $(cat "$WORK_DIR/auth-list.txt")"

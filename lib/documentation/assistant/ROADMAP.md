@@ -37,7 +37,7 @@ See the [`backlog/`](../backlog/README.md) index for the full queue (priority-or
 
 *Decisions taken along the way: config format, data-dir name, web-search strategy, in-process llama.cpp, local vision's home, and — 2026-09-01 — GitHub Releases as the distribution host, self-update deferred, macOS unsigned, and all six targets shipping from the first tag. See the milestones that consumed each.*
 
-*Answered so far — 2026-08-24: the platform matrix (Linux/macOS/Windows on both ARM and x86, six targets) and the repo host (GitHub, making GitHub Releases/Actions the default). 2026-08-25, with the skeleton: **C++20** as the language baseline, **CMake + FetchContent** for build and dependencies, **Catch2 v3** for tests, **nlohmann/json + CLI11 + libcurl** as the standardized library picks, and **macos-arm64 as the only merge-blocking CI target** for v0.1.0.*
+*Answered so far — 2026-08-24: the platform matrix (Linux/macOS/Windows on both ARM and x86, six targets — revised 2026-09-19 to five, the Intel Mac dropped) and the repo host (GitHub, making GitHub Releases/Actions the default). 2026-08-25, with the skeleton: **C++20** as the language baseline, **CMake + FetchContent** for build and dependencies, **Catch2 v3** for tests, **nlohmann/json + CLI11 + libcurl** as the standardized library picks, and **macos-arm64 as the only merge-blocking CI target** for v0.1.0.*
 
 ---
 

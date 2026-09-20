@@ -10,7 +10,7 @@
 ///
 /// **Why ours rather than a library.** Nothing already in the build hashes:
 /// libcurl exposes no portable digest API, and OpenSSL is not a dependency.
-/// Adding one across six targets — including two Windows architectures — to
+/// Adding one across five targets — including two Windows architectures — to
 /// gain a single function is a worse trade than ~120 lines of a fully specified
 /// algorithm with published test vectors. `sha256_test.cpp` checks it against
 /// those vectors, including the multi-block and length-padding edges where a

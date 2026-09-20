@@ -44,6 +44,11 @@ detect_target() {
         x86_64|amd64)  arch=x64 ;;
         *) die "unsupported architecture: $(uname -m)" ;;
     esac
+    # No Intel Mac target (decided 2026-09-19): macOS ships for Apple silicon
+    # only, so say so here rather than fail on a download that does not exist.
+    if [ "$os" = macos ] && [ "$arch" = x64 ]; then
+        die "Intel Macs are not a supported target; Apogee ships macOS binaries for Apple silicon only"
+    fi
     printf '%s-%s' "$os" "$arch"
 }
 

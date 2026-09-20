@@ -197,7 +197,12 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
         }
         // A lexical (or degraded, or hybrid) turn also seeds by the query's
         // own terms through the entity index; a vector turn does not.
-        const std::string_view lexical_query = result.retriever == "vector" ? "" : turn.question;
+        // Both arms as views: `"" : turn.question` would pick std::string as
+        // the common type, copy the question into a temporary, and leave
+        // this view dangling on freed memory -- which is exactly what
+        // happened on Linux, where the allocator reuses it at once.
+        const std::string_view lexical_query =
+            result.retriever == "vector" ? std::string_view{} : std::string_view{turn.question};
         const std::string header = turn.graph_name.empty() ? turn.collection : turn.graph_name;
         try {
             // The collection's own graph lives beside its chunks; a named

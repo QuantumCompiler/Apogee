@@ -5,7 +5,7 @@
 # code. Fully offline -- no network, no API key, no charges -- which is what
 # lets the walking skeleton be exercised on every push.
 #
-# cmake -P rather than a shell script so it runs on all six targets.
+# cmake -P rather than a shell script so it runs on all five targets.
 
 if(NOT DEFINED APOGEE_BIN OR NOT DEFINED APOGEE_WORK_DIR)
     message(FATAL_ERROR "APOGEE_BIN and APOGEE_WORK_DIR must be set")
