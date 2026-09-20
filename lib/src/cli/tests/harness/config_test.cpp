@@ -623,3 +623,39 @@ TEST_CASE("the training section carries the interpreter the environment is seede
     CHECK_THROWS_AS(apogee::harness::parse_config("training:\n  python: [a, b]\n", "<test>"),
                     apogee::harness::ConfigError);
 }
+
+TEST_CASE("the training section's run fields parse with their defaults and refuse bad values",
+          "[harness][config][training]") {
+    const apogee::harness::Config defaults =
+        apogee::harness::parse_config("backends: {}\n", "<test>");
+    CHECK(defaults.training.trainer.empty());
+    CHECK(defaults.training.judge_backend.empty());
+    CHECK(defaults.training.eval_suite_path.empty());
+    CHECK(defaults.training.retain_versions == 3);
+    CHECK(defaults.training.gate_mode.empty());
+    CHECK(defaults.training.effective_gate_mode() == "hard");
+
+    const apogee::harness::Config config = apogee::harness::parse_config(
+        "training:\n  trainer: peft\n  judge_backend: paid\n  eval_suite_path: ~/suite.jsonl\n"
+        "  retain_versions: 0\n  gate_mode: soft\n",
+        "<test>");
+    CHECK(config.training.trainer == "peft");
+    CHECK(config.training.judge_backend == "paid");
+    CHECK(config.training.eval_suite_path == "~/suite.jsonl");
+    CHECK(config.training.retain_versions == 0);
+    CHECK(config.training.effective_gate_mode() == "soft");
+
+    CHECK_THROWS_AS(apogee::harness::parse_config("training:\n  trainer: cuda\n", "<test>"),
+                    apogee::harness::ConfigError);
+    CHECK_THROWS_AS(apogee::harness::parse_config("training:\n  gate_mode: maybe\n", "<test>"),
+                    apogee::harness::ConfigError);
+    CHECK_THROWS_AS(apogee::harness::parse_config("training:\n  retain_versions: -1\n", "<test>"),
+                    apogee::harness::ConfigError);
+    CHECK_THROWS_AS(apogee::harness::parse_config("training:\n  retain_versions: many\n", "<test>"),
+                    apogee::harness::ConfigError);
+    CHECK(
+        apogee::harness::parse_config("training:\n  trainer: mock\n", "<test>").training.trainer ==
+        "mock");
+    // The shipped template documents the fields as comments: nothing set.
+    CHECK(load_text(apogee::harness::config_template()).training.retain_versions == 3);
+}

@@ -97,6 +97,18 @@ std::filesystem::path training_venv_dir() {
     return training_dir() / "venv";
 }
 
+std::filesystem::path training_runs_dir() {
+    return training_dir() / "runs";
+}
+
+std::filesystem::path training_versions_dir() {
+    return training_dir() / "versions";
+}
+
+std::filesystem::path training_suites_dir() {
+    return training_dir() / "suites";
+}
+
 std::filesystem::path prompts_dir() {
     return apogee_home() / "prompts";
 }

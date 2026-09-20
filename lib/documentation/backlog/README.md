@@ -61,9 +61,8 @@ Seven semi-independent tracks that can interleave: the **vendor-CLI family** —
 
 ### Phase 3 — the outer ring (scheduled for v0.1.0)
 
-The **training track** (22 — **split at grooming 2026-09-19** into 22a datasets/kits/the Python boundary → 22b runs → 22c pipelines/regime/cycle). Training is a confirmed direction (2026-08-24), **scheduled for v0.1.0 by the user on 2026-09-19**. **22a shipped 2026-09-19** ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone Z), so 22b is claimable.
+The **training track** (22 — **split at grooming 2026-09-19** into 22a datasets/kits/the Python boundary → 22b runs → 22c pipelines/regime/cycle). Training is a confirmed direction (2026-08-24), **scheduled for v0.1.0 by the user on 2026-09-19**. **22a and 22b shipped 2026-09-19** ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone Z), so 22c is claimable.
 
 | # | Document | Build after | What |
 |---|---|---|---|
-| 22b | [training-run.md](training-run.md) | ✅ 22a (shipped) | `apogee train run\|eval\|promote\|rollback\|versions\|status`: MLX/PEFT trainer subprocesses under a tested JSONL progress contract, substring and pairwise-judge gates at 100%, eval-gated promotion to a versioned GGUF registered through the one config editor, retention, rollback; training reads over HTTP, control CLI-only |
-| 22c | [training-pipelines.md](training-pipelines.md) | 22b | Multi-stage pipelines with cumulative gates and fused-checkpoint chaining, `train regime` distilling a teacher across kits, and the scheduler-invoked cycle with the anchor-baseline dual gate, consented session sources, and the circuit breaker |
+| 22c | [training-pipelines.md](training-pipelines.md) | ✅ 22b (shipped) | Multi-stage pipelines with cumulative gates and fused-checkpoint chaining, `train regime` distilling a teacher across kits, and the scheduler-invoked cycle with the anchor-baseline dual gate, consented session sources, and the circuit breaker |

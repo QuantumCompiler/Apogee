@@ -104,6 +104,15 @@ struct LayoutEntry {
 [[nodiscard]] std::filesystem::path training_scripts_dir();
 /// `training/venv` -- the Python environment `apogee train setup` creates.
 [[nodiscard]] std::filesystem::path training_venv_dir();
+/// `training/runs` -- one directory per fine-tuning run: the manifest, the
+/// adapter, the fused checkpoint while it exists. Created by the first run.
+[[nodiscard]] std::filesystem::path training_runs_dir();
+/// `training/versions` -- promoted GGUFs (`<backend>/v<N>.gguf`) and one
+/// ledger per backend (`<backend>.json`). Created by the first promote.
+[[nodiscard]] std::filesystem::path training_versions_dir();
+/// `training/suites` -- hand-written eval suites; `train eval --suite <name>`
+/// looks here. Created by first use, never seeded.
+[[nodiscard]] std::filesystem::path training_suites_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 
 /// What `seed_data_directory()` did.

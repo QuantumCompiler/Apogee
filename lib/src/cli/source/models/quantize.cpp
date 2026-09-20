@@ -80,6 +80,14 @@ std::vector<QuantType> quant_types() {
     return types;
 }
 
+bool quantize_supported() noexcept {
+#if defined(APOGEE_ENABLE_LLAMA)
+    return true;
+#else
+    return false;
+#endif
+}
+
 QuantizeResult quantize(const std::filesystem::path& input, const std::filesystem::path& output,
                         std::string_view type) {
     QuantizeResult result;

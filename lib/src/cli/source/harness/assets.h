@@ -99,18 +99,32 @@ struct BundledKit {
 };
 
 /// The four, in the order `apogee datasets kits` shows them.
-[[nodiscard]] std::span<const BundledKit> bundled_kits() noexcept;
+[[nodiscard]] std::span<const BundledKit> bundled_kits();
 
-/// A bundled Python driver -- `prepare_dataset.py` today, the trainers with
-/// the run item -- compiled in, byte-identical to `assets/training/<name>`,
+/// A bundled Python driver -- `prepare_dataset.py`, `train_mlx.py`,
+/// `train_peft.py` -- compiled in, byte-identical to `assets/training/<name>`,
 /// and seeded skip-if-present under `training/scripts/` so a user's edit
 /// survives an update and `check` can show the drift.
 struct BundledScript {
+    /// The path under `training/scripts/`.
     std::string_view name;
     std::string_view text;
 };
 
-[[nodiscard]] std::span<const BundledScript> bundled_training_scripts() noexcept;
+/// The three drivers, in listing order.
+[[nodiscard]] std::span<const BundledScript> bundled_training_scripts();
+
+/// llama.cpp's HuggingFace -> GGUF converter, vendored verbatim at the
+/// pinned revision (`third_party/llama.cpp-convert/`, its README naming
+/// the revision): the entry script, its `conversion/` package and the chat
+/// templates it reads by path. Compiled in like the drivers and seeded
+/// under `training/scripts/convert/`; `apogee train promote` runs it under
+/// the environment's interpreter. Names are paths under `training/scripts/`.
+[[nodiscard]] std::span<const BundledScript> bundled_converter_files();
+
+/// `training/scripts/convert`, relative to the data directory -- the tree
+/// the converter files seed into, which the doctor checks as one row.
+[[nodiscard]] std::string bundled_converter_relative_dir();
 
 /// `training/kits/<name>.yaml` and `training/scripts/<name>`, relative to the
 /// data directory -- the paths seeding writes and the commands read.
@@ -118,7 +132,7 @@ struct BundledScript {
 [[nodiscard]] std::string bundled_script_relative_path(std::string_view name);
 
 /// Every file seeding materialises: the agents' prompts and schemas, the
-/// kits, the scripts. ONE list, so the seeder, the unmodified check and the
+/// kits, the drivers, the converter. ONE list, so the seeder, the unmodified check and the
 /// doctor's drift row cannot disagree about what Apogee ships.
 struct BundledFile {
     std::string relative_path;

@@ -34,6 +34,8 @@
 #include "tools/toolsets.h"
 #include "training/kit.h"
 #include "training/python_env.h"
+#include "training/store.h"
+#include "training/trainer.h"
 #include "version/version.h"
 
 namespace apogee::commands {
@@ -885,6 +887,60 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         }
     }
 
+    // The vendored converter: one row over the whole seeded tree, since a
+    // driver's worth of rows per file would drown the section.
+    {
+        const std::filesystem::path converter =
+            inputs.home / harness::bundled_converter_relative_dir();
+        const std::size_t files = harness::bundled_converter_files().size();
+        if (!std::filesystem::is_directory(converter, code)) {
+            add(report, Status::Warn, "Training", "converter",
+                "convert_hf_to_gguf.py is not seeded under " + converter.string(),
+                "apogee check --fix");
+        } else if (harness::is_unmodified_bundled_asset(inputs.home, converter)) {
+            add(report, Status::Ok, "Training", "converter",
+                "convert_hf_to_gguf.py matches the vendored copy (" + std::to_string(files) +
+                    " files)");
+        } else {
+            add(report, Status::Warn, "Training", "converter",
+                "differs from the vendored copy under " + converter.string() +
+                    " -- delete the directory and run 'apogee check --fix' to restore it");
+        }
+    }
+
+    // The trainer this host would use, and what promote needs -- both only
+    // meaningful once the environment exists (its own row says when not).
+    if (status.exists && status.error.empty()) {
+        const training::TrainerChoice choice = training::select_trainer(
+            inputs.config_missing ? std::string{} : inputs.config.training.trainer,
+            training::detect_host());
+        if (choice.name.empty()) {
+            add(report, Status::Warn, "Training", "trainer", choice.error);
+        } else if (choice.name == "mock") {
+            add(report, Status::Ok, "Training", "trainer", "mock (training.trainer)");
+        } else {
+            const training::RequirementSet set = choice.name == "mlx"
+                                                     ? training::RequirementSet::Mlx
+                                                     : training::RequirementSet::Peft;
+            if (status.has(set)) {
+                add(report, Status::Ok, "Training", "trainer",
+                    choice.name + " -- its requirement set is installed");
+            } else {
+                add(report, Status::Warn, "Training", "trainer",
+                    choice.name + " fits this host, but its requirement set is not installed",
+                    "apogee train setup --trainer " + choice.name);
+            }
+        }
+        if (status.has(training::RequirementSet::Convert)) {
+            add(report, Status::Ok, "Training", "convert set",
+                "installed -- 'train promote' can convert to GGUF");
+        } else {
+            add(report, Status::Warn, "Training", "convert set",
+                "not installed -- 'train promote' needs it to convert to GGUF",
+                "apogee train setup --with convert");
+        }
+    }
+
     const std::vector<training::KitSummary> kits = training::list_kits(training / "kits");
     if (kits.empty()) {
         add(report, Status::Warn, "Training", "kits",
@@ -905,6 +961,48 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
     if (inputs.config_missing || !inputs.config_error.empty()) {
         return;
     }
+
+    // Every version ledger: the active version's GGUF exists and the
+    // backend's model_path names it -- else the two have drifted, and a chat
+    // runs something other than what `train versions` says is active.
+    for (const training::VersionLedger& ledger : training::TrainingStore{training}.all_versions()) {
+        const std::string label = "versions: " + ledger.backend;
+        const training::VersionEntry* active = ledger.active();
+        if (active == nullptr) {
+            add(report, Status::Warn, "Training", label,
+                "the ledger names active version " + std::to_string(ledger.active_version) +
+                    ", which it does not hold",
+                "apogee train promote <run> --as " + ledger.backend);
+            continue;
+        }
+        if (!std::filesystem::is_regular_file(active->gguf_path, code)) {
+            add(report, Status::Warn, "Training", label,
+                "active v" + std::to_string(active->version) +
+                    " names a GGUF that is not there: " + active->gguf_path,
+                "apogee train rollback " + ledger.backend + ", or promote again");
+            continue;
+        }
+        const harness::BackendConfig* backend = inputs.config.find_backend(ledger.backend);
+        if (backend == nullptr) {
+            add(report, Status::Warn, "Training", label,
+                "active v" + std::to_string(active->version) +
+                    " exists, but no backend of that name is configured",
+                "apogee config add-backend " + ledger.backend + " --type llamacpp --model-path " +
+                    active->gguf_path);
+            continue;
+        }
+        if (harness::expand_env_and_home(backend->model_path) != active->gguf_path) {
+            add(report, Status::Warn, "Training", label,
+                "the ledger says v" + std::to_string(active->version) + " (" + active->gguf_path +
+                    ") but the backend's model_path is " + backend->model_path,
+                "apogee train rollback " + ledger.backend + ", or promote again");
+            continue;
+        }
+        add(report, Status::Ok, "Training", label,
+            "active v" + std::to_string(active->version) + " of " +
+                std::to_string(ledger.versions.size()) + ", and the backend points at it");
+    }
+
     if (!inputs.config.paths.hf_dir.empty()) {
         const std::filesystem::path hf_dir{
             harness::expand_env_and_home(inputs.config.paths.hf_dir)};

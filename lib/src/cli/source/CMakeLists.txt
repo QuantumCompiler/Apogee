@@ -57,6 +57,24 @@ add_library(apogee_core STATIC
     training/synth.cpp
     training/datasets.h
     training/datasets.cpp
+    training/trainer.h
+    training/trainer.cpp
+    training/script_trainer.h
+    training/script_trainer.cpp
+    training/mlx_trainer.h
+    training/mlx_trainer.cpp
+    training/peft_trainer.h
+    training/peft_trainer.cpp
+    training/mock_trainer.h
+    training/mock_trainer.cpp
+    training/eval.h
+    training/eval.cpp
+    training/manifest.h
+    training/manifest.cpp
+    training/store.h
+    training/store.cpp
+    training/promote.h
+    training/promote.cpp
     models/quantize.h
     models/quantize.cpp
     commands/models_pull.h
@@ -149,6 +167,7 @@ add_library(apogee_core STATIC
     harness/assets.h
     harness/assets.cpp
     harness/assets_training.cpp
+    harness/assets_converter.cpp
     harness/errors.h
     harness/errors.cpp
     harness/cancellation.h
@@ -386,6 +405,8 @@ add_library(apogee_core STATIC
     httpserver/admin_graphs.cpp
     httpserver/admin_datasets.h
     httpserver/admin_datasets.cpp
+    httpserver/admin_training.h
+    httpserver/admin_training.cpp
     httpserver/admin.h
     httpserver/admin.cpp
     httpserver/admin_auth_routes.h

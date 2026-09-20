@@ -729,6 +729,70 @@ std::vector<std::string_view> models_role_fields() {
     return {"default", "default_embedding", "default_extraction"};
 }
 
+std::string set_backend_model_path(std::string_view content, std::string_view name,
+                                   std::string_view path) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange range = find_section(lines, "backends");
+    if (!range.found) {
+        throw ConfigEditError("no 'backends:' section in this config");
+    }
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
+    if (!key_line.has_value()) {
+        throw ConfigEditError("backend '" + std::string{name} + "' not found in config");
+    }
+    const auto [begin, end] = entry_extent(lines, *key_line, range.end);
+    const std::string value = yaml_scalar(std::string{path});
+
+    std::optional<std::size_t> type_line;
+    for (std::size_t i = begin + 1; i < end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line) || indent_of(line) != kFieldIndent) {
+            continue;
+        }
+        const std::string_view field = line.substr(kFieldIndent);
+        if (field.starts_with("type:")) {
+            type_line = i;
+        }
+        if (!field.starts_with("model_path:")) {
+            continue;
+        }
+        // Replace only the value token, keeping any trailing comment.
+        const std::string& original = lines[i];
+        const std::size_t key_colon = original.find(':', kFieldIndent);
+        const std::size_t hash = original.find(" #", key_colon);
+        const std::size_t limit = hash == std::string::npos ? original.size() : hash;
+        std::size_t value_start = key_colon + 1;
+        while (value_start < limit &&
+               (original[value_start] == ' ' || original[value_start] == '\t')) {
+            ++value_start;
+        }
+        std::size_t value_end = limit;
+        while (value_end > value_start &&
+               (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
+                original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
+            --value_end;
+        }
+        std::string replacement = original.substr(0, value_start);
+        if (value_start == key_colon + 1) {
+            replacement += ' ';
+        }
+        replacement += value;
+        replacement += original.substr(value_end);
+        if (replacement.empty() || replacement.back() != '\n') {
+            replacement += terminator;
+        }
+        lines[i] = replacement;
+        return join_lines(lines);
+    }
+    // No `model_path:` yet: it goes right after `type:`, else first in the
+    // entry -- where a reader looks for it.
+    const std::size_t at = type_line.has_value() ? *type_line + 1 : begin + 1;
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(at),
+                 std::string(kFieldIndent, ' ') + "model_path: " + value + terminator);
+    return join_lines(lines);
+}
+
 std::string set_embedding_graph_enabled(std::string_view content, std::string_view collection,
                                         bool enabled) {
     Lines lines = split_lines(content);

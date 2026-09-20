@@ -200,6 +200,22 @@ HttpResponse AdminHandler::list_kits(const HttpRequest& /*request*/) {
     return admin_list_kits(config_context());
 }
 
+HttpResponse AdminHandler::training_status(const HttpRequest& /*request*/) {
+    return admin_training_status(config_context());
+}
+
+HttpResponse AdminHandler::list_training_runs(const HttpRequest& request) {
+    return admin_list_training_runs(config_context(), request);
+}
+
+HttpResponse AdminHandler::get_training_run(const HttpRequest& /*request*/, std::string_view id) {
+    return admin_get_training_run(config_context(), id);
+}
+
+HttpResponse AdminHandler::list_training_versions(const HttpRequest& request) {
+    return admin_list_training_versions(config_context(), request);
+}
+
 HttpResponse AdminHandler::list_communities(const HttpRequest& request, std::string_view name) {
     return admin_list_communities(config_context(), name, request);
 }

@@ -116,6 +116,14 @@ const std::map<std::string, Classification>& table() {
         {"serve", carve_out("it is the server")},
         {"train setup",
          carve_out("creates the Python environment on the host; training control is CLI-only")},
+        {"train run",
+         carve_out("an expensive GPU job with live progress; training control is CLI-only over "
+                   "HTTP, forever -- the reads are served under /v1/admin/training/*")},
+        {"train eval", carve_out("adapter inference on the host; training control is CLI-only")},
+        {"train promote",
+         carve_out("changes what a served backend runs; training control is CLI-only")},
+        {"train rollback",
+         carve_out("changes what a served backend runs; training control is CLI-only")},
         {"__mcp-tools",
          carve_out("an MCP server on this process's own stdio, spawned by another client")},
         // --- read-only / interactive ------------------------------------------
@@ -147,6 +155,8 @@ const std::map<std::string, Classification>& table() {
         {"datasets kits", read_only()},
         {"datasets list", read_only()},
         {"datasets info", read_only()},
+        {"train versions", read_only()},
+        {"train status", read_only()},
     };
     return rows;
 }
@@ -231,6 +241,42 @@ TEST_CASE("every CLI subcommand is classified, and every twin's route is registe
         }
         probe.path = path;
         CHECK(mux.dispatch(probe).status == 401);
+    }
+}
+
+TEST_CASE(
+    "no training control action has a route: a mutating request to any training path is "
+    "not 200",
+    "[httpserver][parity][training]") {
+    const apogee::harness::Config config;
+    apogee::harness::Harness harness{config};
+    apogee::httpserver::Handler handler{harness, {}, nullptr};
+    apogee::events::Bus bus;
+    apogee::httpserver::JobRegistry jobs{bus};
+    apogee::httpserver::AdminHandler admin{{}, jobs, bus};
+    const Mux mux{handler, admin, "secret"};
+    for (const char* method : {"POST", "PUT", "PATCH", "DELETE"}) {
+        for (const char* path :
+             {"/v1/admin/training/run", "/v1/admin/training/runs", "/v1/admin/training/runs/x",
+              "/v1/admin/training/eval", "/v1/admin/training/promote",
+              "/v1/admin/training/rollback", "/v1/admin/training/versions",
+              "/v1/admin/training/status", "/v1/admin/training/setup"}) {
+            HttpRequest request;
+            request.method = method;
+            request.path = path;
+            request.headers["authorization"] = "Bearer secret";
+            INFO(method << " " << path);
+            const int status = mux.dispatch(request).status;
+            CHECK(status != 200);
+            CHECK(status != 202);
+        }
+    }
+    // The route table itself: nothing under training/ that is not a GET.
+    for (const RouteSpec& route : Mux::routes()) {
+        if (route.pattern.find("/v1/admin/training/") != std::string::npos) {
+            INFO(route.method << " " << route.pattern);
+            CHECK(route.method == "GET");
+        }
     }
 }
 

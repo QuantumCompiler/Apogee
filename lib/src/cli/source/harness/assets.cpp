@@ -624,6 +624,10 @@ std::string bundled_script_relative_path(std::string_view name) {
     return "training/scripts/" + std::string{name};
 }
 
+std::string bundled_converter_relative_dir() {
+    return "training/scripts/convert";
+}
+
 std::vector<BundledFile> bundled_files() {
     std::vector<BundledFile> files;
     for (const BundledAgent& agent : kBundled) {
@@ -635,6 +639,9 @@ std::vector<BundledFile> bundled_files() {
     }
     for (const BundledScript& script : bundled_training_scripts()) {
         files.push_back({bundled_script_relative_path(script.name), script.text});
+    }
+    for (const BundledScript& file : bundled_converter_files()) {
+        files.push_back({bundled_script_relative_path(file.name), file.text});
     }
     return files;
 }

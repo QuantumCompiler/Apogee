@@ -814,6 +814,47 @@ neither is ever read as a dataset name. `datasets prepare` (a server-side
 file conversion) and `datasets pull` (a download) are backfills of this
 plane, not routes yet.
 
+### `GET /v1/admin/training/status`
+
+The training track's state, read off the filesystem the CLI writes:
+`200 {"runs": N, "running": [run ids], "versions": [{backend,
+active_version, kept, total}], "active_pipeline": null, "cycle_active":
+false}`. The last two are reserved for the pipelines item and stay `null`
+and `false` until it ships.
+
+**Training control is CLI-only, forever.** `apogee train run|eval|promote|
+rollback|setup` have no route: an expensive GPU job with live progress is
+not a control surface a remote client should be able to start, and a
+promotion changes what this server chats with. Each is a documented
+parity carve-out; what a remote client may do is read.
+
+### `GET /v1/admin/training/runs`
+
+Every fine-tuning run under `training/runs/`, newest first: `200
+{"object": "list", "data": [{kind: "run", id, trainer, status, base_model,
+dataset, method, final_loss, iterations, started_at[, finished_at,
+eval_passed, eval_score]}]}` -- `data` is `[]` and never null. `status` is
+`running`, `complete`, `failed` or `cancelled`. `?kind=run|pipeline`
+filters (pipelines arrive with the next item; the filter answers `[]` for
+them until then); any other value is `400`.
+
+### `GET /v1/admin/training/runs/{id}`
+
+One run's full manifest: `200 {"kind": "run", "run": {run_id, trainer,
+base_model, dataset, dataset_hash, method, iters, batch_size, num_layers,
+grad_checkpoint, mask_prompt, final_loss, iterations, adapter_dir, status,
+started_at[, finished_at, error, eval_results]}}`; `404` when unknown,
+`400` for an id that is not a plain name.
+
+### `GET /v1/admin/training/versions`
+
+The version ledgers under `training/versions/`: `200 {"object": "list",
+"data": [ledger]}`, or with `?backend=<name>` that backend's ledger alone
+(`404` when it has none). A ledger is `{backend_name, active_version,
+versions: [{version, run_id, gguf_path, promoted_at[, eval_score,
+eval_passed, pruned_at]}]}` -- a pruned entry stays as history with the
+time retention removed its file.
+
 ### `GET /v1/admin/permissions`
 
 What the permission gate does for each destructive native tool — `ask`,

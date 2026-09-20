@@ -1,0 +1,1 @@
+"""Stub: importable, nothing else."""

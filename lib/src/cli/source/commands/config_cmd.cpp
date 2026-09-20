@@ -178,6 +178,22 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     if (key == "training.python") {
         return render(config.training.python);
     }
+    if (key == "training.trainer") {
+        return render(config.training.trainer.empty() ? std::string{"auto"}
+                                                      : config.training.trainer);
+    }
+    if (key == "training.judge_backend") {
+        return render(config.training.judge_backend);
+    }
+    if (key == "training.eval_suite_path") {
+        return render(config.training.eval_suite_path);
+    }
+    if (key == "training.retain_versions") {
+        return std::to_string(config.training.retain_versions);
+    }
+    if (key == "training.gate_mode") {
+        return std::string{config.training.effective_gate_mode()};
+    }
     if (key == "tools.fs_root") {
         return render(config.tools.fs_root);
     }

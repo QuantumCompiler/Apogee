@@ -11,3 +11,7 @@ CMakeUserPresets.json
 .vscode/
 .idea/
 *.swp
+
+# Python bytecode from running the shipped drivers, the asset generator, or the tests.
+__pycache__/
+*.pyc

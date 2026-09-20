@@ -43,7 +43,7 @@ A **GUI ships as a sibling application** *(committed direction 2026-08-24; plann
 - **RAG & knowledge** *(gated ring)*: lexical-floor-first retrieval (BM25, then vector, then hybrid), and the knowledge/graph layers after it.
 - **Local-model depth** *(gated ring)*: model management and per-family behavior profiles.
 - **One install contract:** identical on-disk layout from every install path, validated by `apogee check`.
-- **Training/distillation** *(confirmed direction 2026-08-24; scheduled for v0.1.0 2026-09-19)*: fine-tuning local models on their full-weight SafeTensors files, cloned from Ommi's orchestration shape — a C++ orchestrator over Python trainer subprocesses in a virtual environment Apogee owns, never the system Python. The floor (datasets, kits, the Python boundary) shipped 2026-09-19; the run and the orchestration layer follow.
+- **Training/distillation** *(confirmed direction 2026-08-24; scheduled for v0.1.0 2026-09-19)*: fine-tuning local models on their full-weight SafeTensors files, cloned from Ommi's orchestration shape — a C++ orchestrator over Python trainer subprocesses in a virtual environment Apogee owns, never the system Python. The floor (datasets, kits, the Python boundary) and the run (train, the eval gate, promotion to a versioned GGUF, rollback) shipped 2026-09-19; the orchestration layer (pipelines, regimes, the cycle) follows. Training control is CLI-only over HTTP; the reads are served.
 
 ## Non-goals
 

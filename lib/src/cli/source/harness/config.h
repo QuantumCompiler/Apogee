@@ -392,6 +392,38 @@ struct TrainingConfig {
     /// expanded at use. Empty means `python3` on PATH. Never the interpreter
     /// a script runs under -- that is always the environment's own.
     std::string python;
+
+    /// Which trainer `train run` uses when `--trainer` is not given: `auto`
+    /// (the default when empty -- `mlx` on Apple Silicon, `peft` where
+    /// `nvidia-smi` is on PATH), `mlx`, `peft`, or `mock`.
+    std::string trainer;
+
+    /// The backend `train eval` asks to judge items without an `expected`
+    /// substring, pairwise against the untuned base. Empty means such items
+    /// skip and auto-pass, loudly. Named explicitly here or by `--judge`,
+    /// never a metered default.
+    std::string judge_backend;
+
+    /// The suite `train eval` runs when `--suite` is not given.
+    std::string eval_suite_path;
+
+    /// Promoted GGUFs kept per backend; the oldest inactive ones are pruned
+    /// on promote. 0 keeps every version.
+    int retain_versions = kDefaultRetainVersions;
+
+    /// `hard` (the default): promote refuses a run whose eval has not run or
+    /// has not passed. `soft`: the same is a warning. `--force` skips the
+    /// gate either way.
+    std::string gate_mode;
+
+    static constexpr int kDefaultRetainVersions = 3;
+    static constexpr std::string_view kGateHard = "hard";
+    static constexpr std::string_view kGateSoft = "soft";
+
+    /// `gate_mode`, or `hard` when unset.
+    [[nodiscard]] std::string_view effective_gate_mode() const noexcept {
+        return gate_mode.empty() ? kGateHard : std::string_view{gate_mode};
+    }
 };
 
 /// The `tools:` section: where the native toolsets operate.

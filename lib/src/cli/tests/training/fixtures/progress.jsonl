@@ -1,0 +1,8 @@
+{"message": "loading model from /snap/tiny"}
+{"iteration": 1, "total_iters": 3, "loss": 2.5, "lr": 0.0001, "throughput": 4.2}
+Traceback line that is not JSON at all
+{"iteration": 2, "total_iters": 3, "loss": 1.9, "lr": 0.0001, "throughput": 4.4}
+
+{"iteration": 3, "total_iters": 3, "loss": 1.2, "lr": 0.00009, "throughput": 4.6}
+{"fused_dir": "/runs/x/fused"}
+{"error": "the driver gave up"}

@@ -816,6 +816,32 @@ Config parse_config(std::string_view content, std::string_view origin) {
             fail(origin, "training: expected a mapping");
         }
         config.training.python = scalar(training["python"], origin, "training.python");
+        config.training.trainer = scalar(training["trainer"], origin, "training.trainer");
+        if (!config.training.trainer.empty() && config.training.trainer != "auto" &&
+            config.training.trainer != "mlx" && config.training.trainer != "peft" &&
+            config.training.trainer != "mock") {
+            fail(origin, "training.trainer: unknown value '" + config.training.trainer +
+                             "' (accepted: auto, mlx, peft, mock)");
+        }
+        config.training.judge_backend =
+            scalar(training["judge_backend"], origin, "training.judge_backend");
+        config.training.eval_suite_path =
+            scalar(training["eval_suite_path"], origin, "training.eval_suite_path");
+        if (const std::optional<std::int64_t> retain =
+                integer(training["retain_versions"], origin, "training.retain_versions");
+            retain.has_value()) {
+            if (*retain < 0) {
+                fail(origin, "training.retain_versions: must be 0 (keep all) or positive");
+            }
+            config.training.retain_versions = static_cast<int>(*retain);
+        }
+        config.training.gate_mode = scalar(training["gate_mode"], origin, "training.gate_mode");
+        if (!config.training.gate_mode.empty() &&
+            config.training.gate_mode != TrainingConfig::kGateHard &&
+            config.training.gate_mode != TrainingConfig::kGateSoft) {
+            fail(origin, "training.gate_mode: unknown value '" + config.training.gate_mode +
+                             "' (accepted: hard, soft)");
+        }
     }
 
     if (const YAML::Node mode = root["status_mode"]; mode.IsDefined() && !mode.IsNull()) {

@@ -320,12 +320,26 @@ backends:
 #   db: knowledge          # the collection records go into
 
 # ── Training (fine-tuning local models) ──────────────────────────────────────
-# The training track runs its Python drivers -- dataset preparation today,
-# the trainers with the run item -- inside a virtual environment Apogee owns
-# under training/venv/, never the system Python. `apogee train setup` creates
-# it (or the first command that needs it asks, on a terminal). `python` names
-# the interpreter that environment is seeded FROM; empty means python3 on
-# PATH. Datasets live under training/datasets/ (`apogee datasets`), the
-# bundled kits under training/kits/.
+# The training track runs its Python drivers -- dataset preparation and the
+# trainers -- inside a virtual environment Apogee owns under training/venv/,
+# never the system Python. `apogee train setup` creates it (or the first
+# command that needs it asks, on a terminal). `python` names the interpreter
+# that environment is seeded FROM; empty means python3 on PATH. Datasets
+# live under training/datasets/ (`apogee datasets`), the bundled kits under
+# training/kits/, runs under training/runs/ and promoted GGUFs under
+# training/versions/ (`apogee train`).
+#   trainer          auto (mlx on Apple Silicon, peft with nvidia-smi), mlx, or peft
+#   judge_backend    the backend that judges eval items with no `expected`
+#                    substring, pairwise against the untuned base; unset
+#                    means those items skip and auto-pass (loudly)
+#   eval_suite_path  the suite `train eval` runs without --suite
+#   retain_versions  promoted GGUFs kept per backend (default 3; 0 keeps all)
+#   gate_mode        hard (default: promote refuses an unevaluated or failing
+#                    run) or soft (a warning instead)
 # training:
 #   python: /usr/bin/python3
+#   trainer: auto
+#   judge_backend: paid
+#   eval_suite_path: ~/.apogee/training/suites/mine.jsonl
+#   retain_versions: 3
+#   gate_mode: hard

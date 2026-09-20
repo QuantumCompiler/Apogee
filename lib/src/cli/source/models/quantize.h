@@ -52,6 +52,12 @@ struct QuantizeResult {
     std::int64_t output_bytes = 0;
 };
 
+/// Whether this build links llama.cpp and so can quantize at all. A caller
+/// with a long pipeline ahead of the quantize step (`train promote
+/// --quantize`) asks this first, so it refuses before fusing and converting
+/// rather than after.
+[[nodiscard]] bool quantize_supported() noexcept;
+
 /// Quantizes `input` into `output` at `type`.
 ///
 /// `output` must not already exist — the same rule acquisition follows, and for

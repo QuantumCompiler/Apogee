@@ -150,6 +150,13 @@ add_executable(apogee_tests
     commands/datasets_test.cpp
     commands/train_test.cpp
     httpserver/admin_datasets_test.cpp
+    training/trainer_test.cpp
+    training/progress_contract_test.cpp
+    training/manifest_test.cpp
+    training/store_test.cpp
+    training/eval_test.cpp
+    training/promote_test.cpp
+    httpserver/admin_training_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/env_guard.h
@@ -173,6 +180,11 @@ target_compile_definitions(apogee_tests PRIVATE
     # The cross-surface guard scan reads the command sources themselves: the
     # assertion that survives is "every surface calls it", which needs the tree.
     APOGEE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../source"
+    # The training protocol's golden fixture and the stub Python modules the
+    # shipped drivers are run under.
+    APOGEE_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    # The vendored converter, byte-matched to its compiled-in copy.
+    APOGEE_THIRD_PARTY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../third_party"
 )
 
 # So tests can `#include "support/fake_command.h"` the same way source files
@@ -444,6 +456,21 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/datasets-e2e
     )
     set_tests_properties(cli.datasets_lifecycle PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
+    # The run on the real binary with the mock trainer -- no Python at all:
+    # a template dataset, `train run` writing a manifest with the status
+    # line seen, a GGUF and a backend name refused, `train eval --suite`
+    # with substring items passing against the mock's echo, `promote --as`
+    # registering the entry byte-exactly and writing v1.gguf, a second
+    # promote to v2 and `rollback` to v1 deleting nothing, retention,
+    # `versions`, `status`, `check` green throughout, and no training route
+    # on the served admin plane beyond the reads.
+    add_test(NAME cli.train_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/train_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/train-e2e
+    )
+    set_tests_properties(cli.train_lifecycle PROPERTIES TIMEOUT 180)
 endif()
 
 # Startup output discipline, under a real pseudo-terminal.

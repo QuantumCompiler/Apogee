@@ -852,3 +852,79 @@ TEST_CASE("graph helpers are section-scoped: a same-named agent and MCP server s
     CHECK(apogee::harness::section_entry_names(agent_gone, "graphs") ==
           std::vector<std::string>{"shared"});
 }
+
+TEST_CASE(
+    "set_backend_model_path replaces in place keeping the comment, inserts after type, stays "
+    "inside the backends section, and is byte-exact against the shipped template",
+    "[config_edit][golden][training]") {
+    constexpr std::string_view kBase =
+        "# top\n"
+        "backends:\n"
+        "  tuned:\n"
+        "    type: llamacpp\n"
+        "    model_path: /old/v1.gguf   # promoted 2026-09-19\n"
+        "    context_size: 8192\n"
+        "  other:\n"
+        "    type: mock\n"
+        "\nembeddings:\n"
+        "  tuned:\n"
+        "    chunk_size: 512\n";
+    const std::string replaced =
+        apogee::harness::set_backend_model_path(kBase, "tuned", "/new/v2.gguf");
+    require_parses(replaced);
+    CHECK(replaced ==
+          "# top\n"
+          "backends:\n"
+          "  tuned:\n"
+          "    type: llamacpp\n"
+          "    model_path: /new/v2.gguf   # promoted 2026-09-19\n"
+          "    context_size: 8192\n"
+          "  other:\n"
+          "    type: mock\n"
+          "\nembeddings:\n"
+          "  tuned:\n"
+          "    chunk_size: 512\n");
+    CHECK(apogee::harness::parse_config(replaced, "<test>").find_backend("tuned")->model_path ==
+          "/new/v2.gguf");
+    // Case-insensitive on the name, and the inverse edit restores the bytes.
+    CHECK(apogee::harness::set_backend_model_path(replaced, "TUNED", "/old/v1.gguf") ==
+          std::string{kBase});
+
+    // No model_path yet: inserted right after type.
+    const std::string inserted =
+        apogee::harness::set_backend_model_path(kBase, "other", "/models/x.gguf");
+    require_parses(inserted);
+    CHECK(
+        inserted.find("  other:\n    type: mock\n    model_path: /models/x.gguf\n\nembeddings:") !=
+        std::string::npos);
+
+    // A path YAML could misread is quoted; a missing entry or section throws.
+    CHECK(apogee::harness::set_backend_model_path(kBase, "other", "C:\\models\\x: y.gguf")
+              .find("model_path: ") != std::string::npos);
+    CHECK_THROWS_AS(apogee::harness::set_backend_model_path(kBase, "nope", "/x"),
+                    apogee::harness::ConfigEditError);
+    CHECK_THROWS_AS(
+        apogee::harness::set_backend_model_path("embeddings:\n  tuned:\n    x: 1\n", "tuned", "/x"),
+        apogee::harness::ConfigEditError);
+
+    // The promote path on two copies of the shipped template: append a new
+    // llamacpp entry, then repoint it in place -- and the second file equals
+    // the first with only the path changed.
+    const std::string shipped{apogee::harness::config_template()};
+    apogee::harness::BackendConfig entry;
+    entry.type = apogee::harness::BackendType::LlamaCpp;
+    entry.model_path = "/home/me/.apogee/training/versions/tuned/v1.gguf";
+    const std::string appended = apogee::harness::append_backend(shipped, "tuned", entry, false);
+    require_parses(appended);
+    CHECK(appended.find("  tuned:\n    type: llamacpp\n    model_path: "
+                        "/home/me/.apogee/training/versions/tuned/v1.gguf\n") != std::string::npos);
+    const std::string repointed = apogee::harness::set_backend_model_path(
+        appended, "tuned", "/home/me/.apogee/training/versions/tuned/v2.gguf");
+    require_parses(repointed);
+    std::string expected = appended;
+    const std::size_t at = expected.find("/tuned/v1.gguf");
+    REQUIRE(at != std::string::npos);
+    expected.replace(at, std::string_view{"/tuned/v1.gguf"}.size(), "/tuned/v2.gguf");
+    CHECK(repointed == expected);
+    CHECK(apogee::harness::delete_backend(appended, "tuned") == shipped);
+}

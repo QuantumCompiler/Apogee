@@ -1,10 +1,9 @@
 # Training
 
-The reference for fine-tuning local models with Apogee. This page covers the
-floor of the track -- the Python boundary, datasets, and training kits --
-which shipped first; the run itself (`apogee train run|eval|promote`) and the
-pipelines, regimes and the continuous cycle arrive with the next two items
-and extend this page.
+The reference for fine-tuning local models with Apogee: the Python boundary,
+datasets and training kits, and the run itself -- `apogee train
+run|eval|promote|rollback|versions|status`. The pipelines, regimes and the
+continuous cycle arrive with the next item and extend this page.
 
 Apogee fine-tunes **full-weight SafeTensors snapshots** and promotes the
 result to a GGUF a `llamacpp` backend runs. It infers from GGUF only, so a
@@ -19,11 +18,15 @@ for Parquet -- and none of it is assumed installed. Apogee owns a **virtual
 environment under its data directory**:
 
 ```
-~/.apogee/training/venv/        the environment (never the system Python)
-~/.apogee/training/scripts/     the shipped Python drivers, seeded by `apogee check --fix`
-~/.apogee/training/kits/        the bundled training kits, seeded the same way
-~/.apogee/training/datasets/    trainer-ready datasets, one .jsonl per dataset
+~/.apogee/training/venv/          the environment (never the system Python)
+~/.apogee/training/scripts/       the shipped Python drivers, seeded by `apogee check --fix`
+~/.apogee/training/scripts/convert/  llama.cpp's converter, vendored at the pinned revision
+~/.apogee/training/kits/          the bundled training kits, seeded the same way
+~/.apogee/training/datasets/      trainer-ready datasets, one .jsonl per dataset
 ~/.apogee/training/datasets/raw/  downloaded dataset files, for `datasets prepare`
+~/.apogee/training/runs/<id>/     one directory per run: manifest.json, adapters/
+~/.apogee/training/versions/      promoted GGUFs (<backend>/v<N>.gguf) and one ledger per backend
+~/.apogee/training/suites/        your hand-written eval suites
 ```
 
 The `training` row is private (`0700`): a dataset mined from your sessions
@@ -48,9 +51,9 @@ terminal, and on a pipe refuses naming this command.
 | Set | Packages | Needed by |
 |---|---|---|
 | `prepare` | `datasets` | Parquet in `datasets prepare` (JSON, JSONL and CSV need nothing) |
-| `mlx` | `mlx-lm` | the Apple Silicon trainer (the run item) |
-| `peft` | `transformers`, `peft`, `trl`, `bitsandbytes`, `accelerate` | the CUDA trainer (the run item) |
-| `convert` | `torch`, `transformers`, `gguf`, `sentencepiece` | the GGUF converter at promote (the run item) |
+| `mlx` | `mlx-lm` | `train run --trainer mlx`, the Apple Silicon trainer |
+| `peft` | `torch`, `transformers`, `peft`, `bitsandbytes`, `accelerate` | `train run --trainer peft`, the CUDA trainer |
+| `convert` | `torch`, `transformers`, `gguf`, `numpy`, `sentencepiece`, `protobuf` | `train promote`'s GGUF conversion |
 
 `--trainer auto` picks `mlx` on macOS/arm64, `peft` where `nvidia-smi` is on
 PATH, and says so when neither fits. Versions are floors, not exact pins.
@@ -58,11 +61,20 @@ PATH, and says so when neither fits. Versions are floors, not exact pins.
 ```yaml
 training:
   python: /opt/homebrew/bin/python3.12   # the interpreter the venv is seeded FROM
+  trainer: auto            # mlx on Apple Silicon, peft with nvidia-smi; or name one
+  judge_backend: paid      # judges eval items with no `expected`; unset = they skip
+  eval_suite_path: ~/.apogee/training/suites/mine.jsonl   # `train eval` without --suite
+  retain_versions: 3       # promoted GGUFs kept per backend; 0 keeps all
+  gate_mode: hard          # hard: promote refuses an unevaluated/failing run; soft: warns
 ```
 
 `apogee check` reports the environment and its sets, every seeded script
 against the shipped copy (an edit is kept and shown; a missing file is
-repaired by `--fix`), every installed kit, and `paths.hf_dir` when set.
+repaired by `--fix`), the vendored converter tree as one row, the trainer
+this host would use and whether its set is installed, the `convert` set,
+every installed kit, every version ledger's consistency (the active
+version's GGUF exists and the backend points at it), and `paths.hf_dir`
+when set.
 
 ### The script protocol
 
@@ -73,6 +85,9 @@ per line:
 {"message": "..."}                                    a note
 {"error": "..."}                                      fatal; a non-zero exit follows
 {"rows_written": N, "rows_skipped": N, "out": "..."}  prepare's terminal record
+{"iteration": N, "total_iters": N, "loss": F, "lr": F, "throughput": F}   a trainer's progress
+{"fused_dir": "..."}                                  a trainer's fuse record
+{"text": "..."}                                       a trainer's infer record
 ```
 
 Apogee frames the stream with the same framer the vendor CLIs use, keeps a
@@ -250,11 +265,143 @@ check` validates every installed kit. The format is the reference
 implementation's byte for byte, so a kit written for either project runs on
 both.
 
+## The run
+
+```bash
+apogee models pull Qwen/Qwen2.5-0.5B --safetensors        # a student
+apogee train setup --trainer auto --with convert          # the stack, once
+apogee datasets synth maths --teacher paid --kit reasoning
+apogee train run Qwen--Qwen2.5-0.5B --dataset maths --iters 500 --mask-prompt
+apogee train eval 20260919-143022 --suite reasoning --judge paid
+apogee train promote 20260919-143022 --as qwen-maths
+apogee chat -m qwen-maths
+```
+
+### `train run`
+
+```bash
+apogee train run <student> --dataset <name|path> [--method lora|qlora] [--iters N]
+                 [--batch-size N] [--num-layers N] [--grad-checkpoint] [--mask-prompt]
+                 [--trainer auto|mlx|peft|mock]
+```
+
+A LoRA (or QLoRA) fine-tune of a **SafeTensors snapshot** -- a directory
+holding `config.json` and `*.safetensors`, named as a path or as a snapshot
+under `paths.hf_dir` or `models/` -- executed by a Python trainer
+subprocess under the environment: `train_mlx.py` over `mlx_lm` on Apple
+Silicon, `train_peft.py` over `transformers` + `peft` (+ `bitsandbytes` for
+QLoRA) on CUDA. **Only full-precision weights are trainable**: a GGUF or a
+backend name is refused naming `apogee models pull <owner>/<repo>
+--safetensors`. `--trainer auto` (the default, or `training.trainer`) picks
+`mlx` on macOS/arm64 and `peft` where `nvidia-smi` is on PATH; `mock` is an
+in-process trainer that needs no Python, for trying the whole chain.
+
+The driver's JSONL progress becomes the status line -- `iter n/N · loss L ·
+lr R · T it/s` -- and on a pipe a line every tenth. Ctrl-C terminates the
+child and records the run as `cancelled`. Every run gets a directory
+`training/runs/<YYYYMMDD-HHMMSS>/` with `adapters/` and a `manifest.json`
+recording the trainer, the student, the dataset and its sha256, the
+hyperparameters, the final loss, `status` (`running` while it runs, then
+`complete`, `failed` or `cancelled`) and the timestamps. **A crashed driver
+is a failed run, never a silent success**: an `{"error"}` line is its own
+event, a non-JSON line (a stack trace) is kept as a message, and the exit
+code is carried -- three silent gaps in the reference implementation, closed
+by the protocol.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--dataset` | required | a dataset name (`datasets list`) or a `.jsonl` path |
+| `--method` | `lora` | `lora` or `qlora` (4-bit on PEFT; on MLX the snapshot's own precision) |
+| `--iters` | the driver's (1000) | training iterations |
+| `--batch-size` | the driver's (4) | batch size per step |
+| `--num-layers` | the driver's (16) | transformer layers LoRA is applied to (MLX) |
+| `--grad-checkpoint` | off | slower, less memory |
+| `--mask-prompt` | off | completion-only loss: the prompt tokens are excluded |
+| `--trainer` | `training.trainer`, else `auto` | `auto`, `mlx`, `peft`, `mock` |
+
+Two things the drivers do that the reference implementation's did not:
+`train_mlx.py` lays out the `{train,valid}.jsonl` directory `mlx_lm.lora`
+actually wants (every example trains; validation is a copy of the first
+tenth, so nothing is held back from a small dataset), and `train_peft.py`
+masks the prompt **exactly** -- the token count of the chat template with
+the generation prompt appended -- through transformers' own `Trainer`
+rather than a response-template heuristic.
+
+### `train eval`
+
+```bash
+apogee train eval <run-id> [--suite <path|name>] [--judge <backend>] [--force]
+```
+
+The gate. A suite is `{prompt, expected?}` JSONL: a path, a name under
+`training/suites/`, a prepared `<name>.eval.jsonl` (`datasets prepare
+--as-eval`), or a kit's inline eval by kit name. An item **with**
+`expected` is a deterministic substring check. One **without** is a
+**pairwise judge** comparison of the candidate (the base plus the adapter,
+through the trainer's own inference, no fuse, no GGUF) against **its own
+untuned base** -- did the adapter help? -- the judge answering `A`, `B` or
+`TIE` with anything else a tie, and a judge or baseline failure a tie
+too, under the never-fail contract the rerank judge keeps. Without a judge
+such items **skip and auto-pass, loudly, with the count**. The judge is
+named explicitly (`--judge` or `training.judge_backend`), is never a vendor
+CLI, and gets a 1024-token budget so a reasoning judge reaches its verdict.
+
+**The gate is 100%**: `score` is reported, `passed` only when every item
+passed. The results land in the run's manifest; a second `eval` shows them
+and re-runs only with `--force`.
+
+### `train promote`
+
+```bash
+apogee train promote <run-id> --as <backend> [--force] [--quantize TYPE] [--keep-fused]
+```
+
+The only path from a run to inference, in order: the **eval gate** (hard by
+default -- an unevaluated or failing run is refused; `training.gate_mode:
+soft` makes that a warning; `--force` skips it); **fuse** the adapter into
+the base (`runs/<id>/fused/`, SafeTensors); **convert** to GGUF with
+llama.cpp's own `convert_hf_to_gguf.py`, vendored at the pinned revision
+and seeded under `training/scripts/convert/`, run under the environment's
+interpreter with the `convert` set, into `training/versions/<backend>/
+v<N>.gguf` (F16; `--quantize Q4_K_M` runs the in-process quantizer when the
+binary links llama.cpp, else refuses naming `apogee models quantize`);
+**verify** the header with the GGUF reader **before any config is
+touched**; then **register** through the one config editor -- a new
+`llamacpp` entry appended, or an existing one's `model_path` replaced in
+place, comment-preserving and byte-exact -- and append the **version
+ledger** (`training/versions/<backend>.json`: `active_version`, and per
+version the run id, the GGUF path, the time and the eval score). Version
+numbers are `max + 1`, never the count. `retain_versions` (default 3) prunes
+the oldest inactive GGUFs, never the active one, and keeps the pruned
+entries as history. The fused checkpoint is removed after a successful
+conversion unless `--keep-fused`. **A failure at any step leaves the config
+and the ledger unchanged.**
+
+### `train rollback`, `versions`, `status`
+
+```bash
+apogee train rollback <backend>      # repoint model_path at the previous version
+apogee train versions [<backend>]    # the ledger(s): version, time, run, eval, GGUF, active
+apogee train status                  # the runs (newest first, running ones counted) and the active versions
+```
+
+`rollback` repoints the backend at the highest version below the active
+one (not "active minus one": numbers have gaps after a prune) and **deletes
+nothing**; a pruned target, or one whose file is gone, is refused by name.
+The filesystem is the source of truth for all three: nothing is cached.
+
 ## Over HTTP
 
 The datasets slice is a twin family on the admin plane -- `GET/POST
 /v1/admin/datasets`, `GET/DELETE /v1/admin/datasets/{id}`, `GET
 /v1/admin/datasets/kits`, and `POST /v1/admin/datasets/synth` as an async
 job -- see [http-api.md](http-api.md). Synth is teacher inference, not
-training, which is why it is exposed; training control itself (the run
-item's `train run|eval|promote|rollback`) is CLI-only, with reads served.
+training, which is why it is exposed.
+
+**Training itself is read-only over HTTP**: `GET /v1/admin/training/status`,
+`/runs`, `/runs/{id}` and `/versions` under the admin bearer serve the
+manifests and the ledgers the CLI writes. `train run|eval|promote|rollback|
+setup` have no route, forever -- an expensive GPU job with live progress is
+not a control surface a remote client should be able to start, and a
+promotion changes what the server chats with. Each is a documented parity
+carve-out.

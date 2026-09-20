@@ -13,6 +13,7 @@
 #include "httpserver/admin_graph.h"
 #include "httpserver/admin_graphs.h"
 #include "httpserver/admin_knowledge.h"
+#include "httpserver/admin_training.h"
 #include "httpserver/http_types.h"
 #include "httpserver/jobs.h"
 
@@ -108,6 +109,13 @@ public:
     [[nodiscard]] HttpResponse delete_dataset(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse synth_dataset(Handler& plane, const HttpRequest& request);
     [[nodiscard]] HttpResponse list_kits(const HttpRequest& request);
+
+    /// The training slice -- reads only; every control action is a parity
+    /// carve-out with no route.
+    [[nodiscard]] HttpResponse training_status(const HttpRequest& request);
+    [[nodiscard]] HttpResponse list_training_runs(const HttpRequest& request);
+    [[nodiscard]] HttpResponse get_training_run(const HttpRequest& request, std::string_view id);
+    [[nodiscard]] HttpResponse list_training_versions(const HttpRequest& request);
 
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);

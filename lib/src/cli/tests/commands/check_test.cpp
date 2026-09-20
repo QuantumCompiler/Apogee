@@ -1074,3 +1074,121 @@ TEST_CASE(
     REQUIRE(hf != nullptr);
     CHECK(hf->status == Status::Warn);
 }
+
+TEST_CASE(
+    "the run item's rows: the converter tree, the trainer and the convert set once the "
+    "environment exists, and every ledger's consistency",
+    "[commands][check][training]") {
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+
+    CheckReport report = run_checks(inputs);
+    const apogee::commands::CheckRow* converter = row_with(report, "converter");
+    REQUIRE(converter != nullptr);
+    CHECK(converter->status == Status::Warn);
+    CHECK(converter->remedy == "apogee check --fix");
+    // No environment: the trainer and convert-set rows have nothing to say.
+    CHECK(row_with(report, "trainer") == nullptr);
+    CHECK(row_with(report, "convert set") == nullptr);
+
+    REQUIRE(apogee::harness::seed_data_directory(install.root).ok());
+    report = run_checks(inputs);
+    converter = row_with(report, "converter");
+    REQUIRE(converter != nullptr);
+    CHECK(converter->status == Status::Ok);
+    CHECK(converter->detail.find("matches the vendored copy") != std::string::npos);
+    install.write("training/scripts/convert/conversion/llama.py", "# mine\n");
+    report = run_checks(inputs);
+    CHECK(row_with(report, "converter")->status == Status::Warn);
+    CHECK(row_with(report, "converter")->detail.find("differs") != std::string::npos);
+
+    // The environment with the mlx set only: the trainer row depends on
+    // this host's shape, the convert set is missing.
+    std::filesystem::create_directories(install.root / "training" / "venv" / "bin");
+    install.write("training/venv/bin/python", "#!fake");
+    install.write("training/venv/apogee.json",
+                  R"({"base_python": "/usr/bin/python3", "created_at": "x", "sets": ["mlx"]})");
+    install.write("config/config.yaml",
+                  "training:\n  trainer: mlx\nbackends:\n  local:\n    type: mock\n");
+    load_into(inputs);
+    report = run_checks(inputs);
+    const apogee::commands::CheckRow* trainer = row_with(report, "trainer");
+    REQUIRE(trainer != nullptr);
+    CHECK(trainer->status == Status::Ok);
+    CHECK(trainer->detail.find("mlx") != std::string::npos);
+    const apogee::commands::CheckRow* convert = row_with(report, "convert set");
+    REQUIRE(convert != nullptr);
+    CHECK(convert->status == Status::Warn);
+    CHECK(convert->remedy == "apogee train setup --with convert");
+    install.write("config/config.yaml",
+                  "training:\n  trainer: peft\nbackends:\n  local:\n    type: mock\n");
+    load_into(inputs);
+    report = run_checks(inputs);
+    trainer = row_with(report, "trainer");
+    REQUIRE(trainer != nullptr);
+    CHECK(trainer->status == Status::Warn);
+    CHECK(trainer->remedy == "apogee train setup --trainer peft");
+    install.write(
+        "training/venv/apogee.json",
+        R"({"base_python": "/usr/bin/python3", "created_at": "x", "sets": ["peft", "convert"]})");
+    report = run_checks(inputs);
+    CHECK(row_with(report, "trainer")->status == Status::Ok);
+    CHECK(row_with(report, "convert set")->status == Status::Ok);
+
+    // Ledgers: consistent, a drifted model_path, a missing GGUF, an
+    // unconfigured backend, an active version the ledger does not hold.
+    const std::filesystem::path gguf = install.root / "training" / "versions" / "tuned" / "v2.gguf";
+    install.write("training/versions/tuned/v2.gguf", "GGUF");
+    auto ledger = [&](int active, const std::string& path) {
+        install.write(
+            "training/versions/tuned.json",
+            "{\"backend_name\": \"tuned\", \"active_version\": " + std::to_string(active) +
+                ", \"versions\": [{\"version\": 1, \"run_id\": \"r1\", \"gguf_path\": "
+                "\"" +
+                (install.root / "gone.gguf").string() +
+                "\", \"promoted_at\": \"t\"}, "
+                "{\"version\": 2, \"run_id\": \"r2\", \"gguf_path\": \"" +
+                path + "\", \"promoted_at\": \"t\"}]}\n");
+    };
+    ledger(2, gguf.string());
+    install.write(
+        "config/config.yaml",
+        "backends:\n  tuned:\n    type: llamacpp\n    model_path: " + gguf.string() + "\n");
+    load_into(inputs);
+    report = run_checks(inputs);
+    const apogee::commands::CheckRow* versions = row_with(report, "versions: tuned");
+    REQUIRE(versions != nullptr);
+    CHECK(versions->status == Status::Ok);
+    CHECK(versions->detail.find("active v2 of 2") != std::string::npos);
+
+    install.write("config/config.yaml",
+                  "backends:\n  tuned:\n    type: llamacpp\n    model_path: /elsewhere.gguf\n");
+    load_into(inputs);
+    report = run_checks(inputs);
+    versions = row_with(report, "versions: tuned");
+    REQUIRE(versions != nullptr);
+    CHECK(versions->status == Status::Warn);
+    CHECK(versions->detail.find("/elsewhere.gguf") != std::string::npos);
+    CHECK(versions->detail.find(gguf.string()) != std::string::npos);
+
+    ledger(1, gguf.string());
+    report = run_checks(inputs);
+    CHECK(row_with(report, "versions: tuned")->status == Status::Warn);
+    CHECK(row_with(report, "versions: tuned")->detail.find("not there") != std::string::npos);
+
+    ledger(2, gguf.string());
+    install.write("config/config.yaml", "backends:\n  local:\n    type: mock\n");
+    load_into(inputs);
+    report = run_checks(inputs);
+    CHECK(row_with(report, "versions: tuned")->status == Status::Warn);
+    CHECK(row_with(report, "versions: tuned")->detail.find("no backend") != std::string::npos);
+    CHECK(row_with(report, "versions: tuned")->remedy.find("config add-backend tuned") !=
+          std::string::npos);
+
+    ledger(7, gguf.string());
+    report = run_checks(inputs);
+    CHECK(row_with(report, "versions: tuned")->status == Status::Warn);
+    CHECK(row_with(report, "versions: tuned")->detail.find("does not hold") != std::string::npos);
+    CHECK(report.passed());  // warnings only: the install is not broken
+}

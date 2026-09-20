@@ -125,6 +125,18 @@ public:
 [[nodiscard]] std::string set_embedding_graph_enabled(std::string_view content,
                                                       std::string_view collection, bool enabled);
 
+/// Sets `backends.<name>.model_path` to `path`, replacing the value in place
+/// (keeping any trailing comment) or inserting the field right after
+/// `type:` when the entry has none. Scoped to the `backends:` section: a
+/// same-named collection, agent or graph is never touched. The one path by
+/// which `train promote` repoints an existing local backend at the new
+/// version and `train rollback` repoints it at the previous one -- so the
+/// edit is byte-exact and the entry's other fields and comments survive.
+///
+/// Throws ConfigEditError when the section or the entry is missing.
+[[nodiscard]] std::string set_backend_model_path(std::string_view content, std::string_view name,
+                                                 std::string_view path);
+
 /// Field names accepted by set_models_role.
 [[nodiscard]] std::vector<std::string_view> models_role_fields();
 

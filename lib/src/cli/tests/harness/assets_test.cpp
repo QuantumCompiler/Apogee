@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <span>
 #include <sstream>
 #include <string>
 
@@ -57,8 +58,9 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     const apogee::testing::TempDir root{"assets-seed-" + std::to_string(std::random_device{}())};
     const apogee::harness::AssetSeedResult first = seed_bundled_assets(root.path());
     REQUIRE(first.ok());
-    // Six agent files, four kits, one script.
-    CHECK(first.created.size() == 11);
+    // Six agent files, four kits, three drivers, the vendored converter.
+    CHECK(first.created.size() == apogee::harness::bundled_files().size());
+    CHECK(first.created.size() == 6 + 4 + 3 + apogee::harness::bundled_converter_files().size());
     const std::filesystem::path prompt = root.path() / "prompts" / "security-review.txt";
     REQUIRE(std::filesystem::exists(prompt));
     CHECK(read(prompt) == find_bundled_agent("security-review")->prompt);
@@ -170,13 +172,59 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
         CHECK(apogee::harness::bundled_kit_relative_path(kit.name) ==
               "training/kits/" + std::string{kit.name} + ".yaml");
     }
-    REQUIRE(apogee::harness::bundled_training_scripts().size() == 1);
+    REQUIRE(apogee::harness::bundled_training_scripts().size() == 3);
     const apogee::harness::BundledScript& script = apogee::harness::bundled_training_scripts()[0];
     CHECK(script.name == "prepare_dataset.py");
-    CHECK(read(assets / "training" / "prepare_dataset.py") == script.text);
+    CHECK(apogee::harness::bundled_training_scripts()[1].name == "train_mlx.py");
+    CHECK(apogee::harness::bundled_training_scripts()[2].name == "train_peft.py");
+    for (const apogee::harness::BundledScript& driver :
+         apogee::harness::bundled_training_scripts()) {
+        INFO(driver.name);
+        CHECK(read(assets / "training" / driver.name) == driver.text);
+    }
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
-    CHECK(apogee::harness::bundled_files().size() == 11);
+    CHECK(apogee::harness::bundled_files().size() ==
+          6 + 4 + 3 + apogee::harness::bundled_converter_files().size());
+}
+
+TEST_CASE("the compiled-in converter byte-matches the vendored llama.cpp tree, file for file",
+          "[harness][assets][training][converter]") {
+    const std::filesystem::path vendored =
+        std::filesystem::path{APOGEE_THIRD_PARTY_DIR} / "llama.cpp-convert";
+    const std::span<const apogee::harness::BundledScript> files =
+        apogee::harness::bundled_converter_files();
+    // The entry script, the conversion package, the three templates.
+    REQUIRE(files.size() > 60);
+    std::size_t on_disk = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(vendored)) {
+        if (entry.is_regular_file() &&
+            (entry.path().extension() == ".py" || entry.path().extension() == ".jinja")) {
+            ++on_disk;
+        }
+    }
+    CHECK(on_disk == files.size());
+    bool entry_seen = false;
+    bool package_seen = false;
+    bool template_seen = false;
+    for (const apogee::harness::BundledScript& file : files) {
+        INFO(file.name);
+        REQUIRE(file.name.starts_with("convert/"));
+        const std::filesystem::path path = vendored / std::string{file.name.substr(8)};
+        CHECK(read(path) == file.text);
+        CHECK(apogee::harness::bundled_script_relative_path(file.name) ==
+              "training/scripts/" + std::string{file.name});
+        entry_seen = entry_seen || file.name == "convert/convert_hf_to_gguf.py";
+        package_seen = package_seen || file.name == "convert/conversion/__init__.py";
+        template_seen =
+            template_seen || file.name == "convert/models/templates/llama-cpp-rwkv-world.jinja";
+    }
+    CHECK(entry_seen);
+    CHECK(package_seen);
+    CHECK(template_seen);
+    CHECK(apogee::harness::bundled_converter_relative_dir() == "training/scripts/convert");
+    // Not a single literal: chunked under MSVC's limit, joined at first use.
+    CHECK(read(vendored / "conversion" / "base.py").size() > 16380);
 }
 
 TEST_CASE(
