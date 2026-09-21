@@ -11,35 +11,36 @@
 #
 # Gating policy (user decision, 2026-09-19, superseding 2026-08-24's
 # "macos-arm64 only"): EVERY job here is required for a pull request -- the
-# clone, all five builds, all five test runs. There is no `continue-on-error`
+# clone and all five builds. There is no `continue-on-error`
 # in this file and there must not be one; a platform that cannot pass is a
 # platform to fix, not to mark informational. GitHub enforces the requirement
 # through the branch protection rule on `stable`, which lists these checks by
-# their job names (`clone llama.cpp`, `build <name>`, `test <name>`) -- a
-# renamed job has to be renamed there too.
+# their job names (`clone llama.cpp`, `build <name>`) -- a renamed job has to
+# be renamed there too.
 #
-# Job policy (user decision, 2026-09-19): CI is the llama.cpp clone, then one
-# executable build per platform -- five of them, the Intel Mac having been
-# dropped the same day -- then one test run per platform, and nothing else. Formatting, clang-tidy, install
-# parity and the clean-room build are LOCAL gates — `make format-check`,
-# `make lint`, the `cli.install_parity` case the test suite runs on every
-# platform build, and `cicd.sh --fresh` — not jobs here; the dedicated jobs
-# for them were removed that day as work the build itself already covers.
+# Job policy (user decisions, 2026-09-19 and 2026-09-20): CI is the llama.cpp
+# clone, then one executable build per platform -- five of them, the Intel
+# Mac having been dropped -- and nothing else. The test suite does NOT run
+# here (user decision, 2026-09-20: "remove the tests from the CI/CD"); it is
+# the developer's gate, `make test` / `cicd.sh --test`, run before a push.
+# Formatting, clang-tidy, install parity and the clean-room build are LOCAL
+# gates too — `make format-check`, `make lint`, the `cli.install_parity` case
+# in the suite, and `cicd.sh --fresh` — not jobs here; the dedicated jobs for
+# them were removed on 2026-09-19 as work the build itself already covers.
 #
-# Shape (user decision, 2026-09-19): three stages, each a call into cicd.sh.
+# Shape (user decisions, 2026-09-19 and 2026-09-20): two stages, each a call
+# into cicd.sh.
 #
 #   1. clone llama.cpp   -- prove the pin resolves. llama.cpp ships with the
 #                           tool, so a pin that no longer clones is a broken
 #                           product, and no platform is worth building on it.
 #   2. build <platform>  -- one job per platform, llama.cpp linked in like
-#                           every build (it ships with the tool); each hands
-#                           its build tree to stage three as an artifact.
-#   3. test <platform>   -- one job per platform, running the suite on the
-#                           tree stage two built, with nothing rebuilt.
+#                           every build (it ships with the tool).
 #
-# The `needs:` edges are those stages. The two matrices are the same list on
-# purpose (GitHub has no way to declare it once): a row added to one is added
-# to the other, and the artifact name ties a test row to its build row.
+# The `needs:` edge is that order. A third stage ran the suite per platform
+# for one day (2026-09-20) on the build tree handed over as an artifact; it
+# was removed the same day as not making sense on a runner -- the suite is
+# the developer's gate, run against the source before a push.
 #
 # What a runner needs beyond its image, per platform: the Linux images ship no
 # libcurl headers (`find_package(CURL REQUIRED)` is the first hard lookup, and
@@ -47,8 +48,8 @@
 # MSYS2 pre-installed but off PATH, and the Windows build is a MinGW-w64 one
 # (user decision, 2026-09-19) -- GCC in the UCRT64 environment on x64, clang in
 # CLANGARM64 on arm64 -- so msys2/setup-msys2 puts the toolchain, cmake, ninja,
-# pkgconf and MSYS2's Schannel curl in that shell and the build and test
-# steps run inside it; macOS has curl in the SDK. Every runner passes --no-defer, so a
+# pkgconf and MSYS2's Schannel curl in that shell and the build step runs
+# inside it; macOS has curl in the SDK. Every runner passes --no-defer, so a
 # misdetected host is a failure rather than the silent "deferred to CI"
 # success it once was.
 
@@ -106,9 +107,7 @@ jobs:
     # Stage two. Every build has llama.cpp in it -- APOGEE_ENABLE_LLAMA is ON
     # by default (user decision, 2026-09-19: local inference ships with the
     # tool, so the executable CI builds is the executable a release ships) --
-    # which is why stage one proves the pin clones first, and why there is no
-    # separate llama.cpp row any more: until that day one macOS job carried
-    # the option and nothing shipped had the real LlamaRuntime in it.
+    # which is why stage one proves the pin clones first.
     #
     # fail-fast is off so one failing row does not cancel the others: the PR
     # is blocked either way, and the full picture is worth the runner time.
@@ -140,12 +139,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # lsof is not on the Ubuntu images, and the no-listen tests poll with
-      # it: without it they skip the socket check and pass having proven
-      # nothing, which on a runner is worse than failing.
-      - name: Install libcurl headers, the venv module and lsof (Linux)
+      - name: Install libcurl headers (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev python3-venv lsof
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
 
       # `pacboy` prefixes each name for the environment: toolchain:p is
       # mingw-w64-ucrt-x86_64-toolchain in UCRT64 and
@@ -168,11 +164,11 @@ jobs:
             pkgconf:p
             curl-winssl:p
 
-      # Each build and test step tees its output and, on failure, hands the log
-      # to lib/scripts/ci-annotate.sh, which publishes the ctest summary and
-      # each failed test's output as error annotations: annotations are public
-      # on a public repository, the raw log needs admin rights, and a failure
-      # that only the owner can read is a failure nobody else can fix.
+      # Each build step tees its output and, on failure, hands the log to
+      # lib/scripts/ci-annotate.sh, which publishes the failure as error
+      # annotations: annotations are public on a public repository, the raw
+      # log needs admin rights, and a failure that only the owner can read is
+      # a failure nobody else can fix.
       - name: Build
         if: runner.os != 'Windows'
         shell: bash
@@ -196,119 +192,5 @@ jobs:
           set -eo pipefail
           lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "build ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
-            exit 1
-          }
-
-      # Handed over as a tar, not a directory: upload-artifact drops file
-      # modes, and a test binary without its execute bit is not a test. Object
-      # files stay behind -- stage three runs the suite, it does not link --
-      # and so do the dependencies' clone histories.
-      - name: Pack the build tree for the test stage
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd lib/src/cli
-          tar -cf "build-${{ matrix.name }}.tar" --exclude='*.o' --exclude='*.obj' --exclude='.git' "build/${{ matrix.target }}"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: build-${{ matrix.name }}
-          path: lib/src/cli/build-${{ matrix.name }}.tar
-          retention-days: 1
-          if-no-files-found: error
-
-  test:
-    # Stage three. The same matrix, the same runner image per row, the build
-    # tree from the row's stage-two job, and `--test-only`: ctest on that tree
-    # with no configure and no build. The workspace path is the same on every
-    # runner of an image, which is what lets the tree's absolute paths hold.
-    name: test ${{ matrix.name }}
-    needs: build
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macos-arm64
-            target: macos-arm64
-            runner: macos-14
-          - name: linux-x64
-            target: linux-x64
-            runner: ubuntu-24.04
-          - name: linux-arm64
-            target: linux-arm64
-            runner: ubuntu-24.04-arm
-          - name: windows-x64
-            target: windows-x64
-            runner: windows-2025
-            msystem: UCRT64
-          - name: windows-arm64
-            target: windows-arm64
-            runner: windows-11-arm
-            msystem: CLANGARM64
-
-    steps:
-      - uses: actions/checkout@v5
-
-      # The suite needs what the build needed: python3's venv module on Linux
-      # (the training tests create one), and on Windows the MSYS2 shell with
-      # cmake (ctest), the toolchain's runtime, and curl.
-      # lsof is not on the Ubuntu images, and the no-listen tests poll with
-      # it: without it they skip the socket check and pass having proven
-      # nothing, which on a runner is worse than failing.
-      - name: Install libcurl headers, the venv module and lsof (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev python3-venv lsof
-
-      - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: ${{ matrix.msystem }}
-          update: false
-          # git is MSYS2's own (unprefixed): the script opens with
-          # `git rev-parse`, and the shell's minimal PATH has no Git for Windows.
-          install: git
-          pacboy: >-
-            toolchain:p
-            cmake:p
-            ninja:p
-            pkgconf:p
-            curl-winssl:p
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: build-${{ matrix.name }}
-          path: lib/src/cli
-
-      - name: Unpack the build tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd lib/src/cli
-          tar -xf "build-${{ matrix.name }}.tar"
-          rm -f "build-${{ matrix.name }}.tar"
-
-      - name: Test
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test-only --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
-            lib/scripts/ci-annotate.sh "test ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
-            exit 1
-          }
-
-      - name: Test (MSYS2 shell)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        # The checkout was made by Git for Windows under a different HOME, so
-        # MSYS2's git has to be told the tree is safe before the script's
-        # first `git rev-parse`.
-        run: |
-          git config --global --add safe.directory '*'
-          set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test-only --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
-            lib/scripts/ci-annotate.sh "test ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }

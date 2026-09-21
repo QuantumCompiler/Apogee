@@ -19,10 +19,10 @@
 # With --fresh it performs a CI-style clean-room build: clone the repo at the
 # current branch into a temp directory and build there.
 #
-# The CI pipeline (user decision, 2026-09-19) is three stages, and each one is
-# a call into this script: `--clone-llama` proves the llama.cpp pin resolves,
-# then one build per platform (`--platform T --no-defer`), then one test run
-# per platform on the build tree the build stage handed over (`--test-only`).
+# The CI pipeline (user decisions, 2026-09-19 and 2026-09-20) is two stages,
+# each a call into this script: `--clone-llama` proves the llama.cpp pin
+# resolves, then one build per platform (`--platform T --no-defer`). The test
+# suite does not run on a runner; `--test` is the developer's gate.
 #
 # Tab completion: source lib/scripts/cicd-completion.bash (see that file).
 set -euo pipefail
@@ -37,7 +37,6 @@ APPS=(cli)
 
 CLEAN=0
 RUN_TESTS=0
-TEST_ONLY=0
 CLONE_LLAMA=0
 FRESH=0
 NO_DEFER=0
@@ -59,9 +58,6 @@ Options:
   -c, --clean          Remove the target's build directory before building
   -t, --test           Run the test suite (ctest) after a successful build
                        (host-native target only — cross-built binaries can't run here)
-      --test-only      Run the test suite on an EXISTING build directory, with
-                       no configure and no build: the third CI stage, on the
-                       tree the build stage handed over
       --clone-llama    Clone llama.cpp at the commit the CLI's third_party
                        build pins, prove it resolved, and stop: the first CI
                        stage. Nothing else runs.
@@ -165,7 +161,6 @@ while [[ $# -gt 0 ]]; do
             shift ;;
         -c|--clean)  CLEAN=1 ;;
         -t|--test)   RUN_TESTS=1 ;;
-        --test-only) TEST_ONLY=1 ;;
         --clone-llama) CLONE_LLAMA=1 ;;
         -f|--fresh)  FRESH=1 ;;
         --no-defer)  NO_DEFER=1 ;;
@@ -179,8 +174,6 @@ done
 
 HOST="$(host_target)"
 [[ ${#PLATFORMS[@]} -gt 0 ]] || PLATFORMS=("$HOST")
-[[ $TEST_ONLY -eq 1 && $CLEAN -eq 1 ]] && die "--test-only tests an existing build; it cannot be combined with --clean"
-[[ $TEST_ONLY -eq 1 && $FRESH -eq 1 ]] && die "--test-only tests an existing build; it cannot be combined with --fresh"
 
 # Stage one of the CI pipeline: prove the llama.cpp pin resolves. The pin lives
 # in ONE place -- the FetchContent_Declare in the CLI's third_party build --
@@ -214,16 +207,6 @@ build_target() {
 
     if [[ ! -f CMakeLists.txt ]]; then
         log "NOTICE: no CMakeLists.txt at ${app_dir} — skipping app '${app}'."
-        return 0
-    fi
-
-    # The third CI stage: the tree was built by the second and unpacked here.
-    if [[ $TEST_ONLY -eq 1 ]]; then
-        [[ -d "${build_dir}" ]] || die "[${app}/${target}] --test-only: no build directory at ${app_dir}/${build_dir}"
-        [[ "$target" == "$HOST" ]] || die "[${app}/${target}] --test-only: cross-built binaries can't run on ${HOST}"
-        log "[${app}/${target}] running tests on the existing build"
-        ctest --test-dir "${build_dir}" --output-on-failure
-        log "[${app}/${target}] done (branch '$(git -C "$root" rev-parse --abbrev-ref HEAD)')"
         return 0
     fi
 

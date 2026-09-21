@@ -27,7 +27,7 @@ _apogee_cicd() {
             ;;
     esac
 
-    COMPREPLY=( $(compgen -W "-p --platform -c --clean -t --test --test-only --clone-llama -f --fresh -b --branch -j --jobs --no-defer -h --help" -- "$cur") )
+    COMPREPLY=( $(compgen -W "-p --platform -c --clean -t --test --clone-llama -f --fresh -b --branch -j --jobs --no-defer -h --help" -- "$cur") )
 }
 
 complete -F _apogee_cicd cicd.sh ./cicd.sh lib/scripts/cicd.sh ./lib/scripts/cicd.sh

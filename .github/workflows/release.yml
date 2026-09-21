@@ -72,12 +72,9 @@ jobs:
       # The same per-platform prerequisites as CI (ci.yml says why): libcurl
       # headers on Linux; on Windows the MinGW-w64 toolchain, cmake, ninja,
       # pkgconf and the Schannel curl in an MSYS2 shell, where the build runs.
-      # lsof is not on the Ubuntu images, and the no-listen tests poll with
-      # it: without it they skip the socket check and pass having proven
-      # nothing, which on a runner is worse than failing.
-      - name: Install libcurl headers, the venv module and lsof (Linux)
+      - name: Install libcurl headers (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev python3-venv lsof
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
 
       - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
         if: runner.os == 'Windows'
@@ -95,22 +92,23 @@ jobs:
             pkgconf:p
             curl-winssl:p
 
-      # Tests run before an artifact is produced. A release binary that was
-      # never tested is the one thing a release pipeline must not emit.
-      # On failure lib/scripts/ci-annotate.sh publishes the log's summary as
-      # error annotations, readable through the public API without admin
-      # rights (ci.yml says why).
-      - name: Build and test
+      # The suite does not run here (user decision, 2026-09-20: the tests are
+      # out of the CI/CD; they are the developer's gate before a push). A tag
+      # is cut from a branch whose builds CI has already proven, and the step
+      # after packaging still proves the artifact RUNS. On failure
+      # lib/scripts/ci-annotate.sh publishes the log as error annotations,
+      # readable through the public API without admin rights (ci.yml says why).
+      - name: Build
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "build ${{ matrix.target }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }
 
-      - name: Build and test (MSYS2 shell)
+      - name: Build (MSYS2 shell)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         # The checkout was made by Git for Windows under a different HOME, so
@@ -119,7 +117,7 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "build ${{ matrix.target }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }

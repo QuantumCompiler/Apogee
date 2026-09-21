@@ -31,7 +31,7 @@ The one build-related file outside an app directory is `.github/workflows/ci.yml
 ```
 Apogee/
 ├── .github/
-│   └── workflows/ci.yml     — CI: three stages — clone llama.cpp, build per platform, test per platform (nothing else, 2026-09-19)
+│   └── workflows/ci.yml     — CI: two stages — clone llama.cpp, then build per platform (nothing else; no suite run, 2026-09-20)
 │                              (thin caller into cicd.sh; here only because GitHub requires it)
 ├── .claude/
 │   └── skills/
@@ -51,7 +51,7 @@ Apogee/
     │   │                      targets (--platform linux|windows × x64|arm64, macos-arm64, or all;
     │   │                      non-native targets defer to the CI matrix, or fail with --no-defer), --fresh = clean-room
     │   │                      clone of github.com/QuantumCompiler/Apogee at that branch; --test, --clean;
-    │   │                      --clone-llama and --test-only are the first and third CI stages
+    │   │                      --clone-llama is the first CI stage (the suite never runs on a runner)
     │   ├── cicd-completion.bash — Tab completion for cicd.sh's flags (source from your shell rc)
     │   └── ci-annotate.sh   — On a failed CI step, publishes the ctest summary and each failed
     │                          test's output as error annotations (public through the API; the log is not)
@@ -614,7 +614,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 
 | Command | Does |
 |---|---|
-| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — what CI runs. `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops, and `--test-only` runs ctest on an existing build tree with no configure or build (the first and third CI stages); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
+| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — the developer's gate before a push (CI builds without the suite, 2026-09-20). `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops (the first CI stage; the suite itself never runs on a runner — `--test` is the developer's gate, 2026-09-20); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
 | `make test` | The same thing for the CLI alone (it calls `cicd.sh`). |
 | `make build [PRESET=…]` | Configure and build one preset. |
 | `make install [PREFIX=…]` | Build, then install the binary to `$PREFIX/bin` (default `~/.local`, so no sudo). |
