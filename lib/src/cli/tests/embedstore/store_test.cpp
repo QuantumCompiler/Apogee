@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -172,7 +173,15 @@ TEST_CASE("a half-created database is not left behind by a failed open",
 }
 
 TEST_CASE("opening an unwritable path fails with the path in the message", "[embedstore][store]") {
-    CHECK_THROWS_AS(Store{std::filesystem::path{"/proc/nonexistent/store.db"}}, std::runtime_error);
+    // A path under a regular FILE cannot be created anywhere. (/proc/nonexistent
+    // was the old choice; Windows creates C:\proc\nonexistent happily.)
+    Scratch scratch;
+    const std::filesystem::path blocker = scratch.dir / "not-a-directory";
+    {
+        std::ofstream out{blocker};
+        out << "a file where a directory is needed";
+    }
+    CHECK_THROWS_AS(Store{blocker / "store.db"}, std::runtime_error);
 }
 
 TEST_CASE("an empty corpus answers nothing rather than failing", "[embedstore][store]") {

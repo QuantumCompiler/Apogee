@@ -110,6 +110,9 @@ AcquireResult acquire_impl(const std::filesystem::path& destination, const Sourc
     // --- rung 1: stream to the partial --------------------------------------
     Sha256 hash;
     std::int64_t written = 0;
+    std::string transfer_error;
+    bool produced = false;
+    bool stream_ok = false;
     {
         std::ofstream out(partial, std::ios::binary | std::ios::trunc);
         if (!out) {
@@ -130,14 +133,17 @@ AcquireResult acquire_impl(const std::filesystem::path& destination, const Sourc
             return true;
         };
 
-        std::string error;
-        const bool produced = source(write, error);
+        produced = source(write, transfer_error);
         out.flush();
-        if (!produced || !out.good()) {
-            remove_quietly(partial);
-            result.error = error.empty() ? "the transfer failed" : error;
-            return result;
-        }
+        stream_ok = out.good();
+    }
+    // The partial is removed only once the stream that wrote it has closed:
+    // POSIX unlinks an open file, Windows refuses with a sharing violation,
+    // and a failed transfer must land nothing on either (2026-09-20).
+    if (!produced || !stream_ok) {
+        remove_quietly(partial);
+        result.error = transfer_error.empty() ? "the transfer failed" : transfer_error;
+        return result;
     }
 
     Sidecar sidecar;

@@ -13,6 +13,7 @@
 
 #include "commands/registry.h"
 #include "commands/root.h"
+#include "harness/config_edit.h"
 #include "support/env_guard.h"
 
 /// `apogee train setup` refusals -- an interpreter named in the config that
@@ -452,8 +453,13 @@ TEST_CASE(
     const std::filesystem::path v1 = fixture.training / "versions" / "tuned" / "v1.gguf";
     CHECK(std::filesystem::exists(v1));
     CHECK(out.find("promoted to new backend tuned -> v1") != std::string::npos);
+    // The written path goes through the editor's one quoting rule (a Windows
+    // drive colon makes it a quoted scalar), so the expectation does too.
+    const auto scalar = [](const std::filesystem::path& path) {
+        return apogee::harness::yaml_scalar(path.string());
+    };
     CHECK(read_file(fixture.base.config_path) ==
-          before + "\n  tuned:\n    type: llamacpp\n    model_path: " + v1.string() + "\n");
+          before + "\n  tuned:\n    type: llamacpp\n    model_path: " + scalar(v1) + "\n");
     const std::optional<apogee::training::VersionLedger> ledger =
         apogee::training::TrainingStore{fixture.training}.list_versions("tuned");
     REQUIRE(ledger.has_value());
@@ -472,7 +478,8 @@ TEST_CASE(
     const std::filesystem::path v2 = fixture.training / "versions" / "tuned" / "v2.gguf";
     CHECK(out.find("updated backend tuned -> v2") != std::string::npos);
     std::string expected = registered;
-    expected.replace(expected.find(v1.string()), v1.string().size(), v2.string());
+    REQUIRE(expected.find(scalar(v1)) != std::string::npos);
+    expected.replace(expected.find(scalar(v1)), scalar(v1).size(), scalar(v2));
     CHECK(read_file(fixture.base.config_path) == expected);
     CHECK(std::filesystem::exists(fixture.training / "runs" / id2 / "fused" / "config.json"));
 
@@ -525,8 +532,12 @@ TEST_CASE(
     const std::filesystem::path v2 = fixture.training / "versions" / "tuned" / "v2.gguf";
     CHECK(std::filesystem::exists(v1));
     CHECK(std::filesystem::exists(v2));
+    const auto scalar = [](const std::filesystem::path& path) {
+        return apogee::harness::yaml_scalar(path.string());
+    };
     std::string expected = at_v2;
-    expected.replace(expected.find(v2.string()), v2.string().size(), v1.string());
+    REQUIRE(expected.find(scalar(v2)) != std::string::npos);
+    expected.replace(expected.find(scalar(v2)), scalar(v2).size(), scalar(v1));
     CHECK(read_file(fixture.base.config_path) == expected);
     const std::optional<apogee::training::VersionLedger> ledger =
         apogee::training::TrainingStore{fixture.training}.list_versions("tuned");
@@ -973,7 +984,8 @@ TEST_CASE(
     // not a line of the config was removed.
     const std::string after = read_file(fixture.base.base.config_path);
     CHECK(after.find("  nightly-model:\n    type: llamacpp\n    model_path: " +
-                     (fixture.training / "versions" / "nightly-model" / "v1.gguf").string() +
+                     apogee::harness::yaml_scalar(
+                         (fixture.training / "versions" / "nightly-model" / "v1.gguf").string()) +
                      "\n") != std::string::npos);
     CHECK(after.find("  nightly-model:") < after.find("training:"));
     std::size_t cursor = 0;

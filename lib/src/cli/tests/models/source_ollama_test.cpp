@@ -96,14 +96,17 @@ TEST_CASE("a colon inside a namespace is not a tag separator", "[models][ollama]
 }
 
 TEST_CASE("a library ref maps to the library namespace", "[models][ollama]") {
+    // generic_string(): the shape under test is the registry layout, and a
+    // Windows path would spell it with backslashes.
     const std::filesystem::path path = manifest_path("/store", "llama3.2:3b");
-    CHECK(path.string().find("registry.ollama.ai/library/llama3.2/3b") != std::string::npos);
+    CHECK(path.generic_string().find("registry.ollama.ai/library/llama3.2/3b") !=
+          std::string::npos);
 }
 
 TEST_CASE("a namespaced ref maps under its own namespace", "[models][ollama]") {
     const std::filesystem::path path = manifest_path("/store", "someone/model:v2");
-    CHECK(path.string().find("registry.ollama.ai/someone/model/v2") != std::string::npos);
-    CHECK(path.string().find("library") == std::string::npos);
+    CHECK(path.generic_string().find("registry.ollama.ai/someone/model/v2") != std::string::npos);
+    CHECK(path.generic_string().find("library") == std::string::npos);
 }
 
 TEST_CASE("a manifest yields the model layer's blob and digest", "[models][ollama]") {

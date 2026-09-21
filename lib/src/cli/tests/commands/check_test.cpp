@@ -1,6 +1,7 @@
 #include "commands/check.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -16,6 +17,7 @@
 #include "secrets/store.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
+#include "training/python_env.h"
 
 /// The doctor, against a matrix of deliberately broken installs.
 ///
@@ -116,6 +118,17 @@ CheckInputs inputs_for(const Install& install) {
 }
 
 /// Loads a config written into the install, as the command would.
+// A fake venv interpreter, where the platform's layout puts it (bin/python,
+// or Scripts/python.exe on Windows): the environment's own answer, not a
+// spelled path, so the doctor finds it on every host.
+void write_fake_interpreter(const Install& install) {
+    const std::filesystem::path python =
+        apogee::training::PythonEnv{install.root / "training" / "venv"}.interpreter();
+    std::filesystem::create_directories(python.parent_path());
+    std::ofstream out(python, std::ios::binary);
+    out << "#!fake";
+}
+
 void load_into(CheckInputs& inputs) {
     inputs.config_missing = !std::filesystem::exists(inputs.config_path);
     if (inputs.config_missing) {
@@ -352,7 +365,10 @@ TEST_CASE("a missing layout directory fails and --fix repairs it", "[commands][c
     const CheckReport after = run_checks(inputs);
     const auto* repaired = row_with(after, "sessions/");
     REQUIRE(repaired != nullptr);
-    CHECK(repaired->status == Status::Ok);
+    // sessions/ is a private-mode entry: repaired is Ok where the platform has
+    // POSIX modes, and the recorded Skipped where it has none (Windows).
+    CHECK(repaired->status ==
+          (apogee::harness::supports_private_modes() ? Status::Ok : Status::Skipped));
 }
 
 TEST_CASE("check --fix never touches config", "[commands][check]") {
@@ -927,9 +943,16 @@ TEST_CASE(
           std::string::npos);
     CHECK(rows_named(report, "collection: knowledge").front().detail.find("text index ok") !=
           std::string::npos);
-    CHECK(rows_named(report, "raw archive").front().status == apogee::commands::Status::Ok);
-    CHECK(rows_named(report, "raw archive").front().detail.find("2 conversation(s)") !=
-          std::string::npos);
+    // The archive row is a mode check: Ok with the count where the platform
+    // has POSIX modes, the recorded Skipped -- and no count -- where it has none.
+    if (apogee::harness::supports_private_modes()) {
+        CHECK(rows_named(report, "raw archive").front().status == apogee::commands::Status::Ok);
+        CHECK(rows_named(report, "raw archive").front().detail.find("2 conversation(s)") !=
+              std::string::npos);
+    } else {
+        CHECK(rows_named(report, "raw archive").front().status ==
+              apogee::commands::Status::Skipped);
+    }
 
     // The collection the config names is the one inspected.
     CheckInputs renamed = inputs_with_config(
@@ -1041,9 +1064,10 @@ TEST_CASE(
     CHECK(kit->status == Status::Ok);
     CHECK(kit->detail.find("8 eval item(s)") != std::string::npos);
 
-    // The environment exists: an Ok row naming its sets.
-    std::filesystem::create_directories(install.root / "training" / "venv" / "bin");
-    install.write("training/venv/bin/python", "#!fake");
+    // The environment exists: an Ok row naming its sets. The interpreter goes
+    // where the platform's venv layout puts it (bin/python, or Scripts/
+    // python.exe on Windows) -- the env's own answer, not a spelled path.
+    write_fake_interpreter(install);
     install.write("training/venv/apogee.json",
                   R"({"base_python": "/usr/bin/python3", "created_at": "x", "sets": ["prepare"]})");
     report = run_checks(inputs);
@@ -1105,8 +1129,7 @@ TEST_CASE(
 
     // The environment with the mlx set only: the trainer row depends on
     // this host's shape, the convert set is missing.
-    std::filesystem::create_directories(install.root / "training" / "venv" / "bin");
-    install.write("training/venv/bin/python", "#!fake");
+    write_fake_interpreter(install);
     install.write("training/venv/apogee.json",
                   R"({"base_python": "/usr/bin/python3", "created_at": "x", "sets": ["mlx"]})");
     install.write("config/config.yaml",
@@ -1140,16 +1163,20 @@ TEST_CASE(
     // unconfigured backend, an active version the ledger does not hold.
     const std::filesystem::path gguf = install.root / "training" / "versions" / "tuned" / "v2.gguf";
     install.write("training/versions/tuned/v2.gguf", "GGUF");
+    // Built as JSON, not by concatenation: a Windows path's backslashes are
+    // not valid JSON escapes, and the ledger must be readable on every host.
     auto ledger = [&](int active, const std::string& path) {
-        install.write(
-            "training/versions/tuned.json",
-            "{\"backend_name\": \"tuned\", \"active_version\": " + std::to_string(active) +
-                ", \"versions\": [{\"version\": 1, \"run_id\": \"r1\", \"gguf_path\": "
-                "\"" +
-                (install.root / "gone.gguf").string() +
-                "\", \"promoted_at\": \"t\"}, "
-                "{\"version\": 2, \"run_id\": \"r2\", \"gguf_path\": \"" +
-                path + "\", \"promoted_at\": \"t\"}]}\n");
+        const nlohmann::json doc = {
+            {"backend_name", "tuned"},
+            {"active_version", active},
+            {"versions",
+             nlohmann::json::array(
+                 {{{"version", 1},
+                   {"run_id", "r1"},
+                   {"gguf_path", (install.root / "gone.gguf").string()},
+                   {"promoted_at", "t"}},
+                  {{"version", 2}, {"run_id", "r2"}, {"gguf_path", path}, {"promoted_at", "t"}}})}};
+        install.write("training/versions/tuned.json", doc.dump() + "\n");
     };
     ledger(2, gguf.string());
     install.write(

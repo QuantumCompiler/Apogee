@@ -167,11 +167,11 @@ SectionRange find_section(const Lines& lines, std::string_view section) {
     return range;
 }
 
-/// Quotes `value` when YAML would otherwise misread it.
-///
-/// Erring toward quoting is deliberate -- an api_key of `${VAR}` or a
-/// Windows model_path with a colon in it must survive a round trip, and a
-/// needlessly quoted string reads the same to the loader.
+}  // namespace
+
+// Public (declared in config_edit.h) so a test pinning the written bytes goes
+// through the same rule: a Windows model_path carries a drive colon and is
+// written quoted, and an expectation built from the raw path is wrong there.
 std::string yaml_scalar(std::string_view value) {
     const bool needs_quotes =
         value.empty() || value.front() == ' ' || value.back() == ' ' ||
@@ -192,6 +192,8 @@ std::string yaml_scalar(std::string_view value) {
     out.push_back('"');
     return out;
 }
+
+namespace {
 
 std::string number_scalar(double value) {
     std::ostringstream out;

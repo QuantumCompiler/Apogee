@@ -307,7 +307,7 @@ string(JOIN "|" APOGEE_LINKED_ARCHIVE_LIST ${APOGEE_LINKED_ARCHIVES})
 add_test(NAME cli.no_listen_symbols
     COMMAND "${CMAKE_COMMAND}"
         "-DAPOGEE_ARCHIVES=${APOGEE_LINKED_ARCHIVE_LIST}"
-        -DAPOGEE_LISTENER_OBJECT=serve.cpp.o
+        -DAPOGEE_LISTENER_OBJECT=serve.cpp${CMAKE_CXX_OUTPUT_EXTENSION}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_symbols.cmake"
 )
 
@@ -329,6 +329,7 @@ add_test(NAME cli.install_is_ours_only
         -DBUILD_DIR=${CMAKE_BINARY_DIR}
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/install-only
         -DMAKEFILE=${CMAKE_CURRENT_SOURCE_DIR}/../Makefile
+        -DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/install_is_ours_only.cmake"
 )
 

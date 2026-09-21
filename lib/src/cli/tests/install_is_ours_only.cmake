@@ -56,7 +56,7 @@ list(SORT installed)
 
 # Exactly one file: the executable. `apogee_core` is a static library and an
 # implementation detail; no dependency may appear at all.
-set(expected "bin/apogee")
+set(expected "bin/apogee${EXE_SUFFIX}")
 if(NOT installed STREQUAL expected)
     string(REPLACE ";" "\n  " pretty "${installed}")
     message(FATAL_ERROR

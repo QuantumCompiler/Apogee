@@ -241,27 +241,16 @@ TEST_CASE(
     CHECK(outcome.adapter_dir == std::filesystem::path{"/runs/r1/adapters"});
 
     // The argv contract, as the driver's argparse must accept it.
-    CHECK(captured.arguments == std::vector<std::string>{"/scripts/train_mlx.py",
-                                                         "--mode",
-                                                         "train",
-                                                         "--model",
-                                                         "/snap/tiny",
-                                                         "--dataset",
-                                                         "/data/set.jsonl",
-                                                         "--method",
-                                                         "qlora",
-                                                         "--output-dir",
-                                                         "/runs/r1/adapters",
-                                                         "--data-dir",
-                                                         "/runs/r1/data",
-                                                         "--iters",
-                                                         "3",
-                                                         "--batch-size",
-                                                         "2",
-                                                         "--num-layers",
-                                                         "8",
-                                                         "--grad-checkpoint",
-                                                         "--mask-prompt"});
+    CHECK(captured.arguments ==
+          std::vector<std::string>{
+              "/scripts/train_mlx.py", "--mode", "train", "--model", "/snap/tiny", "--dataset",
+              "/data/set.jsonl", "--method", "qlora", "--output-dir",
+              // Spelled the way the trainer spells
+              // them: a joined path, so Windows'
+              // separator is expected, not a bug.
+              (std::filesystem::path{"/runs/r1"} / "adapters").string(), "--data-dir",
+              (std::filesystem::path{"/runs/r1"} / "data").string(), "--iters", "3", "--batch-size",
+              "2", "--num-layers", "8", "--grad-checkpoint", "--mask-prompt"});
 }
 
 TEST_CASE(

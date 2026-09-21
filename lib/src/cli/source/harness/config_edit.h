@@ -134,6 +134,15 @@ public:
 /// edit is byte-exact and the entry's other fields and comments survive.
 ///
 /// Throws ConfigEditError when the section or the entry is missing.
+/// Quotes `value` when YAML would otherwise misread it: empty, leading or
+/// trailing space, any of `:#{}[]&*!|>'"%@\`,` or a control character, or a
+/// bare boolean/null word. Erring toward quoting is deliberate -- an api_key
+/// of `${VAR}` or a Windows model_path with a drive colon must survive a
+/// round trip, and a needlessly quoted string reads the same to the loader.
+/// Every value this file writes goes through it, which is why it is public:
+/// a test that pins the written bytes must apply the same rule.
+[[nodiscard]] std::string yaml_scalar(std::string_view value);
+
 [[nodiscard]] std::string set_backend_model_path(std::string_view content, std::string_view name,
                                                  std::string_view path);
 

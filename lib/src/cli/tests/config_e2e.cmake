@@ -69,7 +69,10 @@ unset(ENV{GOOGLE_API_KEY})
 
 # --- init ------------------------------------------------------------------
 apogee_run(0 config path)
-expect_equal("${APOGEE_OUT}" "${CONFIG_FILE}" "config path")
+# The binary prints the platform's spelling (backslashes on Windows); CMake
+# holds the forward-slash one. Compare in CMake's.
+file(TO_CMAKE_PATH "${APOGEE_OUT}" APOGEE_OUT_CMAKE)
+expect_equal("${APOGEE_OUT_CMAKE}" "${CONFIG_FILE}" "config path")
 
 apogee_run(0 config init)
 if(NOT EXISTS "${CONFIG_FILE}")

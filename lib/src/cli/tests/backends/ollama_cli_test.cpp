@@ -11,6 +11,7 @@
 
 #include "backends/ollama_cli_output.h"
 #include "harness/errors.h"
+#include "platform/child_process.h"
 #include "support/fake_child.h"
 
 /// The Ollama backend, against a scripted child and recorded output.
@@ -269,6 +270,13 @@ TEST_CASE("history is flattened into one prompt, labelled by speaker", "[backend
 }
 
 TEST_CASE("a config with no model is refused by name", "[backends][ollama][errors]") {
+    // from_config refuses the platform before it reads the config where child
+    // processes are unsupported (Windows, recorded skip): the message under
+    // test never forms there.
+    if (!apogee::platform::supports_child_processes()) {
+        SUCCEED("no child-process support on this platform");
+        return;
+    }
     apogee::harness::BackendConfig config;
     config.type = apogee::harness::BackendType::OllamaCli;
 

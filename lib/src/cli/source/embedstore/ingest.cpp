@@ -139,9 +139,12 @@ IngestReport ingest_path(const std::filesystem::path& store_path,
         }
 
         // Relative to the ingest root, so a corpus survives being moved and two
-        // machines record the same source names for the same documents.
+        // machines record the same source names for the same documents -- in
+        // the generic form, with '/', or a Windows machine would record
+        // "nested\\deep\\file.md" for what a POSIX one calls "nested/deep/file.md".
         const std::filesystem::path relative = std::filesystem::relative(file, root, code);
-        const std::string source = code || relative.empty() ? file.string() : relative.string();
+        const std::string source =
+            code || relative.empty() ? file.generic_string() : relative.generic_string();
 
         const std::vector<std::string> chunks = chunk_text(text, options);
         if (embed) {

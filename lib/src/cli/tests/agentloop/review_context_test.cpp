@@ -16,7 +16,9 @@ using apogee::agentloop::valid_fetch_mode;
 
 }  // namespace
 
-TEST_CASE("/branch parses off, a range, and a bare head", "[agentloop][review]") {
+// Not "/branch parses ...": ctest hands the name to the binary as an argument,
+// and on Windows Catch2 reads a leading '/' as an option prefix (2026-09-20).
+TEST_CASE("the /branch argument parses off, a range, and a bare head", "[agentloop][review]") {
     ReviewContext current;
     current.base = "develop";
 

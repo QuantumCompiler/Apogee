@@ -12,6 +12,7 @@
 #include "backends/codex_cli_events.h"
 #include "backends/jsonl_framer.h"
 #include "harness/errors.h"
+#include "platform/child_process.h"
 #include "support/fake_child.h"
 
 /// The Codex backend, against recorded output from a real ChatGPT session.
@@ -281,6 +282,13 @@ TEST_CASE("a mode that this CLI does not have is refused, not ignored",
           "[backends][codex][config]") {
     // The codex CLI has no --bare analogue. Silently accepting `mode: bare`
     // would promise an isolation this backend cannot deliver.
+    // from_config refuses the platform before it reads the config where child
+    // processes are unsupported (Windows, recorded skip): the message under
+    // test never forms there.
+    if (!apogee::platform::supports_child_processes()) {
+        SUCCEED("no child-process support on this platform");
+        return;
+    }
     apogee::harness::BackendConfig config;
     config.type = apogee::harness::BackendType::CodexCli;
     config.mode = "bare";

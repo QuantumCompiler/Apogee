@@ -138,8 +138,10 @@ HttpResponse scaffold_agent(const AdminConfigContext& context, const HttpRequest
     if (view.is_null()) {
         view = nlohmann::json{{"name", result.name}};
     }
-    view["prompt_path"] = result.prompt_path.string();
-    view["schema_path"] = result.schema_path.string();
+    // Generic form on the wire: a JSON path field with backslashes is a
+    // Windows-only contract, and '/' is a valid path there too.
+    view["prompt_path"] = result.prompt_path.generic_string();
+    view["schema_path"] = result.schema_path.generic_string();
     return json_response(force ? 200 : 201, view);
 }
 

@@ -39,6 +39,8 @@ Apogee/
 │       ├── apogee-create-backlog-item/ — Repo-local skill: spec a new item into the backlog + index + roadmap
 │       ├── apogee-document-update/     — Repo-local skill: pre-MR docs pass — reconcile every doc against the branch diff
 │       └── apogee-pull-request/        — Repo-local skill: draft the MR description from the branch's docs evidence
+├── .gitattributes           — Every text file is LF on every platform (Windows checkouts had rewritten
+│                              the byte-exact shipped assets with CRLF, 2026-09-20)
 ├── .gitignore
 └── lib/
     ├── documentation/       — Project documentation
@@ -50,7 +52,9 @@ Apogee/
     │   │                      non-native targets defer to the CI matrix, or fail with --no-defer), --fresh = clean-room
     │   │                      clone of github.com/QuantumCompiler/Apogee at that branch; --test, --clean;
     │   │                      --clone-llama and --test-only are the first and third CI stages
-    │   └── cicd-completion.bash — Tab completion for cicd.sh's flags (source from your shell rc)
+    │   ├── cicd-completion.bash — Tab completion for cicd.sh's flags (source from your shell rc)
+    │   └── ci-annotate.sh   — On a failed CI step, publishes the ctest summary and each failed
+    │                          test's output as error annotations (public through the API; the log is not)
     └── src/                 — Application source, one self-contained project per app
         ├── cli/             — The CLI application
         │   ├── CMakeLists.txt   — Build root: standard, options, target wiring, link-policy assertion

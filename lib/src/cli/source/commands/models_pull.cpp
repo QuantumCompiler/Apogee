@@ -181,9 +181,13 @@ DeletePlan plan_delete(const std::filesystem::path& models_dir, std::string_view
     DeletePlan plan;
 
     // "Delete a model by name" must never become "delete a file by path". Both
-    // an absolute path and a `..` are refused before anything is touched.
+    // an absolute path and a `..` are refused before anything is touched. Any
+    // root counts, not only what is_absolute() accepts: on Windows "/etc/x" is
+    // root-relative rather than absolute, and "C:x" has a drive but no root
+    // directory, and either would have walked out of the models directory.
     const std::filesystem::path requested{name};
-    if (requested.is_absolute() || name.find("..") != std::string_view::npos) {
+    if (requested.is_absolute() || requested.has_root_name() || requested.has_root_directory() ||
+        name.find("..") != std::string_view::npos) {
         plan.error = "a model is named, not pathed: '" + std::string{name} +
                      "' would reach outside the models directory";
         return plan;

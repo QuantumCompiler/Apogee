@@ -5,7 +5,9 @@
 #include <cstring>
 #include <filesystem>
 #include <mutex>
+#include <string>
 #include <system_error>
+#include <vector>
 
 #if !defined(_WIN32)
 #include <fcntl.h>
@@ -269,21 +271,51 @@ std::string find_on_path(std::string_view program) {
         return {};
     }
 
+    // The separator and the spellings tried are the platform's. Windows joins
+    // PATH with ';' -- splitting on ':' cuts every drive letter in half, which
+    // is how this found nothing at all there (2026-09-20) -- and a bare name
+    // resolves through PATHEXT, so `git` is `git.exe`. POSIX joins with ':'
+    // and takes the name as given.
+#if defined(_WIN32)
+    constexpr char separator = ';';
+    std::vector<std::string> spellings{std::string{program}};
+    if (!candidate.has_extension()) {
+        const char* pathext = std::getenv("PATHEXT");
+        std::string_view extensions = pathext != nullptr ? pathext : ".COM;.EXE;.BAT;.CMD";
+        while (!extensions.empty()) {
+            const std::size_t cut = extensions.find(';');
+            const std::string_view extension = extensions.substr(0, cut);
+            if (!extension.empty()) {
+                spellings.push_back(std::string{program} + std::string{extension});
+            }
+            if (cut == std::string_view::npos) {
+                break;
+            }
+            extensions.remove_prefix(cut + 1);
+        }
+    }
+#else
+    constexpr char separator = ':';
+    const std::vector<std::string> spellings{std::string{program}};
+#endif
+
     std::string_view remaining{path};
     while (!remaining.empty()) {
-        const std::size_t separator = remaining.find(':');
-        const std::string_view entry = remaining.substr(0, separator);
+        const std::size_t cut = remaining.find(separator);
+        const std::string_view entry = remaining.substr(0, cut);
         if (!entry.empty()) {
-            const std::filesystem::path full = std::filesystem::path{entry} / candidate;
-            if (std::filesystem::exists(full, code) &&
-                std::filesystem::is_regular_file(full, code)) {
-                return full.string();
+            for (const std::string& spelling : spellings) {
+                const std::filesystem::path full = std::filesystem::path{entry} / spelling;
+                if (std::filesystem::exists(full, code) &&
+                    std::filesystem::is_regular_file(full, code)) {
+                    return full.string();
+                }
             }
         }
-        if (separator == std::string_view::npos) {
+        if (cut == std::string_view::npos) {
             break;
         }
-        remaining.remove_prefix(separator + 1);
+        remaining.remove_prefix(cut + 1);
     }
     return {};
 }

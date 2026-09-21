@@ -97,19 +97,21 @@ foreach(archive IN LISTS ARCHIVES)
         # Undefined symbols, attributed to their member object. Formats:
         #   macOS archive   "libapogee_core.a:serve.cpp.o: _listen"
         #   GNU archive     "libapogee_core.a:serve.cpp.o:                 U listen"
+        #   MinGW archive   "libapogee_core.a:serve.cpp.obj:               U __imp_listen"
         #   shared library  "libllama.dylib: _listen"  /  "libllama.so: U listen@GLIBC_2.2.5"
         # A glibc version suffix is tolerated; a member is present only for an
-        # archive, so a shared library is reported by its file name.
-        if(line MATCHES "[:(]([^:( ]+\\.o)\\)?:[ \t]*(U[ \t]+)?_?(listen|accept|accept4)(@.*)?$")
+        # archive, so a shared library is reported by its file name. Windows
+        # objects end in .obj, and a Winsock import is decorated __imp_.
+        if(line MATCHES "[:(]([^:( ]+\\.o(bj)?)\\)?:[ \t]*(U[ \t]+)?(__imp_)?_?(listen|accept|accept4)(@.*)?$")
             set(member "${CMAKE_MATCH_1}")
-            set(symbol "${CMAKE_MATCH_3}")
+            set(symbol "${CMAKE_MATCH_5}")
             if(member STREQUAL "${APOGEE_LISTENER_OBJECT}")
                 set(LISTENER_SEEN TRUE)
             else()
                 list(APPEND VIOLATIONS "${archive_name}(${member}): ${symbol}")
             endif()
-        elseif(line MATCHES "^[^ ]+:[ \t]*(U[ \t]+)?_?(listen|accept|accept4)(@.*)?$")
-            list(APPEND VIOLATIONS "${archive_name}: ${CMAKE_MATCH_2}")
+        elseif(line MATCHES "^[^ ]+:[ \t]*(U[ \t]+)?(__imp_)?_?(listen|accept|accept4)(@.*)?$")
+            list(APPEND VIOLATIONS "${archive_name}: ${CMAKE_MATCH_3}")
         endif()
     endforeach()
 endforeach()

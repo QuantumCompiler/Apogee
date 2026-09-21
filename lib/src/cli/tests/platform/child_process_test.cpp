@@ -175,6 +175,11 @@ TEST_CASE("writing to a dead child fails rather than throwing", "[platform][chil
 
 TEST_CASE("a missing program is refused by name", "[platform][child]") {
     // Naming what was not found beats a numeric errno the user cannot act on.
+    if (!apogee::platform::supports_child_processes()) {
+        // The refusal there names the platform, not the program (recorded skip).
+        SUCCEED("no child-process support on this platform");
+        return;
+    }
     std::string error;
     ChildCommand command;
     command.program = "apogee-definitely-not-a-real-program";
@@ -189,8 +194,10 @@ TEST_CASE("PATH resolution finds real programs and rejects invented ones", "[pla
     CHECK_FALSE(find_on_path("sh").empty());
     CHECK(find_on_path("apogee-definitely-not-a-real-program").empty());
     CHECK(find_on_path("").empty());
-    // An explicit path is honoured as given, and checked.
-    CHECK(find_on_path("/bin/sh") == "/bin/sh");
+    // An explicit path is honoured as given, and checked: the one just found,
+    // which exists wherever this runs (`/bin/sh` is not a path on Windows).
+    const std::string sh = find_on_path("sh");
+    CHECK(find_on_path(sh) == sh);
     CHECK(find_on_path("/nonexistent/binary").empty());
 }
 

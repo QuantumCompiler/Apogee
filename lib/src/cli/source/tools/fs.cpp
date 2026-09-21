@@ -364,7 +364,11 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
                 continue;
             }
             if (wildcard_match(pattern, name)) {
-                matches.push_back(std::filesystem::relative(it->path(), *base, code).string());
+                // Generic form: the listing is a model-facing contract, and a
+                // path with '/' is valid on every platform the model may name
+                // it back to.
+                matches.push_back(
+                    std::filesystem::relative(it->path(), *base, code).generic_string());
             }
         }
         if (matches.empty()) {
