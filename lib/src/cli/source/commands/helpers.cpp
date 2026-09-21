@@ -286,8 +286,26 @@ std::string read_stdin() {
     return buffer.str();
 }
 
+namespace {
+// The stream buffer std::cin was born with. Everything here reads stdin
+// through std::cin, so a caller that has swapped that buffer -- the command
+// test fixtures feed their "piped" input this way -- has made stdin something
+// other than the terminal for this process, whatever descriptor 0 says.
+// Asking only the descriptor made two tests pass under ctest and fail under a
+// developer's terminal (2026-09-19). Captured at static initialization, before
+// anything can have swapped it, through a noexcept function: rdbuf() is a
+// plain accessor the standard merely forgot to mark so, and a static
+// initializer must not be able to throw.
+[[nodiscard]] std::streambuf* initial_stdin_buffer() noexcept {
+    return std::cin.rdbuf();
+}
+
+std::streambuf* const kOriginalStdinBuffer = initial_stdin_buffer();
+}  // namespace
+
 bool stdin_is_piped() {
-    return !platform::is_terminal(platform::StandardStream::In);
+    return std::cin.rdbuf() != kOriginalStdinBuffer ||
+           !platform::is_terminal(platform::StandardStream::In);
 }
 
 std::string base64_encode(std::string_view bytes) {

@@ -212,7 +212,8 @@ struct BuiltInToolOptions {
 ///
 /// False on a terminal: `apogee complete` with no argument at an interactive
 /// prompt must print usage, not silently block reading the user's keystrokes
-/// until they work out that Ctrl-D is what it wants.
+/// until they work out that Ctrl-D is what it wants. True whenever std::cin's
+/// buffer has been replaced, since that is where the input is read from.
 [[nodiscard]] bool stdin_is_piped();
 
 /// Reads `path` and returns it as an image content part carrying a `data:` URI.

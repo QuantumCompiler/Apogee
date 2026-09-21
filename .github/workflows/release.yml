@@ -97,10 +97,17 @@ jobs:
 
       # Tests run before an artifact is produced. A release binary that was
       # never tested is the one thing a release pipeline must not emit.
+      # On failure the last forty lines become an error annotation, readable
+      # through the public API without admin rights (ci.yml says why).
       - name: Build and test
         if: runner.os != 'Windows'
         shell: bash
-        run: lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer
+        run: |
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            echo "::error title=build ${{ matrix.target }}::$(tail -n 40 "$RUNNER_TEMP/cicd.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            exit 1
+          }
 
       - name: Build and test (MSYS2 shell)
         if: runner.os == 'Windows'
@@ -110,7 +117,11 @@ jobs:
         # first `git rev-parse`.
         run: |
           git config --global --add safe.directory '*'
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            echo "::error title=build ${{ matrix.target }}::$(tail -n 40 "$RUNNER_TEMP/cicd.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            exit 1
+          }
 
       - name: Stage the archive
         shell: bash

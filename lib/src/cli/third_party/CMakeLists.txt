@@ -50,10 +50,11 @@ if(NOT MSVC)
 endif()
 
 if(NOT APOGEE_ENABLE_LLAMA)
-    # Default path. llama.cpp's build is heavy (Metal/CUDA kernel compilation),
-    # so it stays off the per-push hot path and is compile-proofed by a separate
-    # non-blocking CI job until the llamacpp-backend item consumes its API.
-    message(STATUS "Apogee: llama.cpp disabled (-DAPOGEE_ENABLE_LLAMA=ON to build it)")
+    # The developer's fast path only (-DAPOGEE_ENABLE_LLAMA=OFF, `make
+    # no-llama`): the executable ships with llama.cpp in it, and every CI and
+    # release build takes the branch below. Here the llamacpp backend compiles
+    # to its "not built in" answer.
+    message(STATUS "Apogee: llama.cpp disabled for this build (-DAPOGEE_ENABLE_LLAMA=ON is the default)")
     return()
 endif()
 
@@ -81,6 +82,30 @@ set(LLAMA_BUILD_TOOLS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_COMMON   ON  CACHE BOOL "" FORCE)
 set(LLAMA_CURL           OFF CACHE BOOL "" FORCE)
 
+# The executable is a DISTRIBUTED binary on every build path -- cicd.sh is the
+# one path for local, CI and release builds -- so llama.cpp is built for the
+# platform, never for the machine that happens to build it (2026-09-19):
+#
+#   GGML_NATIVE OFF    no -march=native. A release built on a runner whose CPU
+#                      has AVX-512 must not die with an illegal instruction on
+#                      a user's older machine. ggml's non-native baseline is
+#                      AVX2/FMA/F16C on x86-64 (Haswell, 2013) and armv8-a on
+#                      arm64 -- except Apple silicon, where every machine is at
+#                      least armv8.2-a with fp16 and dotprod, and the CPU side
+#                      may as well use them (Metal carries the rest).
+#   GGML_OPENMP OFF    ggml's own thread pool instead of libgomp/libomp: one
+#                      shared-library dependency fewer on Linux, and nothing to
+#                      find a static copy of on MinGW.
+#   GGML_METAL_EMBED_LIBRARY keeps its default (ON with Metal): the Metal
+#                      library lives inside the executable, not in a file
+#                      beside it.
+#   BUILD_SHARED_LIBS  is OFF project-wide (the top-level CMakeLists says why).
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    set(GGML_CPU_ARM_ARCH "armv8.2-a+fp16+dotprod" CACHE STRING "" FORCE)
+endif()
+
 FetchContent_MakeAvailable(llama_cpp)
 
 # Multimodal (vision) support.
@@ -106,6 +131,15 @@ if(EXISTS "${llama_cpp_SOURCE_DIR}/tools/mtmd/CMakeLists.txt")
         set(LLAMA_INSTALL_VERSION 0.0.0)
     endif()
     add_subdirectory("${llama_cpp_SOURCE_DIR}/tools/mtmd" "${llama_cpp_BINARY_DIR}/tools/mtmd")
+    # mtmd-audio.cpp uses M_PI, which the Windows C runtimes' math.h defines
+    # only under _USE_MATH_DEFINES. Upstream compiles with GNU extensions on,
+    # where the macro is always there; this project's CMAKE_CXX_EXTENSIONS OFF
+    # reaches the subdirectory as -std=c++20, and MinGW's <cmath> then hides
+    # it. The definition is upstream's own MSVC remedy, applied to their
+    # target on every Windows toolchain (2026-09-19).
+    if(WIN32 AND TARGET mtmd)
+        target_compile_definitions(mtmd PRIVATE _USE_MATH_DEFINES)
+    endif()
     message(STATUS "Apogee: llama.cpp multimodal (mtmd) enabled")
 else()
     message(WARNING
@@ -113,4 +147,4 @@ else()
         "unavailable. Check whether upstream moved it.")
 endif()
 
-message(STATUS "Apogee: llama.cpp enabled (compile-proof only -- no API use yet)")
+message(STATUS "Apogee: llama.cpp enabled")

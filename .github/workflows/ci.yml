@@ -11,7 +11,7 @@
 #
 # Gating policy (user decision, 2026-09-19, superseding 2026-08-24's
 # "macos-arm64 only"): EVERY job here is required for a pull request -- the
-# clone, all six builds, all six test runs. There is no `continue-on-error`
+# clone, all five builds, all five test runs. There is no `continue-on-error`
 # in this file and there must not be one; a platform that cannot pass is a
 # platform to fix, not to mark informational. GitHub enforces the requirement
 # through the branch protection rule on `stable`, which lists these checks by
@@ -31,9 +31,9 @@
 #   1. clone llama.cpp   -- prove the pin resolves. llama.cpp ships with the
 #                           tool, so a pin that no longer clones is a broken
 #                           product, and no platform is worth building on it.
-#   2. build <platform>  -- one job per platform (plus the macOS build with
-#                           llama.cpp linked); each hands its build tree to
-#                           stage three as an artifact.
+#   2. build <platform>  -- one job per platform, llama.cpp linked in like
+#                           every build (it ships with the tool); each hands
+#                           its build tree to stage three as an artifact.
 #   3. test <platform>   -- one job per platform, running the suite on the
 #                           tree stage two built, with nothing rebuilt.
 #
@@ -103,13 +103,12 @@ jobs:
         run: lib/scripts/cicd.sh --clone-llama
 
   build:
-    # Stage two. The `macos-arm64-llama` row is the local-inference
-    # configuration -- the one that ships with the tool -- built through the
-    # same script with the llama.cpp target enabled; its test row is the ONLY
-    # place the real LlamaRuntime's vendor calls are checked at all, since the
-    # default build compiles the "not built in" half of that file. Required
-    # like every other row (Gating policy, above); the Metal kernel build is
-    # slow, which is a reason for patience, not for an exemption.
+    # Stage two. Every build has llama.cpp in it -- APOGEE_ENABLE_LLAMA is ON
+    # by default (user decision, 2026-09-19: local inference ships with the
+    # tool, so the executable CI builds is the executable a release ships) --
+    # which is why stage one proves the pin clones first, and why there is no
+    # separate llama.cpp row any more: until that day one macOS job carried
+    # the option and nothing shipped had the real LlamaRuntime in it.
     #
     # fail-fast is off so one failing row does not cancel the others: the PR
     # is blocked either way, and the full picture is worth the runner time.
@@ -123,10 +122,6 @@ jobs:
           - name: macos-arm64
             target: macos-arm64
             runner: macos-14
-          - name: macos-arm64-llama
-            target: macos-arm64
-            runner: macos-14
-            cmake_args: -DAPOGEE_ENABLE_LLAMA=ON
           - name: linux-x64
             target: linux-x64
             runner: ubuntu-24.04
@@ -141,8 +136,6 @@ jobs:
             target: windows-arm64
             runner: windows-11-arm
             msystem: CLANGARM64
-    env:
-      APOGEE_CMAKE_ARGS: ${{ matrix.cmake_args }}
 
     steps:
       - uses: actions/checkout@v5
@@ -175,10 +168,19 @@ jobs:
             pkgconf:p
             curl-winssl:p
 
+      # Each build and test step tees its output and, on failure, puts the last
+      # forty lines into an error annotation: annotations are public on a
+      # public repository, the raw log needs admin rights, and a failure that
+      # only the owner can read is a failure nobody else can fix.
       - name: Build
         if: runner.os != 'Windows'
         shell: bash
-        run: lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer
+        run: |
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            echo "::error title=build ${{ matrix.name }}::$(tail -n 40 "$RUNNER_TEMP/cicd.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            exit 1
+          }
 
       # The same command, in the MSYS2 shell the toolchain lives in. The
       # script sees a UCRT64_NT / CLANGARM64_NT host and maps it to Windows.
@@ -190,7 +192,11 @@ jobs:
         # first `git rev-parse`.
         run: |
           git config --global --add safe.directory '*'
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            echo "::error title=build ${{ matrix.name }}::$(tail -n 40 "$RUNNER_TEMP/cicd.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            exit 1
+          }
 
       # Handed over as a tar, not a directory: upload-artifact drops file
       # modes, and a test binary without its execute bit is not a test. Object
@@ -223,9 +229,6 @@ jobs:
       matrix:
         include:
           - name: macos-arm64
-            target: macos-arm64
-            runner: macos-14
-          - name: macos-arm64-llama
             target: macos-arm64
             runner: macos-14
           - name: linux-x64
@@ -288,7 +291,12 @@ jobs:
       - name: Test
         if: runner.os != 'Windows'
         shell: bash
-        run: lib/scripts/cicd.sh --platform ${{ matrix.target }} --test-only --no-defer
+        run: |
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test-only --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            echo "::error title=test ${{ matrix.name }}::$(tail -n 40 "$RUNNER_TEMP/cicd.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            exit 1
+          }
 
       - name: Test (MSYS2 shell)
         if: runner.os == 'Windows'
@@ -298,4 +306,8 @@ jobs:
         # first `git rev-parse`.
         run: |
           git config --global --add safe.directory '*'
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test-only --no-defer
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test-only --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            echo "::error title=test ${{ matrix.name }}::$(tail -n 40 "$RUNNER_TEMP/cicd.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            exit 1
+          }

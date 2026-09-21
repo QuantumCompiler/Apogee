@@ -34,7 +34,7 @@ LINT_CXX     ?= $(dir $(CLANG_TIDY))clang++
 # formatted or linted.
 SOURCES := $(shell find source tests \( -name '*.cpp' -o -name '*.h' \) 2>/dev/null)
 
-.PHONY: help build install install-completions install-zsh-completion test clean fresh format format-check lint llama all
+.PHONY: help build install install-completions install-zsh-completion test clean fresh format format-check lint no-llama all
 
 help:
 	@echo "Apogee CLI — build wrapper (repo-wide entry point: lib/scripts/cicd.sh)"
@@ -49,7 +49,7 @@ help:
 	@echo "  lint          clang-tidy over source/ and tests/"
 	@echo "  format        Rewrite source/ and tests/ in the project style"
 	@echo "  format-check  Fail if anything in source/ or tests/ is unformatted"
-	@echo "  llama         Build with the pinned llama.cpp target enabled (slow)"
+	@echo "  no-llama      The fast developer build: everything except llama.cpp (ON by default)"
 	@echo "  clean         Remove this preset's build directory"
 	@echo "  fresh         Clean-room clone-and-build of the current branch"
 	@echo ""
@@ -135,8 +135,11 @@ install-zsh-completion:
 test:
 	@$(CICD) --platform $$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')-$$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/;s/amd64/x64/') --test --jobs $(JOBS)
 
-llama:
-	cmake --preset $(PRESET) -DAPOGEE_ENABLE_LLAMA=ON
+# The fast developer build: everything except llama.cpp, which is ON by
+# default and is most of the compile time. The llamacpp backend then answers
+# "not built in"; every other package builds and tests as usual.
+no-llama:
+	cmake --preset $(PRESET) -DAPOGEE_ENABLE_LLAMA=OFF
 	cmake --build $(BUILD_DIR) -j $(JOBS)
 
 clean:

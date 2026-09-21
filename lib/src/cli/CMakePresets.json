@@ -43,7 +43,7 @@
             "name": "windows-mingw",
             "hidden": true,
             "inherits": "base",
-            "description": "Windows builds use MinGW-w64 toolchains from MSYS2 (user decision, 2026-09-19): GCC in the UCRT64 environment on x64, clang in CLANGARM64 on arm64. Ninja, because the MSYS2 cmake drives the toolchain on PATH. The executable links -static so it ships alone -- no libstdc++, libgcc or winpthread DLL beside it -- and takes libcurl static for the same reason; cmake/ApogeeDependencies.cmake resolves curl's own static dependencies through pkg-config.",
+            "description": "Windows builds use MinGW-w64 toolchains from MSYS2 (user decision, 2026-09-19): GCC in the UCRT64 environment on x64, clang in CLANGARM64 on arm64. Ninja, because the MSYS2 cmake drives the toolchain on PATH, and each preset names its compilers as cache entries -- a cross-compile from another host overrides them on the command line (-DCMAKE_C_COMPILER=... -DCMAKE_CXX_COMPILER=... beside its toolchain file), since a preset's cache entry wins over the toolchain file's setting. The executable links -static so it ships alone -- no libstdc++, libgcc or winpthread DLL beside it -- and takes libcurl static for the same reason; cmake/ApogeeDependencies.cmake resolves curl's own static dependencies through pkg-config.",
             "generator": "Ninja",
             "cacheVariables": {
                 "CMAKE_EXE_LINKER_FLAGS": "-static",
@@ -53,12 +53,20 @@
         {
             "name": "windows-x64",
             "inherits": "windows-mingw",
-            "displayName": "Windows x64 (MinGW-w64, MSYS2 UCRT64)"
+            "displayName": "Windows x64 (MinGW-w64, MSYS2 UCRT64)",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++"
+            }
         },
         {
             "name": "windows-arm64",
             "inherits": "windows-mingw",
-            "displayName": "Windows arm64 (MinGW-w64, MSYS2 CLANGARM64)"
+            "displayName": "Windows arm64 (MinGW-w64, MSYS2 CLANGARM64)",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
         }
     ],
     "buildPresets": [

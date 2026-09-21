@@ -82,7 +82,14 @@ EOF
 }
 
 log() { printf '[cicd] %s\n' "$*"; }
-die() { printf '[cicd] error: %s\n' "$*" >&2; exit 1; }
+# On a GitHub runner the message is also a workflow command, so it lands in
+# the job's annotations -- readable through the public API by anyone, where
+# the log itself needs admin rights on the repository.
+die() {
+    printf '[cicd] error: %s\n' "$*" >&2
+    [[ -n "${GITHUB_ACTIONS:-}" ]] && printf '::error title=cicd.sh::%s\n' "$*"
+    exit 1
+}
 
 host_target() {
     local os arch
@@ -96,13 +103,27 @@ host_target() {
                                 os="windows" ;;
         *)                      die "unsupported host OS: $(uname -s)" ;;
     esac
-    # On Windows the shell (Git for Windows' bash) may itself be an x64 build
-    # running under emulation on an ARM64 machine, and `uname -m` then reports
-    # the SHELL's architecture, not the machine's. The processor variables are
-    # the OS's own answer: PROCESSOR_ARCHITEW6432 is set for an emulated
-    # process and names the real machine; PROCESSOR_ARCHITECTURE otherwise.
+    # On Windows, what this script builds is whatever the toolchain on PATH
+    # targets, and in an MSYS2 shell MSYSTEM names exactly that: CLANGARM64
+    # is the ARM64 toolchain, UCRT64/MINGW64/CLANG64 are x64 ones. That is the
+    # answer to use, and it is the only reliable one: the shell itself may be
+    # an x64 build running under emulation on an ARM64 machine -- the MSYS2
+    # the ARM runner images ship, Git for Windows' bash -- and then `uname -m`
+    # reports x86_64 and PROCESSOR_ARCHITECTURE reports AMD64. Nor does
+    # PROCESSOR_ARCHITEW6432 help: Windows sets it for 32-bit processes only,
+    # so an emulated x64 process cannot tell it is on an ARM64 machine from
+    # the environment at all. Both Windows ARM runs of 2026-09-19 died on
+    # that, one second in, "cannot build windows-arm64 natively on this host
+    # (windows-x64)". Without MSYSTEM the variables are the fallback, and an
+    # x64 shell then builds x64 -- which is what its toolchain does anyway.
     local machine
-    if [[ "$os" == "windows" ]]; then
+    if [[ "$os" == "windows" && -n "${MSYSTEM:-}" ]]; then
+        case "$MSYSTEM" in
+            CLANGARM64)                 machine="arm64" ;;
+            UCRT64|MINGW64|CLANG64)     machine="x86_64" ;;
+            *)                          die "unsupported MSYS2 environment: ${MSYSTEM} (use UCRT64 or CLANGARM64)" ;;
+        esac
+    elif [[ "$os" == "windows" ]]; then
         machine="${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-$(uname -m)}}"
     else
         machine="$(uname -m)"
@@ -207,6 +228,10 @@ build_target() {
     fi
 
     [[ $CLEAN -eq 1 ]] && { log "cleaning ${app_dir}/${build_dir}/"; rm -rf "${build_dir}"; }
+
+    # One line naming the toolchain this host will use, before configure can
+    # fail on it: on a runner, the log is all there is.
+    log "toolchain: $(uname -s) $(uname -m)${MSYSTEM:+ MSYSTEM=$MSYSTEM}; $(cmake --version 2>/dev/null | head -n 1 || echo 'cmake: none'); cc=$(command -v cc || echo none) gcc=$(command -v gcc || echo none) clang=$(command -v clang || echo none) clang++=$(command -v clang++ || echo none) ninja=$(command -v ninja || echo none) pkg-config=$(command -v pkg-config || echo none)"
 
     # Extra configure arguments from the environment -- how a caller hands in
     # a toolchain file without this script growing a per-platform branch.
