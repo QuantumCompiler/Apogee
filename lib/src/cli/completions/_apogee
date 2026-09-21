@@ -1,0 +1,12 @@
+#compdef apogee
+# Zsh completion for apogee. See apogee.bash for why this only forwards.
+_apogee() {
+    local -a candidates
+    candidates=(${(f)"$(apogee __complete ${words[2,CURRENT]} 2>/dev/null)"})
+    if (( ${#candidates} )); then
+        compadd -- $candidates
+    else
+        _files
+    fi
+}
+compdef _apogee apogee

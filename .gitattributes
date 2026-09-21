@@ -1,0 +1,14 @@
+# Every text file is LF in the working tree on every platform (2026-09-20).
+#
+# Git for Windows defaults to core.autocrlf=true, so a Windows checkout --
+# the CI runners' among them -- rewrote every text file with CRLF. The build
+# embeds shipped assets (prompts, schemas, kits, the sample config) into the
+# executable byte for byte from the checkout, and the suite pins those
+# embedded copies to the files; on Windows a text-mode read of the CRLF file
+# gave back LF while the embedded copy kept the CRLF, and eight of those pins
+# failed there. The files are LF in the repository, and the point of a
+# byte-exact pin is that the bytes are the same everywhere, so: LF, always.
+#
+# PowerShell reads LF scripts fine; there are no .bat or .cmd files to need
+# CRLF. Binaries are detected by content (text=auto) and left alone.
+* text=auto eol=lf

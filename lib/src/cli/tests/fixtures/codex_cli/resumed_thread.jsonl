@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a078e4-9214-75f2-9de2-693c50de6c46"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"You asked me to compute **17 × 23**."}}
+{"type":"turn.completed","usage":{"input_tokens":16900,"cached_input_tokens":15104,"cache_write_input_tokens":0,"output_tokens":16,"reasoning_output_tokens":0}}

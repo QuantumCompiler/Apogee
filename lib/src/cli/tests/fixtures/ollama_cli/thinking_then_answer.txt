@@ -1,0 +1,6 @@
+Thinking...
+The prompt: User says "Say exactly: hello". So we need to respond with exactly "hello". It says "Say exactly: hello". So we should output "hello" exactly. No extra spaces, no punctuation or quotes unless they want. Probably output the word hello. No leading/trailing spaces. Just hello.
+...done thinking.
+
+hello
+

@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SecurityReviewReport",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "A 2-4 sentence security assessment of what this branch changes and its overall risk posture, judged against the commit messages. No findings here -- the 'what' and the headline risk."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Security findings, most severe first. May be empty when no security concerns are found.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low", "info"],
+            "description": "critical = remotely exploitable / immediate compromise; high = serious and exploitable under realistic conditions; medium = exploitable with preconditions or limited impact; low = minor or defense-in-depth; info = hardening note, not a vulnerability."
+          },
+          "category": {
+            "type": "string",
+            "enum": ["injection", "authentication", "authorization", "secrets", "deserialization", "ssrf", "cryptography", "input_validation", "path_traversal", "race_condition", "denial_of_service", "sensitive_data_exposure", "insecure_default", "dependency", "other"],
+            "description": "The class of weakness."
+          },
+          "cwe": {
+            "type": "string",
+            "description": "The mapped CWE identifier when one applies cleanly, e.g. 'CWE-89'. Omit or leave empty when there is no clean mapping."
+          },
+          "file": { "type": "string", "description": "File the finding applies to, relative to repo root." },
+          "location": {
+            "type": "string",
+            "description": "Where in the file -- a line range if known, otherwise a textual anchor like 'the new query builder' or 'the added path join'."
+          },
+          "title": { "type": "string", "description": "A short, specific headline for the weakness." },
+          "description": {
+            "type": "string",
+            "description": "What the weakness is and where, grounded in the code you read. If the concern depends on code outside the diff, state that assumption explicitly."
+          },
+          "impact": {
+            "type": "string",
+            "description": "The concrete attack and what an attacker gains -- the failure mode and its consequence (e.g. 'an unauthenticated caller can read any user's records by changing the id')."
+          },
+          "remediation": {
+            "type": "string",
+            "description": "A specific fix the author could apply -- a parameterized query, the missing authorization check, the validation to add. Not vague advice."
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "high = verified from code you read; medium = strong inference; low = plausible but depends on code or runtime state you could not see. Security review favors recall, so report low-confidence concerns -- but mark them low rather than asserting a proven exploit."
+          }
+        },
+        "required": ["severity", "category", "file", "location", "title", "description", "impact", "remediation", "confidence"]
+      }
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["no_security_concerns", "fix_recommended", "fix_required"],
+      "description": "no_security_concerns = nothing to address; fix_recommended = only medium/low/info items, not blocking; fix_required = at least one critical or high finding should be resolved before merge."
+    },
+    "verdict_rationale": {
+      "type": "string",
+      "description": "One line explaining the verdict -- e.g. 'One high SQL-injection finding in the new search endpoint' or 'No exploitable issues; two hardening notes'."
+    },
+    "human_summary": {
+      "type": "string",
+      "description": "The human-readable wrap-up, written LAST and placed at the very end. A copy-paste-ready security review note in Markdown addressed to the author -- the comment a security reviewer would leave on the pull request. State the verdict in plain words, summarize the headline risk(s), and list what must be fixed before merge (drawn from the findings above, not new ones). A few short paragraphs or a tight bullet list."
+    }
+  },
+  "required": ["summary", "findings", "verdict", "verdict_rationale", "human_summary"]
+}

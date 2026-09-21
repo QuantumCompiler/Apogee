@@ -1,0 +1,488 @@
+# The CLI application.
+#
+# Two targets, and the split between them is load-bearing:
+#
+#   apogee_core -- EVERY capability. Tests link this. The future HTTP server
+#                  links this. It is the whole product minus an entry point.
+#   apogee      -- a thin face: argv in, exit code out, nothing else.
+#
+# Parity across surfaces is structural because of that split (SPEC.md ->
+# Principles: "one source of truth per concern"). cmake/ApogeeLinkPolicy.cmake
+# fails the configure step if anything ever links `apogee`.
+
+# Stamped into the binary at configure time. GIT_COMMIT is best-effort: a
+# tarball export with no .git still builds, it just reports "unknown".
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE APOGEE_GIT_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT APOGEE_GIT_COMMIT)
+    set(APOGEE_GIT_COMMIT "unknown")
+endif()
+string(TIMESTAMP APOGEE_BUILD_DATE "%Y-%m-%d" UTC)
+
+add_library(apogee_core STATIC
+    version/version.h
+    version/version.cpp
+    platform/child_process.h
+    platform/child_process.cpp
+    platform/platform.h
+    platform/platform.cpp
+    commands/command.h
+    models/gguf_inspect.h
+    models/gguf_inspect.cpp
+    models/sha256.h
+    models/sha256.cpp
+    models/sidecar.h
+    models/sidecar.cpp
+    models/acquire.h
+    models/acquire.cpp
+    models/source_ollama.h
+    models/source_ollama.cpp
+    models/source_hf.h
+    models/source_hf.cpp
+    models/snapshot.h
+    models/snapshot.cpp
+
+    training/python_env.h
+    training/python_env.cpp
+    training/script_runner.h
+    training/script_runner.cpp
+    training/kit.h
+    training/kit.cpp
+    training/synth.h
+    training/synth.cpp
+    training/datasets.h
+    training/datasets.cpp
+    training/trainer.h
+    training/trainer.cpp
+    training/script_trainer.h
+    training/script_trainer.cpp
+    training/mlx_trainer.h
+    training/mlx_trainer.cpp
+    training/peft_trainer.h
+    training/peft_trainer.cpp
+    training/mock_trainer.h
+    training/mock_trainer.cpp
+    training/eval.h
+    training/eval.cpp
+    training/manifest.h
+    training/manifest.cpp
+    training/store.h
+    training/store.cpp
+    training/promote.h
+    training/promote.cpp
+    training/pipeline.h
+    training/pipeline.cpp
+    training/regime.h
+    training/regime.cpp
+    training/cycle.h
+    training/cycle.cpp
+    models/quantize.h
+    models/quantize.cpp
+    commands/models_pull.h
+    commands/models_pull.cpp
+    commands/embed.h
+    commands/embed.cpp
+    commands/models.h
+    commands/models.cpp
+    commands/registry.h
+    commands/registry.cpp
+    commands/root.h
+    commands/root.cpp
+    commands/version_command.h
+    commands/version_command.cpp
+    commands/config_cmd.h
+    commands/config_cmd.cpp
+    commands/check.h
+    commands/complete_protocol.h
+    commands/complete_protocol.cpp
+    commands/uninstall.h
+    commands/uninstall.cpp
+    commands/check.cpp
+    commands/complete.h
+    commands/complete.cpp
+    commands/helpers.h
+    commands/helpers.cpp
+    commands/ask_prompt.h
+    commands/ask_prompt.cpp
+    commands/terminal.h
+    commands/terminal.cpp
+    commands/status_line.h
+    commands/status_line.cpp
+    commands/thinking_view.h
+    commands/thinking_view.cpp
+    commands/json_reporter.h
+    commands/json_reporter.cpp
+    commands/cli_reporter.h
+    commands/cli_reporter.cpp
+
+    commands/serve_cmd.h
+    commands/serve_cmd.cpp
+    commands/mcp_cmd.h
+    commands/mcp_cmd.cpp
+    commands/permissions.h
+    commands/permissions.cpp
+    commands/auth_cmd.h
+    commands/auth_cmd.cpp
+    commands/analyze.h
+    commands/analyze.cpp
+    commands/agents_cmd.h
+    commands/agents_cmd.cpp
+    commands/knowledge_core.h
+    commands/knowledge_core.cpp
+    commands/graph.h
+    commands/graph.cpp
+    commands/datasets.h
+    commands/datasets.cpp
+    commands/train.h
+    commands/train.cpp
+    commands/knowledge.h
+    commands/knowledge.cpp
+    commands/chat.h
+    commands/chat.cpp
+    commands/chat_history.h
+    commands/chat_history.cpp
+    commands/input_gate.h
+    commands/input_gate.cpp
+    commands/line_reader.h
+    commands/line_reader.cpp
+
+    ansi/ansi.h
+    ansi/ansi.cpp
+
+    logger/session.h
+    logger/session.cpp
+    logger/operational.h
+    logger/operational.cpp
+
+    harness/layout.h
+    harness/layout.cpp
+    harness/paths.h
+    harness/paths.cpp
+    harness/roles.h
+    harness/roles.cpp
+    harness/config.h
+    harness/config.cpp
+    harness/config_template.cpp
+    harness/config_edit.h
+    harness/config_edit.cpp
+    harness/assets.h
+    harness/assets.cpp
+    harness/assets_training.cpp
+    harness/assets_converter.cpp
+    harness/errors.h
+    harness/errors.cpp
+    harness/cancellation.h
+    harness/cancellation.cpp
+    harness/types.h
+    harness/types.cpp
+    harness/behavior.h
+    harness/behavior.cpp
+    harness/provider.h
+    harness/provider.cpp
+    harness/context_windows.h
+    harness/context_windows.cpp
+    harness/harness.h
+    harness/harness.cpp
+
+    backends/backends.h
+    backends/mock.h
+    backends/mock.cpp
+    backends/http_client.h
+    backends/http_client.cpp
+    backends/sse_parser.h
+    backends/sse_parser.cpp
+    backends/anthropic_wire.h
+    backends/anthropic_wire.cpp
+    backends/anthropic.h
+    backends/anthropic.cpp
+    backends/codex_cli_events.h
+    backends/codex_cli_events.cpp
+    backends/codex_cli.h
+    backends/codex_cli.cpp
+    backends/gemini_cli_events.h
+    backends/gemini_cli_events.cpp
+    backends/gemini_cli.h
+    backends/gemini_cli.cpp
+    backends/ollama_cli_output.h
+    backends/ollama_cli_output.cpp
+    backends/ollama_cli.h
+    backends/ollama_cli.cpp
+    backends/openai_wire.h
+    backends/openai_wire.cpp
+    backends/openai.h
+    backends/openai.cpp
+    backends/google_wire.h
+    backends/google_wire.cpp
+    backends/google.h
+    backends/google.cpp
+    backends/cli_event.h
+    backends/claude_cli.h
+    backends/claude_cli.cpp
+    backends/jsonl_framer.h
+    backends/jsonl_framer.cpp
+    backends/claude_cli_events.h
+    backends/claude_cli_events.cpp
+    backends/llama_runtime.h
+    backends/llama_real.cpp
+    backends/think_filter.h
+    backends/think_filter.cpp
+    backends/markup_filter.h
+    backends/markup_filter.cpp
+    backends/native_tool_calls.h
+    backends/native_tool_calls.cpp
+    backends/model_profile.h
+    backends/model_profile.cpp
+    backends/chat_template.h
+    backends/chat_template.cpp
+    backends/llamacpp_tokens.h
+    backends/llamacpp_tokens.cpp
+    backends/embedding_batch.h
+    backends/embedding_batch.cpp
+    backends/openai_embed.h
+    backends/openai_embed.cpp
+    backends/google_embed.h
+    backends/google_embed.cpp
+    backends/llamacpp_embed.h
+    backends/llamacpp_embed.cpp
+    backends/llamacpp.h
+    backends/llamacpp.cpp
+    backends/factory.h
+    backends/factory.cpp
+
+    agent/tool.h
+    agent/tool.cpp
+    agent/fetch_url.h
+    agent/fetch_url.cpp
+
+    agentloop/agentloop.h
+    agentloop/reporter.h
+    agentloop/embed_func.h
+    agentloop/embed_func.cpp
+    agentloop/retriever.h
+    agentloop/retriever.cpp
+    agentloop/rerank.h
+    agentloop/rerank.cpp
+    agentloop/rag.h
+    agentloop/rag.cpp
+    agentloop/graph_context.h
+    agentloop/graph_context.cpp
+    agentloop/loop.h
+    agentloop/loop.cpp
+    agentloop/content.h
+    agentloop/content.cpp
+    agentloop/question.h
+    agentloop/question.cpp
+    agentloop/structured.h
+    agentloop/structured.cpp
+    agentloop/review_context.h
+    agentloop/review_context.cpp
+    render/json_report.h
+    render/json_report.cpp
+
+    # A leaf: includes nothing else from the project, so anything may publish.
+    events/bus.h
+    events/bus.cpp
+
+    # The credential store and the one key resolver. Beside the harness:
+    # includes harness/config.h and nothing from backends/.
+    secrets/secrets.h
+    secrets/store.h
+    secrets/store.cpp
+    secrets/resolve.h
+    secrets/resolve.cpp
+    tools/tools.h
+    tools/args.h
+    tools/args.cpp
+    tools/process.h
+    tools/process.cpp
+    tools/fs.h
+    tools/fs.cpp
+    tools/shell.h
+    tools/shell.cpp
+    tools/git.h
+    tools/git.cpp
+    tools/notes.h
+    tools/notes.cpp
+    tools/rag_query.h
+    tools/rag_query.cpp
+    tools/toolsets.h
+    tools/toolsets.cpp
+    mcp/types.h
+    mcp/types.cpp
+    mcp/transport.h
+    mcp/transport.cpp
+    mcp/client.h
+    mcp/client.cpp
+    mcp/registry.h
+    mcp/registry.cpp
+    mcp/serve_stdio.h
+    mcp/serve_stdio.cpp
+    scaffold/mcp_server.h
+    scaffold/mcp_server.cpp
+    scaffold/agent.h
+    scaffold/agent.cpp
+
+    # The knowledge layer: records, the capture clerk, and the store over the
+    # chunk store. Includes embedstore/, agentloop/, harness/ and platform/
+    # only -- never backends/ or commands/ (tests/layering.cmake).
+    knowledge/record.h
+    knowledge/record.cpp
+    knowledge/clerk.h
+    knowledge/clerk.cpp
+    knowledge/store.h
+    knowledge/store.cpp
+    knowledge/query.h
+    knowledge/query.cpp
+    knowledge/refine.h
+    knowledge/refine.cpp
+    knowledge/export.h
+    knowledge/export.cpp
+
+    # The knowledge-graph layer over collections: the extraction contract
+    # (prompt and schema compiled in, validation in host code) and the
+    # resumable build with the record pass. Model-free: generation and
+    # embedding arrive as closures. Includes embedstore/, knowledge/,
+    # agentloop/, harness/ and platform/ only (tests/layering.cmake).
+    graph/extract.h
+    graph/extract.cpp
+    graph/build.h
+    graph/build.cpp
+    graph/communities.h
+    graph/communities.cpp
+
+    # Package headers reserved for the items that fill them. They carry no code
+    # yet -- they exist so every later backlog item has one obvious home, and
+    # so `#include "embedstore/embedstore.h"` compiles from the first day.
+    embedstore/embedstore.h
+    embedstore/store.h
+    embedstore/store.cpp
+    embedstore/store_impl.h
+    embedstore/graph.h
+    embedstore/graph.cpp
+    embedstore/graph_search.h
+    embedstore/graph_search.cpp
+    embedstore/graph_communities.h
+    embedstore/graph_communities.cpp
+    embedstore/graph_dedupe.h
+    embedstore/graph_dedupe.cpp
+    embedstore/fts.h
+    embedstore/fts.cpp
+    embedstore/chunk.h
+    embedstore/chunk.cpp
+    embedstore/ingest.h
+    embedstore/ingest.cpp
+    embedstore/vector.h
+    embedstore/vector.cpp
+    httpserver/httpserver.h
+    httpserver/http_types.h
+    httpserver/http_types.cpp
+    httpserver/sse_writer.h
+    httpserver/sse_writer.cpp
+    httpserver/sse_reporter.h
+    httpserver/sse_reporter.cpp
+    httpserver/session.h
+    httpserver/session.cpp
+    httpserver/handler.h
+    httpserver/handler.cpp
+    httpserver/mux.h
+    httpserver/mux.cpp
+    httpserver/shutdown.h
+    httpserver/shutdown.cpp
+    httpserver/admin_auth.h
+    httpserver/admin_auth.cpp
+    httpserver/jobs.h
+    httpserver/jobs.cpp
+    httpserver/admin_events.h
+    httpserver/admin_events.cpp
+    httpserver/admin_config.h
+    httpserver/admin_config.cpp
+    httpserver/admin_agents.h
+    httpserver/admin_agents.cpp
+    httpserver/admin_knowledge.h
+    httpserver/admin_knowledge.cpp
+    httpserver/admin_graph.h
+    httpserver/admin_graph.cpp
+    httpserver/admin_graphs.h
+    httpserver/admin_graphs.cpp
+    httpserver/admin_datasets.h
+    httpserver/admin_datasets.cpp
+    httpserver/admin_training.h
+    httpserver/admin_training.cpp
+    httpserver/admin.h
+    httpserver/admin.cpp
+    httpserver/admin_auth_routes.h
+    httpserver/admin_auth_routes.cpp
+    # The ONE translation unit that may reference listen()/accept(). The
+    # no-listen symbol check allow-lists exactly this object and requires it to
+    # be the only one -- see tests/no_listen_symbols.cmake.
+    httpserver/serve.h
+    httpserver/serve.cpp
+    mcp/mcp.h
+)
+
+target_include_directories(apogee_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+
+target_compile_definitions(apogee_core PRIVATE
+    APOGEE_VERSION="${PROJECT_VERSION}"
+    APOGEE_GIT_COMMIT="${APOGEE_GIT_COMMIT}"
+    APOGEE_BUILD_DATE="${APOGEE_BUILD_DATE}"
+)
+
+target_link_libraries(apogee_core PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp
+                      PRIVATE CURL::libcurl replxx::replxx apogee_sqlite3 httplib::httplib
+                              nlohmann_json_schema_validator::validator)
+
+# Local inference is opt-in at build time. When it is off, backends/llama_real.cpp
+# compiles to the "not built in" answer and never includes llama.h -- so the
+# provider, its tokenizer arithmetic, and every test over them build and run on
+# the merge-blocking target, which has no llama.cpp in it.
+if(APOGEE_ENABLE_LLAMA)
+    # `mtmd` is linked as well as `llama`, and not only for the symbols: it
+    # carries the include directory for its own headers. Without it a
+    # `#include <mtmd.h>` falls through to whatever the system has -- on a
+    # machine with llama.cpp installed via Homebrew that is a DIFFERENT
+    # llama.cpp, and the build fails with a wall of ggml redefinitions that
+    # names neither the real cause nor this file.
+    target_link_libraries(apogee_core PRIVATE llama mtmd)
+    target_compile_definitions(apogee_core PRIVATE APOGEE_ENABLE_LLAMA=1)
+endif()
+
+apogee_set_target_options(apogee_core)
+
+add_executable(apogee main.cpp)
+target_link_libraries(apogee PRIVATE apogee_core)
+apogee_set_target_options(apogee)
+
+# The install path: the binary, and nothing else. `make install` is a thin
+# caller into this, so there is exactly one install path -- the same shape as
+# the build (one CMake definition, a Makefile wrapper that adds no steps).
+#
+# apogee_core is deliberately NOT installed: it is a static library and an
+# implementation detail of the executable, and installing it would invite
+# something outside this project to link the whole product.
+#
+# This rule seeds no ~/.apogee/ assets on purpose. The full install contract --
+# the data-directory layout, the config template, shell completions, and the
+# byte-identical parity between this path and scripts/install.sh validated by
+# `apogee check` -- is owned by the install-check-lifecycle backlog item.
+# SPEC.md -> "No silent install drift" requires any asset landing under
+# ~/.apogee/ to join EVERY install path in the same commit, so this one starts
+# empty rather than shipping half a contract that check cannot yet verify.
+# COMPONENT is load-bearing, not decoration.
+#
+# `FetchContent_MakeAvailable` adds each dependency's own `install()` rules to
+# THIS project, so a plain `cmake --install` installs replxx's headers, static
+# library, and CMake package config alongside our binary. That is not merely
+# untidy: the installed replxx config declares `Threads::Threads` without a
+# `find_package(Threads)`, and our `FIND_PACKAGE_ARGS` then PREFERS that
+# installed copy on the next configure -- so `make install` broke every
+# subsequent build of the project. Found in the wild, 2026-09-06.
+#
+# Naming a component and installing only that component makes the install
+# exactly what we declare, whatever a dependency declares for itself.
+install(TARGETS apogee RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT apogee)

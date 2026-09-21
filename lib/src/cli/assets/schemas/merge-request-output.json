@@ -1,0 +1,221 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MergeRequestReviewReport",
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Output for the `merge-request` agent in branch-review form. The core review sections (acceptance_criteria, adr_review, findings, verdict) apply in both modes; recommended_comments is for peer mode and pr_summary for self mode. Leave inapplicable sections empty/omitted. human_summary is always last.",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": ["peer", "self"],
+      "description": "Which review mode ran: peer = review someone else's branch; self = review your own branch and write the merge-request description."
+    },
+    "walkthrough": {
+      "type": "string",
+      "description": "A 2-4 sentence plain-English summary of what the change does, judged against the commit messages (and the stated intent when provided). No findings -- just the 'what' and 'why'."
+    },
+    "acceptance_criteria": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The requirements review: does the diff satisfy the acceptance criteria? When none were given, leave criteria and scope_drift empty and say so in summary/notes -- never invent criteria.",
+      "properties": {
+        "source": { "type": "string", "description": "Where the criteria came from (the input text, a pasted ticket), or empty when none were provided." },
+        "criteria": {
+          "type": "array",
+          "description": "One entry per acceptance criterion, judged against the diff. Empty when none were provided.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "description": "A short label, e.g. 'AC-1'." },
+              "criterion": { "type": "string", "description": "The criterion, quoted or closely paraphrased from the input." },
+              "status": {
+                "type": "string",
+                "enum": ["met", "partially_met", "not_met", "not_verifiable"],
+                "description": "met = fully satisfied with evidence; partially_met = a gap remains; not_met = not satisfied or no implementing change; not_verifiable = can't be judged from the diff alone."
+              },
+              "evidence": { "type": "string", "description": "The concrete diff evidence, or 'no implementing change found in the diff' for an unimplemented not_met." },
+              "gap": { "type": "string", "description": "For partially_met/not_met: what is missing and what it would take. Omit/'None' for met." },
+              "confidence": { "type": "string", "enum": ["high", "medium", "low"] }
+            },
+            "required": ["criterion", "status", "evidence", "confidence"]
+          }
+        },
+        "scope_drift": {
+          "type": "array",
+          "description": "Changes that map to NO acceptance criterion. Empty when all trace to a criterion or none were provided.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "file": { "type": "string" },
+              "location": { "type": "string" },
+              "description": { "type": "string" },
+              "kind": { "type": "string", "enum": ["supporting", "unrelated"] }
+            },
+            "required": ["file", "description", "kind"]
+          }
+        },
+        "summary": { "type": "string", "description": "The overall requirements verdict in one or two lines." },
+        "notes": { "type": "string", "description": "Brief meta-note about where the criteria came from, or that none were given." }
+      },
+      "required": ["criteria", "summary", "notes"]
+    },
+    "adr_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The architecture-compliance review against the team's ADRs, retrieved from a knowledge collection.",
+      "properties": {
+        "adrs_consulted": { "type": "array", "items": { "type": "string" }, "description": "Sources/identifiers of the ADRs retrieved. Empty when no ADR collection was reachable." },
+        "compliance": {
+          "type": "array",
+          "description": "One entry per governing ADR the diff touches. Records violations and deliberate compliance.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": { "type": "string", "enum": ["violation", "at_risk", "complies"] },
+              "severity": { "type": "string", "enum": ["blocker", "high", "medium", "low", "nit"] },
+              "file": { "type": "string" },
+              "location": { "type": "string" },
+              "title": { "type": "string" },
+              "explanation": { "type": "string" },
+              "suggested_fix": { "type": "string", "description": "For a violation/at_risk: a concrete fix. Omit/'No action needed' for complies." },
+              "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+              "adr_reference": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "The ADR this entry is grounded in. Every entry must cite a retrieved ADR.",
+                "properties": {
+                  "source": { "type": "string", "description": "The ADR's source file/identifier." },
+                  "rule": { "type": "string", "description": "The rule, quoted or closely paraphrased from the retrieved chunk." }
+                },
+                "required": ["source", "rule"]
+              }
+            },
+            "required": ["status", "file", "location", "title", "explanation", "confidence", "adr_reference"]
+          }
+        },
+        "notes": { "type": "string", "description": "Brief meta-note about the ADR check itself." }
+      },
+      "required": ["adrs_consulted", "compliance", "notes"]
+    },
+    "architecture_concerns": {
+      "type": "array",
+      "description": "Architectural drift the ADRs do not yet name. Not ADR violations. Empty when none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": { "type": "string", "enum": ["blocker", "high", "medium", "low", "nit"] },
+          "file": { "type": "string" },
+          "location": { "type": "string" },
+          "title": { "type": "string" },
+          "explanation": { "type": "string" },
+          "suggested_fix": { "type": "string" },
+          "confidence": { "type": "string", "enum": ["high", "medium", "low"] }
+        },
+        "required": ["severity", "file", "location", "title", "explanation", "suggested_fix", "confidence"]
+      }
+    },
+    "other_findings": {
+      "type": "array",
+      "description": "Non-architecture findings a competent reviewer would raise -- correctness, security, tests. A blocker is still a blocker. Empty when none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": { "type": "string", "enum": ["blocker", "high", "medium", "low", "nit"] },
+          "category": { "type": "string", "enum": ["bug", "security", "performance", "validation", "error_handling", "maintainability", "testing", "docs", "style"] },
+          "file": { "type": "string" },
+          "location": { "type": "string" },
+          "title": { "type": "string" },
+          "explanation": { "type": "string" },
+          "suggested_fix": { "type": "string" },
+          "confidence": { "type": "string", "enum": ["high", "medium", "low"] }
+        },
+        "required": ["severity", "category", "file", "location", "title", "explanation", "suggested_fix", "confidence"]
+      }
+    },
+    "praiseworthy": {
+      "type": "array",
+      "description": "What the change genuinely does well. Specific, honest; leave empty rather than padding.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": { "type": "string" },
+          "location": { "type": "string" },
+          "title": { "type": "string" },
+          "explanation": { "type": "string" }
+        },
+        "required": ["title", "explanation"]
+      }
+    },
+    "needs_attention": {
+      "type": "array",
+      "description": "A prioritized digest of the few highest-impact things to address first, each drawn from a detailed finding above and pointing back to it. A synthesis -- NOT new findings. Empty when clean.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": { "type": "string", "enum": ["blocker", "high", "medium", "low", "nit"] },
+          "title": { "type": "string" },
+          "summary": { "type": "string" },
+          "source": {
+            "type": "string",
+            "enum": ["unmet_acceptance_criterion", "adr_violation", "architecture_concern", "other_finding"],
+            "description": "Which section this item is drawn from."
+          }
+        },
+        "required": ["severity", "title", "summary", "source"]
+      }
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["approve", "approve_with_nits", "request_changes"],
+      "description": "approve = satisfies the criteria (when given), complies with governing ADRs, and is clean -- peer: mergeable; self: ready to open. approve_with_nits = only minor/optional items remain. request_changes = at least one blocking item -- an unmet required criterion, a blocker/high ADR violation, or a blocking correctness/security finding."
+    },
+    "verdict_rationale": {
+      "type": "string",
+      "description": "One line explaining the verdict, framed for the mode -- e.g. (peer) 'AC-3 unimplemented; violates the Data Layer ADR', (self) 'All criteria met; ready to open'."
+    },
+    "recommended_comments": {
+      "type": "array",
+      "description": "peer mode: the review comments to leave on the pull request -- each a finished, second-person, paste-ready comment (not a summary of one), covering the needs_attention items and warranted praise. Empty only when there is genuinely nothing to say.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": { "type": "string" },
+          "location": { "type": "string" },
+          "severity": { "type": "string", "enum": ["blocker", "high", "medium", "low", "nit", "praise"] },
+          "comment": { "type": "string", "description": "The comment body exactly as it should appear on the pull request." }
+        },
+        "required": ["severity", "comment"]
+      }
+    },
+    "pr_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "self mode only: the merge-request write-up composed from the diff. The human_summary renders this as the paste-ready description. Omit in peer mode.",
+      "properties": {
+        "title": { "type": "string", "description": "A concise, conventional merge-request title." },
+        "summary": { "type": "string", "description": "What this branch changes and WHY, grounded in the diff/commits (and the stated intent when present)." },
+        "changes": {
+          "type": "array",
+          "description": "The change set grouped by area/purpose.",
+          "items": { "type": "object", "additionalProperties": false, "properties": { "area": { "type": "string" }, "files": { "type": "array", "items": { "type": "string" } }, "note": { "type": "string" } }, "required": ["area", "files", "note"] }
+        },
+        "highlights": { "type": "array", "items": { "type": "string" }, "description": "The few things a reviewer should look at most closely. Empty when straightforward." },
+        "testing": { "type": "string", "description": "How the change was verified and/or how a reviewer can verify it. 'Not yet tested' is honest if so." }
+      },
+      "required": ["title", "summary", "changes", "testing"]
+    },
+    "human_summary": {
+      "type": "string",
+      "description": "Written LAST and placed at the very end. Rendered for the active mode: peer -> a plain-English 'Bottom Line' (does it satisfy the criteria/ADRs, what most needs attention, the action); self -> the paste-ready merge-request description assembled from pr_summary (title, summary, grouped files-changed, highlights, testing) in Markdown. Two to four sentences unless it is the self-mode description."
+    }
+  },
+  "required": ["mode", "walkthrough", "acceptance_criteria", "adr_review", "verdict", "verdict_rationale", "human_summary"]
+}

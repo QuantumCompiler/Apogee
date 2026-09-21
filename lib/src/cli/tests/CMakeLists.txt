@@ -1,0 +1,560 @@
+# The CLI application's tests. Directory layout mirrors source/'s packages.
+#
+# Note what this target links: apogee_core and Catch2 -- NOT the `apogee`
+# executable. That is the library-first split doing its job, and
+# apogee_assert_link_policy() in the top-level CMakeLists fails the configure
+# step if it ever stops being true.
+#
+# Tests must stay hermetic: no network, no models, no writes outside the test's
+# own temp directory. A test that needs a live provider is not a unit test.
+
+include(Catch)
+
+add_executable(apogee_tests
+    smoke_test.cpp
+    packages_test.cpp
+    platform/platform_test.cpp
+    platform/child_process_test.cpp
+    commands/registry_test.cpp
+    commands/root_test.cpp
+    harness/config_test.cpp
+    harness/config_edit_test.cpp
+    harness/paths_test.cpp
+    harness/types_test.cpp
+    harness/harness_test.cpp
+    backends/mock_test.cpp
+    backends/sse_parser_test.cpp
+    backends/http_client_test.cpp
+    backends/anthropic_test.cpp
+    backends/factory_test.cpp
+    backends/openai_test.cpp
+    backends/google_test.cpp
+    backends/openai_embed_test.cpp
+    backends/google_embed_test.cpp
+    backends/embedding_batch_test.cpp
+    backends/llamacpp_embed_test.cpp
+    backends/llamacpp_test.cpp
+    backends/claude_cli_events_test.cpp
+    backends/claude_cli_test.cpp
+    backends/ollama_cli_test.cpp
+    backends/codex_cli_test.cpp
+    backends/gemini_cli_test.cpp
+    harness/roles_test.cpp
+    models/gguf_inspect_test.cpp
+    models/sha256_test.cpp
+    models/acquire_test.cpp
+    models/quantize_test.cpp
+    models/sidecar_test.cpp
+    models/source_ollama_test.cpp
+    models/source_hf_test.cpp
+    commands/models_pull_test.cpp
+    commands/models_test.cpp
+    commands/attachment_guard_test.cpp
+    backends/jsonl_framer_test.cpp
+    backends/think_filter_test.cpp
+    backends/markup_filter_test.cpp
+    backends/native_tool_calls_test.cpp
+    backends/model_profile_test.cpp
+    backends/chat_template_test.cpp
+    embedstore/store_test.cpp
+    agentloop/rag_test.cpp
+    agentloop/retrieval_test.cpp
+    agentloop/rerank_test.cpp
+    embedstore/vector_test.cpp
+    embedstore/fts_query_test.cpp
+    embedstore/chunk_test.cpp
+    embedstore/ingest_test.cpp
+    agentloop/conformance_test.cpp
+    commands/helpers_test.cpp
+    commands/thinking_view_test.cpp
+    commands/status_line_test.cpp
+    commands/cli_reporter_test.cpp
+    ansi/ansi_test.cpp
+    commands/chat_test.cpp
+    commands/check_test.cpp
+    commands/lifecycle_test.cpp
+    commands/machine_mode_test.cpp
+    commands/line_reader_test.cpp
+    logger/session_test.cpp
+    agent/tool_test.cpp
+    agentloop/loop_test.cpp
+    agentloop/anthropic_loop_test.cpp
+    agentloop/content_test.cpp
+    agentloop/question_test.cpp
+    httpserver/handler_test.cpp
+    httpserver/sse_test.cpp
+    httpserver/session_test.cpp
+    httpserver/serve_test.cpp
+    httpserver/admin_auth_test.cpp
+    httpserver/admin_config_test.cpp
+    httpserver/admin_events_test.cpp
+    httpserver/jobs_test.cpp
+    httpserver/parity_test.cpp
+    events/bus_test.cpp
+    secrets/store_test.cpp
+    secrets/resolve_test.cpp
+    secrets/leak_test.cpp
+    httpserver/admin_auth_routes_test.cpp
+    tools/fs_test.cpp
+    tools/shell_test.cpp
+    tools/notes_test.cpp
+    tools/git_test.cpp
+    tools/rag_query_test.cpp
+    tools/gate_test.cpp
+    commands/permissions_test.cpp
+    mcp/types_test.cpp
+    mcp/transport_test.cpp
+    mcp/client_test.cpp
+    mcp/registry_test.cpp
+    mcp/serve_stdio_test.cpp
+    scaffold/mcp_server_test.cpp
+    scaffold/agent_test.cpp
+    agentloop/structured_test.cpp
+    agentloop/review_context_test.cpp
+    render/json_report_test.cpp
+    harness/assets_test.cpp
+    bundled_agents_test.cpp
+    commands/analyze_test.cpp
+    commands/agents_test.cpp
+    httpserver/admin_agents_test.cpp
+    knowledge/record_test.cpp
+    knowledge/clerk_test.cpp
+    knowledge/store_test.cpp
+    knowledge/query_test.cpp
+    knowledge/refine_test.cpp
+    knowledge/export_test.cpp
+    embedstore/metadata_test.cpp
+    commands/knowledge_test.cpp
+    httpserver/admin_knowledge_test.cpp
+    embedstore/graph_test.cpp
+    embedstore/graph_search_test.cpp
+    graph/extract_test.cpp
+    graph/build_test.cpp
+    graph/records_test.cpp
+    agentloop/graph_context_test.cpp
+    commands/graph_test.cpp
+    httpserver/admin_graph_test.cpp
+    embedstore/graph_communities_test.cpp
+    embedstore/graph_dedupe_test.cpp
+    embedstore/graph_multi_test.cpp
+    graph/communities_test.cpp
+    graph/graph_multi_test.cpp
+    agentloop/graph_named_test.cpp
+    httpserver/admin_graphs_test.cpp
+    training/script_runner_test.cpp
+    training/python_env_test.cpp
+    training/kit_test.cpp
+    training/synth_test.cpp
+    training/datasets_test.cpp
+    training/prepare_script_test.cpp
+    commands/datasets_test.cpp
+    commands/train_test.cpp
+    httpserver/admin_datasets_test.cpp
+    training/trainer_test.cpp
+    training/progress_contract_test.cpp
+    training/manifest_test.cpp
+    training/store_test.cpp
+    training/eval_test.cpp
+    training/promote_test.cpp
+    httpserver/admin_training_test.cpp
+    training/pipeline_test.cpp
+    training/regime_test.cpp
+    training/cycle_test.cpp
+    support/fake_command.h
+    support/fake_command.cpp
+    support/env_guard.h
+    support/env_guard.cpp
+    support/fake_mcp_server.cpp
+    support/fake_transport.h
+    support/fake_llama.h
+    support/fake_child.h
+    support/gguf_builder.h
+    support/fake_transport.cpp
+)
+
+# The template-drift test reads the checked-in sample and compares it byte for
+# byte with the template compiled into the binary. It needs to find the asset
+# without depending on the working directory ctest happens to use.
+target_compile_definitions(apogee_tests PRIVATE
+    APOGEE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../assets"
+    # Recorded vendor-CLI JSONL, replayed by the framing suite. Same reason as
+    # above: found by absolute path, not by whatever directory ctest ran in.
+    APOGEE_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    # The cross-surface guard scan reads the command sources themselves: the
+    # assertion that survives is "every surface calls it", which needs the tree.
+    APOGEE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../source"
+    # The training protocol's golden fixture and the stub Python modules the
+    # shipped drivers are run under.
+    APOGEE_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    # The vendored converter, byte-matched to its compiled-in copy.
+    APOGEE_THIRD_PARTY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../third_party"
+)
+
+# So tests can `#include "support/fake_command.h"` the same way source files
+# include across packages.
+target_include_directories(apogee_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+
+# The migration test builds a schema-v2 database by hand, through SQLite
+# itself, so the v3 migration runs against a real predecessor. Same
+# amalgamation the store uses, nothing else.
+target_link_libraries(apogee_tests PRIVATE apogee_core Catch2::Catch2WithMain apogee_sqlite3)
+apogee_set_target_options(apogee_tests)
+
+catch_discover_tests(apogee_tests)
+
+# The binary's own contract, exercised the way a user meets it. These run the
+# built executable as a subprocess; running a target is not linking it, so the
+# link policy above still holds.
+add_test(NAME cli.bare_prints_help COMMAND apogee)
+set_tests_properties(cli.bare_prints_help PROPERTIES
+    PASS_REGULAR_EXPRESSION "Usage: apogee")
+
+add_test(NAME cli.version_flag COMMAND apogee --version)
+set_tests_properties(cli.version_flag PROPERTIES
+    PASS_REGULAR_EXPRESSION "apogee [0-9]+\\.[0-9]+\\.[0-9]+")
+
+add_test(NAME cli.version_subcommand COMMAND apogee version)
+set_tests_properties(cli.version_subcommand PROPERTIES
+    PASS_REGULAR_EXPRESSION "apogee [0-9]+\\.[0-9]+\\.[0-9]+")
+
+add_test(NAME cli.help_lists_subcommands COMMAND apogee --help)
+set_tests_properties(cli.help_lists_subcommands PROPERTIES
+    PASS_REGULAR_EXPRESSION "version")
+
+add_test(NAME cli.unknown_subcommand_fails COMMAND apogee no-such-command)
+set_tests_properties(cli.unknown_subcommand_fails PROPERTIES WILL_FAIL TRUE)
+
+add_test(NAME cli.help_lists_config COMMAND apogee --help)
+set_tests_properties(cli.help_lists_config PROPERTIES PASS_REGULAR_EXPRESSION "config")
+
+# The layering constraint: harness must never include backends. C++ cannot
+# enforce this the way Go's import cycles do, so it is checked mechanically.
+add_test(NAME harness.layering
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake"
+)
+
+# `apogee complete` end to end -- the walking skeleton, fully offline against
+# the mock backend. The pattern every later CLI test reuses.
+add_test(NAME cli.complete_lifecycle
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE_BIN=$<TARGET_FILE:apogee>
+        -DAPOGEE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/complete-e2e-home
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/complete_e2e.cmake"
+)
+
+# The interactive-never-listens invariant (SPEC.md -> Principles), test-locked
+# the day the first interactive command exists. TWO checks, because neither is
+# sufficient on its own -- see the header comments in each for why.
+#
+#   symbols: deterministic; catches code calling listen/accept, ours and any
+#            static dependency's, attributed to the object that made the call.
+#   runtime: catches a spawned child process holding a port.
+#
+# Every library the executable links THAT THIS BUILD PRODUCES is scanned --
+# static archives and shared libraries alike (llama.cpp is shared under the
+# llama preset, and a shared library's imports never show in the executable's
+# own symbol table) -- collected by walking the link graph, so a new in-process
+# dependency is covered without anyone remembering to list it. Imported system
+# libraries are the platform's, not Apogee's code, and are left out. Exactly
+# one object may reference listen/accept: httpserver/serve.cpp, the
+# `apogee serve` listener, allow-listed by name.
+function(apogee_collect_static_archives target visited_var files_var)
+    set(visited ${${visited_var}})
+    set(files ${${files_var}})
+    if(NOT TARGET "${target}")
+        return()
+    endif()
+    get_target_property(aliased "${target}" ALIASED_TARGET)
+    if(aliased)
+        set(target "${aliased}")
+    endif()
+    if("${target}" IN_LIST visited)
+        return()
+    endif()
+    list(APPEND visited "${target}")
+    get_target_property(type "${target}" TYPE)
+    get_target_property(imported "${target}" IMPORTED)
+    if(type STREQUAL "STATIC_LIBRARY")
+        list(APPEND files "$<TARGET_FILE:${target}>")
+    elseif((type STREQUAL "SHARED_LIBRARY" OR type STREQUAL "MODULE_LIBRARY") AND NOT imported)
+        list(APPEND files "$<TARGET_FILE:${target}>")
+    endif()
+    set(deps "")
+    foreach(property LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+        get_target_property(value "${target}" ${property})
+        if(value)
+            list(APPEND deps ${value})
+        endif()
+    endforeach()
+    foreach(dep IN LISTS deps)
+        if(dep MATCHES "^\\$<LINK_ONLY:(.+)>$")
+            set(dep "${CMAKE_MATCH_1}")
+        elseif(dep MATCHES "^\\$<" OR dep MATCHES "^::@")
+            continue()
+        endif()
+        apogee_collect_static_archives("${dep}" visited files)
+    endforeach()
+    set(${visited_var} "${visited}" PARENT_SCOPE)
+    set(${files_var} "${files}" PARENT_SCOPE)
+endfunction()
+
+set(APOGEE_LINKED_VISITED "")
+set(APOGEE_LINKED_ARCHIVES "")
+apogee_collect_static_archives(apogee APOGEE_LINKED_VISITED APOGEE_LINKED_ARCHIVES)
+string(JOIN "|" APOGEE_LINKED_ARCHIVE_LIST ${APOGEE_LINKED_ARCHIVES})
+add_test(NAME cli.no_listen_symbols
+    COMMAND "${CMAKE_COMMAND}"
+        "-DAPOGEE_ARCHIVES=${APOGEE_LINKED_ARCHIVE_LIST}"
+        -DAPOGEE_LISTENER_OBJECT=serve.cpp${CMAKE_CXX_OUTPUT_EXTENSION}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_symbols.cmake"
+)
+
+# `apogee serve` exists, and its help must say what a server deployment needs
+# to know: the bind policy.
+add_test(NAME cli.serve_help COMMAND apogee serve --help)
+set_tests_properties(cli.serve_help PROPERTIES PASS_REGULAR_EXPRESSION "allow-remote")
+
+# The HTTP API reference, pinned to the route table in both directions.
+add_test(NAME cli.http_api_conformance
+    COMMAND "${CMAKE_COMMAND}"
+        -DMUX_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/../source/httpserver/mux.cpp
+        -DAPI_DOC=${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/http-api.md
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/http_api_conformance.cmake"
+)
+
+add_test(NAME cli.install_is_ours_only
+    COMMAND "${CMAKE_COMMAND}"
+        -DBUILD_DIR=${CMAKE_BINARY_DIR}
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/install-only
+        -DMAKEFILE=${CMAKE_CURRENT_SOURCE_DIR}/../Makefile
+        -DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/install_is_ours_only.cmake"
+)
+
+add_test(NAME cli.no_vendor_credentials
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/no_vendor_credentials.cmake"
+)
+
+# One role-resolution chain, and only one. See the file for the Ommi bug class.
+add_test(NAME cli.one_role_resolver
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/one_role_resolver.cmake"
+)
+
+# One key-resolution chain, and only one: the same bug class, for secrets.
+add_test(NAME cli.one_key_resolver
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/one_key_resolver.cmake"
+)
+
+add_test(NAME cli.test_names
+    COMMAND "${CMAKE_COMMAND}"
+        -DTEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/test_names.cmake"
+)
+
+if(UNIX)
+    # The install-parity gate. See tests/install_parity.sh for why an exception
+    # here is where the next drift hides.
+    add_test(NAME cli.install_parity
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/install_parity.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/install-parity
+    )
+    set_tests_properties(cli.install_parity PROPERTIES TIMEOUT 60)
+
+    add_test(NAME cli.machine_mode
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/machine_mode_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/machine-mode
+    )
+    set_tests_properties(cli.machine_mode PROPERTIES TIMEOUT 120)
+
+    # auto_rag's two shell-only properties: `--rag ""` as the off switch (CMake's
+    # execute_process cannot pass an EMPTY argument at all), and the key being
+    # re-read at turn build rather than at startup.
+    add_test(NAME cli.auto_rag
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/auto_rag_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/auto-rag
+    )
+    set_tests_properties(cli.auto_rag PROPERTIES TIMEOUT 60)
+
+    add_test(NAME cli.complete_opens_no_listening_socket
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_check.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/no-listen-home
+    )
+    set_tests_properties(cli.complete_opens_no_listening_socket PROPERTIES TIMEOUT 60)
+
+    # The other half of that boundary: serve DOES hold a port, fails closed on a
+    # non-loopback bind, streams to a real client, mints sessions the terminal
+    # can resume, and stops on SIGTERM. Properties of the process, not a class.
+    add_test(NAME cli.serve_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/serve_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/serve-e2e-home
+    )
+    set_tests_properties(cli.serve_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The MCP client on the real binary: a scaffolded server created, tested
+    # through the production client, connected by a tool-using run, a dying
+    # one skipped with its stderr tail, and the in-binary server as one more
+    # server. Needs python3 for the scaffold (skips itself without one).
+    add_test(NAME cli.mcp_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/mcp_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/mcp-e2e-home
+    )
+    set_tests_properties(cli.mcp_lifecycle PROPERTIES TIMEOUT 120)
+
+    # `analyze` on the real binary: the bundled agents on the mock backend
+    # against a fixture repository -- a ref reviewed without being checked out,
+    # the refs decided by flags, the report rendered and saved, the validator's
+    # retry and its honest flag, a vendor CLI refused, and chat's --branch.
+    add_test(NAME cli.analyze_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/analyze_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/analyze-e2e
+    )
+    set_tests_properties(cli.analyze_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The knowledge layer on the real binary: capture on the scripted mock,
+    # --dry-run's zero footprint, overrides, a supersede, the raw archive
+    # present and the index text free of the attribution, the doctor's rows,
+    # a vendor CLI refused, and chat's /capture through the same core.
+    add_test(NAME cli.knowledge_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/knowledge_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/knowledge-e2e
+    )
+    set_tests_properties(cli.knowledge_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The knowledge graph on the real binary: a build over an ingested
+    # collection on the scripted mock as extractor, --dry-run's zero
+    # footprint, the enable write through the one editor, a --rag turn whose
+    # status line counts the graph entities while the answer carries the
+    # entity of a chunk the query never matched, a captured record as a
+    # decision node, `knowledge query --graph`, and delete.
+    add_test(NAME cli.graph_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/graph_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/graph-e2e
+    )
+    set_tests_properties(cli.graph_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The datasets floor on the real binary: the seeded kits, create, synth
+    # through the scripted mock, the Python boundary (the refusal on a pipe,
+    # `train setup` against the host's python3, `prepare` through the seeded
+    # script under the environment's interpreter), list, info, delete. Skips
+    # (77) where the host has no python3.
+    add_test(NAME cli.datasets_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/datasets_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/datasets-e2e
+    )
+    set_tests_properties(cli.datasets_lifecycle PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
+    # The run on the real binary with the mock trainer -- no Python at all:
+    # a template dataset, `train run` writing a manifest with the status
+    # line seen, a GGUF and a backend name refused, `train eval --suite`
+    # with substring items passing against the mock's echo, `promote --as`
+    # registering the entry byte-exactly and writing v1.gguf, a second
+    # promote to v2 and `rollback` to v1 deleting nothing, retention,
+    # `versions`, `status`, `check` green throughout, and no training route
+    # on the served admin plane beyond the reads.
+    add_test(NAME cli.train_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/train_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/train-e2e
+    )
+    set_tests_properties(cli.train_lifecycle PROPERTIES TIMEOUT 180)
+endif()
+
+# Startup output discipline, under a real pseudo-terminal.
+#
+# A pipe-based test proves nothing here: `apogee` asks whether stdout is a
+# terminal before rendering anything, so piping exercises the branch that
+# deliberately emits nothing. The PTY is the only way to see what the user sees.
+# POSIX only -- `pty` has no Windows equivalent (a recorded per-item skip).
+if(UNIX)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME cli.startup_speaks_on_one_line
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/pty_startup_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.startup_speaks_on_one_line PROPERTIES TIMEOUT 60)
+
+        # Typeahead and crash-safety. The first needs a real terminal (tcflush
+        # applies to a terminal input queue, and on a pipe the buffered bytes
+        # ARE the input); the second needs a real SIGKILL. Neither reproduces
+        # in a unit test.
+        # A noisy, dying MCP server under a PTY: its stderr never paints the
+        # terminal, the failure carries its tail, and startup does not wait
+        # out the connect timeout. Ommi's Milestone P postmortem, locked.
+        add_test(NAME cli.mcp_server_stderr_stays_off_the_terminal
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/pty_mcp_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.mcp_server_stderr_stays_off_the_terminal PROPERTIES TIMEOUT 120)
+
+        add_test(NAME cli.chat_typeahead_and_crash_safety
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/pty_chat_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.chat_typeahead_and_crash_safety PROPERTIES TIMEOUT 120)
+
+        # Line editing. replxx engages only when stdin AND stdout are both
+        # terminals, so none of this reproduces on a pipe -- which is the point:
+        # before it was wired, an arrow key arrived in the message as a literal
+        # escape sequence.
+        add_test(NAME cli.chat_line_editing
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/pty_lineedit_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.chat_line_editing PROPERTIES TIMEOUT 120)
+
+        # The reference driver: machine mode's worked example AND its
+        # test-lock. It reconstructs the conversation from the JSONL and
+        # checks it against what the terminal renderer printed, so the two
+        # surfaces cannot drift apart unnoticed.
+        add_test(NAME cli.reference_driver
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/reference_driver.py"
+                $<TARGET_FILE:apogee>
+                ${CMAKE_CURRENT_BINARY_DIR}/reference-driver-home
+        )
+        set_tests_properties(cli.reference_driver PROPERTIES TIMEOUT 120)
+
+        # The protocol document, pinned to the code that implements it. A GUI
+        # author trusts that document and debugs Apogee for faults that are
+        # actually in the prose, so it is not allowed to drift.
+        add_test(NAME cli.machine_schema_conformance
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/schema_conformance.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../source/commands/json_reporter.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/machine-mode.md"
+        )
+        set_tests_properties(cli.machine_schema_conformance PROPERTIES TIMEOUT 60)
+    endif()
+endif()
+
+# `apogee config` end to end against the real binary, under a throwaway
+# APOGEE_HOME. Driven by cmake -P so it runs on every target, Windows included.
+add_test(NAME cli.config_lifecycle
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE_BIN=$<TARGET_FILE:apogee>
+        -DAPOGEE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/config-e2e-home
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/config_e2e.cmake"
+)

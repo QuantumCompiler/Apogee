@@ -1,0 +1,33 @@
+# Formatting is settled here so it is never a review topic.
+# Apply with `make format`; CI checks it with `make format-check`.
+---
+Language: Cpp
+BasedOnStyle: Google
+
+ColumnLimit: 100
+IndentWidth: 4
+AccessModifierOffset: -4
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+InsertNewlineAtEOF: true
+SeparateDefinitionBlocks: Always
+
+# Include ordering mirrors the dependency direction: the file's own header,
+# then third-party, then first-party packages. A first-party include that
+# drifts into the wrong block is usually a layering mistake worth seeing.
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<catch2/'
+    Priority: 2
+  - Regex: '^<(CLI|nlohmann)/'
+    Priority: 2
+  - Regex: '^<.*\.h>$'
+    Priority: 3
+  - Regex: '^<.*>$'
+    Priority: 4
+  - Regex: '^".*"$'
+    Priority: 5

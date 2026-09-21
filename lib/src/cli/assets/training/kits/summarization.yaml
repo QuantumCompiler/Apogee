@@ -1,0 +1,49 @@
+name: summarization
+description: Condense a passage into a faithful, concise summary.
+skill: summarization
+
+synth:
+  system: |
+    You produce supervised fine-tuning examples that teach a small language model
+    to summarize. Each example pairs a user prompt — a short self-contained passage
+    (3 to 8 sentences) followed by an instruction to summarize it (e.g. "Summarize
+    the passage in one sentence." or "Give a two-sentence summary.") — with an
+    assistant completion that is a faithful, concise summary capturing the main
+    point and the key named entities, introducing no facts that are not in the
+    passage. Vary the domains (science, history, business, technology, everyday
+    life) and the requested summary lengths. Include the full passage text inside
+    the prompt so the example is self-contained.
+  seeds:
+    - "a short science/nature passage, summarize in one sentence"
+    - "a brief news-style passage about a company or product"
+    - "a historical paragraph mentioning a person and a year"
+    - "a how-something-works explanation, two-sentence summary"
+    - "a passage describing a place or landmark"
+    - "a short biography paragraph"
+    - "a passage about a recent event with a named organization"
+    - "a paragraph with a clear main claim and supporting detail"
+  count: 200
+  per_seed: 6
+  temperature: 0.8
+
+train:
+  iters: 400
+  num_layers: 16
+
+eval:
+  - prompt: "Summarize in one sentence: The Eiffel Tower is a wrought-iron lattice tower in Paris, France. It was completed in 1889 and was the tallest structure in the world until 1930."
+    expected: "Eiffel"
+  - prompt: "Summarize in one sentence: Photosynthesis is the process by which green plants use sunlight to convert carbon dioxide and water into glucose and oxygen."
+    expected: "Photosynthesis"
+  - prompt: "Summarize in one sentence: Acme Corp announced a new electric scooter on Tuesday. The company said the scooter has a range of 40 miles on a single charge."
+    expected: "Acme"
+  - prompt: "Summarize in one sentence: The Great Barrier Reef, located off the coast of Australia, is the world's largest coral reef system and is visible from space."
+    expected: "reef"
+  - prompt: "Summarize in one sentence: Marie Curie was a physicist and chemist who conducted pioneering research on radioactivity and won two Nobel Prizes."
+    expected: "Curie"
+  - prompt: "Summarize in one sentence: The Amazon rainforest produces a significant share of the world's oxygen and is home to millions of species of plants and animals."
+    expected: "Amazon"
+  - prompt: "Summarize in one sentence: A solar eclipse occurs when the Moon passes between the Earth and the Sun, briefly blocking the Sun's light."
+    expected: "eclipse"
+  - prompt: "Summarize in one sentence: The company Globex reported record quarterly revenue, driven mainly by strong sales of its cloud software products."
+    expected: "Globex"

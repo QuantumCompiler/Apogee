@@ -1,0 +1,85 @@
+# Static analysis for first-party code.
+#
+# The ownership checks are the point: CLAUDE.md -> Code Style makes "smart
+# pointers, never owning raw pointers" a hard rule, and a hard rule that is
+# only ever checked by a reviewer is a suggestion. These make it a build
+# failure.
+#
+# Scope: lib/src only. third_party/ is read-only vendored code and is never
+# held to Apogee's bar -- the HeaderFilterRegex below plus the file list
+# `make lint` passes in keep it out.
+#
+# NOTE: `Checks:` below is a YAML folded scalar -- every line in it is part of
+# the check list, and a `#` there is NOT a comment, it silently becomes a bogus
+# check name and breaks the entries after it. Rationale for a disabled check
+# belongs here, above the block:
+#
+#   -readability-use-concise-preprocessor-directives
+#       C++20 has no `#elifdef`, so satisfying it would leave the platform
+#       seam's one #if chain starting with `#ifdef` and continuing with
+#       `#elif defined`. Revisit if the project moves to C++23.
+#   -misc-include-cleaner, -misc-use-internal-linkage
+#       Too noisy / false-positive on out-of-line member definitions.
+---
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-owning-memory,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-prefer-member-initializer,
+  cppcoreguidelines-pro-type-const-cast,
+  cppcoreguidelines-pro-type-reinterpret-cast,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-special-member-functions,
+  cppcoreguidelines-virtual-class-destructor,
+  misc-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  -misc-use-internal-linkage,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-use-concise-preprocessor-directives
+
+# Only diagnose our own headers; anything fetched into build/_deps or vendored
+# under third_party/ is out of scope.
+HeaderFilterRegex: '.*/lib/src/.*'
+
+WarningsAsErrors: >
+  cppcoreguidelines-owning-memory,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-special-member-functions,
+  cppcoreguidelines-virtual-class-destructor,
+  modernize-make-unique,
+  modernize-make-shared,
+  modernize-use-nullptr,
+  bugprone-use-after-move
+
+CheckOptions:
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberSuffix
+    value: _
+  # Namespace case is deliberately unchecked: Apogee's own namespaces are
+  # lower_case by convention, but headers must forward-declare third-party ones
+  # (`namespace CLI`) whose spelling is not ours to choose.
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.GlobalConstantPrefix
+    value: k

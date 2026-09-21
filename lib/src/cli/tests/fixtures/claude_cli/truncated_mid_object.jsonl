@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"trunc-session","model":"claude-sonnet-5"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Partial"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_de

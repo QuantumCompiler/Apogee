@@ -1,0 +1,48 @@
+name: instruction-following
+description: Follow explicit instructions precisely — format, length, and constraints.
+skill: instruction-following
+
+synth:
+  system: |
+    You produce supervised fine-tuning examples that teach a small language model
+    to follow explicit user instructions exactly. Each example pairs a user prompt
+    that contains one or more concrete, checkable constraints (an exact word count,
+    a required prefix or suffix, an output format, a forbidden word, a number of
+    list items, a casing rule, etc.) with an assistant completion that satisfies
+    every constraint precisely and adds nothing extra. The constraints must be
+    unambiguous so compliance is objectively verifiable. Cover a wide range of
+    instruction types and difficulty.
+  seeds:
+    - "exact length constraints (e.g. 'in exactly 7 words', 'in under 20 characters')"
+    - "required formatting (bullet list of N items, numbered steps, a single sentence)"
+    - "casing and punctuation rules (ALL CAPS, no punctuation, title case)"
+    - "must-start-with / must-end-with constraints"
+    - "forbidden words or required keywords"
+    - "answer-only constraints ('reply with only the number', 'one word only')"
+    - "structured replies (key: value pairs, a short table, CSV row)"
+    - "tone and persona constraints kept short and checkable"
+  count: 200
+  per_seed: 8
+  temperature: 0.9
+
+train:
+  iters: 400
+  num_layers: 16
+
+eval:
+  - prompt: "Reply with only the word DONE in all capital letters. No punctuation."
+    expected: "DONE"
+  - prompt: "Answer with a single digit only: how many sides does a triangle have?"
+    expected: "3"
+  - prompt: "Begin your reply with the prefix 'RESULT:' and then state the capital of Japan."
+    expected: "RESULT:"
+  - prompt: "Reply with exactly one word naming the color of a clear daytime sky."
+    expected: "blue"
+  - prompt: "List exactly three primary colors as a comma-separated list, lowercase."
+    expected: "red"
+  - prompt: "Respond with only YES or only NO: is 10 greater than 7?"
+    expected: "YES"
+  - prompt: "End your response with the exact suffix '-- end'. Say hello first."
+    expected: "-- end"
+  - prompt: "Output the number 42 and nothing else."
+    expected: "42"

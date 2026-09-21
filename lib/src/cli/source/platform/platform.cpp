@@ -1,0 +1,284 @@
+#include "platform/platform.h"
+
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <string>
+#include <system_error>
+
+#if defined(_WIN32)
+#include <io.h>
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <fcntl.h>
+#include <mach-o/dyld.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
+#else
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
+#endif
+
+// The only place in Apogee where a platform `#ifdef` is expected. Everything
+// else asks this header instead. An unrecognized platform is a hard compile
+// error on purpose: silently degrading to "Unknown" would let an unsupported
+// target build and then misbehave at runtime, which is exactly the failure the
+// five-target matrix exists to prevent.
+
+namespace apogee::platform {
+
+OperatingSystem host_os() noexcept {
+#if defined(__linux__)
+    return OperatingSystem::Linux;
+#elif defined(__APPLE__)
+    return OperatingSystem::MacOS;
+#elif defined(_WIN32)
+    return OperatingSystem::Windows;
+#else
+#error "Apogee supports Linux, macOS, and Windows only -- see CLAUDE.md -> Stack & environment"
+#endif
+}
+
+Architecture host_architecture() noexcept {
+#if defined(__aarch64__) || defined(_M_ARM64)
+    return Architecture::Arm64;
+#elif defined(__x86_64__) || defined(_M_X64)
+    return Architecture::X64;
+#else
+#error "Apogee supports x86_64 and arm64 only -- see CLAUDE.md -> Stack & environment"
+#endif
+}
+
+std::string_view to_string(OperatingSystem os) noexcept {
+    switch (os) {
+        case OperatingSystem::Linux:
+            return "linux";
+        case OperatingSystem::MacOS:
+            return "macos";
+        case OperatingSystem::Windows:
+            return "windows";
+    }
+    return "unknown";
+}
+
+std::string_view to_string(Architecture arch) noexcept {
+    switch (arch) {
+        case Architecture::X64:
+            return "x64";
+        case Architecture::Arm64:
+            return "arm64";
+    }
+    return "unknown";
+}
+
+std::filesystem::path executable_path() {
+    // Three genuinely different mechanisms, which is why this lives behind the
+    // seam rather than in the one caller that wants it.
+#if defined(_WIN32)
+    std::wstring buffer(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD written =
+            GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (written == 0) {
+            return {};
+        }
+        if (written < buffer.size()) {
+            buffer.resize(written);
+            return std::filesystem::path{buffer};
+        }
+        buffer.resize(buffer.size() * 2);  // truncated: ask again with more room
+    }
+#elif defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);  // returns -1 and sets the size needed
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+        return {};
+    }
+    buffer.resize(std::strlen(buffer.c_str()));
+    std::error_code code;
+    // Resolve symlinks: a Homebrew-style install is a link into a cellar, and
+    // `apogee uninstall` must act on what it is really deleting.
+    const std::filesystem::path resolved = std::filesystem::weakly_canonical(buffer, code);
+    return code ? std::filesystem::path{buffer} : resolved;
+#else
+    std::error_code code;
+    const std::filesystem::path resolved = std::filesystem::read_symlink("/proc/self/exe", code);
+    if (code) {
+        return {};
+    }
+    return resolved;
+#endif
+}
+
+long current_process_id() noexcept {
+#if defined(_WIN32)
+    return static_cast<long>(GetCurrentProcessId());
+#else
+    return static_cast<long>(getpid());
+#endif
+}
+
+bool create_exclusive_file(const std::filesystem::path& path, std::string_view content,
+                           bool& exists) {
+    exists = false;
+#if defined(_WIN32)
+    const HANDLE handle = CreateFileA(path.string().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        exists = GetLastError() == ERROR_FILE_EXISTS;
+        return false;
+    }
+    DWORD written = 0;
+    const bool ok = WriteFile(handle, content.data(), static_cast<DWORD>(content.size()), &written,
+                              nullptr) != 0;
+    CloseHandle(handle);
+    return ok;
+#else
+    const int fd = ::open(path.string().c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd < 0) {
+        exists = errno == EEXIST;
+        return false;
+    }
+    const ssize_t written = ::write(fd, content.data(), content.size());
+    ::close(fd);
+    return written == static_cast<ssize_t>(content.size());
+#endif
+}
+
+std::optional<std::string> home_directory() {
+#if defined(_WIN32)
+    if (const char* profile = std::getenv("USERPROFILE"); profile != nullptr && *profile != '\0') {
+        return std::string{profile};
+    }
+    const char* drive = std::getenv("HOMEDRIVE");
+    const char* path = std::getenv("HOMEPATH");
+    if (drive != nullptr && *drive != '\0' && path != nullptr && *path != '\0') {
+        return std::string{drive} + path;
+    }
+    return std::nullopt;
+#else
+    if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+        return std::string{home};
+    }
+    return std::nullopt;
+#endif
+}
+
+bool is_terminal(StandardStream stream) noexcept {
+#if defined(_WIN32)
+    int descriptor = 0;
+    switch (stream) {
+        case StandardStream::In:
+            descriptor = 0;
+            break;
+        case StandardStream::Out:
+            descriptor = 1;
+            break;
+        case StandardStream::Err:
+            descriptor = 2;
+            break;
+    }
+    return _isatty(descriptor) != 0;
+#else
+    int descriptor = STDIN_FILENO;
+    switch (stream) {
+        case StandardStream::In:
+            descriptor = STDIN_FILENO;
+            break;
+        case StandardStream::Out:
+            descriptor = STDOUT_FILENO;
+            break;
+        case StandardStream::Err:
+            descriptor = STDERR_FILENO;
+            break;
+    }
+    return ::isatty(descriptor) != 0;
+#endif
+}
+
+std::optional<int> terminal_width() noexcept {
+#if defined(_WIN32)
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info) != 0) {
+        const int width = info.srWindow.Right - info.srWindow.Left + 1;
+        return width > 0 ? std::optional<int>{width} : std::nullopt;
+    }
+    return std::nullopt;
+#else
+    ::winsize size{};
+    if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
+        return static_cast<int>(size.ws_col);
+    }
+    return std::nullopt;
+#endif
+}
+
+void discard_pending_input() noexcept {
+    if (!is_terminal(StandardStream::In)) {
+        // A pipe or a heredoc: those bytes are the input, not typeahead.
+        return;
+    }
+#if defined(_WIN32)
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+#else
+    // Ignored on failure: this is an ergonomic nicety, not a precondition.
+    static_cast<void>(::tcflush(STDIN_FILENO, TCIFLUSH));
+#endif
+}
+
+std::optional<std::string> read_hidden_line(std::string_view prompt) {
+    std::cerr << prompt << std::flush;
+    std::string line;
+    if (!is_terminal(StandardStream::In)) {
+        if (!std::getline(std::cin, line)) {
+            return std::nullopt;
+        }
+        return line;
+    }
+#if defined(_WIN32)
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0;
+    const bool had_mode = GetConsoleMode(input, &mode) != 0;
+    if (had_mode) {
+        SetConsoleMode(input, mode & ~static_cast<DWORD>(ENABLE_ECHO_INPUT));
+    }
+    const bool got = static_cast<bool>(std::getline(std::cin, line));
+    if (had_mode) {
+        SetConsoleMode(input, mode);
+    }
+#else
+    ::termios saved{};
+    const bool had_mode = ::tcgetattr(STDIN_FILENO, &saved) == 0;
+    if (had_mode) {
+        ::termios quiet = saved;
+        quiet.c_lflag &= static_cast<tcflag_t>(~ECHO);
+        static_cast<void>(::tcsetattr(STDIN_FILENO, TCSAFLUSH, &quiet));
+    }
+    const bool got = static_cast<bool>(std::getline(std::cin, line));
+    if (had_mode) {
+        static_cast<void>(::tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved));
+    }
+#endif
+    std::cerr << "\n";
+    if (!got) {
+        return std::nullopt;
+    }
+    if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+    }
+    return line;
+}
+
+std::string host_target() {
+    std::string target{to_string(host_os())};
+    target += "-";
+    target += to_string(host_architecture());
+    return target;
+}
+
+}  // namespace apogee::platform

@@ -1,0 +1,196 @@
+# Apogee CI.
+#
+# Every build job shells out to lib/scripts/cicd.sh — the same script a
+# developer runs locally. That is deliberate: the moment CI grows its own build
+# steps, "works on my machine" becomes a real answer. If a step belongs in CI,
+# it belongs in that script.
+#
+# This workflow must live at .github/workflows/ (GitHub's requirement), which is
+# why it is the one build-related file not under lib/src/cli/. It stays a thin
+# caller for exactly that reason: the CLI's build lives with the CLI.
+#
+# Gating policy (user decision, 2026-09-19, superseding 2026-08-24's
+# "macos-arm64 only"): EVERY job here is required for a pull request -- the
+# clone and all five builds. There is no `continue-on-error`
+# in this file and there must not be one; a platform that cannot pass is a
+# platform to fix, not to mark informational. GitHub enforces the requirement
+# through the branch protection rule on `stable`, which lists these checks by
+# their job names (`clone llama.cpp`, `build <name>`) -- a renamed job has to
+# be renamed there too.
+#
+# Job policy (user decisions, 2026-09-19 and 2026-09-20): CI is the llama.cpp
+# clone, then one executable build per platform -- five of them, the Intel
+# Mac having been dropped -- and nothing else. The test suite does NOT run
+# here (user decision, 2026-09-20: "remove the tests from the CI/CD"); it is
+# the developer's gate, `make test` / `cicd.sh --test`, run before a push.
+# Formatting, clang-tidy, install parity and the clean-room build are LOCAL
+# gates too — `make format-check`, `make lint`, the `cli.install_parity` case
+# in the suite, and `cicd.sh --fresh` — not jobs here; the dedicated jobs for
+# them were removed on 2026-09-19 as work the build itself already covers.
+#
+# Shape (user decisions, 2026-09-19 and 2026-09-20): two stages, each a call
+# into cicd.sh.
+#
+#   1. clone llama.cpp   -- prove the pin resolves. llama.cpp ships with the
+#                           tool, so a pin that no longer clones is a broken
+#                           product, and no platform is worth building on it.
+#   2. build <platform>  -- one job per platform, llama.cpp linked in like
+#                           every build (it ships with the tool).
+#
+# The `needs:` edge is that order. A third stage ran the suite per platform
+# for one day (2026-09-20) on the build tree handed over as an artifact; it
+# was removed the same day as not making sense on a runner -- the suite is
+# the developer's gate, run against the source before a push.
+#
+# What a runner needs beyond its image, per platform: the Linux images ship no
+# libcurl headers (`find_package(CURL REQUIRED)` is the first hard lookup, and
+# the whole configure fell over on it five seconds in); the Windows images ship
+# MSYS2 pre-installed but off PATH, and the Windows build is a MinGW-w64 one
+# (user decision, 2026-09-19) -- GCC in the UCRT64 environment on x64, clang in
+# CLANGARM64 on arm64 -- so msys2/setup-msys2 puts the toolchain, cmake, ninja,
+# pkgconf and MSYS2's Schannel curl in that shell and the build step runs
+# inside it; macOS has curl in the SDK. Every runner passes --no-defer, so a
+# misdetected host is a failure rather than the silent "deferred to CI"
+# success it once was.
+
+name: CI
+
+# Trigger policy (user decision, 2026-08-31): a run starts on a PROPOSED merge,
+# on a COMPLETED merge, or ON REQUEST -- and never on an ordinary push, so
+# work-in-progress commits on a branch with no PR open cost nothing:
+#
+#   pull_request       reviewing a merge before it happens (the gating one)
+#   push: [stable]     the merge itself, plus any direct push to stable
+#   workflow_dispatch  gh workflow run CI --ref <branch>
+#
+# The two branch lists are the same list on purpose: they name the integration
+# branches. Adding one means adding it BOTH places -- a PR into `v0.1.0`, or a
+# merge into it, triggers nothing while only `stable` is listed.
+#
+# These two do not double up. `pull_request` fires for the topic branch's PR;
+# `push` fires only for `stable`, which no topic branch is. (The combination
+# that double-fires is `push: ["**"]` with `pull_request`, which is what this
+# file used to have.)
+#
+# Fork PRs run with a read-only token and no secrets. Nothing here needs a
+# secret, so they work -- keep it that way.
+#
+# Note the GitHub constraint the dispatch half depends on: workflow_dispatch is
+# only offered for a workflow that exists on the repository's DEFAULT branch
+# (`stable`). Deleting this file from `stable`, or renaming it there, removes
+# the on-request half entirely. The dispatch reads the trigger list from
+# `stable` but RUNS the workflow file from the ref you select, so per-branch job
+# changes still apply.
+on:
+  pull_request:
+    branches: [stable]
+  push:
+    branches: [stable]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clone-llama:
+    # Stage one. The script reads the pin from the CLI's third_party build --
+    # the one place it lives -- fetches that commit, and checks it resolved.
+    name: clone llama.cpp
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Clone llama.cpp at the pinned commit
+        run: lib/scripts/cicd.sh --clone-llama
+
+  build:
+    # Stage two. Every build has llama.cpp in it -- APOGEE_ENABLE_LLAMA is ON
+    # by default (user decision, 2026-09-19: local inference ships with the
+    # tool, so the executable CI builds is the executable a release ships) --
+    # which is why stage one proves the pin clones first.
+    #
+    # fail-fast is off so one failing row does not cancel the others: the PR
+    # is blocked either way, and the full picture is worth the runner time.
+    name: build ${{ matrix.name }}
+    needs: clone-llama
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            target: macos-arm64
+            runner: macos-14
+          - name: linux-x64
+            target: linux-x64
+            runner: ubuntu-24.04
+          - name: linux-arm64
+            target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - name: windows-x64
+            target: windows-x64
+            runner: windows-2025
+            msystem: UCRT64
+          - name: windows-arm64
+            target: windows-arm64
+            runner: windows-11-arm
+            msystem: CLANGARM64
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install libcurl headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
+      # `pacboy` prefixes each name for the environment: toolchain:p is
+      # mingw-w64-ucrt-x86_64-toolchain in UCRT64 and
+      # mingw-w64-clang-aarch64-toolchain in CLANGARM64. curl-winssl is curl
+      # built on Schannel -- the platform trust store, which is the whole
+      # reason curl is found rather than fetched (cmake/ApogeeDependencies).
+      - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          # git is MSYS2's own (unprefixed): the script opens with
+          # `git rev-parse`, and the shell's minimal PATH has no Git for Windows.
+          install: git
+          pacboy: >-
+            toolchain:p
+            cmake:p
+            ninja:p
+            pkgconf:p
+            curl-winssl:p
+
+      # Each build step tees its output and, on failure, hands the log to
+      # lib/scripts/ci-annotate.sh, which publishes the failure as error
+      # annotations: annotations are public on a public repository, the raw
+      # log needs admin rights, and a failure that only the owner can read is
+      # a failure nobody else can fix.
+      - name: Build
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            lib/scripts/ci-annotate.sh "build ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
+            exit 1
+          }
+
+      # The same command, in the MSYS2 shell the toolchain lives in. The
+      # script sees a UCRT64_NT / CLANGARM64_NT host and maps it to Windows.
+      - name: Build (MSYS2 shell)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        # The checkout was made by Git for Windows under a different HOME, so
+        # MSYS2's git has to be told the tree is safe before the script's
+        # first `git rev-parse`.
+        run: |
+          git config --global --add safe.directory '*'
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            lib/scripts/ci-annotate.sh "build ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
+            exit 1
+          }

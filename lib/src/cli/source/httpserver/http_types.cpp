@@ -1,0 +1,71 @@
+#include "httpserver/http_types.h"
+
+#include <nlohmann/json.hpp>
+
+#include <cctype>
+
+namespace apogee::httpserver {
+namespace {
+
+std::string lower(std::string_view text) {
+    std::string out{text};
+    for (char& c : out) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return out;
+}
+
+}  // namespace
+
+bool is_loopback_host(std::string_view host) {
+    std::string h = lower(host);
+    if (h.size() >= 2 && h.front() == '[' && h.back() == ']') {
+        h = h.substr(1, h.size() - 2);
+    }
+    return h == "localhost" || h == "::1" || h == "0:0:0:0:0:0:0:1" || h.starts_with("127.");
+}
+
+bool HttpRequest::has_query(std::string_view key) const {
+    return query.contains(std::string{key});
+}
+
+std::string HttpRequest::query_value(std::string_view key) const {
+    const auto it = query.find(std::string{key});
+    return it == query.end() ? std::string{} : it->second;
+}
+
+std::string HttpRequest::header(std::string_view name) const {
+    const auto it = headers.find(lower(name));
+    return it == headers.end() ? std::string{} : it->second;
+}
+
+HttpResponse json_response(int status, const nlohmann::json& body) {
+    HttpResponse response;
+    response.status = status;
+    response.content_type = "application/json";
+    response.body = body.dump();
+    return response;
+}
+
+nlohmann::json error_body(std::string_view message, std::string_view type) {
+    return nlohmann::json{
+        {"error", {{"message", std::string{message}}, {"type", std::string{type}}}}};
+}
+
+HttpResponse error_response(int status, std::string_view message, std::string_view type) {
+    return json_response(status, error_body(message, type));
+}
+
+nlohmann::json error_json(const HttpError& error) {
+    nlohmann::json body = error_body(error.message, error.type);
+    for (const auto& [key, value] : error.extra.items()) {
+        body["error"][key] = value;
+    }
+    return body;
+}
+
+HttpResponse to_response(const HttpError& error) {
+    return json_response(error.status, error_json(error));
+}
+
+}  // namespace apogee::httpserver

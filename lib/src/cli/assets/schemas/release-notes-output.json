@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReleaseNotes",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "A title for these release notes, e.g. 'v1.3.0' or 'Changes since v1.2.0'."
+    },
+    "range": {
+      "type": "string",
+      "description": "The commit range these notes cover, e.g. 'v1.2.0..v1.3.0' or 'main..HEAD'."
+    },
+    "summary": {
+      "type": "string",
+      "description": "A 1-3 sentence highlight of the most important changes in this range, in changelog voice. State plainly when there are no user-facing changes."
+    },
+    "features": {
+      "type": "array",
+      "description": "New capabilities or user-facing additions. Empty if none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "description": { "type": "string", "description": "A user-facing, one-line description of the addition -- rewritten for a reader, not the raw commit subject." },
+          "commits": { "type": "array", "description": "Short hashes of the commits this entry covers (optional).", "items": { "type": "string" } }
+        },
+        "required": ["description"]
+      }
+    },
+    "fixes": {
+      "type": "array",
+      "description": "Bug fixes. Empty if none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "description": { "type": "string", "description": "A user-facing, one-line description of the fix -- what was broken and is now fixed." },
+          "commits": { "type": "array", "description": "Short hashes of the commits this entry covers (optional).", "items": { "type": "string" } }
+        },
+        "required": ["description"]
+      }
+    },
+    "breaking_changes": {
+      "type": "array",
+      "description": "Backward-incompatible changes -- a changed function signature or API shape, a removed/renamed CLI flag or config key, a changed default, or an altered on-disk/wire format. Anything that forces a user to adapt. Empty if none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "description": { "type": "string", "description": "What changed and why it breaks backward compatibility." },
+          "migration": { "type": "string", "description": "The concrete step a user must take to adapt (e.g. 'rename the `db_path` config key to `database.path`')." },
+          "commits": { "type": "array", "description": "Short hashes of the commits this entry covers (optional).", "items": { "type": "string" } }
+        },
+        "required": ["description", "migration"]
+      }
+    },
+    "other": {
+      "type": "array",
+      "description": "Notable internal changes worth mentioning (performance, refactors, docs, tooling) that are not features or fixes. Empty if none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "description": { "type": "string", "description": "A one-line description of the change." },
+          "commits": { "type": "array", "description": "Short hashes of the commits this entry covers (optional).", "items": { "type": "string" } }
+        },
+        "required": ["description"]
+      }
+    },
+    "human_summary": {
+      "type": "string",
+      "description": "The human-readable wrap-up, written LAST and placed at the very end. A paste-ready release announcement in Markdown -- the actual notes to drop into a release page or CHANGELOG entry. Open with a one-line headline, then short '### Features', '### Fixes', and '### Breaking changes' sections (omit any that are empty) in changelog voice, ending with an upgrade note when there are breaking changes. This restates the categorized entries above as finished prose a reader can publish as-is."
+    }
+  },
+  "required": ["title", "range", "summary", "features", "fixes", "breaking_changes", "other", "human_summary"]
+}

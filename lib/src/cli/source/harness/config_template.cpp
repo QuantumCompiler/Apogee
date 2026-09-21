@@ -1,0 +1,441 @@
+#include <filesystem>
+#include <fstream>
+#include <string_view>
+
+#include "harness/config.h"
+#include "harness/config_edit.h"
+
+// The starter config, embedded.
+//
+// C++20 has no #embed (that is C++23, and the standard is pinned at 20 for
+// five-target reasons -- see CLAUDE.md -> Stack & environment), so the bytes
+// live in a raw string literal. They are GENERATED from
+// lib/src/cli/assets/config.yaml, and a test asserts the two are byte-identical
+// so the shipped sample and `apogee config init` can never drift apart. If you
+// edit one, regenerate the other -- CI fails otherwise.
+//
+// Ported from Ommi's template-drift test, which caught exactly this class of
+// bug: a documented option that `config init` had quietly stopped writing.
+
+namespace apogee::harness {
+namespace {
+
+constexpr std::string_view kConfigTemplate = R"APOGEE(# Apogee configuration.
+#
+# This file ships with everything commented out on purpose: a fresh install has
+# no API keys and no models, and it must still load and pass `apogee check`.
+# Local by default, cloud by choice -- uncomment only what you actually use.
+#
+# Edits made by `apogee config ...` preserve every comment in this file,
+# including these. Hand-edit it freely; the tooling works around you.
+#
+# ${ENV_VAR} references are expanded when the file is read, and the literal
+# text is what stays on disk -- so an api_key never has to appear here.
+
+# Role pointers. Each names an entry under `backends:` below.
+models:
+  # Role pointers. Each names an entry under `backends:` below, and all three
+  # resolve through one shared chain:
+  #     -m on the command line  >  a per-feature pin  >  the role pointer here
+  #                             >  models.default
+  # `apogee models status` prints which rung answered for each role.
+
+  # The backend used when nothing else is specified.
+  # default: claude
+
+  # Used for embeddings (RAG). With this unset, embedding falls back to
+  # models.default. Which entries can embed is a property of the entry, not of
+  # a list: an openai or google entry embeds with its vendor's embedding model
+  # (see embedding_model on those entries), a llamacpp entry embeds with
+  # whatever GGUF it holds, and anthropic cannot -- that vendor has no
+  # embeddings endpoint. `apogee models status` says which rung answered.
+  # default_embedding: embedder
+
+  # Used for structured-extraction work. Unset means models.default.
+  # default_extraction: extractor
+
+# Optional search roots that pre-fill path prompts. Each is optional; an empty
+# value simply means "no default". ${ENV_VAR} references are expanded.
+paths:
+  gguf_dir:        # .gguf model files
+  hf_dir:          # HuggingFace SafeTensors directories
+  mcp_dir:         # local MCP server scripts
+  embeddings_dir:  # embedding database files
+
+# What the model may do with the native tools (`--tools`). Every destructive
+# tool is listed here with one of:
+#   ask     prompt each time -- the default for anything not listed. Where
+#           nobody can answer (a pipe, `serve`) ask means deny.
+#   allow   never prompt
+#   deny    never run
+# The prompt's [a]lways answer rewrites the tool's line here to `allow`.
+# Read-only tools (read_file, git_diff, search_documents, ...) never prompt.
+permissions:
+  write_file: ask
+  delete_file: ask
+  run_command: ask
+  write_note: ask
+  delete_note: ask
+
+# Where the native toolsets operate.
+# tools:
+#   fs_root: ~            # the filesystem tools cannot leave this directory
+#   disabled: [shell]     # switch a whole toolset off: fs, shell, git, notes, rag
+
+# MCP servers: external tool servers spoken to over stdio (the Model Context
+# Protocol). Each one's tools appear to the model as mcp__<name>__<tool> and
+# go through the permission gate above unless the server marks them read-only.
+# `apogee mcp create <name>` scaffolds one and registers it here; `apogee mcp
+# list` shows what connected. A server's stderr never reaches your terminal.
+#
+# mcp_servers:
+#   weather:
+#     command: ~/.apogee/mcp/weather/server.py
+#     args: []
+#     enabled: true
+#     env: ["WEATHER_API_URL=https://example.invalid"]
+
+# Agents: named workflows run with `apogee analyze --agent <name>` -- a persona
+# from prompt files, an optional output schema the answer must satisfy, and a
+# TOOL POLICY that is the agent's permission model: read-only registers only
+# tools that never write (so a run never blocks on a prompt), all puts it under
+# the gate above like chat, none registers nothing. Three review agents are
+# built in -- security-review, release-notes, merge-request -- with their files
+# under prompts/ and schemas/ (seeded by `apogee check --fix`, never overwritten
+# once present, so edit them freely). An entry here overrides a bundled agent
+# of the same name; `apogee agents create` scaffolds a new one. Relative paths
+# are read against this data directory.
+#
+# agents:
+#   security-review:
+#     model: local              # pin a backend; blank = models.default
+#     tools: read-only          # read-only | all | none
+#     prompts: [prompts/security-review.txt]
+#     schemas: [schemas/security-review-output.json]
+#     save_subdir: security-review
+#   release-notes:
+#     tools: read-only
+#     prompts: [prompts/release-notes.txt]
+#     schemas: [schemas/release-notes-output.json]
+#     save_subdir: release-notes
+#   merge-request:
+#     collection: adrs          # retrieved from on every run (this agent's auto_rag)
+#     tools: read-only
+#     prompts: [prompts/merge-request.txt]
+#     schemas: [schemas/merge-request-output.json]
+#     save_subdir: merge-request
+
+backends:
+
+  # ── Anthropic (API billing plan) ────────────────────────────────────────────
+  # Uses the Messages API directly with your own key. For the subscription
+  # plan -- driving the `claude` CLI you are already logged into -- see the
+  # claude-cli backend, which arrives after v0.1.0.
+  # claude:
+  #   type: anthropic
+  #   api_key: "${ANTHROPIC_API_KEY}"
+  #   model: claude-sonnet-5
+  #   context_size: 200000
+  #   max_tokens: 8192
+
+  # ── OpenAI ──────────────────────────────────────────────────────────────────
+  # embedding_model is what this entry uses when it EMBEDS rather than chats;
+  # unset means text-embedding-3-small. One key serves both.
+  # gpt:
+  #   type: openai
+  #   api_key: "${OPENAI_API_KEY}"
+  #   model: gpt-5
+  #   context_size: 128000
+  #   # embedding_model: text-embedding-3-large
+
+  # ── Google ──────────────────────────────────────────────────────────────────
+  # embedding_model: unset means gemini-embedding-001.
+  # gemini:
+  #   type: google
+  #   api_key: "${GEMINI_API_KEY}"
+  #   model: gemini-2.5-pro
+  #   context_size: 1048576
+  #   # embedding_model: gemini-embedding-001
+
+  # ── Claude through the official CLI (subscription plan) ────────────────────
+  # The subscription-auth path: Apogee spawns the `claude` binary you already
+  # installed and logged into, as a long-lived child process. It never reads
+  # your credentials -- not ~/.claude, not a keychain, not a session file.
+  #
+  # binary: resolved from PATH when unset.
+  # mode:   subscription (default) uses whatever your CLI is logged into.
+  #         bare passes --bare, which skips hook/MCP/CLAUDE.md discovery AND
+  #         disables subscription auth -- the child then needs an API key.
+  #         Right for CI; wrong on your own machine.
+  #
+  # Watch out for ANTHROPIC_API_KEY: if it is set in your environment, the CLI
+  # prefers it over your subscription login, which quietly bills per token.
+  # claude-sub:
+  #   type: claude-cli
+  #   mode: subscription
+  #   # binary: /usr/local/bin/claude
+  #   # model: claude-sonnet-5
+
+  # ── Gemini through the official CLI (subscription plan) ────────────────────
+  # The subscription-auth path for Google, beside the API-billing `google`
+  # entry above -- both can live in this file at once, chosen per entry.
+  # Apogee spawns the `gemini` binary you installed and signed into with your
+  # Google account. It never reads your credentials -- not ~/.gemini, not a
+  # keychain, not a session file.
+  #
+  # binary: resolved from PATH when unset.
+  # There is no `mode` here: this CLI has no auth modes, so setting one is an
+  # error rather than a no-op. For an API key, use the `google` entry above.
+  #
+  # Watch out for GEMINI_API_KEY: if it is set in your environment, the CLI
+  # prefers it over your Google login, which quietly bills per token -- the
+  # same trap ANTHROPIC_API_KEY sets for the claude-cli entry.
+  #
+  # Two flags are pinned and not configurable, because this CLI runs tools
+  # while it answers: --approval-mode plan (read-only) and --skip-trust. The
+  # second is not optional -- without it the CLI silently downgrades the
+  # read-only pin to its default in an untrusted folder, and refuses to run
+  # headless at all.
+  # gem-sub:
+  #   type: gemini-cli
+  #   # binary: /usr/local/bin/gemini
+  #   # model: gemini-3.5-flash
+
+  # ── Local inference via llama.cpp ───────────────────────────────────────────
+  # Runs in-process: no server and no listening socket. The model STAYS LOADED
+  # between turns, which is what keeps a multi-turn chat warm -- each turn adds
+  # only its new tokens to the KV cache instead of re-reading the conversation.
+  # model_path is any GGUF you supply -- Apogee ships none and curates none, so
+  # any model you point it at will run.
+  #
+  # context_size unset means "whatever this model was trained for", which is
+  # usually what you want; set it to trade memory against conversation length.
+  # idle_unload_seconds releases the weights after a quiet spell -- worth
+  # setting if you switch between a local and a cloud backend in one session,
+  # since the model is the largest thing the process holds.
+  # local:
+  #   type: llamacpp
+  #   model_path: "${HOME}/.cache/llms/my-model.gguf"
+  #   # context_size: 8192
+  #   # idle_unload_seconds: 900
+
+  # ── Local vision ────────────────────────────────────────────────────────────
+  # A local model can read images when you also point it at that model's
+  # multimodal projector -- a separate "mmproj" GGUF, usually published beside
+  # the model itself. It is a field of its own rather than something Apogee
+  # guesses: projectors have no reliable naming relationship to their model, and
+  # the wrong one produces nonsense instead of an error.
+  #
+  # Needs a build with -DAPOGEE_ENABLE_LLAMA=ON. Without an mmproj_path the
+  # entry is text-only and `--image` is refused with a message saying so.
+  #
+  # `apogee models info <backend>` tells you which of your files is which: a
+  # projector reports as one rather than as a model.
+  # vision:
+  #   type: llamacpp
+  #   model_path: "${HOME}/.cache/llms/SmolVLM-500M-Instruct-Q8_0.gguf"
+  #   mmproj_path: "${HOME}/.cache/llms/mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
+
+  # ── User-supplied embedding backend (vector RAG) ────────────────────────────
+  # No embedding model ships with Apogee. To enable vector retrieval, point
+  # model_path at a local GGUF -- a dedicated embedding model is best, though a
+  # general instruct model works (mean-pooled, with variable quality). Then
+  # uncomment default_embedding above. A collection must be ingested and
+  # queried by the SAME model, so pick once or re-ingest after changing it.
+  # embedder:
+  #   type: llamacpp
+  #   model_path: "${HOME}/.cache/llms/my-embedder.gguf"
+  #   context_size: 2048
+
+  # ── Mock ────────────────────────────────────────────────────────────────────
+  # Answers from a canned script with no network and no model. Useful for
+  # trying the CLI out, and for tests.
+  # mock:
+  #   type: mock
+
+# How operational status output is displayed.
+#   line    (default) one self-overwriting status line on a terminal
+#   verbose every status message as a permanent line -- good for logs
+#   quiet   no status output at all
+# status_mode: line
+
+# color: false turns off ANSI color everywhere. When unset, color is enabled on
+# a terminal unless NO_COLOR is set or --no-color is passed.
+# color: true
+
+# ── Retrieval (RAG) ──────────────────────────────────────────────────────────
+# Collections are made by `apogee embed ingest <name> <path>`; the first ingest
+# of a new name registers it under `embeddings:` below, creating that section
+# on first use. Registration is a convenience, not a requirement -- a
+# collection works the moment its file exists. Every write here goes through
+# the comment-preserving editor, so this commentary survives it.
+#
+# auto_rag names ONE collection to retrieve from on every turn without typing
+# --rag. The flag still wins: `--rag other` for a single run, `--rag ""` to
+# switch it off for a single run. Read each turn, so an edit here takes effect
+# on the next question rather than the next session. The status line always
+# says when context was injected this way.
+# auto_rag: notes
+
+# Each collection can also say HOW it is searched. Three retrievers exist:
+#   lexical  BM25 full-text; needs no model and no network (the floor)
+#   vector   cosine over embeddings; needs an embedding backend, and the
+#            collection must have been ingested with that same model
+#   hybrid   both, fused by rank (never by score); explicit only -- auto
+#            never picks it
+# With nothing set, `auto` picks vector when the collection's vectors match
+# the embedding backend that would answer, else lexical -- and never spends
+# money on your behalf to build vectors: ingesting a whole collection through
+# a paid embedder (openai, google) takes `--retriever vector` or a `retriever:
+# vector` pin, while answering a question against one already built is one
+# small call and is allowed. A local embedder costs nothing either way.
+#
+# rerank names a backend that reorders retrieved chunks with one generation
+# call and drops the ones that only share words with the question. Every
+# failure of the judge falls back to the raw order and says so.
+#
+# embeddings:
+#   notes:
+#     chunk_size: 512        # codepoints per chunk; the default for re-ingests
+#     chunk_overlap: 64      # codepoints shared between neighbouring chunks
+#     description: "Meeting notes"
+#     # backend: embedder    # which entry embeds this collection (default: models.default_embedding)
+#     # retriever: auto      # lexical | vector | hybrid | auto -- checked by `apogee check`
+#     # rerank: off          # a backend name, or off
+#     # graph:               # the knowledge graph over this collection (apogee graph)
+#     #   enabled: true        # set by the first successful `apogee graph build`
+#     #   extract_backend: local # the backend `graph build` extracts with
+#     #   hops: 1              # expansion depth at retrieval (1 or 2)
+#     #   max_entities: 8      # neighbour entities an expansion injects, at most
+
+# ── Named graphs (one knowledge graph over several collections) ──────────────
+# A per-collection graph cannot see across collection boundaries: the same
+# person, system or project mentioned in `docs`, `meetings` and `tickets`
+# becomes three disconnected twins. A named graph spans its member
+# collections into ONE node per entity, in its own database under
+# embeddings/graphs/, built by `apogee graph build <name>` (the first build
+# creates it -- an installer never does). A built named graph takes retrieval
+# precedence for its members; their own graph: blocks are left as they are.
+# Managed by `apogee config add-graph` / `delete-graph`. A graph's name must
+# not collide with a collection's -- `apogee check` fails the collision.
+#
+# graphs:
+#   work:
+#     collections: [docs, meetings]   # the member collections
+#     # extract_backend: local        # the backend `graph build work` extracts with
+#     # hops: 1                       # expansion depth at retrieval (1 or 2)
+#     # max_entities: 8               # neighbour entities an expansion injects, at most
+
+# ── Knowledge (captured decisions) ───────────────────────────────────────────
+# `apogee knowledge capture` distils a conversation into one canonical record
+# -- the why behind a decision, what was chosen, whether it shipped -- and
+# stores it in an ordinary collection (the default is `knowledge`, registered
+# under `embeddings:` above on first use), with the raw conversation archived
+# privately under knowledge/raw/. `/capture` in chat does the same for the
+# live conversation using the model already loaded.
+#
+# auto_capture distils one record from every interactive chat that ends
+# cleanly. Off by default: it costs a generation call per session, and most
+# chats carry nothing worth keeping.
+# knowledge:
+#   auto_capture: false
+#   db: knowledge          # the collection records go into
+
+# ── Training (fine-tuning local models) ──────────────────────────────────────
+# The training track runs its Python drivers -- dataset preparation and the
+# trainers -- inside a virtual environment Apogee owns under training/venv/,
+# never the system Python. `apogee train setup` creates it (or the first
+# command that needs it asks, on a terminal). `python` names the interpreter
+# that environment is seeded FROM; empty means python3 on PATH. Datasets
+# live under training/datasets/ (`apogee datasets`), the bundled kits under
+# training/kits/, runs under training/runs/ and promoted GGUFs under
+# training/versions/ (`apogee train`).
+#   trainer          auto (mlx on Apple Silicon, peft with nvidia-smi), mlx, or peft
+#   judge_backend    the backend that judges eval items with no `expected`
+#                    substring, pairwise against the untuned base; unset
+#                    means those items skip and auto-pass (loudly)
+#   eval_suite_path  the suite `train eval` runs without --suite
+#   retain_versions  promoted GGUFs kept per backend (default 3; 0 keeps all)
+#   gate_mode        hard (default: promote refuses an unevaluated or failing
+#                    run) or soft (a warning instead)
+#   pipelines        named multi-stage pipelines (`apogee train pipeline run
+#                    --pipeline <name>`): a student snapshot and ordered stages,
+#                    each a fresh LoRA on the previous stage's fused weights,
+#                    gated on the union of every prior suite plus its own at
+#                    100%; a stage's dataset and eval_suite are names or paths
+#                    as `train run --dataset` and `train eval --suite` take
+#                    them; rehearsal_fraction mixes a deterministic sample of
+#                    the prior datasets into a stage (default 0)
+#   regimes          named regimes (`apogee train regime run <name>`): a
+#                    teacher distils a dataset per kit, the kits become one
+#                    gated pipeline over the student, the last passing stage
+#                    is promoted as promote_as; flags override every field
+#   cycle            the unattended loop `apogee train cycle run` performs one
+#                    gated pass of, from launchd or cron: the pipeline it runs
+#                    (every stage's dataset replaced by the merged sources),
+#                    the backend a pass promotes into, the sources -- a
+#                    `directory` queue of *.jsonl (default training/cycle/
+#                    queue/) and/or `sessions`, your own chats, ONLY with
+#                    log_consent: true (they are your data, and a model trained
+#                    on its own answers reinforces its mistakes), optionally
+#                    filtered by backend and since -- the anchor gate
+#                    (regression_threshold, default 0: strict no-regression
+#                    against the last passing cycle AND the pinned anchor;
+#                    anchor_version pins one, else the first passing cycle
+#                    sets it) and the circuit breaker (circuit_breaker_k,
+#                    default 3: consecutive failures that halt the loop until
+#                    `apogee train cycle resume`; 0 disables it)
+# training:
+#   python: /usr/bin/python3
+#   trainer: auto
+#   judge_backend: paid
+#   eval_suite_path: ~/.apogee/training/suites/mine.jsonl
+#   retain_versions: 3
+#   gate_mode: hard
+#   pipelines:
+#     skills:
+#       student: Qwen--Qwen2.5-0.5B
+#       stages:
+#         - name: instructions
+#           dataset: instructions           # training/datasets/instructions.jsonl
+#           eval_suite: instruction-following   # a kit's inline suite, a suites/ name, or a path
+#           iters: 500
+#         - name: reasoning
+#           dataset: maths
+#           eval_suite: reasoning
+#           iters: 500
+#           rehearsal_fraction: 0.1
+#   regimes:
+#     everything:
+#       teacher: paid
+#       student: Qwen--Qwen2.5-0.5B
+#       kits: [instruction-following, reasoning]
+#       promote_as: qwen-tuned
+#   cycle:
+#     pipeline: skills
+#     backend: qwen-nightly
+#     regression_threshold: 0.0
+#     circuit_breaker_k: 3
+#     sources:
+#       - type: directory                # training/cycle/queue/*.jsonl
+#       - type: sessions
+#         log_consent: true
+#         backend: qwen-nightly
+#         since: 2026-09-01
+)APOGEE";
+
+}  // namespace
+
+std::string_view config_template() noexcept {
+    return kConfigTemplate;
+}
+
+void save_config_template(const std::filesystem::path& path, bool force) {
+    if (!force && std::filesystem::exists(path)) {
+        throw ConfigEditError(path.string() +
+                              ": config already exists; pass --force to overwrite it");
+    }
+    write_file_atomically(path, config_template());
+}
+
+}  // namespace apogee::harness

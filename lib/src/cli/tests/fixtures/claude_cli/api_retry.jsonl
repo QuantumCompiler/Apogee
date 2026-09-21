@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"retry-session","model":"claude-sonnet-5"}
+{"type":"system","subtype":"api_retry","message":"overloaded_error, retrying in 1s"}
+{"type":"rate_limit_event","status":"approaching"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Recovered."}}}
+{"type":"result","subtype":"success","is_error":false,"session_id":"retry-session","result":"Recovered.","num_turns":1,"total_cost_usd":0.001,"usage":{"input_tokens":10,"output_tokens":3}}

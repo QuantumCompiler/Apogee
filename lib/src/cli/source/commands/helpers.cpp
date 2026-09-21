@@ -1,0 +1,445 @@
+#include "commands/helpers.h"
+
+#include <array>
+#include <cctype>
+#include <chrono>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <utility>
+
+#include "agent/fetch_url.h"
+#include "agentloop/graph_context.h"
+#include "backends/http_client.h"
+#include "commands/embed.h"
+#include "harness/harness.h"
+#include "platform/platform.h"
+#include "version/version.h"
+
+namespace apogee::commands {
+namespace {
+
+constexpr std::string_view kBase64Alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+const harness::BackendConfig* entry_for(const harness::Config& config,
+                                        std::string_view backend_name) {
+    return config.find_backend(backend_name);
+}
+
+std::string lowercase_extension(const std::filesystem::path& path) {
+    std::string extension = path.extension().string();
+    for (char& c : extension) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return extension;
+}
+
+}  // namespace
+
+std::optional<double> resolve_temperature(const std::optional<double>& flag_value,
+                                          const harness::Config& config,
+                                          std::string_view backend_name) {
+    if (flag_value.has_value()) {
+        return flag_value;
+    }
+    const harness::BackendConfig* entry = entry_for(config, backend_name);
+    return entry == nullptr ? std::nullopt : entry->temperature;
+}
+
+std::optional<std::int64_t> resolve_max_tokens(const std::optional<std::int64_t>& flag_value,
+                                               const harness::Config& config,
+                                               std::string_view backend_name) {
+    if (flag_value.has_value()) {
+        return flag_value;
+    }
+    const harness::BackendConfig* entry = entry_for(config, backend_name);
+    return entry == nullptr ? std::nullopt : entry->max_tokens;
+}
+
+std::string resolve_system_prompt(const std::string& flag_value, const harness::Config& config,
+                                  std::string_view backend_name) {
+    if (!flag_value.empty()) {
+        return flag_value;
+    }
+    const harness::BackendConfig* entry = entry_for(config, backend_name);
+    return entry == nullptr ? std::string{} : entry->system_prompt;
+}
+
+agentloop::RagResult retrieve_for_collection(
+    const harness::Harness& harness, const harness::Config& config, std::string_view collection,
+    const std::string& question, int limit, std::string_view retriever_flag,
+    std::string_view rerank_flag, const harness::CancellationToken& cancellation) {
+    agentloop::RagTurn turn;
+    turn.store_path = collection_path(collection);
+    turn.question = question;
+    turn.limit = limit;
+    turn.retriever_flag = std::string{retriever_flag};
+    turn.rerank_flag = std::string{rerank_flag};
+    turn.collection = std::string{collection};
+    std::string collection_backend;
+    if (const harness::EmbeddingConfig* pin = config.find_embedding(collection); pin != nullptr) {
+        turn.retriever_pin = pin->retriever;
+        turn.rerank_pin = pin->rerank;
+        collection_backend = pin->backend;
+    }
+    // Which graph the turn walks -- a built named graph covering the
+    // collection first, else its own enabled block -- decided in ONE place
+    // for every surface, so the precedence rule cannot drift between them.
+    const agentloop::TurnGraph graph = agentloop::resolve_turn_graph(config, collection);
+    turn.graph_enabled = graph.enabled;
+    turn.graph_hops = graph.hops;
+    turn.graph_max_entities = graph.max_entities;
+    turn.graph_store_path = graph.store_path;
+    turn.graph_name = graph.name;
+    turn.graph_seed_collection = graph.seed_collection;
+    turn.embedder =
+        agentloop::resolve_embedder(harness, config, collection_backend, turn.embedder_reason);
+    turn.harness = &harness;
+    turn.config = &config;
+    turn.cancellation = cancellation;
+    return agentloop::retrieve_for_turn(turn);
+}
+
+RagChoice choose_rag_collection(bool flag_given, std::string_view flag_value,
+                                std::string_view auto_rag) {
+    RagChoice choice;
+    if (flag_given) {
+        // Present wins, even when empty: `--rag ""` is the off switch.
+        choice.collection = std::string{flag_value};
+        choice.source = flag_value.empty() ? RagSource::None : RagSource::Flag;
+        return choice;
+    }
+    if (!auto_rag.empty()) {
+        choice.collection = std::string{auto_rag};
+        choice.source = RagSource::Config;
+    }
+    return choice;
+}
+
+std::string describe_retrieval(const RagChoice& choice, const agentloop::RagResult& result) {
+    const std::string origin = choice.source == RagSource::Config ? " (auto_rag)" : "";
+    std::string notes;
+    for (const std::string& note : result.notes) {
+        notes += " -- " + note;
+    }
+    if (!result.error.empty()) {
+        return "retrieval unavailable -- " + result.error + origin + notes;
+    }
+    // The graph's contribution, always named: entities injected beside the
+    // chunks are context the user did not see retrieved.
+    const std::string graph = result.graph_entities > 0
+                                  ? " +" + std::to_string(result.graph_entities) + " graph entities"
+                                  : "";
+    if (result.chunks == 0) {
+        return "no matching context in '" + choice.collection + "' [" + result.retriever + "]" +
+               graph + origin + notes;
+    }
+    // Chunks, top score, and the retriever that produced it -- the last because
+    // lexical, vector and RRF scales are incomparable -- and whether a judge's
+    // ranking was actually applied, from the same place as the ranking.
+    std::string line = std::to_string(result.chunks) + " chunk(s) from '" + choice.collection +
+                       "', top " + std::to_string(result.top_score).substr(0, 5) + " [" +
+                       result.retriever + (result.reranked ? ", reranked" : "") + "]" + graph +
+                       origin;
+    for (const std::string& note : result.notes) {
+        line += " -- " + note;
+    }
+    return line;
+}
+
+std::string configured_backend_key(const harness::Config& config, std::string_view model) {
+    if (model.empty()) {
+        return {};
+    }
+    // The key as WRITTEN, found the way the map compares keys -- a request
+    // spelling `Claude` must land on the entry named `claude`, and the name
+    // handed back must be the file's spelling so later lookups agree.
+    if (const auto it = config.backends.find(model); it != config.backends.end()) {
+        return it->first;
+    }
+    const std::string normalized = harness::normalize_route_key(model);
+    for (const auto& [name, entry] : config.backends) {
+        if (entry.model == model || harness::normalize_route_key(entry.model) == normalized) {
+            return name;
+        }
+    }
+    return {};
+}
+
+bool names_a_configured_backend(const harness::Config& config, std::string_view model) {
+    return !configured_backend_key(config, model).empty();
+}
+
+agent::ToolRegistry apply_tool_policy(const agent::ToolRegistry& registry,
+                                      harness::AgentToolPolicy policy) {
+    if (policy == harness::AgentToolPolicy::All) {
+        return registry;
+    }
+    agent::ToolRegistry filtered;
+    if (policy == harness::AgentToolPolicy::None) {
+        return filtered;
+    }
+    for (const std::string& name : registry.names()) {
+        const agent::Tool* tool = registry.find(name);
+        if (tool != nullptr && !tool->writes) {
+            filtered.add(*tool);
+        }
+    }
+    return filtered;
+}
+
+agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
+    agent::ToolRegistry registry;
+    if (options.policy == harness::AgentToolPolicy::None) {
+        // Nothing to register and no server to dial: a `none` agent costs
+        // no child process either.
+        return registry;
+    }
+
+    auto client =
+        std::make_shared<backends::HttpClient>(std::make_unique<backends::CurlTransport>());
+
+    registry.add(agent::make_fetch_url_tool([client](std::string_view url) {
+        agent::FetchResult result;
+        backends::HttpRequest request;
+        request.method = "GET";
+        request.url = std::string{url};
+        request.timeout = std::chrono::seconds{30};
+        try {
+            const backends::HttpResponse response = client->send(request, {}, {});
+            result.status = response.status;
+            result.body = response.body;
+        } catch (const std::exception& e) {
+            result.error = e.what();
+        }
+        return result;
+    }));
+
+    tools::ToolsetOptions toolsets;
+    toolsets.harness = options.harness;
+    toolsets.config = options.config;
+    toolsets.review = options.review;
+    toolsets.live_review = options.live_review;
+    if (options.config != nullptr) {
+        toolsets.fs_root = harness::expand_env(options.config->tools.fs_root);
+        toolsets.disabled = options.config->tools.disabled;
+    }
+    tools::register_native_toolsets(registry, toolsets);
+
+    // Third-party servers last, so a namespaced name can never shadow a
+    // native one -- the registry refuses duplicates either way.
+    if (options.mcp != nullptr && options.config != nullptr &&
+        !options.config->mcp_servers.empty()) {
+        std::vector<mcp::ServerSpec> specs;
+        if (options.mcp_servers.has_value()) {
+            // Only what the agent named, in the config's own spelling.
+            for (const std::string& wanted : *options.mcp_servers) {
+                const auto it = options.config->mcp_servers.find(wanted);
+                if (it == options.config->mcp_servers.end()) {
+                    if (options.mcp_status) {
+                        options.mcp_status("[mcp] warning: no server named '" + wanted +
+                                           "' in mcp_servers (skipped)");
+                    }
+                    continue;
+                }
+                specs.push_back(mcp::ServerSpec{it->first, it->second.command, it->second.args,
+                                                it->second.env, it->second.enabled});
+            }
+        } else {
+            for (const auto& [name, server] : options.config->mcp_servers) {
+                specs.push_back(
+                    mcp::ServerSpec{name, server.command, server.args, server.env, server.enabled});
+            }
+        }
+        mcp::RegistryOptions mcp_options;
+        mcp_options.status = options.mcp_status;
+        mcp_options.server_log = options.mcp_server_log;
+        mcp_options.spawn = options.mcp_spawn;
+        mcp_options.client_version = std::string{version::semantic()};
+        if (!specs.empty()) {
+            options.mcp->connect_all(specs, mcp_options);
+            options.mcp->register_into(registry);
+        }
+    }
+
+    // The policy last, over everything registered -- native, fetch_url and
+    // MCP alike -- so what the loop advertises IS the policy.
+    return apply_tool_policy(registry, options.policy);
+}
+
+std::function<void(std::string_view)> mcp_status_line(StatusLine& status) {
+    return [&status](std::string_view line) {
+        if (line.find("warning") != std::string_view::npos) {
+            status.print_line(line);
+        } else {
+            status.set(line);
+        }
+    };
+}
+
+std::string read_stdin() {
+    std::ostringstream buffer;
+    buffer << std::cin.rdbuf();
+    return buffer.str();
+}
+
+namespace {
+// The stream buffer std::cin was born with. Everything here reads stdin
+// through std::cin, so a caller that has swapped that buffer -- the command
+// test fixtures feed their "piped" input this way -- has made stdin something
+// other than the terminal for this process, whatever descriptor 0 says.
+// Asking only the descriptor made two tests pass under ctest and fail under a
+// developer's terminal (2026-09-19). Captured at static initialization, before
+// anything can have swapped it, through a noexcept function: rdbuf() is a
+// plain accessor the standard merely forgot to mark so, and a static
+// initializer must not be able to throw.
+[[nodiscard]] std::streambuf* initial_stdin_buffer() noexcept {
+    return std::cin.rdbuf();
+}
+
+std::streambuf* const kOriginalStdinBuffer = initial_stdin_buffer();
+}  // namespace
+
+bool stdin_is_piped() {
+    return std::cin.rdbuf() != kOriginalStdinBuffer ||
+           !platform::is_terminal(platform::StandardStream::In);
+}
+
+std::string base64_encode(std::string_view bytes) {
+    std::string out;
+    out.reserve(((bytes.size() + 2) / 3) * 4);
+
+    std::size_t i = 0;
+    for (; i + 2 < bytes.size(); i += 3) {
+        const auto a = static_cast<unsigned char>(bytes[i]);
+        const auto b = static_cast<unsigned char>(bytes[i + 1]);
+        const auto c = static_cast<unsigned char>(bytes[i + 2]);
+        const std::uint32_t triple = (static_cast<std::uint32_t>(a) << 16U) |
+                                     (static_cast<std::uint32_t>(b) << 8U) |
+                                     static_cast<std::uint32_t>(c);
+        out.push_back(kBase64Alphabet[(triple >> 18U) & 0x3FU]);
+        out.push_back(kBase64Alphabet[(triple >> 12U) & 0x3FU]);
+        out.push_back(kBase64Alphabet[(triple >> 6U) & 0x3FU]);
+        out.push_back(kBase64Alphabet[triple & 0x3FU]);
+    }
+
+    if (i < bytes.size()) {
+        const auto a = static_cast<unsigned char>(bytes[i]);
+        std::uint32_t triple = static_cast<std::uint32_t>(a) << 16U;
+        const bool has_second = i + 1 < bytes.size();
+        if (has_second) {
+            triple |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[i + 1])) << 8U;
+        }
+        out.push_back(kBase64Alphabet[(triple >> 18U) & 0x3FU]);
+        out.push_back(kBase64Alphabet[(triple >> 12U) & 0x3FU]);
+        out.push_back(has_second ? kBase64Alphabet[(triple >> 6U) & 0x3FU] : '=');
+        out.push_back('=');
+    }
+    return out;
+}
+
+std::string image_media_type(const std::filesystem::path& path) {
+    // The set the cloud vendors actually accept. An unrecognised extension is
+    // reported rather than guessed: the wire format needs an explicit media
+    // type, and sending the wrong one fails with a far less clear message.
+    static const std::array<std::pair<std::string_view, std::string_view>, 6> kTypes{{
+        {".png", "image/png"},
+        {".jpg", "image/jpeg"},
+        {".jpeg", "image/jpeg"},
+        {".gif", "image/gif"},
+        {".webp", "image/webp"},
+        {".bmp", "image/bmp"},
+    }};
+
+    const std::string extension = lowercase_extension(path);
+    for (const auto& [candidate, media_type] : kTypes) {
+        if (extension == candidate) {
+            return std::string{media_type};
+        }
+    }
+    return {};
+}
+
+harness::ContentPart load_image_part(const std::filesystem::path& path) {
+    const std::string media_type = image_media_type(path);
+    if (media_type.empty()) {
+        throw std::runtime_error(path.string() +
+                                 ": unsupported image type (accepted: png, jpg, jpeg, gif, "
+                                 "webp, bmp)");
+    }
+
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw std::runtime_error(path.string() + ": cannot open file");
+    }
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    if (in.bad()) {
+        throw std::runtime_error(path.string() + ": error reading file");
+    }
+
+    const std::string encoded = base64_encode(buffer.str());
+    if (encoded.empty()) {
+        throw std::runtime_error(path.string() + ": file is empty");
+    }
+    return harness::ContentPart::from_image_url("data:" + media_type + ";base64," + encoded);
+}
+
+std::string attachment_refusal(const harness::Harness& harness, const std::string& model,
+                               const std::vector<harness::ContentPart>& attachments) {
+    if (attachments.empty()) {
+        return {};
+    }
+    if (harness.accepts_images(model)) {
+        return {};
+    }
+    return image_refusal_message(model);
+}
+
+std::string image_refusal_message(const std::string& model) {
+    // Names the backend and BOTH ways forward. A message that only says
+    // "cannot accept images" leaves a user guessing between three different
+    // problems: the wrong backend, a missing mmproj_path, or a build without
+    // llama.cpp.
+    return "backend '" + model +
+           "' cannot accept images. Local (llamacpp) vision needs an mmproj_path on the backend "
+           "and a build with -DAPOGEE_ENABLE_LLAMA=ON; a cloud backend accepts --image today";
+}
+
+std::vector<harness::ChatMessage> build_messages(
+    const std::string& system_prompt, const std::string& context, const std::string& prompt,
+    const std::vector<harness::ContentPart>& attachments) {
+    std::vector<harness::ChatMessage> messages;
+
+    if (!system_prompt.empty()) {
+        messages.push_back(harness::ChatMessage::system(system_prompt));
+    }
+    if (!context.empty()) {
+        // Before the prompt: a model weights the last message most, and the
+        // prompt is what it should be answering, not the reference material.
+        messages.push_back(harness::ChatMessage::system(context));
+    }
+
+    if (attachments.empty()) {
+        messages.push_back(harness::ChatMessage::user(prompt));
+        return messages;
+    }
+
+    // With attachments the content becomes multi-part: the text first, so the
+    // instruction is read before the images it refers to.
+    std::vector<harness::ContentPart> parts;
+    parts.reserve(attachments.size() + 1);
+    if (!prompt.empty()) {
+        parts.push_back(harness::ContentPart::from_text(prompt));
+    }
+    for (const harness::ContentPart& attachment : attachments) {
+        parts.push_back(attachment);
+    }
+    messages.push_back(harness::ChatMessage::user(harness::MessageContent::from_parts(parts)));
+    return messages;
+}
+
+}  // namespace apogee::commands

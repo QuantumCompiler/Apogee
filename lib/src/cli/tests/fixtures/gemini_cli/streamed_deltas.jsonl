@@ -1,0 +1,6 @@
+{"type":"init","timestamp":"2026-09-07T00:31:22.635Z","session_id":"00000000-0000-4000-8000-000000000002","model":"auto"}
+{"type":"message","timestamp":"2026-09-07T00:31:22.636Z","role":"user","content":"Count from 1 to 20, one number per line, nothing else."}
+{"type":"message","timestamp":"2026-09-07T00:31:29.981Z","role":"assistant","content":"1\n2\n","delta":true}
+{"type":"message","timestamp":"2026-09-07T00:31:30.009Z","role":"assistant","content":"3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n1","delta":true}
+{"type":"message","timestamp":"2026-09-07T00:31:30.097Z","role":"assistant","content":"3\n14\n15\n16\n17\n18\n19\n20","delta":true}
+{"type":"result","timestamp":"2026-09-07T00:31:30.138Z","status":"success","stats":{"total_tokens":10534,"input_tokens":9348,"output_tokens":78,"cached":4063,"input":5285,"duration_ms":7503,"tool_calls":0,"models":{"gemini-3.1-flash-lite":{"total_tokens":1760,"input_tokens":896,"output_tokens":28,"cached":0,"input":896},"gemini-3.5-flash":{"total_tokens":8774,"input_tokens":8452,"output_tokens":50,"cached":4063,"input":4389}}}}

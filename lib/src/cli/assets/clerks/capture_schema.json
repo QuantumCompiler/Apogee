@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CanonicalKnowledgeRecord",
+  "type": "object",
+  "additionalProperties": false,
+  "description": "One canonical intent record extracted from a raw brainstorm or development conversation. Captures the durable 'why' behind a decision so it can be retrieved later. The system assigns id, raw_ref, and timestamp — do not emit them.",
+  "properties": {
+    "intent": {
+      "type": "string",
+      "description": "The why — the rationale that explains the decision, in the participants' own words where possible. This is the load-bearing field; preserve it verbatim rather than pre-summarizing it away. Required."
+    },
+    "decision": {
+      "type": "string",
+      "description": "What was actually chosen — distinct from the range of options discussed. Discussion is not decision."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["shipped", "rejected", "superseded"],
+      "description": "Which branch this record represents: shipped (chosen/implemented), rejected (considered and abandoned), or superseded (replaced by a later decision). Never label an abandoned idea shipped."
+    },
+    "discipline": {
+      "type": "string",
+      "enum": ["program", "product", "project", "ux", "eng"],
+      "description": "The originating discipline. Choose the closest single value."
+    },
+    "downstream_link": {
+      "type": "string",
+      "description": "The artifact this decision produced — a ticket ID, Figma component, commit, PR, or file path. The write-time link that makes the record traceable. Empty when the conversation references none; do not fabricate."
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the record came from. Source and attribution are deliberately separate so attribution can be stripped without losing the chain.",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "The source surface, e.g. claude-code, copilot, chat, meeting, manual."
+        },
+        "attribution": {
+          "type": "string",
+          "description": "Who said it, when clearly identifiable. Keep names ONLY here — never in intent or decision."
+        }
+      },
+      "required": ["source"]
+    }
+  },
+  "required": ["intent", "decision", "status", "discipline", "provenance"]
+}
