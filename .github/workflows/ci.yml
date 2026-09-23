@@ -18,29 +18,49 @@
 # their job names (`clone llama.cpp`, `build <name>`) -- a renamed job has to
 # be renamed there too.
 #
-# Job policy (user decisions, 2026-09-19 and 2026-09-20): CI is the llama.cpp
-# clone, then one executable build per platform -- five of them, the Intel
-# Mac having been dropped -- and nothing else. The test suite does NOT run
-# here (user decision, 2026-09-20: "remove the tests from the CI/CD"); it is
-# the developer's gate, `make test` / `cicd.sh --test`, run before a push.
+# Job policy (user decisions, 2026-09-19, 2026-09-20 and 2026-09-22): CI is the
+# llama.cpp clone, the suite per platform, then one executable build per
+# platform -- five of them, the Intel Mac having been dropped -- and nothing
+# else -- plus one pull-request-only check, `version bump`, which exists
+# because a merge to `stable` now publishes a release and a forgotten version
+# bump would otherwise merge and publish nothing, silently.
+# The suite RUNS here again as of 2026-09-22, reversing 2026-09-20's
+# "remove the tests from the CI/CD"; `make test` remains the developer's gate
+# before a push, and this is the same gate enforced where it cannot be skipped.
 # Formatting, clang-tidy, install parity and the clean-room build are LOCAL
-# gates too — `make format-check`, `make lint`, the `cli.install_parity` case
+# gates still — `make format-check`, `make lint`, the `cli.install_parity` case
 # in the suite, and `cicd.sh --fresh` — not jobs here; the dedicated jobs for
 # them were removed on 2026-09-19 as work the build itself already covers.
 #
-# Shape (user decisions, 2026-09-19 and 2026-09-20): two stages, each a call
-# into cicd.sh.
+# Shape (user decisions, 2026-09-19, 2026-09-20 and 2026-09-22): three stages,
+# each a call into cicd.sh.
 #
 #   1. clone llama.cpp   -- prove the pin resolves. llama.cpp ships with the
 #                           tool, so a pin that no longer clones is a broken
 #                           product, and no platform is worth building on it.
+#   1. test <platform>   -- the suite on its own native runner, built WITHOUT
+#                           llama.cpp. Runs beside stage 1, not after it.
 #   2. build <platform>  -- one job per platform, llama.cpp linked in like
 #                           every build (it ships with the tool).
 #
-# The `needs:` edge is that order. A third stage ran the suite per platform
-# for one day (2026-09-20) on the build tree handed over as an artifact; it
-# was removed the same day as not making sense on a runner -- the suite is
-# the developer's gate, run against the source before a push.
+# `build` needs BOTH of the first two; those two have no edge between them,
+# because a test build with llama.cpp off never consults the pin. That
+# ordering is the point of the stage: the five builds cost ~82 minutes of
+# runner time, and a commit whose tests fail should never spend it.
+#
+# Why llama.cpp is OFF for the suite (user decision, 2026-09-22): it is most
+# of the compile time, and nothing carries between jobs -- so a test stage
+# that built it would rebuild, in full, everything stage 2 then rebuilds,
+# roughly doubling CI for a gate whose job is to fail fast. The cost is
+# real and named: the llamacpp backend answers "not built in", so its own
+# cases do not run here. Stage 2 still compiles it on every platform, so a
+# break in llama.cpp itself is caught one stage later rather than never.
+#
+# This is the second attempt at a suite stage. The first (2026-09-20) ran it
+# on the build tree handed over from stage 2 as an artifact, and was removed
+# the same day: it could only run AFTER the builds it was supposed to gate,
+# which is the wrong order and the expensive one. This one builds its own
+# tree, cheaply, in front of them.
 #
 # What a runner needs beyond its image, per platform: the Linux images ship no
 # libcurl headers (`find_package(CURL REQUIRED)` is the first hard lookup, and
@@ -93,6 +113,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  version:
+    # A merge into `stable` publishes a release, and what it publishes is
+    # decided by `project(... VERSION x.y.z)` in lib/src/cli/CMakeLists.txt
+    # (user decision, 2026-09-22). A PR that forgets to bump it therefore
+    # merges cleanly and then releases NOTHING -- a silent no-op that looks
+    # exactly like a deliberate skip, and is only noticed by its absence.
+    # This job makes that case loud at review time instead.
+    #
+    # It is a pull_request-only check on purpose. The same condition on a push
+    # to `stable` is not an error: it is precisely how a docs or hotfix merge
+    # declines to cut a release, and release.yml's gate handles it by doing
+    # nothing.
+    name: version bump
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: The version must not already be released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="v$(sed -n 's/^[[:space:]]*VERSION[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' lib/src/cli/CMakeLists.txt | head -1)"
+          if [ "$version" = "v" ]; then
+            echo "::error file=lib/src/cli/CMakeLists.txt::could not read VERSION"
+            exit 1
+          fi
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo "::error file=lib/src/cli/CMakeLists.txt::$version is already released -- bump project(... VERSION x.y.z) or this merge will publish nothing"
+            exit 1
+          fi
+          echo "$version is unreleased; merging this PR will publish it" >> "$GITHUB_STEP_SUMMARY"
+
   clone-llama:
     # Stage one. The script reads the pin from the CLI's third_party build --
     # the one place it lives -- fetches that commit, and checks it resolved.
@@ -103,6 +156,92 @@ jobs:
       - name: Clone llama.cpp at the pinned commit
         run: lib/scripts/cicd.sh --clone-llama
 
+  test:
+    # Stage one-and-a-half. The suite on its own native runner, one job per
+    # platform, built WITHOUT llama.cpp -- the `make no-llama` configuration,
+    # reached here through the script's documented APOGEE_CMAKE_ARGS seam
+    # rather than a CI-only build step.
+    #
+    # `cicd.sh --test` runs ctest only when the target it built IS the host,
+    # which on a native runner is always true. That is also why there is one
+    # row per platform instead of one job: a cross-built test binary cannot
+    # run, so "test everywhere" means "a runner everywhere".
+    #
+    # No continue-on-error, per this file's gating policy: a platform whose
+    # tests cannot pass is a platform to fix. NOTE that the Windows rows are
+    # the first time the suite has ever run on a Windows runner -- the
+    # portability gaps recorded in release.yml (PTY, tcflush, lsof, 0600
+    # modes) are real, and if they surface it is as a failing check here.
+    name: test ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      APOGEE_CMAKE_ARGS: -DAPOGEE_ENABLE_LLAMA=OFF
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            target: macos-arm64
+            runner: macos-14
+          - name: linux-x64
+            target: linux-x64
+            runner: ubuntu-24.04
+          - name: linux-arm64
+            target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - name: windows-x64
+            target: windows-x64
+            runner: windows-2025
+            msystem: UCRT64
+          - name: windows-arm64
+            target: windows-arm64
+            runner: windows-11-arm
+            msystem: CLANGARM64
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install libcurl headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
+      - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          install: git
+          pacboy: >-
+            toolchain:p
+            cmake:p
+            ninja:p
+            pkgconf:p
+            curl-winssl:p
+
+      # Same annotate-on-failure contract as the build steps: a failing case
+      # has to be readable without admin rights on the repository.
+      - name: Test
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            lib/scripts/ci-annotate.sh "test ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
+            exit 1
+          }
+
+      - name: Test (MSYS2 shell)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          git config --global --add safe.directory '*'
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            lib/scripts/ci-annotate.sh "test ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
+            exit 1
+          }
+
   build:
     # Stage two. Every build has llama.cpp in it -- APOGEE_ENABLE_LLAMA is ON
     # by default (user decision, 2026-09-19: local inference ships with the
@@ -112,7 +251,10 @@ jobs:
     # fail-fast is off so one failing row does not cancel the others: the PR
     # is blocked either way, and the full picture is worth the runner time.
     name: build ${{ matrix.name }}
-    needs: clone-llama
+    # Both first-stage gates: the pin resolves, and the suite passes on every
+    # platform. Neither costs a build of llama.cpp, so the ~82 minutes of
+    # builds below only start once the cheap checks have agreed.
+    needs: [clone-llama, test]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
