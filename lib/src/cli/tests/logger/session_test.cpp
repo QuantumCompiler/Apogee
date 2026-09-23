@@ -224,10 +224,19 @@ TEST_CASE("listing is newest first and skips corrupt files", "[chat][session]") 
     const TempDir dir{"session-list"};
     const EnvGuard home{"APOGEE_HOME", dir.path().string()};
 
+    // Written directly rather than through save(), because save() replaces
+    // updated_at with timestamp_now() -- and that is whole-second. Two saves
+    // in the same second therefore carry IDENTICAL timestamps, the "newest
+    // first" comparator sees a tie, and which one lands in front falls out of
+    // directory-iteration order. This case had never really tested ordering;
+    // it was a coin flip that happened to land right, until linux-arm64 lost
+    // the toss on 2026-09-22. Writing the file preserves the intended age.
     Session older = sample();
     older.chat_id = "older";
+    older.started_at = "2026-08-01T00:00:00Z";
     older.updated_at = "2026-08-01T00:00:00Z";
-    apogee::logger::save(older);
+    apogee::harness::write_file_atomically(apogee::logger::session_path("older"),
+                                           apogee::logger::serialize(older));
 
     Session newer = sample();
     newer.chat_id = "newer";

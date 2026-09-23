@@ -18,48 +18,48 @@
 # their job names (`clone llama.cpp`, `build <name>`) -- a renamed job has to
 # be renamed there too.
 #
-# Job policy (user decisions, 2026-09-19, 2026-09-20 and 2026-09-22): CI is the
-# llama.cpp clone, then one build-and-test per platform -- five of them, the
-# Intel Mac having been dropped -- and nothing else, plus one
-# pull-request-only check, `version bump`, which exists because a merge to
-# `stable` now publishes a release and a forgotten version bump would
-# otherwise merge and publish nothing, silently.
+# Job policy (user decisions, 2026-09-19, 2026-09-20 and 2026-09-22): CI is
+# the llama.cpp clone, the source suite per platform, then one executable
+# build per platform -- five of them, the Intel Mac having been dropped -- and
+# nothing else, plus one pull-request-only check, `version bump`, which exists
+# because a merge to `stable` now publishes a release and a forgotten version
+# bump would otherwise merge and publish nothing, silently.
 #
-# The suite RUNS here again as of 2026-09-22, reversing 2026-09-20's "remove
-# the tests from the CI/CD"; `make test` remains the developer's gate before a
-# push, and this is the same gate enforced where it cannot be skipped. Each
-# `build` job is named for what gates a PR, but it builds AND tests -- renaming
-# it would mean renaming it in the branch protection rule too.
-# Formatting, clang-tidy, install parity and the clean-room build are LOCAL
-# gates still — `make format-check`, `make lint`, the `cli.install_parity` case
-# in the suite, and `cicd.sh --fresh` — not jobs here; the dedicated jobs for
-# them were removed on 2026-09-19 as work the build itself already covers.
+# The suite runs here again as of 2026-09-22, reversing 2026-09-20's "remove
+# the tests from the CI/CD" -- but ONLY the source-level suite. Nothing in
+# this pipeline runs a test that needs the `apogee` executable (user decision,
+# 2026-09-22: "we should only be testing the source code"). What that drops,
+# named because it is a real loss rather than a tidy-up: the 18 ctest entries
+# that spawn the binary, `cli.install_parity` among them -- the case that
+# keeps install drift closed, which MILESTONES records as Ommi's dominant
+# early bug class. They remain in tests/CMakeLists.txt and still run under
+# `make test`; they are simply not a gate here.
 #
-# Shape (user decisions, 2026-09-19, 2026-09-20 and 2026-09-22): two stages,
+# Shape (user decisions, 2026-09-19, 2026-09-20 and 2026-09-22): three stages,
 # each a call into cicd.sh.
 #
-#   1. clone llama.cpp   -- prove the pin resolves. llama.cpp ships with the
-#                           tool, so a pin that no longer clones is a broken
-#                           product, and no platform is worth building on it.
-#   2. build <platform>  -- one job per platform: `cicd.sh --test` builds the
-#                           executable with llama.cpp linked in, then runs
-#                           ctest against that very tree.
+#   1. clone llama.cpp     -- prove the pin resolves. llama.cpp ships with the
+#                             tool, so a pin that no longer clones is a broken
+#                             product, and no platform is worth building on it.
+#   1. unit tests <plat>   -- `cicd.sh --unit-tests`: builds the apogee_tests
+#                             target ALONE, llama.cpp off, and runs the binary.
+#                             No executable is produced and ctest never runs.
+#                             Beside stage 1, not after it.
+#   2. build <platform>    -- one job per platform, llama.cpp linked in like
+#                             every build, once BOTH of the above agree.
 #
-# Why build-then-test in ONE job, rather than a cheap test stage in front of
-# the builds (which this file had briefly on 2026-09-22): the suite links
-# apogee_core and 18 of the ctest cases run the built `apogee` as a
-# subprocess, so testing means compiling the same library the build compiles.
-# Split across two jobs, nothing carries between them and that compile happens
-# twice -- on every run where the tests pass, which is most of them. In one
-# job it happens once, and the executable that ships is the exact one the
-# suite just passed against, llama.cpp included. What it gives up is failing
-# in five minutes instead of thirty when a test breaks; the developer's
-# `make test` is where that speed belongs.
+# Why running the binary rather than `ctest -E <something>`: the add_test()
+# entries live in CTest, not in the Catch2 binary, so invoking apogee_tests
+# selects the source-level cases by construction. There is no exclusion list
+# to maintain, and no way for a new executable-dependent test to leak in.
 #
-# This is also why the 2026-09-20 attempt failed and this one does not. That
-# one made the suite a separate job too, and paid for it by tarring the whole
-# build tree into an artifact for the test job to download -- the handover
-# that "did not make sense on a runner". Same job, no handover.
+# Two earlier shapes, and why this is not either of them. On 2026-09-20 the
+# suite was a separate job fed the build tree as an artifact -- it could only
+# run after the builds it was meant to gate, and the handover was the thing
+# that "did not make sense on a runner". Earlier on 2026-09-22 it shared the
+# build's job, which compiled once but could only report after a full build.
+# This stage compiles one target and gates the builds, because it needs
+# neither llama.cpp nor an executable.
 #
 # What a runner needs beyond its image, per platform: the Linux images ship no
 # libcurl headers (`find_package(CURL REQUIRED)` is the first hard lookup, and
@@ -155,6 +155,90 @@ jobs:
       - name: Clone llama.cpp at the pinned commit
         run: lib/scripts/cicd.sh --clone-llama
 
+  unit-tests:
+    # Stage one, beside the clone. The SOURCE suite and nothing else: this
+    # builds the `apogee_tests` target alone and runs the binary, so no
+    # `apogee` executable is produced and ctest never runs.
+    #
+    # That is the point (user decision, 2026-09-22). tests/CMakeLists.txt
+    # registers 34 add_test() entries with ctest, 18 of which spawn the built
+    # executable; none of them are compiled into the Catch2 binary. Running
+    # that binary directly therefore selects exactly the 1411 source-level
+    # cases, without naming a single test to exclude -- and drops the ctest
+    # entries with it, including the 16 script checks that needed no
+    # executable either.
+    #
+    # llama.cpp is off: it is most of the compile time, the tests reach the
+    # llamacpp backend through its injectable seam rather than the library,
+    # and the build stage below still compiles it on every platform.
+    name: unit tests ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      APOGEE_CMAKE_ARGS: -DAPOGEE_ENABLE_LLAMA=OFF
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            target: macos-arm64
+            runner: macos-14
+          - name: linux-x64
+            target: linux-x64
+            runner: ubuntu-24.04
+          - name: linux-arm64
+            target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - name: windows-x64
+            target: windows-x64
+            runner: windows-2025
+            msystem: UCRT64
+          - name: windows-arm64
+            target: windows-arm64
+            runner: windows-11-arm
+            msystem: CLANGARM64
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install libcurl headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
+      - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          install: git
+          pacboy: >-
+            toolchain:p
+            cmake:p
+            ninja:p
+            pkgconf:p
+            curl-winssl:p
+
+      - name: Unit tests
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --unit-tests --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            lib/scripts/ci-annotate.sh "unit tests ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
+            exit 1
+          }
+
+      - name: Unit tests (MSYS2 shell)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          git config --global --add safe.directory '*'
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --unit-tests --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            lib/scripts/ci-annotate.sh "unit tests ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
+            exit 1
+          }
+
   build:
     # Stage two. Every build has llama.cpp in it -- APOGEE_ENABLE_LLAMA is ON
     # by default (user decision, 2026-09-19: local inference ships with the
@@ -164,7 +248,7 @@ jobs:
     # fail-fast is off so one failing row does not cancel the others: the PR
     # is blocked either way, and the full picture is worth the runner time.
     name: build ${{ matrix.name }}
-    needs: clone-llama
+    needs: [clone-llama, unit-tests]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -226,7 +310,7 @@ jobs:
         shell: bash
         run: |
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "build ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }
@@ -242,7 +326,7 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "build ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }

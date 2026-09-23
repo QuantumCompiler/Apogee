@@ -37,6 +37,7 @@ APPS=(cli)
 
 CLEAN=0
 RUN_TESTS=0
+UNIT_TESTS=0
 CLONE_LLAMA=0
 FRESH=0
 NO_DEFER=0
@@ -58,6 +59,10 @@ Options:
   -c, --clean          Remove the target's build directory before building
   -t, --test           Run the test suite (ctest) after a successful build
                        (host-native target only — cross-built binaries can't run here)
+  -u, --unit-tests     Build ONLY the test binary and run it directly: the
+                       source-level suite, with no apogee executable built and
+                       no ctest. Implies the tests; --test is not needed.
+                       Host-native target only, same reason.
       --clone-llama    Clone llama.cpp at the commit the CLI's third_party
                        build pins, prove it resolved, and stop: the first CI
                        stage. Nothing else runs.
@@ -161,6 +166,7 @@ while [[ $# -gt 0 ]]; do
             shift ;;
         -c|--clean)  CLEAN=1 ;;
         -t|--test)   RUN_TESTS=1 ;;
+        -u|--unit-tests) UNIT_TESTS=1 ;;
         --clone-llama) CLONE_LLAMA=1 ;;
         -f|--fresh)  FRESH=1 ;;
         --no-defer)  NO_DEFER=1 ;;
@@ -240,6 +246,31 @@ build_target() {
         fi
         log "[${app}/${target}] configuring (cmake -S . -B ${build_dir})"
         cmake -S . -B "${build_dir}" ${extra[@]+"${extra[@]}"} ${env_args[@]+"${env_args[@]}"}
+    fi
+
+    # --unit-tests stops here: the one target, run straight from its build
+    # directory. Running the binary rather than ctest is the whole point --
+    # the 34 add_test() entries in tests/CMakeLists.txt are registered with
+    # CTEST, not compiled into the Catch2 binary, and 18 of them spawn the
+    # built `apogee`. Invoking apogee_tests directly therefore runs exactly
+    # the source-level cases and nothing that needs an executable, without
+    # naming a single test to exclude.
+    if [[ $UNIT_TESTS -eq 1 ]]; then
+        if [[ "$target" != "$HOST" ]]; then
+            log "[${app}/${target}] skipping unit tests: cross-built binaries can't run on ${HOST}"
+            return 0
+        fi
+        log "[${app}/${target}] building the test binary only (target apogee_tests)"
+        cmake --build "${build_dir}" --target apogee_tests -j "${JOBS}"
+
+        local unit_bin="${build_dir}/tests/apogee_tests"
+        [[ -x "$unit_bin" ]] || unit_bin="${build_dir}/tests/apogee_tests.exe"
+        [[ -x "$unit_bin" ]] || die "no test binary at ${build_dir}/tests/apogee_tests"
+
+        log "[${app}/${target}] running the source-level suite"
+        "$unit_bin"
+        log "[${app}/${target}] unit tests done"
+        return 0
     fi
 
     log "[${app}/${target}] building with ${JOBS} jobs"

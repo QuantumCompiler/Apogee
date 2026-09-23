@@ -31,8 +31,8 @@ The one build-related file outside an app directory is `.github/workflows/ci.yml
 ```
 Apogee/
 ├── .github/
-│   ├── workflows/ci.yml     — CI: two stages — clone llama.cpp, then build-and-test per platform; plus the PR-only `version bump` check (2026-09-22)
-│   └── workflows/release.yml — Release: gate (version + already-released?) → build-and-test ×5 → publish; runs on a merge to stable or a v* tag (2026-09-22)
+│   ├── workflows/ci.yml     — CI: three stages — clone llama.cpp + unit tests per platform (parallel), then build per platform; plus the PR-only `version bump` check (2026-09-22)
+│   └── workflows/release.yml — Release: gate → unit tests ×5 → build ×5 → publish; runs on a merge to stable or a v* tag (2026-09-22)
 │                              (thin caller into cicd.sh; here only because GitHub requires it)
 ├── .claude/
 │   └── skills/
@@ -615,7 +615,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 
 | Command | Does |
 |---|---|
-| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — the developer's gate before a push, and since 2026-09-22 CI's first stage too. `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops (CI's first stage; its second is this same script with `--test`, which builds and then runs the suite in one job); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
+| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — the developer's gate before a push, and since 2026-09-22 CI's first stage too. `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops (one of CI's two first-stage jobs); **`--unit-tests`** builds the `apogee_tests` target alone and runs that binary — the source-level suite, no `apogee` executable, no ctest — which is what both pipelines gate their builds on (2026-09-22); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
 | `make test` | The same thing for the CLI alone (it calls `cicd.sh`). |
 | `make build [PRESET=…]` | Configure and build one preset. |
 | `make install [PREFIX=…]` | Build, then install the binary to `$PREFIX/bin` (default `~/.local`, so no sudo). |
@@ -731,6 +731,21 @@ error: src refspec vX.Y.Z matches more than one
 ```
 
 `git checkout vX.Y.Z` also warns and picks the branch. Version-named *branches* are for releases still being built; a finished release is a tag and only a tag. Pushing as `refs/tags/vX.Y.Z` is immune either way, which is why `make release` spells it out.
+
+### Re-running a failed run
+
+Use GitHub's own **Re-run failed jobs** (run page, or `gh run rerun <id> --failed`). Nothing needs doing first — the pipeline is built to survive it:
+
+- **Artifacts are overwritable.** `upload-artifact` scopes artifacts to the *run*, not the attempt, and its default (`overwrite: false`) fails when a name already exists. Attempt 2 would rebuild everything and then die at the upload. `overwrite: true` is set for exactly this.
+- **The gate yields to an explicit re-run.** Normally it stops the run when the version is already released. On `GITHUB_RUN_ATTEMPT > 1` it proceeds anyway: pressing re-run *is* the statement of intent, and refusing it would leave a half-published release unfixable by the pipeline that made it.
+- **Publish finishes what it started.** `gh release create` makes the release and then uploads assets, so it can fail with a real release in place and assets missing. If the release exists, publish uploads into it with `--clobber` instead of failing.
+- **Releases never run concurrently.** `concurrency: release-<ref>` with `cancel-in-progress: false` — a second run queues rather than racing, and a release in flight is never cancelled partway.
+
+What a re-run does **not** bypass is the version guard: a tag disagreeing with `CMakeLists.txt` fails the gate on every attempt. That is a wrong input, not a flaky one.
+
+**The one case re-run-failed will not catch:** `windows-x64` and `windows-arm64` are `continue-on-error` in `release.yml`, so a Windows failure is reported as a *success* and is not a "failed job". To retry one, use **Re-run all jobs**, or fix the cause and merge again.
+
+In CI, re-runs are free of all this — no artifacts, no side effects. The only wrinkle is `concurrency: ci-<ref>` with `cancel-in-progress: true`: re-running an old run on a ref that has a newer run in flight will cancel one of them.
 
 ### Re-cutting a bad release
 

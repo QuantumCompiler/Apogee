@@ -86,6 +86,15 @@ TEST_CASE("the environment guards precede the first ML import", "[training][scri
 
 TEST_CASE("prepare_dataset.py converts every standard-library format",
           "[training][scripts][python]") {
+    // Both halves matter. python3 can be on PATH -- it is on the Windows
+    // runner images -- while the platform still cannot start it: child_process
+    // has no Windows implementation, so the spawn fails with "this build
+    // cannot spawn child processes". Checking only the interpreter let these
+    // three cases run and fail there (2026-09-22). supports_child_processes()
+    // is the same guard tools/shell_test.cpp uses.
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
     if (python3().empty()) {
         SKIP("no python3 on PATH");
     }

@@ -48,6 +48,16 @@ on:
         type: boolean
         default: true
 
+# One release at a time, and never cancelled. `cancel-in-progress: false` is
+# the opposite of CI's setting and deliberate: a superseded CI run is waste,
+# but a half-finished release is a tag, a release object, or a set of assets
+# in a state nobody asked for. A second run queues behind the first and then
+# finds the version already published, which is the outcome that needs no
+# cleanup.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -109,6 +119,7 @@ jobs:
           # matrix on a release that publish would then refuse to overwrite.
           if [ "$proceed" = "pending" ]; then
             if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then proceed=true;
+            elif [ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]; then proceed=true;
             elif [ "$exists" = "true" ]; then proceed=false;
             else proceed=true; fi
           fi
@@ -131,9 +142,84 @@ jobs:
             echo "Nothing to do: \`$version\` is already published. Bump \`project(... VERSION x.y.z)\` in \`lib/src/cli/CMakeLists.txt\` to cut the next one." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  unit-tests:
+    # The same source-level gate CI runs, in front of the release builds
+    # (user decision, 2026-09-22). It repeats what CI ran on this commit, and
+    # that is deliberate: a merge to `stable` starts BOTH workflows at once,
+    # so without this stage `publish` could finish before CI had an opinion.
+    # The stage is cheap -- one target, llama.cpp off, no executable -- which
+    # is what makes paying for it twice reasonable.
+    name: unit tests ${{ matrix.target }}
+    needs: gate
+    if: needs.gate.outputs.proceed == 'true'
+    runs-on: ${{ matrix.runner }}
+    env:
+      APOGEE_CMAKE_ARGS: -DAPOGEE_ENABLE_LLAMA=OFF
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            runner: macos-14
+            blocking: true
+          - target: linux-x64
+            runner: ubuntu-24.04
+            blocking: true
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            blocking: true
+          - target: windows-x64
+            runner: windows-2025
+            msystem: UCRT64
+          - target: windows-arm64
+            runner: windows-11-arm
+            msystem: CLANGARM64
+    continue-on-error: ${{ matrix.blocking != true }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install libcurl headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
+      - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          install: git
+          pacboy: >-
+            toolchain:p
+            cmake:p
+            ninja:p
+            pkgconf:p
+            curl-winssl:p
+
+      - name: Unit tests
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --unit-tests --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            lib/scripts/ci-annotate.sh "unit tests ${{ matrix.target }}" "$RUNNER_TEMP/cicd.log"
+            exit 1
+          }
+
+      - name: Unit tests (MSYS2 shell)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          git config --global --add safe.directory '*'
+          set -eo pipefail
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --unit-tests --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+            lib/scripts/ci-annotate.sh "unit tests ${{ matrix.target }}" "$RUNNER_TEMP/cicd.log"
+            exit 1
+          }
+
   build:
     name: build ${{ matrix.target }}
-    needs: gate
+    needs: [gate, unit-tests]
     if: needs.gate.outputs.proceed == 'true'
     runs-on: ${{ matrix.runner }}
     continue-on-error: ${{ matrix.blocking != true }}
@@ -183,12 +269,10 @@ jobs:
             pkgconf:p
             curl-winssl:p
 
-      # Builds AND runs the suite, in that order, in one job (user decision,
-      # 2026-09-22). `--test` costs no second compile -- ctest runs against the
-      # tree this step just produced -- so the executable that gets packaged
-      # below is the exact one the tests just passed against, llama.cpp
-      # included. A failing case fails the job, and `publish` needs every
-      # blocking row, so a release cannot outrun its own tests. On failure
+      # Builds only. The suite ran in the `unit-tests` stage above, against
+      # the source, and this job cannot start until it passed (user decision,
+      # 2026-09-22). The step after packaging still proves the artifact RUNS,
+      # which is the one executable-level check the pipeline keeps. On failure
       # lib/scripts/ci-annotate.sh publishes the log as error annotations,
       # readable through the public API without admin rights (ci.yml says why).
       - name: Build
@@ -196,7 +280,7 @@ jobs:
         shell: bash
         run: |
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "build ${{ matrix.target }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }
@@ -210,7 +294,7 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "build ${{ matrix.target }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }
@@ -265,20 +349,23 @@ jobs:
       # warning. v6 was the version that declared `runs.using: node24`; v7 is
       # current. `archive` still defaults to true, so the upload is zipped
       # exactly as before -- the only change here is the runtime.
+      # `overwrite` is what makes a re-run possible at all. Artifacts are
+      # immutable and scoped to the RUN, not the attempt, so the upload from
+      # attempt 1 is still there on attempt 2 -- and the default (`false`)
+      # fails the step when a name already exists. Re-running a failed build
+      # would die here, having rebuilt everything first.
       - uses: actions/upload-artifact@v7
         with:
           name: apogee-${{ matrix.target }}
           path: ${{ runner.temp }}/apogee-${{ matrix.target }}.*
           if-no-files-found: error
+          overwrite: true
 
   publish:
     name: publish release
     needs: [gate, build]
     runs-on: ubuntu-24.04
-    # `exists` is re-checked here and not only in the gate: the gate's answer
-    # is minutes old by now, and two runs racing to publish the same version
-    # should lose the race, not overwrite each other.
-    if: needs.gate.outputs.proceed == 'true' && needs.gate.outputs.exists != 'true' && inputs.dry_run != true
+    if: needs.gate.outputs.proceed == 'true' && inputs.dry_run != true
     steps:
       - uses: actions/checkout@v5
 
@@ -308,9 +395,19 @@ jobs:
         run: |
           set -euo pipefail
           ls -la artifacts
-          gh release create "${VERSION}" \
-            --target "${GITHUB_SHA}" \
-            --title "${VERSION}" \
-            --generate-notes \
-            artifacts/*
-          echo "published ${VERSION} at ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+          # Create, or finish creating. `gh release create` is one call but not
+          # one operation: it can make the release and then fail partway
+          # through the asset uploads, which leaves a real release missing
+          # assets. Re-running has to be able to complete that, so publishing
+          # an existing release means uploading into it rather than failing.
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            echo "release ${VERSION} exists; uploading assets into it"
+            gh release upload "${VERSION}" artifacts/* --clobber
+          else
+            gh release create "${VERSION}" \
+              --target "${GITHUB_SHA}" \
+              --title "${VERSION}" \
+              --generate-notes \
+              artifacts/*
+          fi
+          echo "published ${VERSION} at ${GITHUB_SHA} (attempt ${GITHUB_RUN_ATTEMPT})" >> "$GITHUB_STEP_SUMMARY"

@@ -374,6 +374,15 @@ TEST_CASE(
     "train_mlx.py emits the protocol under the stub mlx_lm: train lays out the data "
     "directory and forwards the flags, fuse records, infer answers",
     "[training][trainer][python]") {
+    // Both halves matter. python3 can be on PATH -- it is on the Windows
+    // runner images -- while the platform still cannot start it: child_process
+    // has no Windows implementation, so the spawn fails with "this build
+    // cannot spawn child processes". Checking only the interpreter let these
+    // three cases run and fail there (2026-09-22). supports_child_processes()
+    // is the same guard tools/shell_test.cpp uses.
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
     if (python3().empty()) {
         SKIP("no python3 on PATH");
     }
@@ -494,6 +503,15 @@ TEST_CASE(
     "train_peft.py emits the protocol under the stub transformers: the exact prompt "
     "mask, the flags, fuse and infer; its hard-exit on Apple Silicon is the first line",
     "[training][trainer][python]") {
+    // Both halves matter. python3 can be on PATH -- it is on the Windows
+    // runner images -- while the platform still cannot start it: child_process
+    // has no Windows implementation, so the spawn fails with "this build
+    // cannot spawn child processes". Checking only the interpreter let these
+    // three cases run and fail there (2026-09-22). supports_child_processes()
+    // is the same guard tools/shell_test.cpp uses.
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
     if (python3().empty()) {
         SKIP("no python3 on PATH");
     }
