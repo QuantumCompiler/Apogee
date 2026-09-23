@@ -231,7 +231,7 @@ When applicable, also update the root `README.md` if the change affects how some
 
 ### Versioning
 
-Feature releases are `v0.x.0`; patch releases are `v0.x.y`. Development happens on a branch named for the upcoming release (currently `v0.1.0`) and merges into `stable` when the release is done. ROADMAP.md tracks each release at the theme level; MILESTONES.md records what actually shipped in detail. _TODO:_ the tagging/release procedure itself is not yet defined.
+Feature releases are `v0.x.0`; patch releases are `v0.x.y`. Development happens on a branch named for the release being built and merges into `stable` when that release is done — `v0.1.0` was tagged on 2026-09-22, so the next branch is `v0.1.1`. ROADMAP.md tracks each release at the theme level; MILESTONES.md records what actually shipped in detail. The version itself lives in exactly one place: the `project(... VERSION x.y.z)` call in `lib/src/cli/CMakeLists.txt`, which flows into `apogee version`. A **tag** is what cuts a release — the policy is [below](#release-and-install-infrastructure), the procedure is in [DEVELOPER.md](DEVELOPER.md#cutting-a-release).
 
 ---
 
@@ -270,4 +270,12 @@ When a work item ships, in the same change:
 
 ## Release and Install Infrastructure
 
-Development happens on a version-named branch (currently `v0.1.0`) and merges into `stable` when the release is complete. _TODO:_ build, packaging, tagging, and install steps — to be defined once the stack is chosen.
+Development happens on a version-named branch and merges into `stable` when the release is complete. **A release is cut by pushing a tag, and by nothing else.** [`.github/workflows/release.yml`](../../../.github/workflows/release.yml) triggers on `push: tags: v*`, builds each of the five targets on its own native runner **through `lib/scripts/cicd.sh`** — the same script CI and local builds use, so a release binary cannot diverge from a tested one — proves each staged binary actually runs, and then publishes a GitHub Release carrying one archive per target.
+
+What ships: `apogee-<target>.tar.gz` for the three POSIX targets and `apogee-<target>.zip` for the two Windows ones, each containing the binary and the four completion stubs. Completions ride inside the archive because they are part of the install contract, and `install.sh` / `install.ps1` fetch that one archive for the host.
+
+Two properties worth knowing before reading a green run as a full release. The three POSIX targets are `blocking: true` — if one fails, `publish` never runs and **no release is created**, though the tag remains pushed. The two Windows targets are not, so a Windows failure publishes a release with three assets instead of five and says so nowhere on the release page; the run summary is the only place that records it. That asymmetry is deliberate (the workflow header explains why: Windows is verified more weakly than a POSIX target), but it means the run, not the release page, is the thing to check.
+
+Nothing here signs anything — macOS ships unsigned (user decision, 2026-09-01), and `apogee check` detects the quarantine attribute a browser download sets and prints the exact `xattr -d` fix.
+
+The step-by-step procedure — version bump, tag, push, dry run, and how to re-cut a bad release — is in [DEVELOPER.md](DEVELOPER.md#cutting-a-release).

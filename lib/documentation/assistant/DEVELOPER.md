@@ -681,4 +681,58 @@ Vendored code goes under `lib/src/cli/third_party/` instead, and is **never edit
 
 ## Cutting a release
 
-See [CLAUDE.md](CLAUDE.md) → **Release and Install Infrastructure**: development happens on a version-named branch (currently `v0.1.0`) and merges into `stable`; the tagging/packaging procedure is still a `_TODO:_` there. The version itself is set by the `project()` call in `lib/src/cli/CMakeLists.txt` and flows into `apogee --version` from there.
+A release is cut by pushing a tag. [`.github/workflows/release.yml`](../../../.github/workflows/release.yml) triggers on `push: tags: v*`, builds all five targets through `lib/scripts/cicd.sh`, and publishes a GitHub Release with one archive per target. [CLAUDE.md](CLAUDE.md#release-and-install-infrastructure) covers what the pipeline ships and how its blocking/non-blocking split behaves; this is the procedure.
+
+### 1. Bump the version — on the branch, before the merge
+
+`project(... VERSION x.y.z)` in `lib/src/cli/CMakeLists.txt` is the single source of the version, and it flows into `apogee version` from there. Commit the bump on the version branch along with the rest of the release.
+
+**Nothing verifies the bump against the tag name.** The pipeline's "Verify the staged binary runs" step runs `apogee version` but never reads what it printed, so a forgotten bump ships a `vX.Y.Z` release whose binary reports the previous version, and the build stays green. Until that gate exists, this step is on you.
+
+### 2. Merge, then sync `stable`
+
+```sh
+git checkout stable && git pull
+```
+
+### 3. Tag and push
+
+```sh
+git tag -a vX.Y.Z -m "Apogee vX.Y.Z"
+git push origin refs/tags/vX.Y.Z
+```
+
+Annotated (`-a`), so the tag carries a tagger and a message and `git describe` behaves. Pushed as fully-qualified `refs/tags/` — see the pitfall below. The tag must start with `v` or the workflow does not trigger at all.
+
+### 4. Open the next dev branch
+
+```sh
+git checkout -b vX.Y.Z+1 && git push -u origin vX.Y.Z+1
+```
+
+Named for the release being *built*, never one already tagged.
+
+### Dry run
+
+The workflow takes a `workflow_dispatch` with a `dry_run` input (default on): Actions → Release → "Run workflow". It runs the identical matrix — same build, same staging, same run-verification — and skips only `publish`. All five archives land as Actions artifacts to download and inspect, with no tag spent and no public release to clean up. Worth doing whenever the pipeline itself changed.
+
+### Pitfall: never name a branch after a tag
+
+If both `refs/heads/vX.Y.Z` and `refs/tags/vX.Y.Z` exist, git cannot resolve the short name and every push fails with:
+
+```
+error: src refspec vX.Y.Z matches more than one
+```
+
+`git checkout vX.Y.Z` also warns and picks the branch. Version-named *branches* are for releases still being built; a finished release is a tag and only a tag. Pushing as `refs/tags/vX.Y.Z` is immune to the ambiguity either way, which is why step 3 spells it out.
+
+### Re-cutting a bad release
+
+Deleting the tag alone leaves an orphaned GitHub Release behind, and the next `gh release create` fails against it. Delete both:
+
+```sh
+git push --delete origin vX.Y.Z && git tag -d vX.Y.Z
+gh release delete vX.Y.Z --cleanup-tag
+```
+
+`gh` ([cli.github.com](https://cli.github.com)) is not required to cut a release — the pipeline uses its own `github.token` on the runner — but it is the only way to delete or repair one from a terminal, and `gh run watch` follows a build live.
