@@ -183,11 +183,12 @@ jobs:
             pkgconf:p
             curl-winssl:p
 
-      # The suite does not run here (user decision, 2026-09-22: the suite is a
-      # CI stage now, but a RELEASE one would only re-run what CI already ran
-      # on this very commit). A tag is cut from a branch whose builds AND
-      # tests CI has already proven, and the step
-      # after packaging still proves the artifact RUNS. On failure
+      # Builds AND runs the suite, in that order, in one job (user decision,
+      # 2026-09-22). `--test` costs no second compile -- ctest runs against the
+      # tree this step just produced -- so the executable that gets packaged
+      # below is the exact one the tests just passed against, llama.cpp
+      # included. A failing case fails the job, and `publish` needs every
+      # blocking row, so a release cannot outrun its own tests. On failure
       # lib/scripts/ci-annotate.sh publishes the log as error annotations,
       # readable through the public API without admin rights (ci.yml says why).
       - name: Build
@@ -195,7 +196,7 @@ jobs:
         shell: bash
         run: |
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "build ${{ matrix.target }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }
@@ -209,7 +210,7 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           set -eo pipefail
-          lib/scripts/cicd.sh --platform ${{ matrix.target }} --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
+          lib/scripts/cicd.sh --platform ${{ matrix.target }} --test --no-defer 2>&1 | tee "$RUNNER_TEMP/cicd.log" || {
             lib/scripts/ci-annotate.sh "build ${{ matrix.target }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }

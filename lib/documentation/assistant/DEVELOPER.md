@@ -31,8 +31,8 @@ The one build-related file outside an app directory is `.github/workflows/ci.yml
 ```
 Apogee/
 ├── .github/
-│   ├── workflows/ci.yml     — CI: three stages — clone llama.cpp and the suite per platform (in parallel), then build per platform; plus the PR-only `version bump` check (2026-09-22)
-│   └── workflows/release.yml — Release: gate (version + already-released?) → build ×5 → publish; runs on a merge to stable or a v* tag (2026-09-22)
+│   ├── workflows/ci.yml     — CI: two stages — clone llama.cpp, then build-and-test per platform; plus the PR-only `version bump` check (2026-09-22)
+│   └── workflows/release.yml — Release: gate (version + already-released?) → build-and-test ×5 → publish; runs on a merge to stable or a v* tag (2026-09-22)
 │                              (thin caller into cicd.sh; here only because GitHub requires it)
 ├── .claude/
 │   └── skills/
@@ -615,7 +615,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 
 | Command | Does |
 |---|---|
-| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — the developer's gate before a push, and since 2026-09-22 CI's first stage too. `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops (one of the two first-stage CI jobs; the other is `--test`, which since 2026-09-22 runs the suite per platform with llama.cpp off); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
+| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — the developer's gate before a push, and since 2026-09-22 CI's first stage too. `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops (CI's first stage; its second is this same script with `--test`, which builds and then runs the suite in one job); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
 | `make test` | The same thing for the CLI alone (it calls `cicd.sh`). |
 | `make build [PRESET=…]` | Configure and build one preset. |
 | `make install [PREFIX=…]` | Build, then install the binary to `$PREFIX/bin` (default `~/.local`, so no sudo). |
