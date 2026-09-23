@@ -31,7 +31,8 @@ The one build-related file outside an app directory is `.github/workflows/ci.yml
 ```
 Apogee/
 ├── .github/
-│   └── workflows/ci.yml     — CI: two stages — clone llama.cpp, then build per platform (nothing else; no suite run, 2026-09-20)
+│   ├── workflows/ci.yml     — CI: three stages — clone llama.cpp + unit tests per platform (parallel), then build per platform; plus the PR-only `version bump` check (2026-09-22)
+│   └── workflows/release.yml — Release: gate → unit tests ×5 → build ×5 → publish; runs on a merge to stable or a v* tag (2026-09-22)
 │                              (thin caller into cicd.sh; here only because GitHub requires it)
 ├── .claude/
 │   └── skills/
@@ -614,7 +615,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 
 | Command | Does |
 |---|---|
-| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — the developer's gate before a push (CI builds without the suite, 2026-09-20). `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops (the first CI stage; the suite itself never runs on a runner — `--test` is the developer's gate, 2026-09-20); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
+| `lib/scripts/cicd.sh --test` | **The repo-wide entry point.** Builds every app for the host target and runs its suite — the developer's gate before a push, and since 2026-09-22 CI's first stage too. `--platform`, `--fresh`, `--clean`, `--jobs` too; `--no-defer` turns a target this host cannot build from a deferral into a failure (every CI runner passes it); `--clone-llama` proves the llama.cpp pin resolves and stops (one of CI's two first-stage jobs); **`--unit-tests`** builds the `apogee_tests` target alone and runs that binary — the source-level suite, no `apogee` executable, no ctest — which is what both pipelines gate their builds on (2026-09-22); `APOGEE_CMAKE_ARGS` appends configure flags (a toolchain file, e.g. a MinGW cross-compile from macOS). |
 | `make test` | The same thing for the CLI alone (it calls `cicd.sh`). |
 | `make build [PRESET=…]` | Configure and build one preset. |
 | `make install [PREFIX=…]` | Build, then install the binary to `$PREFIX/bin` (default `~/.local`, so no sudo). |
@@ -681,4 +682,77 @@ Vendored code goes under `lib/src/cli/third_party/` instead, and is **never edit
 
 ## Cutting a release
 
-See [CLAUDE.md](CLAUDE.md) → **Release and Install Infrastructure**: development happens on a version-named branch (currently `v0.1.0`) and merges into `stable`; the tagging/packaging procedure is still a `_TODO:_` there. The version itself is set by the `project()` call in `lib/src/cli/CMakeLists.txt` and flows into `apogee --version` from there.
+**A merge into `stable` is a release** (user decision, 2026-09-22). The version in `project(... VERSION x.y.z)` — `lib/src/cli/CMakeLists.txt`, the one place it lives — decides which one, and whether there is one at all. Nothing else needs doing.
+
+```
+bump VERSION on the branch  ->  PR  ->  merge  ->  release published
+```
+
+[`release.yml`](../../../.github/workflows/release.yml) runs on the push to `stable`. Its `gate` job reads `CMakeLists.txt`, and if that version has no release yet, the five builds run and `publish` creates **the tag and the release together**. If it does have one, the run stops at the gate and nothing is published — which is how a docs or hotfix merge into `stable` declines to cut a release, with no exception rule required.
+
+### What you actually do
+
+1. **Bump `project(... VERSION x.y.z)`** on the version branch, committed with the rest of the release.
+2. **Open the PR.** CI's `version bump` check fails if that version is already released — that is the moment a forgotten bump surfaces, rather than after the merge when the release silently does not happen.
+3. **Merge.** The release publishes itself.
+4. **Open the next dev branch** from `stable`, named for the release being *built*:
+   ```sh
+   git checkout stable && git pull && git checkout -b vX.Y.Z+1 && git push -u origin vX.Y.Z+1
+   ```
+
+### The manual path
+
+Still supported, as the escape hatch — for re-cutting a release, or for tagging a commit that is not the tip of a merge:
+
+```sh
+make -C lib/src/cli release VERSION=x.y.z
+```
+
+Preflights the tree, branch, version and tag, asks once, then tags and pushes; the tag push triggers the same workflow. `make -C lib/src/cli release-check VERSION=x.y.z` runs the checks and pushes nothing. `VERSION` is the only required input; `REMOTE`, `RELEASE_BRANCH` and `CONFIRM=yes` are the overrides.
+
+### The version guard, and where it lives
+
+A tag whose name disagrees with `CMakeLists.txt` would publish a release whose binary reports a different version, and the build would stay green throughout — the pipeline's "Verify the staged binary runs" step runs `apogee version` but never reads what it printed. That hole is now closed in **two** places: `make release` refuses locally, and `release.yml`'s `gate` job fails the run before any runner starts. The gate is the one that cannot be skipped; a hand-pushed tag still meets it.
+
+### No orphaned tags
+
+`publish` creates the tag and the release in a single `gh release create --target <sha>`, and nothing earlier in the workflow pushes a tag. A blocking build failure therefore leaves nothing behind: fix the build and merge again, with no tag to delete first. This is the one real behavioural difference from the old flow, where the tag push was what started everything and a failed build stranded it.
+
+### Dry run
+
+`make release-check VERSION=x.y.z` is the local half — tree and version, no remote. For the pipeline, use the `workflow_dispatch` with `dry_run` (default on): Actions → Release → "Run workflow". A dispatch always builds, even when the version is already released, so a dry run is never silently skipped; only `publish` is. All five archives land as Actions artifacts to inspect. Worth doing whenever the pipeline itself changed.
+
+### Pitfall: never name a branch after a tag
+
+If both `refs/heads/vX.Y.Z` and `refs/tags/vX.Y.Z` exist, git cannot resolve the short name and every push fails with:
+
+```
+error: src refspec vX.Y.Z matches more than one
+```
+
+`git checkout vX.Y.Z` also warns and picks the branch. Version-named *branches* are for releases still being built; a finished release is a tag and only a tag. Pushing as `refs/tags/vX.Y.Z` is immune either way, which is why `make release` spells it out.
+
+### Re-running a failed run
+
+Use GitHub's own **Re-run failed jobs** (run page, or `gh run rerun <id> --failed`). Nothing needs doing first — the pipeline is built to survive it:
+
+- **Artifacts are overwritable.** `upload-artifact` scopes artifacts to the *run*, not the attempt, and its default (`overwrite: false`) fails when a name already exists. Attempt 2 would rebuild everything and then die at the upload. `overwrite: true` is set for exactly this.
+- **The gate yields to an explicit re-run.** Normally it stops the run when the version is already released. On `GITHUB_RUN_ATTEMPT > 1` it proceeds anyway: pressing re-run *is* the statement of intent, and refusing it would leave a half-published release unfixable by the pipeline that made it.
+- **Publish finishes what it started.** `gh release create` makes the release and then uploads assets, so it can fail with a real release in place and assets missing. If the release exists, publish uploads into it with `--clobber` instead of failing.
+- **Releases never run concurrently.** `concurrency: release-<ref>` with `cancel-in-progress: false` — a second run queues rather than racing, and a release in flight is never cancelled partway.
+
+What a re-run does **not** bypass is the version guard: a tag disagreeing with `CMakeLists.txt` fails the gate on every attempt. That is a wrong input, not a flaky one.
+
+**The one case re-run-failed will not catch:** `windows-x64` and `windows-arm64` are `continue-on-error` in `release.yml`, so a Windows failure is reported as a *success* and is not a "failed job". To retry one, use **Re-run all jobs**, or fix the cause and merge again.
+
+In CI, re-runs are free of all this — no artifacts, no side effects. The only wrinkle is `concurrency: ci-<ref>` with `cancel-in-progress: true`: re-running an old run on a ref that has a newer run in flight will cancel one of them.
+
+### Re-cutting a bad release
+
+Delete the release and its tag, fix, and merge or tag again:
+
+```sh
+gh release delete vX.Y.Z --cleanup-tag
+```
+
+`gh` ([cli.github.com](https://cli.github.com)) is not needed to cut a release — the pipeline uses its own `github.token` on the runner — but it is the only way to delete or repair one from a terminal, and `gh run watch` follows a build live.

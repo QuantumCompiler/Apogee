@@ -33,7 +33,7 @@ The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](S
 
 See the [`backlog/`](../backlog/README.md) index for the full queue (priority-ordered; topmost claimable item = next to build).
 
-**Every v0.1.0 item has shipped** (Milestones A–K). What remains before the release is cutting it: the tag → build → publish pipeline exists and is syntactically valid, but **no tag has been pushed**, so the first release is also the first run of that pipeline.
+**Every v0.1.0 item has shipped** (Milestones A–K), and **`v0.1.0` was tagged on 2026-09-22** — the first tag pushed, and therefore the first real exercise of the tag → build → publish pipeline rather than a syntactic one. The procedure it settled is written down in [DEVELOPER.md](DEVELOPER.md#cutting-a-release).
 
 *Decisions taken along the way: config format, data-dir name, web-search strategy, in-process llama.cpp, local vision's home, and — 2026-09-01 — GitHub Releases as the distribution host, self-update deferred, macOS unsigned, and all six targets shipping from the first tag. See the milestones that consumed each.*
 

@@ -34,7 +34,7 @@ LINT_CXX     ?= $(dir $(CLANG_TIDY))clang++
 # formatted or linted.
 SOURCES := $(shell find source tests \( -name '*.cpp' -o -name '*.h' \) 2>/dev/null)
 
-.PHONY: help build install install-completions install-zsh-completion test clean fresh format format-check lint no-llama all
+.PHONY: help build install install-completions install-zsh-completion test clean fresh format format-check lint no-llama all release release-check
 
 help:
 	@echo "Apogee CLI — build wrapper (repo-wide entry point: lib/scripts/cicd.sh)"
@@ -52,6 +52,11 @@ help:
 	@echo "  no-llama      The fast developer build: everything except llama.cpp (ON by default)"
 	@echo "  clean         Remove this preset's build directory"
 	@echo "  fresh         Clean-room clone-and-build of the current branch"
+	@echo ""
+	@echo "Cutting a release (DEVELOPER.md -> Cutting a release):"
+	@echo "  release-check Preflight a release -- checks only, pushes nothing"
+	@echo "  release       Preflight, then tag $(RELEASE_BRANCH) and push; the push cuts it"
+	@echo "                  make release VERSION=0.1.1"
 	@echo ""
 	@echo "Presets are the five release targets plus 'default' (host native):"
 	@echo "  linux-x64  linux-arm64  macos-arm64  windows-x64  windows-arm64"
@@ -171,3 +176,108 @@ lint:
 		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null
 	@$(CLANG_TIDY) -p $(LINT_DIR) --quiet $(filter %.cpp,$(SOURCES))
 	@echo "lint OK"
+
+# ---------------------------------------------------------------------------
+# Cutting a release
+#
+# Thin by the same rule as the rest of this file: the release is built and
+# published by .github/workflows/release.yml on GitHub's runners, and nothing
+# here builds, packages or uploads anything.
+#
+# Since 2026-09-22 this is the ESCAPE HATCH, not the everyday path: a merge
+# into stable publishes the version CMakeLists.txt names, so the normal way to
+# cut a release is to bump that version and merge the PR. This target is for a
+# re-cut, or for tagging a commit that is not the tip of a merge. It remains
+# worth keeping because the preflight below is the same set of mistakes either
+# path can make, and it catches them before the remote hears about them.
+#
+#     make release-check VERSION=0.1.1   # preflight only, pushes nothing
+#     make release VERSION=0.1.1         # preflight, confirm, tag, push
+#
+# The checks exist because each one is a real way to ship a broken release:
+# a version in CMakeLists.txt that disagrees with the tag produces a green
+# build whose binary reports the wrong version (the workflow runs
+# `apogee version` but never reads what it printed), and a BRANCH sharing a
+# tag's name makes every later `git push origin vX.Y.Z` fail with
+# "src refspec ... matches more than one".
+#
+# The suite is deliberately NOT run here. Since 2026-09-22 CI runs it per
+# platform, so a tag cut from a merged branch has already been tested; making
+# this target rebuild and re-run it would only delay the push. `make test`
+# remains the gate for anything not yet through CI, and the confirmation
+# prompt says so rather than pretending otherwise.
+# ---------------------------------------------------------------------------
+
+REMOTE         ?= origin
+RELEASE_BRANCH ?= stable
+# CONFIRM=yes skips the interactive prompt, for a scripted release.
+CONFIRM        ?=
+
+# Accept 0.1.1 and v0.1.1 alike: the tag always carries the v, the CMake
+# project() call never does.
+VERSION_NUM := $(patsubst v%,%,$(VERSION))
+TAG         := v$(VERSION_NUM)
+
+# `git branch --show-current` and not `git rev-parse --abbrev-ref HEAD`: the
+# latter disambiguates to "heads/<name>" the moment a tag shares the branch's
+# name, which is precisely the situation the tag check below exists to catch.
+release-check:
+	@set -euo pipefail; \
+	if [ -z "$(VERSION_NUM)" ]; then \
+	    echo "error: VERSION is required -- e.g. make release VERSION=0.1.1" >&2; exit 1; fi; \
+	if ! printf '%s' "$(VERSION_NUM)" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+	    echo "error: VERSION must be x.y.z (got '$(VERSION_NUM)')" >&2; exit 1; fi; \
+	branch="$$(git branch --show-current)"; \
+	if [ -z "$$branch" ]; then \
+	    echo "error: HEAD is detached; a release is cut from '$(RELEASE_BRANCH)'" >&2; exit 1; fi; \
+	if [ "$$branch" != "$(RELEASE_BRANCH)" ]; then \
+	    echo "error: on '$$branch'; a release is cut from '$(RELEASE_BRANCH)'" >&2; \
+	    echo "       git checkout $(RELEASE_BRANCH) && git pull" >&2; exit 1; fi; \
+	if ! git diff --quiet || ! git diff --cached --quiet; then \
+	    echo "error: working tree is dirty; commit or stash before tagging" >&2; exit 1; fi; \
+	git fetch --quiet $(REMOTE) $(RELEASE_BRANCH); \
+	if [ "$$(git rev-parse HEAD)" != "$$(git rev-parse $(REMOTE)/$(RELEASE_BRANCH))" ]; then \
+	    echo "error: $(RELEASE_BRANCH) is not in sync with $(REMOTE)/$(RELEASE_BRANCH)" >&2; exit 1; fi; \
+	cmake_version="$$(sed -n 's/^[[:space:]]*VERSION[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' CMakeLists.txt | head -1)"; \
+	if [ "$$cmake_version" != "$(VERSION_NUM)" ]; then \
+	    echo "error: CMakeLists.txt says VERSION $$cmake_version, but the tag would be $(TAG)" >&2; \
+	    echo "       bump project(... VERSION $(VERSION_NUM)) and commit it first -- otherwise" >&2; \
+	    echo "       the release ships a binary whose 'apogee version' reports $$cmake_version" >&2; exit 1; fi; \
+	if git show-ref --verify --quiet "refs/heads/$(TAG)"; then \
+	    echo "error: a BRANCH named $(TAG) exists; git cannot then resolve the tag by name" >&2; \
+	    echo "       git branch -D $(TAG)" >&2; exit 1; fi; \
+	if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
+	    echo "error: tag $(TAG) already exists locally (git tag -d $(TAG) to redo it)" >&2; exit 1; fi; \
+	if git ls-remote --exit-code --tags $(REMOTE) "refs/tags/$(TAG)" >/dev/null 2>&1; then \
+	    echo "error: tag $(TAG) is already on $(REMOTE) -- that release is cut" >&2; exit 1; fi; \
+	echo "preflight OK"; \
+	echo "  branch   $(RELEASE_BRANCH) @ $$(git rev-parse --short HEAD), in sync with $(REMOTE)"; \
+	echo "  version  CMakeLists.txt $$cmake_version == $(TAG)"; \
+	echo "  tag      $(TAG) is free locally and on $(REMOTE)"
+
+release: release-check
+	@set -euo pipefail; \
+	if [ "$(CONFIRM)" != "yes" ]; then \
+	    echo ""; \
+	    echo "Pushing $(TAG) to $(REMOTE) builds all five targets and publishes a PUBLIC"; \
+	    echo "GitHub release. The test suite is your gate, not the pipeline's -- run"; \
+	    echo "'make test' first if you have not."; \
+	    printf "Push %s? [y/N] " "$(TAG)"; \
+	    read -r reply </dev/tty; \
+	    case "$$reply" in y|Y|yes|YES) ;; *) echo "aborted; nothing was tagged or pushed"; exit 1 ;; esac; \
+	fi; \
+	git tag -a "$(TAG)" -m "Apogee $(TAG)"; \
+	git push "$(REMOTE)" "refs/tags/$(TAG)"; \
+	echo ""; \
+	echo "pushed $(TAG) -- the Release workflow is now running."; \
+	if command -v gh >/dev/null 2>&1; then \
+	    echo "  gh run watch \$$(gh run list --workflow=Release --limit 1 --json databaseId -q '.[0].databaseId')"; \
+	else \
+	    url="$$(git remote get-url $(REMOTE))"; \
+	    case "$$url" in \
+	        *github.com*) echo "  https://github.com/$$(printf '%s' "$$url" | sed -e 's#.*github.com[:/]##' -e 's#\.git$$##')/actions" ;; \
+	        *)            echo "  watch it on the repository's Actions tab" ;; \
+	    esac; \
+	fi; \
+	echo ""; \
+	echo "Next: open the branch for the release after this one, from $(RELEASE_BRANCH)."
