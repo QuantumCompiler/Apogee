@@ -10,6 +10,25 @@ class App;
 
 namespace apogee::commands {
 
+/// The type name that registers an option's value as a configured backend's
+/// name: `->type_name(kBackendValue)` on a flag or a positional, on any
+/// subcommand at any depth.
+///
+/// **This is the completion registration, and the only one.** Shell completion
+/// reads it out of the live parser (`specs_from_app`), so a backend-valued
+/// option completes to the user's backends the moment it is declared -- and
+/// `--help` shows BACKEND where it showed TEXT, so the same word documents the
+/// argument. It replaced a list keyed by spelling, which offered backends for
+/// `config add-backend --model` (a vendor model id) and nothing for `--judge`.
+inline constexpr const char* kBackendValue = "BACKEND";
+
+/// The type name that registers an option's value as a filesystem path --
+/// wherever a path is one accepted form, "a kit name or path" included -- so
+/// completion offers the shell's file names there and nowhere else. An
+/// untagged value is free text, and TAB says what it wants instead of listing
+/// files: before, `--model <TAB>` offered the working directory's contents.
+inline constexpr const char* kPathValue = "PATH";
+
 /// Root-level state every subcommand can read.
 ///
 /// Populated by CLI11 while it parses, which means a command must read these

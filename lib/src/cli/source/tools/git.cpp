@@ -157,7 +157,7 @@ std::string resolve_review_ref(const Git& git, const std::string& ref, const std
     }
     if (do_fetch) {
         (void)git.quiet({"fetch", remote, ref});
-        for (const std::string candidate : {remote + "/" + ref, std::string{"FETCH_HEAD"}}) {
+        for (const std::string& candidate : {remote + "/" + ref, std::string{"FETCH_HEAD"}}) {
             if (git.is_local_ref(candidate)) {
                 return candidate;
             }

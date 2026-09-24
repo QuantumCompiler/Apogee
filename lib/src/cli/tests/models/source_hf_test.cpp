@@ -114,9 +114,9 @@ TEST_CASE("a repo with several gguf files refuses and lists them", "[models][hf]
 
 TEST_CASE("a SafeTensors repo names the conversion path", "[models][hf]") {
     // SPEC lists SafeTensors in scope, so "no .gguf" alone reads as a product
-    // limitation rather than as a step the user can take. Apogee does not run
-    // the converter itself -- it needs Python with torch and transformers,
-    // which a C++ harness cannot assume and should not install for someone.
+    // limitation rather than as a step the user can take. The pull never
+    // converts on its own -- the converter needs torch and transformers, which
+    // a user installs on purpose -- but it names the command that does.
     auto client =
         client_for({{.status = 200, .body = repo_json({"README.md", "model.safetensors"})}});
 
@@ -127,7 +127,7 @@ TEST_CASE("a SafeTensors repo names the conversion path", "[models][hf]") {
     CHECK(error.find("no .gguf") != std::string::npos);
     CHECK(error.find("SafeTensors") != std::string::npos);
     // The actual next step, not just a diagnosis.
-    CHECK(error.find("convert_hf_to_gguf.py") != std::string::npos);
+    CHECK(error.find("apogee models convert owner/repo") != std::string::npos);
 }
 
 TEST_CASE("a repo with neither says so without mentioning SafeTensors", "[models][hf]") {
@@ -282,7 +282,7 @@ TEST_CASE("snapshot and dataset file filters, and the directory name", "[models]
           "Owner--Repo-Name");
 }
 
-TEST_CASE("a GGUF-less SafeTensors repository names --safetensors beside the converter",
+TEST_CASE("a GGUF-less SafeTensors repository names the pull and the convert that follow",
           "[models][hf]") {
     auto client = client_for({FakeTransport::Reply{
         .status = 200, .body = repo_json({"config.json", "model.safetensors"})}});
@@ -290,7 +290,10 @@ TEST_CASE("a GGUF-less SafeTensors repository names --safetensors beside the con
     std::string error;
     CHECK_FALSE(apogee::models::resolve_file(*client, ref, "", {}, error));
     CHECK(error.find("apogee models pull owner/repo --safetensors") != std::string::npos);
-    CHECK(error.find("convert_hf_to_gguf.py") != std::string::npos);
+    // The next step is Apogee's own command, not a script to find and run by
+    // hand: the vendored converter and its environment already ship.
+    CHECK(error.find("apogee models convert owner/repo owner--repo.gguf") != std::string::npos);
+    CHECK(error.find("train setup --with convert") != std::string::npos);
     const apogee::models::HfListing listing = apogee::models::list_gguf_files(
         *client_for({FakeTransport::Reply{.status = 200,
                                           .body = repo_json({"a.safetensors", "b.safetensors"})}}),

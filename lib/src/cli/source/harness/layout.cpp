@@ -24,7 +24,10 @@ constexpr std::array<LayoutEntry, 13> kDirectories{{
     {"config", "config.yaml and anything else the config engine owns", true, true},
     {"logs", "operational log, one file per day", false, true},
     {"sessions", "persisted chat transcripts", true, true},
-    {"models", "GGUF models you supply -- Apogee ships and downloads none", false, true},
+    {"models",
+     "the model store: <model>/gguf and <model>/safetensors, one directory per set of weights "
+     "(models/store.h)",
+     false, true},
     {"embeddings", "vector stores for RAG", false, true},
     {"notes", "notes the model keeps for you (the write_note / read_note tools)", false, true},
     {"mcp", "MCP servers scaffolded by 'apogee mcp create', one directory each", false, true},

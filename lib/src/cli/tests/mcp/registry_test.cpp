@@ -173,7 +173,7 @@ TEST_CASE("built-ins dispatch identically with zero, one failed, or one connecte
     native.name = "read_file";
     native.description = "native";
     native.run = [](std::string_view) { return apogee::agent::ToolOutcome{"native ran", false}; };
-    for (const std::vector<ServerSpec> servers :
+    for (const std::vector<ServerSpec>& servers :
          {std::vector<ServerSpec>{}, std::vector<ServerSpec>{server("dying", "dying")},
           std::vector<ServerSpec>{server("well", "well")}}) {
         const Run run{servers};

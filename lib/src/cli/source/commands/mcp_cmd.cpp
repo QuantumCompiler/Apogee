@@ -73,7 +73,8 @@ void bind_create(CLI::App& parent, const RootContext& context) {
         "create", "Scaffold a runnable Python MCP server, or register an existing executable");
     cmd->add_option("name", *name, "The server's name (letters, digits, _ and -)")->required();
     cmd->add_option("--command", *command,
-                    "Register this executable instead of scaffolding a server");
+                    "Register this executable instead of scaffolding a server")
+        ->type_name(kPathValue);
     cmd->add_option("--args", *args, "Arguments for --command")->needs("--command");
     cmd->add_flag("--force", *force, "Replace an existing server of the same name");
     cmd->callback([&context, name, command, args, force]() {

@@ -1,12 +1,38 @@
 #compdef apogee
 # Zsh completion for apogee. See apogee.bash for why this only forwards.
 _apogee() {
-    local -a candidates
-    candidates=(${(f)"$(apogee __complete ${words[2,CURRENT]} 2>/dev/null)"})
-    if (( ${#candidates} )); then
-        compadd -- $candidates
-    else
-        _files
+    local -a lines
+    local directive=:files
+    # Quoted with (@): an unquoted array drops empty elements, and the word
+    # under the cursor is empty at a fresh <TAB> -- so `apogee models <TAB>`
+    # arrived as `__complete models`, "still typing models", and no verb
+    # below the top level ever completed.
+    lines=(${(f)"$(APOGEE_COMPLETION_PROTOCOL=2 apogee __complete "${(@)words[2,CURRENT]}" 2>/dev/null)"})
+    # The first line says what the rest mean. A binary too old to send one
+    # sends bare candidates, which is `:values` -- or nothing, which is files.
+    if [[ ${lines[1]} == :* ]]; then
+        directive=${lines[1]}
+        shift lines
+    elif (( ${#lines} )); then
+        directive=:values
     fi
+    case $directive in
+        :values) (( ${#lines} )) && compadd -- $lines ;;
+        # Free text, a number, a name: say what it is, and never offer file
+        # names for a word that is not a path. No `--`: _message takes the
+        # word after -r as the message, whatever it is. `%` doubled, because
+        # that message is a prompt-style format.
+        :hint\ *) _message -r "${${directive#:hint }//\%/%%}" ;;
+        *) _files ;;
+    esac
 }
-compdef _apogee apogee
+
+# Both installers put this file on fpath, where compinit autoloads it as the
+# BODY of _apogee: that body defines the function above and must then run it,
+# or the first <TAB> of every shell completes nothing. Sourced, it registers
+# the function instead.
+if [[ ${funcstack[1]} == _apogee ]]; then
+    _apogee "$@"
+else
+    compdef _apogee apogee
+fi

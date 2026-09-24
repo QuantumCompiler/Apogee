@@ -108,6 +108,11 @@ struct AcquireResult {
 /// tokenizer, a dataset file: rungs 1-3 and 5, with the header rung skipped
 /// and the sidecar saying so (`header_checked` false, not a lie about a
 /// parse that never ran).
+///
+/// The sidecar is RETURNED, never written beside the file: its derived name
+/// (`config.json` -> `config.json`, `tokenizer.model` -> `tokenizer.json`)
+/// collides with the files a repository ships. A tree's caller records them
+/// all in one place instead (`write_snapshot`).
 [[nodiscard]] AcquireResult acquire_file(const std::filesystem::path& destination,
                                          const SourcePromise& promise, const ByteSource& source,
                                          const ProgressFn& progress = {});

@@ -7,7 +7,8 @@
 #
 # Adding a dependency:
 #   1. Declare it here with a PINNED GIT_TAG (never a branch) + FIND_PACKAGE_ARGS.
-#   2. FetchContent_MakeAvailable it here.
+#   2. apogee_make_available it here (below) -- never FetchContent_MakeAvailable
+#      directly, or it builds with its warnings on and its own policy floor.
 #   3. target_link_libraries against it in the consuming target's CMakeLists.
 #   4. Record the pick in DEVELOPER.md -> Dependencies.
 #
@@ -52,6 +53,36 @@
 include(FetchContent)
 
 set(FETCHCONTENT_QUIET OFF)
+
+# Every dependency this project compiles is made available through here, for
+# two reasons that both belong to the dependency rather than to Apogee:
+#
+#   A policy floor of 3.10. CMake warns on every cmake_minimum_required below
+#   3.10 ("Compatibility with CMake < 3.10 will be removed from a future
+#   version") -- CLI11 2.4.2, replxx 0.0.4 and yaml-cpp 0.8.0 all ask for less
+#   -- and since 4.0 refuses anything below 3.5 outright, which is how yaml-cpp
+#   first broke the configure. CMAKE_POLICY_VERSION_MINIMUM is CMake's own
+#   remedy: the subproject configures as if it had asked for 3.10, so the
+#   warning goes AND the future removal cannot break the build. Raised for the
+#   call only, then restored, so Apogee's own policy settings are untouched.
+#
+#   Warnings off, through apogee_quiet_third_party (ApogeeWarnings.cmake).
+#
+# A macro, not a function: FetchContent_MakeAvailable publishes
+# <name>_SOURCE_DIR in the calling scope, and later code reads it.
+macro(apogee_make_available)
+    set(_apogee_saved_policy_minimum "${CMAKE_POLICY_VERSION_MINIMUM}")
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
+    FetchContent_MakeAvailable(${ARGN})
+    set(CMAKE_POLICY_VERSION_MINIMUM "${_apogee_saved_policy_minimum}")
+    foreach(_apogee_dependency IN ITEMS ${ARGN})
+        string(TOLOWER "${_apogee_dependency}" _apogee_dependency)
+        # Unset when find_package satisfied it: a system copy is already built.
+        if(${_apogee_dependency}_SOURCE_DIR)
+            apogee_quiet_third_party("${${_apogee_dependency}_SOURCE_DIR}")
+        endif()
+    endforeach()
+endmacro()
 
 # libcurl: found on the system, never fetched.
 #
@@ -160,7 +191,7 @@ FetchContent_Declare(replxx
 set(REPLXX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(REPLXX_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(nlohmann_json CLI11 replxx)
+apogee_make_available(nlohmann_json CLI11 replxx)
 
 # JSON Schema validation (draft-07), for structured agent output: a report is
 # validated client-side on EVERY provider, whatever native mode the wire also
@@ -179,7 +210,7 @@ set(JSON_VALIDATOR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(JSON_VALIDATOR_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(JSON_VALIDATOR_INSTALL OFF CACHE BOOL "" FORCE)
 set(JSON_VALIDATOR_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(json_schema_validator)
+apogee_make_available(json_schema_validator)
 if(NOT TARGET nlohmann_json_schema_validator::validator)
     add_library(nlohmann_json_schema_validator::validator ALIAS nlohmann_json_schema_validator)
 endif()
@@ -211,21 +242,16 @@ set(HTTPLIB_TEST OFF CACHE BOOL "" FORCE)
 # name. Off everywhere, so the header compiles to the same thing on all five
 # targets, which is the stance of everything else in this block.
 set(HTTPLIB_USE_NON_BLOCKING_GETADDRINFO OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(httplib)
+apogee_make_available(httplib)
 
 # yaml-cpp 0.8.0 (the newest release; tagged 2023) opens with
-# cmake_minimum_required(VERSION 3.4), and CMake >= 4.0 refuses to configure a
-# project asking for < 3.5 compatibility. This raises the floor for that
-# subproject only, then restores the previous value so Apogee's own targets and
-# every other dependency keep the project's real policy settings.
+# cmake_minimum_required(VERSION 3.4), which CMake >= 4.0 refuses outright --
+# the policy floor in apogee_make_available is what lets it configure at all.
 #
 # Revisit when yaml-cpp cuts a release past 0.8.0 -- the fix is already on its
 # master branch. Pinning a master SHA instead was rejected: a pinned release
-# with a two-line shim is easier to reason about than an unreleased commit.
-set(APOGEE_SAVED_POLICY_MINIMUM "${CMAKE_POLICY_VERSION_MINIMUM}")
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-FetchContent_MakeAvailable(yaml-cpp)
-set(CMAKE_POLICY_VERSION_MINIMUM "${APOGEE_SAVED_POLICY_MINIMUM}")
+# with the floor is easier to reason about than an unreleased commit.
+apogee_make_available(yaml-cpp)
 
 # The same release's other age mark: emitterutils.cpp uses uint16_t without
 # including <cstdint>, which libstdc++ 13+ no longer pulls in transitively --
@@ -245,7 +271,7 @@ if(APOGEE_BUILD_TESTS)
         SYSTEM
         FIND_PACKAGE_ARGS NAMES Catch2 CONFIG
     )
-    FetchContent_MakeAvailable(Catch2)
+    apogee_make_available(Catch2)
 
     # catch_discover_tests() ships in Catch2's extras/ directory, which is only
     # on the module path automatically when Catch2 came from find_package.

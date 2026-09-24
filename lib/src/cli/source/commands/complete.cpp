@@ -310,7 +310,8 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
     cmd->add_option("prompt", flags->prompt, "The prompt. Read from stdin when omitted");
     cmd->add_option("-m,--model", flags->model,
-                    "Backend or model to use (default: models.default from config)");
+                    "Backend or model to use (default: models.default from config)")
+        ->type_name(kBackendValue);
     cmd->add_option("-s,--system", flags->system_prompt, "System prompt for this turn");
     cmd->add_option("--context", flags->context, "Extra context injected before the prompt");
     // allow_extra_args(false) is load-bearing: a CLI11 vector option is GREEDY
@@ -330,8 +331,10 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                        : agentloop::retriever_values_message("", value);
         });
     cmd->add_option("--rerank", flags->rerank,
-                    "Backend that reorders retrieved chunks with one generation call, or off");
+                    "Backend that reorders retrieved chunks with one generation call, or off")
+        ->type_name(kBackendValue);
     cmd->add_option("--image", flags->images, "Image file to attach (repeatable)")
+        ->type_name(kPathValue)
         ->allow_extra_args(false);
     flags->temperature_option =
         cmd->add_option("-t,--temperature", flags->temperature, "Sampling temperature");

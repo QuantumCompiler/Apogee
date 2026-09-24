@@ -2,7 +2,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
+#include <ctime>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <system_error>
 
 #include "models/sha256.h"
@@ -179,6 +183,20 @@ std::string file_sha256(const std::filesystem::path& path) {
         return {};
     }
     return hash.hex_digest();
+}
+
+std::string now_rfc3339() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t as_time = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+#if defined(_WIN32)
+    gmtime_s(&utc, &as_time);
+#else
+    gmtime_r(&as_time, &utc);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+    return out.str();
 }
 
 }  // namespace apogee::models

@@ -8,9 +8,11 @@
 
 #include "commands/command.h"
 #include "harness/config.h"
+#include "models/store.h"
 #include "training/eval.h"
 #include "training/promote.h"
 #include "training/python_env.h"
+#include "training/store.h"
 #include "training/trainer.h"
 
 /// `apogee train` -- fine-tuning local models, end to end on the CLI:
@@ -74,6 +76,14 @@ void run_train_setup(const harness::Config& config, const SetupRequest& request)
 /// entry's name, a GGUF, or anything that is not a snapshot is refused
 /// naming `apogee models pull <owner>/<repo> --safetensors`. Empty `path`
 /// with `error` set on a refusal.
+/// The model a run's weights belong to in the store: the model directory its
+/// base model came from -- for a pipeline stage, the pipeline's original
+/// student, not the stage before it. Where the promoted GGUF and a kept
+/// fine-tune land, beside the weights they were trained from.
+[[nodiscard]] std::string base_model_name(const models::StoreRoots& roots,
+                                          const training::TrainingStore& store,
+                                          const training::RunManifest& manifest);
+
 struct StudentResolution {
     std::filesystem::path path;
     std::string error;

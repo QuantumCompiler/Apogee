@@ -90,7 +90,8 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
     cmd->add_option("-m,--model", flags->model,
                     "Serve this backend instead of models.default (a request may name "
-                    "only served backends)");
+                    "only served backends)")
+        ->type_name(kBackendValue);
     cmd->add_flag("--all-backends", flags->all_backends,
                   "Serve every configured API-billing and local backend");
     cmd->add_option("--bind", flags->bind,
@@ -113,7 +114,8 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
                        : agentloop::retriever_values_message("", value);
         });
     cmd->add_option("--rerank", flags->rerank,
-                    "Backend that reorders retrieved chunks, or off (?rerank= overrides)");
+                    "Backend that reorders retrieved chunks, or off (?rerank= overrides)")
+        ->type_name(kBackendValue);
     cmd->add_flag("--tools", flags->tools,
                   "Let the model call tools server-side (fetch_url); clients see only the "
                   "final answer");

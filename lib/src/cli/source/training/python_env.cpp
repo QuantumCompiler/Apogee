@@ -24,7 +24,9 @@ constexpr std::array<std::string_view, 1> kMlx{"mlx-lm>=0.21"};
 constexpr std::array<std::string_view, 5> kPeft{"torch>=2.6", "transformers>=4.46", "peft>=0.13",
                                                 "bitsandbytes>=0.44", "accelerate>=1.0"};
 // The floors the vendored converter's own requirements file states at the
-// pinned llama.cpp revision (third_party/llama.cpp-convert/README.md).
+// pinned llama.cpp revision (third_party/llama.cpp-convert/README.md). PyPI's
+// `gguf` is here for the dependencies it brings: the package the converter
+// imports is the pinned copy seeded beside it, which PyPI's lags.
 constexpr std::array<std::string_view, 6> kConvert{"torch>=2.6",         "transformers>=5.5",
                                                    "gguf>=0.19",         "numpy>=1.26",
                                                    "sentencepiece>=0.2", "protobuf>=4.21"};

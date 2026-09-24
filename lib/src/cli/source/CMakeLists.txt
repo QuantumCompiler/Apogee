@@ -75,6 +75,8 @@ add_library(apogee_core STATIC
     training/store.cpp
     training/promote.h
     training/promote.cpp
+    training/convert.h
+    training/convert.cpp
     training/pipeline.h
     training/pipeline.cpp
     training/regime.h
@@ -83,8 +85,16 @@ add_library(apogee_core STATIC
     training/cycle.cpp
     models/quantize.h
     models/quantize.cpp
+    models/convert.h
+    models/convert.cpp
+    models/store.h
+    models/store.cpp
+    models/migrate.h
+    models/migrate.cpp
     commands/models_pull.h
     commands/models_pull.cpp
+    commands/models_migrate.h
+    commands/models_migrate.cpp
     commands/embed.h
     commands/embed.cpp
     commands/models.h
@@ -113,6 +123,10 @@ add_library(apogee_core STATIC
     commands/terminal.cpp
     commands/status_line.h
     commands/status_line.cpp
+    commands/download_progress.h
+    commands/download_progress.cpp
+    commands/interrupt.h
+    commands/interrupt.cpp
     commands/thinking_view.h
     commands/thinking_view.cpp
     commands/json_reporter.h

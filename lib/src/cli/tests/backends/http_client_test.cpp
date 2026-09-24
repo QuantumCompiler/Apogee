@@ -174,7 +174,7 @@ TEST_CASE("a transport failure is retried, then rethrown", "[backends][http][ret
 TEST_CASE("a transport failure that then succeeds is recovered", "[backends][http][retry]") {
     auto transport = std::make_unique<FakeTransport>(std::vector<FakeTransport::Reply>{
         {0, "", 0, true, "dns failure", std::nullopt, std::nullopt},
-        {200, "recovered", 0, false, "", std::nullopt},
+        {200, "recovered", 0, false, "", std::nullopt, std::nullopt},
     });
     HttpClient client{std::move(transport)};
     SleepRecorder recorder;

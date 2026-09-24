@@ -137,4 +137,7 @@ struct Sidecar {
 /// Streams `path` and returns its lowercase hex sha256, or "" if unreadable.
 [[nodiscard]] std::string file_sha256(const std::filesystem::path& path);
 
+/// Now, as a record's timestamps carry it: RFC 3339, UTC.
+[[nodiscard]] std::string now_rfc3339();
+
 }  // namespace apogee::models

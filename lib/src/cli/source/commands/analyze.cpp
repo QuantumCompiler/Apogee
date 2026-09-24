@@ -450,9 +450,11 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("--list", flags->list, "List the agents and exit; needs no backend");
     cmd->add_option("--prompt", flags->prompts,
                     "Prompt file; overrides the agent's prompts (repeatable)")
+        ->type_name(kPathValue)
         ->allow_extra_args(false);
     cmd->add_option("--schema", flags->schemas,
                     "Schema file; overrides the agent's schemas (repeatable)")
+        ->type_name(kPathValue)
         ->allow_extra_args(false);
     cmd->add_option("--input", flags->input, "Input text (alternative to the argument or stdin)");
     cmd->add_flag("--interactive", flags->interactive, "A multi-turn session under the agent");
@@ -460,10 +462,12 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("--markdown", flags->markdown, "Render the report as Markdown (the default)");
     cmd->add_flag("--text", flags->text, "Render the report as plain text");
     cmd->add_flag("--show", flags->show, "Print the report even when it was saved");
-    cmd->add_option("--save", flags->save_dir, "Directory to save the report in");
+    cmd->add_option("--save", flags->save_dir, "Directory to save the report in")
+        ->type_name(kPathValue);
     cmd->add_option("--save-name", flags->save_name, "Base filename for the saved report");
     cmd->add_option("-m,--model", flags->model,
-                    "Backend override (default: the agent's, then models.default)");
+                    "Backend override (default: the agent's, then models.default)")
+        ->type_name(kBackendValue);
     flags->rag_option =
         cmd->add_option("--rag", flags->rag,
                         "Retrieve context from this collection; \"\" switches the agent's off");
@@ -476,7 +480,8 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                        : agentloop::retriever_values_message("", value);
         });
     cmd->add_option("--rerank", flags->rerank,
-                    "Backend that reorders retrieved chunks with one generation call, or off");
+                    "Backend that reorders retrieved chunks with one generation call, or off")
+        ->type_name(kBackendValue);
     cmd->add_option("--branch", flags->branch,
                     "Branch under review (the head); reviewed without checking it out");
     cmd->add_option("--base", flags->base, "Ref to compare against (default: the default branch)");

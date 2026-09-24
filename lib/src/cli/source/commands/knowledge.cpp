@@ -296,11 +296,6 @@ struct ReindexFlags {
     std::string model;
 };
 
-const std::vector<std::string>& status_completions() {
-    static const std::vector<std::string> values{"shipped", "rejected", "superseded"};
-    return values;
-}
-
 }  // namespace
 
 std::string_view KnowledgeCommand::name() const noexcept {
@@ -323,7 +318,8 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     // positional against every long name.
     capture->add_option("TEXT", flags->positional,
                         "The raw conversation (or --input, --from-chat, or piped stdin)");
-    capture->add_option("--input", flags->input, "Read the conversation from this file");
+    capture->add_option("--input", flags->input, "Read the conversation from this file")
+        ->type_name(kPathValue);
     capture->add_option("--from-chat", flags->from_chat,
                         "Distil a saved chat session, by id or name (see 'apogee chats list')");
     capture
@@ -338,8 +334,10 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                         "Override the clerk: program, product, project, ux, or eng");
     capture->add_option("--source", flags->source,
                         "The source surface (chat, meeting, manual, ...); overrides the clerk");
-    capture->add_option("--link", flags->link,
-                        "The artifact this decision produced (a ticket, a commit, a file)");
+    capture
+        ->add_option("--link", flags->link,
+                     "The artifact this decision produced (a ticket, a commit, a file)")
+        ->type_name(kPathValue);
     capture->add_option("--supersedes", flags->supersedes,
                         "The id of the record this one replaces; that record is marked superseded");
     capture
@@ -350,9 +348,11 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                        ? std::string{}
                        : agentloop::retriever_values_message("", value);
         });
-    capture->add_option("-m,--model", flags->model,
-                        "Backend that runs the clerk (default: the extraction role, then the "
-                        "default backend)");
+    capture
+        ->add_option("-m,--model", flags->model,
+                     "Backend that runs the clerk (default: the extraction role, then the "
+                     "default backend)")
+        ->type_name(kBackendValue);
     capture->add_option("--db", flags->db,
                         "Collection to store into (default: knowledge.db, then 'knowledge')");
     capture->add_flag("--dry-run", flags->dry_run,
@@ -526,8 +526,10 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                        ? std::string{}
                        : agentloop::retriever_values_message("", value);
         });
-    query->add_option("--rerank", q->rerank,
-                      "Backend that reorders the matches with one generation call, or off");
+    query
+        ->add_option("--rerank", q->rerank,
+                     "Backend that reorders the matches with one generation call, or off")
+        ->type_name(kBackendValue);
     query->add_option("--db", q->db, "The collection (default: knowledge.db, then 'knowledge')");
     query->add_flag("--json", q->json, "Print the result as JSON");
     query->add_flag("--graph", q->graph,
@@ -714,7 +716,9 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* link = cmd->add_subcommand(
         "link", "Set the record's downstream link -- the artifact the decision produced");
     link->add_option("ID", lk->id, "The record id")->required();
-    link->add_option("REF", lk->value, "A ticket, a commit, a PR, a file")->required();
+    link->add_option("REF", lk->value, "A ticket, a commit, a PR, a file")
+        ->type_name(kPathValue)
+        ->required();
     link->add_option("--db", lk->db, "The collection (default: knowledge.db, then 'knowledge')");
     link->callback([&context, lk]() {
         std::filesystem::path config_path;
@@ -781,7 +785,8 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                          "Strip attribution and the local raw_ref; keep the provenance chain");
     export_cmd->add_option("--status", ex->status, "Keep only this branch");
     export_cmd->add_option("--discipline", ex->discipline, "Keep only this discipline");
-    export_cmd->add_option("-o,--out", ex->out, "Write to this file instead of stdout");
+    export_cmd->add_option("-o,--out", ex->out, "Write to this file instead of stdout")
+        ->type_name(kPathValue);
     export_cmd->add_option("--db", ex->db,
                            "The collection (default: knowledge.db, then 'knowledge')");
     export_cmd->callback([&context, ex]() {
@@ -810,8 +815,10 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* reindex = cmd->add_subcommand(
         "reindex", "Re-embed the records' vectors after an embedding-model change");
     reindex->add_option("ID", rx->id, "One record to reindex (default: every record)");
-    reindex->add_option("-m,--model", rx->model,
-                        "Embedding backend to reindex with (default: the collection's)");
+    reindex
+        ->add_option("-m,--model", rx->model,
+                     "Embedding backend to reindex with (default: the collection's)")
+        ->type_name(kBackendValue);
     reindex->add_option("--db", rx->db, "The collection (default: knowledge.db, then 'knowledge')");
     reindex->callback([&context, rx]() {
         std::filesystem::path config_path;

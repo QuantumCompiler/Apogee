@@ -20,12 +20,15 @@
 #include "ansi/ansi.h"
 #include "commands/embed.h"
 #include "commands/helpers.h"
+#include "commands/models_pull.h"
 #include "harness/assets.h"
 #include "harness/layout.h"
 #include "harness/paths.h"
 #include "httpserver/admin_auth.h"
 #include "knowledge/store.h"
 #include "models/gguf_inspect.h"
+#include "models/snapshot.h"
+#include "models/store.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
 #include "scaffold/agent.h"
@@ -297,42 +300,70 @@ void check_filesystem(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
+/// The model store's roots as `check` sees them: `paths.hf_dir` from the
+/// config when it sets one.
+[[nodiscard]] models::StoreRoots check_roots(const CheckInputs& inputs) {
+    models::StoreRoots roots = models::StoreRoots::at(inputs.home / "models");
+    if (!inputs.config.paths.hf_dir.empty()) {
+        roots.safetensors =
+            std::filesystem::path{harness::expand_env_and_home(inputs.config.paths.hf_dir)};
+    }
+    return roots;
+}
+
 void check_models(CheckReport& report, const CheckInputs& inputs) {
     std::error_code code;
-    const std::filesystem::path models = inputs.home / "models";
-    if (!std::filesystem::exists(models, code)) {
+    if (!std::filesystem::exists(inputs.home / "models", code)) {
         return;  // already reported by the filesystem section
     }
+    const models::StoreRoots roots = check_roots(inputs);
 
     int found = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(models, code)) {
-        if (code) {
-            break;
-        }
-        if (!entry.is_regular_file(code) || entry.path().extension() != ".gguf") {
-            continue;
-        }
+    for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
         ++found;
+        const std::string name = stored.model + "/gguf/" + stored.id;
         // A full header read, not the 4-byte magic check this used to do. The
         // failure that actually happens is a half-finished download, and that
         // file has perfectly valid magic -- so magic alone reported "valid
         // GGUF header" for exactly the file that cannot be loaded.
-        const models::GgufInfo info = models::inspect_gguf(entry.path());
+        const models::GgufInfo info = models::inspect_gguf(stored.file);
         if (!info.parsed) {
-            add(report, Status::Fail, "Models", entry.path().filename().string(),
-                "unreadable GGUF -- " + info.parse_error, "re-download the model");
+            add(report, Status::Fail, "Models", name, "unreadable GGUF -- " + info.parse_error,
+                "apogee models repair " + name);
         } else {
-            add(report, Status::Ok, "Models", entry.path().filename().string(),
+            add(report, Status::Ok, "Models", name,
                 info.architecture.empty() ? "valid GGUF header"
                                           : info.architecture + ", valid GGUF header");
         }
     }
+    for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
+        ++found;
+        const std::string name = stored.model + "/safetensors/" + stored.id;
+        if (models::config_is_download_record(stored.dir)) {
+            add(report, Status::Warn, "Models", name,
+                "damaged by an older pull: its config.json is a download record",
+                "apogee models repair " + name);
+        } else {
+            add(report, Status::Ok, "Models", name, "SafeTensors weights");
+        }
+    }
 
-    if (found == 0) {
+    // What the flat layout left is found, never read in place: say so, and
+    // name the one command that moves it -- `check` itself never edits the
+    // config that points at it.
+    const models::LegacyLayout legacy = models::find_legacy(roots);
+    if (!legacy.empty()) {
+        add(report, Status::Warn, "Models", "old layout",
+            std::to_string(legacy.ggufs.size() + legacy.snapshots.size()) +
+                " model(s) still in the flat layout, which nothing reads any more",
+            "apogee models migrate");
+    }
+
+    if (found == 0 && legacy.empty()) {
         // The fresh-install criterion in one row: no models is CORRECT.
         // Apogee bundles none and downloads none without being asked.
         add(report, Status::Ok, "Models", "models/",
-            "no models installed -- Apogee bundles none; add your own GGUF here");
+            "no models installed -- Apogee bundles none; pull one with 'apogee models pull'");
     }
 }
 
@@ -894,9 +925,24 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         const std::filesystem::path converter =
             inputs.home / harness::bundled_converter_relative_dir();
         const std::size_t files = harness::bundled_converter_files().size();
+        // Missing files are no edit, so the drift test below passes them;
+        // counted here, since a missing `gguf` package is not a missing
+        // feature -- the script falls back to the PyPI one, which lags the pin.
+        std::size_t missing = 0;
+        for (const harness::BundledScript& file : harness::bundled_converter_files()) {
+            if (!std::filesystem::is_regular_file(
+                    inputs.home / harness::bundled_script_relative_path(file.name), code)) {
+                ++missing;
+            }
+        }
         if (!std::filesystem::is_directory(converter, code)) {
             add(report, Status::Warn, "Training", "converter",
                 "convert_hf_to_gguf.py is not seeded under " + converter.string(),
+                "apogee check --fix");
+        } else if (missing > 0) {
+            add(report, Status::Warn, "Training", "converter",
+                std::to_string(missing) + " of the vendored converter's " + std::to_string(files) +
+                    " files are missing from " + converter.string(),
                 "apogee check --fix");
         } else if (harness::is_unmodified_bundled_asset(inputs.home, converter)) {
             add(report, Status::Ok, "Training", "converter",
@@ -1021,24 +1067,16 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
     // present -- warnings, since a cycle's pipeline has its datasets
     // overridden and a student may be pulled later; a stage that names
     // nothing at all already failed the load.
-    const std::filesystem::path hf_root =
-        inputs.config.paths.hf_dir.empty()
-            ? inputs.home / "models"
-            : std::filesystem::path{harness::expand_env_and_home(inputs.config.paths.hf_dir)};
+    const models::StoreRoots roots = check_roots(inputs);
     for (const auto& [name, spec] : inputs.config.training.pipelines) {
         const std::string label = "pipeline: " + name;
         std::vector<std::string> problems;
         if (spec.student.empty()) {
             problems.emplace_back("no student named");
-        } else {
-            const std::filesystem::path given{spec.student};
-            bool found = std::filesystem::is_directory(given, code);
-            for (const std::filesystem::path& root : {hf_root, inputs.home / "models"}) {
-                found = found || std::filesystem::is_directory(root / spec.student, code);
-            }
-            if (!found) {
-                problems.push_back("student '" + spec.student + "' is not a snapshot directory");
-            }
+        } else if (const SnapshotChoice student = choose_snapshot(roots, spec.student);
+                   !student.error.empty()) {
+            // The same lookup `train` makes, so this row and a run agree.
+            problems.push_back("student '" + spec.student + "': " + student.error);
         }
         for (const harness::PipelineStageSpec& stage : spec.stages) {
             const std::filesystem::path given{stage.dataset};

@@ -37,10 +37,10 @@ struct MockTurn {
     std::string text;
 
     /// Tool calls to attach to the response.
-    std::vector<harness::ToolCall> tool_calls;
+    std::vector<harness::ToolCall> tool_calls{};
 
     harness::FinishReason finish_reason = harness::FinishReason::Stop;
-    harness::Usage usage;
+    harness::Usage usage{};
 };
 
 /// Turns from a JSON script: `{"turns": [{"text": "...", "tool_calls":

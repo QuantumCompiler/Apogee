@@ -52,16 +52,15 @@ int next_version(const VersionLedger& ledger) {
 }
 
 PromotePlan plan_promotion(const VersionLedger& ledger, const std::filesystem::path& run_dir,
-                           const std::filesystem::path& versions_dir, std::string_view backend,
+                           const std::filesystem::path& output_dir, std::string_view backend,
                            std::string_view quantize_type, bool keep_fused) {
     PromotePlan plan;
     plan.version = next_version(ledger);
     plan.fused_dir = run_dir / kFusedDirName;
-    const std::filesystem::path dir = versions_dir / std::string{backend};
-    const std::string stem = "v" + std::to_string(plan.version);
-    plan.gguf_path = dir / (stem + ".gguf");
+    const std::string stem = std::string{backend} + "-v" + std::to_string(plan.version);
+    plan.gguf_path = output_dir / (stem + ".gguf");
     plan.quantize_type = std::string{quantize_type};
-    plan.f16_path = quantize_type.empty() ? plan.gguf_path : dir / (stem + ".f16.gguf");
+    plan.f16_path = quantize_type.empty() ? plan.gguf_path : output_dir / (stem + ".f16.gguf");
     plan.keep_fused = keep_fused;
     return plan;
 }
@@ -216,24 +215,43 @@ std::vector<int> prune_candidates(const VersionLedger& ledger, int retain) {
 }
 
 PruneResult record_promotion(VersionLedger& ledger, VersionEntry entry, int retain,
-                             std::string pruned_at) {
+                             std::string pruned_at, const ArtifactRemover& remove) {
     PruneResult result;
     ledger.active_version = entry.version;
     ledger.versions.push_back(std::move(entry));
     std::ranges::sort(ledger.versions, [](const VersionEntry& a, const VersionEntry& b) {
         return a.version < b.version;
     });
-    for (const int version : prune_candidates(ledger, retain)) {
+    const std::vector<int> candidates = prune_candidates(ledger, retain);
+    for (const int version : candidates) {
         for (VersionEntry& old : ledger.versions) {
             if (old.version != version) {
                 continue;
             }
-            std::error_code code;
-            const bool existed = std::filesystem::exists(old.gguf_path, code);
-            std::filesystem::remove(old.gguf_path, code);
-            if (code && existed) {
-                result.failed.push_back(old.gguf_path + ": " + code.message());
-                continue;
+            // Identical weights promoted twice share one stored file; it goes
+            // only when no version still kept records it.
+            const bool shared =
+                std::ranges::any_of(ledger.versions, [&](const VersionEntry& other) {
+                    return other.version != old.version && !other.pruned() &&
+                           other.gguf_path == old.gguf_path &&
+                           std::ranges::find(candidates, other.version) == candidates.end();
+                });
+            if (!shared) {
+                std::string error;
+                if (remove) {
+                    error = remove(old);
+                } else {
+                    std::error_code code;
+                    const bool existed = std::filesystem::exists(old.gguf_path, code);
+                    std::filesystem::remove(old.gguf_path, code);
+                    if (code && existed) {
+                        error = code.message();
+                    }
+                }
+                if (!error.empty()) {
+                    result.failed.push_back(old.gguf_path + ": " + error);
+                    continue;
+                }
             }
             old.pruned_at = pruned_at;
             result.removed.push_back(old.gguf_path);

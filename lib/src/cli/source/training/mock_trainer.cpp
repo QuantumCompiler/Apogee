@@ -263,7 +263,10 @@ std::string write_mock_gguf(const std::filesystem::path& fused_dir,
     append_text(bytes, architecture);
     append_text(bytes, "general.name");
     append_u32(bytes, 8);
-    append_text(bytes, "apogee-mock-promotion");
+    // The run in the name, so two runs' GGUFs differ as real fine-tunes do:
+    // the model store names a GGUF by its hash, and identical bytes from two
+    // runs would be one stored file.
+    append_text(bytes, "apogee-mock-promotion " + fused_dir.parent_path().filename().string());
     append_text(bytes, "general.file_type");
     append_u32(bytes, 4);  // UInt32
     append_u32(bytes, 1);  // mostly F16

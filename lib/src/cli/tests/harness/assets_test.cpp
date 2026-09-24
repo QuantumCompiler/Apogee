@@ -194,8 +194,9 @@ TEST_CASE("the compiled-in converter byte-matches the vendored llama.cpp tree, f
         std::filesystem::path{APOGEE_THIRD_PARTY_DIR} / "llama.cpp-convert";
     const std::span<const apogee::harness::BundledScript> files =
         apogee::harness::bundled_converter_files();
-    // The entry script, the conversion package, the three templates.
-    REQUIRE(files.size() > 60);
+    // The entry script, the conversion package, the `gguf` package it
+    // imports, the three templates.
+    REQUIRE(files.size() > 70);
     std::size_t on_disk = 0;
     for (const auto& entry : std::filesystem::recursive_directory_iterator(vendored)) {
         if (entry.is_regular_file() &&
@@ -206,6 +207,7 @@ TEST_CASE("the compiled-in converter byte-matches the vendored llama.cpp tree, f
     CHECK(on_disk == files.size());
     bool entry_seen = false;
     bool package_seen = false;
+    bool gguf_seen = false;
     bool template_seen = false;
     for (const apogee::harness::BundledScript& file : files) {
         INFO(file.name);
@@ -216,11 +218,15 @@ TEST_CASE("the compiled-in converter byte-matches the vendored llama.cpp tree, f
               "training/scripts/" + std::string{file.name});
         entry_seen = entry_seen || file.name == "convert/convert_hf_to_gguf.py";
         package_seen = package_seen || file.name == "convert/conversion/__init__.py";
+        // Where the script's own `sys.path` tweak looks, so the pinned copy
+        // shadows the PyPI one (which lags the pin at the same version).
+        gguf_seen = gguf_seen || file.name == "convert/gguf-py/gguf/__init__.py";
         template_seen =
             template_seen || file.name == "convert/models/templates/llama-cpp-rwkv-world.jinja";
     }
     CHECK(entry_seen);
     CHECK(package_seen);
+    CHECK(gguf_seen);
     CHECK(template_seen);
     CHECK(apogee::harness::bundled_converter_relative_dir() == "training/scripts/convert");
     // Not a single literal: chunked under MSVC's limit, joined at first use.

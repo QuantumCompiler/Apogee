@@ -114,7 +114,8 @@ void bind_create(CLI::App& parent, const RootContext& context) {
     flags->description_option =
         cmd->add_option("--description", flags->description, "Short description of the agent");
     flags->model_option =
-        cmd->add_option("--model", flags->model, "Backend override (blank = models.default)");
+        cmd->add_option("--model", flags->model, "Backend override (blank = models.default)")
+            ->type_name(kBackendValue);
     flags->tools_option =
         cmd->add_option("--tools", flags->tools, "Tool policy: read-only (default) | all | none");
     cmd->add_flag("--no-schema", flags->no_schema, "A prose-only agent (no output schema)");
@@ -123,7 +124,8 @@ void bind_create(CLI::App& parent, const RootContext& context) {
                     "How the schema shapes the answer: auto | json | markdown");
     cmd->add_option("--collection", flags->collection,
                     "Collection retrieved from on every run (the agent's auto_rag)");
-    cmd->add_option("--save-dir", flags->save_dir, "Directory reports are saved in");
+    cmd->add_option("--save-dir", flags->save_dir, "Directory reports are saved in")
+        ->type_name(kPathValue);
     cmd->add_option("--save-name", flags->save_name, "Base filename for saved reports");
     cmd->add_option("--save-subdir", flags->save_subdir,
                     "Subdirectory under the save directory (default: the agent's name)");

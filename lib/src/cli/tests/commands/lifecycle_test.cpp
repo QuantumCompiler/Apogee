@@ -9,6 +9,7 @@
 
 #include "commands/complete_protocol.h"
 #include "commands/registry.h"
+#include "commands/root.h"
 #include "commands/uninstall.h"
 #include "harness/config.h"
 #include "harness/layout.h"
@@ -33,21 +34,69 @@ backends:
                                          "test");
 }
 
-[[nodiscard]] const std::vector<apogee::commands::CommandSpec>& commands() {
+[[nodiscard]] const apogee::commands::CommandSpec& commands() {
+    // A small hand-built tree, for the walking rules alone. Anything about what
+    // the real commands declare goes through `real_tree()` instead: this is a
+    // second list, and could pass while the real registration was broken.
     using apogee::commands::CommandSpec;
-    static const std::vector<CommandSpec> kCommands{
-        // The root's own flags live under an empty name, so `apogee --<TAB>`
+    using apogee::commands::ValueKind;
+    using apogee::commands::ValueSpec;
+    static const ValueSpec kBackend{.kind = ValueKind::Backend};
+    static const ValueSpec kText{.kind = ValueKind::Text, .hint = "a word"};
+    static const ValueSpec kPath{.kind = ValueKind::Path};
+    static const CommandSpec kRoot{
+        // The root's own flags live on the root node, so `apogee --<TAB>`
         // needs no special case at the call site.
-        CommandSpec{"", {"--config", "--help", "--version", "-V", "-h"}},
-        CommandSpec{"chat", {"--help", "--model", "--search", "--tools", "-h", "-m"}},
-        CommandSpec{"check", {"--fix", "--help", "--no-color", "-h"}},
-        CommandSpec{"chats", {"--help", "-h"}},
-        CommandSpec{"complete", {"--help", "--image", "--model", "--tools", "-h", "-m"}},
-        CommandSpec{"config", {"--help", "-h"}},
-        CommandSpec{"uninstall", {"--help", "--keep-data", "--yes", "-h", "-y"}},
-        CommandSpec{"version", {"--help", "-h"}},
+        .name = "",
+        .flags = {"--config", "--help", "--version", "-V", "-h"},
+        .values = {{"--config", kPath}},
+        .subcommands =
+            {
+                CommandSpec{.name = "chat",
+                            .flags = {"--help", "--model", "--search", "--tools", "-h", "-m"},
+                            .values = {{"--model", kBackend}, {"-m", kBackend}}},
+                CommandSpec{.name = "check", .flags = {"--fix", "--help", "--no-color", "-h"}},
+                CommandSpec{.name = "chats", .flags = {"--help", "-h"}},
+                CommandSpec{.name = "complete",
+                            .flags = {"--help", "--image", "--model", "--tools", "-h", "-m"},
+                            .values = {{"--image", kPath}, {"--model", kBackend}, {"-m", kBackend}},
+                            .positionals = {kText}},
+                CommandSpec{.name = "config", .flags = {"--help", "-h"}},
+                CommandSpec{.name = "knowledge",
+                            .flags = {"--db", "--help", "-h"},
+                            .values = {{"--db", kText}},
+                            .aliases = {"kn"},
+                            .subcommands = {CommandSpec{.name = "list",
+                                                        .flags = {"--help", "--status", "-h"},
+                                                        .values = {{"--status", kText}}},
+                                            CommandSpec{.name = "query",
+                                                        .flags = {"--help", "-h"},
+                                                        .positionals = {kText}}}},
+                CommandSpec{.name = "uninstall",
+                            .flags = {"--help", "--keep-data", "--yes", "-h", "-y"}},
+                CommandSpec{.name = "version", .flags = {"--help", "-h"}},
+            },
     };
-    return kCommands;
+    return kRoot;
+}
+
+/// The tree the real registry declares, read the way `apogee __complete`
+/// reads it.
+[[nodiscard]] const apogee::commands::CommandSpec& real_tree() {
+    static const apogee::commands::CommandSpec kTree = [] {
+        // The real root, so its own flags (`--config`) are in the tree too.
+        const apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        return apogee::commands::specs_from_app(root.app());
+    }();
+    return kTree;
+}
+
+[[nodiscard]] std::vector<std::string> complete_line(std::vector<std::string> words,
+                                                     std::string current = "") {
+    CompletionRequest request;
+    request.words = std::move(words);
+    request.current = std::move(current);
+    return completion_candidates(request, two_backends(), real_tree());
 }
 
 [[nodiscard]] bool contains(const std::vector<std::string>& haystack, std::string_view needle) {
@@ -115,15 +164,12 @@ TEST_CASE("the short model flag completes too", "[commands][completion]") {
 }
 
 TEST_CASE("config verbs taking a backend complete to backend names", "[commands][completion]") {
+    // Through the real registry: what makes these complete is the type the
+    // command declares on its positional, not a list in the protocol.
     for (const std::string_view verb :
          {"set-default", "set-default-embedding", "set-default-extraction", "delete-backend"}) {
         INFO(verb);
-        CompletionRequest request;
-        request.words = {"config", std::string{verb}};
-        request.current = "";
-
-        const std::vector<std::string> candidates =
-            completion_candidates(request, two_backends(), commands());
+        const std::vector<std::string> candidates = complete_line({"config", std::string{verb}});
         CHECK(contains(candidates, "claude"));
         CHECK(contains(candidates, "local"));
     }
@@ -155,7 +201,7 @@ TEST_CASE("every registered command reaches completion with no per-shell edit",
     apogee::commands::CommandRegistry registry = apogee::commands::default_registry();
     registry.bind_all(app, context);
 
-    const std::vector<apogee::commands::CommandSpec> specs = apogee::commands::specs_from_app(app);
+    const apogee::commands::CommandSpec specs = apogee::commands::specs_from_app(app);
 
     CompletionRequest request;
     request.current = "";
@@ -380,4 +426,263 @@ TEST_CASE("a flag expecting a value still wins over flag completion",
         completion_candidates(request, two_backends(), commands());
     CHECK(contains(candidates, "claude"));
     CHECK_FALSE(contains(candidates, "--tools"));
+}
+
+namespace {
+
+/// Every node of `node`'s tree with its path, parents before children.
+void collect_paths(
+    const apogee::commands::CommandSpec& node, std::vector<std::string> path,
+    std::vector<std::pair<std::vector<std::string>, const apogee::commands::CommandSpec*>>& out) {
+    out.emplace_back(path, &node);
+    for (const apogee::commands::CommandSpec& child : node.subcommands) {
+        std::vector<std::string> deeper = path;
+        deeper.push_back(child.name);
+        collect_paths(child, deeper, out);
+    }
+}
+
+[[nodiscard]] std::string joined(const std::vector<std::string>& words) {
+    std::string out;
+    for (const std::string& word : words) {
+        out += (out.empty() ? "" : " ") + word;
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("every visible subcommand completes under its parent, at every depth",
+          "[commands][completion][tree]") {
+    // The report: `apogee models <TAB>` offered nothing. The protocol read the
+    // top level of the parser and kept `config`'s verbs by hand -- four behind
+    // by the time anyone looked. Now every parent in the real tree must offer
+    // exactly its children, so a verb added anywhere is covered by this loop.
+    std::vector<std::pair<std::vector<std::string>, const apogee::commands::CommandSpec*>> nodes;
+    collect_paths(real_tree(), {}, nodes);
+
+    std::size_t parents = 0;
+    std::size_t deepest = 0;
+    for (const auto& [path, node] : nodes) {
+        if (node->subcommands.empty()) {
+            continue;
+        }
+        ++parents;
+        deepest = std::max(deepest, path.size());
+        INFO("apogee " << joined(path) << " <TAB>");
+        std::vector<std::string> expected;
+        for (const apogee::commands::CommandSpec& child : node->subcommands) {
+            expected.push_back(child.name);
+        }
+        CHECK(complete_line(path) == expected);
+    }
+    // Not vacuous: the tree has verbs two levels down (`train pipeline run`).
+    CHECK(parents >= 10);
+    CHECK(deepest >= 2);
+    CHECK(contains(complete_line({"models"}), "pull"));
+    CHECK(contains(complete_line({"train", "pipeline"}), "resume"));
+    CHECK(contains(complete_line({"config"}), "add-graph"));
+}
+
+TEST_CASE("every command's own flags complete at its own depth", "[commands][completion][tree]") {
+    std::vector<std::pair<std::vector<std::string>, const apogee::commands::CommandSpec*>> nodes;
+    collect_paths(real_tree(), {}, nodes);
+    for (const auto& [path, node] : nodes) {
+        INFO("apogee " << joined(path) << " -<TAB>");
+        CHECK(complete_line(path, "-") == node->flags);
+    }
+    CHECK(contains(complete_line({"models", "pull"}, "--"), "--safetensors"));
+    // A parent's flags do not leak into its children, nor the other way.
+    CHECK_FALSE(contains(complete_line({"models", "pull"}, "--"), "--config"));
+    CHECK_FALSE(contains(complete_line({}, "--"), "--safetensors"));
+}
+
+TEST_CASE("hidden commands are never offered, at any depth", "[commands][completion][tree]") {
+    const std::vector<std::string> top = complete_line({});
+    CHECK_FALSE(contains(top, "__complete"));
+    CHECK_FALSE(contains(top, "__mcp-tools"));
+    for (const std::string& name : top) {
+        CHECK_FALSE(name.starts_with("__"));
+    }
+}
+
+TEST_CASE("an alias walks like the name it stands for", "[commands][completion][tree]") {
+    // Recognised on the line, never offered: offering `kn` beside `knowledge`
+    // would double what the user reads.
+    CHECK(complete_line({"kn"}) == complete_line({"knowledge"}));
+    CHECK_FALSE(complete_line({"knowledge"}).empty());
+    CHECK_FALSE(contains(complete_line({}), "kn"));
+
+    CompletionRequest request;
+    request.words = {"kn"};
+    const std::vector<std::string> candidates =
+        completion_candidates(request, two_backends(), commands());
+    CHECK(candidates == std::vector<std::string>{"list", "query"});
+}
+
+TEST_CASE("a flag's value is never mistaken for a subcommand", "[commands][completion][tree]") {
+    // `knowledge --db list <TAB>`: `list` is the value of --db, so the verbs
+    // are still on offer. Descending into `list` would offer nothing.
+    CompletionRequest request;
+    request.words = {"knowledge", "--db", "list"};
+    request.current = "";
+    CHECK(completion_candidates(request, two_backends(), commands()) ==
+          std::vector<std::string>{"list", "query"});
+
+    // `--db=list` carries its own value, so the next word is free again and
+    // does descend: these are `list`'s flags, not `knowledge`'s.
+    request.words = {"knowledge", "--db=x", "list"};
+    request.current = "--";
+    CHECK(completion_candidates(request, two_backends(), commands()) ==
+          std::vector<std::string>{"--help", "--status"});
+    request.words = {"knowledge", "--db=x"};
+    request.current = "";
+    CHECK(completion_candidates(request, two_backends(), commands()) ==
+          std::vector<std::string>{"list", "query"});
+}
+
+TEST_CASE("a positional completes by what it declares, once", "[commands][completion][tree]") {
+    // `models info <backend>`: declared BACKEND, so it completes; once given,
+    // there is no second positional and nothing more is offered.
+    CHECK(complete_line({"models", "info"}) == std::vector<std::string>{"claude", "local"});
+    CHECK(complete_line({"models", "info"}, "lo") == std::vector<std::string>{"local"});
+    // Every positional given: only a flag can follow, so flags are offered.
+    CHECK(complete_line({"models", "info", "claude"}) == std::vector<std::string>{"--help", "-h"});
+    CHECK(complete_line({"train", "rollback"}) == std::vector<std::string>{"claude", "local"});
+    // A positional that is a file or free text offers nothing, which hands
+    // the word back to the shell's own file completion.
+    CHECK(complete_line({"models", "delete"}).empty());
+    CHECK(complete_line({"embed", "ingest", "notes"}).empty());
+}
+
+TEST_CASE("backend-valued flags are the ones declared so, not the ones spelled so",
+          "[commands][completion][tree]") {
+    // The spelling rule this replaced offered backends for any `--model`, and
+    // `config add-backend --model` takes a vendor model id (claude-sonnet-5),
+    // while `--judge` and `--teacher` -- backend names -- offered nothing.
+    CHECK(complete_line({"config", "add-backend", "x", "--model"}).empty());
+    CHECK(complete_line({"train", "eval", "run-1", "--judge"}) ==
+          std::vector<std::string>{"claude", "local"});
+    CHECK(complete_line({"datasets", "synth", "d", "--teacher"}) ==
+          std::vector<std::string>{"claude", "local"});
+    CHECK(complete_line({"chat", "--rerank"}) == std::vector<std::string>{"claude", "local"});
+    CHECK(complete_line({"graph", "build", "notes", "-m"}, "cl") ==
+          std::vector<std::string>{"claude"});
+    // A value flag that is not a backend hands the word to the shell.
+    CHECK(complete_line({"chat", "--system"}).empty());
+}
+
+namespace {
+
+[[nodiscard]] apogee::commands::Completion complete_full(std::vector<std::string> words,
+                                                         std::string current = "") {
+    CompletionRequest request;
+    request.words = std::move(words);
+    request.current = std::move(current);
+    return apogee::commands::complete_words(request, two_backends(), real_tree());
+}
+
+}  // namespace
+
+TEST_CASE("a fixed set of values completes from the parser's own validator",
+          "[commands][completion][values]") {
+    // `--type` is validated against CLI::IsMember; `--help` shows the set, and
+    // completion reads the same set -- nothing restated here.
+    const std::vector<std::string> types = complete_line({"config", "add-backend", "x", "--type"});
+    CHECK(contains(types, "anthropic"));
+    CHECK(contains(types, "llamacpp"));
+    CHECK(contains(types, "ollama-cli"));
+    CHECK(complete_line({"config", "add-backend", "x", "-t"}, "cl") ==
+          std::vector<std::string>{"claude-cli"});
+    CHECK(complete_line({"config", "set-permission", "write_file"}) ==
+          std::vector<std::string>{"ask", "allow", "deny"});
+    // models convert's precisions come from the converter's own list.
+    const std::vector<std::string> precisions =
+        complete_line({"models", "convert", "snap", "out.gguf", "--type"});
+    CHECK(contains(precisions, "f16"));
+    CHECK(contains(precisions, "q8_0"));
+    CHECK(complete_full({"models", "convert"}).files);
+}
+
+TEST_CASE("free text says what it wants instead of offering file names",
+          "[commands][completion][values]") {
+    // The report: `config add-backend --model na<TAB>` did nothing, and a bare
+    // `--model <TAB>` listed the working directory -- a model id is neither.
+    const apogee::commands::Completion model =
+        complete_full({"config", "add-backend", "--model"}, "na");
+    CHECK(model.candidates.empty());
+    CHECK_FALSE(model.files);
+    CHECK(model.hint == "--model TEXT: Model name");
+
+    const apogee::commands::Completion name = complete_full({"config", "add-backend"});
+    CHECK(name.hint == "name TEXT: Name for the new backend");
+    CHECK_FALSE(name.files);
+
+    const apogee::commands::Completion size =
+        complete_full({"config", "add-backend", "x", "--context-size"});
+    CHECK(size.hint.starts_with("--context-size INT"));
+}
+
+TEST_CASE("a path, and only a path, completes files", "[commands][completion][values]") {
+    CHECK(complete_full({"config", "add-backend", "x", "--model-path"}).files);
+    CHECK(complete_full({"embed", "ingest", "notes"}).files);
+    CHECK(complete_full({"models", "quantize"}).files);
+    CHECK(complete_full({"--config"}).files);
+    CHECK_FALSE(complete_full({"models", "delete"}).files);
+    CHECK_FALSE(complete_full({"chat", "--system"}).files);
+}
+
+TEST_CASE("a backend word with no backends configured says so", "[commands][completion][values]") {
+    CompletionRequest request;
+    request.words = {"config", "set-default"};
+    const apogee::commands::Completion completion =
+        apogee::commands::complete_words(request, apogee::harness::Config{}, real_tree());
+    CHECK(completion.candidates.empty());
+    CHECK_FALSE(completion.files);
+    CHECK(completion.hint.find("no backends configured") != std::string::npos);
+}
+
+TEST_CASE("every argument in the real tree can say what it is", "[commands][completion][values]") {
+    // A hint is what TAB shows for free text, so an argument without one would
+    // be the silent TAB this replaced. And a Choice with no members would
+    // offer nothing while claiming a fixed set.
+    std::vector<std::pair<std::vector<std::string>, const apogee::commands::CommandSpec*>> nodes;
+    collect_paths(real_tree(), {}, nodes);
+    std::size_t values = 0;
+    for (const auto& [path, node] : nodes) {
+        for (const auto& [spelling, value] : node->values) {
+            INFO("apogee " << joined(path) << " " << spelling);
+            CHECK_FALSE(value.hint.empty());
+            if (value.kind == apogee::commands::ValueKind::Choice) {
+                CHECK_FALSE(value.choices.empty());
+            }
+            ++values;
+        }
+        for (const apogee::commands::ValueSpec& value : node->positionals) {
+            INFO("apogee " << joined(path) << " <positional>");
+            CHECK_FALSE(value.hint.empty());
+        }
+    }
+    CHECK(values > 100);
+}
+
+TEST_CASE("the directive line is sent only to a stub that asks for it",
+          "[commands][completion][values]") {
+    using apogee::commands::Completion;
+    using apogee::commands::render_completion;
+    const Completion values{.candidates = {"pull", "list"}};
+    const Completion files{.files = true};
+    const Completion hint{.hint = "--model TEXT: Model\nname"};
+
+    // Bare: exactly the old contract, one candidate per line and nothing else,
+    // so an older stub never offers a directive as a completion.
+    CHECK(render_completion(values, false) == "pull\nlist\n");
+    CHECK(render_completion(files, false).empty());
+    CHECK(render_completion(hint, false).empty());
+
+    CHECK(render_completion(values, true) == ":values\npull\nlist\n");
+    CHECK(render_completion(files, true) == ":files\n");
+    // One line, whatever the description held: the stubs read lines.
+    CHECK(render_completion(hint, true) == ":hint --model TEXT: Model name\n");
+    CHECK(render_completion(Completion{}, true) == ":values\n");
 }

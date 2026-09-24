@@ -106,7 +106,7 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     set(GGML_CPU_ARM_ARCH "armv8.2-a+fp16+dotprod" CACHE STRING "" FORCE)
 endif()
 
-FetchContent_MakeAvailable(llama_cpp)
+apogee_make_available(llama_cpp)
 
 # Multimodal (vision) support.
 #
@@ -140,6 +140,10 @@ if(EXISTS "${llama_cpp_SOURCE_DIR}/tools/mtmd/CMakeLists.txt")
     if(WIN32 AND TARGET mtmd)
         target_compile_definitions(mtmd PRIVATE _USE_MATH_DEFINES)
     endif()
+    # Added here rather than by llama.cpp, so apogee_make_available never saw
+    # it: upstream's warnings (a C++20 enum-arithmetic deprecation in
+    # clip-graph.h, once per model file) are theirs, like the rest.
+    apogee_quiet_third_party("${llama_cpp_SOURCE_DIR}/tools/mtmd")
     message(STATUS "Apogee: llama.cpp multimodal (mtmd) enabled")
 else()
     message(WARNING

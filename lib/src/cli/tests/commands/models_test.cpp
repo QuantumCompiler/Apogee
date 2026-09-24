@@ -46,11 +46,14 @@ struct RealModel {
     /// order-dependent test is worse than no test.
     std::filesystem::path dir = std::filesystem::temp_directory_path() /
                                 ("apogee-models-test-" + std::to_string(counter()));
-    std::filesystem::path path = dir / "real.gguf";
+    /// Where the model store keeps a GGUF: `<model>/gguf/<id>/<file>`.
+    std::filesystem::path path = dir / "m" / "gguf" / "111111111111" / "real.gguf";
+    /// What `models list` calls it: the handle the other verbs take.
+    std::string handle = "m/gguf/111111111111";
 
     explicit RealModel(std::string_view architecture) {
         std::error_code code;
-        std::filesystem::create_directories(dir, code);
+        std::filesystem::create_directories(path.parent_path(), code);
         const std::string bytes = apogee::testing::minimal_gguf(architecture);
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         REQUIRE(out.good());
@@ -282,8 +285,8 @@ TEST_CASE("a model on disk is listed even when no backend points at it",
     // built only from `backends:` cannot see the thing the user just fetched.
     const RealModel model{"llama"};
     const std::vector<ModelRow> rows = build_model_rows(Config{}, model.dir);
-    const auto match = std::ranges::find_if(
-        rows, [&](const ModelRow& row) { return row.model == model.path.filename().string(); });
+    const auto match =
+        std::ranges::find_if(rows, [&](const ModelRow& row) { return row.model == model.handle; });
     REQUIRE(match != rows.end());
 
     CHECK(match->backend == "(not configured)");
@@ -308,8 +311,8 @@ TEST_CASE("the verified column reports what was checked, never the word verified
     REQUIRE(apogee::models::write_sidecar(model.path, sidecar));
 
     const std::vector<ModelRow> rows = build_model_rows(Config{}, model.dir);
-    const auto match = std::ranges::find_if(
-        rows, [&](const ModelRow& row) { return row.model == model.path.filename().string(); });
+    const auto match =
+        std::ranges::find_if(rows, [&](const ModelRow& row) { return row.model == model.handle; });
     REQUIRE(match != rows.end());
 
     CHECK(match->verified.find("no digest published") != std::string::npos);
@@ -429,14 +432,17 @@ TEST_CASE(
     "and record",
     "[commands][models][listing][snapshot]") {
     const RealModel model{"llama"};
-    const std::filesystem::path snapshot = model.dir / "owner--repo";
+    const std::filesystem::path snapshot =
+        model.dir / "owner--repo" / "safetensors" / "aaaaaaaaaaaa";
     std::filesystem::create_directories(snapshot);
     std::ofstream{snapshot / "config.json"} << R"({"architectures": ["Qwen2ForCausalLM"]})";
     std::ofstream{snapshot / "model.safetensors"} << "weights";
+    const auto is_snapshot_row = [](const ModelRow& row) {
+        return row.model == "owner--repo/safetensors/aaaaaaaaaaaa";
+    };
 
     std::vector<ModelRow> rows = build_model_rows(Config{}, model.dir);
-    auto match =
-        std::ranges::find_if(rows, [](const ModelRow& row) { return row.model == "owner--repo/"; });
+    auto match = std::ranges::find_if(rows, is_snapshot_row);
     REQUIRE(match != rows.end());
     CHECK(match->backend == "(not configured)");
     CHECK(match->state == "safetensors");
@@ -444,6 +450,7 @@ TEST_CASE(
     CHECK(match->provenance == "local");
     CHECK(match->verified == "no record");
     CHECK(match->note.find("trainable") != std::string::npos);
+    CHECK(match->note.find("apogee models convert owner--repo") != std::string::npos);
 
     apogee::models::Snapshot record;
     record.ref = "owner/repo";
@@ -451,23 +458,36 @@ TEST_CASE(
     record.files.push_back({"model.safetensors", 7, "abc"});
     REQUIRE(apogee::models::write_snapshot(snapshot, record));
     rows = build_model_rows(Config{}, model.dir);
-    match =
-        std::ranges::find_if(rows, [](const ModelRow& row) { return row.model == "owner--repo/"; });
+    match = std::ranges::find_if(rows, is_snapshot_row);
     REQUIRE(match != rows.end());
     CHECK(match->provenance == "huggingface");
     CHECK(match->verified == "1 file(s) on record");
 
-    // paths.hf_dir is a second root.
+    // paths.hf_dir is where SafeTensors sets live when it is set.
     const apogee::testing::TempDir hf{"models-hf-" + std::to_string(std::random_device{}())};
-    const std::filesystem::path other = hf.path() / "org--base";
+    const std::filesystem::path other = hf.path() / "org--base" / "safetensors" / "bbbbbbbbbbbb";
     std::filesystem::create_directories(other);
     std::ofstream{other / "config.json"} << R"({"model_type": "gemma3"})";
     std::ofstream{other / "w.safetensors"} << "w";
     Config config;
     config.paths.hf_dir = hf.path().string();
     rows = build_model_rows(config, model.dir);
-    match =
-        std::ranges::find_if(rows, [](const ModelRow& row) { return row.model == "org--base/"; });
+    match = std::ranges::find_if(rows, [](const ModelRow& row) {
+        return row.model == "org--base/safetensors/bbbbbbbbbbbb";
+    });
     REQUIRE(match != rows.end());
     CHECK(match->architecture == "gemma3");
+}
+
+TEST_CASE("a model still in the flat layout is listed with the migration named",
+          "[commands][models][listing][legacy]") {
+    const apogee::testing::TempDir models{"models-flat-" + std::to_string(std::random_device{}())};
+    std::ofstream{models.path() / "old.gguf", std::ios::binary}
+        << apogee::testing::minimal_gguf("llama");
+    const std::vector<ModelRow> rows = build_model_rows(Config{}, models.path());
+    const auto match =
+        std::ranges::find_if(rows, [](const ModelRow& row) { return row.model == "old.gguf"; });
+    REQUIRE(match != rows.end());
+    CHECK(match->state == "old layout");
+    CHECK(match->note.find("apogee models migrate") != std::string::npos);
 }

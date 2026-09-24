@@ -18,6 +18,7 @@
 #include "harness/roles.h"
 #include "models/sidecar.h"
 #include "models/snapshot.h"
+#include "models/store.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 
@@ -130,9 +131,9 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             if (secrets::takes_api_key(backend.type)) {
                 // The one chain -- so this column says what a build would
                 // use, and only WHERE it came from. Never the key.
-                const secrets::KeyResolution key = secrets::resolve_api_key(
+                const secrets::KeyResolution resolved = secrets::resolve_api_key(
                     backend, store.has_value() ? &*store : nullptr, snapshot);
-                switch (key.source) {
+                switch (resolved.source) {
                     case secrets::KeySource::Config:
                         row.state = "key: config";
                         break;
@@ -140,7 +141,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                         row.state = "key: store";
                         break;
                     case secrets::KeySource::Environment:
-                        row.state = "key: " + key.variable;
+                        row.state = "key: " + resolved.variable;
                         break;
                     case secrets::KeySource::None:
                         row.state = "no key";
@@ -191,83 +192,110 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         rows.push_back(std::move(row));
     }
 
-    // The second half: models on disk that no backend points at -- everything
-    // `models pull` has ever fetched, until the user wires it up.
+    // The rest: what the model store holds that no backend points at --
+    // everything `models pull`, `convert`, `quantize` and `train promote` have
+    // made, until the user wires it up. Each by the handle the other verbs
+    // take: `<model>/<format>/<id>`.
+    models::StoreRoots roots = models::StoreRoots::at(models_dir);
+    if (!config.paths.hf_dir.empty()) {
+        roots.safetensors =
+            std::filesystem::path{harness::expand_env_and_home(config.paths.hf_dir)};
+    }
+    std::vector<std::filesystem::path> configured;
+    for (const auto& [key, backend] : config.backends) {
+        if (!backend.model_path.empty()) {
+            configured.push_back(
+                std::filesystem::path{harness::expand_env_and_home(backend.model_path)}
+                    .lexically_normal());
+        }
+    }
     if (!models_dir.empty()) {
-        std::error_code code;
-        for (const auto& entry : std::filesystem::directory_iterator(models_dir, code)) {
-            if (code) {
-                break;
+        for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
+            if (std::ranges::find(configured, stored.file.lexically_normal()) != configured.end()) {
+                continue;  // its backend's row already says everything
             }
-            if (!entry.is_regular_file(code) || entry.path().extension() != ".gguf") {
-                continue;
-            }
-            const bool already_listed = std::ranges::any_of(rows, [&](const ModelRow& row) {
-                return row.model == entry.path().filename().string();
-            });
-            if (already_listed) {
-                continue;
-            }
-
             ModelRow row;
             // Not a backend: it is a file waiting to be pointed at.
             row.backend = "(not configured)";
             row.type = "-";
-            row.model = entry.path().filename().string();
+            row.model = stored.model + "/gguf/" + stored.id;
             row.provenance = "local";
-            row.verified = describe_record(entry.path());
+            if (const std::optional<models::Sidecar> record = models::load_sidecar(stored.file);
+                record.has_value() && !record->source.empty()) {
+                row.provenance = record->source;
+            }
+            row.verified = describe_record(stored.file);
 
-            const models::GgufInfo info = models::inspect_gguf(entry.path());
+            const models::GgufInfo info = models::inspect_gguf(stored.file);
             row.state = info.parsed ? "ok" : "unreadable";
             row.architecture = info.parsed && !info.architecture.empty() ? info.architecture : "-";
-            row.profile =
-                info.parsed ? describe_profile(info.architecture, entry.path().filename().string())
-                            : "unprofiled";
+            row.profile = info.parsed
+                              ? describe_profile(info.architecture, stored.file.filename().string())
+                              : "unprofiled";
             if (!info.parsed) {
                 row.note = info.parse_error;
-            } else if (info.is_projector()) {
-                row.note = "a multimodal projector (" + std::to_string(info.tensors) +
-                           " vision tensors) -- point a backend's mmproj_path at this, not "
-                           "model_path";
             } else if (info.has_vision_tensors()) {
                 row.note = "combined text+vision blob (" +
                            std::to_string(info.tensors - info.text_tensors) + " vision tensors)";
+            } else {
+                row.note = stored.file.filename().string() +
+                           (stored.projector.empty() ? "" : " + vision projector");
             }
             rows.push_back(std::move(row));
         }
-    }
 
-    // The third half: SafeTensors snapshots -- trainable, not runnable --
-    // under the models directory and under `paths.hf_dir` when it is set.
-    // Listed so a user can see what `models pull --safetensors` landed and
-    // what `apogee train` can take, without a backend ever pointing at one.
-    std::vector<std::filesystem::path> snapshot_roots;
-    if (!models_dir.empty()) {
-        snapshot_roots.push_back(models_dir);
-    }
-    if (!config.paths.hf_dir.empty()) {
-        const std::filesystem::path hf_dir{harness::expand_env_and_home(config.paths.hf_dir)};
-        if (hf_dir != models_dir) {
-            snapshot_roots.push_back(hf_dir);
-        }
-    }
-    for (const std::filesystem::path& root : snapshot_roots) {
-        for (const std::filesystem::path& dir : models::list_snapshots(root)) {
+        // SafeTensors sets -- trainable, not runnable -- listed so a user can
+        // see what `convert` and `apogee train` can take, without a backend
+        // ever pointing at one.
+        for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
             ModelRow row;
             row.backend = "(not configured)";
             row.type = "-";
-            row.model = dir.filename().string() + "/";
-            const std::optional<models::Snapshot> record = models::load_snapshot(dir);
+            row.model = stored.model + "/safetensors/" + stored.id;
+            const std::optional<models::Snapshot> record = models::load_snapshot(stored.dir);
             row.provenance =
                 record.has_value() && !record->source.empty() ? record->source : "local";
-            const std::string architecture = models::snapshot_architecture(dir);
+            const std::string architecture = models::snapshot_architecture(stored.dir);
             row.architecture = architecture.empty() ? "-" : architecture;
             row.profile = "-";
             row.state = "safetensors";
             row.verified = record.has_value()
                                ? std::to_string(record->files.size()) + " file(s) on record"
                                : "no record";
-            row.note = "a full-weight snapshot: trainable with 'apogee train', not runnable";
+            row.note = models::config_is_download_record(stored.dir)
+                           ? "damaged by an older pull -- 'apogee models repair " + stored.model +
+                                 "/safetensors/" + stored.id + "'"
+                           : "full weights, trainable -- 'apogee models convert " + stored.model +
+                                 "' makes a GGUF";
+            rows.push_back(std::move(row));
+        }
+
+        // The flat layout this one replaced: shown, never used in place.
+        const models::LegacyLayout legacy = models::find_legacy(roots);
+        for (const models::LegacyGguf& gguf : legacy.ggufs) {
+            ModelRow row;
+            row.backend = "(not configured)";
+            row.type = "-";
+            row.model = gguf.file.filename().string();
+            row.provenance = "local";
+            row.architecture = "-";
+            row.profile = "-";
+            row.state = "old layout";
+            row.verified = "-";
+            row.note = "run 'apogee models migrate' to move it into the model store";
+            rows.push_back(std::move(row));
+        }
+        for (const models::LegacySnapshot& flat : legacy.snapshots) {
+            ModelRow row;
+            row.backend = "(not configured)";
+            row.type = "-";
+            row.model = flat.dir.filename().string() + "/";
+            row.provenance = "local";
+            row.architecture = "-";
+            row.profile = "-";
+            row.state = "old layout";
+            row.verified = "-";
+            row.note = "run 'apogee models migrate' to move it into the model store";
             rows.push_back(std::move(row));
         }
     }
@@ -377,8 +405,17 @@ std::string render_model_info(const harness::Config& config, std::string_view ba
         // The reason, always. An unreadable header rendering as blank fields is
         // the exact failure this surface exists to prevent.
         out << "header:       FAILED -- " << info.parse_error << "\n";
-        out << "repair:       apogee models repair " << backend
-            << "   (once model-acquisition lands; until then re-download the file)\n";
+        // A stored file names itself: <model>/gguf/<id>/<file>.
+        const std::filesystem::path file{expanded};
+        const std::filesystem::path id_dir = file.parent_path();
+        if (models::is_weight_id(id_dir.filename().string()) &&
+            id_dir.parent_path().filename() == models::kGgufFormat) {
+            out << "repair:       apogee models repair "
+                << id_dir.parent_path().parent_path().filename().string() << "/gguf/"
+                << id_dir.filename().string() << "\n";
+        } else {
+            out << "repair:       re-download the file, or point model_path at another\n";
+        }
         return out.str();
     }
 
@@ -478,7 +515,9 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
 
     auto info_name = std::make_shared<std::string>();
     CLI::App* info = cmd->add_subcommand("info", "Show one backend's model in detail");
-    info->add_option("backend", *info_name, "Backend key from the config")->required();
+    info->add_option("backend", *info_name, "Backend key from the config")
+        ->type_name(kBackendValue)
+        ->required();
     info->callback([load, info_name]() {
         const harness::Config config = load();
         const std::string body = render_model_info(config, *info_name);

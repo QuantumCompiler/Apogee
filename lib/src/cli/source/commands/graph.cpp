@@ -823,9 +823,11 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         "Extract entities and relations from a collection's or a named graph's stale chunks");
     build->add_option("NAME", b->name, "A named graph (a graphs: entry) or a collection")
         ->required();
-    build->add_option("-m,--model", b->model,
-                      "The extraction backend (default: the entry's extract_backend, then the "
-                      "extraction role, then the default -- a metered default is refused)");
+    build
+        ->add_option("-m,--model", b->model,
+                     "The extraction backend (default: the entry's extract_backend, then the "
+                     "extraction role, then the default -- a metered default is refused)")
+        ->type_name(kBackendValue);
     build->add_flag("--dry-run", b->dry_run,
                     "Print every chunk's extraction and a summary; store nothing");
     build->add_flag("--force", b->force, "Re-extract every source, stale or not");
@@ -918,8 +920,10 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
                             "Detect and summarise thematic communities; each summary becomes a "
                             "retrievable chunk");
     communities->add_option("NAME", c->name, "A named graph or a collection")->required();
-    communities->add_option("-m,--model", c->model,
-                            "The summariser backend (default: as graph build resolves it)");
+    communities
+        ->add_option("-m,--model", c->model,
+                     "The summariser backend (default: as graph build resolves it)")
+        ->type_name(kBackendValue);
     communities->add_flag("--force", c->force,
                           "Re-summarise every community, membership unchanged or not");
     communities->add_option("--min-size", c->min_size,

@@ -29,6 +29,10 @@ struct VersionEntry {
     std::optional<bool> eval_passed;
     /// Set when retention removed the file; the entry stays as history, so
     /// a rollback can name what it can no longer reach.
+    /// The fine-tuned SafeTensors weights this version was converted from,
+    /// when `--keep-fused` kept them -- in the model store beside the base
+    /// model. Empty when they were dropped.
+    std::string fused_path;
     std::string pruned_at;
 
     [[nodiscard]] bool pruned() const noexcept {

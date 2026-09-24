@@ -928,3 +928,46 @@ TEST_CASE(
     CHECK(repointed == expected);
     CHECK(apogee::harness::delete_backend(appended, "tuned") == shipped);
 }
+
+TEST_CASE("set_backend_mmproj_path replaces in place, or lands right after model_path",
+          "[config_edit][golden][models]") {
+    // What `models migrate` rewrites when a vision model's projector moves:
+    // the same one-line edit as model_path, every other byte kept.
+    constexpr std::string_view kBase =
+        "backends:\n"
+        "  vision:\n"
+        "    type: llamacpp\n"
+        "    model_path: /old/llava.gguf\n"
+        "    mmproj_path: /old/llava-mmproj.gguf   # the projector\n"
+        "  text:\n"
+        "    type: llamacpp\n"
+        "    model_path: /old/text.gguf\n"
+        "    context_size: 4096\n";
+    const std::string replaced =
+        apogee::harness::set_backend_mmproj_path(kBase, "vision", "/new/llava-mmproj.gguf");
+    require_parses(replaced);
+    CHECK(replaced ==
+          "backends:\n"
+          "  vision:\n"
+          "    type: llamacpp\n"
+          "    model_path: /old/llava.gguf\n"
+          "    mmproj_path: /new/llava-mmproj.gguf   # the projector\n"
+          "  text:\n"
+          "    type: llamacpp\n"
+          "    model_path: /old/text.gguf\n"
+          "    context_size: 4096\n");
+    CHECK(apogee::harness::parse_config(replaced, "<test>").find_backend("vision")->mmproj_path ==
+          "/new/llava-mmproj.gguf");
+
+    const std::string inserted =
+        apogee::harness::set_backend_mmproj_path(kBase, "text", "/new/text-mmproj.gguf");
+    require_parses(inserted);
+    CHECK(inserted.find("    model_path: /old/text.gguf\n    mmproj_path: /new/text-mmproj.gguf\n"
+                        "    context_size: 4096\n") != std::string::npos);
+    // model_path's own edit is unchanged by the generalisation.
+    CHECK(apogee::harness::set_backend_model_path(kBase, "text", "/new/text.gguf")
+              .find("    model_path: /new/text.gguf\n    context_size: 4096\n") !=
+          std::string::npos);
+    CHECK_THROWS_AS(apogee::harness::set_backend_mmproj_path(kBase, "nope", "/x"),
+                    apogee::harness::ConfigEditError);
+}

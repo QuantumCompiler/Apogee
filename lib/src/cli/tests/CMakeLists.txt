@@ -43,11 +43,15 @@ add_executable(apogee_tests
     models/gguf_inspect_test.cpp
     models/sha256_test.cpp
     models/acquire_test.cpp
+    models/convert_test.cpp
+    models/store_test.cpp
+    models/migrate_test.cpp
     models/quantize_test.cpp
     models/sidecar_test.cpp
     models/source_ollama_test.cpp
     models/source_hf_test.cpp
     commands/models_pull_test.cpp
+    commands/models_migrate_test.cpp
     commands/models_test.cpp
     commands/attachment_guard_test.cpp
     backends/jsonl_framer_test.cpp
@@ -68,6 +72,7 @@ add_executable(apogee_tests
     commands/helpers_test.cpp
     commands/thinking_view_test.cpp
     commands/status_line_test.cpp
+    commands/download_progress_test.cpp
     commands/cli_reporter_test.cpp
     ansi/ansi_test.cpp
     commands/chat_test.cpp
@@ -156,6 +161,7 @@ add_executable(apogee_tests
     training/store_test.cpp
     training/eval_test.cpp
     training/promote_test.cpp
+    training/convert_test.cpp
     httpserver/admin_training_test.cpp
     training/pipeline_test.cpp
     training/regime_test.cpp
@@ -368,6 +374,17 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/install-parity
     )
     set_tests_properties(cli.install_parity PROPERTIES TIMEOUT 60)
+
+    # The completion stubs in the real shells (bash always; zsh and fish when
+    # present) against the real binary -- what a stub SENDS `__complete`, which
+    # the protocol's own tests cannot see. See the script for the two zsh bugs
+    # that hid nested verbs there.
+    add_test(NAME cli.shell_completion
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/shell_completion_check.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/shell-completion
+    )
+    set_tests_properties(cli.shell_completion PROPERTIES TIMEOUT 60)
 
     add_test(NAME cli.machine_mode
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/machine_mode_e2e.sh"

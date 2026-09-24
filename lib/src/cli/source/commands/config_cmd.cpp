@@ -412,7 +412,8 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
                     "API key. Prefer a ${ENV_VAR} reference, which is stored literally and "
                     "expanded on read");
     cmd->add_option("--model", flags->model, "Model name");
-    cmd->add_option("--model-path", flags->model_path, "Path to a local model file");
+    cmd->add_option("--model-path", flags->model_path, "Path to a local model file")
+        ->type_name(kPathValue);
     cmd->add_option("--embedding-model", flags->embedding_model,
                     "Model used when this entry embeds text (cloud types; default: the "
                     "vendor's)");
@@ -460,7 +461,7 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
 void bind_delete_backend(CLI::App& parent, const RootContext& context) {
     auto name = std::make_shared<std::string>();
     CLI::App* cmd = parent.add_subcommand("delete-backend", "Remove a backend entry");
-    cmd->add_option("name", *name, "Backend to remove")->required();
+    cmd->add_option("name", *name, "Backend to remove")->type_name(kBackendValue)->required();
     cmd->callback([&context, name]() {
         const std::filesystem::path path = config_path_for(context);
         apply_edit(path, [name](std::string_view content) {
@@ -475,7 +476,9 @@ void bind_set_role(CLI::App& parent, const RootContext& context, const std::stri
                    const std::string& field, const std::string& description) {
     auto name = std::make_shared<std::string>();
     CLI::App* cmd = parent.add_subcommand(command_name, description);
-    cmd->add_option("name", *name, "Backend to point this role at")->required();
+    cmd->add_option("name", *name, "Backend to point this role at")
+        ->type_name(kBackendValue)
+        ->required();
     cmd->callback([&context, name, field]() {
         const std::filesystem::path path = config_path_for(context);
         require_backend_exists(path, *name);
@@ -522,7 +525,8 @@ void bind_add_graph(CLI::App& parent, const RootContext& context) {
                     "The member collections, comma-separated (e.g. docs,meetings)")
         ->required();
     cmd->add_option("--extract-backend", flags->extract_backend,
-                    "The backend `graph build` extracts with (default: the extraction role)");
+                    "The backend `graph build` extracts with (default: the extraction role)")
+        ->type_name(kBackendValue);
     cmd->add_option("--hops", flags->hops, "Expansion depth at retrieval: 1 or 2 (default 1)");
     cmd->add_option("--max-entities", flags->max_entities,
                     "Neighbour entities an expansion injects, at most (default 8)");

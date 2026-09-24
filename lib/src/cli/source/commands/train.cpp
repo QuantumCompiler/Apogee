@@ -22,6 +22,7 @@
 #include "backends/factory.h"
 #include "commands/datasets.h"
 #include "commands/helpers.h"
+#include "commands/interrupt.h"
 #include "commands/models_pull.h"
 #include "commands/status_line.h"
 #include "commands/terminal.h"
@@ -31,8 +32,12 @@
 #include "harness/paths.h"
 #include "models/gguf_inspect.h"
 #include "models/quantize.h"
+#include "models/sidecar.h"
+#include "models/snapshot.h"
+#include "models/store.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
+#include "training/convert.h"
 #include "training/cycle.h"
 #include "training/kit.h"
 #include "training/manifest.h"
@@ -86,52 +91,6 @@ std::string describe_status(const training::PythonEnvStatus& status) {
     return "at " + status.interpreter.parent_path().parent_path().string() +
            (sets.empty() ? std::string{"; no requirement sets installed"} : "; sets: " + sets);
 }
-
-// --- Ctrl-C ---------------------------------------------------------------------
-//
-// A run is a child process that can hold a GPU for an hour; Ctrl-C must
-// terminate it cleanly and record the run as cancelled, never leave a
-// driver running behind a dead parent. The handler only flips the token --
-// the read loop notices between chunks and terminates the child.
-harness::CancellationToken g_interrupt_token;
-std::atomic<int> g_interrupt_count{0};
-
-void on_interrupt(int /*signal*/) {
-    g_interrupt_token.cancel();
-    if (g_interrupt_count.fetch_add(1) >= 2) {
-        // A third Ctrl-C while the child is still winding down: the user
-        // means it.
-        std::_Exit(kCancelled);
-    }
-}
-
-class InterruptScope {
-public:
-    InterruptScope() : previous_{install()} {}
-
-    ~InterruptScope() {
-        std::signal(SIGINT, previous_);
-    }
-
-    InterruptScope(const InterruptScope&) = delete;
-    InterruptScope& operator=(const InterruptScope&) = delete;
-    InterruptScope(InterruptScope&&) = delete;
-    InterruptScope& operator=(InterruptScope&&) = delete;
-
-    [[nodiscard]] static const harness::CancellationToken& token() noexcept {
-        return g_interrupt_token;
-    }
-
-private:
-    /// Arms the token and the counter, then installs the handler.
-    static void (*install())(int) {
-        g_interrupt_token = harness::CancellationToken::create();
-        g_interrupt_count.store(0);
-        return std::signal(SIGINT, on_interrupt);
-    }
-
-    void (*previous_)(int) = nullptr;
-};
 
 // --- the composition ----------------------------------------------------------------
 
@@ -241,40 +200,11 @@ struct Providers {
         };
     }
     const training::PythonEnv env = require_python_env(config, "train promote");
-    if (!env.status().has(training::RequirementSet::Convert)) {
-        fail_user(
-            "the GGUF converter needs the 'convert' requirement set in the Python environment "
-            "-- run 'apogee train setup --with convert'");
+    const std::filesystem::path script = training::converter_script();
+    if (const std::string why = training::converter_unavailable(env, script); !why.empty()) {
+        fail_user(why);
     }
-    const std::filesystem::path script =
-        harness::training_scripts_dir() / "convert" / "convert_hf_to_gguf.py";
-    std::error_code code;
-    if (!std::filesystem::is_regular_file(script, code)) {
-        fail_user("the vendored converter is missing: " + script.string() +
-                  " -- run 'apogee check --fix' to seed it");
-    }
-    return [interpreter = env.interpreter(), script](
-               const std::filesystem::path& fused, const std::filesystem::path& gguf,
-               const training::MessageSink& on_message,
-               const harness::CancellationToken& cancellation) {
-        training::ScriptRequest request;
-        request.interpreter = interpreter;
-        request.script = script;
-        request.arguments = {"--outtype", "f16", "--outfile", gguf.string(), fused.string()};
-        request.environment.emplace_back("PYTHONDONTWRITEBYTECODE", "1");
-        const training::ScriptOutcome outcome = training::run_script(
-            request,
-            [&on_message](const training::ScriptEvent& event) {
-                if (on_message && event.kind != training::ScriptEvent::Kind::Error) {
-                    on_message(event.text);
-                }
-            },
-            cancellation);
-        if (outcome.ok) {
-            return std::string{};
-        }
-        return outcome.cancelled ? std::string{"cancelled"} : outcome.describe();
-    };
+    return training::script_converter(env.interpreter(), script);
 }
 
 [[nodiscard]] training::Verifier header_verifier() {
@@ -424,6 +354,74 @@ struct PromoteOutcome {
     training::PruneResult pruned;
 };
 
+/// The model store's roots as a promotion sees them: `paths.hf_dir` for
+/// SafeTensors when the config sets it.
+[[nodiscard]] models::StoreRoots promotion_roots(const harness::Config& config) {
+    models::StoreRoots roots = models::StoreRoots::at(harness::models_dir());
+    if (!config.paths.hf_dir.empty()) {
+        roots.safetensors =
+            std::filesystem::path{harness::expand_env_and_home(config.paths.hf_dir)};
+    }
+    return roots;
+}
+
+/// A kept fused checkpoint, committed into the store as a SafeTensors set of
+/// the base model -- with the record every stored set has -- and its new
+/// path. Empty when it could not be (it then stays in the run directory).
+[[nodiscard]] std::string keep_fused_weights(const models::StoreRoots& roots,
+                                             const std::string& model,
+                                             const std::filesystem::path& fused,
+                                             const std::string& run_id) {
+    std::error_code code;
+    if (!std::filesystem::is_directory(fused, code)) {
+        return {};
+    }
+    models::Snapshot record;
+    record.ref = "run " + run_id;
+    record.source = "train";
+    record.pulled_at = models::now_rfc3339();
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(fused, code)) {
+        if (entry.is_regular_file(code)) {
+            record.files.push_back({entry.path().lexically_relative(fused).generic_string(),
+                                    static_cast<std::int64_t>(entry.file_size(code)),
+                                    models::file_sha256(entry.path())});
+        }
+    }
+    std::string id = models::snapshot_weight_id(record.files);
+    if (id.empty()) {
+        id = models::random_weight_id();
+    }
+    if (!models::write_snapshot(fused, record)) {
+        return {};
+    }
+    const models::Commit commit = models::commit_weights(
+        fused, models::weights_dir(roots, models::kSafetensorsFormat, model, id));
+    return commit.error.empty() ? commit.dir.string() : std::string{};
+}
+
+/// What retention removes for a pruned version: its whole stored GGUF
+/// directory (file, record) and its kept fine-tune, if any. A GGUF outside the
+/// store -- a version promoted before the store existed -- goes alone.
+[[nodiscard]] std::string remove_promoted(const training::VersionEntry& entry) {
+    const std::filesystem::path file{entry.gguf_path};
+    const std::filesystem::path dir = file.parent_path();
+    std::string error;
+    if (models::is_weight_id(dir.filename().string()) &&
+        dir.parent_path().filename() == models::kGgufFormat) {
+        error = models::remove_weights(dir);
+    } else {
+        std::error_code code;
+        std::filesystem::remove(file, code);
+        if (code) {
+            error = code.message();
+        }
+    }
+    if (error.empty() && !entry.fused_path.empty()) {
+        error = models::remove_weights(entry.fused_path);
+    }
+    return error;
+}
+
 [[nodiscard]] PromoteOutcome promote_run(
     const harness::Config& config, const std::filesystem::path& config_path,
     const training::TrainingStore& store, const training::RunManifest& manifest,
@@ -448,11 +446,17 @@ struct PromoteOutcome {
     ledger.backend = checks.existing_key.empty() ? request.backend : checks.existing_key;
     outcome.backend_key = ledger.backend;
     outcome.updated = !checks.existing_key.empty();
+    // Built in a staging directory beside the base model's GGUFs and
+    // committed into the model store under the weights' own id once verified:
+    // a later promotion can never overwrite an earlier one's file.
+    const models::StoreRoots roots = promotion_roots(config);
+    const std::string model = base_model_name(roots, store, manifest);
+    const std::filesystem::path staging =
+        models::make_incoming_dir(roots, models::kGgufFormat, model);
     const training::PromotePlan plan =
-        training::plan_promotion(ledger, store.run_dir(manifest.run_id), store.versions_dir(),
-                                 ledger.backend, request.quantize, request.keep_fused);
+        training::plan_promotion(ledger, store.run_dir(manifest.run_id), staging, ledger.backend,
+                                 request.quantize, request.keep_fused);
     outcome.version = plan.version;
-    outcome.gguf_path = plan.gguf_path.string();
     if (on_message) {
         on_message("run " + manifest.run_id + " -> " + ledger.backend + " v" +
                    std::to_string(plan.version));
@@ -460,48 +464,79 @@ struct PromoteOutcome {
     const training::ArtifactsResult built =
         training::build_promotion_artifacts(manifest, plan, trainer, convert, header_verifier(),
                                             in_process_quantizer(), on_message, cancellation);
+    std::error_code code;
     if (built.cancelled) {
+        (void)models::remove_weights(staging);
         outcome.cancelled = true;
         outcome.error = "cancelled";
         return outcome;
     }
     if (!built.ok) {
+        (void)models::remove_weights(staging);
         outcome.error = built.error + " -- the config and the version ledger are unchanged";
         return outcome;
     }
+
+    models::Sidecar record;
+    record.ref = ledger.backend + " v" + std::to_string(plan.version);
+    record.source = "train";
+    record.transform = "promote";
+    record.transform_note =
+        "run " + manifest.run_id + (plan.quantize_type.empty() ? "" : ", " + plan.quantize_type);
+    record.verification.header_checked = true;
+    record.verification.header_parsed = true;
+    const models::StoredFile stored =
+        models::commit_gguf(roots, model, staging, plan.gguf_path, record);
+    if (!stored.error.empty()) {
+        (void)models::remove_weights(staging);
+        outcome.error = stored.error + " -- the config and the version ledger are unchanged";
+        return outcome;
+    }
+    outcome.gguf_path = stored.file.string();
+    // Removes what this promotion stored, should the config refuse it.
+    const auto unstore = [&stored] {
+        if (!stored.existed) {
+            (void)models::remove_weights(stored.file.parent_path());
+        }
+    };
 
     // The GGUF exists and parses: now, and only now, the config.
     try {
         if (outcome.updated) {
             harness::edit_config_file(config_path, [&](std::string_view content) {
-                return harness::set_backend_model_path(content, ledger.backend,
-                                                       plan.gguf_path.string());
+                return harness::set_backend_model_path(content, ledger.backend, outcome.gguf_path);
             });
         } else {
             harness::BackendConfig entry;
             entry.type = harness::BackendType::LlamaCpp;
-            entry.model_path = plan.gguf_path.string();
+            entry.model_path = outcome.gguf_path;
             harness::edit_config_file(config_path, [&](std::string_view content) {
                 return harness::append_backend(content, ledger.backend, entry, false);
             });
         }
     } catch (const harness::ConfigEditError& e) {
-        std::error_code code;
-        std::filesystem::remove(plan.gguf_path, code);
+        unstore();
         outcome.error = std::string{"registering the backend: "} + e.what() +
                         " -- the GGUF was removed and the ledger is unchanged";
         return outcome;
     } catch (const harness::ConfigError& e) {
-        std::error_code code;
-        std::filesystem::remove(plan.gguf_path, code);
+        unstore();
         outcome.error = std::string{"registering the backend: "} + e.what() +
                         " -- the GGUF was removed and the ledger is unchanged";
         return outcome;
     }
 
-    outcome.pruned = training::record_promotion(
-        ledger, training::promotion_entry(manifest, plan, training::rfc3339_now()),
-        config.training.retain_versions, training::rfc3339_now());
+    training::VersionEntry entry =
+        training::promotion_entry(manifest, plan, training::rfc3339_now());
+    entry.gguf_path = outcome.gguf_path;
+    if (plan.keep_fused) {
+        // The fine-tuned weights themselves, kept: into the store beside the
+        // base model's own SafeTensors, under their own id.
+        entry.fused_path = keep_fused_weights(roots, model, plan.fused_dir, manifest.run_id);
+    }
+    outcome.pruned =
+        training::record_promotion(ledger, std::move(entry), config.training.retain_versions,
+                                   training::rfc3339_now(), remove_promoted);
     if (const std::string failure = training::save_ledger(store.versions_dir(), ledger);
         !failure.empty()) {
         outcome.error = "the backend is registered, but the ledger could not be saved: " + failure;
@@ -804,46 +839,72 @@ std::string detect_trainer(std::string& reason) {
     return choice.name;
 }
 
+std::string base_model_name(const models::StoreRoots& roots, const training::TrainingStore& store,
+                            const training::RunManifest& manifest) {
+    std::filesystem::path base{manifest.base_model};
+    if (!manifest.pipeline_run_id.empty()) {
+        if (const std::optional<training::PipelineRunManifest> pipeline =
+                store.get_pipeline(manifest.pipeline_run_id);
+            pipeline.has_value() && !pipeline->base_model.empty()) {
+            base = pipeline->base_model;
+        }
+    }
+    const std::filesystem::path normal = base.lexically_normal();
+    for (const std::filesystem::path& root : {roots.safetensors, roots.models}) {
+        const std::filesystem::path relative = normal.lexically_relative(root.lexically_normal());
+        if (!relative.empty() && *relative.begin() != ".." && *relative.begin() != ".") {
+            return relative.begin()->string();
+        }
+    }
+    return models::safe_model_name(normal.filename().string());
+}
+
 StudentResolution resolve_student(const harness::Config& config,
                                   const std::filesystem::path& models_dir,
                                   const std::filesystem::path& snapshot_root,
                                   std::string_view name) {
     StudentResolution resolution;
-    std::error_code code;
-    const std::filesystem::path given{std::string{name}};
-    if (std::filesystem::is_directory(given, code)) {
-        resolution.error = training::validate_student(given);
-        if (resolution.error.empty()) {
-            resolution.path = std::filesystem::absolute(given, code);
-        }
-        return resolution;
-    }
     if (const std::string key = configured_backend_key(config, name); !key.empty()) {
-        const harness::BackendConfig* backend = config.find_backend(key);
-        resolution.error =
-            "'" + std::string{name} + "' is a backend entry (" +
-            std::string{backend != nullptr ? harness::to_string(backend->type) : "?"} +
-            "), not a snapshot: a backend runs a GGUF, and only full-precision SafeTensors "
-            "snapshots are trainable. Pull one with 'apogee models pull <owner>/<repo> "
-            "--safetensors' and name its directory";
-        return resolution;
-    }
-    if (name.find('/') == std::string_view::npos && name.find('\\') == std::string_view::npos &&
-        name.find("..") == std::string_view::npos) {
-        for (const std::filesystem::path& root : {snapshot_root, models_dir}) {
-            const std::filesystem::path candidate = root / std::string{name};
-            if (std::filesystem::is_directory(candidate, code)) {
-                resolution.error = training::validate_student(candidate);
-                if (resolution.error.empty()) {
-                    resolution.path = candidate;
-                }
-                return resolution;
-            }
+        std::error_code code;
+        if (!std::filesystem::is_directory(std::filesystem::path{std::string{name}}, code)) {
+            const harness::BackendConfig* backend = config.find_backend(key);
+            resolution.error =
+                "'" + std::string{name} + "' is a backend entry (" +
+                std::string{backend != nullptr ? harness::to_string(backend->type) : "?"} +
+                "), not a snapshot: a backend runs a GGUF, and only full-precision SafeTensors "
+                "snapshots are trainable. Pull one with 'apogee models pull <owner>/<repo> "
+                "--safetensors' and name it";
+            return resolution;
         }
     }
-    resolution.error = training::validate_student(given);
+    // The one way a SafeTensors set is named anywhere: a model (its newest
+    // set), `<model>/safetensors/<id>`, an id, or a directory. The old flat
+    // layout is refused by name, with the migration that fixes it.
+    const models::StoreRoots roots{models_dir, snapshot_root};
+    const SnapshotChoice choice = choose_snapshot(roots, name);
+    if (!choice.error.empty()) {
+        const std::filesystem::path given{std::string{name}};
+        if (given.extension() == ".gguf") {
+            resolution.error = training::validate_student(given);
+        } else if (choice.error.find("models migrate") != std::string::npos) {
+            resolution.error = choice.error;
+        } else {
+            resolution.error = choice.error +
+                               " -- only full-precision SafeTensors weights are trainable; pull "
+                               "them with 'apogee models pull <owner>/<repo> --safetensors'";
+        }
+        return resolution;
+    }
+    // The shape check, then the one a shape check cannot see: a snapshot
+    // whose config.json an older `models pull --safetensors` replaced with a
+    // download record would fail somewhere deep in the Python run instead.
+    resolution.error = training::validate_student(choice.path);
     if (resolution.error.empty()) {
-        resolution.path = std::filesystem::absolute(given, code);
+        resolution.error = models::damaged_snapshot_error(choice.path);
+    }
+    if (resolution.error.empty()) {
+        std::error_code code;
+        resolution.path = std::filesystem::absolute(choice.path, code);
     }
     return resolution;
 }
@@ -1081,8 +1142,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         "run", "Fine-tune a SafeTensors snapshot on a dataset, recording a run");
     run->add_option("student", *run_student,
                     "A snapshot: a directory, or a name under paths.hf_dir or models/")
+        ->type_name(kPathValue)
         ->required();
     run->add_option("--dataset", *run_dataset, "A dataset name ('datasets list') or a .jsonl path")
+        ->type_name(kPathValue)
         ->required();
     run->add_option("--method", *run_method, "lora (default) or qlora");
     run->add_option("--iters", *run_iters, "Training iterations (default: the driver's)");
@@ -1239,10 +1302,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     eval->add_option("run", *eval_run, "The run id")->required();
     eval->add_option("--suite", *eval_suite,
                      "A .jsonl path, a suite under training/suites, a prepared <name>.eval, or "
-                     "a kit (default: training.eval_suite_path)");
+                     "a kit (default: training.eval_suite_path)")
+        ->type_name(kPathValue);
     eval->add_option("--judge", *eval_judge,
                      "The backend that judges items without `expected` (default: "
-                     "training.judge_backend; none skips them)");
+                     "training.judge_backend; none skips them)")
+        ->type_name(kBackendValue);
     eval->add_flag("-f,--force", *eval_force, "Re-run when results already exist");
     eval->add_option("--trainer", *eval_trainer, "Override the run's recorded trainer");
     eval->callback([&context, eval_run, eval_suite, eval_judge, eval_force, eval_trainer]() {
@@ -1382,6 +1447,7 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         "promote", "Fuse, convert to GGUF, verify, and register the run as a llamacpp backend");
     promote->add_option("run", *promote_id, "The run id")->required();
     promote->add_option("--as", *promote_as, "The backend name: new, or an existing llamacpp entry")
+        ->type_name(kBackendValue)
         ->required();
     promote->add_flag("-f,--force", *promote_force, "Skip the eval gate");
     promote->add_option("--quantize", *promote_quantize,
@@ -1457,7 +1523,9 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto rollback_backend = std::make_shared<std::string>();
     CLI::App* rollback =
         cmd->add_subcommand("rollback", "Repoint a backend at its previous promoted version");
-    rollback->add_option("backend", *rollback_backend, "The backend name")->required();
+    rollback->add_option("backend", *rollback_backend, "The backend name")
+        ->type_name(kBackendValue)
+        ->required();
     rollback->callback([&context, rollback_backend]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
@@ -1507,7 +1575,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     // ---- versions ----------------------------------------------------------
     auto versions_backend = std::make_shared<std::string>();
     CLI::App* versions = cmd->add_subcommand("versions", "List a backend's promoted versions");
-    versions->add_option("backend", *versions_backend, "The backend name (default: every ledger)");
+    versions->add_option("backend", *versions_backend, "The backend name (default: every ledger)")
+        ->type_name(kBackendValue);
     versions->callback([versions_backend]() {
         const training::TrainingStore store{harness::training_dir()};
         std::vector<training::VersionLedger> ledgers;
@@ -1651,12 +1720,15 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     pipe_run
         ->add_option("--pipeline", *pipe_spec,
                      "A spec file (YAML), or a name under training.pipelines")
+        ->type_name(kPathValue)
         ->required();
     pipe_run->add_flag("--continue-on-fail", *pipe_continue,
                        "Go on to the next stage when the cumulative gate fails");
-    pipe_run->add_option("--judge", *pipe_judge,
-                         "The backend that judges items without `expected` (default: "
-                         "training.judge_backend)");
+    pipe_run
+        ->add_option("--judge", *pipe_judge,
+                     "The backend that judges items without `expected` (default: "
+                     "training.judge_backend)")
+        ->type_name(kBackendValue);
     pipe_run->add_option("--trainer", *pipe_trainer, "auto (default), mlx, peft, or mock");
 
     auto resume_id = std::make_shared<std::string>();
@@ -1667,11 +1739,14 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* pipe_resume = pipeline->add_subcommand(
         "resume", "Continue a pipeline from the first stage that has not passed");
     pipe_resume->add_option("id", *resume_id, "The pipeline run id")->required();
-    pipe_resume->add_option("--pipeline", *resume_spec,
-                            "The spec, when the run's named pipeline is no longer in the config");
+    pipe_resume
+        ->add_option("--pipeline", *resume_spec,
+                     "The spec, when the run's named pipeline is no longer in the config")
+        ->type_name(kPathValue);
     pipe_resume->add_flag("--continue-on-fail", *resume_continue,
                           "Go on to the next stage when the cumulative gate fails");
-    pipe_resume->add_option("--judge", *resume_judge, "The judge backend");
+    pipe_resume->add_option("--judge", *resume_judge, "The judge backend")
+        ->type_name(kBackendValue);
     pipe_resume->add_option("--trainer", *resume_trainer, "auto (default), mlx, peft, or mock");
 
     auto pipe_status_id = std::make_shared<std::string>();
@@ -1840,17 +1915,24 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         "run",
         "Run a regime: a dataset per kit from the teacher, one eval-gated pipeline, "
         "the last passing stage promoted");
-    regime_run->add_option("name", *regime_named,
-                           "A regime under training.regimes (or a spec file path)");
-    regime_run->add_option("--regime", *regime_file, "A regime spec file (YAML)");
-    regime_run->add_option("--teacher", *regime_teacher, "The backend that synthesises the data");
-    regime_run->add_option("--student", *regime_student,
-                           "The snapshot to fine-tune: a directory, or a name under paths.hf_dir "
-                           "or models/");
-    regime_run->add_option("--kit", *regime_kits, "A kit per stage, in order (repeatable)");
+    regime_run
+        ->add_option("name", *regime_named, "A regime under training.regimes (or a spec file path)")
+        ->type_name(kPathValue);
+    regime_run->add_option("--regime", *regime_file, "A regime spec file (YAML)")
+        ->type_name(kPathValue);
+    regime_run->add_option("--teacher", *regime_teacher, "The backend that synthesises the data")
+        ->type_name(kBackendValue);
+    regime_run
+        ->add_option("--student", *regime_student,
+                     "The snapshot to fine-tune: a directory, or a name under paths.hf_dir "
+                     "or models/")
+        ->type_name(kPathValue);
+    regime_run->add_option("--kit", *regime_kits, "A kit per stage, in order (repeatable)")
+        ->type_name(kPathValue);
     regime_run->add_flag("--all-kits", *regime_all,
                          "Every installed kit, alphabetically (an explicit --kit list wins)");
-    regime_run->add_option("--as", *regime_as, "Promote the last passing stage into this backend");
+    regime_run->add_option("--as", *regime_as, "Promote the last passing stage into this backend")
+        ->type_name(kBackendValue);
     regime_run->add_option("--count", *regime_count,
                            "Examples per kit (default: each kit's synth.count)");
     regime_run->add_option("--iters", *regime_iters,
@@ -1859,9 +1941,11 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                            "The teacher's sampling temperature (default: each kit's)");
     regime_run->add_option("--max-tokens", *regime_max_tokens,
                            "The teacher's per-call token budget (default 4096)");
-    regime_run->add_option("--judge", *regime_judge,
-                           "The backend that judges items without `expected` (default: "
-                           "training.judge_backend)");
+    regime_run
+        ->add_option("--judge", *regime_judge,
+                     "The backend that judges items without `expected` (default: "
+                     "training.judge_backend)")
+        ->type_name(kBackendValue);
     regime_run->add_flag("--no-promote", *regime_no_promote,
                          "Stop after the gated pipeline; promote by hand");
     regime_run->add_option("--trainer", *regime_trainer, "auto (default), mlx, peft, or mock");
@@ -2039,8 +2123,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         "run",
         "One gated pass: collect, merge, run the cycle's pipeline, gate against the "
         "last pass and the anchor, promote or discard");
-    cycle_run->add_option("--source", *cycle_source,
-                          "A queue directory for this run, replacing the first directory source");
+    cycle_run
+        ->add_option("--source", *cycle_source,
+                     "A queue directory for this run, replacing the first directory source")
+        ->type_name(kPathValue);
     cycle_run->callback([&context, cycle_source]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);

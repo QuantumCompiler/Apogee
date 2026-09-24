@@ -144,7 +144,9 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
 
     CLI::App* ingest = cmd->add_subcommand("ingest", "Add a file or directory to a collection");
     ingest->add_option("collection", *in_collection, "Collection name")->required();
-    ingest->add_option("path", *in_path, "File or directory to read")->required();
+    ingest->add_option("path", *in_path, "File or directory to read")
+        ->type_name(kPathValue)
+        ->required();
     CLI::Option* size_option = ingest->add_option(
         "--chunk-size", *in_size, "Codepoints per chunk (default: the collection's, else 512)");
     CLI::Option* overlap_option =
@@ -353,8 +355,10 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
                        ? std::string{}
                        : agentloop::retriever_values_message("", value);
         });
-    query->add_option("--rerank", *q_rerank,
-                      "Backend that reorders the hits with one generation call, or off");
+    query
+        ->add_option("--rerank", *q_rerank,
+                     "Backend that reorders the hits with one generation call, or off")
+        ->type_name(kBackendValue);
 
     query->callback([&context, q_collection, q_text, q_limit, q_retriever, q_rerank]() {
         require_plain_name(*q_collection);

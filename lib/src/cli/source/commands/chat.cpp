@@ -308,7 +308,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     auto flags = std::make_shared<ChatFlags>();
 
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
-    cmd->add_option("-m,--model", flags->model, "Backend or model to use");
+    cmd->add_option("-m,--model", flags->model, "Backend or model to use")
+        ->type_name(kBackendValue);
     cmd->add_option("-s,--system", flags->system_prompt, "System prompt for the session");
     flags->rag_option =
         cmd->add_option("--rag", flags->rag,
@@ -325,8 +326,10 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             });
     flags->rerank_option =
         cmd->add_option("--rerank", flags->rerank,
-                        "Backend that reorders retrieved chunks with one generation call, or off");
+                        "Backend that reorders retrieved chunks with one generation call, or off")
+            ->type_name(kBackendValue);
     cmd->add_option("--image", flags->images, "Image to attach to the first message (repeatable)")
+        ->type_name(kPathValue)
         ->allow_extra_args(false);
     flags->temperature_option =
         cmd->add_option("-t,--temperature", flags->temperature, "Sampling temperature");
