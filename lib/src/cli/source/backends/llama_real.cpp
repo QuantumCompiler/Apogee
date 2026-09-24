@@ -265,8 +265,20 @@ private:
         owned.reserve(images.size());
         borrowed.reserve(images.size());
         for (const std::string& bytes : images) {
-            BitmapPtr bitmap{mtmd_helper_bitmap_init_from_buf(
-                vision_, reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size())};
+            // Since b11151 the helper also decodes video, handing back a
+            // video context beside the bitmap. An attachment here is an
+            // image; a video context is freed and the input refused.
+            const mtmd_helper_bitmap_wrapper decoded = mtmd_helper_bitmap_init_from_buf(
+                vision_, reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size(),
+                /*placeholder=*/false, mtmd_helper_init_opt_default());
+            BitmapPtr bitmap{decoded.bitmap};
+            if (decoded.video_ctx != nullptr) {
+                mtmd_helper_video_free(decoded.video_ctx);
+                error =
+                    "an attachment decoded as video, which this backend does not take -- "
+                    "attach an image";
+                return -1;
+            }
             if (bitmap == nullptr) {
                 error =
                     "an attached image could not be decoded -- it may be a format this "
@@ -286,14 +298,27 @@ private:
         mtmd_input_text input{};
         const std::string prompt{text};
         input.text = prompt.c_str();
+        // Since b11151 the text is read by length, not to its terminator:
+        // left at zero, mtmd saw an empty prompt with no image markers in it,
+        // and refused every image (found live, 2026-09-23 -- the compiler
+        // cannot, since the field value-initialises).
+        input.text_len = prompt.size();
         input.add_special = true;
         input.parse_special = true;
 
-        if (mtmd_tokenize(vision_, chunks.get(), &input, borrowed.data(), borrowed.size()) != 0) {
-            // The usual cause is a marker count that does not match the number
-            // of images, which is our bug rather than the user's -- so it says
-            // what went wrong rather than blaming the picture.
+        llama_log().forget();
+        const std::int32_t tokenized =
+            mtmd_tokenize(vision_, chunks.get(), &input, borrowed.data(), borrowed.size());
+        if (tokenized == 1) {
+            // A marker count that does not match the number of images: our
+            // bug rather than the user's, so it says what went wrong rather
+            // than blaming the picture.
             error = "the multimodal prompt could not be tokenized (marker/image mismatch)";
+            return -1;
+        }
+        if (tokenized != 0) {
+            // 2: the projector could not prepare an image -- mtmd says why.
+            error = with_llama_reason("an attached image could not be prepared for this projector");
             return -1;
         }
 

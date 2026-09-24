@@ -68,13 +68,33 @@ Encoders snapshot_encoders(const std::filesystem::path& snapshot) {
     return encoders;
 }
 
+bool snapshot_has_chat_template(const std::filesystem::path& snapshot) {
+    std::error_code code;
+    if (std::filesystem::is_regular_file(snapshot / "chat_template.jinja", code) ||
+        std::filesystem::is_regular_file(snapshot / "chat_template.json", code)) {
+        return true;
+    }
+    std::ifstream in{snapshot / "tokenizer_config.json", std::ios::binary};
+    if (!in) {
+        return false;
+    }
+    const nlohmann::json config = nlohmann::json::parse(in, nullptr, false);
+    if (!config.is_object()) {
+        return false;
+    }
+    const auto found = config.find("chat_template");
+    return found != config.end() && !found->is_null() && !found->empty();
+}
+
 bool is_encoder_tensor(std::string_view name) noexcept {
-    // Qwen-VL, LLaVA/Gemma/Mistral, Llama 4/InternVL/Idefics, Gemma 3n, and
-    // the audio towers of the omni models.
-    constexpr std::array<std::string_view, 12> kMarkers{
+    // Qwen-VL, LLaVA/Gemma/Mistral, Llama 4/InternVL/Idefics, Gemma 3n and
+    // Gemma 4's transformer-less towers, and the audio towers of the omni
+    // models.
+    constexpr std::array<std::string_view, 13> kMarkers{
         "visual.",       "vision_tower.",   "multi_modal_projector.", "vision_model.",
-        "mm_projector.", "vision_encoder.", "modality_projection.",   "embed_vision.",
-        "audio_tower.",  "audio_model.",    "audio_encoder.",         "embed_audio."};
+        "mm_projector.", "vision_encoder.", "vision_embedder.",       "modality_projection.",
+        "embed_vision.", "audio_tower.",    "audio_model.",           "audio_encoder.",
+        "embed_audio."};
     return std::ranges::any_of(kMarkers, [name](std::string_view marker) {
         return name.find(marker) != std::string_view::npos;
     });

@@ -142,6 +142,18 @@ std::string projector_failure(const std::string& error) {
     return error;
 }
 
+/// A snapshot with no chat template is a base model: its GGUF continues text
+/// rather than answering, which reads as a broken chat unless it is said.
+void note_if_base_model(const std::filesystem::path& snapshot) {
+    if (models::snapshot_has_chat_template(snapshot)) {
+        return;
+    }
+    std::cout << "note: this model has no chat template -- it is a base model, which continues "
+                 "text rather than answering.\n"
+                 "      To chat, convert its instruction-tuned release (often named '-it' or "
+                 "'-Instruct'); a base model is what fine-tuning starts from.\n";
+}
+
 /// The one command that puts a stored model to use, its projector included.
 void print_backend_hint(const std::filesystem::path& model_file,
                         const std::filesystem::path& projector) {
@@ -1012,6 +1024,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             }
             std::cout << "(to convert it again, delete it first: apogee models delete "
                       << done->model << "/gguf/" << done->id << ")\n";
+            note_if_base_model(source.path);
             print_backend_hint(done->file, done->projector);
             return;
         }
@@ -1151,6 +1164,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                       << "\n         the model works for text; it cannot read " << encoders.reads()
                       << " without one\n";
         }
+        note_if_base_model(source.path);
         if (!done.has_value() && models::is_known_unrunnable(model_info.architecture)) {
             std::cout << "warning: architecture '" << model_info.architecture
                       << "' is not known to run in Apogee's llama.cpp.\n";

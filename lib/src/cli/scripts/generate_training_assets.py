@@ -21,6 +21,7 @@ literal per file would not build on two of the six release targets.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -28,6 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets" / "training"
 CONVERTER = ROOT / "third_party" / "llama.cpp-convert"
+RETIRED = CONVERTER / "retired-digests.txt"
 OUT_TRAINING = ROOT / "source" / "harness" / "assets_training.cpp"
 OUT_CONVERTER = ROOT / "source" / "harness" / "assets_converter.cpp"
 
@@ -193,6 +195,27 @@ def generate_converter() -> str:
         out.append(accessor("convert_" + identifier(relative), symbol))
         names.append(relative)
     out.append("}  // namespace")
+    out.append("")
+    # The versions earlier Apogees shipped (retired-digests.txt, written by
+    # scripts/vendor_llama_convert.py), less any this build ships unchanged.
+    current = {
+        f"convert/{path.relative_to(CONVERTER).as_posix()} "
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}"
+        for path in files
+    }
+    retired = []
+    if RETIRED.exists():
+        retired = sorted(
+            {line.strip() for line in RETIRED.read_text(encoding="utf-8").splitlines()
+             if line.strip() and not line.startswith("#")} - current
+        )
+    out.append("std::span<const std::string_view> bundled_converter_retired() {")
+    out.append(f"    static constexpr std::array<std::string_view, {len(retired)}> retired{{{{")
+    for line in retired:
+        out.append(f'        "{line}",')
+    out.append("    }};")
+    out.append("    return retired;")
+    out.append("}")
     out.append("")
     out.append("std::span<const BundledScript> bundled_converter_files() {")
     out.append(f"    static const std::array<BundledScript, {len(names)}> files{{{{")

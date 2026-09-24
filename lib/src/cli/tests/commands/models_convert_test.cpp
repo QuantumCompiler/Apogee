@@ -105,6 +105,10 @@ struct Home {
                               "vision_config": {"depth": 27}})"
                           : R"({"architectures": ["Qwen3ForCausalLM"]})");
         write_file(dir / "model.safetensors", "weights");
+        if (vision) {
+            // An instruction-tuned release; the text-only one stands for a base model.
+            write_file(dir / "tokenizer_config.json", R"({"chat_template": "{{ messages }}"})");
+        }
     }
 
     [[nodiscard]] std::vector<std::string> converter_calls() const {
@@ -170,6 +174,7 @@ TEST_CASE("convert makes a vision model's projector beside it", "[commands][mode
 
     // The one command that uses both.
     CHECK(out.find("--mmproj-path " + stored.front().projector.string()) != std::string::npos);
+    CHECK(out.find("no chat template") == std::string::npos);
 }
 
 TEST_CASE("a projector the converter cannot make leaves the model, and a later run adds it",
@@ -219,5 +224,7 @@ TEST_CASE("a text-only model is converted once, with no projector attempted",
     CHECK(stored.front().projector.empty());
     CHECK(out.find("projector") == std::string::npos);
     CHECK(out.find("--mmproj-path") == std::string::npos);
+    // No chat template: a base model, said so -- converted all the same.
+    CHECK(out.find("no chat template -- it is a base model") != std::string::npos);
 }
 #endif

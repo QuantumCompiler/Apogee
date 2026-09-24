@@ -66,6 +66,14 @@ struct Encoders {
 /// when the model's own configuration says so.
 [[nodiscard]] Encoders snapshot_encoders(const std::filesystem::path& snapshot);
 
+/// Whether the snapshot carries a chat template -- `chat_template.jinja`,
+/// `chat_template.json`, or a `chat_template` in `tokenizer_config.json`.
+/// One without is a base model: it continues text rather than answering, so
+/// chatting with its GGUF produces a ramble, not a reply (Gemma 4 12B,
+/// 2026-09-23). Worth a note when it is converted; never a refusal -- a base
+/// model is what fine-tuning starts from.
+[[nodiscard]] bool snapshot_has_chat_template(const std::filesystem::path& snapshot);
+
 /// Whether a SafeTensors tensor belongs to a vision or audio encoder, by the
 /// names Hugging Face checkpoints use (`model.visual.`, `vision_tower.`,
 /// `multi_modal_projector.`, `audio_tower.` ...). For splitting a size

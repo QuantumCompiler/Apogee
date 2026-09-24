@@ -2,10 +2,12 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "harness/assets.h"
 #include "training/promote.h"
 #include "training/python_env.h"
 
@@ -28,11 +30,13 @@ namespace apogee::training {
 
 /// Why the converter cannot run, naming the one command that fixes it -- or
 /// empty when it can: the environment, its `convert` set, and every file of
-/// the vendored tree `script` heads. The environment is not created or filled
-/// here: the requirement set is torch and transformers, gigabytes a user
-/// installs on purpose.
-[[nodiscard]] std::string converter_unavailable(const PythonEnv& env,
-                                                const std::filesystem::path& script);
+/// the vendored tree `script` heads -- present, and not an earlier Apogee's
+/// copy (`retired`, as `harness::inspect_converter_tree` takes it). The environment is not created
+/// or filled here: the requirement set is torch and transformers, gigabytes a user installs on
+/// purpose.
+[[nodiscard]] std::string converter_unavailable(
+    const PythonEnv& env, const std::filesystem::path& script,
+    std::span<const std::string_view> retired = harness::bundled_converter_retired());
 
 /// Which file a run of the script writes: the model, or -- for a model with
 /// a vision or audio encoder -- the projector that lets it read images or

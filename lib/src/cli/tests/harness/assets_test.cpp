@@ -2,6 +2,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -11,6 +13,7 @@
 
 #include "harness/config.h"
 #include "harness/layout.h"
+#include "models/sha256.h"
 #include "support/env_guard.h"
 
 /// The bundled agents: compiled-in texts byte-equal to the shipped files,
@@ -257,4 +260,87 @@ TEST_CASE(
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), kits));
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), kits / "reasoning.yaml"));
     CHECK(apogee::harness::is_unmodified_bundled_asset(root.path(), kits / "summarization.yaml"));
+}
+
+TEST_CASE("an earlier Apogee's converter is brought up to this build's; an edit is kept",
+          "[harness][assets][converter][refresh]") {
+    // Seeding is skip-if-present, so without this a pin bump never reaches an
+    // existing install: its converter stays the old llama.cpp's, and refuses
+    // the models the bump was for (Gemma 4 "unified", 2026-09-23).
+    const apogee::testing::TempDir root{"assets-refresh-" + std::to_string(std::random_device{}())};
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    const std::filesystem::path tree =
+        root.path() / apogee::harness::bundled_converter_relative_dir();
+    CHECK(apogee::harness::inspect_converter_tree(tree).current());
+
+    const auto write = [](const std::filesystem::path& path, const std::string& bytes) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream{path, std::ios::binary} << bytes;
+    };
+    // Three files an earlier Apogee shipped: one this build ships too, one it
+    // no longer does (in a directory of its own), and one the user edited.
+    write(tree / "conversion" / "llama.py", "# llama, as the old pin had it\n");
+    write(tree / "conversion" / "gone" / "retired.py", "# upstream deleted this\n");
+    write(tree / "conversion" / "qwen.py", "# the user's own change\n");
+    // Python's cache is nobody's edit.
+    write(tree / "conversion" / "__pycache__" / "llama.cpython-314.pyc", "bytecode");
+    std::vector<std::string> retired{
+        "convert/conversion/gone/retired.py " +
+            apogee::models::sha256_hex("# upstream deleted this\n"),
+        "convert/conversion/llama.py " +
+            apogee::models::sha256_hex("# llama, as the old pin had it\n"),
+    };
+    std::ranges::sort(retired);
+    const std::vector<std::string_view> list{retired.begin(), retired.end()};
+
+    const apogee::harness::ConverterTreeState before =
+        apogee::harness::inspect_converter_tree(tree, list);
+    CHECK(before.stale == 2);
+    CHECK(before.edited == 1);
+    CHECK(before.missing == 0);
+
+    apogee::harness::AssetSeedResult result;
+    apogee::harness::refresh_converter_tree(root.path(), tree, result, list);
+    REQUIRE(result.ok());
+    CHECK(result.updated ==
+          std::vector<std::string>{"training/scripts/convert/conversion/llama.py"});
+    CHECK(result.removed ==
+          std::vector<std::string>{"training/scripts/convert/conversion/gone/retired.py"});
+    // The stale file is this build's now, the retired one and its emptied
+    // directory are gone, and the edit is exactly as the user left it.
+    const apogee::harness::BundledScript* llama = nullptr;
+    for (const apogee::harness::BundledScript& file : apogee::harness::bundled_converter_files()) {
+        if (file.name == "convert/conversion/llama.py") {
+            llama = &file;
+        }
+    }
+    REQUIRE(llama != nullptr);
+    CHECK(read(tree / "conversion" / "llama.py") == llama->text);
+    CHECK_FALSE(std::filesystem::exists(tree / "conversion" / "gone"));
+    CHECK(read(tree / "conversion" / "qwen.py") == "# the user's own change\n");
+
+    const apogee::harness::ConverterTreeState after =
+        apogee::harness::inspect_converter_tree(tree, list);
+    CHECK(after.stale == 0);
+    CHECK(after.edited == 1);
+}
+
+TEST_CASE("the compiled-in retired list names earlier versions, never this build's",
+          "[harness][assets][converter][refresh]") {
+    const std::span<const std::string_view> retired = apogee::harness::bundled_converter_retired();
+    CHECK(std::ranges::is_sorted(retired));
+    for (const std::string_view entry : retired) {
+        INFO(entry);
+        const std::size_t space = entry.rfind(' ');
+        REQUIRE(space != std::string_view::npos);
+        CHECK(entry.starts_with("convert/"));
+        CHECK(entry.size() - space - 1 == 64);
+    }
+    // A file this build ships unchanged is not "retired": the refresh would
+    // rewrite it for nothing and check would call a current tree stale.
+    for (const apogee::harness::BundledScript& file : apogee::harness::bundled_converter_files()) {
+        const std::string current =
+            std::string{file.name} + " " + apogee::models::sha256_hex(file.text);
+        CHECK_FALSE(std::ranges::binary_search(retired, std::string_view{current}));
+    }
 }

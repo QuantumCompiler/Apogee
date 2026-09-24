@@ -133,6 +133,10 @@ struct SeedResult {
     /// Directories -- and bundled asset files -- that did not exist and were
     /// created, relative to the root.
     std::vector<std::string> created;
+    /// Converter files an earlier Apogee seeded, brought up to this build's
+    /// (`seed_bundled_assets`), or removed when it no longer ships them.
+    std::vector<std::string> updated;
+    std::vector<std::string> removed;
 
     /// Non-empty on failure. Seeding is all-or-nothing from the caller's point
     /// of view: a partial layout is exactly the state the parity rule exists to

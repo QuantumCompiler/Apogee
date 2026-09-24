@@ -18,7 +18,8 @@ std::filesystem::path converter_script() {
     return harness::training_scripts_dir() / "convert" / "convert_hf_to_gguf.py";
 }
 
-std::string converter_unavailable(const PythonEnv& env, const std::filesystem::path& script) {
+std::string converter_unavailable(const PythonEnv& env, const std::filesystem::path& script,
+                                  std::span<const std::string_view> retired) {
     if (!env.exists()) {
         return "the GGUF converter runs in Apogee's Python environment, which has not been "
                "created yet -- run 'apogee train setup --with convert' (a one-time install of "
@@ -44,6 +45,14 @@ std::string converter_unavailable(const PythonEnv& env, const std::filesystem::p
             return "the vendored converter is incomplete: " + path.string() +
                    " is missing -- run 'apogee check --fix' to seed it";
         }
+    }
+    // An earlier Apogee's copy, left by skip-if-present seeding: it would run
+    // an older llama.cpp's converter than this build's runtime, and refuse
+    // the models the update was for.
+    if (harness::inspect_converter_tree(script.parent_path(), retired).stale > 0) {
+        return "the converter under " + script.parent_path().string() +
+               " is from an earlier Apogee (an older llama.cpp than this build's) -- run "
+               "'apogee check --fix' to update it";
     }
     return {};
 }

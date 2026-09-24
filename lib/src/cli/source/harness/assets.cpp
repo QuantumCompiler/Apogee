@@ -1,12 +1,18 @@
 #include "harness/assets.h"
 
+#include <algorithm>
 #include <array>
+#include <exception>
 #include <fstream>
 #include <iterator>
+#include <optional>
+#include <set>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "harness/config_edit.h"
+#include "models/sha256.h"
 
 // GENERATED from lib/src/cli/assets/prompts/*.txt and assets/schemas/*.json by
 // the script recorded in MILESTONES.md (Milestone X). The shipped files and
@@ -624,6 +630,131 @@ std::string bundled_script_relative_path(std::string_view name) {
     return "training/scripts/" + std::string{name};
 }
 
+namespace {
+
+[[nodiscard]] std::optional<std::string> read_bytes(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        return std::nullopt;
+    }
+    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+/// The bundled converter file named `name` (`convert/...`), or null.
+[[nodiscard]] const BundledScript* find_converter_file(std::string_view name) {
+    for (const BundledScript& file : bundled_converter_files()) {
+        if (file.name == name) {
+            return &file;
+        }
+    }
+    return nullptr;
+}
+
+/// Each regular file under the tree `dir`, named as `bundled_converter_files`
+/// names them. A `__pycache__` is Python's, not anyone's edit, and skipped.
+[[nodiscard]] std::vector<std::pair<std::filesystem::path, std::string>> converter_tree_files(
+    const std::filesystem::path& dir) {
+    std::vector<std::pair<std::filesystem::path, std::string>> out;
+    std::error_code code;
+    for (auto it = std::filesystem::recursive_directory_iterator(dir, code);
+         !code && it != std::filesystem::recursive_directory_iterator(); it.increment(code)) {
+        if (it->is_directory(code) && it->path().filename() == "__pycache__") {
+            it.disable_recursion_pending();
+            continue;
+        }
+        if (it->is_regular_file(code)) {
+            out.emplace_back(it->path(), dir.filename().generic_string() + "/" +
+                                             it->path().lexically_relative(dir).generic_string());
+        }
+    }
+    return out;
+}
+
+[[nodiscard]] bool is_retired(std::span<const std::string_view> retired, const std::string& name,
+                              std::string_view bytes) {
+    const std::string key = name + " " + models::sha256_hex(bytes);
+    return std::ranges::binary_search(retired, std::string_view{key});
+}
+
+}  // namespace
+
+ConverterTreeState inspect_converter_tree(const std::filesystem::path& dir,
+                                          std::span<const std::string_view> retired) {
+    ConverterTreeState state;
+    std::set<std::string> present;
+    for (const auto& [path, name] : converter_tree_files(dir)) {
+        present.insert(name);
+        const std::optional<std::string> bytes = read_bytes(path);
+        const BundledScript* bundled = find_converter_file(name);
+        if (bytes.has_value() && bundled != nullptr && *bytes == bundled->text) {
+            continue;
+        }
+        if (bytes.has_value() && is_retired(retired, name, *bytes)) {
+            ++state.stale;
+        } else {
+            ++state.edited;
+        }
+    }
+    for (const BundledScript& file : bundled_converter_files()) {
+        if (!present.contains(std::string{file.name})) {
+            ++state.missing;
+        }
+    }
+    return state;
+}
+
+void refresh_converter_tree(const std::filesystem::path& root, const std::filesystem::path& dir,
+                            AssetSeedResult& result, std::span<const std::string_view> retired) {
+    bool removed_any = false;
+    for (const auto& [path, name] : converter_tree_files(dir)) {
+        const std::optional<std::string> bytes = read_bytes(path);
+        if (!bytes.has_value() || !is_retired(retired, name, *bytes)) {
+            continue;  // current, or the user's
+        }
+        const BundledScript* bundled = find_converter_file(name);
+        const std::string relative = path.lexically_relative(root).generic_string();
+        if (bundled != nullptr && *bytes == bundled->text) {
+            continue;
+        }
+        if (bundled == nullptr) {
+            std::error_code code;
+            std::filesystem::remove(path, code);
+            if (code) {
+                result.error = "could not remove " + path.string() + ": " + code.message();
+                return;
+            }
+            result.removed.push_back(relative);
+            removed_any = true;
+            continue;
+        }
+        try {
+            write_file_atomically(path, bundled->text);
+        } catch (const std::exception& e) {
+            result.error = e.what();
+            return;
+        }
+        result.updated.push_back(relative);
+    }
+    if (!removed_any) {
+        return;
+    }
+    // Directories a removal emptied, deepest first; never the tree itself.
+    std::vector<std::filesystem::path> dirs;
+    std::error_code code;
+    for (auto it = std::filesystem::recursive_directory_iterator(dir, code);
+         !code && it != std::filesystem::recursive_directory_iterator(); it.increment(code)) {
+        if (it->is_directory(code)) {
+            dirs.push_back(it->path());
+        }
+    }
+    std::ranges::sort(dirs, std::ranges::greater{});
+    for (const std::filesystem::path& empty : dirs) {
+        if (std::filesystem::is_empty(empty, code)) {
+            std::filesystem::remove(empty, code);
+        }
+    }
+}
+
 std::string bundled_converter_relative_dir() {
     return "training/scripts/convert";
 }
@@ -672,13 +803,35 @@ bool is_unmodified_bundled_asset(const std::filesystem::path& root,
             return false;
         }
         std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        return bytes == bundled.content;
+        if (bytes == bundled.content) {
+            return true;
+        }
+        break;  // this build's file, changed: an edit -- unless an earlier Apogee shipped it
     }
-    return false;
+    // An earlier Apogee's unedited converter file is still Apogee's.
+    const std::filesystem::path converter = root / bundled_converter_relative_dir();
+    const std::filesystem::path relative = file.lexically_relative(converter);
+    if (relative.empty() || relative.begin()->string() == "..") {
+        return false;
+    }
+    const std::optional<std::string> bytes = read_bytes(file);
+    return bytes.has_value() &&
+           is_retired(bundled_converter_retired(),
+                      converter.filename().generic_string() + "/" + relative.generic_string(),
+                      *bytes);
 }
 
 AssetSeedResult seed_bundled_assets(const std::filesystem::path& root) {
     AssetSeedResult result;
+    // Before the skip-if-present pass: an earlier Apogee's converter would
+    // otherwise be "present" and skipped for good.
+    if (const std::filesystem::path converter = root / bundled_converter_relative_dir();
+        std::filesystem::is_directory(converter)) {
+        refresh_converter_tree(root, converter, result);
+        if (!result.ok()) {
+            return result;
+        }
+    }
     for (const BundledFile& bundled : bundled_files()) {
         const std::filesystem::path path = root / bundled.relative_path;
         std::error_code code;

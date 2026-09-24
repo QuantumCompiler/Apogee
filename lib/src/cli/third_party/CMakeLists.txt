@@ -60,13 +60,16 @@ endif()
 
 include(FetchContent)
 
-# Pinned to the exact revision Ommi's local-inference path is built against, so
-# the llamacpp-backend item starts from ground already proven in the reference
-# implementation. Updating this pin is a DELIBERATE event: it gets its own
-# commit, and the message says what changed upstream and why we want it.
+# Pinned to release b11151 (2026-09-23). It started at 549b9d84, the revision
+# Ommi's local-inference path built against; moved for Gemma 4's "unified"
+# checkpoints, which that revision's converter refused and whose image and
+# audio projectors (gemma4uv/gemma4ua) its mtmd could not load. Updating this
+# pin is a DELIBERATE event: it gets its own commit, the message says what
+# changed upstream and why we want it, and the vendored converter moves with it
+# (scripts/vendor_llama_convert.py -- third_party/llama.cpp-convert/README.md).
 FetchContent_Declare(llama_cpp
     GIT_REPOSITORY https://github.com/ggml-org/llama.cpp
-    GIT_TAG        549b9d84330c327e6791fa812a7d60c0cf63572e
+    GIT_TAG        bd4f514db14d87fded667787a7a963bfbaa98e89  # b11151
 )
 
 # Library only -- Apogee links llama.cpp in-process (SPEC.md -> Background) and

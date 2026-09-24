@@ -217,6 +217,8 @@ SeedResult seed_data_directory(const std::filesystem::path& root) {
     for (std::string& file : assets.created) {
         result.created.push_back(std::move(file));
     }
+    result.updated = std::move(assets.updated);
+    result.removed = std::move(assets.removed);
     if (!assets.ok()) {
         result.error = assets.error;
     }

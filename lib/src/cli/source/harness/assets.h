@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -126,6 +127,40 @@ struct BundledScript {
 /// the converter files seed into, which the doctor checks as one row.
 [[nodiscard]] std::string bundled_converter_relative_dir();
 
+/// Every converter file version an earlier Apogee shipped and this one does
+/// not, as `<name> <sha256>` with the name as in `bundled_converter_files`,
+/// sorted. From `third_party/llama.cpp-convert/retired-digests.txt`, which
+/// `scripts/vendor_llama_convert.py` extends before each re-vendor.
+///
+/// Why it exists: seeding is skip-if-present, so after a pin bump every
+/// existing install would keep converting with the old llama.cpp's converter
+/// -- which knows neither the new models nor the tensors the new runtime
+/// expects (2026-09-23: Gemma 4 "unified" refused by the old one). A seeded
+/// file matching an entry is an earlier Apogee's copy, not the user's edit,
+/// and is safe to replace.
+[[nodiscard]] std::span<const std::string_view> bundled_converter_retired();
+
+/// A seeded converter tree, file by file, against this build's.
+struct ConverterTreeState {
+    /// Files this build ships that are not there.
+    std::size_t missing = 0;
+    /// Files an earlier Apogee shipped, unedited: to be updated, or removed
+    /// when this build no longer ships them.
+    std::size_t stale = 0;
+    /// Anything else that differs: the user's, kept, and reported as drift.
+    std::size_t edited = 0;
+
+    [[nodiscard]] bool current() const noexcept {
+        return missing == 0 && stale == 0 && edited == 0;
+    }
+};
+
+/// `dir` is the tree (`<home>/training/scripts/convert`). `retired` is
+/// `bundled_converter_retired()` but for tests.
+[[nodiscard]] ConverterTreeState inspect_converter_tree(
+    const std::filesystem::path& dir,
+    std::span<const std::string_view> retired = bundled_converter_retired());
+
 /// `training/kits/<name>.yaml` and `training/scripts/<name>`, relative to the
 /// data directory -- the paths seeding writes and the commands read.
 [[nodiscard]] std::string bundled_kit_relative_path(std::string_view name);
@@ -144,6 +179,10 @@ struct BundledFile {
 struct AssetSeedResult {
     /// Files written, relative to the root. Absent files only.
     std::vector<std::string> created;
+    /// Converter files an earlier Apogee seeded, replaced by this build's.
+    std::vector<std::string> updated;
+    /// Converter files an earlier Apogee seeded that this build no longer ships.
+    std::vector<std::string> removed;
     std::string error;
 
     [[nodiscard]] bool ok() const noexcept {
@@ -154,6 +193,20 @@ struct AssetSeedResult {
 /// Writes every bundled prompt and schema under `root` that is not already
 /// there. Called by `seed_data_directory`, so `apogee check --fix` -- and
 /// through it both installers -- is the only path that materialises them.
+///
+/// The converter tree first has its stale files brought up to this build
+/// (`refresh_converter_tree`): skip-if-present protects an edit, and an
+/// earlier Apogee's unedited copy is not one.
 [[nodiscard]] AssetSeedResult seed_bundled_assets(const std::filesystem::path& root);
+
+/// Replaces each stale file under the converter tree `dir` (see
+/// `ConverterTreeState`) with this build's copy, or removes it when this
+/// build no longer ships it, recording each under `result` relative to
+/// `root`. Edited and missing files are left: the first are the user's, the
+/// second are seeding's. `retired` is `bundled_converter_retired()` but for
+/// tests.
+void refresh_converter_tree(
+    const std::filesystem::path& root, const std::filesystem::path& dir, AssetSeedResult& result,
+    std::span<const std::string_view> retired = bundled_converter_retired());
 
 }  // namespace apogee::harness

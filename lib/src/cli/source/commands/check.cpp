@@ -925,29 +925,28 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         const std::filesystem::path converter =
             inputs.home / harness::bundled_converter_relative_dir();
         const std::size_t files = harness::bundled_converter_files().size();
-        // Missing files are no edit, so the drift test below passes them;
-        // counted here, since a missing `gguf` package is not a missing
-        // feature -- the script falls back to the PyPI one, which lags the pin.
-        std::size_t missing = 0;
-        for (const harness::BundledScript& file : harness::bundled_converter_files()) {
-            if (!std::filesystem::is_regular_file(
-                    inputs.home / harness::bundled_script_relative_path(file.name), code)) {
-                ++missing;
-            }
-        }
         if (!std::filesystem::is_directory(converter, code)) {
             add(report, Status::Warn, "Training", "converter",
                 "convert_hf_to_gguf.py is not seeded under " + converter.string(),
                 "apogee check --fix");
-        } else if (missing > 0) {
-            add(report, Status::Warn, "Training", "converter",
-                std::to_string(missing) + " of the vendored converter's " + std::to_string(files) +
-                    " files are missing from " + converter.string(),
-                "apogee check --fix");
-        } else if (harness::is_unmodified_bundled_asset(inputs.home, converter)) {
+        } else if (const harness::ConverterTreeState tree =
+                       harness::inspect_converter_tree(converter);
+                   tree.current()) {
             add(report, Status::Ok, "Training", "converter",
                 "convert_hf_to_gguf.py matches the vendored copy (" + std::to_string(files) +
                     " files)");
+        } else if (tree.stale > 0 || tree.missing > 0) {
+            // An earlier Apogee's converter, or part of one: the fix updates
+            // it in place, and an edit elsewhere in the tree is kept. Stale,
+            // it is a failure waiting to happen -- its llama.cpp is older
+            // than the runtime's, and a model only the new one knows fails.
+            add(report, Status::Warn, "Training", "converter",
+                (tree.stale > 0 ? std::to_string(tree.stale) +
+                                      " file(s) are from an earlier Apogee's llama.cpp"
+                                : std::to_string(tree.missing) + " of the vendored converter's " +
+                                      std::to_string(files) + " files are missing") +
+                    " under " + converter.string(),
+                "apogee check --fix");
         } else {
             add(report, Status::Warn, "Training", "converter",
                 "differs from the vendored copy under " + converter.string() +
@@ -1218,6 +1217,12 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
     done.reserve(seeded.created.size());
     for (const std::string& name : seeded.created) {
         done.push_back("created " + (inputs.home / name).string());
+    }
+    for (const std::string& name : seeded.updated) {
+        done.push_back("updated " + (inputs.home / name).string());
+    }
+    for (const std::string& name : seeded.removed) {
+        done.push_back("removed " + (inputs.home / name).string());
     }
     if (!seeded.ok()) {
         done.push_back("could not finish: " + seeded.error);

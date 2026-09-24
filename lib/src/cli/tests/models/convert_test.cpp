@@ -258,6 +258,8 @@ TEST_CASE("an encoder's tensors are told apart for the size estimate",
     CHECK(is_encoder_tensor("vision_tower.encoder.layers.0.mlp.fc1.weight"));
     CHECK(is_encoder_tensor("multi_modal_projector.linear_1.weight"));
     CHECK(is_encoder_tensor("model.audio_tower.layers.0.self_attn.k_proj.weight"));
+    CHECK(is_encoder_tensor("model.vision_embedder.patch_embedder.weight"));  // Gemma 4 unified
+    CHECK(is_encoder_tensor("model.embed_audio.embedding_projection.weight"));
     CHECK_FALSE(is_encoder_tensor("model.language_model.layers.0.mlp.up_proj.weight"));
     CHECK_FALSE(is_encoder_tensor("mtp.fc.weight"));
     CHECK_FALSE(is_encoder_tensor("lm_head.weight"));
@@ -268,4 +270,24 @@ TEST_CASE("an encoder's tensors are told apart for the size estimate",
     // The fixture's first shard holds 40 text elements; this one 6 encoder ones.
     CHECK(apogee::models::snapshot_elements(fixture.snapshot) == 46);
     CHECK(apogee::models::snapshot_elements(fixture.snapshot, is_encoder_tensor) == 6);
+}
+
+TEST_CASE("a snapshot without a chat template is a base model", "[models][convert]") {
+    const Fixture fixture;
+    using apogee::models::snapshot_has_chat_template;
+    CHECK_FALSE(snapshot_has_chat_template(fixture.snapshot));
+
+    // Gemma 4 12B, the base release: a tokenizer config with no template.
+    write_file(fixture.snapshot / "tokenizer_config.json", R"({"model_max_length": 262144})");
+    CHECK_FALSE(snapshot_has_chat_template(fixture.snapshot));
+    write_file(fixture.snapshot / "tokenizer_config.json", R"({"chat_template": null})");
+    CHECK_FALSE(snapshot_has_chat_template(fixture.snapshot));
+
+    // Where instruction-tuned releases keep theirs.
+    write_file(fixture.snapshot / "tokenizer_config.json",
+               R"({"chat_template": "{% for m in messages %}{{ m.content }}{% endfor %}"})");
+    CHECK(snapshot_has_chat_template(fixture.snapshot));
+    std::filesystem::remove(fixture.snapshot / "tokenizer_config.json");
+    write_file(fixture.snapshot / "chat_template.jinja", "{{ messages }}");
+    CHECK(snapshot_has_chat_template(fixture.snapshot));
 }

@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include "harness/assets.h"
+#include "models/sha256.h"
 #include "support/env_guard.h"
 
 using apogee::training::converter_arguments;
@@ -77,6 +79,36 @@ TEST_CASE("a converter that cannot run names the one command that fixes it",
     // Everything in place.
     std::ofstream{package / "__init__.py"} << "";
     CHECK(converter_unavailable(PythonEnv{venv}, script).empty());
+}
+
+TEST_CASE("a converter an earlier Apogee seeded is refused, naming the update",
+          "[training][convert]") {
+    // After a pin bump the seeded copy keeps the old llama.cpp's converter --
+    // skip-if-present -- and would refuse exactly the models the bump was for.
+    const apogee::testing::TempDir root{"convert-stale-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path venv = root.path() / "venv";
+    const std::filesystem::path script = root.path() / "convert" / "convert_hf_to_gguf.py";
+    std::filesystem::create_directories(venv / "bin");
+    std::ofstream{venv / "bin" / "python"} << "";
+    std::ofstream{venv / "apogee.json"} << R"({"sets": ["convert"]})";
+    for (const apogee::harness::BundledScript& file : apogee::harness::bundled_converter_files()) {
+        const std::filesystem::path path = root.path() / std::string{file.name};
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream{path} << file.text;
+    }
+    CHECK(converter_unavailable(PythonEnv{venv}, script).empty());
+
+    // The entry script as an earlier Apogee shipped it.
+    std::ofstream{script} << "# the old converter\n";
+    const std::string entry =
+        "convert/convert_hf_to_gguf.py " + apogee::models::sha256_hex("# the old converter\n");
+    const std::array<std::string_view, 1> retired{entry};
+    const std::string why = converter_unavailable(PythonEnv{venv}, script, retired);
+    CHECK(why.find("from an earlier Apogee") != std::string::npos);
+    CHECK(why.find("apogee check --fix") != std::string::npos);
+
+    // The same bytes, not retired: an edit, which runs.
+    CHECK(converter_unavailable(PythonEnv{venv}, script, {}).empty());
 }
 
 TEST_CASE("a failure the pinned converter cannot help is explained, anything else passed through",
