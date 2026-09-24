@@ -63,4 +63,8 @@ Seven semi-independent tracks that can interleave: the **vendor-CLI family** —
 
 The **training track** (22 — **split at grooming 2026-09-19** into 22a datasets/kits/the Python boundary → 22b runs → 22c pipelines/regime/cycle). Training is a confirmed direction (2026-08-24), **scheduled for v0.1.0 by the user on 2026-09-19**. **All three shipped 2026-09-19** ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone Z) — **the track is complete, and nothing in the outer ring is pending.**
 
-**The backlog is empty.** Every specced item has shipped; the next work begins as a line on [ROADMAP.md](../assistant/ROADMAP.md) and a new document here.
+### Phase 4 — after v0.1.x
+
+| # | Item | Status |
+|---|---|---|
+| 23 | [Terminal markdown rendering](terminal-markdown.md) — an answer's Markdown rendered as it streams on a TTY; pipes, machine mode and history untouched | specced 2026-09-23; two **[user]** open calls (hand-written vs md4c, code highlighting) block the build |

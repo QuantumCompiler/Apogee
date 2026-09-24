@@ -115,7 +115,9 @@ struct SnapshotRepair {
 
 /// Tensor elements across the snapshot's shards, read from each shard's
 /// header alone -- an 8-byte length and a JSON table of shapes -- so nothing
-/// is loaded. nullopt when a header cannot be read.
-[[nodiscard]] std::optional<std::int64_t> snapshot_elements(const std::filesystem::path& dir);
+/// is loaded. Only the tensors `include` accepts by name, when given. nullopt
+/// when a header cannot be read.
+[[nodiscard]] std::optional<std::int64_t> snapshot_elements(
+    const std::filesystem::path& dir, const std::function<bool(std::string_view)>& include = {});
 
 }  // namespace apogee::models

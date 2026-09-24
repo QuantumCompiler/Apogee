@@ -74,6 +74,16 @@ private:
     ThinkingView thinking_;
     std::int64_t thinking_characters_ = 0;
     bool emitted_ = false;
+    /// Whether the current answer has shown any text yet. Until it has, its
+    /// whitespace is held: a thinking model opens its answer with the blank
+    /// lines that followed its reasoning, which printed as a gap under the
+    /// "Thought for" line.
+    bool answer_began_ = false;
+    /// Whitespace not yet written -- the leading run before the first text,
+    /// then whatever trails the latest chunk. Written once text follows it,
+    /// dropped at the end, so an answer neither starts nor ends with blank
+    /// lines.
+    std::string held_;
 };
 
 }  // namespace apogee::commands

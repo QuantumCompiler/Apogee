@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -87,6 +88,9 @@ struct SnapshotChoice {
 /// Which GGUF `models quantize` reads.
 struct GgufChoice {
     std::filesystem::path file;
+    /// Its projector, when one sits beside it -- carried into the quantized
+    /// copy's directory, since quantizing the model leaves it unchanged.
+    std::filesystem::path projector;
     std::string model;
     std::string id;
     std::string error;
@@ -98,6 +102,15 @@ struct GgufChoice {
 /// named after the file).
 [[nodiscard]] GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
                                      std::string_view from_id = {});
+
+/// The GGUF `models convert` already made of the SafeTensors set `ref` at
+/// `out_type` -- its record says so -- or nullopt. A conversion is recognised
+/// before it runs, as a pull is before it downloads: redoing it would write
+/// the same bytes again.
+[[nodiscard]] std::optional<models::StoredGguf> find_conversion(const models::StoreRoots& roots,
+                                                                std::string_view model,
+                                                                std::string_view ref,
+                                                                std::string_view out_type);
 
 /// Finds what an older `models pull --safetensors` damaged in the snapshot at
 /// `dir` and fixes it in place -- fetching each damaged file again from where

@@ -879,6 +879,11 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                     reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
                 rag_settings, review_note);
+            if (decorate) {
+                // One blank line between an answer and the next prompt, so
+                // turns read as turns rather than one run of text.
+                reporter.status().print_line("");
+            }
         }
 
         logger::save(session);

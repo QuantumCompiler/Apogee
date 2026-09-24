@@ -224,3 +224,48 @@ TEST_CASE("the size estimate follows the precision", "[models][convert]") {
     CHECK(estimated_gguf_bytes(3200, "f32") == 12800);
     CHECK(estimated_gguf_bytes(3200, "q8_0") == 3400);  // 34 bytes per block of 32
 }
+
+TEST_CASE("a model's encoders are what its config declares", "[models][convert][projector]") {
+    const Fixture fixture;
+    using apogee::models::snapshot_encoders;
+    // The fixture's config names no encoder.
+    CHECK_FALSE(snapshot_encoders(fixture.snapshot).any());
+
+    write_file(fixture.snapshot / "config.json",
+               R"({"architectures": ["Qwen3_5ForConditionalGeneration"],
+                   "vision_config": {"depth": 27}, "language_model_only": false})");
+    CHECK(snapshot_encoders(fixture.snapshot).vision);
+    CHECK(snapshot_encoders(fixture.snapshot).reads() == "images");
+
+    write_file(fixture.snapshot / "config.json",
+               R"({"vision_config": {"depth": 1}, "audio_config": {"d_model": 8}})");
+    CHECK(snapshot_encoders(fixture.snapshot).reads() == "images and audio");
+
+    // Declared text-only, or declared empty: nothing to project.
+    write_file(fixture.snapshot / "config.json",
+               R"({"vision_config": {"depth": 1}, "language_model_only": true})");
+    CHECK_FALSE(snapshot_encoders(fixture.snapshot).any());
+    write_file(fixture.snapshot / "config.json", R"({"vision_config": null})");
+    CHECK_FALSE(snapshot_encoders(fixture.snapshot).any());
+    write_file(fixture.snapshot / "config.json", "not json");
+    CHECK_FALSE(snapshot_encoders(fixture.snapshot).any());
+}
+
+TEST_CASE("an encoder's tensors are told apart for the size estimate",
+          "[models][convert][projector]") {
+    using apogee::models::is_encoder_tensor;
+    CHECK(is_encoder_tensor("model.visual.blocks.0.attn.qkv.weight"));
+    CHECK(is_encoder_tensor("vision_tower.encoder.layers.0.mlp.fc1.weight"));
+    CHECK(is_encoder_tensor("multi_modal_projector.linear_1.weight"));
+    CHECK(is_encoder_tensor("model.audio_tower.layers.0.self_attn.k_proj.weight"));
+    CHECK_FALSE(is_encoder_tensor("model.language_model.layers.0.mlp.up_proj.weight"));
+    CHECK_FALSE(is_encoder_tensor("mtp.fc.weight"));
+    CHECK_FALSE(is_encoder_tensor("lm_head.weight"));
+
+    const Fixture fixture;
+    write_shard(fixture.snapshot / "model-00002.safetensors",
+                {{"model.visual.patch_embed.proj.weight", {2, 3}}});
+    // The fixture's first shard holds 40 text elements; this one 6 encoder ones.
+    CHECK(apogee::models::snapshot_elements(fixture.snapshot) == 46);
+    CHECK(apogee::models::snapshot_elements(fixture.snapshot, is_encoder_tensor) == 6);
+}

@@ -258,6 +258,21 @@ TEST_CASE("values that would confuse YAML are quoted on write", "[config_edit]")
     CHECK(written->system_prompt == backend.system_prompt);
 }
 
+TEST_CASE("a projector is written right after its model", "[config_edit]") {
+    // What `config add-backend --mmproj-path` writes, and what `models
+    // convert` hands the user for a model that reads images.
+    BackendConfig backend;
+    backend.type = BackendType::LlamaCpp;
+    backend.model_path = "/m/Qwen-F16.gguf";
+    backend.mmproj_path = "/m/Qwen-F16-mmproj.gguf";
+    const std::string added = append_backend("backends:\n", "vision", backend, false);
+    CHECK(added ==
+          "backends:\n  vision:\n    type: llamacpp\n    model_path: /m/Qwen-F16.gguf\n"
+          "    mmproj_path: /m/Qwen-F16-mmproj.gguf\n");
+    const auto config = apogee::harness::parse_config(added, "<test>");
+    CHECK(config.find_backend("vision")->mmproj_path == backend.mmproj_path);
+}
+
 TEST_CASE("an api_key is stored literally, not expanded, on write", "[config_edit]") {
     const apogee::testing::EnvGuard key{"NEW_KEY", "sk-should-not-appear"};
     const std::string added = append_backend("", "a", anthropic_backend(), false);

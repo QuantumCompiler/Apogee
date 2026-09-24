@@ -52,6 +52,7 @@ add_executable(apogee_tests
     models/source_hf_test.cpp
     commands/models_pull_test.cpp
     commands/models_migrate_test.cpp
+    commands/models_convert_test.cpp
     commands/models_test.cpp
     commands/attachment_guard_test.cpp
     backends/jsonl_framer_test.cpp

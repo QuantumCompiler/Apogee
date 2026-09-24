@@ -1,5 +1,10 @@
 #include "models/convert.h"
 
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <array>
+#include <fstream>
 #include <system_error>
 
 #include "models/snapshot.h"
@@ -28,6 +33,51 @@ std::int64_t estimated_gguf_bytes(std::int64_t elements, std::string_view out_ty
         return elements / 32 * 34;
     }
     return elements * 2;  // f16, bf16, and what `auto` picks for a 16-bit source
+}
+
+std::string Encoders::reads() const {
+    if (vision && audio) {
+        return "images and audio";
+    }
+    if (vision) {
+        return "images";
+    }
+    return audio ? "audio" : "";
+}
+
+Encoders snapshot_encoders(const std::filesystem::path& snapshot) {
+    Encoders encoders;
+    std::ifstream in{snapshot / "config.json", std::ios::binary};
+    if (!in) {
+        return encoders;
+    }
+    const nlohmann::json config = nlohmann::json::parse(in, nullptr, false);
+    if (!config.is_object()) {
+        return encoders;
+    }
+    if (const auto only = config.find("language_model_only");
+        only != config.end() && only->is_boolean() && only->get<bool>()) {
+        return encoders;
+    }
+    const auto declared = [&config](std::string_view key) {
+        const auto found = config.find(std::string{key});
+        return found != config.end() && found->is_object() && !found->empty();
+    };
+    encoders.vision = declared("vision_config");
+    encoders.audio = declared("audio_config") || declared("whisper_config");
+    return encoders;
+}
+
+bool is_encoder_tensor(std::string_view name) noexcept {
+    // Qwen-VL, LLaVA/Gemma/Mistral, Llama 4/InternVL/Idefics, Gemma 3n, and
+    // the audio towers of the omni models.
+    constexpr std::array<std::string_view, 12> kMarkers{
+        "visual.",       "vision_tower.",   "multi_modal_projector.", "vision_model.",
+        "mm_projector.", "vision_encoder.", "modality_projection.",   "embed_vision.",
+        "audio_tower.",  "audio_model.",    "audio_encoder.",         "embed_audio."};
+    return std::ranges::any_of(kMarkers, [name](std::string_view marker) {
+        return name.find(marker) != std::string_view::npos;
+    });
 }
 
 std::string conversion_refusal(const std::filesystem::path& snapshot,

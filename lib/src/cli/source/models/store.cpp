@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <optional>
 #include <random>
 #include <system_error>
+#include <utility>
 
 #include "models/sha256.h"
 #include "models/sidecar.h"
@@ -45,6 +47,18 @@ constexpr std::string_view kIncomingPrefix = ".incoming-";
 
 [[nodiscard]] bool is_projector_file(const std::filesystem::path& path) {
     return path.stem().string().ends_with("-mmproj");
+}
+
+/// The one `*-mmproj.gguf` directly inside `dir`, if any.
+[[nodiscard]] std::optional<std::filesystem::path> projector_in(const std::filesystem::path& dir) {
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, code)) {
+        if (entry.is_regular_file(code) && entry.path().extension() == ".gguf" &&
+            is_projector_file(entry.path())) {
+            return entry.path();
+        }
+    }
+    return std::nullopt;
 }
 
 /// The model a flat-layout GGUF belongs to: its record's ref when it has one.
@@ -196,7 +210,19 @@ Commit commit_weights(const std::filesystem::path& staged, const std::filesystem
     std::error_code code;
     if (std::filesystem::exists(final_dir, code)) {
         // Same id, same weights: what is already there is kept, and the copy
-        // that was just made is not.
+        // that was just made is not -- but for a projector the stored copy
+        // lacks. The id is the model file's hash alone, so a projector made
+        // after the model (a later `convert`, an Ollama layer that failed the
+        // first time) has nowhere else to go.
+        const std::optional<std::filesystem::path> staged_projector = projector_in(staged);
+        if (staged_projector.has_value() && !projector_in(final_dir).has_value()) {
+            const std::filesystem::path record = sidecar_path_for(*staged_projector);
+            commit.error = move_path(*staged_projector, final_dir / staged_projector->filename());
+            if (commit.error.empty() && std::filesystem::exists(record, code)) {
+                commit.error = move_path(record, final_dir / record.filename());
+            }
+            commit.projector_added = commit.error.empty();
+        }
         std::filesystem::remove_all(staged, code);
         commit.existed = true;
         return commit;
@@ -231,10 +257,11 @@ std::string move_path(const std::filesystem::path& from, const std::filesystem::
     return {};
 }
 
-StoredFile commit_gguf(const StoreRoots& roots, std::string_view model,
-                       const std::filesystem::path& staging, const std::filesystem::path& file,
-                       Sidecar record) {
-    StoredFile stored;
+std::filesystem::path projector_path_for(const std::filesystem::path& model_file) {
+    return model_file.parent_path() / (model_file.stem().string() + "-mmproj.gguf");
+}
+
+std::string write_record(const std::filesystem::path& file, Sidecar record) {
     std::error_code code;
     record.file = file.filename().string();
     if (record.pulled_at.empty()) {
@@ -242,13 +269,60 @@ StoredFile commit_gguf(const StoreRoots& roots, std::string_view model,
     }
     record.file_digest = file_sha256(file);
     record.file_size = static_cast<std::int64_t>(std::filesystem::file_size(file, code));
+    if (code || record.file_digest.empty()) {
+        return "could not read " + file.string() + " to record it";
+    }
     record.verification.size_checked = true;
     record.verification.size_matched = true;
     if (!write_sidecar(file, record)) {
-        stored.error = "could not write the record beside " + file.string();
+        return "could not write the record beside " + file.string();
+    }
+    return {};
+}
+
+std::string share_projector(const std::filesystem::path& projector,
+                            const std::filesystem::path& dir) {
+    std::error_code code;
+    const std::filesystem::path link = dir / projector.filename();
+    if (std::filesystem::exists(link, code)) {
+        return "a file already exists at " + link.string();
+    }
+    std::filesystem::create_directories(dir, code);
+    std::filesystem::create_hard_link(projector, link, code);
+    if (code) {
+        // Another filesystem, or one without hard links: a copy.
+        code.clear();
+        std::filesystem::copy_file(projector, link, code);
+        if (code) {
+            std::error_code cleanup;
+            std::filesystem::remove(link, cleanup);
+            return "could not copy " + projector.string() + " to " + dir.string() + ": " +
+                   code.message();
+        }
+    }
+    // The record is copied, never linked: it is small, and a record is
+    // rewritten in place where the weights never are.
+    const std::filesystem::path record = sidecar_path_for(projector);
+    if (std::filesystem::exists(record, code)) {
+        std::filesystem::copy_file(record, dir / record.filename(), code);
+        if (code) {
+            return "could not copy " + record.string() + " to " + dir.string() + ": " +
+                   code.message();
+        }
+    }
+    return {};
+}
+
+StoredFile commit_gguf(const StoreRoots& roots, std::string_view model,
+                       const std::filesystem::path& staging, const std::filesystem::path& file,
+                       Sidecar record) {
+    StoredFile stored;
+    if (std::string error = write_record(file, std::move(record)); !error.empty()) {
+        stored.error = std::move(error);
         return stored;
     }
-    std::string id = weight_id_from_digest(record.file_digest);
+    const std::optional<Sidecar> written = load_sidecar(file);
+    std::string id = written.has_value() ? weight_id_from_digest(written->file_digest) : "";
     if (id.empty()) {
         id = random_weight_id();
     }
@@ -258,12 +332,12 @@ StoredFile commit_gguf(const StoreRoots& roots, std::string_view model,
         return stored;
     }
     stored.existed = commit.existed;
+    stored.projector_added = commit.projector_added;
     stored.file = commit.dir / file.filename();
-    if (commit.existed) {
-        for (const StoredGguf& existing : list_store_ggufs(roots, model)) {
-            if (existing.id == id) {
-                stored.file = existing.file;
-            }
+    for (const StoredGguf& existing : list_store_ggufs(roots, model)) {
+        if (existing.id == id) {
+            stored.file = existing.file;
+            stored.projector = existing.projector;
         }
     }
     return stored;
@@ -531,8 +605,7 @@ LegacyLayout find_legacy(const StoreRoots& roots) {
             if (std::filesystem::exists(sidecar_path_for(file), code)) {
                 gguf.sidecar = sidecar_path_for(file);
             }
-            const std::filesystem::path projector =
-                file.parent_path() / (file.stem().string() + "-mmproj.gguf");
+            const std::filesystem::path projector = projector_path_for(file);
             if (!is_projector_file(file) && std::filesystem::exists(projector, code)) {
                 gguf.projector = projector;
                 if (std::filesystem::exists(sidecar_path_for(projector), code)) {

@@ -104,6 +104,56 @@ private:
     std::thread thread_;  // last: it starts running before the body of the constructor
 };
 
+/// One run of the converter into `output`, the partial file's growth shown
+/// against `estimate` (unknown when zero). Ctrl-C cancels it.
+models::ConvertResult run_conversion(const std::filesystem::path& snapshot,
+                                     const std::filesystem::path& output,
+                                     const training::Converter& converter, std::int64_t estimate) {
+    const std::filesystem::path partial = models::conversion_partial_path(output);
+    models::ConvertResult result;
+    DownloadProgress progress{std::cout, stdout_download_options()};
+    {
+        const Ticker ticker{[&progress, &partial, estimate]() {
+            std::error_code code;
+            const std::uintmax_t size = std::filesystem::file_size(partial, code);
+            progress.bytes(code ? 0 : static_cast<std::int64_t>(size), estimate);
+        }};
+        const InterruptScope interrupt;
+        result = models::convert_snapshot(
+            snapshot, output,
+            [&converter](const std::filesystem::path& from, const std::filesystem::path& gguf,
+                         const harness::CancellationToken& cancellation) {
+                return converter(from, gguf, {}, cancellation);
+            },
+            InterruptScope::token());
+    }
+    progress.finish();
+    return result;
+}
+
+/// Why a projector could not be made, in words a user can act on. The
+/// converter says an architecture "is not supported" when it has no projector
+/// class for it -- the model itself converted fine.
+std::string projector_failure(const std::string& error) {
+    if (error.find("is not supported") != std::string::npos) {
+        return "the converter shipped with this build's llama.cpp cannot make a projector for "
+               "this model's architecture";
+    }
+    return error;
+}
+
+/// The one command that puts a stored model to use, its projector included.
+void print_backend_hint(const std::filesystem::path& model_file,
+                        const std::filesystem::path& projector) {
+    std::cout << "\nUse it by adding a backend:\n"
+              << "  apogee config add-backend <name> --type llamacpp --model-path "
+              << model_file.string();
+    if (!projector.empty()) {
+        std::cout << " --mmproj-path " << projector.string();
+    }
+    std::cout << "\n";
+}
+
 /// The configured backends whose model or projector lies inside one of `dirs`.
 /// Best effort: a config that does not load names none.
 [[nodiscard]] std::vector<std::string> backends_inside(
@@ -505,6 +555,10 @@ GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
         }
         choice.file = target.path;
         choice.model = models::safe_model_name(target.path.stem().string());
+        if (const std::filesystem::path projector = models::projector_path_for(target.path);
+            std::filesystem::is_regular_file(projector, code)) {
+            choice.projector = projector;
+        }
         return choice;
     }
     choice.model = target.model;
@@ -521,6 +575,7 @@ GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
         for (const models::StoredGguf& gguf : stored) {
             if (gguf.id == id) {
                 choice.file = gguf.file;
+                choice.projector = gguf.projector;
                 choice.id = gguf.id;
                 return choice;
             }
@@ -556,8 +611,23 @@ GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
         return choice;
     }
     choice.file = best->file;
+    choice.projector = best->projector;
     choice.id = best->id;
     return choice;
+}
+
+std::optional<models::StoredGguf> find_conversion(const models::StoreRoots& roots,
+                                                  std::string_view model, std::string_view ref,
+                                                  std::string_view out_type) {
+    const std::string note = "--outtype " + std::string{out_type};
+    for (const models::StoredGguf& stored : models::list_store_ggufs(roots, model)) {
+        const std::optional<models::Sidecar> record = models::load_sidecar(stored.file);
+        if (record.has_value() && record->source == "convert" && record->ref == ref &&
+            record->transform_note == note) {
+            return stored;
+        }
+    }
+    return std::nullopt;
 }
 
 /// Finds what an older pull damaged in the snapshot at `dir` and fixes it,
@@ -766,13 +836,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             }
         }
 
-        std::cout << "\nUse it by adding a backend:\n"
-                  << "  apogee config add-backend <name> --type llamacpp --model-path "
-                  << model_file.string() << "\n";
-        if (!projector.empty()) {
-            std::cout << "\nthen add its projector to that backend so it can read images:\n"
-                      << "  mmproj_path: \"" << projector.string() << "\"\n";
-        }
+        print_backend_hint(model_file, projector);
     });
 
     // ---- delete -------------------------------------------------------------
@@ -925,61 +989,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             fail(why);
         }
 
-        std::int64_t estimate = 0;
-        if (const std::optional<std::int64_t> elements = models::snapshot_elements(source.path)) {
-            estimate = models::estimated_gguf_bytes(*elements, *convert_type);
-        }
-        std::string precision = *convert_type;
-        for (char& c : precision) {
-            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        }
-        const std::filesystem::path staging =
-            models::make_incoming_dir(roots, models::kGgufFormat, source.model);
-        const std::filesystem::path output =
-            staging / (display_name(source.model) +
-                       (*convert_type == "auto" ? std::string{} : "-" + precision) + ".gguf");
-        std::cout << "converting " << source.path.string() << " to a GGUF ("
-                  << (*convert_type == "auto" ? "precision chosen by the converter" : precision)
-                  << (estimate > 0 ? ", about " + format_progress_size(estimate) : std::string{})
-                  << ")\n";
-
-        const training::Converter converter =
-            training::script_converter(env.interpreter(), script, *convert_type);
-        const std::filesystem::path partial = models::conversion_partial_path(output);
-        models::ConvertResult result;
-        {
-            DownloadProgress progress{std::cout, stdout_download_options()};
-            {
-                const Ticker ticker{[&progress, &partial, estimate]() {
-                    std::error_code code;
-                    const std::uintmax_t size = std::filesystem::file_size(partial, code);
-                    progress.bytes(code ? 0 : static_cast<std::int64_t>(size), estimate);
-                }};
-                const InterruptScope interrupt;
-                result = models::convert_snapshot(
-                    source.path, output,
-                    [&converter](const std::filesystem::path& snapshot,
-                                 const std::filesystem::path& gguf,
-                                 const harness::CancellationToken& cancellation) {
-                        return converter(snapshot, gguf, {}, cancellation);
-                    },
-                    InterruptScope::token());
-            }
-            progress.finish();
-        }
-
-        std::error_code code;
-        if (result.cancelled) {
-            (void)models::remove_weights(staging);
-            std::cerr << "apogee models: cancelled -- nothing was written\n";
-            throw CLI::RuntimeError(kCancelled);
-        }
-        if (!result.ok) {
-            (void)models::remove_weights(staging);
-            fail(result.error);
-        }
-
-        // Its id is its own hash, so the directory can only be named now.
+        const models::Encoders encoders = models::snapshot_encoders(source.path);
         models::Sidecar record;
         record.ref =
             source.id.empty() ? source.path.string() : source.model + "/safetensors/" + source.id;
@@ -988,30 +998,168 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         record.transform_note = "--outtype " + *convert_type;
         record.verification.header_checked = true;
         record.verification.header_parsed = true;
-        const models::StoredFile stored =
-            models::commit_gguf(roots, source.model, staging, result.path, record);
-        if (!stored.error.empty()) {
-            (void)models::remove_weights(staging);
-            fail(stored.error);
+        models::Sidecar projector_record = record;
+        projector_record.transform_note = "--mmproj --outtype " + *convert_type;
+
+        // Recognised before it runs: the same set at the same precision is the
+        // same bytes, and only a projector it still lacks is worth making.
+        const std::optional<models::StoredGguf> done =
+            find_conversion(roots, source.model, record.ref, *convert_type);
+        if (done.has_value() && (!encoders.any() || !done->projector.empty())) {
+            std::cout << "already converted:\n  " << done->file.string() << "\n";
+            if (!done->projector.empty()) {
+                std::cout << "  " << done->projector.string() << "\n";
+            }
+            std::cout << "(to convert it again, delete it first: apogee models delete "
+                      << done->model << "/gguf/" << done->id << ")\n";
+            print_backend_hint(done->file, done->projector);
+            return;
         }
 
-        std::cout << "\n"
-                  << (stored.existed ? "already here -- these exact weights are at\n" : "")
-                  << stored.file.string() << "\n"
-                  << "verified: GGUF header parsed -- " << result.info.architecture << ", "
-                  << result.info.tensors << " tensors, " << human_size(result.info.file_size)
-                  << "\n";
-        if (models::is_known_unrunnable(result.info.architecture)) {
-            std::cout << "warning: architecture '" << result.info.architecture
+        // The encoder's tensors go to the projector, the rest to the model.
+        std::int64_t model_estimate = 0;
+        std::int64_t projector_estimate = 0;
+        if (const std::optional<std::int64_t> all = models::snapshot_elements(source.path)) {
+            const std::int64_t encoder =
+                models::snapshot_elements(source.path, models::is_encoder_tensor).value_or(0);
+            model_estimate = models::estimated_gguf_bytes(*all - encoder, *convert_type);
+            projector_estimate = models::estimated_gguf_bytes(encoder, *convert_type);
+        }
+        std::string precision = *convert_type;
+        for (char& c : precision) {
+            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+        const std::filesystem::path staging =
+            models::make_incoming_dir(roots, models::kGgufFormat, source.model);
+        const auto cancelled = [&staging]() {
+            (void)models::remove_weights(staging);
+            std::cerr << "apogee models: cancelled -- nothing was written\n";
+            throw CLI::RuntimeError(kCancelled);
+        };
+
+        // ---- the model ------------------------------------------------------
+        std::filesystem::path model_output;
+        models::GgufInfo model_info;
+        if (done.has_value()) {
+            std::cout << "already converted:\n  " << done->file.string() << "\n";
+        } else {
+            model_output =
+                staging / (display_name(source.model) +
+                           (*convert_type == "auto" ? std::string{} : "-" + precision) + ".gguf");
+            std::cout << "converting " << source.path.string() << " to a GGUF ("
+                      << (*convert_type == "auto" ? "precision chosen by the converter" : precision)
+                      << (model_estimate > 0 ? ", about " + format_progress_size(model_estimate)
+                                             : std::string{})
+                      << ")\n";
+            const models::ConvertResult result =
+                run_conversion(source.path, model_output,
+                               training::script_converter(env.interpreter(), script, *convert_type),
+                               model_estimate);
+            if (result.cancelled) {
+                cancelled();
+            }
+            if (!result.ok) {
+                (void)models::remove_weights(staging);
+                fail(result.error);
+            }
+            model_info = result.info;
+        }
+
+        // ---- its projector --------------------------------------------------
+        // A separate GGUF beside the model (`mmproj_path`): without it a model
+        // that can see or hear is text-only, and nothing would say so.
+        const std::filesystem::path projector_output =
+            staging /
+            models::projector_path_for(done.has_value() ? done->file : model_output).filename();
+        std::string projector_problem;
+        models::GgufInfo projector_info;
+        if (encoders.any()) {
+            std::cout << (done.has_value() ? "making its projector" : "\nand its projector")
+                      << ", so it can read " << encoders.reads()
+                      << (projector_estimate > 0
+                              ? " (about " + format_progress_size(projector_estimate) + ")"
+                              : std::string{})
+                      << "\n";
+            const models::ConvertResult made =
+                run_conversion(source.path, projector_output,
+                               training::script_converter(env.interpreter(), script, *convert_type,
+                                                          training::ConverterOutput::Projector),
+                               projector_estimate);
+            if (made.cancelled) {
+                cancelled();
+            }
+            if (!made.ok) {
+                projector_problem = projector_failure(made.error);
+            } else if (!made.info.is_projector()) {
+                projector_problem = "the converter's output holds a text model, not a projector";
+            } else {
+                projector_problem = models::write_record(projector_output, projector_record);
+                projector_info = made.info;
+            }
+            if (!projector_problem.empty()) {
+                std::error_code code;
+                std::filesystem::remove(projector_output, code);
+                if (done.has_value()) {
+                    (void)models::remove_weights(staging);
+                    fail("its projector could not be made -- " + projector_problem);
+                }
+            }
+        }
+
+        // ---- into the store -------------------------------------------------
+        // Its id is the model's own hash, so the directory can only be named
+        // now; a projector for a model already stored joins it there.
+        std::filesystem::path model_file;
+        std::filesystem::path projector;
+        bool existed = false;
+        if (done.has_value()) {
+            const models::Commit commit = models::commit_weights(staging, done->dir);
+            if (!commit.error.empty()) {
+                (void)models::remove_weights(staging);
+                fail(commit.error);
+            }
+            model_file = done->file;
+            projector = done->dir / projector_output.filename();
+        } else {
+            const models::StoredFile stored =
+                models::commit_gguf(roots, source.model, staging, model_output, record);
+            if (!stored.error.empty()) {
+                (void)models::remove_weights(staging);
+                fail(stored.error);
+            }
+            model_file = stored.file;
+            projector = stored.projector;
+            existed = stored.existed;
+        }
+
+        std::cout << "\n" << (existed ? "already here -- these exact weights are at\n" : "");
+        if (!done.has_value()) {
+            std::cout << model_file.string() << "\n"
+                      << "verified: GGUF header parsed -- " << model_info.architecture << ", "
+                      << model_info.tensors << " tensors, " << human_size(model_info.file_size)
+                      << "\n";
+        }
+        if (!projector.empty()) {
+            std::cout << projector.string() << "\n";
+            if (projector_info.parsed) {
+                std::cout << "verified: projector header parsed -- " << projector_info.tensors
+                          << " tensors, " << human_size(projector_info.file_size) << "\n";
+            }
+        }
+        if (!projector_problem.empty()) {
+            std::cout << "warning: its projector could not be made -- " << projector_problem
+                      << "\n         the model works for text; it cannot read " << encoders.reads()
+                      << " without one\n";
+        }
+        if (!done.has_value() && models::is_known_unrunnable(model_info.architecture)) {
+            std::cout << "warning: architecture '" << model_info.architecture
                       << "' is not known to run in Apogee's llama.cpp.\n";
         }
         if (*convert_type != "q8_0") {
             std::cout << "\nMake it smaller:\n  apogee models quantize " << source.model
                       << " --type Q4_K_M\n";
         }
-        std::cout << "\nUse it by adding a backend:\n"
-                  << "  apogee config add-backend <name> --type llamacpp --model-path "
-                  << stored.file.string() << "\n";
+        print_backend_hint(model_file, projector);
     });
 
     // ---- repair -------------------------------------------------------------

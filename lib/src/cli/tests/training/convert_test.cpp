@@ -22,6 +22,12 @@ TEST_CASE("the converter is called with one argument shape", "[training][convert
     // a second spelling of its arguments would drift from upstream alone.
     CHECK(converter_arguments("q8_0", "/snap", "/out/m.gguf") ==
           std::vector<std::string>{"--outtype", "q8_0", "--outfile", "/out/m.gguf", "/snap"});
+    // The projector is the same run with --mmproj: the script picks the
+    // encoder's tensors itself.
+    CHECK(converter_arguments("f16", "/snap", "/out/m-mmproj.gguf",
+                              apogee::training::ConverterOutput::Projector) ==
+          std::vector<std::string>{"--outtype", "f16", "--outfile", "/out/m-mmproj.gguf", "/snap",
+                                   "--mmproj"});
 }
 
 TEST_CASE("the offered precisions are the script's own, less the ternary ones",

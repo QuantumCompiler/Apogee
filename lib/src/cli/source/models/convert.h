@@ -45,6 +45,33 @@ struct ConvertResult {
 /// f32 and adds a header -- never a check.
 [[nodiscard]] std::int64_t estimated_gguf_bytes(std::int64_t elements, std::string_view out_type);
 
+/// What a snapshot's `config.json` says the model perceives beyond text:
+/// a vision encoder (`vision_config`), an audio one (`audio_config`,
+/// `whisper_config`) -- the keys llama.cpp's converter reads to build a
+/// projector. A config that declares itself `language_model_only` has none.
+struct Encoders {
+    bool vision = false;
+    bool audio = false;
+
+    [[nodiscard]] bool any() const noexcept {
+        return vision || audio;
+    }
+
+    /// "images", "audio", or "images and audio" -- what a projector lets the
+    /// model read, for a sentence.
+    [[nodiscard]] std::string reads() const;
+};
+
+/// Nothing when `config.json` cannot be read: an encoder is claimed only
+/// when the model's own configuration says so.
+[[nodiscard]] Encoders snapshot_encoders(const std::filesystem::path& snapshot);
+
+/// Whether a SafeTensors tensor belongs to a vision or audio encoder, by the
+/// names Hugging Face checkpoints use (`model.visual.`, `vision_tower.`,
+/// `multi_modal_projector.`, `audio_tower.` ...). For splitting a size
+/// estimate between the model and its projector -- never a check.
+[[nodiscard]] bool is_encoder_tensor(std::string_view name) noexcept;
+
 /// Why rungs 1 and 2 below refuse, or empty. Separate so a surface can refuse
 /// BEFORE announcing a conversion or checking for Python: a refusal that
 /// arrives after "converting ..." reads as a crash.

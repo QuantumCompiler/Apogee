@@ -58,9 +58,18 @@ public:
         return script[sampled++];
     }
 
-    void trim_to(std::int64_t position) override {
+    /// False plays a recurrent or hybrid model: a trim that would cut cached
+    /// positions is refused and the cache cleared, as the real context does.
+    bool rewindable = true;
+
+    [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
         trims.push_back(position);
+        if (!rewindable && position < resident) {
+            resident = 0;
+            return 0;
+        }
         resident = std::min(resident, position);
+        return position;
     }
 
     [[nodiscard]] std::int64_t eval_count() const noexcept override {
@@ -116,8 +125,8 @@ public:
         return state_->sample();
     }
 
-    void trim_to(std::int64_t position) override {
-        state_->trim_to(position);
+    [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
+        return state_->trim_to(position);
     }
 
     [[nodiscard]] std::int64_t eval_count() const noexcept override {
@@ -147,6 +156,7 @@ public:
     /// Applied to every context this model creates.
     std::int64_t batch_limit = 1000000;
     std::int64_t context_capacity = 1000000;
+    bool rewindable = true;
 
     /// What each new context should sample. Applied at creation.
     std::vector<std::int32_t> script;
@@ -253,6 +263,7 @@ public:
         state->eog_token = eog_token;
         state->batch_limit = batch_limit;
         state->context_capacity = context_capacity;
+        state->rewindable = rewindable;
         contexts.push_back(state);
         // The provider owns its contexts and destroys a side request's the
         // moment the call returns -- so the model keeps them ALIVE and hands
@@ -292,6 +303,8 @@ public:
 
     /// Applied to every model this runtime hands out.
     std::int64_t batch_limit = 1000000;
+    /// False plays a recurrent or hybrid model (see FakeLlamaContext).
+    bool rewindable = true;
     std::vector<std::int32_t> script;
     std::int32_t eog_token = -1;
     std::string builtin_template_prefix;
@@ -320,6 +333,7 @@ public:
         ++loads;
         auto loaded = std::make_unique<FakeLlamaModel>();
         loaded->batch_limit = batch_limit;
+        loaded->rewindable = rewindable;
         loaded->script = script;
         for (const std::string& piece : script_text) {
             loaded->script.push_back(loaded->id_for(piece));

@@ -102,11 +102,16 @@ struct Commit {
     /// The id was already there -- identical weights -- and the staged copy
     /// was dropped in its favour.
     bool existed = false;
+    /// The id was already there without a projector, and the staged one was
+    /// moved in beside it.
+    bool projector_added = false;
     std::string error;
 };
 
 /// `staged` becomes `<model>/<format>/<id>`. When that id already exists the
-/// existing directory wins: same id, same weights.
+/// existing directory wins: same id, same weights -- except that a projector
+/// it lacks is taken from `staged` (with its record), since the id names the
+/// model file alone and a projector made or found later belongs beside it.
 [[nodiscard]] Commit commit_weights(const std::filesystem::path& staged,
                                     const std::filesystem::path& final_dir);
 
@@ -115,14 +120,34 @@ struct Commit {
 [[nodiscard]] std::string move_path(const std::filesystem::path& from,
                                     const std::filesystem::path& to);
 
+/// Where a model file's vision or audio projector sits: `<stem>-mmproj.gguf`
+/// beside it, the name llama.cpp's own releases and Ollama's layers use.
+[[nodiscard]] std::filesystem::path projector_path_for(const std::filesystem::path& model_file);
+
+/// Completes `record` for the file it describes -- name, size, sha256, and
+/// when -- and writes it beside the file. Error, or empty.
+[[nodiscard]] std::string write_record(const std::filesystem::path& file, Sidecar record);
+
+/// Puts `projector` and its record into `dir` under the same name: a hard
+/// link when both are on one filesystem, so a quantized copy and the model it
+/// came from share one projector's bytes, else a copy. Never replaces a file.
+/// Error, or empty.
+[[nodiscard]] std::string share_projector(const std::filesystem::path& projector,
+                                          const std::filesystem::path& dir);
+
 /// A GGUF just written into `staging` (from `make_incoming_dir`), committed:
 /// hashed, its record completed and written beside it (`record` carries the
 /// provenance -- ref, source, transform), and the directory renamed to the id.
+/// A projector already recorded in `staging` goes with it.
 struct StoredFile {
     /// The stored file: `file`'s new home, or the GGUF already stored under
     /// the same id when identical weights were there first.
     std::filesystem::path file;
+    /// The projector beside it once committed, whichever run put it there.
+    std::filesystem::path projector;
     bool existed = false;
+    /// `existed`, and this commit supplied the projector the directory lacked.
+    bool projector_added = false;
     std::string error;
 };
 

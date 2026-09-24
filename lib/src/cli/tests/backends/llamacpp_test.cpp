@@ -206,6 +206,60 @@ TEST_CASE("a reused prefix never claims more than the cache holds", "[backends][
     }
 }
 
+TEST_CASE("a model whose memory cannot be rewound decodes the whole prompt again",
+          "[backends][llamacpp][kv]") {
+    // Qwen3.5 on 2026-09-23: its linear-attention layers keep a running state
+    // llama.cpp can rewind only a few tokens, and a thinking model's template
+    // re-renders the last answer without its reasoning -- so turn two's prompt
+    // parts from the cache early, the trim is refused, and decoding on from
+    // the shared prefix failed every second turn ("for M-RoPE, it is required
+    // that the position satisfies: X < Y"). The cache is cleared instead and
+    // the prompt decoded from 0.
+    Fixture fixture;
+    fixture.runtime->rewindable = false;
+
+    // Turn one generates, so the cache holds tokens past its prompt.
+    (void)fixture.provider->chat(turn({ChatMessage::user("prime thinking answer")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    session->script = {fixture.runtime->model->id_for("thinking"),
+                       fixture.runtime->model->id_for("answer")};
+    session->sampled = 0;
+    (void)fixture.provider->chat(turn({ChatMessage::user("alpha beta")}), {});
+    const std::size_t decodes_before = session->decodes.size();
+
+    // The answer comes back re-rendered differently from what was generated,
+    // as a template that strips reasoning does.
+    const auto second = fixture.provider->chat(
+        turn({ChatMessage::user("alpha beta"), ChatMessage::assistant("restated"),
+              ChatMessage::user("gamma")}),
+        {});
+    REQUIRE(session->decodes.size() > decodes_before);
+    // A shared prefix was found, and asked for...
+    REQUIRE_FALSE(session->trims.empty());
+    CHECK(session->trims.back() > 0);
+    // ...but the cache could not be cut there, so the prompt decoded whole.
+    const apogee::backends::DecodeRecord& prompt = session->decodes.at(decodes_before);
+    CHECK(prompt.position == 0);
+    CHECK(prompt.count == second.usage.prompt_tokens);
+}
+
+TEST_CASE("a model whose memory cannot be rewound still reuses a prompt that only extends",
+          "[backends][llamacpp][kv]") {
+    // Nothing to cut, nothing refused: a turn that adds to what is cached
+    // decodes only what is new, rewindable or not.
+    Fixture fixture;
+    fixture.runtime->rewindable = false;
+
+    const auto first = fixture.provider->chat(turn({ChatMessage::user("alpha beta")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    const std::int64_t after_first = session->prompt_tokens_decoded();
+    const auto second = fixture.provider->chat(
+        turn({ChatMessage::user("alpha beta"), ChatMessage::assistant(first.message.content),
+              ChatMessage::user("gamma")}),
+        {});
+    CHECK(session->prompt_tokens_decoded() - after_first < second.usage.prompt_tokens);
+}
+
 TEST_CASE("usage is exact on both sides", "[backends][llamacpp][usage]") {
     // A local tokenizer is the model's own, so these are measurements rather
     // than the characters/4 estimate every other path falls back to.

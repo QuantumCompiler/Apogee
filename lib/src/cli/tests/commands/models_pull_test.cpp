@@ -316,4 +316,55 @@ TEST_CASE("quantize starts from the newest unquantized GGUF, never a quantized o
     const apogee::commands::GgufChoice imported = choose_gguf(store.roots, outside.string());
     CHECK(imported.file == outside);
     CHECK(imported.model == "Downloaded-7B");
+    CHECK(imported.projector.empty());
+}
+
+TEST_CASE("quantize's source brings its projector along",
+          "[commands][models][quantize][projector]") {
+    // Quantizing leaves the projector as it was, and a quantized model that
+    // lost it could no longer read images.
+    using apogee::commands::choose_gguf;
+    const Store store;
+    const std::filesystem::path f16 = store.add_gguf("m", "111111111111", "m-F16.gguf");
+    const std::filesystem::path projector = store.add_gguf("m", "111111111111", "m-F16-mmproj.gguf",
+                                                           apogee::testing::minimal_gguf("clip"));
+    CHECK(choose_gguf(store.roots, "m").projector == projector);
+    CHECK(choose_gguf(store.roots, "m", "111111111111").projector == projector);
+
+    // Outside the store: the `<stem>-mmproj.gguf` beside the file.
+    const std::filesystem::path outside = store.root.path() / "Vision-7B.gguf";
+    std::ofstream{outside, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+    std::ofstream{store.root.path() / "Vision-7B-mmproj.gguf", std::ios::binary}
+        << apogee::testing::minimal_gguf("clip");
+    CHECK(choose_gguf(store.roots, outside.string()).projector ==
+          store.root.path() / "Vision-7B-mmproj.gguf");
+    (void)f16;
+}
+
+TEST_CASE("a conversion is recognised by its record: the same set, at the same precision",
+          "[commands][models][convert]") {
+    using apogee::commands::find_conversion;
+    const Store store;
+    const std::filesystem::path made = store.add_gguf("org--repo", "111111111111", "repo-F16.gguf");
+    apogee::models::Sidecar record;
+    record.ref = "org--repo/safetensors/aaaaaaaaaaaa";
+    record.source = "convert";
+    record.transform = "convert";
+    record.transform_note = "--outtype f16";
+    REQUIRE(apogee::models::write_record(made, record).empty());
+
+    const auto found =
+        find_conversion(store.roots, "org--repo", "org--repo/safetensors/aaaaaaaaaaaa", "f16");
+    REQUIRE(found.has_value());
+    CHECK(found->file == made);
+    CHECK_FALSE(
+        find_conversion(store.roots, "org--repo", "org--repo/safetensors/aaaaaaaaaaaa", "bf16"));
+    CHECK_FALSE(
+        find_conversion(store.roots, "org--repo", "org--repo/safetensors/bbbbbbbbbbbb", "f16"));
+
+    // A pulled GGUF is not a conversion, whatever it says it came from.
+    record.source = "huggingface";
+    REQUIRE(apogee::models::write_record(made, record).empty());
+    CHECK_FALSE(
+        find_conversion(store.roots, "org--repo", "org--repo/safetensors/aaaaaaaaaaaa", "f16"));
 }

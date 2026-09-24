@@ -332,6 +332,9 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     if (field == "model_path") {
         return render(backend->model_path);
     }
+    if (field == "mmproj_path") {
+        return render(backend->mmproj_path);
+    }
     if (field == "embedding_model") {
         return render(backend->embedding_model);
     }
@@ -361,6 +364,7 @@ struct AddBackendFlags {
     std::string api_key;
     std::string model;
     std::string model_path;
+    std::string mmproj_path;
     std::string embedding_model;
     std::string system_prompt;
     std::int64_t context_size = 0;
@@ -414,6 +418,9 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
     cmd->add_option("--model", flags->model, "Model name");
     cmd->add_option("--model-path", flags->model_path, "Path to a local model file")
         ->type_name(kPathValue);
+    cmd->add_option("--mmproj-path", flags->mmproj_path,
+                    "Path to the model's projector (an mmproj GGUF), so it can read images")
+        ->type_name(kPathValue);
     cmd->add_option("--embedding-model", flags->embedding_model,
                     "Model used when this entry embeds text (cloud types; default: the "
                     "vendor's)");
@@ -439,6 +446,7 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
         backend.api_key = flags->api_key;
         backend.model = flags->model;
         backend.model_path = flags->model_path;
+        backend.mmproj_path = flags->mmproj_path;
         backend.embedding_model = flags->embedding_model;
         backend.system_prompt = flags->system_prompt;
         if (flags->context_size_option->count() > 0) {

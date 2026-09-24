@@ -211,6 +211,67 @@ TEST_CASE("committing weights never replaces an id that is already there", "[mod
     CHECK(std::string{std::istreambuf_iterator<char>{in}, {}} == "new");
 }
 
+TEST_CASE("a projector made after its model joins the stored directory, never replacing one",
+          "[models][store][projector]") {
+    // The id is the model file's hash alone, so a projector converted later --
+    // or an Ollama layer that failed the first time -- belongs in the
+    // directory the model already occupies.
+    const Store store;
+    const std::filesystem::path stored = store.roots.models / "m" / "gguf" / "aaaaaaaaaaaa";
+    write_file(stored / "m-F16.gguf", "model");
+
+    const std::filesystem::path staged = store.roots.models / "m" / "gguf" / ".incoming-1";
+    write_file(staged / "m-F16.gguf", "model");
+    write_file(staged / "m-F16-mmproj.gguf", "projector");
+    write_file(staged / "m-F16-mmproj.json", "{}");
+    const apogee::models::Commit first = apogee::models::commit_weights(staged, stored);
+    REQUIRE(first.error.empty());
+    CHECK(first.existed);
+    CHECK(first.projector_added);
+    CHECK(std::filesystem::exists(stored / "m-F16-mmproj.gguf"));
+    CHECK(std::filesystem::exists(stored / "m-F16-mmproj.json"));
+    CHECK_FALSE(std::filesystem::exists(staged));
+
+    // A second projector finds one there: the stored one stays.
+    write_file(staged / "other-mmproj.gguf", "another projector");
+    const apogee::models::Commit second = apogee::models::commit_weights(staged, stored);
+    CHECK(second.existed);
+    CHECK_FALSE(second.projector_added);
+    CHECK_FALSE(std::filesystem::exists(stored / "other-mmproj.gguf"));
+    CHECK_FALSE(std::filesystem::exists(staged));
+}
+
+TEST_CASE("a projector is shared into another directory with its record",
+          "[models][store][projector]") {
+    const Store store;
+    const std::filesystem::path from = store.roots.models / "m" / "gguf" / "aaaaaaaaaaaa";
+    write_file(from / "m-F16-mmproj.gguf", "projector");
+    apogee::models::Sidecar record;
+    record.ref = "m/safetensors/bbbbbbbbbbbb";
+    record.source = "convert";
+    REQUIRE(apogee::models::write_record(from / "m-F16-mmproj.gguf", record).empty());
+
+    const std::filesystem::path into = store.roots.models / "m" / "gguf" / ".incoming-2";
+    REQUIRE(apogee::models::share_projector(from / "m-F16-mmproj.gguf", into).empty());
+    CHECK(std::filesystem::exists(into / "m-F16-mmproj.gguf"));
+    // One set of bytes, two names: quantizing a model does not copy its
+    // projector's gigabyte.
+    CHECK(std::filesystem::hard_link_count(from / "m-F16-mmproj.gguf") == 2);
+    const std::optional<apogee::models::Sidecar> copied =
+        apogee::models::load_sidecar(into / "m-F16-mmproj.gguf");
+    REQUIRE(copied.has_value());
+    CHECK(copied->file_digest == apogee::models::sha256_hex("projector"));
+    CHECK(copied->file_size == 9);
+
+    // Never over a file already there.
+    CHECK_FALSE(apogee::models::share_projector(from / "m-F16-mmproj.gguf", into).empty());
+}
+
+TEST_CASE("a model file's projector sits beside it under its stem", "[models][store][projector]") {
+    CHECK(apogee::models::projector_path_for("/s/m/gguf/x/Qwen-F16.gguf") ==
+          std::filesystem::path{"/s/m/gguf/x/Qwen-F16-mmproj.gguf"});
+}
+
 TEST_CASE("removing weights tidies emptied format and model directories only", "[models][store]") {
     const Store store;
     const std::filesystem::path model = store.roots.models / "m";

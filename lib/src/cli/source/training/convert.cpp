@@ -50,8 +50,14 @@ std::string converter_unavailable(const PythonEnv& env, const std::filesystem::p
 
 std::vector<std::string> converter_arguments(std::string_view out_type,
                                              const std::filesystem::path& input,
-                                             const std::filesystem::path& output) {
-    return {"--outtype", std::string{out_type}, "--outfile", output.string(), input.string()};
+                                             const std::filesystem::path& output,
+                                             ConverterOutput writes) {
+    std::vector<std::string> arguments{"--outtype", std::string{out_type}, "--outfile",
+                                       output.string(), input.string()};
+    if (writes == ConverterOutput::Projector) {
+        arguments.emplace_back("--mmproj");
+    }
+    return arguments;
 }
 
 std::string explain_converter_failure(std::string error) {
@@ -69,15 +75,15 @@ std::string explain_converter_failure(std::string error) {
 }
 
 Converter script_converter(std::filesystem::path interpreter, std::filesystem::path script,
-                           std::string out_type) {
+                           std::string out_type, ConverterOutput writes) {
     return [interpreter = std::move(interpreter), script = std::move(script),
-            out_type = std::move(out_type)](
-               const std::filesystem::path& input, const std::filesystem::path& gguf,
-               const MessageSink& on_message, const harness::CancellationToken& cancellation) {
+            out_type = std::move(out_type),
+            writes](const std::filesystem::path& input, const std::filesystem::path& gguf,
+                    const MessageSink& on_message, const harness::CancellationToken& cancellation) {
         ScriptRequest request;
         request.interpreter = interpreter;
         request.script = script;
-        request.arguments = converter_arguments(out_type, input, gguf);
+        request.arguments = converter_arguments(out_type, input, gguf, writes);
         request.environment.emplace_back("PYTHONDONTWRITEBYTECODE", "1");
         const ScriptOutcome outcome = run_script(
             request,

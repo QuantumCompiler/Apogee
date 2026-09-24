@@ -135,3 +135,34 @@ TEST_CASE("a reporter with no answer stream drops answer tokens safely", "[ux][r
     CHECK_NOTHROW(reporter.on_answer_end());
     CHECK_FALSE(reporter.emitted_answer());
 }
+
+TEST_CASE("an answer neither starts nor ends with blank lines, however it streams",
+          "[ux][reporter]") {
+    // Qwen3.5 on 2026-09-23: the answer opened with the "\n\n" that followed
+    // the model's reasoning, and printed as a three-line gap under "Thought
+    // for Ns". The whitespace arrives as its own tokens, so the rule has to
+    // hold across chunk boundaries, not within one chunk.
+    Harness h;
+    CliReporter reporter = h.make();
+
+    reporter.on_answer_start();
+    for (const std::string_view chunk :
+         {"\n", "\n", "Hello", "!", "\n\n", "How are", " you?", "\n"}) {
+        reporter.on_answer_token(chunk);
+    }
+    reporter.on_answer_end();
+    CHECK(h.answer.str() == "Hello!\n\nHow are you?\n");
+
+    // The next answer starts afresh, and a first line's own indentation --
+    // the start of a code block -- is kept.
+    reporter.on_answer_start();
+    reporter.on_answer_token("\n    indented");
+    reporter.on_answer_end();
+    CHECK(h.answer.str() == "Hello!\n\nHow are you?\n    indented\n");
+
+    // An answer that is only whitespace shows nothing at all.
+    reporter.on_answer_start();
+    reporter.on_answer_token("\n\n ");
+    reporter.on_answer_end();
+    CHECK(h.answer.str() == "Hello!\n\nHow are you?\n    indented\n");
+}

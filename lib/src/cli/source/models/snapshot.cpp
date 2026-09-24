@@ -229,7 +229,8 @@ std::string damaged_snapshot_error(const std::filesystem::path& dir) {
            "2026-09-23. Delete it and pull it again";
 }
 
-std::optional<std::int64_t> snapshot_elements(const std::filesystem::path& dir) {
+std::optional<std::int64_t> snapshot_elements(
+    const std::filesystem::path& dir, const std::function<bool(std::string_view)>& include) {
     // A header past this is not a SafeTensors header: the format caps it at
     // 100 MB, and reading an arbitrary length would be reading the weights.
     constexpr std::uint64_t kMaxHeader = 100ULL * 1024 * 1024;
@@ -265,7 +266,7 @@ std::optional<std::int64_t> snapshot_elements(const std::filesystem::path& dir) 
             return std::nullopt;
         }
         for (const auto& [name, tensor] : table.items()) {
-            if (name == "__metadata__" || !tensor.is_object()) {
+            if (name == "__metadata__" || !tensor.is_object() || (include && !include(name))) {
                 continue;
             }
             const auto shape = tensor.find("shape");

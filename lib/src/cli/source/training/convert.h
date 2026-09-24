@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -33,10 +34,17 @@ namespace apogee::training {
 [[nodiscard]] std::string converter_unavailable(const PythonEnv& env,
                                                 const std::filesystem::path& script);
 
-/// The script's arguments: `--outtype <type> --outfile <output> <input>`.
-[[nodiscard]] std::vector<std::string> converter_arguments(std::string_view out_type,
-                                                           const std::filesystem::path& input,
-                                                           const std::filesystem::path& output);
+/// Which file a run of the script writes: the model, or -- for a model with
+/// a vision or audio encoder -- the projector that lets it read images or
+/// sound (`--mmproj`), a separate GGUF a llamacpp backend loads beside the
+/// model (`mmproj_path`).
+enum class ConverterOutput : std::uint8_t { Model, Projector };
+
+/// The script's arguments: `--outtype <type> --outfile <output> <input>`,
+/// then `--mmproj` for a projector.
+[[nodiscard]] std::vector<std::string> converter_arguments(
+    std::string_view out_type, const std::filesystem::path& input,
+    const std::filesystem::path& output, ConverterOutput writes = ConverterOutput::Model);
 
 /// A failed run's error, with one plain line added when it names an
 /// architecture or a tensor the script does not know: the fix (a newer
@@ -47,7 +55,7 @@ namespace apogee::training {
 /// sink; its stderr is captured as a tail and folded into the error, never
 /// inherited, and explained (`explain_converter_failure`).
 [[nodiscard]] Converter script_converter(std::filesystem::path interpreter,
-                                         std::filesystem::path script,
-                                         std::string out_type = "f16");
+                                         std::filesystem::path script, std::string out_type = "f16",
+                                         ConverterOutput writes = ConverterOutput::Model);
 
 }  // namespace apogee::training

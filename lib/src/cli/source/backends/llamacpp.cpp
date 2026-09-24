@@ -599,12 +599,14 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
             llama_tokens::common_prefix_length(session_tokens_, prompt), prompt.size());
 
         // Everything past the shared prefix is stale -- drop it from the KV so
-        // the new suffix decodes into the right positions.
-        context->trim_to(static_cast<std::int64_t>(shared));
+        // the new suffix decodes into the right positions. A model whose
+        // memory cannot be cut there is cleared instead, and the whole prompt
+        // decodes again from wherever the cache really ends.
+        const std::int64_t kept = context->trim_to(static_cast<std::int64_t>(shared));
 
-        const std::vector<std::int32_t> suffix{prompt.begin() + static_cast<std::ptrdiff_t>(shared),
+        const std::vector<std::int32_t> suffix{prompt.begin() + static_cast<std::ptrdiff_t>(kept),
                                                prompt.end()};
-        decode_in_batches(*context, suffix, static_cast<std::int64_t>(shared));
+        decode_in_batches(*context, suffix, kept);
         session_tokens_ = prompt;
     }
 
