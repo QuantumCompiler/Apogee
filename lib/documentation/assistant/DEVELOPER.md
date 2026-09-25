@@ -31,12 +31,14 @@ The build-related files outside an app directory are the two workflows and the o
 ```
 Apogee/
 ├── .github/
-│   ├── workflows/ci.yml     — CI: clone llama.cpp + unit tests per platform (parallel), then build + package per platform;
-│   │                          the PR-only `version bump` check; and, after a merge, `tag and release` (2026-09-25);
-│   │                          all behind `what changed`: a documentation-only PR runs every job with no work in it
+│   ├── workflows/ci.yml     — The CLI pipeline: clone llama.cpp + unit tests per platform (parallel), then build +
+│   │                          package per platform; the PR-only `version bump` check; after a merge, `tag and release`;
+│   │                          all behind `what changed`: with the CLI unchanged since the latest release, every job
+│   │                          runs with no build in it and the builds copy the release's archives (2026-09-25)
 │   ├── workflows/release.yml — The manual release: a v* tag or a dry-run dispatch → gate → unit tests ×5 → build ×5 → publish
 │   │                          (thin callers into lib/scripts/; here only because GitHub requires it)
-│   └── actions/package/     — The packaging step both workflows use: lib/scripts/package.sh, then the artifact upload
+│   └── actions/package/     — The packaging step both workflows use: package.sh (built) or cli-from-release.sh
+│                              (copied), then the artifact upload
 ├── .claude/
 │   └── skills/
 │       ├── apogee-backlog-item/        — Repo-local skill: take the next backlog item per the docs-first process
@@ -46,6 +48,8 @@ Apogee/
 │       └── apogee-release-summary/     — Repo-local skill: draft a version's GitHub release notes in the published format
 ├── .gitattributes           — Every text file is LF on every platform (Windows checkouts had rewritten
 │                              the byte-exact shipped assets with CRLF, 2026-09-20)
+├── VERSION                  — The release, x.y.z (2026-09-25): what a merge publishes; the CLI's own version
+│                              is in lib/src/cli/CMakeLists.txt, and equals it whenever the CLI changes
 ├── .gitignore
 ├── README.md            — The public front door: what the project is (harness CLI today, GUI apps later),
 │                          install one-liners, quick start; update it when install or build changes (2026-09-25)
@@ -61,22 +65,25 @@ Apogee/
     │   │                      --clone-llama is the first CI stage, --unit-tests the source suite beside it;
     │   │                      --host prints the native target (the one host detection)
     │   ├── cicd-completion.bash — Tab completion for cicd.sh's flags (source from your shell rc)
-    │   ├── version-check.sh — CI's `version bump` check: the version CMakeLists.txt names must be unreleased
-    │   │                      (gh when signed in, else the tag on origin)
+    │   ├── version-check.sh — CI's `version bump` check: what the merge publishes; with the CLI changed,
+    │   │                      VERSION unreleased and the CLI's version equal to it (gh, else the tag on origin)
     │   ├── package.sh       — The one packaging definition: archive, .source record, the binary run
     │   │                      (the package action and pr-ci.sh both call it)
+    │   ├── cli-from-release.sh — Its other half: a target's archive copied from a release, the copy run
     │   ├── pr-ci.sh         — `make pr-ci`: a pull request's CI run rehearsed on this host -- the test
     │   │                      merge into stable, then version bump, clone, unit tests, build + package,
     │   │                      and a GCC compile of every file standing in for the Linux/Windows compiles
-    │   ├── code-changed.sh  — Does a change touch anything but documentation? The one definition of
-    │   │                      "documentation" (lib/documentation/, .claude/, root *.md), for CI and pr-ci
+    │   ├── changed.sh       — What each deliverable is built from, declared once, and whether that
+    │   │                      changed between two commits (`changed.sh cli <from> <to>`), for CI and pr-ci
+    │   ├── latest-release.sh — The newest published release: its tag, and its commit as origin has it
     │   ├── gcc-check.py     — Every first-party file compiled -fsyntax-only with GCC's standard library
     │   │                      (MinGW-w64 preferred), from a build's compile_commands.json
     │   ├── ci-annotate.sh   — On a failed CI step, publishes the ctest summary -- or Catch2's, for the
     │   │                      unit-test jobs -- and each failed test's output as error annotations
     │   │                      (public through the API; the log is not)
-    │   └── release-from-pr.sh — The release after a merge: the PR's own CI archives, checked against the
-    │                          merged source tree, tagged with the executable's version; a rehearsal without --publish
+    │   └── release-from-pr.sh — The release after a merge: v<VERSION>, with the PR's own CI archives (checked
+    │                          against the merged tree and VERSION) or, the CLI unchanged, the latest release's;
+    │                          a rehearsal without --publish
     └── src/                 — Application source, one self-contained project per app
         ├── cli/             — The CLI application
         │   ├── CMakeLists.txt   — Build root: standard, options, target wiring, link-policy assertion
@@ -668,7 +675,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 | `make lint` | clang-tidy over `source/` and `tests/`, including the ownership gate. |
 | `make no-llama` | The fast developer build: everything except llama.cpp, which is on by default and most of the compile time. |
 | `make clean` / `make fresh` | Drop a build dir / clean-room clone-and-build. |
-| `make pr-ci` | **The pull request's CI run, rehearsed on this host** (`lib/scripts/pr-ci.sh`, 2026-09-25). It makes GitHub's test merge of the branch into `stable` (fetched first) and runs `ci.yml`'s pull-request jobs on it, in its order and through the scripts the workflow calls: `version bump`, `clone llama.cpp`, `unit tests <host>` with llama.cpp off, then `build <host>` and its packaging, which run only if the clone and the unit tests passed. It prints a checks-style summary and exits non-zero if CI would fail. The four targets this host cannot build are named as CI's. The jobs run in two worktrees under `~/.cache/apogee/pr-ci` (`APOGEE_PR_CI_DIR`), one per job as on the runners, since the unit build has llama.cpp off and the build has it on. They are reset each run, so builds after the first are incremental. Uncommitted changes are left out, as a pull request would leave them; `UNCOMMITTED=1` rehearses them as a commit object no branch points at. `BASE=<ref>` merges elsewhere. A conflicting merge stops it, since GitHub runs no CI then. It follows CI's docs-only rule (`code-changed.sh`): a change that touches only documentation runs nothing. It adds one check CI doesn't have, **`gcc compile`** (`lib/scripts/gcc-check.py`): every first-party file compiled syntax-only with GCC's standard library, preferably the MinGW-w64 compiler (`brew install mingw-w64`), using the build's own compile commands. That is a Mac's stand-in for the Linux and Windows x64 compiles, which Apple's libc++ cannot vouch for; it takes about 30 seconds, and is reported as skipped without a GCC. `make pr-ci-clean` removes it all. |
+| `make pr-ci` | **The pull request's CI run, rehearsed on this host** (`lib/scripts/pr-ci.sh`, 2026-09-25). It makes GitHub's test merge of the branch into `stable` (fetched first) and runs `ci.yml`'s pull-request jobs on it, in its order and through the scripts the workflow calls: `what changed` (the CLI against the latest release), `version bump`, `clone llama.cpp`, `unit tests <host>` with llama.cpp off, then `build <host>` and its packaging, which run only if the clone and the unit tests passed — or, with the CLI unchanged, nothing built and `build <host>` copying the host's archive from the latest release, as CI does. It prints a checks-style summary and exits non-zero if CI would fail. The four targets this host cannot build are named as CI's. The jobs run in two worktrees under `~/.cache/apogee/pr-ci` (`APOGEE_PR_CI_DIR`), one per job as on the runners, since the unit build has llama.cpp off and the build has it on. They are reset each run, so builds after the first are incremental. Uncommitted changes are left out, as a pull request would leave them; `UNCOMMITTED=1` rehearses them as a commit object no branch points at. `BASE=<ref>` merges elsewhere. A conflicting merge stops it, since GitHub runs no CI then. It follows CI's rule for an unchanged CLI (`changed.sh cli` against the latest release): nothing is built, and `build <host>` copies the host's archive from that release. It adds one check CI doesn't have, **`gcc compile`** (`lib/scripts/gcc-check.py`): every first-party file compiled syntax-only with GCC's standard library, preferably the MinGW-w64 compiler (`brew install mingw-w64`), using the build's own compile commands. That is a Mac's stand-in for the Linux and Windows x64 compiles, which Apple's libc++ cannot vouch for; it takes about 30 seconds, and is reported as skipped without a GCC. `make pr-ci-clean` removes it all. |
 
 `make install` is a thin caller into the `install()` rule in `source/CMakeLists.txt`, invoked with **`--component apogee`**. That flag is not optional: `FetchContent_MakeAvailable` adds every dependency's own `install()` rules to this project, so a component-less install also writes replxx's headers, library, and CMake package config into the prefix — and our `FIND_PACKAGE_ARGS` then prefers that broken installed copy on the next configure, so the project stops building. `cli.install_is_ours_only` guards both halves. It installs the executable (`apogee_core` is an implementation detail and is deliberately not installed), then the shell completions, and then runs **`apogee check --fix`** so the binary creates and verifies its own data directory. That last step is the parity rule in one line: the Makefile does not know what `~/.apogee/` contains, and neither installer does — all three reach the single declaration in `source/harness/layout.h`. See CLAUDE.md → *One layout declaration, and every install path reads it*.
 
@@ -730,37 +737,40 @@ Vendored code goes under `lib/src/cli/third_party/` instead, and is **never edit
 
 ## Cutting a release
 
-**A merge into `stable` is a release** (user decision, 2026-09-22), **published from the pull request's own build** (user decision, 2026-09-25). The version in `project(... VERSION x.y.z)` — `lib/src/cli/CMakeLists.txt`, the one place it lives — decides which one, and whether there is one at all. Nothing else needs doing.
+**A merge into `stable` is a release** (user decision, 2026-09-22) of **`VERSION`** — the file at the top of the repository, the release's one name (user decision, 2026-09-25) — **published from the pull request's own build**, or, when the CLI is unchanged since the latest release, **with that release's CLI copied** (user decisions, 2026-09-25). Nothing else needs doing.
 
 ```
-bump VERSION on the branch  ->  PR (CI builds and packages)  ->  merge  ->  tag + release from those archives
+bump VERSION on the branch  ->  PR (CI builds and packages, or copies)  ->  merge  ->  tag + release
 ```
 
-Every CI build packages its target ([`.github/actions/package`](../../../.github/actions/package/action.yml)) and keeps the archive as an artifact of the run. When the pull request merges, CI runs again for the `closed` event, and there only `tag and release` runs: [`lib/scripts/release-from-pr.sh`](../../../lib/scripts/release-from-pr.sh) `--publish`. Nothing is built. In order, each a hard stop:
+**Two versions.** `VERSION` names the release. The CLI keeps its own version in `project(... VERSION x.y.z)` in `lib/src/cli/CMakeLists.txt` — what `apogee version` reports — and bumps it **only when the CLI changes, to the release it ships in**. So a release that changes the CLI bumps both, to the same number; a release that does not (documentation today, a GUI application one day) bumps `VERSION` alone and ships the previous release's CLI archives, whose binaries still report the older CLI version. `VERSION` is deliberately not an input of the CLI's build: bumping it runs no CLI pipeline.
+
+**The CLI pipeline runs only when the CLI changed.** CI's `what changed` job asks [`lib/scripts/changed.sh`](../../../lib/scripts/changed.sh) whether what the CLI is built from — `lib/src/cli/`, `lib/scripts/`, the CLI pipeline's workflow and action files, `.gitattributes` — differs between the **latest release** and the pull request's test merge. If not, the clone, the unit tests and the builds all run under their required names with their build steps skipped, and each `build <target>` copies that platform's archive from the latest release (and runs it, on its own platform) into the same `apogee-<target>` artifact a build would make. The comparison is against the release, not the pull request's base, because a copy of the release is only true while the CLI that would merge is the CLI that was released.
+
+Every CI build packages its target ([`.github/actions/package`](../../../.github/actions/package/action.yml)) and keeps the archive as an artifact of the run. When the pull request merges, CI runs again for the `closed` event, and there only `tag and release` runs — nothing else starts, because CI has no trigger on a push to `stable` (2026-09-25): [`lib/scripts/release-from-pr.sh`](../../../lib/scripts/release-from-pr.sh) `--publish`. Nothing is built. In order, each a hard stop:
 
 1. **The pull request** — into `stable`, and merged.
-2. **The version** — read from `CMakeLists.txt` at the merge commit. If its tag already exists at another commit, that version is out and the merge publishes nothing, successfully: how a docs or hotfix merge declines to cut a release, with no exception rule required. If the tag is at the merge commit itself, an earlier attempt made it, and this one finishes the release.
-3. **The run** — the newest successful CI run of the pull request's head holding an archive for every platform it built (its `build <target>` jobs, so the set follows the matrix).
-4. **The source** — every archive's `.source` record must name the merge commit's exact source **tree**. CI builds GitHub's *test merge*; if `stable` moved after the run, the archives are not the merged source and nothing is published.
-5. **The executable** — the binary for the runner's own platform is extracted and run; `apogee version` must report the version of step 2. The tag is `v` + what the executable says.
-6. **Publish** — the tag at the merge commit and the release, in one `gh release create --target <merge>`, with the five archives.
+2. **The release** — `VERSION` at the merge commit. If its tag already exists at another commit, that version is out and the merge publishes nothing, successfully: how a docs or hotfix merge declines to cut a release, with no exception rule required. If the tag is at the merge commit itself, an earlier attempt made it, and this one finishes the release.
+3. **The CLI** — changed since the latest release (the release being made excepted), or not?
+4. **Changed:** the newest successful CI run of the pull request's head holding an archive for every platform it built (its `build <target>` jobs, so the set follows the matrix); every archive's `.source` record naming the merge commit's exact source **tree** — CI builds GitHub's *test merge*, and if `stable` moved after the run the archives are not the merged source and nothing is published; and the binary for the runner's own platform, run: `apogee version` must report `VERSION`. **Unchanged:** the latest release's CLI archives, downloaded; the binary for the runner's platform is run to prove the copy starts.
+5. **Publish** — the tag `v<VERSION>` at the merge commit and the release, in one `gh release create --target <merge>`, with the five archives.
 
 The run page's summary lists each of those as it passes.
 
-**One consequence, recorded:** the binaries were built from the test merge, so `apogee version` names *its* commit — the same source tree as the merge commit on `stable`, a different hash, and one no branch points at. The tree check is what makes that safe; the release notes do not mention it.
+**One consequence, recorded:** built binaries come from the test merge, so `apogee version` names *its* commit — the same source tree as the merge commit on `stable`, a different hash, and one no branch points at. The tree check is what makes that safe; the release notes do not mention it.
 
 ### What you actually do
 
-1. **Bump `project(... VERSION x.y.z)`** on the version branch, committed with the rest of the release.
-2. **Open the PR** — after `make pr-ci`, which runs the jobs the PR will start on this host's target, against the test merge, and says whether CI would pass. CI's `version bump` check fails if that version is already released — that is the moment a forgotten bump surfaces, rather than after the merge when the release silently does not happen.
-3. **Rehearse the release** once CI is green: Actions → CI → Run workflow, on the version branch, with the PR's number in `release_rehearsal_pr` (or `gh workflow run CI --ref vX.Y.Z -f release_rehearsal_pr=<PR>`). It runs steps 1–5 against the test merge and reports what it would publish; it builds nothing and publishes nothing. `lib/scripts/release-from-pr.sh <PR>` does the same from a terminal with `gh` signed in.
-4. **Merge** — keeping the branch up to date with `stable` first, or step 4's tree check refuses the archives. The release publishes itself.
-
-**Documentation-only changes** (2026-09-25). A pull request that changes nothing outside `lib/documentation/`, `.claude/` and root-level Markdown (the one definition: `lib/scripts/code-changed.sh`) runs CI's jobs with no work in them. The matrix jobs start and skip every step, so each reports success under its required name; `version bump` is skipped whole; a merge of it publishes nothing, as before. The PR is judged by everything it changes, so a docs commit pushed onto a PR that also changes code still runs everything. To push docs mid-review without a run, put `[skip ci]` in the commit message. The PR's last commit must still run, or its required checks never report and the merge has no archives to release.
+1. **Bump `VERSION`** on the version branch — and, if the release changes the CLI, `project(... VERSION x.y.z)` in `lib/src/cli/CMakeLists.txt` to the same number — committed with the rest of the release.
+2. **Open the PR** — after `make pr-ci`, which runs the jobs the PR will start on this host's target, against the test merge, and says whether CI would pass. CI's `version bump` check says what the merge will publish, and fails when the CLI changed but `VERSION` is already released or the CLI's version differs from it — the moment a forgotten bump surfaces, rather than after the merge when the release silently does not happen.
+3. **Rehearse the release** once CI is green: Actions → CI → Run workflow, on the version branch, with the PR's number in `release_rehearsal_pr` (or `gh workflow run CI --ref vX.Y.Z -f release_rehearsal_pr=<PR>`). It runs steps 1–4 against the test merge and reports what it would publish; it builds nothing and publishes nothing. `lib/scripts/release-from-pr.sh <PR>` does the same from a terminal with `gh` signed in.
+4. **Merge** — keeping the branch up to date with `stable` first, or step 4's tree check refuses a built CLI's archives. The release publishes itself.
 5. **Open the next dev branch** from `stable`, named for the release being *built*:
    ```sh
    git checkout stable && git pull && git checkout -b vX.Y.Z+1 && git push -u origin vX.Y.Z+1
    ```
+
+**Changes that leave the CLI alone** (2026-09-25, superseding the same day's documentation-only rule). A pull request that changes nothing the CLI is built from — documentation, skills, root Markdown, `VERSION`, a future GUI application — builds no CLI, as above, and its merge publishes a release only if it bumped `VERSION`. It is judged by its whole test merge, so a docs commit pushed onto a PR that also changes the CLI still runs everything. To push docs mid-review without a run, put `[skip ci]` in the commit message. The PR's last commit must still run, or its required checks never report and the merge has nothing to release.
 
 ### The manual path
 
@@ -770,11 +780,17 @@ Still supported, as the escape hatch — for re-cutting a release, or for taggin
 make -C lib/src/cli release VERSION=x.y.z
 ```
 
-Preflights the tree, branch, version and tag, asks once, then tags and pushes; the tag push runs [`release.yml`](../../../.github/workflows/release.yml), which — unlike the merge path — **rebuilds** every target from the tag. Use it when a merged pull request's own archives cannot be released: the tree check refused them, or the artifacts expired. `make -C lib/src/cli release-check VERSION=x.y.z` runs the checks and pushes nothing. `VERSION` is the only required input; `REMOTE`, `RELEASE_BRANCH` and `CONFIRM=yes` are the overrides.
+Preflights the tree, branch, `VERSION` and tag, asks once, then tags and pushes; the tag push runs [`release.yml`](../../../.github/workflows/release.yml), which — unlike the merge path — **rebuilds** every target from the tag, the CLI included even when it is unchanged since the latest release. Use it when a merged pull request's own archives cannot be released: the tree check refused them, or the artifacts expired. `make -C lib/src/cli release-check VERSION=x.y.z` runs the checks and pushes nothing. `VERSION` is the only required input; `REMOTE`, `RELEASE_BRANCH` and `CONFIRM=yes` are the overrides.
 
 ### The version guard, and where it lives
 
-A tag whose name disagrees with `CMakeLists.txt` would publish a release whose binary reports a different version, and the build would stay green throughout — the pipeline's "Verify the staged binary runs" step runs `apogee version` but never reads what it printed. That hole is now closed in **three** places: `make release` refuses locally, `release.yml`'s `gate` job fails the run before any runner starts, and on the merge path the tag is not a name anyone types at all — it is read from what the executable reports, and refused when that disagrees with `CMakeLists.txt`. The gate is the one a hand-pushed tag cannot skip.
+A tag whose name disagrees with the version it should carry would publish a release under a name the repository does not give it, and the build would stay green throughout — the pipeline's "Verify the staged binary runs" step runs `apogee version` but never reads what it printed. Since 2026-09-25 the name is `VERSION`, and the guard holds in four places:
+- `make release` refuses a tag that disagrees with `VERSION`, locally;
+- `release.yml`'s `gate` job fails the run for it before any runner starts;
+- on the merge path nobody types the tag at all — it is `VERSION` at the merge commit — and when the CLI changed, the executable must report that same version;
+- CI's `version bump` refuses a pull request that changes the CLI without the CLI's own version equalling `VERSION`.
+
+The gate is the one a hand-pushed tag cannot skip.
 
 ### No orphaned tags
 

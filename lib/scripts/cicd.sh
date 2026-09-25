@@ -19,11 +19,13 @@
 # With --fresh it performs a CI-style clean-room build: clone the repo at the
 # current branch into a temp directory and build there.
 #
-# The CI pipeline (user decisions, 2026-09-19 to 2026-09-25) calls this script
-# for each stage: `--clone-llama` proves the llama.cpp pin resolves and
+# The CLI pipeline in CI (user decisions, 2026-09-19 to 2026-09-25) calls this
+# script for each stage: `--clone-llama` proves the llama.cpp pin resolves and
 # `--unit-tests` runs the source suite per platform beside it, then one build
 # per platform (`--platform T --no-defer`), which .github/actions/package
-# turns into the archive a release ships. The full suite with its executable
+# turns into the archive a release ships -- all of it only when what the CLI
+# is built from changed since the latest release (lib/scripts/changed.sh);
+# otherwise nothing is built and the release's archives are copied. The full suite with its executable
 # checks (`--test`) is the developer's gate, not a runner's.
 #
 # Tab completion: source lib/scripts/cicd-completion.bash (see that file).

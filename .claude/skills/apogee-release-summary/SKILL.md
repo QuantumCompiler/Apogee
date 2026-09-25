@@ -8,12 +8,12 @@ argument-hint: "[vX.Y.Z]"
 
 Writes the notes a GitHub Release page shows for one Apogee version, in the format the published releases already use ([releases](https://github.com/QuantumCompiler/Apogee/releases)). A merge into `stable` publishes the release with GitHub's generated notes (ci.yml → `tag and release`); this summary is what replaces them. The **format** comes from the published releases, the **facts** from the repo's own record — never from memory of the session.
 
-The optional argument is the version (`v0.1.2` or `0.1.2`). With none, it is the version the checkout's `lib/src/cli/CMakeLists.txt` names.
+The optional argument is the version (`v0.1.2` or `0.1.2`). With none, it is the release the checkout's `VERSION` file names — the release's own version since 2026-09-25; the CLI keeps a separate one in `lib/src/cli/CMakeLists.txt`, which moves only when the CLI changes.
 
 ## 1. Pin the release and its range
 
 ```bash
-sed -n 's/^[[:space:]]*VERSION[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' lib/src/cli/CMakeLists.txt | head -1
+tr -d ' \r\n' < VERSION
 ```
 
 - **The target** — `v<version>`, from the argument or the command above.
@@ -64,7 +64,7 @@ curl -s "https://api.github.com/repos/QuantumCompiler/Apogee/releases/tags/<tag>
   ```bash
   git log --diff-filter=D --name-only --format= <base>..<end> -- lib/documentation/backlog | sort -u
   ```
-- **Did the binary change at all?** `git diff --stat <base>..<end> -- lib/src/cli/source` — empty means a maintenance release whose binary is functionally identical to the previous one, and the notes say so up front (as v0.1.1's did).
+- **Did the CLI change at all?** `lib/scripts/changed.sh cli <base> <end>` — `cli=false` means the release **carries the previous release's CLI archives, copied** (the CLI pipeline builds nothing then), so its binaries are byte for byte the previous release's and report the older CLI version: say so up front, as v0.1.1's notes did for a binary that had not changed. With `cli=true`, `git diff --stat <base>..<end> -- lib/src/cli/source` still tells a pipeline-only change (v0.1.1: the binary functionally identical) from one the binary's user feels.
 - **The history** — `git log --oneline <base>..<end>` for anything the docs missed.
 - **What moves the fixed sections** — `git diff --stat <base>..<end> -- lib/scripts/install.sh lib/scripts/install.ps1 README.md` (Install), `ALL_TARGETS` in `lib/scripts/cicd.sh` (Platforms), `git diff --name-status <base>..<end> -- lib/documentation/reference` (Reference), and any work that closes a listed limitation (signing, self-update, Windows child processes, TLS on `serve`).
 

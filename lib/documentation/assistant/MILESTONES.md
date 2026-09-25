@@ -563,6 +563,16 @@ The guards were then removed one at a time (tree, merged, version, other-commit 
 
 **Not verified.** Nothing here has run on GitHub's runners yet. The first real exercise is the rehearsal on this release's own pull request; the first publish is its merge.
 
+**After the merge, the same day: it worked, and the rebuild on `stable` is gone.** The v0.1.2 merge (PR #3, `b343620`) published v0.1.2 through this path:
+- the `closed` run (36200564148) ran `tag and release` alone, in 43 seconds, with every other job skipped;
+- the release carries the five archives from the pull request's own run (36196338575), tagged at the merge commit.
+
+The one piece of the old shape still in place was CI's `push: branches: [stable]` trigger, which had rebuilt and retested every merge commit from scratch (run 35813923174 after v0.1.1). The user's call: a merge must not start a fresh run from `stable`. The trigger is removed, and with it the `what changed` job's handling of push events, which nothing could reach any more.
+
+Nothing depended on that run. The merged tree is the one the pull request's run tested, and `tag and release` refuses to publish if it is not. A direct push to `stable` now runs nothing, and the branch protection rule is what keeps changes arriving by pull request.
+
+The removal governs from the next merge on: a push runs the workflow file of the commit pushed, and the next merge commit carries the change.
+
 ### 2026-09-25 — A pull request's CI run, rehearsed locally (`make pr-ci`)
 
 Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the workflow when a PR is made." `act` was ruled out: it runs Linux containers, so it cannot run the macOS job that matters most here, or the Windows ones. The workflow is instead replayed natively for the host's own target, through the scripts the workflow calls.
@@ -620,6 +630,42 @@ Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the
 - **"A staging directory is claimed by its process"** kept the owner marker open in an `ifstream` while the commit had to delete it. Windows refuses to delete an open file, so the marker stayed. It is closed before the commit now.
 - **Three tests aged a directory** with `std::filesystem::last_write_time`, which MinGW's libstdc++ cannot do: it goes through `_wutime`, which cannot open a directory ("cannot set file time: Permission denied"). libc++ on the ARM runner can, which is why arm64 passed them. `tests/support/file_time` (`set_modified_time`) falls back to the Win32 API there, with the FILETIME borrowed from a scratch file the standard call can stamp, so no clock is converted by hand.
 - **Verified here as far as a Mac allows.** The affected tests pass on macOS (1,305 assertions), and `gcc-check.py` compiles all 363 files, the helper's Windows branch included, with the MinGW GCC. Nothing on this Mac can run a Windows binary (`wine` is an Intel build and Rosetta is not installed), so the run that proves them is the next pull request run.
+
+### 2026-09-25 — The CLI pipeline: built only when the CLI changes, copied from the latest release when not
+
+**Goal.** The user's call, made with the GUI applications in view: what CI and the release do today is the **CLI pipeline**, one pipeline per deliverable. It must run only when what the CLI is built from changes. When it has not changed, the CLI deliverables are copied from the latest release, so a future pull request that changes only a GUI application runs that application's pipeline and takes the latest CLI as it is. A release that leaves the CLI alone needs a name the CLI does not give it, so the release got its own version (the user chose it from two options):
+- `VERSION` at the top of the repository names the release;
+- the CLI's `project(... VERSION)` changes only when the CLI does, and then equals the release it ships in.
+
+**What was built**
+
+- [x] **`VERSION`**, the release. It is one line, and deliberately not an input of the CLI's build, so bumping it alone runs no CLI pipeline.
+- [x] **`lib/scripts/changed.sh`: what each deliverable is built from, declared once.** `changed.sh cli <from> <to>` answers `cli=true|false`. The CLI's inputs are:
+  - `lib/src/cli/` and `lib/scripts/`, which the user named;
+  - the CLI pipeline's own `ci.yml`, `release.yml` and package action, because a change to how the CLI is built must be exercised by building it;
+  - `.gitattributes`, which sets the bytes the CLI's pinned assets are checked out with.
+
+  A GUI application adds its own entry there. An empty `<from>`, or a commit the repository does not have, answers true: when in doubt, build. It replaces `code-changed.sh` and that morning's documentation-only rule, which it subsumes: documentation is simply not a CLI input.
+- [x] **Against the latest release, not the pull request's base.** CI's `what changed` job diffs the latest release's commit (**`lib/scripts/latest-release.sh`**: published releases only, the commit as `origin` has it, never a local tag) against the test merge. A copy of the release is only true while the CLI that would merge is the CLI that was released, so that is the comparison. In the everyday case it agrees with the pull request's own diff.
+- [x] **An unchanged CLI in CI.** The clone, the unit tests and the builds still run under their required names, with the build steps skipped (the reason the morning's rule found: a matrix job skipped whole never reports its name). Each `build <target>` then copies that platform's archive from the latest release (**`lib/scripts/cli-from-release.sh`**, through the package action's new `from-release` input) and runs the copied binary on its own platform. The copy goes into the same `apogee-<target>` artifact a build makes, so every run carries the CLI, built or copied, where a later job will look for it.
+- [x] **`version bump` on every pull request.** When the CLI changed, `VERSION` must be unreleased and the CLI's version must equal it. Otherwise the check passes and says what the merge will publish: a release with the CLI copied, or nothing.
+- [x] **`release-from-pr.sh` publishes `v<VERSION>`.** The name comes from `VERSION` at the merge. With the CLI changed since the latest release (the release being made excepted, for a retried attempt), it uses the pull request's own archives under the same checks as before, and the executable must now report `VERSION`. With the CLI unchanged, it downloads the latest release's archives, runs the host's binary to prove the copy starts, and publishes them again as they are.
+- [x] **The manual path reads `VERSION`.** `release.yml`'s gate and `make release`'s preflight compare the tag with `VERSION`. The manual path still rebuilds the CLI even when it is unchanged; that is deliberate for an escape hatch, and recorded in the workflow's header.
+- [x] **`pr-ci.sh` asks the same question.** With the CLI unchanged, it builds nothing and copies the host's archive from the latest release. It passes CI's answers to `version bump`.
+
+**Verified.**
+- The three scripts were driven through 56 checks in a throwaway repository, with a bare `origin`, real commits and tags, and a stand-in `gh` serving canned API responses and archives, under both bash 5 and macOS's bash 3.2:
+  - `changed.sh` against CLI, documentation-plus-`VERSION`, workflow and `.gitattributes` changes, and against no release, an unknown commit and an unknown deliverable;
+  - `version-check.sh` through every rule;
+  - `release-from-pr.sh` through a built release, a copied release, a documentation merge, a binary reporting the wrong version, a run whose archive was itself a copy, a rehearsal, an open pull request refused, finishing an earlier attempt, a latest release with no archives, and no release at all.
+- Seven rules were removed one at a time (always copy, the empty-copy check, the release-being-made exclusion, the CLI-equals-`VERSION` rule, the released-`VERSION` rule, and two CLI inputs), and every removal failed a check.
+- Against the real repository:
+  - `latest-release.sh` names v0.1.2 at `b343620` without `gh`;
+  - `changed.sh` calls this branch's version-bump commit a CLI change, and the skill-only commit `68d653c` not one;
+  - `cli-from-release.sh` copied v0.1.2's macOS archive and ran it (it reports `apogee 0.1.2 (5827772, …)`, the test merge's hash, as recorded above);
+  - `release.yml`'s gate script, run locally, passes a matching tag, refuses a mismatched one, and names the release on a dispatch.
+
+**Not verified.** None of it has run on a runner. The copying build jobs on the Windows runners (`curl` and `7z` in Git Bash) are exercised first by the first pull request that leaves the CLI alone. `make pr-ci` was not run end to end, because this branch changes the CLI, so a rehearsal would be a full build.
 
 ### 2026-09-01 — Layout, doctor, installers, completions, release pipeline
 

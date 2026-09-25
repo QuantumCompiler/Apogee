@@ -1,33 +1,48 @@
-# Package one target's build into the archive a release ships.
+# Package one target's CLI archive -- built, or copied from a release -- as
+# the artifact a release ships.
 #
 # Shared by ci.yml -- every build job packages, because since 2026-09-25 a
 # merged pull request's OWN artifacts are what the release publishes (user
 # decision) -- and by release.yml, the manual tag path. One definition, so the
 # two ways to cut a release cannot package differently.
 #
-# It expects the target already built in this job by
-# `lib/scripts/cicd.sh --platform <target>`, and uploads the artifact
-# `apogee-<target>` holding two files:
+# Two sources, one artifact (user decision, 2026-09-25):
+#
+#   from-release empty    the target was built in this job by
+#                         `lib/scripts/cicd.sh --platform <target>`: package
+#                         it (lib/scripts/package.sh)
+#   from-release: <tag>   the CLI is unchanged since that release, so nothing
+#                         was built: copy the release's archive for the target
+#                         (lib/scripts/cli-from-release.sh)
+#
+# Either way it uploads the artifact `apogee-<target>`, so whatever reads the
+# run's CLI -- the release after a merge, a GUI pipeline one day -- finds it in
+# the same place, holding two files:
 #
 #   apogee-<target>.tar.gz | .zip   the archive: the binary and the four
 #                                   completion stubs (they are part of the
 #                                   install contract, so they ride along)
-#   apogee-<target>.source          the commit and the source TREE it was
-#                                   built from -- how the release after a
+#   apogee-<target>.source          built: the commit and the source TREE it
+#                                   was built from -- how the release after a
 #                                   merge proves the archive is exactly the
-#                                   merged source (lib/scripts/release-from-pr.sh)
+#                                   merged source (lib/scripts/release-from-pr.sh);
+#                                   copied: `release <tag>`
 #
 # The tree, not the commit, is the identity that matters: CI builds a pull
 # request's test merge commit, and the merge GitHub then makes is a different
 # commit with the same tree.
 
 name: Package apogee
-description: Stage one target's release archive, prove the binary runs, and upload it as the artifact apogee-<target>.
+description: Package one target's CLI archive (built here, or copied from a release), prove the binary runs, and upload it as the artifact apogee-<target>.
 
 inputs:
   target:
     description: The release target, as cicd.sh --platform names it.
     required: true
+  from-release:
+    description: A release tag to copy the target's archive from instead of packaging a build. Empty packages the build.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -39,12 +54,27 @@ runs:
     # which is where a static link is proven (see the script).
     - name: Stage the archive and verify the binary runs
       id: stage
+      if: inputs.from-release == ''
       shell: bash
       env:
         TARGET: ${{ inputs.target }}
       run: |
         set -euo pipefail
         lib/scripts/package.sh "$TARGET" "$RUNNER_TEMP/package"
+        echo "files=$RUNNER_TEMP/package/apogee-$TARGET.*" >> "$GITHUB_OUTPUT"
+
+    # The CLI unchanged since the release: its archive, byte for byte, and the
+    # copied binary run on this, its own platform.
+    - name: Copy the archive from ${{ inputs.from-release }} and verify the binary runs
+      id: copy
+      if: inputs.from-release != ''
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        FROM: ${{ inputs.from-release }}
+      run: |
+        set -euo pipefail
+        lib/scripts/cli-from-release.sh "$FROM" "$TARGET" "$RUNNER_TEMP/package"
         echo "files=$RUNNER_TEMP/package/apogee-$TARGET.*" >> "$GITHUB_OUTPUT"
 
     # v7: v4 and v5 still default to the Node 20 runtime, which the runners
@@ -55,6 +85,6 @@ runs:
     - uses: actions/upload-artifact@v7
       with:
         name: apogee-${{ inputs.target }}
-        path: ${{ steps.stage.outputs.files }}
+        path: ${{ steps.stage.outputs.files || steps.copy.outputs.files }}
         if-no-files-found: error
         overwrite: true
