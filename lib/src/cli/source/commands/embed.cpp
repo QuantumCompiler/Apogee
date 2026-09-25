@@ -143,7 +143,9 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
     auto in_overlap = std::make_shared<std::size_t>(64);
 
     CLI::App* ingest = cmd->add_subcommand("ingest", "Add a file or directory to a collection");
-    ingest->add_option("collection", *in_collection, "Collection name")->required();
+    ingest->add_option("collection", *in_collection, "Collection name")
+        ->type_name(kCollectionValue)
+        ->required();
     ingest->add_option("path", *in_path, "File or directory to read")
         ->type_name(kPathValue)
         ->required();
@@ -156,6 +158,7 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
     ingest
         ->add_option("--retriever", *in_retriever,
                      "lexical (text index only), vector (also embed every chunk), or auto")
+        ->type_name(words_value(agentloop::ingest_retriever_names()))
         ->check([](const std::string& value) {
             return agentloop::valid_retriever(value)
                        ? std::string{}
@@ -346,10 +349,13 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
     auto q_retriever = std::make_shared<std::string>();
     auto q_rerank = std::make_shared<std::string>();
     CLI::App* query = cmd->add_subcommand("query", "Search a collection");
-    query->add_option("collection", *q_collection, "Collection name")->required();
+    query->add_option("collection", *q_collection, "Collection name")
+        ->type_name(kCollectionValue)
+        ->required();
     query->add_option("text", *q_text, "What to search for")->required();
     query->add_option("-n,--limit", *q_limit, "How many results (default 5)");
     query->add_option("--retriever", *q_retriever, "lexical, vector, hybrid, or auto")
+        ->type_name(words_value(agentloop::retriever_names()))
         ->check([](const std::string& value) {
             return agentloop::valid_retriever(value)
                        ? std::string{}
@@ -489,7 +495,9 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
     // ---- info ---------------------------------------------------------------
     auto info_collection = std::make_shared<std::string>();
     CLI::App* info = cmd->add_subcommand("info", "Show a collection's sources and health");
-    info->add_option("collection", *info_collection, "Collection name")->required();
+    info->add_option("collection", *info_collection, "Collection name")
+        ->type_name(kCollectionValue)
+        ->required();
     info->callback([info_collection]() {
         require_plain_name(*info_collection);
         const std::filesystem::path path = collection_path(*info_collection);
@@ -543,7 +551,9 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
     auto del_yes = std::make_shared<bool>(false);
 
     CLI::App* remove = cmd->add_subcommand("delete", "Delete a collection, or one source in it");
-    remove->add_option("collection", *del_collection, "Collection name")->required();
+    remove->add_option("collection", *del_collection, "Collection name")
+        ->type_name(kCollectionValue)
+        ->required();
     remove->add_option("--source", *del_source, "Delete only this source, keeping the rest");
     remove->add_flag("-y,--yes", *del_yes, "Do not ask for confirmation");
 

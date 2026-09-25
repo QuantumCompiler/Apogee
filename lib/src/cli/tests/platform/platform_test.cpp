@@ -52,3 +52,12 @@ TEST_CASE("host detection is stable across calls", "[platform]") {
     REQUIRE(apogee::platform::host_architecture() == apogee::platform::host_architecture());
     REQUIRE(apogee::platform::host_target() == apogee::platform::host_target());
 }
+
+TEST_CASE("a process is running while it runs, and an id nothing holds is not", "[platform]") {
+    // What tells a live `models convert`'s staging directory from one an
+    // interrupted run left behind.
+    CHECK(apogee::platform::process_running(apogee::platform::current_process_id()));
+    CHECK_FALSE(apogee::platform::process_running(0));
+    CHECK_FALSE(apogee::platform::process_running(-1));
+    CHECK_FALSE(apogee::platform::process_running(999999999));
+}

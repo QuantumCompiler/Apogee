@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "ansi/ansi.h"
 #include "commands/command.h"
 #include "harness/config.h"
 #include "models/gguf_inspect.h"
@@ -69,6 +70,13 @@ struct ModelRow {
     /// An advisory note — a missing file, a combined multimodal blob, an
     /// unreadable header's reason. Never fatal on its own.
     std::string note;
+
+    /// A `backends:` entry, rather than something on disk no backend points at.
+    bool configured = false;
+    /// Something about it needs fixing -- a missing or unreadable file, no API
+    /// key, a projector configured as a model, a damaged snapshot, the old
+    /// layout. `note` says what.
+    bool attention = false;
 };
 
 /// Builds the listing: every configured backend, plus every model on disk.
@@ -91,7 +99,13 @@ struct ModelRow {
 
 /// Renders rows as an aligned table. Empty input yields a single explanatory
 /// line, never a bare header with nothing under it.
-[[nodiscard]] std::string render_model_table(const std::vector<ModelRow>& rows);
+///
+/// Each row is coloured by what it is, with its note beneath in the same
+/// colour: a configured backend in Apogee's cyan, anything needing attention
+/// in the warning yellow, and what no backend points at dimmed. Alignment is
+/// measured on the plain text, so a colourless `style` gives the same table.
+[[nodiscard]] std::string render_model_table(const std::vector<ModelRow>& rows,
+                                             const ansi::Style& style = {});
 
 /// Renders the listing as one JSON object per line, for `--output-format
 /// stream-json`. A GUI listing models is the first consumer of machine mode

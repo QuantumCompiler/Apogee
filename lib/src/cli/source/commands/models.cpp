@@ -115,6 +115,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     for (const auto& [key, backend] : config.backends) {
         ModelRow row;
         row.backend = key;
+        row.configured = true;
         row.type = std::string{harness::to_string(backend.type)};
         row.roles = roles_for(config, key);
         // Until the model-profiles item lands nothing resolves a profile, and
@@ -145,6 +146,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                         break;
                     case secrets::KeySource::None:
                         row.state = "no key";
+                        row.attention = true;
                         row.note = "no API key found; run 'apogee auth add " +
                                    std::string{harness::to_string(backend.type)} + "'";
                         break;
@@ -161,6 +163,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         if (expanded.empty()) {
             row.model = backend.model;
             row.state = "missing";
+            row.attention = true;
             row.note = "no model_path set";
             rows.push_back(std::move(row));
             continue;
@@ -173,6 +176,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         const models::GgufInfo info = models::inspect_gguf(path);
         if (!info.parsed) {
             row.state = std::filesystem::exists(path) ? "unreadable" : "missing";
+            row.attention = true;
             row.note = info.parse_error;
         } else {
             row.state = "ok";
@@ -181,6 +185,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             // column cannot claim a profile the run would not resolve.
             row.profile = describe_profile(info.architecture, path.filename().string());
             if (info.is_projector()) {
+                row.attention = true;
                 row.note = "a multimodal projector (" + std::to_string(info.tensors) +
                            " vision tensors) -- point a backend's mmproj_path at this, not "
                            "model_path";
@@ -233,6 +238,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                               ? describe_profile(info.architecture, stored.file.filename().string())
                               : "unprofiled";
             if (!info.parsed) {
+                row.attention = true;
                 row.note = info.parse_error;
             } else if (info.has_vision_tensors()) {
                 row.note = "combined text+vision blob (" +
@@ -262,11 +268,13 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             row.verified = record.has_value()
                                ? std::to_string(record->files.size()) + " file(s) on record"
                                : "no record";
-            row.note = models::config_is_download_record(stored.dir)
-                           ? "damaged by an older pull -- 'apogee models repair " + stored.model +
-                                 "/safetensors/" + stored.id + "'"
-                           : "full weights, trainable -- 'apogee models convert " + stored.model +
-                                 "' makes a GGUF";
+            // No note for a healthy one: its state column already says what
+            // it is, and a line under every snapshot was noise.
+            if (models::config_is_download_record(stored.dir)) {
+                row.attention = true;
+                row.note = "damaged by an older pull -- 'apogee models repair " + stored.model +
+                           "/safetensors/" + stored.id + "'";
+            }
             rows.push_back(std::move(row));
         }
 
@@ -278,6 +286,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             row.type = "-";
             row.model = gguf.file.filename().string();
             row.provenance = "local";
+            row.attention = true;
             row.architecture = "-";
             row.profile = "-";
             row.state = "old layout";
@@ -291,6 +300,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             row.type = "-";
             row.model = flat.dir.filename().string() + "/";
             row.provenance = "local";
+            row.attention = true;
             row.architecture = "-";
             row.profile = "-";
             row.state = "old layout";
@@ -305,7 +315,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     return rows;
 }
 
-std::string render_model_table(const std::vector<ModelRow>& rows) {
+std::string render_model_table(const std::vector<ModelRow>& rows, const ansi::Style& style) {
     if (rows.empty()) {
         return "no backends configured -- run 'apogee config init' to write a starter config\n";
     }
@@ -335,13 +345,22 @@ std::string render_model_table(const std::vector<ModelRow>& rows) {
     }
     out << "\n";
 
-    for (const ModelRow& row : rows) {
-        for (std::size_t i = 0; i < columns.size(); ++i) {
-            pad(out, columns[i].second(row), widths[i], i + 1 == columns.size());
+    // Each line is laid out plain and coloured whole, so escape codes never
+    // count toward a column's width.
+    const auto paint = [&style](const ModelRow& row, const std::string& line) {
+        if (row.attention) {
+            return style.colorize(line, ansi::Color::Yellow);
         }
-        out << "\n";
+        return row.configured ? style.colorize(line, ansi::Color::Cyan) : style.dim(line);
+    };
+    for (const ModelRow& row : rows) {
+        std::ostringstream line;
+        for (std::size_t i = 0; i < columns.size(); ++i) {
+            pad(line, columns[i].second(row), widths[i], i + 1 == columns.size());
+        }
+        out << paint(row, line.str()) << "\n";
         if (!row.note.empty()) {
-            out << "    " << row.note << "\n";
+            out << paint(row, "    " + row.note) << "\n";
         }
     }
     return out.str();
@@ -503,14 +522,20 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
     };
 
     auto format = std::make_shared<std::string>();
+    auto no_color = std::make_shared<bool>(false);
     CLI::App* list = cmd->add_subcommand("list", "List configured backends and their models");
     list->add_option("--output-format", *format, "text (default) or stream-json")
         ->check(CLI::IsMember({"text", "stream-json"}));
-    list->callback([load, format, &context]() {
+    list->add_flag("--no-color", *no_color, "Disable coloured output");
+    list->callback([load, format, no_color, &context]() {
         const std::vector<ModelRow> rows = build_model_rows(
             load(), harness::models_dir(), harness::resolve_config_path(context.config_path));
-        std::cout << (*format == "stream-json" ? render_model_jsonl(rows)
-                                               : render_model_table(rows));
+        if (*format == "stream-json") {
+            std::cout << render_model_jsonl(rows);
+            return;
+        }
+        std::cout << render_model_table(
+            rows, ansi::Style::detect(*no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto));
     });
 
     auto info_name = std::make_shared<std::string>();

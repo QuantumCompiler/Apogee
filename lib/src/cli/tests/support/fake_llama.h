@@ -166,9 +166,16 @@ public:
     /// texts appended — the "model ships its own template" path.
     std::string builtin_template_prefix;
 
+    /// Every text tokenized, in order: what the provider actually sent.
+    mutable std::vector<std::string> tokenized;
+
+    /// The window each context was asked for, in creation order.
+    std::vector<std::int64_t> context_sizes;
+
     [[nodiscard]] std::vector<std::int32_t> tokenize(std::string_view text,
                                                      bool add_special) const override {
         (void)add_special;
+        tokenized.emplace_back(text);
         std::vector<std::int32_t> tokens;
         std::string word;
         for (const char character : text) {
@@ -257,7 +264,7 @@ public:
 
     [[nodiscard]] std::unique_ptr<backends::LlamaContext> make_context(
         std::int64_t context_size) override {
-        (void)context_size;
+        context_sizes.push_back(context_size);
         auto state = std::make_shared<FakeLlamaContext>();
         state->script = script;
         state->eog_token = eog_token;

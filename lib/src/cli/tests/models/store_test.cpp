@@ -11,6 +11,7 @@
 
 #include "models/sha256.h"
 #include "models/sidecar.h"
+#include "platform/platform.h"
 #include "support/env_guard.h"
 
 using apogee::models::StoreRoots;
@@ -426,4 +427,80 @@ TEST_CASE("a snapshot with no record cannot be judged, and says so", "[models][s
         store.roots.models / "m" / "safetensors" / "aaaaaaaaaaaa");
     CHECK(damage.error.find("nothing to judge") != std::string::npos);
     CHECK(damage.empty());
+}
+
+TEST_CASE("a staging directory is claimed by its process until it is committed or removed",
+          "[models][store][staging]") {
+    const Store store;
+    const std::filesystem::path staging =
+        apogee::models::make_incoming_dir(store.roots, "gguf", "org--repo");
+    const std::filesystem::path owner = apogee::models::staging_owner_path(staging);
+    REQUIRE(std::filesystem::exists(owner));
+    std::ifstream in{owner};
+    long pid = 0;
+    in >> pid;
+    CHECK(pid == apogee::platform::current_process_id());
+    // Beside, not inside: the rename that commits it cannot carry the claim.
+    CHECK(owner.parent_path() == staging.parent_path());
+
+    write_file(staging / "m.gguf", "weights");
+    const apogee::models::Commit commit = apogee::models::commit_weights(
+        staging, apogee::models::weights_dir(store.roots, "gguf", "org--repo", "aaaaaaaaaaaa"));
+    REQUIRE(commit.error.empty());
+    CHECK_FALSE(std::filesystem::exists(owner));
+    CHECK_FALSE(std::filesystem::exists(commit.dir / owner.filename()));
+
+    const std::filesystem::path dropped =
+        apogee::models::make_incoming_dir(store.roots, "gguf", "org--repo");
+    REQUIRE(apogee::models::remove_weights(dropped).empty());
+    CHECK_FALSE(std::filesystem::exists(apogee::models::staging_owner_path(dropped)));
+}
+
+TEST_CASE("abandoned staging is what no running process owns", "[models][store][staging]") {
+    // A killed `models convert` left two 52 GB copies behind (2026-09-23).
+    // What is live must never be listed: `check --fix` removes what is.
+    const Store store;
+    const auto staging = [&store](std::string_view format, std::string_view name) {
+        const std::filesystem::path dir =
+            store.roots.models / "org--repo" / std::string{format} / std::string{name};
+        write_file(dir / "big.gguf", std::string(1000, 'x'));
+        return dir;
+    };
+    const auto owned_by = [](const std::filesystem::path& dir, long pid) {
+        std::ofstream{apogee::models::staging_owner_path(dir)} << pid << "\n";
+    };
+
+    const std::filesystem::path live = staging("gguf", ".incoming-111111111111");
+    owned_by(live, apogee::platform::current_process_id());
+    const std::filesystem::path dead = staging("gguf", ".incoming-222222222222");
+    owned_by(dead, 999999999);
+    const std::filesystem::path fresh = staging("safetensors", ".incoming-333333333333");
+    const std::filesystem::path stale = staging("safetensors", ".incoming-444444444444");
+    // Made before markers existed, untouched since yesterday.
+    const auto yesterday = std::filesystem::file_time_type::clock::now() - std::chrono::hours{24};
+    std::filesystem::last_write_time(stale / "big.gguf", yesterday);
+    std::filesystem::last_write_time(stale, yesterday);
+
+    std::vector<std::filesystem::path> found;
+    for (const apogee::models::AbandonedStaging& leftover :
+         apogee::models::find_abandoned_staging(store.roots)) {
+        found.push_back(leftover.dir);
+        CHECK(leftover.bytes == 1000);
+    }
+    std::ranges::sort(found);
+    CHECK(found == std::vector<std::filesystem::path>{dead, stale});
+}
+
+TEST_CASE("a commit whose hash is stopped leaves its staging to the caller",
+          "[models][store][staging]") {
+    const Store store;
+    const std::filesystem::path staging =
+        apogee::models::make_incoming_dir(store.roots, "gguf", "org--repo");
+    write_file(staging / "m.gguf", std::string(3 * 1024 * 1024, 'g'));
+    const apogee::models::StoredFile stored =
+        apogee::models::commit_gguf(store.roots, "org--repo", staging, staging / "m.gguf",
+                                    apogee::models::Sidecar{}, [](std::int64_t) { return false; });
+    CHECK(stored.error == apogee::models::kStopped);
+    CHECK(std::filesystem::exists(staging / "m.gguf"));
+    CHECK(apogee::models::list_store_ggufs(store.roots).empty());
 }

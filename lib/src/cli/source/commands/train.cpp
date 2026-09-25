@@ -824,6 +824,18 @@ void print_cycle_history(const training::CycleHistory& history, bool active) {
     }
 }
 
+/// The trainers `train setup --trainer` installs a stack for: every name but
+/// the mock, which needs none.
+[[nodiscard]] std::vector<std::string_view> installable_trainers() {
+    std::vector<std::string_view> out;
+    for (const std::string_view name : training::trainer_names()) {
+        if (name != "mock") {
+            out.push_back(name);
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 // --- the resolvers ------------------------------------------------------------------
@@ -1102,10 +1114,14 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto setup_with = std::make_shared<std::vector<std::string>>();
     CLI::App* setup = cmd->add_subcommand(
         "setup", "Create the Python environment under training/venv and install requirement sets");
-    setup->add_option("--trainer", *setup_trainer,
-                      "Install a trainer's stack: auto (detect this host), mlx, or peft");
-    setup->add_option("--with", *setup_with,
-                      "Install a requirement set: prepare (Parquet), mlx, peft, convert");
+    setup
+        ->add_option("--trainer", *setup_trainer,
+                     "Install a trainer's stack: auto (detect this host), mlx, or peft")
+        ->type_name(words_value(installable_trainers()));
+    setup
+        ->add_option("--with", *setup_with,
+                     "Install a requirement set: prepare (Parquet), mlx, peft, convert")
+        ->type_name(words_value(training::requirement_set_names()));
     setup->callback([&context, setup_trainer, setup_with]() {
         const harness::Config config = load_config_or_default(context);
         SetupRequest request;
@@ -1142,23 +1158,26 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         "run", "Fine-tune a SafeTensors snapshot on a dataset, recording a run");
     run->add_option("student", *run_student,
                     "A snapshot: a directory, or a name under paths.hf_dir or models/")
-        ->type_name(kPathValue)
+        ->type_name(kSnapshotValue)
         ->required();
     run->add_option("--dataset", *run_dataset, "A dataset name ('datasets list') or a .jsonl path")
-        ->type_name(kPathValue)
+        ->type_name(kDatasetValue)
         ->required();
-    run->add_option("--method", *run_method, "lora (default) or qlora");
+    run->add_option("--method", *run_method, "lora (default) or qlora")
+        ->type_name(words_value(harness::lora_methods()));
     run->add_option("--iters", *run_iters, "Training iterations (default: the driver's)");
     run->add_option("--batch-size", *run_batch, "Batch size per step");
     run->add_option("--num-layers", *run_layers, "Transformer layers LoRA is applied to");
     run->add_flag("--grad-checkpoint", *run_grad, "Gradient checkpointing: slower, less memory");
     run->add_flag("--mask-prompt", *run_mask, "Completion-only loss: the prompt is not trained on");
-    run->add_option("--trainer", *run_trainer, "auto (default), mlx, peft, or mock");
+    run->add_option("--trainer", *run_trainer, "auto (default), mlx, peft, or mock")
+        ->type_name(words_value(training::trainer_names()));
     run->callback([&context, run_student, run_dataset, run_method, run_iters, run_batch, run_layers,
                    run_grad, run_mask, run_trainer]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
-        if (*run_method != "lora" && *run_method != "qlora") {
+        if (std::ranges::find(harness::lora_methods(), std::string_view{*run_method}) ==
+            harness::lora_methods().end()) {
             fail_user("--method must be lora or qlora (got '" + *run_method + "')");
         }
         const StudentResolution student = resolve_student(
@@ -1299,17 +1318,18 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto eval_force = std::make_shared<bool>(false);
     auto eval_trainer = std::make_shared<std::string>();
     CLI::App* eval = cmd->add_subcommand("eval", "Gate a run: substring and pairwise-judge items");
-    eval->add_option("run", *eval_run, "The run id")->required();
+    eval->add_option("run", *eval_run, "The run id")->type_name(kRunValue)->required();
     eval->add_option("--suite", *eval_suite,
                      "A .jsonl path, a suite under training/suites, a prepared <name>.eval, or "
                      "a kit (default: training.eval_suite_path)")
-        ->type_name(kPathValue);
+        ->type_name(kSuiteValue);
     eval->add_option("--judge", *eval_judge,
                      "The backend that judges items without `expected` (default: "
                      "training.judge_backend; none skips them)")
         ->type_name(kBackendValue);
     eval->add_flag("-f,--force", *eval_force, "Re-run when results already exist");
-    eval->add_option("--trainer", *eval_trainer, "Override the run's recorded trainer");
+    eval->add_option("--trainer", *eval_trainer, "Override the run's recorded trainer")
+        ->type_name(words_value(training::trainer_names()));
     eval->callback([&context, eval_run, eval_suite, eval_judge, eval_force, eval_trainer]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
@@ -1445,16 +1465,19 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto promote_trainer = std::make_shared<std::string>();
     CLI::App* promote = cmd->add_subcommand(
         "promote", "Fuse, convert to GGUF, verify, and register the run as a llamacpp backend");
-    promote->add_option("run", *promote_id, "The run id")->required();
+    promote->add_option("run", *promote_id, "The run id")->type_name(kRunValue)->required();
     promote->add_option("--as", *promote_as, "The backend name: new, or an existing llamacpp entry")
         ->type_name(kBackendValue)
         ->required();
     promote->add_flag("-f,--force", *promote_force, "Skip the eval gate");
-    promote->add_option("--quantize", *promote_quantize,
-                        "Quantize the F16 GGUF to this type (needs a build with llama.cpp)");
+    promote
+        ->add_option("--quantize", *promote_quantize,
+                     "Quantize the F16 GGUF to this type (needs a build with llama.cpp)")
+        ->type_name(words_value(models::quant_type_names()));
     promote->add_flag("--keep-fused", *promote_keep,
                       "Keep the fused SafeTensors checkpoint under the run directory");
-    promote->add_option("--trainer", *promote_trainer, "Override the run's recorded trainer");
+    promote->add_option("--trainer", *promote_trainer, "Override the run's recorded trainer")
+        ->type_name(words_value(training::trainer_names()));
     promote->callback([&context, promote_id, promote_as, promote_force, promote_quantize,
                        promote_keep, promote_trainer]() {
         std::filesystem::path config_path;
@@ -1720,7 +1743,7 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     pipe_run
         ->add_option("--pipeline", *pipe_spec,
                      "A spec file (YAML), or a name under training.pipelines")
-        ->type_name(kPathValue)
+        ->type_name(kPipelineValue)
         ->required();
     pipe_run->add_flag("--continue-on-fail", *pipe_continue,
                        "Go on to the next stage when the cumulative gate fails");
@@ -1729,7 +1752,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                      "The backend that judges items without `expected` (default: "
                      "training.judge_backend)")
         ->type_name(kBackendValue);
-    pipe_run->add_option("--trainer", *pipe_trainer, "auto (default), mlx, peft, or mock");
+    pipe_run->add_option("--trainer", *pipe_trainer, "auto (default), mlx, peft, or mock")
+        ->type_name(words_value(training::trainer_names()));
 
     auto resume_id = std::make_shared<std::string>();
     auto resume_spec = std::make_shared<std::string>();
@@ -1738,21 +1762,25 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto resume_trainer = std::make_shared<std::string>();
     CLI::App* pipe_resume = pipeline->add_subcommand(
         "resume", "Continue a pipeline from the first stage that has not passed");
-    pipe_resume->add_option("id", *resume_id, "The pipeline run id")->required();
+    pipe_resume->add_option("id", *resume_id, "The pipeline run id")
+        ->type_name(kPipelineRunValue)
+        ->required();
     pipe_resume
         ->add_option("--pipeline", *resume_spec,
                      "The spec, when the run's named pipeline is no longer in the config")
-        ->type_name(kPathValue);
+        ->type_name(kPipelineValue);
     pipe_resume->add_flag("--continue-on-fail", *resume_continue,
                           "Go on to the next stage when the cumulative gate fails");
     pipe_resume->add_option("--judge", *resume_judge, "The judge backend")
         ->type_name(kBackendValue);
-    pipe_resume->add_option("--trainer", *resume_trainer, "auto (default), mlx, peft, or mock");
+    pipe_resume->add_option("--trainer", *resume_trainer, "auto (default), mlx, peft, or mock")
+        ->type_name(words_value(training::trainer_names()));
 
     auto pipe_status_id = std::make_shared<std::string>();
     CLI::App* pipe_status =
         pipeline->add_subcommand("status", "A pipeline run's stages, or every pipeline run");
-    pipe_status->add_option("id", *pipe_status_id, "The pipeline run id (default: list them)");
+    pipe_status->add_option("id", *pipe_status_id, "The pipeline run id (default: list them)")
+        ->type_name(kPipelineRunValue);
 
     // One body for run and resume: resolve, drive, report.
     auto drive_pipeline = [&context](const harness::Config& config,
@@ -1917,7 +1945,7 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         "the last passing stage promoted");
     regime_run
         ->add_option("name", *regime_named, "A regime under training.regimes (or a spec file path)")
-        ->type_name(kPathValue);
+        ->type_name(kRegimeValue);
     regime_run->add_option("--regime", *regime_file, "A regime spec file (YAML)")
         ->type_name(kPathValue);
     regime_run->add_option("--teacher", *regime_teacher, "The backend that synthesises the data")
@@ -1926,9 +1954,9 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         ->add_option("--student", *regime_student,
                      "The snapshot to fine-tune: a directory, or a name under paths.hf_dir "
                      "or models/")
-        ->type_name(kPathValue);
+        ->type_name(kSnapshotValue);
     regime_run->add_option("--kit", *regime_kits, "A kit per stage, in order (repeatable)")
-        ->type_name(kPathValue);
+        ->type_name(kKitValue);
     regime_run->add_flag("--all-kits", *regime_all,
                          "Every installed kit, alphabetically (an explicit --kit list wins)");
     regime_run->add_option("--as", *regime_as, "Promote the last passing stage into this backend")
@@ -1948,7 +1976,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kBackendValue);
     regime_run->add_flag("--no-promote", *regime_no_promote,
                          "Stop after the gated pipeline; promote by hand");
-    regime_run->add_option("--trainer", *regime_trainer, "auto (default), mlx, peft, or mock");
+    regime_run->add_option("--trainer", *regime_trainer, "auto (default), mlx, peft, or mock")
+        ->type_name(words_value(training::trainer_names()));
     regime_run->callback([&context, regime_named, regime_file, regime_teacher, regime_student,
                           regime_kits, regime_all, regime_as, regime_count, regime_iters,
                           regime_temperature, regime_max_tokens, regime_judge, regime_no_promote,

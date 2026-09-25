@@ -51,6 +51,8 @@ const std::vector<ModelProfile>& model_profiles() {
                         .architectures = {"qwen35", "qwen3", "qwen3moe", "qwen35moe", "qwen2"},
                         .name_hints = {"qwen"},
                         .reasoning = {{.open = "<think>", .close = "</think>"}},
+                        // What Qwen's template writes for enable_thinking=false.
+                        .skip_reasoning = "<think>\n\n</think>\n\n",
                         .tools = {},
                         .verified = true,
                         .evidence = "qwen3.6-27b Q4_K_M, 2026-09-07: emitted a literal "
@@ -232,6 +234,10 @@ std::vector<HeaderMarker> header_markers_for(const ModelProfile* profile) {
         return {};
     }
     return profile->headers;
+}
+
+std::string reasoning_skip_for(const ModelProfile* profile) {
+    return profile == nullptr ? std::string{} : profile->skip_reasoning;
 }
 
 }  // namespace apogee::backends

@@ -320,29 +320,37 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                         "The raw conversation (or --input, --from-chat, or piped stdin)");
     capture->add_option("--input", flags->input, "Read the conversation from this file")
         ->type_name(kPathValue);
-    capture->add_option("--from-chat", flags->from_chat,
-                        "Distil a saved chat session, by id or name (see 'apogee chats list')");
+    capture
+        ->add_option("--from-chat", flags->from_chat,
+                     "Distil a saved chat session, by id or name (see 'apogee chats list')")
+        ->type_name(kChatValue);
     capture
         ->add_option("--status", flags->status,
                      "Override the clerk: shipped, rejected, or superseded")
+        ->type_name(words_value(knowledge::valid_statuses()))
         ->check([](const std::string& value) {
             return knowledge::is_valid_status(knowledge::normalize_status(value))
                        ? std::string{}
                        : "'" + value + "' is not a status (shipped, rejected, superseded)";
         });
-    capture->add_option("--discipline", flags->discipline,
-                        "Override the clerk: program, product, project, ux, or eng");
+    capture
+        ->add_option("--discipline", flags->discipline,
+                     "Override the clerk: program, product, project, ux, or eng")
+        ->type_name(words_value(knowledge::valid_disciplines()));
     capture->add_option("--source", flags->source,
                         "The source surface (chat, meeting, manual, ...); overrides the clerk");
     capture
         ->add_option("--link", flags->link,
                      "The artifact this decision produced (a ticket, a commit, a file)")
         ->type_name(kPathValue);
-    capture->add_option("--supersedes", flags->supersedes,
-                        "The id of the record this one replaces; that record is marked superseded");
+    capture
+        ->add_option("--supersedes", flags->supersedes,
+                     "The id of the record this one replaces; that record is marked superseded")
+        ->type_name(kRecordValue);
     capture
         ->add_option("--retriever", flags->retriever,
                      "How the record is indexed: lexical (text only), vector, or auto")
+        ->type_name(words_value(agentloop::ingest_retriever_names()))
         ->check([](const std::string& value) {
             return agentloop::valid_retriever(value)
                        ? std::string{}
@@ -353,8 +361,10 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                      "Backend that runs the clerk (default: the extraction role, then the "
                      "default backend)")
         ->type_name(kBackendValue);
-    capture->add_option("--db", flags->db,
-                        "Collection to store into (default: knowledge.db, then 'knowledge')");
+    capture
+        ->add_option("--db", flags->db,
+                     "Collection to store into (default: knowledge.db, then 'knowledge')")
+        ->type_name(kCollectionValue);
     capture->add_flag("--dry-run", flags->dry_run,
                       "Run the clerk and print the record and the store decision; write nothing");
     capture->add_flag("--json", flags->json, "Print the result as JSON");
@@ -513,14 +523,17 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     query
         ->add_option("--status", q->status,
                      "Keep only this branch (default shipped; \"\" for every branch)")
+        ->type_name(words_value(knowledge::valid_statuses()))
         ->check([](const std::string& value) {
             return value.empty() || knowledge::is_valid_status(value)
                        ? std::string{}
                        : "'" + value + "' is not a status (shipped, rejected, superseded, or \"\")";
         });
-    query->add_option("--discipline", q->discipline, "Keep only this discipline");
+    query->add_option("--discipline", q->discipline, "Keep only this discipline")
+        ->type_name(words_value(knowledge::valid_disciplines()));
     query->add_option("-n,--top-k", q->top_k, "How many records to return (default 5)");
     query->add_option("--retriever", q->retriever, "lexical, vector, hybrid, or auto")
+        ->type_name(words_value(agentloop::retriever_names()))
         ->check([](const std::string& value) {
             return agentloop::valid_retriever(value)
                        ? std::string{}
@@ -530,7 +543,8 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         ->add_option("--rerank", q->rerank,
                      "Backend that reorders the matches with one generation call, or off")
         ->type_name(kBackendValue);
-    query->add_option("--db", q->db, "The collection (default: knowledge.db, then 'knowledge')");
+    query->add_option("--db", q->db, "The collection (default: knowledge.db, then 'knowledge')")
+        ->type_name(kCollectionValue);
     query->add_flag("--json", q->json, "Print the result as JSON");
     query->add_flag("--graph", q->graph,
                     "Also walk the knowledge graph from the matched records: the entities their "
@@ -650,9 +664,12 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     // ---- list ---------------------------------------------------------------
     auto l = std::make_shared<ListFlags>();
     CLI::App* list = cmd->add_subcommand("list", "List the records, newest first");
-    list->add_option("--status", l->status, "Keep only this branch");
-    list->add_option("--discipline", l->discipline, "Keep only this discipline");
-    list->add_option("--db", l->db, "The collection (default: knowledge.db, then 'knowledge')");
+    list->add_option("--status", l->status, "Keep only this branch")
+        ->type_name(words_value(knowledge::valid_statuses()));
+    list->add_option("--discipline", l->discipline, "Keep only this discipline")
+        ->type_name(words_value(knowledge::valid_disciplines()));
+    list->add_option("--db", l->db, "The collection (default: knowledge.db, then 'knowledge')")
+        ->type_name(kCollectionValue);
     list->add_flag("--json", l->json, "Print the records as JSON");
     list->callback([&context, l]() {
         std::filesystem::path config_path;
@@ -681,9 +698,10 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     // ---- info ---------------------------------------------------------------
     auto i = std::make_shared<InfoFlags>();
     CLI::App* info = cmd->add_subcommand("info", "Show one record in full");
-    info->add_option("ID", i->id, "The record id")->required();
+    info->add_option("ID", i->id, "The record id")->type_name(kRecordValue)->required();
     info->add_flag("--raw", i->raw, "Also print the archived raw conversation");
-    info->add_option("--db", i->db, "The collection (default: knowledge.db, then 'knowledge')");
+    info->add_option("--db", i->db, "The collection (default: knowledge.db, then 'knowledge')")
+        ->type_name(kCollectionValue);
     info->add_flag("--json", i->json, "Print the record as JSON");
     info->callback([&context, i]() {
         std::filesystem::path config_path;
@@ -715,11 +733,12 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     auto lk = std::make_shared<EditFlags>();
     CLI::App* link = cmd->add_subcommand(
         "link", "Set the record's downstream link -- the artifact the decision produced");
-    link->add_option("ID", lk->id, "The record id")->required();
+    link->add_option("ID", lk->id, "The record id")->type_name(kRecordValue)->required();
     link->add_option("REF", lk->value, "A ticket, a commit, a PR, a file")
         ->type_name(kPathValue)
         ->required();
-    link->add_option("--db", lk->db, "The collection (default: knowledge.db, then 'knowledge')");
+    link->add_option("--db", lk->db, "The collection (default: knowledge.db, then 'knowledge')")
+        ->type_name(kCollectionValue);
     link->callback([&context, lk]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_lenient(context, config_path);
@@ -734,15 +753,17 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
 
     auto st = std::make_shared<EditFlags>();
     CLI::App* status = cmd->add_subcommand("status", "Change the record's branch marker");
-    status->add_option("ID", st->id, "The record id")->required();
+    status->add_option("ID", st->id, "The record id")->type_name(kRecordValue)->required();
     status->add_option("STATUS", st->value, "shipped, rejected, or superseded")
+        ->type_name(words_value(knowledge::valid_statuses()))
         ->required()
         ->check([](const std::string& value) {
             return knowledge::is_valid_status(knowledge::normalize_status(value))
                        ? std::string{}
                        : "'" + value + "' is not a status (shipped, rejected, superseded)";
         });
-    status->add_option("--db", st->db, "The collection (default: knowledge.db, then 'knowledge')");
+    status->add_option("--db", st->db, "The collection (default: knowledge.db, then 'knowledge')")
+        ->type_name(kCollectionValue);
     status->callback([&context, st]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_lenient(context, config_path);
@@ -758,8 +779,9 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
 
     auto del = std::make_shared<EditFlags>();
     CLI::App* remove = cmd->add_subcommand("delete", "Remove a record and its raw archive");
-    remove->add_option("ID", del->id, "The record id")->required();
-    remove->add_option("--db", del->db, "The collection (default: knowledge.db, then 'knowledge')");
+    remove->add_option("ID", del->id, "The record id")->type_name(kRecordValue)->required();
+    remove->add_option("--db", del->db, "The collection (default: knowledge.db, then 'knowledge')")
+        ->type_name(kCollectionValue);
     remove->callback([&context, del]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_lenient(context, config_path);
@@ -772,10 +794,13 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     });
 
     // ---- export -------------------------------------------------------------
+    // What `--format` offers; its check also takes `md` for markdown.
+    static constexpr std::array<std::string_view, 2> kExportFormats{"json", "markdown"};
     auto ex = std::make_shared<ExportFlags>();
     CLI::App* export_cmd = cmd->add_subcommand(
         "export", "Export the records as JSON or a Markdown report, optionally anonymized");
     export_cmd->add_option("--format", ex->format, "json (default) or markdown")
+        ->type_name(words_value(kExportFormats))
         ->check([](const std::string& value) {
             return value == "json" || value == "markdown" || value == "md"
                        ? std::string{}
@@ -783,12 +808,15 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         });
     export_cmd->add_flag("--anonymize", ex->anonymize,
                          "Strip attribution and the local raw_ref; keep the provenance chain");
-    export_cmd->add_option("--status", ex->status, "Keep only this branch");
-    export_cmd->add_option("--discipline", ex->discipline, "Keep only this discipline");
+    export_cmd->add_option("--status", ex->status, "Keep only this branch")
+        ->type_name(words_value(knowledge::valid_statuses()));
+    export_cmd->add_option("--discipline", ex->discipline, "Keep only this discipline")
+        ->type_name(words_value(knowledge::valid_disciplines()));
     export_cmd->add_option("-o,--out", ex->out, "Write to this file instead of stdout")
         ->type_name(kPathValue);
-    export_cmd->add_option("--db", ex->db,
-                           "The collection (default: knowledge.db, then 'knowledge')");
+    export_cmd
+        ->add_option("--db", ex->db, "The collection (default: knowledge.db, then 'knowledge')")
+        ->type_name(kCollectionValue);
     export_cmd->callback([&context, ex]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_lenient(context, config_path);
@@ -814,12 +842,14 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     auto rx = std::make_shared<ReindexFlags>();
     CLI::App* reindex = cmd->add_subcommand(
         "reindex", "Re-embed the records' vectors after an embedding-model change");
-    reindex->add_option("ID", rx->id, "One record to reindex (default: every record)");
+    reindex->add_option("ID", rx->id, "One record to reindex (default: every record)")
+        ->type_name(kRecordValue);
     reindex
         ->add_option("-m,--model", rx->model,
                      "Embedding backend to reindex with (default: the collection's)")
         ->type_name(kBackendValue);
-    reindex->add_option("--db", rx->db, "The collection (default: knowledge.db, then 'knowledge')");
+    reindex->add_option("--db", rx->db, "The collection (default: knowledge.db, then 'knowledge')")
+        ->type_name(kCollectionValue);
     reindex->callback([&context, rx]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_lenient(context, config_path);

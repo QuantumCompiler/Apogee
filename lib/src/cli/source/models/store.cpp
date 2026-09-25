@@ -2,14 +2,19 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdint>
+#include <fstream>
 #include <optional>
 #include <random>
+#include <set>
 #include <system_error>
 #include <utility>
 
 #include "models/sha256.h"
 #include "models/sidecar.h"
 #include "models/source_hf.h"
+#include "platform/platform.h"
 
 namespace apogee::models {
 namespace {
@@ -192,8 +197,22 @@ std::filesystem::path find_weights_dir(const StoreRoots& roots, std::string_view
 
 std::filesystem::path incoming_path(const StoreRoots& roots, std::string_view format,
                                     std::string_view model) {
-    return model_dir(roots, format, model) / std::string{format} /
-           (std::string{kIncomingPrefix} + random_weight_id());
+    const std::filesystem::path dir = model_dir(roots, format, model) / std::string{format} /
+                                      (std::string{kIncomingPrefix} + random_weight_id());
+    // Claimed now, so the one check that asks -- is its owner still running? --
+    // never reads a live staging directory as abandoned. Best effort: without
+    // a marker, an hour of no change is what marks it abandoned.
+    std::error_code code;
+    std::filesystem::create_directories(dir.parent_path(), code);
+    std::ofstream{staging_owner_path(dir), std::ios::binary} << platform::current_process_id()
+                                                             << "\n";
+    return dir;
+}
+
+std::filesystem::path staging_owner_path(const std::filesystem::path& staging) {
+    std::filesystem::path owner = staging;
+    owner += ".owner";
+    return owner;
 }
 
 std::filesystem::path make_incoming_dir(const StoreRoots& roots, std::string_view format,
@@ -208,6 +227,8 @@ Commit commit_weights(const std::filesystem::path& staged, const std::filesystem
     Commit commit;
     commit.dir = final_dir;
     std::error_code code;
+    // Committed either way below: the claim on the staging name ends here.
+    std::filesystem::remove(staging_owner_path(staged), code);
     if (std::filesystem::exists(final_dir, code)) {
         // Same id, same weights: what is already there is kept, and the copy
         // that was just made is not -- but for a projector the stored copy
@@ -261,13 +282,25 @@ std::filesystem::path projector_path_for(const std::filesystem::path& model_file
     return model_file.parent_path() / (model_file.stem().string() + "-mmproj.gguf");
 }
 
-std::string write_record(const std::filesystem::path& file, Sidecar record) {
+std::string write_record(const std::filesystem::path& file, Sidecar record,
+                         const HashProgress& progress) {
     std::error_code code;
     record.file = file.filename().string();
     if (record.pulled_at.empty()) {
         record.pulled_at = now_rfc3339();
     }
-    record.file_digest = file_sha256(file);
+    bool stopped = false;
+    HashProgress watched;
+    if (progress) {
+        watched = [&progress, &stopped](std::int64_t hashed) {
+            stopped = !progress(hashed);
+            return !stopped;
+        };
+    }
+    record.file_digest = file_sha256(file, watched);
+    if (stopped) {
+        return std::string{kStopped};
+    }
     record.file_size = static_cast<std::int64_t>(std::filesystem::file_size(file, code));
     if (code || record.file_digest.empty()) {
         return "could not read " + file.string() + " to record it";
@@ -315,9 +348,9 @@ std::string share_projector(const std::filesystem::path& projector,
 
 StoredFile commit_gguf(const StoreRoots& roots, std::string_view model,
                        const std::filesystem::path& staging, const std::filesystem::path& file,
-                       Sidecar record) {
+                       Sidecar record, const HashProgress& progress) {
     StoredFile stored;
-    if (std::string error = write_record(file, std::move(record)); !error.empty()) {
+    if (std::string error = write_record(file, std::move(record), progress); !error.empty()) {
         stored.error = std::move(error);
         return stored;
     }
@@ -444,6 +477,70 @@ std::vector<std::string> list_store_models(const StoreRoots& roots) {
     return out;
 }
 
+namespace {
+
+/// The newest change to anything under `dir`, `dir` included.
+[[nodiscard]] std::filesystem::file_time_type newest_change(const std::filesystem::path& dir) {
+    std::error_code code;
+    std::filesystem::file_time_type newest = std::filesystem::last_write_time(dir, code);
+    for (auto it = std::filesystem::recursive_directory_iterator(dir, code);
+         !code && it != std::filesystem::recursive_directory_iterator(); it.increment(code)) {
+        const std::filesystem::file_time_type time = it->last_write_time(code);
+        if (!code && time > newest) {
+            newest = time;
+        }
+    }
+    return newest;
+}
+
+[[nodiscard]] std::uintmax_t bytes_under(const std::filesystem::path& dir) {
+    std::uintmax_t total = 0;
+    std::error_code code;
+    for (auto it = std::filesystem::recursive_directory_iterator(dir, code);
+         !code && it != std::filesystem::recursive_directory_iterator(); it.increment(code)) {
+        if (it->is_regular_file(code)) {
+            total += it->file_size(code);
+        }
+    }
+    return total;
+}
+
+/// Whether nothing owns `staging` any more: its marker names a process that
+/// is gone, or it has none and an hour has passed without a change -- well
+/// past any live writer, which grows a partial file or a download as it goes.
+[[nodiscard]] bool abandoned(const std::filesystem::path& staging) {
+    std::ifstream owner{staging_owner_path(staging)};
+    long pid = 0;
+    if (owner >> pid) {
+        return !platform::process_running(pid);
+    }
+    return std::filesystem::file_time_type::clock::now() - newest_change(staging) >
+           std::chrono::hours{1};
+}
+
+}  // namespace
+
+std::vector<AbandonedStaging> find_abandoned_staging(const StoreRoots& roots) {
+    std::vector<AbandonedStaging> out;
+    std::set<std::filesystem::path> seen;  // the two roots are often one
+    for (const std::filesystem::path& root : {roots.models, roots.safetensors}) {
+        for (const std::filesystem::path& model_path : subdirectories(root)) {
+            for (const std::string_view format : {kGgufFormat, kSafetensorsFormat}) {
+                std::error_code code;
+                for (const auto& entry :
+                     std::filesystem::directory_iterator(model_path / std::string{format}, code)) {
+                    if (entry.is_directory(code) &&
+                        entry.path().filename().string().starts_with(kIncomingPrefix) &&
+                        seen.insert(entry.path()).second && abandoned(entry.path())) {
+                        out.push_back({.dir = entry.path(), .bytes = bytes_under(entry.path())});
+                    }
+                }
+            }
+        }
+    }
+    return out;
+}
+
 StoreTarget resolve_store_target(const StoreRoots& roots, std::string_view given) {
     StoreTarget target;
     std::error_code code;
@@ -567,6 +664,9 @@ std::string remove_weights(const std::filesystem::path& weights_dir) {
     std::filesystem::remove_all(weights_dir, code);
     if (code) {
         return "could not remove " + weights_dir.string() + ": " + code.message();
+    }
+    if (weights_dir.filename().string().starts_with(kIncomingPrefix)) {
+        std::filesystem::remove(staging_owner_path(weights_dir), code);
     }
     // Tidy upward: an emptied format directory, then an emptied model one.
     const std::filesystem::path format_dir = weights_dir.parent_path();

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -136,8 +137,9 @@ namespace {
 /// Extracted when machine mode landed. The terminal REPL and a JSONL-driven
 /// child differ entirely in how they READ input -- a line editor with slash
 /// commands versus one JSON object per line -- and not at all in what a turn
-/// *is*: measure the context, compact or warn, append, run the loop, persist,
-/// and title the conversation once.
+/// *is*: measure the context, compact or warn, append, run the loop, persist.
+/// (Titling is shared the same way, as `BackgroundTitle` below, but it outlives
+/// a turn: it runs while the next one is being typed.)
 ///
 /// Duplicating that for the driver would have been the parity failure the
 /// Reporter seam exists to prevent, one level up: context monitoring or the
@@ -275,24 +277,78 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     // completed turn on disk, and that is a property of writing here rather
     // than at exit.
     logger::save(session);
+}
 
-    // Auto-titling rides the first completed exchange. A side request so it
-    // never enters the conversation's own history.
-    if (session.title.empty() && session.custom_name.empty() && session.turns >= 1) {
-        harness::ChatRequest title_request;
-        title_request.model = session.backend;
-        title_request.messages = session.messages;
-        title_request.messages.push_back(harness::ChatMessage::user(title_prompt()));
-        title_request.transient.side_request = true;
-        try {
-            session.title =
-                sanitize_title(harness.chat(title_request).message.content.plain_text());
+/// The conversation's title, asked for once and off the prompt's path.
+///
+/// Auto-titling rides the first completed exchange, as a side request so it
+/// never enters the conversation's own history. It used to run in line, and
+/// the next prompt waited for it: on a local 27B that was fifteen seconds and
+/// more -- and every turn, because a reasoning model's title came back empty
+/// and was asked for again (found live, 2026-09-25). Now it runs while the
+/// user reads the answer and types the next question.
+///
+/// **One model call at a time is the rule this keeps.** A local provider is
+/// not safe to drive from two threads, so everything that may reach the model
+/// -- the next turn, a slash command, the exit -- calls `settle()` first. That
+/// waits for a title still in flight (seconds at most: a few dozen tokens with
+/// the reasoning skipped) and records it.
+class BackgroundTitle {
+public:
+    explicit BackgroundTitle(const harness::Harness& harness) : harness_{harness} {}
+
+    BackgroundTitle(const BackgroundTitle&) = delete;
+    BackgroundTitle& operator=(const BackgroundTitle&) = delete;
+    BackgroundTitle(BackgroundTitle&&) = delete;
+    BackgroundTitle& operator=(BackgroundTitle&&) = delete;
+
+    /// An unwinding command must not wait out a whole title: cancelled, then
+    /// joined (a future from std::async joins as it is destroyed).
+    ~BackgroundTitle() {
+        cancellation_.cancel();
+    }
+
+    /// Asks for a title when `session` has no name yet -- once per process, so
+    /// a model that cannot produce one is not asked again after every turn.
+    void start_if_due(const logger::Session& session) {
+        if (asked_ || session.turns < 1 || !session.title.empty() || !session.custom_name.empty()) {
+            return;
+        }
+        asked_ = true;
+        title_ = std::async(std::launch::async, [this, request = title_request(session)]() {
+            try {
+                return sanitize_title(
+                    harness_.chat(request, cancellation_).message.content.plain_text());
+            } catch (const std::exception&) {
+                return std::string{};  // a failed title is cosmetic; it never costs a turn
+            }
+        });
+    }
+
+    /// Waits for a title in flight and records it on `session`.
+    void settle(logger::Session& session) {
+        if (!title_.valid()) {
+            return;
+        }
+        const std::string title = title_.get();
+        if (!title.empty() && session.title.empty()) {
+            session.title = title;
             logger::save(session);
-        } catch (const harness::HarnessError&) {
-            // A failed title is cosmetic. It must never cost a turn.
         }
     }
-}
+
+    /// Abandons a title in flight: the user interrupted, and did not ask for a
+    /// model call to finish first.
+    void cancel() const noexcept {
+        cancellation_.cancel();
+    }
+
+private:
+    const harness::Harness& harness_;
+    harness::CancellationToken cancellation_ = harness::CancellationToken::create();
+    std::future<std::string> title_;
+    bool asked_ = false;
+};
 
 }  // namespace
 
@@ -314,11 +370,13 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     flags->rag_option =
         cmd->add_option("--rag", flags->rag,
                         "Retrieve context from this collection each turn (see 'apogee embed'); "
-                        "\"\" switches off the config's auto_rag for this session");
+                        "\"\" switches off the config's auto_rag for this session")
+            ->type_name(kCollectionValue);
     cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
     flags->retriever_option =
         cmd->add_option("--retriever", flags->retriever,
                         "How to search the collection: lexical, vector, hybrid, or auto")
+            ->type_name(words_value(agentloop::retriever_names()))
             ->check([](const std::string& value) {
                 return agentloop::valid_retriever(value)
                            ? std::string{}
@@ -349,7 +407,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                flags->output_format = *parsed;
            },
            "Output format: text (default) or stream-json for a machine driver")
-        ->type_name("FORMAT");
+        ->type_name(words_value(format_names()));
     cmd->add_option_function<std::string>(
            "--input-format",
            [flags](const std::string& value) {
@@ -360,14 +418,18 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                flags->input_format = *parsed;
            },
            "Input format: text (default) or stream-json; follows --output-format if unset")
-        ->type_name("FORMAT");
+        ->type_name(words_value(format_names()));
     cmd->add_flag("-v,--verbose", flags->verbose, "Print progress notes");
-    cmd->add_option("--resume", flags->resume, "Resume a saved conversation by id or name");
+    cmd->add_option("--resume", flags->resume, "Resume a saved conversation by id or name")
+        ->type_name(kChatValue);
     cmd->add_flag("-c,--continue", flags->cont, "Resume the most recent conversation");
     cmd->add_option("--branch", flags->branch,
-                    "Branch under review for the git tools (the head); never checked out");
-    cmd->add_option("--base", flags->base, "Ref to compare against (default: the default branch)");
-    cmd->add_option("--remote", flags->remote, "Remote to resolve refs against (default origin)");
+                    "Branch under review for the git tools (the head); never checked out")
+        ->type_name(kGitRefValue);
+    cmd->add_option("--base", flags->base, "Ref to compare against (default: the default branch)")
+        ->type_name(kGitRefValue);
+    cmd->add_option("--remote", flags->remote, "Remote to resolve refs against (default origin)")
+        ->type_name(kGitRemoteValue);
     cmd->add_flag("--fetch", flags->fetch, "Always fetch the refs before diffing");
     cmd->add_flag("--no-fetch", flags->no_fetch, "Never fetch; refuse a ref that is absent");
 
@@ -541,6 +603,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + model +
                                          "  ·  chat " + session.chat_id +
                                          "  ·  /help for commands");
+            // The banner stands apart from the first prompt.
+            reporter.status().print_line("");
         }
 
         // --- machine mode ----------------------------------------------------
@@ -613,6 +677,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             const agentloop::AskFn driver_ask =
                 flags->tools ? make_driver_ask_fn(machine_reporter, std::cin) : agentloop::AskFn{};
 
+            BackgroundTitle title{harness};
             std::string line;
             while (std::getline(std::cin, line)) {
                 const DriverMessage message = parse_driver_line(line);
@@ -621,6 +686,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                     // tolerance this protocol asks of its own drivers.
                     continue;
                 }
+                title.settle(session);
 
                 // The driver reads structured input, so there IS someone to
                 // answer a question -- the loop's "nil AskFn <=> never
@@ -632,6 +698,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                                                       config_path, approvals)
                                                                 : agent::ConfirmFn{}},
                               machine_reporter, machine_notice, rag_settings, review_note);
+                title.start_if_due(session);
 
                 harness::ChatResponse response;
                 response.message = session.messages.empty() ? harness::ChatMessage::assistant("")
@@ -642,6 +709,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
 
             // stdin closed: the driver is done. Everything is already persisted
             // by the per-turn save, so exiting is clean by construction.
+            title.settle(session);
             logger::save(session);
             return;
         }
@@ -700,6 +768,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         };
 
         // --- the REPL --------------------------------------------------------
+        BackgroundTitle title{harness};
         bool running = true;
         while (running) {
             // The editor draws its own prompt; the plain reader ignores it and
@@ -724,6 +793,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             // Only non-empty lines enter the history, so recall is not padded
             // with blanks.
             reader->remember(input);
+
+            // Before anything below can reach the model.
+            title.settle(session);
 
             if (const std::optional<SlashCommand> command = parse_slash(input);
                 command.has_value()) {
@@ -868,6 +940,12 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             }
 
             // --- the turn ------------------------------------------------------
+            if (decorate) {
+                // One blank line between the question and whatever answers it
+                // -- the thinking block, or the answer itself -- as there is
+                // one after the answer.
+                reporter.status().print_line("");
+            }
             run_chat_turn(
                 harness, session, input, attachments, flags->tools ? &registry : nullptr,
                 flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
@@ -879,6 +957,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                     reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
                 rag_settings, review_note);
+            title.start_if_due(session);
             if (decorate) {
                 // One blank line between an answer and the next prompt, so
                 // turns read as turns rather than one run of text.
@@ -886,6 +965,10 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             }
         }
 
+        if (reader->interrupted()) {
+            title.cancel();
+        }
+        title.settle(session);
         logger::save(session);
         // Opt-in auto-capture on a CLEAN exit -- /exit, /quit, the end of the
         // input -- with the still-loaded model as the clerk. Never on an

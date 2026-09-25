@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -134,8 +135,15 @@ struct Sidecar {
 /// file that is not there.
 [[nodiscard]] bool write_sidecar(const std::filesystem::path& model, const Sidecar& sidecar);
 
-/// Streams `path` and returns its lowercase hex sha256, or "" if unreadable.
-[[nodiscard]] std::string file_sha256(const std::filesystem::path& path);
+/// Told the bytes hashed so far as a file is hashed; returning false stops it.
+using HashProgress = std::function<bool(std::int64_t hashed)>;
+
+/// Streams `path` and returns its lowercase hex sha256, or "" if unreadable --
+/// or stopped: `progress`, when given, hears about every chunk and can say
+/// stop. A converted model is tens of gigabytes, and hashing it silently read
+/// as a hang (2026-09-24).
+[[nodiscard]] std::string file_sha256(const std::filesystem::path& path,
+                                      const HashProgress& progress = {});
 
 /// Now, as a record's timestamps carry it: RFC 3339, UTC.
 [[nodiscard]] std::string now_rfc3339();

@@ -83,6 +83,13 @@ struct ModelProfile {
     /// how a filter either strips nothing or strips everything.
     std::vector<TagPair> reasoning;
 
+    /// What to write after the generation prompt so the model answers without
+    /// reasoning first: an already-closed reasoning block, which is what the
+    /// family's own template writes when thinking is switched off. Empty when
+    /// the family has no such switch, and then a request asking to skip
+    /// reasoning gets it anyway.
+    std::string skip_reasoning;
+
     /// Control-token **headers** this family leaks into its own answer.
     ///
     /// Not reasoning wrappers, and the distinction is the design: a wrapper
@@ -142,5 +149,10 @@ struct ModelProfile {
 /// the opposite of the reasoning case, where the expensive direction is
 /// recognising too little.
 [[nodiscard]] std::vector<HeaderMarker> header_markers_for(const ModelProfile* profile);
+
+/// What skips this family's reasoning (see `ModelProfile::skip_reasoning`).
+/// Empty for nullptr: an uncharacterised family's switch is not guessed at,
+/// because a wrong one lands in the prompt as text.
+[[nodiscard]] std::string reasoning_skip_for(const ModelProfile* profile);
 
 }  // namespace apogee::backends

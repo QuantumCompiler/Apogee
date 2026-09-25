@@ -175,6 +175,15 @@ TEST_CASE("convert makes a vision model's projector beside it", "[commands][mode
     // The one command that uses both.
     CHECK(out.find("--mmproj-path " + stored.front().projector.string()) != std::string::npos);
     CHECK(out.find("no chat template") == std::string::npos);
+    // The hash is announced, never a silent wait (2026-09-24), and nothing
+    // left behind claims the staging name.
+    CHECK(out.find("hashing it (") != std::string::npos);
+    CHECK(out.find("\n\nand its projector") == std::string::npos);
+    CHECK(apogee::models::find_abandoned_staging(home.roots).empty());
+    for (const auto& entry :
+         std::filesystem::directory_iterator(home.roots.models / "org--vision" / "gguf")) {
+        CHECK_FALSE(entry.path().filename().string().starts_with(".incoming-"));
+    }
 }
 
 TEST_CASE("a projector the converter cannot make leaves the model, and a later run adds it",

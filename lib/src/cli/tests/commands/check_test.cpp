@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -14,6 +15,7 @@
 #include "httpserver/admin_auth.h"
 #include "knowledge/record.h"
 #include "knowledge/store.h"
+#include "platform/platform.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
@@ -1351,6 +1353,43 @@ TEST_CASE("models in the flat layout are a warning naming the migration, never a
     CHECK(legacy->remedy == "apogee models migrate");
     // And --fix leaves them exactly where they were.
     CHECK(std::filesystem::exists(install.root / "models" / "old.gguf"));
+}
+
+TEST_CASE("staging an interrupted run left is reported and removed; a live run's is not",
+          "[commands][check][models]") {
+    // Two 52 GB copies of one model sat in the store after a Ctrl-C during a
+    // convert's hash (2026-09-23), and nothing said so.
+    Install install;
+    install.seed();
+    install.write("models/m/gguf/111111111111/m.gguf", apogee::testing::minimal_gguf("qwen3"));
+    install.write("models/m/gguf/.incoming-aaaaaaaaaaaa/m.gguf", std::string(2048, 'x'));
+    install.write("models/m/gguf/.incoming-aaaaaaaaaaaa.owner", "999999999\n");
+    install.write("models/m/gguf/.incoming-bbbbbbbbbbbb/m.gguf", std::string(2048, 'y'));
+    install.write("models/m/gguf/.incoming-bbbbbbbbbbbb.owner",
+                  std::to_string(apogee::platform::current_process_id()) + "\n");
+    CheckInputs inputs = inputs_for(install);
+
+    const CheckReport report = run_checks(inputs);
+    const apogee::commands::CheckRow* leftovers = row_with(report, "leftovers");
+    REQUIRE(leftovers != nullptr);
+    CHECK(leftovers->status == Status::Warn);
+    CHECK(leftovers->detail.find("1 staging folder(s)") != std::string::npos);
+    CHECK(leftovers->remedy == "apogee check --fix");
+
+    const std::vector<std::string> fixed = apogee::commands::apply_fixes(inputs);
+    const bool said = std::ranges::any_of(fixed, [](const std::string& line) {
+        return line.find(".incoming-aaaaaaaaaaaa") != std::string::npos &&
+               line.find("interrupted run") != std::string::npos;
+    });
+    CHECK(said);
+    CHECK_FALSE(std::filesystem::exists(install.root / "models/m/gguf/.incoming-aaaaaaaaaaaa"));
+    CHECK_FALSE(
+        std::filesystem::exists(install.root / "models/m/gguf/.incoming-aaaaaaaaaaaa.owner"));
+    // The live one, and the stored model, untouched.
+    CHECK(std::filesystem::exists(install.root / "models/m/gguf/.incoming-bbbbbbbbbbbb/m.gguf"));
+    CHECK(std::filesystem::exists(install.root / "models/m/gguf/111111111111/m.gguf"));
+    const CheckReport after = run_checks(inputs);
+    CHECK(row_with(after, "leftovers") == nullptr);
 }
 
 TEST_CASE("stored models are checked by the handle the other verbs take",

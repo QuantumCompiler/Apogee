@@ -110,6 +110,7 @@ add_library(apogee_core STATIC
     commands/check.h
     commands/complete_protocol.h
     commands/complete_protocol.cpp
+    commands/complete_sources.cpp
     commands/uninstall.h
     commands/uninstall.cpp
     commands/check.cpp

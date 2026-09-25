@@ -8,6 +8,7 @@
 #include <memory>
 #include <sstream>
 
+#include "commands/complete_sources.h"
 #include "harness/paths.h"
 
 namespace apogee::commands {
@@ -25,10 +26,14 @@ namespace {
     const std::string type = option.get_type_name();
     const std::size_t colon = type.find(':');
     const std::string base = type.substr(0, colon);
+    value.type = base;
     if (base == kBackendValue) {
         value.kind = ValueKind::Backend;
     } else if (base == kPathValue) {
         value.kind = ValueKind::Path;
+    } else if (std::ranges::find(kNameValues, base) != kNameValues.end()) {
+        value.kind = ValueKind::Names;
+        value.source = base;
     }
     if (colon != std::string::npos) {
         std::stringstream validators{type.substr(colon + 1)};
@@ -52,11 +57,56 @@ namespace {
     return value;
 }
 
+/// The names `value` offers for `current`: a list's words after the last
+/// comma, carrying what precedes it and skipping what is already there.
+[[nodiscard]] Completion offer_names(const ValueSpec& value, const CompletionSources& sources,
+                                     const CompletionContext& context, std::string_view current) {
+    Completion completion;
+    const bool list = value.source == kCollectionListValue;
+    std::string head;
+    std::string_view word = current;
+    if (const std::size_t comma = current.rfind(','); list && comma != std::string_view::npos) {
+        head = std::string{current.substr(0, comma + 1)};
+        word = current.substr(comma + 1);
+    }
+    NameList found;
+    if (sources) {
+        try {
+            found = sources(list ? std::string_view{kCollectionValue} : value.source, context);
+        } catch (const std::exception&) {
+            found = {};  // silent, as every completion failure is
+        }
+    }
+    std::ranges::sort(found.names);
+    const auto [duplicates, end] = std::ranges::unique(found.names);
+    found.names.erase(duplicates, end);
+    for (const std::string& name : filter_prefix(found.names, word)) {
+        if (list && (',' + head).find(',' + name + ',') != std::string::npos) {
+            continue;  // already in the list
+        }
+        completion.candidates.push_back(head + name);
+    }
+    if (!completion.candidates.empty()) {
+        return completion;
+    }
+    if (found.paths) {
+        completion.files = true;
+    } else {
+        completion.hint = found.names.empty() && !found.none.empty()
+                              ? value.hint + " -- " + found.none
+                              : value.hint;
+    }
+    return completion;
+}
+
 /// What to offer for a word `value` describes.
 [[nodiscard]] Completion offer(const ValueSpec& value, const harness::Config& config,
+                               const CompletionSources& sources, const CompletionContext& context,
                                std::string_view current) {
     Completion completion;
     switch (value.kind) {
+        case ValueKind::Names:
+            return offer_names(value, sources, context, current);
         case ValueKind::Backend: {
             const std::vector<std::string> names = config.backend_names();
             if (names.empty()) {
@@ -152,37 +202,45 @@ CommandSpec specs_from_app(const CLI::App& app) {
 }
 
 Completion complete_words(const CompletionRequest& request, const harness::Config& config,
-                          const CommandSpec& root) {
+                          const CommandSpec& root, const CompletionSources& sources) {
     // Walk the words the way the parser will: descend on a subcommand's name,
     // step over a flag and the value it consumes, count everything else as a
-    // positional of the command in play.
+    // positional of the command in play -- keeping what each was, for a list
+    // that depends on it.
     const CommandSpec* node = &root;
-    std::size_t positionals = 0;
+    CompletionContext context;
+    context.config = &config;
     const ValueSpec* pending = nullptr;
+    std::string pending_flag;
     for (const std::string& word : request.words) {
         if (pending != nullptr) {
-            pending = nullptr;  // this word was that flag's value
+            context.flags[pending_flag] = word;  // this word was that flag's value
+            pending = nullptr;
             continue;
         }
         if (word.size() > 1 && word.front() == '-') {
             // `--model=x` carries its own value; `--model x` takes the next word.
-            if (const auto value = node->values.find(word);
-                word.find('=') == std::string::npos && value != node->values.end()) {
+            if (const std::size_t equals = word.find('='); equals != std::string::npos) {
+                context.flags[word.substr(0, equals)] = word.substr(equals + 1);
+            } else if (const auto value = node->values.find(word); value != node->values.end()) {
                 pending = &value->second;
+                pending_flag = word;
             }
             continue;
         }
         if (const CommandSpec* child = child_named(*node, word)) {
             node = child;
-            positionals = 0;
+            context.positionals.clear();
+            context.flags.clear();
             continue;
         }
-        ++positionals;
+        context.positionals.push_back(word);
     }
+    const std::size_t positionals = context.positionals.size();
 
     // The cursor is on a flag's value.
     if (pending != nullptr) {
-        return offer(*pending, config, request.current);
+        return offer(*pending, config, sources, context, request.current);
     }
 
     // A word starting with a dash is a flag being typed: the flags of whichever
@@ -204,10 +262,10 @@ Completion complete_words(const CompletionRequest& request, const harness::Confi
 
     // The next positional, if the command takes one.
     if (positionals < node->positionals.size()) {
-        return offer(node->positionals[positionals], config, request.current);
+        return offer(node->positionals[positionals], config, sources, context, request.current);
     }
     if (!node->positionals.empty() && node->last_positional_repeats) {
-        return offer(node->positionals.back(), config, request.current);
+        return offer(node->positionals.back(), config, sources, context, request.current);
     }
 
     // Every positional is given: only flags can follow, so offer those rather
@@ -217,8 +275,9 @@ Completion complete_words(const CompletionRequest& request, const harness::Confi
 
 std::vector<std::string> completion_candidates(const CompletionRequest& request,
                                                const harness::Config& config,
-                                               const CommandSpec& root) {
-    return complete_words(request, config, root).candidates;
+                                               const CommandSpec& root,
+                                               const CompletionSources& sources) {
+    return complete_words(request, config, root, sources).candidates;
 }
 
 std::string render_completion(const Completion& completion, bool directives) {
@@ -291,7 +350,8 @@ void CompleteProtocolCommand::bind(CLI::App& root, const RootContext& context) {
         // directive line itself as a candidate.
         const char* protocol = std::getenv(kCompletionProtocolVar);
         const bool directives = protocol != nullptr && std::string_view{protocol} == "2";
-        std::cout << render_completion(complete_words(request, config, tree), directives);
+        std::cout << render_completion(
+            complete_words(request, config, tree, default_completion_sources()), directives);
     });
 }
 

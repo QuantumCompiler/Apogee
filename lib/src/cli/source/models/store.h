@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -87,6 +88,8 @@ struct StoreRoots {
 
 /// A staging path beside the ids, `<model>/<format>/.incoming-<random>`, NOT
 /// created -- for a writer that insists on creating its destination itself.
+/// Its owner marker is written, though (`staging_owner_path`): a staging
+/// directory is claimed by this process from the moment it is named.
 [[nodiscard]] std::filesystem::path incoming_path(const StoreRoots& roots, std::string_view format,
                                                   std::string_view model);
 
@@ -96,6 +99,24 @@ struct StoreRoots {
 [[nodiscard]] std::filesystem::path make_incoming_dir(const StoreRoots& roots,
                                                       std::string_view format,
                                                       std::string_view model);
+
+/// `<staging>.owner`, beside it: the id of the process filling it. Beside and
+/// not inside, so the rename that commits the directory cannot carry it into
+/// an id. Removed when the staging directory is committed or removed.
+[[nodiscard]] std::filesystem::path staging_owner_path(const std::filesystem::path& staging);
+
+/// A staging directory an interrupted pull, convert or quantize left behind.
+struct AbandonedStaging {
+    std::filesystem::path dir;
+    std::uintmax_t bytes = 0;
+};
+
+/// Every abandoned staging directory under both roots: its owner marker names
+/// a process that is no longer running -- or, made before markers existed,
+/// nothing in it has changed for an hour. One a live process owns is never
+/// listed. A killed `models convert` left two 52 GB copies of a model this way
+/// (2026-09-23): Ctrl-C during the hash, which nothing cleaned up after.
+[[nodiscard]] std::vector<AbandonedStaging> find_abandoned_staging(const StoreRoots& roots);
 
 struct Commit {
     std::filesystem::path dir;
@@ -125,8 +146,13 @@ struct Commit {
 [[nodiscard]] std::filesystem::path projector_path_for(const std::filesystem::path& model_file);
 
 /// Completes `record` for the file it describes -- name, size, sha256, and
-/// when -- and writes it beside the file. Error, or empty.
-[[nodiscard]] std::string write_record(const std::filesystem::path& file, Sidecar record);
+/// when -- and writes it beside the file. Error, or empty -- `kStopped` when
+/// `progress` said stop.
+[[nodiscard]] std::string write_record(const std::filesystem::path& file, Sidecar record,
+                                       const HashProgress& progress = {});
+
+/// What `write_record` and `commit_gguf` answer when their hash was stopped.
+inline constexpr std::string_view kStopped = "stopped";
 
 /// Puts `projector` and its record into `dir` under the same name: a hard
 /// link when both are on one filesystem, so a quantized copy and the model it
@@ -151,9 +177,12 @@ struct StoredFile {
     std::string error;
 };
 
+/// `progress` hears the hash of `file` -- the one slow step, tens of
+/// gigabytes -- and can stop it, leaving `staging` for the caller to remove.
 [[nodiscard]] StoredFile commit_gguf(const StoreRoots& roots, std::string_view model,
                                      const std::filesystem::path& staging,
-                                     const std::filesystem::path& file, Sidecar record);
+                                     const std::filesystem::path& file, Sidecar record,
+                                     const HashProgress& progress = {});
 
 // --- what is stored ------------------------------------------------------------------
 

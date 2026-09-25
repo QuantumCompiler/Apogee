@@ -321,10 +321,12 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
     flags->rag_option =
         cmd->add_option("--rag", flags->rag,
                         "Retrieve context from this collection (see 'apogee embed'); "
-                        "\"\" switches off the config's auto_rag for this run");
+                        "\"\" switches off the config's auto_rag for this run")
+            ->type_name(kCollectionValue);
     cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
     cmd->add_option("--retriever", flags->retriever,
                     "How to search the collection: lexical, vector, hybrid, or auto")
+        ->type_name(words_value(agentloop::retriever_names()))
         ->check([](const std::string& value) {
             return agentloop::valid_retriever(value)
                        ? std::string{}
@@ -358,7 +360,7 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                flags->output_format = *parsed;
            },
            "Output format: text (default) or stream-json for a machine driver")
-        ->type_name("FORMAT");
+        ->type_name(words_value(format_names()));
     cmd->add_flag("--search", flags->search,
                   "Enable the provider's own server-side web search, where it has one");
 

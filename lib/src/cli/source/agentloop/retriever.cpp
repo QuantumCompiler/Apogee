@@ -1,5 +1,7 @@
 #include "agentloop/retriever.h"
 
+#include <array>
+
 namespace apogee::agentloop {
 namespace {
 
@@ -7,6 +9,9 @@ constexpr std::string_view kLexical = "lexical";
 constexpr std::string_view kVector = "vector";
 constexpr std::string_view kHybrid = "hybrid";
 constexpr std::string_view kAuto = "auto";
+
+constexpr std::array<std::string_view, 4> kRetrieverNames{kLexical, kVector, kHybrid, kAuto};
+constexpr std::array<std::string_view, 3> kIngestRetrieverNames{kLexical, kVector, kAuto};
 
 /// The explicit choice from the flag, else the pin, else nullopt for auto.
 [[nodiscard]] std::optional<Retriever> explicit_choice(std::string_view flag,
@@ -61,6 +66,14 @@ constexpr std::string_view kAuto = "auto";
 }
 
 }  // namespace
+
+std::span<const std::string_view> retriever_names() noexcept {
+    return kRetrieverNames;
+}
+
+std::span<const std::string_view> ingest_retriever_names() noexcept {
+    return kIngestRetrieverNames;
+}
 
 std::string_view to_string(Retriever retriever) noexcept {
     switch (retriever) {

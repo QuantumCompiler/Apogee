@@ -446,7 +446,8 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
     // Upper-case so it cannot collide with the `--input`/`--text` long names:
     // CLI11 matches a positional against every long name.
     cmd->add_option("INPUT", flags->positional, "The input text (or --input, or piped stdin)");
-    cmd->add_option("-a,--agent", flags->agent, "The agent to run (see --list)");
+    cmd->add_option("-a,--agent", flags->agent, "The agent to run (see --list)")
+        ->type_name(kAgentValue);
     cmd->add_flag("--list", flags->list, "List the agents and exit; needs no backend");
     cmd->add_option("--prompt", flags->prompts,
                     "Prompt file; overrides the agent's prompts (repeatable)")
@@ -470,10 +471,12 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kBackendValue);
     flags->rag_option =
         cmd->add_option("--rag", flags->rag,
-                        "Retrieve context from this collection; \"\" switches the agent's off");
+                        "Retrieve context from this collection; \"\" switches the agent's off")
+            ->type_name(kCollectionValue);
     cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
     cmd->add_option("--retriever", flags->retriever,
                     "How to search the collection: lexical, vector, hybrid, or auto")
+        ->type_name(words_value(agentloop::retriever_names()))
         ->check([](const std::string& value) {
             return agentloop::valid_retriever(value)
                        ? std::string{}
@@ -483,9 +486,12 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                     "Backend that reorders retrieved chunks with one generation call, or off")
         ->type_name(kBackendValue);
     cmd->add_option("--branch", flags->branch,
-                    "Branch under review (the head); reviewed without checking it out");
-    cmd->add_option("--base", flags->base, "Ref to compare against (default: the default branch)");
-    cmd->add_option("--remote", flags->remote, "Remote to resolve refs against (default origin)");
+                    "Branch under review (the head); reviewed without checking it out")
+        ->type_name(kGitRefValue);
+    cmd->add_option("--base", flags->base, "Ref to compare against (default: the default branch)")
+        ->type_name(kGitRefValue);
+    cmd->add_option("--remote", flags->remote, "Remote to resolve refs against (default origin)")
+        ->type_name(kGitRemoteValue);
     cmd->add_flag("--fetch", flags->fetch, "Always fetch the refs before diffing");
     cmd->add_flag("--no-fetch", flags->no_fetch, "Never fetch; refuse a ref that is absent");
     cmd->add_flag("--no-questions", flags->no_questions,
@@ -508,7 +514,7 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                flags->output_format = *parsed;
            },
            "Output format: text (default) or stream-json for a machine driver")
-        ->type_name("FORMAT");
+        ->type_name(words_value(format_names()));
 
     cmd->callback([&context, flags]() {
         harness::Config config;

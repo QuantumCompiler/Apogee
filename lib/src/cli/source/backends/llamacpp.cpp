@@ -374,14 +374,32 @@ harness::ChatResponse LlamaCppProvider::stream_chat(const harness::ChatRequest& 
     return run(request, options);
 }
 
+std::int64_t LlamaCppProvider::generation_limit(const harness::ChatRequest& request) const {
+    const std::int64_t own = request.max_tokens.value_or(0);
+    return own > 0 ? own : options_.max_tokens;
+}
+
+std::int64_t LlamaCppProvider::side_context_size(const harness::ChatRequest& request,
+                                                 std::size_t prompt_tokens) const {
+    // Floored so llama.cpp's default batch (2048) stays below the window
+    // rather than equal to it -- the edge the session context's sizing found
+    // (llama_real.cpp, make_context) -- and a small window costs nothing.
+    constexpr std::int64_t kFloor = 4096;
+    constexpr std::int64_t kSlack = 256;
+    const std::int64_t window =
+        options_.context_size > 0 ? options_.context_size : model_->context_length();
+    const std::int64_t needed =
+        static_cast<std::int64_t>(prompt_tokens) + generation_limit(request) + kSlack;
+    return std::min(window, std::max(needed, kFloor));
+}
+
 LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
                                                         std::int64_t prompt_end,
                                                         const harness::ChatRequest& request,
                                                         const harness::StreamOptions& options) {
     options.cancellation.throw_if_cancelled();
 
-    const std::int64_t limit =
-        request.max_tokens.value_or(0) > 0 ? *request.max_tokens : options_.max_tokens;
+    const std::int64_t limit = generation_limit(request);
 
     std::string answer;
     std::vector<std::int32_t> generated;
@@ -570,8 +588,15 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
         return run_multimodal(request, options, images);
     }
 
-    const std::vector<std::int32_t> prompt =
-        llama_tokens::tokenize_prompt(*model_, options_.model, messages_with_schema(request), true);
+    std::string text =
+        llama_tokens::render_prompt(*model_, options_.model, messages_with_schema(request), true);
+    if (request.transient.skip_reasoning) {
+        // After the generation prompt, so the model's first token is already
+        // the answer's.
+        text += reasoning_skip_for(profile());
+    }
+    // add_special: see llama_tokens::tokenize_prompt.
+    const std::vector<std::int32_t> prompt = model_->tokenize(text, true);
 
     // A side request -- a background title summary, a one-off clerk call -- is
     // not a turn of this conversation. It runs on its own throwaway context so
@@ -583,7 +608,7 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
     std::unique_ptr<LlamaContext> scratch;
 
     if (side_request) {
-        scratch = model_->make_context(options_.context_size);
+        scratch = model_->make_context(side_context_size(request, prompt.size()));
         context = scratch.get();
         reject_if_too_long(*context, prompt.size(), options_.backend_name);
         decode_in_batches(*context, prompt, 0);

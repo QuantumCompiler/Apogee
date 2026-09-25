@@ -131,6 +131,44 @@ models::ConvertResult run_conversion(const std::filesystem::path& snapshot,
     return result;
 }
 
+/// `commit_gguf`, with its hash on a progress line and Ctrl-C able to stop it.
+///
+/// The id is the GGUF's SHA-256, and a converted model is tens of gigabytes:
+/// the hash ran for three silent minutes after a 51 GiB conversion and read
+/// as a hang (2026-09-24) -- and a Ctrl-C there killed the process outright,
+/// leaving the staging directory behind at full size. A stopped hash is
+/// cancelled like a stopped conversion: the staging directory goes, and the
+/// exit code says so.
+models::StoredFile commit_with_progress(const models::StoreRoots& roots, std::string_view model,
+                                        const std::filesystem::path& staging,
+                                        const std::filesystem::path& file, models::Sidecar record) {
+    std::error_code code;
+    const auto total = static_cast<std::int64_t>(std::filesystem::file_size(file, code));
+    std::cout << "hashing it (" << format_progress_size(total)
+              << ") -- its SHA-256 names its folder in the store\n";
+    models::StoredFile stored;
+    {
+        DownloadProgress progress{std::cout, stdout_download_options()};
+        const InterruptScope interrupt;
+        stored = models::commit_gguf(roots, model, staging, file, std::move(record),
+                                     [&progress, total](std::int64_t hashed) {
+                                         progress.bytes(hashed, total);
+                                         return !InterruptScope::token().stop_requested();
+                                     });
+        progress.finish();
+    }
+    if (stored.error == models::kStopped) {
+        (void)models::remove_weights(staging);
+        std::cerr << "apogee models: cancelled -- nothing was written\n";
+        throw CLI::RuntimeError(kCancelled);
+    }
+    if (!stored.error.empty()) {
+        (void)models::remove_weights(staging);
+        fail(stored.error);
+    }
+    return stored;
+}
+
 /// Why a projector could not be made, in words a user can act on. The
 /// converter says an architecture "is not supported" when it has no projector
 /// class for it -- the model itself converted fine.
@@ -681,6 +719,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     CLI::App* pull = models.add_subcommand("pull", "Download a model from Hugging Face or Ollama");
     pull->add_option("ref", *pull_ref,
                      "owner/repo[:file.gguf] for Hugging Face, or name:tag for Ollama")
+        ->type_name(kPullRefValue)
         ->required();
     pull->add_flag("-y,--yes", *pull_yes, "Do not stop for the unrunnable-architecture warning");
     auto pull_safetensors = std::make_shared<bool>(false);
@@ -858,6 +897,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     remove
         ->add_option("name", *delete_name,
                      "A model (owner/repo or its directory name), <model>/<format>/<id>, or an id")
+        ->type_name(kModelValue)
         ->required();
     remove->add_flag("-y,--yes", *delete_yes, "Do not ask for confirmation");
 
@@ -908,9 +948,11 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     quantize
         ->add_option("model", *quant_in,
                      "A model (its newest unquantized GGUF), <model>/gguf/<id>, or a .gguf file")
-        ->type_name(kPathValue);
-    quantize->add_option("-t,--type", *quant_type, "Quantization type (default Q4_K_M)");
-    quantize->add_option("--from", *quant_from, "Which of the model's GGUFs, by id");
+        ->type_name(kGgufValue);
+    quantize->add_option("-t,--type", *quant_type, "Quantization type (default Q4_K_M)")
+        ->type_name(words_value(models::quant_type_names()));
+    quantize->add_option("--from", *quant_from, "Which of the model's GGUFs, by id")
+        ->type_name(kGgufIdValue);
     quantize->add_flag("--types", *quant_list, "List the accepted quantization types and exit");
 
     quantize->callback([quant_in, quant_type, quant_from, quant_list, models_dir, &context]() {
@@ -946,6 +988,16 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             fail(result.error);
         }
 
+        // The projector is the same for every quantization of a model, so it
+        // comes along -- a hard link, no second copy -- and the smaller model
+        // still reads images. (Declared on 2026-09-23 and never called: the
+        // first Q4_K_M made with it stored no projector.) Committed with the
+        // model; into an identical model's directory that lacks one, adopted.
+        std::string projector_problem;
+        if (!input.projector.empty()) {
+            projector_problem = models::share_projector(input.projector, staging);
+        }
+
         models::Sidecar record;
         record.ref = input.id.empty() ? input.file.string() : input.model + "/gguf/" + input.id;
         record.source = "quantize";
@@ -954,15 +1006,21 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         record.verification.header_checked = true;
         record.verification.header_parsed = models::inspect_gguf(output).parsed;
         const models::StoredFile stored =
-            models::commit_gguf(roots, input.model, staging, output, record);
-        if (!stored.error.empty()) {
-            (void)models::remove_weights(staging);
-            fail(stored.error);
-        }
-        std::cout << (stored.existed ? "already here -- these exact weights are at\n" : "")
+            commit_with_progress(roots, input.model, staging, output, record);
+        std::cout << "\n"
+                  << (stored.existed ? "already here -- these exact weights are at\n" : "")
                   << stored.file.string() << "\n"
                   << human_size(result.input_bytes) << " -> " << human_size(result.output_bytes)
                   << "\n";
+        if (!stored.projector.empty()) {
+            std::cout << stored.projector.string()
+                      << (stored.projector_added ? "  (its projector, added now)\n" : "\n");
+        }
+        if (!projector_problem.empty()) {
+            std::cout << "warning: its projector did not come along -- " << projector_problem
+                      << "\n         point mmproj_path at " << input.projector.string() << "\n";
+        }
+        print_backend_hint(stored.file, stored.projector);
     });
 
     // ---- convert ------------------------------------------------------------
@@ -974,13 +1032,14 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         ->add_option("model", *convert_in,
                      "A model (its newest SafeTensors download), <model>/safetensors/<id>, or a "
                      "snapshot directory")
-        ->type_name(kPathValue)
+        ->type_name(kSnapshotValue)
         ->required();
     convert
         ->add_option("-t,--type", *convert_type,
                      "Precision to write (default f16; make it smaller with 'models quantize')")
         ->check(CLI::IsMember(training::converter_out_types()));
-    convert->add_option("--from", *convert_from, "Which of the model's SafeTensors sets, by id");
+    convert->add_option("--from", *convert_from, "Which of the model's SafeTensors sets, by id")
+        ->type_name(kSnapshotIdValue);
 
     convert->callback([convert_in, convert_type, convert_from, models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
@@ -1087,7 +1146,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         std::string projector_problem;
         models::GgufInfo projector_info;
         if (encoders.any()) {
-            std::cout << (done.has_value() ? "making its projector" : "\nand its projector")
+            std::cout << (done.has_value() ? "making its projector" : "and its projector")
                       << ", so it can read " << encoders.reads()
                       << (projector_estimate > 0
                               ? " (about " + format_progress_size(projector_estimate) + ")"
@@ -1135,11 +1194,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             projector = done->dir / projector_output.filename();
         } else {
             const models::StoredFile stored =
-                models::commit_gguf(roots, source.model, staging, model_output, record);
-            if (!stored.error.empty()) {
-                (void)models::remove_weights(staging);
-                fail(stored.error);
-            }
+                commit_with_progress(roots, source.model, staging, model_output, record);
             model_file = stored.file;
             projector = stored.projector;
             existed = stored.existed;
@@ -1183,6 +1238,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     repair
         ->add_option("name", *repair_name,
                      "A model (owner/repo or its directory name), <model>/<format>/<id>, or an id")
+        ->type_name(kModelValue)
         ->required();
     repair->callback([repair_name, models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);

@@ -71,6 +71,14 @@ static_assert(static_cast<int>(LLAMA_FTYPE_MOSTLY_F16) == 1,
 
 }  // namespace
 
+std::vector<std::string> quant_type_names() {
+    std::vector<std::string> names;
+    for (QuantType& type : quant_types()) {
+        names.push_back(std::move(type.name));
+    }
+    return names;
+}
+
 std::vector<QuantType> quant_types() {
     std::vector<QuantType> types;
     types.reserve(kTypes.size());

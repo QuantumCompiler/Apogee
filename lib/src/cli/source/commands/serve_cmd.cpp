@@ -103,11 +103,13 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
     flags->rag_option =
         cmd->add_option("--rag", flags->rag,
                         "Retrieve context from this collection on every request (see 'apogee "
-                        "embed'); \"\" switches off the config's auto_rag");
+                        "embed'); \"\" switches off the config's auto_rag")
+            ->type_name(kCollectionValue);
     cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
     cmd->add_option("--retriever", flags->retriever,
                     "How to search the collection: lexical, vector, hybrid, or auto "
                     "(?retriever= overrides per request)")
+        ->type_name(words_value(agentloop::retriever_names()))
         ->check([](const std::string& value) {
             return agentloop::valid_retriever(value)
                        ? std::string{}

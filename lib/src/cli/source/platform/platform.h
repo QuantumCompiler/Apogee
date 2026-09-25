@@ -72,6 +72,11 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 /// else -- a number a person can `kill`, never an identity.
 [[nodiscard]] long current_process_id() noexcept;
 
+/// Whether a process with this id is running -- for telling a staging
+/// directory a live `models convert` is filling from one an interrupted run
+/// left behind. A reused id reads as running, which errs toward keeping.
+[[nodiscard]] bool process_running(long pid) noexcept;
+
 /// Creates `path` holding `content` only if it does not exist yet -- one
 /// atomic create-or-fail (`O_CREAT|O_EXCL`; `CREATE_NEW` on Windows), so two
 /// processes racing for a lock cannot both win. False when the file exists

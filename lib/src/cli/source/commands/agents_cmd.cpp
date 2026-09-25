@@ -117,13 +117,16 @@ void bind_create(CLI::App& parent, const RootContext& context) {
         cmd->add_option("--model", flags->model, "Backend override (blank = models.default)")
             ->type_name(kBackendValue);
     flags->tools_option =
-        cmd->add_option("--tools", flags->tools, "Tool policy: read-only (default) | all | none");
+        cmd->add_option("--tools", flags->tools, "Tool policy: read-only (default) | all | none")
+            ->type_name(words_value(harness::agent_tool_policy_names()));
     cmd->add_flag("--no-schema", flags->no_schema, "A prose-only agent (no output schema)");
     cmd->add_flag("--force", flags->force, "Replace an existing agent and its files");
     cmd->add_option("--output-format", flags->output_format,
-                    "How the schema shapes the answer: auto | json | markdown");
+                    "How the schema shapes the answer: auto | json | markdown")
+        ->type_name(words_value(harness::agent_output_format_names()));
     cmd->add_option("--collection", flags->collection,
-                    "Collection retrieved from on every run (the agent's auto_rag)");
+                    "Collection retrieved from on every run (the agent's auto_rag)")
+        ->type_name(kCollectionValue);
     cmd->add_option("--save-dir", flags->save_dir, "Directory reports are saved in")
         ->type_name(kPathValue);
     cmd->add_option("--save-name", flags->save_name, "Base filename for saved reports");
@@ -132,6 +135,7 @@ void bind_create(CLI::App& parent, const RootContext& context) {
     cmd->add_flag("--questions", flags->questions,
                   "Let the agent ask the user questions mid-turn (ask_user) on a terminal");
     cmd->add_option("--mcp", flags->mcp, "MCP server to connect for this agent (repeatable)")
+        ->type_name(kServerValue)
         ->allow_extra_args(false);
     cmd->callback([&context, flags]() {
         // Flags first; a terminal fills in what was omitted; a pipe takes
@@ -208,7 +212,7 @@ void bind_list(CLI::App& parent, const RootContext& context) {
 void bind_edit(CLI::App& parent, const RootContext& context) {
     auto name = std::make_shared<std::string>();
     CLI::App* cmd = parent.add_subcommand("edit", "Open an agent's prompt and schema in $EDITOR");
-    cmd->add_option("name", *name, "The agent's name")->required();
+    cmd->add_option("name", *name, "The agent's name")->type_name(kAgentValue)->required();
     cmd->callback([&context, name]() {
         const std::filesystem::path config_path = config_path_for(context);
         const harness::Config config = load(config_path);
@@ -259,7 +263,7 @@ void bind_delete(CLI::App& parent, const RootContext& context) {
     auto keep = std::make_shared<bool>(false);
     CLI::App* cmd =
         parent.add_subcommand("delete", "Remove an agent's entry, and optionally its files");
-    cmd->add_option("name", *name, "The agent's name")->required();
+    cmd->add_option("name", *name, "The agent's name")->type_name(kAgentValue)->required();
     cmd->add_flag("--purge", *purge, "Also delete the prompt and schema files, without asking");
     cmd->add_flag("--keep-files", *keep, "Keep the files (never asks)");
     cmd->callback([&context, name, purge, keep]() {

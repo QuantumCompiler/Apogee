@@ -18,6 +18,7 @@
 #include "agentloop/retriever.h"
 #include "agentloop/structured.h"
 #include "ansi/ansi.h"
+#include "commands/download_progress.h"
 #include "commands/embed.h"
 #include "commands/helpers.h"
 #include "commands/models_pull.h"
@@ -357,6 +358,23 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
             std::to_string(legacy.ggufs.size() + legacy.snapshots.size()) +
                 " model(s) still in the flat layout, which nothing reads any more",
             "apogee models migrate");
+    }
+
+    // What an interrupted pull, convert or quantize left: its whole staging
+    // directory, at full size -- two 52 GB copies of one model, the first
+    // time (2026-09-23). A live run's is claimed by its process and never
+    // listed, so the fix below cannot pull one out from under it.
+    const std::vector<models::AbandonedStaging> leftovers = models::find_abandoned_staging(roots);
+    if (!leftovers.empty()) {
+        std::uintmax_t bytes = 0;
+        for (const models::AbandonedStaging& leftover : leftovers) {
+            bytes += leftover.bytes;
+        }
+        add(report, Status::Warn, "Models", "leftovers",
+            std::to_string(leftovers.size()) +
+                " staging folder(s) an interrupted pull, convert or quantize left behind, " +
+                format_progress_size(static_cast<std::int64_t>(bytes)),
+            "apogee check --fix");
     }
 
     if (found == 0 && legacy.empty()) {
@@ -1226,6 +1244,19 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
     }
     if (!seeded.ok()) {
         done.push_back("could not finish: " + seeded.error);
+    }
+    // Staging an interrupted run left in the model store: Apogee's own
+    // scratch, never the user's file, and never a live run's (see the
+    // `leftovers` row). Removing it is a repair like seeding one.
+    for (const models::AbandonedStaging& leftover :
+         models::find_abandoned_staging(check_roots(inputs))) {
+        if (const std::string error = models::remove_weights(leftover.dir); error.empty()) {
+            done.push_back("removed " + leftover.dir.string() + " (" +
+                           format_progress_size(static_cast<std::int64_t>(leftover.bytes)) +
+                           ", left by an interrupted run)");
+        } else {
+            done.push_back(error);
+        }
     }
     // A scaffolded server that lost its execute bit is a repair of the same
     // kind: the file is the user's, its mode is the install's.

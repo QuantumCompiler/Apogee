@@ -278,8 +278,10 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     prepare->add_option("path", *prep_source, "A data file, or a directory of them")
         ->type_name(kPathValue)
         ->required();
-    prepare->add_option("--format", *prep_format,
-                        "alpaca, sharegpt, chatml, oasst, or prompt-completion (auto-detected)");
+    prepare
+        ->add_option("--format", *prep_format,
+                     "alpaca, sharegpt, chatml, oasst, or prompt-completion (auto-detected)")
+        ->type_name(words_value(training::prepare_formats()));
     prepare->add_option("--map", *prep_map, "Column renames: dest=src[,dest2=src2]");
     prepare->add_option("--split", *prep_split, "The split to read (default train)");
     prepare->add_flag("--as-eval", *prep_eval, "Emit an eval suite {prompt, expected}");
@@ -393,8 +395,10 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     auto create_force = std::make_shared<bool>(false);
     CLI::App* create = cmd->add_subcommand("create", "Scaffold a dataset");
     create->add_option("name", *create_name, "Dataset name")->required();
-    create->add_option("--from", *create_from,
-                       "template (two example lines), sessions (your chats), or empty");
+    create
+        ->add_option("--from", *create_from,
+                     "template (two example lines), sessions (your chats), or empty")
+        ->type_name(words_value(training::create_source_names()));
     create->add_option("--backend", *create_backend, "sessions: only chats on this backend")
         ->type_name(kBackendValue);
     create->add_option("--since", *create_since, "sessions: on or after YYYY-MM-DD");
@@ -446,7 +450,7 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kBackendValue)
         ->required();
     synth->add_option("--kit", *synth_kit, "A training kit name or path ('datasets kits')")
-        ->type_name(kPathValue)
+        ->type_name(kKitValue)
         ->required();
     synth->add_option("--count", *synth_count, "Examples to generate (default: the kit's)");
     synth->add_option("--topic", *synth_topic, "Extra focus appended to every batch");
@@ -578,7 +582,7 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
 
     auto info_name = std::make_shared<std::string>();
     CLI::App* info = cmd->add_subcommand("info", "Show one dataset");
-    info->add_option("name", *info_name, "Dataset name")->required();
+    info->add_option("name", *info_name, "Dataset name")->type_name(kDatasetValue)->required();
     info->callback([info_name]() {
         const training::DatasetStore store{harness::training_datasets_dir()};
         const std::optional<training::DatasetInfo> found = store.info(*info_name);
@@ -595,7 +599,7 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     auto del_name = std::make_shared<std::string>();
     auto del_yes = std::make_shared<bool>(false);
     CLI::App* remove = cmd->add_subcommand("delete", "Remove a dataset");
-    remove->add_option("name", *del_name, "Dataset name")->required();
+    remove->add_option("name", *del_name, "Dataset name")->type_name(kDatasetValue)->required();
     remove->add_flag("-y,--yes", *del_yes, "Do not ask for confirmation");
     remove->callback([del_name, del_yes]() {
         const training::DatasetStore store{harness::training_datasets_dir()};

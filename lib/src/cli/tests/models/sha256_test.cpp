@@ -2,8 +2,17 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <random>
 #include <string>
 #include <vector>
+
+#include "models/sidecar.h"
+#include "support/env_guard.h"
 
 /// SHA-256 against published vectors.
 ///
@@ -102,4 +111,53 @@ TEST_CASE("an empty update does not disturb the digest", "[models][sha256]") {
     hash.update("abc");
     hash.update("");
     CHECK(hash.hex_digest() == sha256_hex("abc"));
+}
+
+TEST_CASE("the fast block function agrees with the portable one, block for block",
+          "[models][sha256]") {
+    // On a host with the SHA-256 instructions the known-answer vectors above
+    // run the fast path; this holds it to the portable code on data nobody
+    // chose -- and runs long runs of blocks, the case where the fast path keeps
+    // its state in registers.
+    using apogee::models::sha256_detail::compress;
+    using apogee::models::sha256_detail::compress_portable;
+    std::mt19937 random{20260924};
+    std::vector<std::uint8_t> blocks(64 * 97);
+    for (std::uint8_t& byte : blocks) {
+        byte = static_cast<std::uint8_t>(random());
+    }
+    std::array<std::uint32_t, 8> fast{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                                      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    std::array<std::uint32_t, 8> portable = fast;
+    compress(fast, blocks.data(), 97);
+    for (std::size_t block = 0; block < 97; ++block) {
+        compress_portable(portable, blocks.data() + (64 * block));
+    }
+    CHECK(fast == portable);
+#if defined(__ARM_FEATURE_SHA2)
+    CHECK(apogee::models::sha256_detail::accelerated());
+#endif
+}
+
+TEST_CASE("a file's hash reports its progress and stops when told", "[models][sha256]") {
+    const apogee::testing::TempDir root{"sha-progress-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path file = root.path() / "weights.bin";
+    const std::string bytes(3 * 1024 * 1024 + 17, 'w');  // three chunks and a bit
+    std::ofstream{file, std::ios::binary} << bytes;
+
+    std::vector<std::int64_t> seen;
+    const std::string digest = apogee::models::file_sha256(file, [&seen](std::int64_t hashed) {
+        seen.push_back(hashed);
+        return true;
+    });
+    CHECK(digest == sha256_hex(bytes));
+    REQUIRE_FALSE(seen.empty());
+    CHECK(seen.back() == static_cast<std::int64_t>(bytes.size()));
+    CHECK(std::is_sorted(seen.begin(), seen.end()));
+
+    // Told to stop: no digest, and no more reads than it took to be told.
+    int calls = 0;
+    CHECK(
+        apogee::models::file_sha256(file, [&calls](std::int64_t) { return ++calls < 2; }).empty());
+    CHECK(calls == 2);
 }

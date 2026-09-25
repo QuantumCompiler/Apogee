@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -81,6 +82,12 @@ enum class CreateSource : std::uint8_t {
 };
 
 [[nodiscard]] std::optional<CreateSource> create_source_from_string(std::string_view name) noexcept;
+/// The names `create_source_from_string` accepts, for completion.
+[[nodiscard]] std::span<const std::string_view> create_source_names() noexcept;
+
+/// The formats `prepare_dataset.py --format` names -- the driver decides;
+/// this is what completion offers, and a test holds it to the bundled driver.
+[[nodiscard]] std::span<const std::string_view> prepare_formats() noexcept;
 [[nodiscard]] std::string_view to_string(CreateSource source) noexcept;
 
 /// One chat-format line, `role` before `content` -- the order the drivers

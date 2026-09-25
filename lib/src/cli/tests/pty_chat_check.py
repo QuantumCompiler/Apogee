@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Chat behaviours that only reproduce against a real terminal, or a real kill.
 
-Three checks:
+Four checks:
 
   typeahead   Text typed BEFORE the first prompt is discarded once; text typed
               after it is honoured.  Only reproducible on a PTY -- `tcflush`
@@ -13,6 +13,10 @@ Three checks:
 
   resume      A killed session reopens with its history intact.
 
+  spacing     A blank line after the banner, and one between a question and
+              whatever answers it.  Only on a terminal: a pipe gets no banner
+              and no decoration at all.
+
 POSIX only -- `pty` and SIGKILL have no portable Windows equivalent.  Recorded
 as a per-item skip in CLAUDE.md -> Platforms.
 """
@@ -20,6 +24,7 @@ as a per-item skip in CLAUDE.md -> Platforms.
 import json
 import os
 import pty
+import re
 import signal
 import selectors
 import subprocess
@@ -125,6 +130,61 @@ def check_typeahead(binary, home, env):
     return failures
 
 
+def check_spacing(binary, home, env):
+    """The banner and each question stand apart from what follows them.
+
+    Asked for directly (2026-09-25): a blank line after the `[apogee]` banner,
+    before the first prompt, and one between the question and the thinking
+    block or answer under it.
+    """
+    primary, secondary = pty.openpty()
+    process = subprocess.Popen(
+        [binary, "chat"],
+        stdin=secondary, stdout=secondary, stderr=secondary,
+        env=env, close_fds=True,
+    )
+    os.close(secondary)
+    selector = selectors.DefaultSelector()
+    selector.register(primary, selectors.EVENT_READ)
+    seen = bytearray()
+
+    def drain(seconds):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if not selector.select(timeout=0.1):
+                continue
+            try:
+                chunk = os.read(primary, 65536)
+            except OSError:
+                return
+            if not chunk:
+                return
+            seen.extend(chunk)
+
+    drain(2.0)
+    os.write(primary, b"hello there\r")  # raw mode at the prompt: Enter is \r
+    drain(2.0)
+    os.write(primary, b"/exit\r")
+    drain(2.0)
+    selector.close()
+    os.close(primary)
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        return ["chat did not exit"]
+
+    # The line editor redraws as it goes, so escapes and carriage returns are
+    # dropped and only what is stable across redraws is asserted on.
+    text = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", bytes(seen)).replace(b"\r", b"")
+    failures = []
+    if b"/help for commands\n\nYou:" not in text:
+        failures.append(f"no blank line between the banner and the first prompt: {text!r}")
+    if b"hello there\n\nmock response" not in text:
+        failures.append(f"no blank line between the question and its answer: {text!r}")
+    return failures
+
+
 def check_crash_and_resume(binary, home, env):
     """kill -9 mid-conversation; every completed turn must survive, and reopen."""
     process = subprocess.Popen(
@@ -184,7 +244,8 @@ def main():
 
     failures = []
     for name, check in (("typeahead", check_typeahead),
-                        ("crash+resume", check_crash_and_resume)):
+                        ("crash+resume", check_crash_and_resume),
+                        ("spacing", check_spacing)):
         home = tempfile.mkdtemp(prefix=f"apogee-chat-{name}-")
         try:
             env = setup(binary, home)
@@ -200,7 +261,8 @@ def main():
             print(f"FAIL: {failure}", file=sys.stderr)
         return 1
 
-    print("typeahead discarded once; completed turns survive a kill -9 - OK")
+    print("typeahead discarded once; completed turns survive a kill -9; "
+          "the banner and each question stand apart - OK")
     return 0
 
 

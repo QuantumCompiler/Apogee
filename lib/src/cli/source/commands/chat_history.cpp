@@ -17,6 +17,31 @@ namespace {
     throw CLI::RuntimeError(1);
 }
 
+/// `text` cut to at most `limit` bytes, never through a codepoint: a sequence
+/// the cut would split goes whole, lead byte included.
+[[nodiscard]] std::string clip(std::string_view text, std::size_t limit) {
+    if (text.size() <= limit) {
+        return std::string{text};
+    }
+    std::size_t end = limit;
+    while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0U) == 0x80U) {
+        --end;  // back to the start of the codepoint the cut lands in
+    }
+    return std::string{text.substr(0, end)};
+}
+
+/// `text` without any of `front` at its start or of `back` at its end.
+[[nodiscard]] std::string_view strip(std::string_view text, std::string_view front,
+                                     std::string_view back) {
+    while (!text.empty() && front.find(text.front()) != std::string_view::npos) {
+        text.remove_prefix(1);
+    }
+    while (!text.empty() && back.find(text.back()) != std::string_view::npos) {
+        text.remove_suffix(1);
+    }
+    return text;
+}
+
 }  // namespace
 
 std::string format_session_row(const logger::Session& session) {
@@ -60,40 +85,70 @@ std::string title_prompt() {
            "-- no quotes, no punctuation at the end, no explanation.";
 }
 
+harness::ChatRequest title_request(const logger::Session& session) {
+    // What the user asked, not the whole transcript: the questions say what a
+    // conversation is about, and the answers are most of its length. The
+    // whole transcript made a title cost a full re-read of the conversation.
+    constexpr std::size_t kPerMessage = 300;
+    constexpr std::size_t kTotal = 1500;
+    std::string asked;
+    for (const harness::ChatMessage& message : session.messages) {
+        if (message.role != harness::Role::User) {
+            continue;
+        }
+        const std::string text =
+            clip(strip(message.content.plain_text(), " \t\r\n", " \t\r\n"), kPerMessage);
+        if (text.empty()) {
+            continue;
+        }
+        if (asked.size() + text.size() > kTotal) {
+            break;
+        }
+        asked += "- " + text + "\n";
+    }
+
+    harness::ChatRequest request;
+    request.model = session.backend;
+    request.messages.push_back(
+        harness::ChatMessage::user(title_prompt() + "\n\nWhat the user asked:\n" + asked));
+    // Six words and room to spare; a model that ignores the instruction is cut
+    // short rather than left to write an essay nobody reads.
+    constexpr std::int64_t kTitleTokens = 32;
+    request.max_tokens = kTitleTokens;
+    request.transient.side_request = true;
+    // A reasoning model otherwise thinks for hundreds of tokens before six
+    // words -- the most expensive part of the request, by far.
+    request.transient.skip_reasoning = true;
+    return request;
+}
+
 std::string sanitize_title(std::string_view raw) {
-    // First line only: a model asked for a title will sometimes explain its
-    // choice underneath.
-    const std::size_t newline = raw.find('\n');
-    std::string_view line = newline == std::string_view::npos ? raw : raw.substr(0, newline);
+    constexpr std::string_view kFront = " \t\r\"'*#`";
+    constexpr std::string_view kBack = " \t\r\"'*`.";
 
-    auto trim = [](std::string_view text) {
-        while (!text.empty() && (text.front() == ' ' || text.front() == '\t' ||
-                                 text.front() == '"' || text.front() == '\'')) {
-            text.remove_prefix(1);
-        }
-        while (!text.empty() &&
-               (text.back() == ' ' || text.back() == '\t' || text.back() == '"' ||
-                text.back() == '\'' || text.back() == '.' || text.back() == '\r')) {
-            text.remove_suffix(1);
-        }
-        return text;
-    };
-
-    std::string title{trim(line)};
+    // The first line with anything on it. A model asked for a title will
+    // sometimes explain its choice underneath -- and a reasoning model's answer
+    // begins with the blank lines its closed think block leaves. Taking the
+    // first line outright titled every such conversation "", and the title
+    // was asked for again after every turn (found live, 2026-09-25).
+    std::string_view line;
+    for (std::size_t start = 0; start < raw.size() && line.empty();) {
+        const std::size_t newline = raw.find('\n', start);
+        const std::size_t end = newline == std::string_view::npos ? raw.size() : newline;
+        line = strip(raw.substr(start, end - start), kFront, kBack);
+        start = end + 1;
+    }
 
     // Bounded so one runaway answer cannot make every listing row wrap.
     constexpr std::size_t kMaxTitle = 60;
-    if (title.size() > kMaxTitle) {
-        title.resize(kMaxTitle);
-        while (!title.empty() && (static_cast<unsigned char>(title.back()) & 0xC0U) == 0x80U) {
-            title.pop_back();  // never cut mid-codepoint
-        }
-        while (!title.empty() && title.back() == ' ') {
-            title.pop_back();
-        }
-        title += "…";
+    if (line.size() <= kMaxTitle) {
+        return std::string{line};
     }
-    return title;
+    std::string title = clip(line, kMaxTitle);
+    while (!title.empty() && title.back() == ' ') {
+        title.pop_back();
+    }
+    return title + "…";
 }
 
 std::string_view ChatsCommand::name() const noexcept {
@@ -124,7 +179,7 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
 
     auto info_name = std::make_shared<std::string>();
     CLI::App* info = cmd->add_subcommand("info", "Show one conversation's details");
-    info->add_option("name", *info_name, "Chat id or name")->required();
+    info->add_option("name", *info_name, "Chat id or name")->type_name(kChatValue)->required();
     info->callback([info_name]() {
         try {
             std::cout << format_session_info(logger::load(*info_name, {}).session);
@@ -136,7 +191,7 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
     auto title_name = std::make_shared<std::string>();
     auto title_value = std::make_shared<std::string>();
     CLI::App* title = cmd->add_subcommand("title", "Rename a conversation");
-    title->add_option("name", *title_name, "Chat id or name")->required();
+    title->add_option("name", *title_name, "Chat id or name")->type_name(kChatValue)->required();
     title->add_option("title", *title_value, "The new name")->required();
     title->callback([title_name, title_value]() {
         try {
@@ -153,7 +208,7 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
 
     auto delete_name = std::make_shared<std::string>();
     CLI::App* remove = cmd->add_subcommand("delete", "Delete a conversation");
-    remove->add_option("name", *delete_name, "Chat id or name")->required();
+    remove->add_option("name", *delete_name, "Chat id or name")->type_name(kChatValue)->required();
     remove->callback([delete_name]() {
         try {
             const logger::Session session = logger::load(*delete_name, {}).session;

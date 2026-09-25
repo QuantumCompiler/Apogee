@@ -33,6 +33,16 @@ apogee config init </dev/null >/dev/null
 apogee config add-backend claude --type anthropic --model claude-sonnet-5 </dev/null >/dev/null
 apogee config add-backend local --type llamacpp --model-path /tmp/x.gguf </dev/null >/dev/null
 
+# Names that exist: a collection, and a model in a stand-in Ollama store --
+# whose ref carries the `:` bash splits words at.
+printf 'a note about completion\n' >"$work/note.txt"
+apogee embed ingest notes "$work/note.txt" --retriever lexical </dev/null >/dev/null 2>&1
+export OLLAMA_MODELS="$work/ollama"
+mkdir -p "$OLLAMA_MODELS/manifests/registry.ollama.ai/library/llama3.2" "$OLLAMA_MODELS/blobs"
+printf '{"layers":[{"mediaType":"application/vnd.ollama.image.model","digest":"sha256:ab12","size":1}]}' \
+    >"$OLLAMA_MODELS/manifests/registry.ollama.ai/library/llama3.2/3b"
+printf 'x' >"$OLLAMA_MODELS/blobs/sha256-ab12"
+
 failures=0
 fail() {
     echo "FAIL: $*" >&2
@@ -60,13 +70,33 @@ cases=(
     "|models"
     "config|add-backend|x|--type||anthropic"
     "config|add-backend|x|-t|cl|claude-cli"
+    # Names read from the config and the data directory.
+    "embed|query||notes"
+    "complete|--rag||notes"
+    "config|get|backends.cl|backends.claude"
+    "datasets|synth|x|--kit||reasoning"
+    "models|pull|ll|llama3.2:3b"
+    # Words a command validates itself, offered from the same list.
+    "knowledge|query|q|--status||rejected"
+    "complete|--retriever|h|hybrid"
 )
 
 # ---- bash -------------------------------------------------------------------
 bash_complete() {
     bash --norc --noprofile -c '
         source "$1"; shift
-        COMP_WORDS=(apogee "$@")
+        # As bash hands them over: the raw line to the cursor, and words
+        # split at COMP_WORDBREAKS -- which the stub must not trust.
+        COMP_LINE="apogee $*"
+        COMP_POINT=${#COMP_LINE}
+        COMP_WORDS=(apogee)
+        for word in "$@"; do
+            while [[ $word == *:* ]]; do
+                COMP_WORDS+=("${word%%:*}" ":")
+                word=${word#*:}
+            done
+            COMP_WORDS+=("$word")
+        done
         COMP_CWORD=$(( ${#COMP_WORDS[@]} - 1 ))
         _apogee
         printf "%s\n" "${COMPREPLY[@]}"
@@ -78,7 +108,9 @@ for case in "${cases[@]}"; do
     needle="${parts[${#parts[@]}-1]}"
     expect bash "$(bash_complete "${words[@]}")" "$needle" "${words[*]}"
 done
-echo "bash: checked ${#cases[@]} lines"
+# Past a `:`, bash replaces only what follows it: the candidate is the rest.
+expect bash "$(bash_complete models pull llama3.2:)" "3b" "models pull llama3.2:"
+echo "bash: checked ${#cases[@]} lines, plus a word-break"
 
 # ---- zsh --------------------------------------------------------------------
 # compadd and _files only exist inside a completion widget, so they are stood
@@ -127,6 +159,9 @@ if command -v zsh >/dev/null 2>&1; then
         # A path still gets the shell's file completion.
         expect "zsh ($mode)" "$(zsh_complete "$mode" config add-backend x --model-path "")" "<files>" \
             "config add-backend x --model-path "
+        # A name-or-path word falls back to files once no name matches.
+        expect "zsh ($mode)" "$(zsh_complete "$mode" datasets synth x --kit ./)" "<files>" \
+            "datasets synth x --kit ./"
     done
     echo "zsh: checked ${#cases[@]} lines, autoloaded and sourced, plus hints and paths"
 else

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <string_view>
@@ -52,6 +53,10 @@ enum class ValueKind : std::uint8_t {
     Choice,
     /// A configured backend's name -- declared `kBackendValue`.
     Backend,
+    /// The name of something that exists -- a collection, a chat, a model,
+    /// a run -- declared with one of `kNameValues`, listed by a
+    /// `CompletionSources`.
+    Names,
 };
 
 /// What one flag's value, or one positional, takes.
@@ -59,6 +64,11 @@ struct ValueSpec {
     ValueKind kind = ValueKind::Text;
     /// The accepted values, for `ValueKind::Choice`.
     std::vector<std::string> choices;
+    /// Which names, for `ValueKind::Names`: the declared type name.
+    std::string source;
+    /// The declared type name as written -- `TEXT`, `INT`, `COLLECTION` --
+    /// so a test can tell free text from a number.
+    std::string type;
     /// What the word is -- `--model TEXT: Model name` -- for a shell that can
     /// show it when there is nothing to offer.
     std::string hint;
@@ -102,6 +112,34 @@ struct Completion {
     std::string hint;
 };
 
+/// What the words before the cursor already say, for a list that depends on
+/// them: `models convert <model> --from <TAB>` offers that model's ids.
+struct CompletionContext {
+    const harness::Config* config = nullptr;
+    /// The positionals given so far to the command in play, in order.
+    std::vector<std::string> positionals;
+    /// The value each flag was given, by the spelling used -- the last one
+    /// when a flag repeats.
+    std::map<std::string, std::string> flags;
+};
+
+/// The names of one kind that exist now.
+struct NameList {
+    std::vector<std::string> names;
+    /// The kind also accepts a path: when no name matches what is typed, the
+    /// shell's file names are the answer.
+    bool paths = false;
+    /// Said instead when there is none to offer, e.g. "none yet -- 'apogee
+    /// embed ingest' makes one".
+    std::string none;
+};
+
+/// Lists a name kind (`kNameValues`). Injected, so the protocol stays pure and
+/// the test for it needs no disk; `default_completion_sources` reads the real
+/// config and data directory. A source that throws offers nothing.
+using CompletionSources =
+    std::function<NameList(std::string_view kind, const CompletionContext& context)>;
+
 /// The environment variable a stub sets to receive the directive line (see
 /// `render_completion`). A stub that does not set it gets bare candidates, so
 /// a stub and a binary from different releases still work together -- and
@@ -113,13 +151,18 @@ inline constexpr const char* kCompletionProtocolVar = "APOGEE_COMPLETION_PROTOCO
 ///
 /// Pure: takes the config and the tree rather than reading either, so the
 /// whole protocol is testable without a config file or a parser.
+///
+/// Names come from `sources`; without one, a name kind says what it wants, as
+/// free text does.
 [[nodiscard]] Completion complete_words(const CompletionRequest& request,
-                                        const harness::Config& config, const CommandSpec& root);
+                                        const harness::Config& config, const CommandSpec& root,
+                                        const CompletionSources& sources = {});
 
 /// `complete_words(...).candidates`.
 [[nodiscard]] std::vector<std::string> completion_candidates(const CompletionRequest& request,
                                                              const harness::Config& config,
-                                                             const CommandSpec& root);
+                                                             const CommandSpec& root,
+                                                             const CompletionSources& sources = {});
 
 /// The protocol's output. Bare: one candidate per line. With directives, the
 /// first line says what the rest mean -- `:values` (the candidates follow),

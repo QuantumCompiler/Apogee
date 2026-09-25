@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <regex>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -427,10 +428,8 @@ TEST_CASE("status on an empty config reports unset rather than a blank name",
     CHECK(status.find("(unset") != std::string::npos);
 }
 
-TEST_CASE(
-    "a SafeTensors snapshot is listed as trainable, not runnable, with its architecture "
-    "and record",
-    "[commands][models][listing][snapshot]") {
+TEST_CASE("a SafeTensors snapshot is listed by its state, architecture and record, with no note",
+          "[commands][models][listing][snapshot]") {
     const RealModel model{"llama"};
     const std::filesystem::path snapshot =
         model.dir / "owner--repo" / "safetensors" / "aaaaaaaaaaaa";
@@ -449,8 +448,11 @@ TEST_CASE(
     CHECK(match->architecture == "Qwen2");
     CHECK(match->provenance == "local");
     CHECK(match->verified == "no record");
-    CHECK(match->note.find("trainable") != std::string::npos);
-    CHECK(match->note.find("apogee models convert owner--repo") != std::string::npos);
+    // Its state column says what it is. The line that used to sit under every
+    // snapshot ("full weights, trainable -- ... makes a GGUF") was noise, and
+    // was asked to go (2026-09-25).
+    CHECK(match->note.empty());
+    CHECK_FALSE(match->attention);
 
     apogee::models::Snapshot record;
     record.ref = "owner/repo";
@@ -490,4 +492,68 @@ TEST_CASE("a model still in the flat layout is listed with the migration named",
     REQUIRE(match != rows.end());
     CHECK(match->state == "old layout");
     CHECK(match->note.find("apogee models migrate") != std::string::npos);
+}
+
+TEST_CASE("a row says whether it is configured and whether it needs attention",
+          "[commands][models][listing][color]") {
+    const RealModel stored{"llama"};
+    Config config = sample_config();
+    config.backends["keyed"] = config.backends["cloud"];
+    config.backends["keyed"].api_key = "sk-test";
+    const apogee::secrets::EnvSnapshot empty;
+    const std::vector<ModelRow> rows = build_model_rows(config, stored.dir, {}, &empty);
+
+    // Configured and working.
+    CHECK(row_for(rows, "keyed").configured);
+    CHECK_FALSE(row_for(rows, "keyed").attention);
+    // Configured, and each needing something: a key, a file, a model_path.
+    for (const std::string_view broken : {"cloud", "embedder", "unset"}) {
+        INFO(broken);
+        CHECK(row_for(rows, broken).configured);
+        CHECK(row_for(rows, broken).attention);
+    }
+    // On disk, fine, and no backend points at it.
+    CHECK_FALSE(row_for(rows, "(not configured)").configured);
+    CHECK_FALSE(row_for(rows, "(not configured)").attention);
+}
+
+TEST_CASE("rows are coloured by what they are, and align the same without colour",
+          "[commands][models][listing][color]") {
+    // Asked for directly (2026-09-25): configured backends in Apogee's cyan,
+    // what no backend points at in another colour. Attention is yellow either
+    // way -- a configured backend with no file is not one to look healthy.
+    const auto row = [](std::string backend, bool configured, bool attention, std::string note) {
+        ModelRow out;
+        out.backend = std::move(backend);
+        out.type = "llamacpp";
+        out.model = "m.gguf";
+        out.configured = configured;
+        out.attention = attention;
+        out.note = std::move(note);
+        return out;
+    };
+    const std::vector<ModelRow> rows{row("ready", true, false, ""),
+                                     row("broken", true, true, "no model_path set"),
+                                     row("(not configured)", false, false, "")};
+
+    const std::string plain = render_model_table(rows);
+    CHECK(plain.find('\033') == std::string::npos);
+
+    const std::string coloured = render_model_table(rows, apogee::ansi::Style{true});
+    const std::string cyan{apogee::ansi::color_code(apogee::ansi::Color::Cyan)};
+    const std::string yellow{apogee::ansi::color_code(apogee::ansi::Color::Yellow)};
+    const std::string dim{apogee::ansi::kDim};
+    const auto line_starting = [&coloured](std::string_view text) {
+        const std::size_t at = coloured.find(text);
+        REQUIRE(at != std::string::npos);
+        return coloured.substr(coloured.rfind('\n', at) + 1, at - coloured.rfind('\n', at) - 1);
+    };
+    CHECK(line_starting("ready") == cyan);
+    CHECK(line_starting("broken") == yellow);
+    CHECK(line_starting("    no model_path set") == yellow);  // a note is its row's colour
+    CHECK(line_starting("(not configured)") == dim);
+    CHECK(coloured.find("BACKEND") == 0);  // the header stays plain
+
+    // Colour is laid over the text, never counted into a column's width.
+    CHECK(std::regex_replace(coloured, std::regex{"\033\\[[0-9;]*m"}, "") == plain);
 }

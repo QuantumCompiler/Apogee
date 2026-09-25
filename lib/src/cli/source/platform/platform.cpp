@@ -13,11 +13,13 @@
 #elif defined(__APPLE__)
 #include <fcntl.h>
 #include <mach-o/dyld.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 #else
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -120,6 +122,26 @@ long current_process_id() noexcept {
     return static_cast<long>(GetCurrentProcessId());
 #else
     return static_cast<long>(getpid());
+#endif
+}
+
+bool process_running(long pid) noexcept {
+    if (pid <= 0) {
+        return false;
+    }
+#if defined(_WIN32)
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    if (process == nullptr) {
+        // No such process -- or one this user may not look at, which exists.
+        return GetLastError() == ERROR_ACCESS_DENIED;
+    }
+    DWORD code = 0;
+    const bool running = GetExitCodeProcess(process, &code) != 0 && code == STILL_ACTIVE;
+    CloseHandle(process);
+    return running;
+#else
+    // Signal 0 checks without sending; EPERM means it exists, owned by another.
+    return ::kill(static_cast<pid_t>(pid), 0) == 0 || errno == EPERM;
 #endif
 }
 

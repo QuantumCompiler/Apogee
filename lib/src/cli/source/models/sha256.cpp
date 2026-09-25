@@ -1,5 +1,9 @@
 #include "models/sha256.h"
 
+#if defined(__ARM_FEATURE_SHA2)
+#include <arm_neon.h>
+#endif
+
 #include <cstring>
 #include <iomanip>
 #include <sstream>
@@ -29,7 +33,9 @@ Sha256::Sha256()
     : state_{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
              0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19} {}
 
-void Sha256::compress(const std::uint8_t* block) {
+namespace sha256_detail {
+
+void compress_portable(std::array<std::uint32_t, 8>& state, const std::uint8_t* block) noexcept {
     std::array<std::uint32_t, 64> schedule{};
     for (std::size_t i = 0; i < 16; ++i) {
         schedule[i] = (static_cast<std::uint32_t>(block[i * 4]) << 24U) |
@@ -45,14 +51,14 @@ void Sha256::compress(const std::uint8_t* block) {
         schedule[i] = schedule[i - 16] + s0 + schedule[i - 7] + s1;
     }
 
-    std::uint32_t a = state_[0];
-    std::uint32_t b = state_[1];
-    std::uint32_t c = state_[2];
-    std::uint32_t d = state_[3];
-    std::uint32_t e = state_[4];
-    std::uint32_t f = state_[5];
-    std::uint32_t g = state_[6];
-    std::uint32_t h = state_[7];
+    std::uint32_t a = state[0];
+    std::uint32_t b = state[1];
+    std::uint32_t c = state[2];
+    std::uint32_t d = state[3];
+    std::uint32_t e = state[4];
+    std::uint32_t f = state[5];
+    std::uint32_t g = state[6];
+    std::uint32_t h = state[7];
 
     for (std::size_t i = 0; i < 64; ++i) {
         const std::uint32_t s1 = rotate_right(e, 6) ^ rotate_right(e, 11) ^ rotate_right(e, 25);
@@ -72,14 +78,83 @@ void Sha256::compress(const std::uint8_t* block) {
         a = temp1 + temp2;
     }
 
-    state_[0] += a;
-    state_[1] += b;
-    state_[2] += c;
-    state_[3] += d;
-    state_[4] += e;
-    state_[5] += f;
-    state_[6] += g;
-    state_[7] += h;
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+    state[5] += f;
+    state[6] += g;
+    state[7] += h;
+}
+
+namespace {
+
+#if defined(__ARM_FEATURE_SHA2)
+/// Blocks through ARMv8's SHA-256 instructions. The state is ABCD and EFGH
+/// in their natural order -- the same layout as the portable code -- and each
+/// of the sixteen steps runs four rounds on four schedule words, extending the
+/// schedule four words ahead while there are rounds left to need them.
+void compress_arm(std::array<std::uint32_t, 8>& state, const std::uint8_t* blocks,
+                  std::size_t count) noexcept {
+    uint32x4_t abcd = vld1q_u32(state.data());
+    uint32x4_t efgh = vld1q_u32(state.data() + 4);
+    for (std::size_t block = 0; block < count; ++block) {
+        const std::uint8_t* data = blocks + (64 * block);
+        const uint32x4_t abcd_in = abcd;
+        const uint32x4_t efgh_in = efgh;
+        // The message is big-endian words; the lanes are little-endian.
+        std::array<uint32x4_t, 4> words{};
+        for (std::size_t i = 0; i < words.size(); ++i) {
+            words[i] = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(data + (16 * i))));
+        }
+        for (std::size_t step = 0; step < 16; ++step) {
+            uint32x4_t& current = words[step % 4];
+            const uint32x4_t scheduled =
+                vaddq_u32(current, vld1q_u32(kRoundConstants.data() + (4 * step)));
+            if (step < 12) {
+                current = vsha256su1q_u32(vsha256su0q_u32(current, words[(step + 1) % 4]),
+                                          words[(step + 2) % 4], words[(step + 3) % 4]);
+            }
+            const uint32x4_t previous = abcd;
+            abcd = vsha256hq_u32(abcd, efgh, scheduled);
+            efgh = vsha256h2q_u32(efgh, previous, scheduled);
+        }
+        abcd = vaddq_u32(abcd, abcd_in);
+        efgh = vaddq_u32(efgh, efgh_in);
+    }
+    // The state stays in registers across a run of blocks: a load and a store
+    // per block would cost a third of the speed.
+    vst1q_u32(state.data(), abcd);
+    vst1q_u32(state.data() + 4, efgh);
+}
+#endif
+
+}  // namespace
+
+bool accelerated() noexcept {
+#if defined(__ARM_FEATURE_SHA2)
+    return true;
+#else
+    return false;
+#endif
+}
+
+void compress(std::array<std::uint32_t, 8>& state, const std::uint8_t* blocks,
+              std::size_t count) noexcept {
+#if defined(__ARM_FEATURE_SHA2)
+    compress_arm(state, blocks, count);
+#else
+    for (std::size_t block = 0; block < count; ++block) {
+        compress_portable(state, blocks + (64 * block));
+    }
+#endif
+}
+
+}  // namespace sha256_detail
+
+void Sha256::compress(const std::uint8_t* block) {
+    sha256_detail::compress(state_, block, 1);
 }
 
 void Sha256::update(std::string_view bytes) {
@@ -103,14 +178,16 @@ void Sha256::update(std::string_view bytes) {
         buffered_ = 0;
     }
 
-    while (bytes.size() - offset >= buffer_.size()) {
+    if (const std::size_t blocks = (bytes.size() - offset) / buffer_.size(); blocks > 0) {
         // Reading the same bytes as unsigned octets, which is what the algorithm
         // is defined over. There is no way to do this without a cast, and copying
         // every block into a std::array first would double the work on a 71 GB
-        // file for no benefit.
+        // file for no benefit. Every whole block in one call, so a fast block
+        // function keeps its state in registers across them.
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-        compress(reinterpret_cast<const std::uint8_t*>(bytes.data()) + offset);
-        offset += buffer_.size();
+        sha256_detail::compress(
+            state_, reinterpret_cast<const std::uint8_t*>(bytes.data()) + offset, blocks);
+        offset += blocks * buffer_.size();
     }
 
     const std::size_t remaining = bytes.size() - offset;

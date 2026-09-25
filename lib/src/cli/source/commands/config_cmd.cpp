@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <initializer_list>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -14,6 +15,7 @@
 #include "harness/config.h"
 #include "harness/config_edit.h"
 #include "harness/paths.h"
+#include "tools/toolsets.h"
 
 namespace apogee::commands {
 namespace {
@@ -501,7 +503,7 @@ void bind_delete_mcp_server(CLI::App& parent, const RootContext& context) {
     auto name = std::make_shared<std::string>();
     CLI::App* cmd = parent.add_subcommand("delete-mcp-server",
                                           "Remove an MCP server entry (its files are left alone)");
-    cmd->add_option("name", *name, "The server's name")->required();
+    cmd->add_option("name", *name, "The server's name")->type_name(kServerValue)->required();
     cmd->callback([&context, name]() {
         const std::filesystem::path path = config_path_for(context);
         apply_edit(path, [name](std::string_view content) {
@@ -531,6 +533,7 @@ void bind_add_graph(CLI::App& parent, const RootContext& context) {
         ->required();
     cmd->add_option("--collections", flags->collections,
                     "The member collections, comma-separated (e.g. docs,meetings)")
+        ->type_name(kCollectionListValue)
         ->required();
     cmd->add_option("--extract-backend", flags->extract_backend,
                     "The backend `graph build` extracts with (default: the extraction role)")
@@ -587,7 +590,7 @@ void bind_delete_graph(CLI::App& parent, const RootContext& context) {
     auto name = std::make_shared<std::string>();
     CLI::App* cmd = parent.add_subcommand(
         "delete-graph", "Remove a named graph's entry (its database is left alone)");
-    cmd->add_option("name", *name, "The graph's name")->required();
+    cmd->add_option("name", *name, "The graph's name")->type_name(kNamedGraphValue)->required();
     cmd->callback([&context, name]() {
         const std::filesystem::path path = config_path_for(context);
         apply_edit(path, [name](std::string_view content) {
@@ -604,7 +607,9 @@ void bind_set_permission(CLI::App& parent, const RootContext& context) {
     auto level = std::make_shared<std::string>();
     CLI::App* cmd = parent.add_subcommand(
         "set-permission", "Set what the permission gate does for a tool: ask, allow, or deny");
-    cmd->add_option("tool", *tool, "Tool name, e.g. write_file or run_command")->required();
+    cmd->add_option("tool", *tool, "Tool name, e.g. write_file or run_command")
+        ->type_name(kToolValue)
+        ->required();
     cmd->add_option("level", *level, "ask | allow | deny")
         ->required()
         ->check(CLI::IsMember({"ask", "allow", "deny"}));
@@ -624,6 +629,7 @@ void bind_get(CLI::App& parent, const RootContext& context) {
     cmd->add_option("key", *key,
                     "Dotted key, e.g. models.default or backends.claude.model. 'backends' "
                     "lists every backend name; 'embeddings' every registered collection")
+        ->type_name(kConfigKeyValue)
         ->required();
     cmd->add_flag("--reveal", *reveal, "Print api_key values instead of redacting them");
     cmd->callback([&context, key, reveal]() {
@@ -653,6 +659,61 @@ void bind_format(CLI::App& parent, const RootContext& context) {
 }
 
 }  // namespace
+
+std::vector<std::string> config_keys(const harness::Config& config) {
+    std::vector<std::string> keys{"status_mode",
+                                  "color",
+                                  "auto_rag",
+                                  "models.default",
+                                  "models.default_embedding",
+                                  "models.default_extraction",
+                                  "paths.gguf_dir",
+                                  "paths.hf_dir",
+                                  "paths.mcp_dir",
+                                  "paths.embeddings_dir",
+                                  "tools.fs_root",
+                                  "tools.disabled",
+                                  "training.python",
+                                  "training.trainer",
+                                  "training.judge_backend",
+                                  "training.eval_suite_path",
+                                  "training.retain_versions",
+                                  "training.gate_mode",
+                                  "training.cycle.pipeline",
+                                  "training.cycle.backend",
+                                  "training.cycle.anchor_version",
+                                  "training.cycle.regression_threshold",
+                                  "training.cycle.circuit_breaker_k",
+                                  "training.cycle.judge_backend",
+                                  "permissions",
+                                  "mcp_servers",
+                                  "embeddings",
+                                  "backends"};
+    for (const std::string_view tool : tools::destructive_tool_names()) {
+        keys.push_back("permissions." + std::string{tool});
+    }
+    const auto entry = [&keys](std::string_view section, const std::string& name,
+                               std::initializer_list<std::string_view> fields) {
+        const std::string prefix = std::string{section} + "." + name;
+        keys.push_back(prefix);
+        for (const std::string_view field : fields) {
+            keys.push_back(prefix + "." + std::string{field});
+        }
+    };
+    for (const std::string& name : config.backend_names()) {
+        entry("backends", name,
+              {"type", "api_key", "model", "model_path", "mmproj_path", "embedding_model",
+               "system_prompt", "context_size", "max_tokens", "temperature"});
+    }
+    for (const std::string& name : config.mcp_server_names()) {
+        entry("mcp_servers", name, {"command", "enabled", "args", "env"});
+    }
+    for (const std::string& name : config.embedding_names()) {
+        entry("embeddings", name,
+              {"chunk_size", "chunk_overlap", "description", "backend", "retriever", "rerank"});
+    }
+    return keys;
+}
 
 std::string_view ConfigCommand::name() const noexcept {
     return "config";

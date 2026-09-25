@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -574,12 +576,41 @@ TEST_CASE("backend-valued flags are the ones declared so, not the ones spelled s
 
 namespace {
 
-[[nodiscard]] apogee::commands::Completion complete_full(std::vector<std::string> words,
-                                                         std::string current = "") {
+[[nodiscard]] apogee::commands::Completion complete_full(
+    std::vector<std::string> words, std::string current = "",
+    const apogee::commands::CompletionSources& sources = {}) {
     CompletionRequest request;
     request.words = std::move(words);
     request.current = std::move(current);
-    return apogee::commands::complete_words(request, two_backends(), real_tree());
+    return apogee::commands::complete_words(request, two_backends(), real_tree(), sources);
+}
+
+/// A stand-in for the data directory: fixed names per kind, the path kinds
+/// marked, and the two that read the line echoing what they were given.
+[[nodiscard]] apogee::commands::CompletionSources fake_sources() {
+    namespace c = apogee::commands;
+    return [](std::string_view kind, const c::CompletionContext& context) {
+        c::NameList list;
+        if (kind == c::kCollectionValue) {
+            list.names = {"meetings", "docs", "notes"};
+        } else if (kind == c::kSnapshotValue || kind == c::kGgufValue || kind == c::kKitValue) {
+            list.names = {"org--repo", "org--repo/gguf/111111111111"};
+            list.paths = true;
+        } else if (kind == c::kSnapshotIdValue) {
+            if (!context.positionals.empty()) {
+                list.names = {context.positionals.front() + "-set"};
+            }
+        } else if (kind == c::kRecordValue) {
+            const auto db = context.flags.find("--db");
+            list.names = {(db == context.flags.end() ? std::string{"default"} : db->second) +
+                          "-record"};
+        } else if (kind == c::kChatValue) {
+            throw std::runtime_error("an unreadable chat");
+        } else if (kind == c::kServerValue) {
+            list.none = "no MCP servers configured";
+        }
+        return list;
+    };
 }
 
 }  // namespace
@@ -601,7 +632,8 @@ TEST_CASE("a fixed set of values completes from the parser's own validator",
         complete_line({"models", "convert", "snap", "out.gguf", "--type"});
     CHECK(contains(precisions, "f16"));
     CHECK(contains(precisions, "q8_0"));
-    CHECK(complete_full({"models", "convert"}).files);
+    // A snapshot directory is one accepted form: files once no name matches.
+    CHECK(complete_full({"models", "convert"}, "./", fake_sources()).files);
 }
 
 TEST_CASE("free text says what it wants instead of offering file names",
@@ -626,7 +658,7 @@ TEST_CASE("free text says what it wants instead of offering file names",
 TEST_CASE("a path, and only a path, completes files", "[commands][completion][values]") {
     CHECK(complete_full({"config", "add-backend", "x", "--model-path"}).files);
     CHECK(complete_full({"embed", "ingest", "notes"}).files);
-    CHECK(complete_full({"models", "quantize"}).files);
+    CHECK(complete_full({"models", "quantize"}, "./", fake_sources()).files);
     CHECK(complete_full({"--config"}).files);
     CHECK_FALSE(complete_full({"models", "delete"}).files);
     CHECK_FALSE(complete_full({"chat", "--system"}).files);
@@ -685,4 +717,166 @@ TEST_CASE("the directive line is sent only to a stub that asks for it",
     // One line, whatever the description held: the stubs read lines.
     CHECK(render_completion(hint, true) == ":hint --model TEXT: Model name\n");
     CHECK(render_completion(Completion{}, true) == ":values\n");
+}
+
+TEST_CASE("a name completes to what exists, filtered by what is typed",
+          "[commands][completion][names]") {
+    // `--rag <TAB>` offered the collection's hint and nothing else; the
+    // collections on disk are the useful answer.
+    CHECK(complete_full({"complete", "--rag"}, "", fake_sources()).candidates ==
+          std::vector<std::string>{"docs", "meetings", "notes"});
+    CHECK(complete_full({"embed", "query"}, "n", fake_sources()).candidates ==
+          std::vector<std::string>{"notes"});
+    // The kind is read from the declaration, at any depth.
+    CHECK(complete_full({"knowledge", "query", "q", "--db"}, "d", fake_sources()).candidates ==
+          std::vector<std::string>{"docs"});
+}
+
+TEST_CASE("a name-or-path word offers names, then files once none match",
+          "[commands][completion][names]") {
+    const apogee::commands::Completion names =
+        complete_full({"models", "convert"}, "org", fake_sources());
+    CHECK(names.candidates == std::vector<std::string>{"org--repo", "org--repo/gguf/111111111111"});
+    CHECK_FALSE(names.files);
+    // `./`, `~/`, an absolute path: nothing by that name, so the shell's files.
+    CHECK(complete_full({"datasets", "synth", "d", "--kit"}, "./", fake_sources()).files);
+    CHECK(complete_full({"train", "run"}, "/", fake_sources()).files);
+}
+
+TEST_CASE("a name with nothing to offer says what it wants and why",
+          "[commands][completion][names]") {
+    const apogee::commands::Completion none = complete_full({"mcp", "enable"}, "", fake_sources());
+    CHECK(none.candidates.empty());
+    CHECK_FALSE(none.files);
+    CHECK(none.hint.find("SERVER") != std::string::npos);
+    CHECK(none.hint.find("no MCP servers configured") != std::string::npos);
+    // Without a source at all -- a test, an older caller -- the hint alone.
+    const apogee::commands::Completion bare = complete_full({"mcp", "enable"});
+    CHECK(bare.candidates.empty());
+    CHECK(bare.hint.find("SERVER") != std::string::npos);
+}
+
+TEST_CASE("a comma list completes its last word and skips what it holds",
+          "[commands][completion][names]") {
+    CHECK(complete_full({"config", "add-graph", "g", "--collections"}, "docs,", fake_sources())
+              .candidates == std::vector<std::string>{"docs,meetings", "docs,notes"});
+    CHECK(
+        complete_full({"config", "add-graph", "g", "--collections"}, "docs,notes,m", fake_sources())
+            .candidates == std::vector<std::string>{"docs,notes,meetings"});
+}
+
+TEST_CASE("a list that depends on the line reads the line", "[commands][completion][names]") {
+    // `--from <TAB>` offers the ids of the model already named...
+    CHECK(complete_full({"models", "convert", "org--repo", "--from"}, "", fake_sources())
+              .candidates == std::vector<std::string>{"org--repo-set"});
+    // ...and a record id is looked up in the collection `--db` names, before
+    // or after it on the line.
+    CHECK(
+        complete_full({"knowledge", "info", "--db", "decisions"}, "", fake_sources()).candidates ==
+        std::vector<std::string>{"decisions-record"});
+    CHECK(complete_full({"knowledge", "info"}, "", fake_sources()).candidates ==
+          std::vector<std::string>{"default-record"});
+}
+
+TEST_CASE("a source that fails offers nothing, quietly", "[commands][completion][names]") {
+    // A corrupt chat file must make TAB unhelpful, never print into the line.
+    const apogee::commands::Completion failed =
+        complete_full({"chats", "info"}, "", fake_sources());
+    CHECK(failed.candidates.empty());
+    CHECK_FALSE(failed.files);
+    CHECK(failed.hint.find("CHAT") != std::string::npos);
+}
+
+namespace {
+
+/// The arguments that are free text on purpose, reviewed 2026-09-24: prompts
+/// and messages, names for things being created, dates, patterns, and values
+/// with no listing to read (a vendor model id, a Hugging Face repository, an
+/// entity in a graph). Everything else must complete to something. A new
+/// TEXT argument fails the test below until it is tagged -- or added here,
+/// on purpose.
+const std::vector<std::string> kFreeText{"agents create name",
+                                         "agents create --description",
+                                         "agents create --save-name",
+                                         "agents create --save-subdir",
+                                         "analyze INPUT",
+                                         "analyze --input",
+                                         "analyze --save-name",
+                                         "chat -s",
+                                         "chat --system",
+                                         "chats title title",
+                                         "complete prompt",
+                                         "complete -s",
+                                         "complete --system",
+                                         "complete --context",
+                                         "config add-backend name",
+                                         "config add-backend --api-key",
+                                         "config add-backend --model",
+                                         "config add-backend --embedding-model",
+                                         "config add-backend --system-prompt",
+                                         "config add-graph name",
+                                         "datasets prepare --map",
+                                         "datasets prepare --split",
+                                         "datasets create name",
+                                         "datasets create --since",
+                                         "datasets create --until",
+                                         "datasets synth name",
+                                         "datasets synth --topic",
+                                         "datasets pull ref",
+                                         "embed query text",
+                                         "embed delete --source",
+                                         "graph show ENTITY",
+                                         "knowledge capture TEXT",
+                                         "knowledge capture --source",
+                                         "knowledge query TEXT",
+                                         "mcp create name",
+                                         "mcp create --args",
+                                         "mcp test tool",
+                                         "mcp test arguments",
+                                         "serve --bind"};
+
+}  // namespace
+
+TEST_CASE("every argument completes to something, or is free text on purpose",
+          "[commands][completion][names]") {
+    // The report (2026-09-24): "I need more thorough tab auto complete
+    // coverage across the application." 134 arguments said only what they
+    // were; most name something that exists -- a collection, a chat, a model,
+    // a run -- or take one of a known set of words. This holds the line: an
+    // untagged TEXT argument must be one of the reviewed free-text ones.
+    std::vector<std::pair<std::vector<std::string>, const apogee::commands::CommandSpec*>> nodes;
+    collect_paths(real_tree(), {}, nodes);
+    std::set<std::string> used_kinds;
+    std::vector<std::string> free_seen;
+    const auto consider = [&](const std::string& where, const apogee::commands::ValueSpec& value) {
+        if (value.kind == apogee::commands::ValueKind::Names) {
+            used_kinds.insert(value.source);
+        }
+        if (value.kind != apogee::commands::ValueKind::Text || value.type != "TEXT") {
+            return;  // named, chosen, a path, a backend -- or a number
+        }
+        INFO(where << " is free text: tag it, or add it to kFreeText on purpose");
+        CHECK(std::find(kFreeText.begin(), kFreeText.end(), where) != kFreeText.end());
+        free_seen.push_back(where);
+    };
+    for (const auto& [path, node] : nodes) {
+        for (const auto& [spelling, value] : node->values) {
+            consider(joined(path) + " " + spelling, value);
+        }
+        for (const apogee::commands::ValueSpec& value : node->positionals) {
+            consider(joined(path) + " " + value.hint.substr(0, value.hint.find(' ')), value);
+        }
+    }
+    // The list names only what is still free text: an entry for an argument
+    // that was tagged or removed is stale.
+    for (const std::string& entry : kFreeText) {
+        INFO(entry << " is on kFreeText but is not free text in the tree");
+        CHECK(std::find(free_seen.begin(), free_seen.end(), entry) != free_seen.end());
+    }
+    // And every name kind is declared somewhere: a kind nothing uses is a
+    // registration with no argument behind it.
+    for (const std::string_view kind : apogee::commands::kNameValues) {
+        INFO(kind);
+        CHECK(used_kinds.contains(std::string{kind}));
+    }
 }

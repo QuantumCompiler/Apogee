@@ -171,6 +171,10 @@ std::optional<InputFormat> input_format_from_string(std::string_view name) noexc
     return std::nullopt;
 }
 
+std::vector<std::string_view> format_names() {
+    return {to_string(OutputFormat::Text), to_string(OutputFormat::StreamJson)};
+}
+
 std::optional<OutputFormat> output_format_from_string(std::string_view name) noexcept {
     if (name == "text" || name.empty()) {
         return OutputFormat::Text;
