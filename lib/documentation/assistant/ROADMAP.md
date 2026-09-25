@@ -2,7 +2,7 @@
 
 How we work: features get discussed in chat, written up here (and in [SPEC.md](SPEC.md)), given their own document in [`backlog/`](../backlog/README.md) when they're specced, then an agent takes the backlog item and builds it straight from that document (there is no separate TODO file — the backlog is the queue). When work ships it's recorded in detail in [MILESTONES.md](MILESTONES.md); this file stays high-level — the running board of themes per release, plus what's next.
 
-**Version scheme:** feature releases are `v0.x.0`, patch releases are `v0.x.y`; development happens on a branch named for the release being built (currently `v0.1.2`) and merges into `stable` — **and that merge is the release** (decided 2026-09-22): the pipeline publishes whatever version `CMakeLists.txt` names, if it hasn't shipped already. Checked boxes are shipped; the detailed write-up of each is in MILESTONES.md.
+**Version scheme:** feature releases are `v0.x.0`, patch releases are `v0.x.y`; development happens on a branch named for the release being built (currently `v0.1.3`) and merges into `stable` — **and that merge is the release** (decided 2026-09-22): the pipeline publishes whatever version `CMakeLists.txt` names, if it hasn't shipped already. Checked boxes are shipped; the detailed write-up of each is in MILESTONES.md.
 
 ---
 
@@ -28,13 +28,9 @@ The first release, planned 2026-08-24 from Ommi's documentation (see [SPEC.md](S
 
 A maintenance release — nothing under `source/` changed; the binary is functionally identical to v0.1.0, rebuilt by a pipeline worth trusting. A merge into `stable` **is** now the release, with the version in `CMakeLists.txt` deciding which (an already-shipped version publishes nothing, so docs merges stay quiet); the version can no longer disagree with the tag (a local preflight, the workflow's gate job, and a PR-time `version bump` check); the tag and the release are created together after every blocking build passes, so a failed run strands nothing; the source-level suite — 1,411 cases, selected by construction rather than an exclusion list — gates all five platforms before anything is built for release; and the pipeline survives being re-run. The recorded cost: the 18 executable-spawning ctest entries (`cli.install_parity` among them) gate only `make test` now. The procedure lives in [DEVELOPER.md](DEVELOPER.md#cutting-a-release) → Cutting a release.
 
----
+### v0.1.2 — The terminal and the model directory *(released 2026-09-25 · [release notes](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.2))*
 
-## In progress
-
-### v0.1.2 — The terminal and the model directory
-
-Quality-of-life for the two places a local-model user actually lives: the chat terminal and the model files. Landed on the branch so far:
+Quality-of-life for the two places a local-model user actually lives: the chat terminal and the model files. Existing installs move their models into the new store with `apogee models migrate --yes`.
 
 - [x] **Completion at every depth** *(2026-09-23/24)* — shell completion now reads the whole live parser (every verb, alias and flag, at every depth), argument kinds are declared where each argument is added, and the 95 arguments that name something real complete to it; the stubs are exercised in the real shells.
 - [x] **The model store** *(2026-09-23)* — one directory per model, per format (`gguf/`, `safetensors/`), per set of weights named by the weights' own hash, declared once in `models/store.h`; `apogee models convert` (SafeTensors → GGUF through llama.cpp's vendored converter, image projector included); `models migrate` for existing installs; a pull that can no longer overwrite an earlier snapshot; training outputs land in the same structure.
@@ -42,11 +38,11 @@ Quality-of-life for the two places a local-model user actually lives: the chat t
 - [x] **Chat and terminal UX** *(2026-09-25)* — the wait after every chat answer removed, a hybrid model's failing second turn fixed, `models list` coloured by what a row is, and room around the banner and each question.
 - [x] **Terminal Markdown rendering** — backlog item 23, shipped 2026-09-25 *([Milestone G](MILESTONES.md#milestone-g--the-terminal-ux-layer))*: an answer's Markdown rendered as it streams — emphasis, headings, lists, quotes, fenced code, rules, links, tables — one open line redrawn in place and never the last column, while pipes, machine mode and the saved transcript keep the model's text byte for byte. Hand-written over md4c and no code highlighting yet (both the user's calls); `--raw` and `ui.markdown: false` switch it off.
 - [x] **Chat input completion** — backlog item 24, shipped 2026-09-25 *([Milestone H](MILESTONES.md#milestone-h--apogee-chat))*: Claude Code's input affordances in `apogee chat`. Typing `/` lists the commands as you type, each with a one-line description; a command's values follow it (backends after `/model`, retrievers after `/retriever`); `@` completes files and folders from the working directory; Tab takes the top row. The rows are the line editor's own (not a TUI), never reach the last column, and never outlive the line they belong to. One table now feeds `/help`, completion and dispatch, and a missing handler fails the build; `/retriever` and `/rerank` are listed for the first time. A piped chat is unchanged. A sent `@file` stays text until attachments (26d) land (the user's call).
-- [x] **Releases from the pull request's own build** *(2026-09-25, [Milestone K](MILESTONES.md#milestone-k--the-install-contract))*: a merge into `stable` no longer rebuilds anything, and no longer runs `release.yml`. CI packages every build as it runs. Once the pull request merges, `tag and release` checks those archives against the merged source, tags the version the executable reports, and publishes them. A dispatched rehearsal proves it before the merge, and a pushed tag remains the manual path. It is first exercised by this release's own merge. Before the pull request even exists, `make pr-ci` rehearses its CI run on the developer's machine: the test merge into `stable`, then the same jobs through the same scripts, for the host's target.
+- [x] **Releases from the pull request's own build** *(2026-09-25, [Milestone K](MILESTONES.md#milestone-k--the-install-contract))*: a merge into `stable` no longer rebuilds anything, and no longer runs `release.yml`. CI packages every build as it runs. Once the pull request merges, `tag and release` checks those archives against the merged source, tags the version the executable reports, and publishes them. A dispatched rehearsal proves it before the merge, and a pushed tag remains the manual path. Its first use was this release's own merge, which published all five archives from the pull request's run with nothing rebuilt. Before the pull request even exists, `make pr-ci` rehearses its CI run on the developer's machine: the test merge into `stable`, then the same jobs through the same scripts, for the host's target.
 
 ---
 
-## Up next
+## In progress
 
 ### v0.1.3 — Local agent tools + small-model depth
 
@@ -54,6 +50,12 @@ The two tracks specced 2026-09-25, eighteen backlog items in all — see the [`b
 
 - **Local agent tools** *(a spike split into six items, [25a–25f](../backlog/README.md#index))*: local models get files, the shell, git, notes, document search, page reading and web search — the tools every other backend already has. The spike found the gap (the llama.cpp backend never put tools into the prompt, so no local model was ever shown one) and measured the fix, llama.cpp's own chat layer linked in-process: 6 of 6 tasks on Qwen3.8-27B and Qwen3-VL-8B. In build order: **tool safety defaults** (fetch asks per new website, file tools start in the launch folder — closes an outbound-data exposure that exists today), **local tool calling** (the unlock), **hybrid prompt checkpoints** (Qwen3.5/3.8 stop re-reading the conversation every step), **tool ergonomics**, **web search through the user's own SearXNG** (revising the 2026-08-26 provider-search-only decision), and **`fetch_url` as a reader**. The user's calls: SearXNG, ask per website, the launch folder, and 8B-class models and up.
 - **Small-model depth** *(a review split into twelve items, [26a–26l](../backlog/README.md#index))*: getting the most out of small local models. **Automatic attachments** — files, folders, PDFs, images, audio and video attached to a chat, indexed with the embedding model, handed to the model each turn with citations; media read natively when the model can and through a helper model when not. **Helper-model roles** (vision, transcription, a utility model for chores). **Reliability** — grammar-constrained JSON, tool selection by relevance, sampling that actually reaches local models, thinking on/off/auto with a budget. **Speed and memory** — a default window sized to the machine, a persistent prompt cache, speculative decoding only if a clean measurement justifies it. **Memory across chats** — a per-turn context budget and automatic recall, never on `serve`. The user's calls: attachments kept with their chat and cached by hash, helper models used automatically, and external converters.
+
+---
+
+## Up next
+
+Nothing is prescribed past v0.1.3 yet. The next release's section opens here when its first item is specced.
 
 ## Unspecced ideas
 
