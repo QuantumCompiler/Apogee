@@ -41,7 +41,8 @@ Apogee/
 │       ├── apogee-backlog-item/        — Repo-local skill: take the next backlog item per the docs-first process
 │       ├── apogee-create-backlog-item/ — Repo-local skill: spec a new item into the backlog + index + roadmap
 │       ├── apogee-document-update/     — Repo-local skill: pre-MR docs pass — reconcile every doc against the branch diff
-│       └── apogee-pull-request/        — Repo-local skill: draft the MR description from the branch's docs evidence
+│       ├── apogee-pull-request/        — Repo-local skill: draft the MR description from the branch's docs evidence
+│       └── apogee-release-summary/     — Repo-local skill: draft a version's GitHub release notes in the published format
 ├── .gitattributes           — Every text file is LF on every platform (Windows checkouts had rewritten
 │                              the byte-exact shipped assets with CRLF, 2026-09-20)
 ├── .gitignore
