@@ -261,22 +261,22 @@ bool resolve_file(backends::HttpClient& client, HfRef& ref, std::string_view tok
     if (listing.gguf_files.empty()) {
         // Naming the conversion path matters: SPEC lists SafeTensors in scope,
         // so "no .gguf" alone reads as a limitation rather than as a step the
-        // user can take. Apogee does not run the converter itself -- it needs a
-        // Python environment with torch and transformers, which a C++ harness
-        // cannot assume is present and should not install on someone's behalf.
+        // user can take. The pull never converts on its own -- the converter
+        // needs torch and transformers, gigabytes a user installs on purpose
+        // (`train setup --with convert`), never a harness on their behalf.
         error = "'" + ref.repo_id() + "' contains no .gguf file.\n\n";
         if (listing.has_safetensors) {
             error +=
-                "It is a SafeTensors repository. Apogee runs GGUF, so it needs converting "
-                "first:\n"
-                "  python convert_hf_to_gguf.py --outfile model.gguf <the downloaded repo>\n"
-                "(that script ships with llama.cpp and needs Python with torch and "
-                "transformers)\n\n"
-                "To download the full-weight snapshot itself -- for fine-tuning -- pass "
-                "--safetensors:\n"
+                "It is a SafeTensors repository. Apogee runs GGUF, so pull the snapshot "
+                "and convert it:\n"
                 "  apogee models pull " +
                 ref.repo_id() +
-                " --safetensors\n\n"
+                " --safetensors\n"
+                "  apogee models convert " +
+                ref.repo_id() + " " + repo_directory_name(ref) +
+                ".gguf\n"
+                "(conversion runs in Apogee's Python environment: 'apogee train setup "
+                "--with convert' installs it once)\n\n"
                 "Or look for a community GGUF conversion -- searching the model's name with "
                 "\"GGUF\" usually finds one.";
         } else {

@@ -34,7 +34,7 @@ LINT_CXX     ?= $(dir $(CLANG_TIDY))clang++
 # formatted or linted.
 SOURCES := $(shell find source tests \( -name '*.cpp' -o -name '*.h' \) 2>/dev/null)
 
-.PHONY: help build install install-completions install-zsh-completion test clean fresh format format-check lint no-llama all release release-check
+.PHONY: help build install install-completions install-zsh-completion test clean fresh format format-check lint no-llama all release release-check pr-ci pr-ci-clean
 
 help:
 	@echo "Apogee CLI — build wrapper (repo-wide entry point: lib/scripts/cicd.sh)"
@@ -52,6 +52,10 @@ help:
 	@echo "  no-llama      The fast developer build: everything except llama.cpp (ON by default)"
 	@echo "  clean         Remove this preset's build directory"
 	@echo "  fresh         Clean-room clone-and-build of the current branch"
+	@echo "  pr-ci         Rehearse the CI run a pull request into stable starts, on this host:"
+	@echo "                  the test merge, version bump, clone, unit tests, build + package"
+	@echo "                  (UNCOMMITTED=1 includes the working tree; BASE=<ref> to merge elsewhere)"
+	@echo "  pr-ci-clean   Remove pr-ci's worktrees, builds and logs"
 	@echo ""
 	@echo "Cutting a release (DEVELOPER.md -> Cutting a release):"
 	@echo "  release-check Preflight a release -- checks only, pushes nothing"
@@ -140,6 +144,24 @@ install-zsh-completion:
 test:
 	@$(CICD) --platform $$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')-$$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/;s/amd64/x64/') --test --jobs $(JOBS)
 
+# Rehearse the CI run a pull request into `stable` starts: GitHub's test merge
+# of this branch into stable, then ci.yml's pull-request jobs on it -- version
+# bump, clone llama.cpp, unit tests, build and package -- for this host's
+# target, through the same scripts the workflow calls. Thin by the rule above:
+# the rehearsal is lib/scripts/pr-ci.sh. BASE=<ref> merges into another base;
+# UNCOMMITTED=1 includes the working tree's changes, which a PR would not.
+#
+#     make pr-ci                 # exits non-zero if CI would fail
+#     make pr-ci UNCOMMITTED=1   # as if everything here were committed
+#     make pr-ci-clean           # its worktrees are gigabytes once built
+PR_CI := ../../scripts/pr-ci.sh
+
+pr-ci:
+	@$(PR_CI) --jobs $(JOBS) $(if $(BASE),--base $(BASE)) $(if $(UNCOMMITTED),--uncommitted)
+
+pr-ci-clean:
+	@$(PR_CI) --clean
+
 # The fast developer build: everything except llama.cpp, which is ON by
 # default and is most of the compile time. The llamacpp backend then answers
 # "not built in"; every other package builds and tests as usual.
@@ -180,16 +202,19 @@ lint:
 # ---------------------------------------------------------------------------
 # Cutting a release
 #
-# Thin by the same rule as the rest of this file: the release is built and
-# published by .github/workflows/release.yml on GitHub's runners, and nothing
-# here builds, packages or uploads anything.
+# Thin by the same rule as the rest of this file: the tag this pushes runs
+# .github/workflows/release.yml, which builds and publishes on GitHub's
+# runners, and nothing here builds, packages or uploads anything.
 #
 # Since 2026-09-22 this is the ESCAPE HATCH, not the everyday path: a merge
-# into stable publishes the version CMakeLists.txt names, so the normal way to
-# cut a release is to bump that version and merge the PR. This target is for a
-# re-cut, or for tagging a commit that is not the tip of a merge. It remains
-# worth keeping because the preflight below is the same set of mistakes either
-# path can make, and it catches them before the remote hears about them.
+# into stable publishes the version CMakeLists.txt names -- since 2026-09-25
+# from the merged pull request's own CI archives (ci.yml's `tag and release`)
+# -- so the normal way to cut a release is to bump that version and merge the
+# PR. This target is for a re-cut, for a merge whose own archives could not be
+# released (the tree check refused them, or they expired), or for tagging a
+# commit that is not the tip of a merge. It remains worth keeping because the
+# preflight below is the same set of mistakes either path can make, and it
+# catches them before the remote hears about them.
 #
 #     make release-check VERSION=0.1.1   # preflight only, pushes nothing
 #     make release VERSION=0.1.1         # preflight, confirm, tag, push

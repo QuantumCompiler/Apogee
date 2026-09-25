@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <regex>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -46,11 +47,14 @@ struct RealModel {
     /// order-dependent test is worse than no test.
     std::filesystem::path dir = std::filesystem::temp_directory_path() /
                                 ("apogee-models-test-" + std::to_string(counter()));
-    std::filesystem::path path = dir / "real.gguf";
+    /// Where the model store keeps a GGUF: `<model>/gguf/<id>/<file>`.
+    std::filesystem::path path = dir / "m" / "gguf" / "111111111111" / "real.gguf";
+    /// What `models list` calls it: the handle the other verbs take.
+    std::string handle = "m/gguf/111111111111";
 
     explicit RealModel(std::string_view architecture) {
         std::error_code code;
-        std::filesystem::create_directories(dir, code);
+        std::filesystem::create_directories(path.parent_path(), code);
         const std::string bytes = apogee::testing::minimal_gguf(architecture);
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         REQUIRE(out.good());
@@ -282,8 +286,8 @@ TEST_CASE("a model on disk is listed even when no backend points at it",
     // built only from `backends:` cannot see the thing the user just fetched.
     const RealModel model{"llama"};
     const std::vector<ModelRow> rows = build_model_rows(Config{}, model.dir);
-    const auto match = std::ranges::find_if(
-        rows, [&](const ModelRow& row) { return row.model == model.path.filename().string(); });
+    const auto match =
+        std::ranges::find_if(rows, [&](const ModelRow& row) { return row.model == model.handle; });
     REQUIRE(match != rows.end());
 
     CHECK(match->backend == "(not configured)");
@@ -308,8 +312,8 @@ TEST_CASE("the verified column reports what was checked, never the word verified
     REQUIRE(apogee::models::write_sidecar(model.path, sidecar));
 
     const std::vector<ModelRow> rows = build_model_rows(Config{}, model.dir);
-    const auto match = std::ranges::find_if(
-        rows, [&](const ModelRow& row) { return row.model == model.path.filename().string(); });
+    const auto match =
+        std::ranges::find_if(rows, [&](const ModelRow& row) { return row.model == model.handle; });
     REQUIRE(match != rows.end());
 
     CHECK(match->verified.find("no digest published") != std::string::npos);
@@ -424,26 +428,31 @@ TEST_CASE("status on an empty config reports unset rather than a blank name",
     CHECK(status.find("(unset") != std::string::npos);
 }
 
-TEST_CASE(
-    "a SafeTensors snapshot is listed as trainable, not runnable, with its architecture "
-    "and record",
-    "[commands][models][listing][snapshot]") {
+TEST_CASE("a SafeTensors snapshot is listed by its state, architecture and record, with no note",
+          "[commands][models][listing][snapshot]") {
     const RealModel model{"llama"};
-    const std::filesystem::path snapshot = model.dir / "owner--repo";
+    const std::filesystem::path snapshot =
+        model.dir / "owner--repo" / "safetensors" / "aaaaaaaaaaaa";
     std::filesystem::create_directories(snapshot);
     std::ofstream{snapshot / "config.json"} << R"({"architectures": ["Qwen2ForCausalLM"]})";
     std::ofstream{snapshot / "model.safetensors"} << "weights";
+    const auto is_snapshot_row = [](const ModelRow& row) {
+        return row.model == "owner--repo/safetensors/aaaaaaaaaaaa";
+    };
 
     std::vector<ModelRow> rows = build_model_rows(Config{}, model.dir);
-    auto match =
-        std::ranges::find_if(rows, [](const ModelRow& row) { return row.model == "owner--repo/"; });
+    auto match = std::ranges::find_if(rows, is_snapshot_row);
     REQUIRE(match != rows.end());
     CHECK(match->backend == "(not configured)");
     CHECK(match->state == "safetensors");
     CHECK(match->architecture == "Qwen2");
     CHECK(match->provenance == "local");
     CHECK(match->verified == "no record");
-    CHECK(match->note.find("trainable") != std::string::npos);
+    // Its state column says what it is. The line that used to sit under every
+    // snapshot ("full weights, trainable -- ... makes a GGUF") was noise, and
+    // was asked to go (2026-09-25).
+    CHECK(match->note.empty());
+    CHECK_FALSE(match->attention);
 
     apogee::models::Snapshot record;
     record.ref = "owner/repo";
@@ -451,23 +460,100 @@ TEST_CASE(
     record.files.push_back({"model.safetensors", 7, "abc"});
     REQUIRE(apogee::models::write_snapshot(snapshot, record));
     rows = build_model_rows(Config{}, model.dir);
-    match =
-        std::ranges::find_if(rows, [](const ModelRow& row) { return row.model == "owner--repo/"; });
+    match = std::ranges::find_if(rows, is_snapshot_row);
     REQUIRE(match != rows.end());
     CHECK(match->provenance == "huggingface");
     CHECK(match->verified == "1 file(s) on record");
 
-    // paths.hf_dir is a second root.
+    // paths.hf_dir is where SafeTensors sets live when it is set.
     const apogee::testing::TempDir hf{"models-hf-" + std::to_string(std::random_device{}())};
-    const std::filesystem::path other = hf.path() / "org--base";
+    const std::filesystem::path other = hf.path() / "org--base" / "safetensors" / "bbbbbbbbbbbb";
     std::filesystem::create_directories(other);
     std::ofstream{other / "config.json"} << R"({"model_type": "gemma3"})";
     std::ofstream{other / "w.safetensors"} << "w";
     Config config;
     config.paths.hf_dir = hf.path().string();
     rows = build_model_rows(config, model.dir);
-    match =
-        std::ranges::find_if(rows, [](const ModelRow& row) { return row.model == "org--base/"; });
+    match = std::ranges::find_if(rows, [](const ModelRow& row) {
+        return row.model == "org--base/safetensors/bbbbbbbbbbbb";
+    });
     REQUIRE(match != rows.end());
     CHECK(match->architecture == "gemma3");
+}
+
+TEST_CASE("a model still in the flat layout is listed with the migration named",
+          "[commands][models][listing][legacy]") {
+    const apogee::testing::TempDir models{"models-flat-" + std::to_string(std::random_device{}())};
+    std::ofstream{models.path() / "old.gguf", std::ios::binary}
+        << apogee::testing::minimal_gguf("llama");
+    const std::vector<ModelRow> rows = build_model_rows(Config{}, models.path());
+    const auto match =
+        std::ranges::find_if(rows, [](const ModelRow& row) { return row.model == "old.gguf"; });
+    REQUIRE(match != rows.end());
+    CHECK(match->state == "old layout");
+    CHECK(match->note.find("apogee models migrate") != std::string::npos);
+}
+
+TEST_CASE("a row says whether it is configured and whether it needs attention",
+          "[commands][models][listing][color]") {
+    const RealModel stored{"llama"};
+    Config config = sample_config();
+    config.backends["keyed"] = config.backends["cloud"];
+    config.backends["keyed"].api_key = "sk-test";
+    const apogee::secrets::EnvSnapshot empty;
+    const std::vector<ModelRow> rows = build_model_rows(config, stored.dir, {}, &empty);
+
+    // Configured and working.
+    CHECK(row_for(rows, "keyed").configured);
+    CHECK_FALSE(row_for(rows, "keyed").attention);
+    // Configured, and each needing something: a key, a file, a model_path.
+    for (const std::string_view broken : {"cloud", "embedder", "unset"}) {
+        INFO(broken);
+        CHECK(row_for(rows, broken).configured);
+        CHECK(row_for(rows, broken).attention);
+    }
+    // On disk, fine, and no backend points at it.
+    CHECK_FALSE(row_for(rows, "(not configured)").configured);
+    CHECK_FALSE(row_for(rows, "(not configured)").attention);
+}
+
+TEST_CASE("rows are coloured by what they are, and align the same without colour",
+          "[commands][models][listing][color]") {
+    // Asked for directly (2026-09-25): configured backends in Apogee's cyan,
+    // what no backend points at in another colour. Attention is yellow either
+    // way -- a configured backend with no file is not one to look healthy.
+    const auto row = [](std::string backend, bool configured, bool attention, std::string note) {
+        ModelRow out;
+        out.backend = std::move(backend);
+        out.type = "llamacpp";
+        out.model = "m.gguf";
+        out.configured = configured;
+        out.attention = attention;
+        out.note = std::move(note);
+        return out;
+    };
+    const std::vector<ModelRow> rows{row("ready", true, false, ""),
+                                     row("broken", true, true, "no model_path set"),
+                                     row("(not configured)", false, false, "")};
+
+    const std::string plain = render_model_table(rows);
+    CHECK(plain.find('\033') == std::string::npos);
+
+    const std::string coloured = render_model_table(rows, apogee::ansi::Style{true});
+    const std::string cyan{apogee::ansi::color_code(apogee::ansi::Color::Cyan)};
+    const std::string yellow{apogee::ansi::color_code(apogee::ansi::Color::Yellow)};
+    const std::string dim{apogee::ansi::kDim};
+    const auto line_starting = [&coloured](std::string_view text) {
+        const std::size_t at = coloured.find(text);
+        REQUIRE(at != std::string::npos);
+        return coloured.substr(coloured.rfind('\n', at) + 1, at - coloured.rfind('\n', at) - 1);
+    };
+    CHECK(line_starting("ready") == cyan);
+    CHECK(line_starting("broken") == yellow);
+    CHECK(line_starting("    no model_path set") == yellow);  // a note is its row's colour
+    CHECK(line_starting("(not configured)") == dim);
+    CHECK(coloured.find("BACKEND") == 0);  // the header stays plain
+
+    // Colour is laid over the text, never counted into a column's width.
+    CHECK(std::regex_replace(coloured, std::regex{"\033\\[[0-9;]*m"}, "") == plain);
 }

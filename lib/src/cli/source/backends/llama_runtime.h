@@ -56,7 +56,14 @@ public:
 
     /// Drops every cached position at or after `position`, so the next decode
     /// re-establishes from there. `position == 0` clears the cache entirely.
-    virtual void trim_to(std::int64_t position) = 0;
+    ///
+    /// Returns where the cache now ends -- `position`, or 0. A recurrent or
+    /// hybrid model (Qwen3.5's linear-attention layers, Mamba, RWKV) keeps a
+    /// running state rather than one entry per token, and llama.cpp can rewind
+    /// it only a few tokens; asked for more it refuses and changes nothing.
+    /// The cache is then cleared, and the caller decodes the whole prompt
+    /// from 0 -- slower, where decoding on from `position` would fail.
+    [[nodiscard]] virtual std::int64_t trim_to(std::int64_t position) = 0;
 
     /// Total tokens this context has ever decoded.
     ///

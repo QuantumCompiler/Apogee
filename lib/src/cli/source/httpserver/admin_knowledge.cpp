@@ -279,7 +279,7 @@ HttpResponse admin_create_knowledge(const AdminConfigContext& context, Handler& 
     return json_response(201, envelope(result));
 }
 
-HttpResponse admin_refine_knowledge(const AdminConfigContext& context, Handler& plane,
+HttpResponse admin_refine_knowledge(const AdminConfigContext& /*context*/, Handler& plane,
                                     const HttpRequest& request) {
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
     if (body.is_discarded() || !body.is_object()) {

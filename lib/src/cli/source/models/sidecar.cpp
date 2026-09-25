@@ -2,7 +2,13 @@
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
+#include <cstdio>
+#include <ctime>
 #include <fstream>
+#include <iomanip>
+#include <memory>
+#include <sstream>
 #include <system_error>
 
 #include "models/sha256.h"
@@ -11,6 +17,23 @@ namespace apogee::models {
 namespace {
 
 constexpr std::size_t kHashChunk = 1U << 20U;  // 1 MiB
+
+/// Closes a C stream: the one owner of a FILE* here.
+struct FileCloser {
+    void operator()(std::FILE* file) const noexcept {
+        std::fclose(file);  // NOLINT(cppcoreguidelines-owning-memory): the deleter is the owner
+    }
+};
+
+/// `path`, opened for binary reading, or null. The wide spelling on Windows,
+/// where a narrow one cannot name every path.
+[[nodiscard]] std::FILE* open_for_reading(const std::filesystem::path& path) {
+#if defined(_WIN32)
+    return _wfopen(path.c_str(), L"rb");  // NOLINT(cppcoreguidelines-owning-memory)
+#else
+    return std::fopen(path.c_str(), "rb");  // NOLINT(cppcoreguidelines-owning-memory)
+#endif
+}
 
 }  // namespace
 
@@ -161,24 +184,46 @@ bool write_sidecar(const std::filesystem::path& model, const Sidecar& sidecar) {
     return true;
 }
 
-std::string file_sha256(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
+std::string file_sha256(const std::filesystem::path& path, const HashProgress& progress) {
+    // C stdio, unbuffered, in 1 MiB reads: ifstream's copy through its own
+    // buffer held the hash to 1.3 GB/s where the hash itself does 2.
+    const std::unique_ptr<std::FILE, FileCloser> file{open_for_reading(path)};
+    if (file == nullptr) {
         return {};
     }
+    std::setvbuf(file.get(), nullptr, _IONBF, 0);
     Sha256 hash;
     std::string chunk(kHashChunk, '\0');
-    while (in) {
-        in.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
-        const std::streamsize got = in.gcount();
-        if (got > 0) {
-            hash.update(std::string_view{chunk.data(), static_cast<std::size_t>(got)});
+    std::int64_t hashed = 0;
+    for (;;) {
+        const std::size_t got = std::fread(chunk.data(), 1, chunk.size(), file.get());
+        if (got == 0) {
+            break;
+        }
+        hash.update(std::string_view{chunk.data(), got});
+        hashed += static_cast<std::int64_t>(got);
+        if (progress && !progress(hashed)) {
+            return {};
         }
     }
-    if (in.bad()) {
+    if (std::ferror(file.get()) != 0) {
         return {};
     }
     return hash.hex_digest();
+}
+
+std::string now_rfc3339() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t as_time = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+#if defined(_WIN32)
+    gmtime_s(&utc, &as_time);
+#else
+    gmtime_r(&as_time, &utc);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+    return out.str();
 }
 
 }  // namespace apogee::models

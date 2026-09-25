@@ -111,9 +111,14 @@ agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
                           (target.empty() ? "" : " -> " + std::string{target}));
         std::cerr << style.dim("Allow? [y]es / [n]o / [a]lways / [s]ession: ") << std::flush;
         std::string line;
-        if (!std::getline(std::cin, line)) {
-            std::cerr << "\n";
-            return false;
+        {
+            // A turn keeps typing hidden (platform::TypeaheadGuard); the answer
+            // to this question must be seen as it is typed.
+            const platform::EchoPause visible;
+            if (!std::getline(std::cin, line)) {
+                std::cerr << "\n";
+                return false;
+            }
         }
         std::string note;
         const bool allowed = apply_answer(parse_answer(line), tool, config_path, approvals, note);

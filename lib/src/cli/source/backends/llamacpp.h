@@ -213,6 +213,16 @@ private:
     [[nodiscard]] harness::ChatResponse run(const harness::ChatRequest& request,
                                             const harness::StreamOptions& options);
 
+    /// How many tokens `request` may generate: its own cap, else the backend's.
+    [[nodiscard]] std::int64_t generation_limit(const harness::ChatRequest& request) const;
+
+    /// The window a side request's throwaway context gets: its prompt and its
+    /// cap, not the session's whole window. Left at the session's size, every
+    /// title allocated the model's full trained window -- 256K positions on a
+    /// Qwen 3.8, gigabytes of cache -- to hold a few hundred tokens.
+    [[nodiscard]] std::int64_t side_context_size(const harness::ChatRequest& request,
+                                                 std::size_t prompt_tokens) const;
+
     /// One turn's generated output.
     struct Generation {
         std::string text;

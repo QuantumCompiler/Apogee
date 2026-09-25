@@ -205,6 +205,16 @@ std::string DatasetStore::remove(std::string_view name) const {
     return {};
 }
 
+std::span<const std::string_view> create_source_names() noexcept {
+    return kSourceNames;
+}
+
+std::span<const std::string_view> prepare_formats() noexcept {
+    static constexpr std::array<std::string_view, 5> kFormats{"alpaca", "sharegpt", "chatml",
+                                                              "oasst", "prompt-completion"};
+    return kFormats;
+}
+
 std::optional<CreateSource> create_source_from_string(std::string_view name) noexcept {
     for (std::size_t i = 0; i < kSourceNames.size(); ++i) {
         if (kSourceNames.at(i) == name) {

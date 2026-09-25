@@ -11,6 +11,9 @@ namespace {
 
 /// Reads one line from stdin. Returns false on EOF.
 bool read_line(std::string& line) {
+    // A turn keeps typing hidden (platform::TypeaheadGuard); an answer must be
+    // seen as it is typed.
+    const platform::EchoPause visible;
     return static_cast<bool>(std::getline(std::cin, line));
 }
 

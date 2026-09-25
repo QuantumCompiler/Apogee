@@ -146,6 +146,11 @@ public:
 [[nodiscard]] std::string set_backend_model_path(std::string_view content, std::string_view name,
                                                  std::string_view path);
 
+/// The same edit for `mmproj_path`, the vision projector a llamacpp model
+/// reads images with. Placed after `model_path` when the entry has none yet.
+[[nodiscard]] std::string set_backend_mmproj_path(std::string_view content, std::string_view name,
+                                                  std::string_view path);
+
 /// Field names accepted by set_models_role.
 [[nodiscard]] std::vector<std::string_view> models_role_fields();
 

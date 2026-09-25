@@ -185,6 +185,13 @@ struct ChatRequest {
         /// state, and it may run concurrently with a real turn.
         bool side_request = false;
 
+        /// Asks for the answer without the model reasoning first, where its
+        /// family has a switch for that (a local Qwen's closed think block).
+        /// For a request whose answer needs no working -- a title -- and on a
+        /// thinking model the reasoning would cost far more than the answer.
+        /// A provider with no such switch ignores it.
+        bool skip_reasoning = false;
+
         /// When set, asks the provider to constrain its answer to this JSON
         /// Schema. Providers that cannot leave it alone and the caller's
         /// prose-parsing fallback applies.

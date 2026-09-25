@@ -74,6 +74,9 @@ struct KeyResolution {
 /// or nullopt for a type that takes no key.
 [[nodiscard]] std::optional<std::string> slot_name(harness::BackendType type);
 
+/// The slot names `slot_type` accepts, for completion.
+[[nodiscard]] std::span<const std::string_view> slot_names();
+
 /// Parses a slot name. Returns the type for `anthropic`/`openai`/`google`;
 /// nullopt otherwise -- including for a vendor-CLI type, which is a real
 /// backend type but never a slot.

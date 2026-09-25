@@ -822,10 +822,13 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         "build",
         "Extract entities and relations from a collection's or a named graph's stale chunks");
     build->add_option("NAME", b->name, "A named graph (a graphs: entry) or a collection")
+        ->type_name(kGraphValue)
         ->required();
-    build->add_option("-m,--model", b->model,
-                      "The extraction backend (default: the entry's extract_backend, then the "
-                      "extraction role, then the default -- a metered default is refused)");
+    build
+        ->add_option("-m,--model", b->model,
+                     "The extraction backend (default: the entry's extract_backend, then the "
+                     "extraction role, then the default -- a metered default is refused)")
+        ->type_name(kBackendValue);
     build->add_flag("--dry-run", b->dry_run,
                     "Print every chunk's extraction and a summary; store nothing");
     build->add_flag("--force", b->force, "Re-extract every source, stale or not");
@@ -842,7 +845,9 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
     auto s_name = std::make_shared<std::string>();
     CLI::App* stats =
         cmd->add_subcommand("stats", "Show a graph's counts, coverage, and build state");
-    stats->add_option("NAME", *s_name, "A named graph or a collection")->required();
+    stats->add_option("NAME", *s_name, "A named graph or a collection")
+        ->type_name(kGraphValue)
+        ->required();
     stats->callback([&context, s_name]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
@@ -868,7 +873,9 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
     auto sh_chunks = std::make_shared<int>(3);
     CLI::App* show =
         cmd->add_subcommand("show", "One entity: its relations and the chunks that support it");
-    show->add_option("NAME", *sh_name, "A named graph or a collection")->required();
+    show->add_option("NAME", *sh_name, "A named graph or a collection")
+        ->type_name(kGraphValue)
+        ->required();
     show->add_option("ENTITY", *sh_entity, "The entity's name (case-insensitive), or a record id")
         ->required();
     show->add_option("--chunks", *sh_chunks, "Supporting chunks to print (default 3; 0 = all)");
@@ -917,9 +924,13 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         cmd->add_subcommand("communities",
                             "Detect and summarise thematic communities; each summary becomes a "
                             "retrievable chunk");
-    communities->add_option("NAME", c->name, "A named graph or a collection")->required();
-    communities->add_option("-m,--model", c->model,
-                            "The summariser backend (default: as graph build resolves it)");
+    communities->add_option("NAME", c->name, "A named graph or a collection")
+        ->type_name(kGraphValue)
+        ->required();
+    communities
+        ->add_option("-m,--model", c->model,
+                     "The summariser backend (default: as graph build resolves it)")
+        ->type_name(kBackendValue);
     communities->add_flag("--force", c->force,
                           "Re-summarise every community, membership unchanged or not");
     communities->add_option("--min-size", c->min_size,
@@ -991,7 +1002,9 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
     auto d = std::make_shared<DedupeFlags>();
     CLI::App* dedupe = cmd->add_subcommand(
         "dedupe", "Merge same-type entities whose vectors say they are the same thing");
-    dedupe->add_option("NAME", d->name, "A named graph or a collection")->required();
+    dedupe->add_option("NAME", d->name, "A named graph or a collection")
+        ->type_name(kGraphValue)
+        ->required();
     dedupe->add_option("--threshold", d->threshold,
                        "Cosine similarity at or above which two entities merge (default 0.92)");
     dedupe->add_flag("--dry-run", d->dry_run, "Print the merge groups; change nothing");
@@ -1042,7 +1055,9 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         "delete",
         "Clear a collection's graph, or remove a named graph's database (config "
         "entries and chunks stay)");
-    del->add_option("NAME", *d_name, "A named graph or a collection")->required();
+    del->add_option("NAME", *d_name, "A named graph or a collection")
+        ->type_name(kGraphValue)
+        ->required();
     del->callback([&context, d_name]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);

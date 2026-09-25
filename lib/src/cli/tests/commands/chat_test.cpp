@@ -1,15 +1,25 @@
 #include "commands/chat.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <memory>
+#include <random>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include "backends/mock.h"
 #include "commands/chat_history.h"
+#include "commands/registry.h"
+#include "commands/root.h"
 #include "harness/config.h"
 #include "logger/operational.h"
+#include "logger/session.h"
 #include "support/env_guard.h"
 
 using apogee::commands::format_session_info;
@@ -93,6 +103,58 @@ TEST_CASE("a runaway title is truncated without breaking a codepoint", "[chat][t
     }
 }
 
+TEST_CASE("a title is the first line with anything on it", "[chat][title]") {
+    // A reasoning model's answer begins with the blank lines its closed think
+    // block leaves. Taking the first line outright gave "" every time -- and
+    // an empty title was asked for again after every turn.
+    CHECK(sanitize_title("\n\nRefactoring the parser") == "Refactoring the parser");
+    CHECK(sanitize_title("  \r\n\t\nA title\nwhy I chose it") == "A title");
+    CHECK(sanitize_title("**Bold Title**") == "Bold Title");
+    CHECK(sanitize_title("# Heading Title") == "Heading Title");
+    CHECK(sanitize_title("\n\n\n").empty());
+}
+
+TEST_CASE("a truncated title never keeps half a codepoint", "[chat][title]") {
+    // The cut backed up over continuation bytes and kept the lead byte they
+    // belonged to: a title ending in a stray 0xC3 or 0xE2.
+    CHECK(sanitize_title(std::string(59, 'a') + "\xC3\xA9\xC3\xA9") ==
+          std::string(59, 'a') + "\xE2\x80\xA6");
+    CHECK(sanitize_title(std::string(58, 'a') + "\xE2\x82\xAC\xE2\x82\xAC") ==
+          std::string(58, 'a') + "\xE2\x80\xA6");
+}
+
+TEST_CASE("the title request carries the questions, not the answers", "[chat][title]") {
+    // The answers are most of a conversation's length and none of what it is
+    // about; sending them made a title cost a full re-read.
+    apogee::logger::Session session;
+    session.backend = "local";
+    session.messages = {ChatMessage::system("be terse"), ChatMessage::user("How do I parse YAML?"),
+                        ChatMessage::assistant(std::string(5000, 'x')),
+                        ChatMessage::user("And JSON?")};
+    const apogee::harness::ChatRequest request = apogee::commands::title_request(session);
+    CHECK(request.model == "local");
+    REQUIRE(request.messages.size() == 1);
+    const std::string text = request.messages.front().content.plain_text();
+    CHECK(text.find(apogee::commands::title_prompt()) != std::string::npos);
+    CHECK(text.find("How do I parse YAML?") != std::string::npos);
+    CHECK(text.find("And JSON?") != std::string::npos);
+    CHECK(text.find("xxxx") == std::string::npos);
+    CHECK(text.find("be terse") == std::string::npos);
+    // Cheap to run: no history of its own, no reasoning first, a small cap.
+    CHECK(request.transient.side_request);
+    CHECK(request.transient.skip_reasoning);
+    REQUIRE(request.max_tokens.has_value());
+    CHECK(*request.max_tokens <= 64);
+
+    // However long the conversation, the request stays small.
+    session.messages.clear();
+    for (int i = 0; i < 100; ++i) {
+        session.messages.push_back(ChatMessage::user(std::string(1000, 'q')));
+    }
+    CHECK(apogee::commands::title_request(session).messages.front().content.plain_text().size() <
+          2000);
+}
+
 TEST_CASE("the title prompt asks for a title and nothing else", "[chat][title]") {
     const std::string prompt = apogee::commands::title_prompt();
     CHECK(prompt.find("title") != std::string::npos);
@@ -153,4 +215,94 @@ TEST_CASE("logging never throws, even with nowhere to write", "[chat][log]") {
     // conversation.
     const apogee::testing::EnvGuard home{"APOGEE_HOME", "/proc/nonexistent/cannot/write"};
     CHECK_NOTHROW(apogee::logger::log(apogee::logger::Level::Info, "test", "message"));
+}
+
+// ---------------------------------------------------------------------------
+// Auto-titling, through the real command
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// `apogee chat` in process on a scripted mock, fed `input` as its stdin.
+struct ScriptedChat {
+    apogee::testing::TempDir home{"chat-title-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    std::filesystem::path config_path = home.path() / "config" / "config.yaml";
+
+    explicit ScriptedChat(const std::vector<std::string>& replies) {
+        nlohmann::json turns = nlohmann::json::array();
+        for (const std::string& reply : replies) {
+            turns.push_back({{"text", reply}});
+        }
+        const std::filesystem::path script = home.path() / "script.json";
+        std::filesystem::create_directories(config_path.parent_path());
+        std::ofstream{script, std::ios::binary} << nlohmann::json{{"turns", turns}}.dump();
+        std::ofstream{config_path, std::ios::binary}
+            << "models:\n  default: scripted\nbackends:\n  scripted:\n    type: mock\n"
+               "    model_path: "
+            << script.string() << "\n";
+    }
+
+    [[nodiscard]] apogee::logger::Session run(std::string_view input) const {
+        std::ostringstream out;
+        std::ostringstream err;
+        std::istringstream fed{std::string{input}};
+        std::streambuf* old_out = std::cout.rdbuf(out.rdbuf());
+        std::streambuf* old_err = std::cerr.rdbuf(err.rdbuf());
+        std::streambuf* old_in = std::cin.rdbuf(fed.rdbuf());
+        int code = -1;
+        {
+            apogee::commands::RootCommand root{apogee::commands::default_registry()};
+            const std::string path = config_path.string();
+            std::vector<const char*> argv{"apogee", "--config", path.c_str(), "chat"};
+            code = root.run(static_cast<int>(argv.size()), argv.data());
+        }
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+        std::cin.rdbuf(old_in);
+        std::cin.clear();
+        INFO(err.str());
+        REQUIRE(code == 0);
+        const std::vector<apogee::logger::Session> sessions = apogee::logger::list_sessions();
+        REQUIRE(sessions.size() == 1);
+        return sessions.front();
+    }
+};
+
+/// The assistant's replies in `session`, in order.
+[[nodiscard]] std::vector<std::string> replies(const apogee::logger::Session& session) {
+    std::vector<std::string> out;
+    for (const ChatMessage& message : session.messages) {
+        if (message.role == apogee::harness::Role::Assistant) {
+            out.push_back(message.content.plain_text());
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("the first exchange titles the conversation, between turns", "[chat][title][cli]") {
+    // The title runs in the background while the next question is typed, and
+    // settles before that question reaches the model: the mock answers in
+    // script order, so the second reply being the second answer proves the
+    // title took exactly its one turn, in between. The leading blank lines are
+    // what a reasoning model's closed think block leaves.
+    const ScriptedChat chat{{"first answer", "\n\n**Parsing Config Files**", "second answer"}};
+    const apogee::logger::Session session = chat.run("first question\nsecond question\n");
+    CHECK(session.title == "Parsing Config Files");
+    CHECK(replies(session) == std::vector<std::string>{"first answer", "second answer"});
+}
+
+TEST_CASE("a title that comes back empty is not asked for again", "[chat][title][cli]") {
+    // It was asked for after EVERY turn, each time re-reading the whole
+    // conversation: the wait before the next prompt grew with every answer.
+    // Were it asked again after turn two, it would take "third answer" -- and
+    // title the conversation with it.
+    const ScriptedChat chat{{"first answer", "\n\n", "second answer", "third answer"}};
+    const apogee::logger::Session session =
+        chat.run("first question\nsecond question\nthird question\n");
+    CHECK(session.title.empty());
+    CHECK(replies(session) ==
+          std::vector<std::string>{"first answer", "second answer", "third answer"});
 }

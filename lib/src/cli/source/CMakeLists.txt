@@ -75,6 +75,8 @@ add_library(apogee_core STATIC
     training/store.cpp
     training/promote.h
     training/promote.cpp
+    training/convert.h
+    training/convert.cpp
     training/pipeline.h
     training/pipeline.cpp
     training/regime.h
@@ -83,8 +85,16 @@ add_library(apogee_core STATIC
     training/cycle.cpp
     models/quantize.h
     models/quantize.cpp
+    models/convert.h
+    models/convert.cpp
+    models/store.h
+    models/store.cpp
+    models/migrate.h
+    models/migrate.cpp
     commands/models_pull.h
     commands/models_pull.cpp
+    commands/models_migrate.h
+    commands/models_migrate.cpp
     commands/embed.h
     commands/embed.cpp
     commands/models.h
@@ -100,6 +110,7 @@ add_library(apogee_core STATIC
     commands/check.h
     commands/complete_protocol.h
     commands/complete_protocol.cpp
+    commands/complete_sources.cpp
     commands/uninstall.h
     commands/uninstall.cpp
     commands/check.cpp
@@ -113,10 +124,16 @@ add_library(apogee_core STATIC
     commands/terminal.cpp
     commands/status_line.h
     commands/status_line.cpp
+    commands/download_progress.h
+    commands/download_progress.cpp
+    commands/interrupt.h
+    commands/interrupt.cpp
     commands/thinking_view.h
     commands/thinking_view.cpp
     commands/json_reporter.h
     commands/json_reporter.cpp
+    commands/answer_view.h
+    commands/answer_view.cpp
     commands/cli_reporter.h
     commands/cli_reporter.cpp
 
@@ -144,6 +161,8 @@ add_library(apogee_core STATIC
     commands/knowledge.cpp
     commands/chat.h
     commands/chat.cpp
+    commands/chat_completer.h
+    commands/chat_completer.cpp
     commands/chat_history.h
     commands/chat_history.cpp
     commands/input_gate.h
@@ -153,6 +172,15 @@ add_library(apogee_core STATIC
 
     ansi/ansi.h
     ansi/ansi.cpp
+    ansi/text_width.h
+    ansi/text_width.cpp
+    markdown/types.h
+    markdown/inline.h
+    markdown/inline.cpp
+    markdown/layout.h
+    markdown/layout.cpp
+    markdown/stream_renderer.h
+    markdown/stream_renderer.cpp
 
     logger/session.h
     logger/session.cpp

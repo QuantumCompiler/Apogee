@@ -35,10 +35,14 @@ fail() { echo "train_e2e: $*" >&2; exit 1; }
 CONFIG="$APOGEE_HOME/config/config.yaml"
 TRAINING="$APOGEE_HOME/training"
 
-# A student: a snapshot directory with config.json and a shard.
-mkdir -p "$APOGEE_HOME/models/tiny"
-printf '{"architectures": ["LlamaForCausalLM"], "model_type": "llama"}\n' > "$APOGEE_HOME/models/tiny/config.json"
-printf 'weights' > "$APOGEE_HOME/models/tiny/model.safetensors"
+# A student: a SafeTensors set where the model store keeps one --
+# models/<model>/safetensors/<id>/ -- with config.json and a shard.
+STUDENT="$APOGEE_HOME/models/tiny/safetensors/aaaaaaaaaaaa"
+mkdir -p "$STUDENT"
+printf '{"architectures": ["LlamaForCausalLM"], "model_type": "llama"}\n' > "$STUDENT/config.json"
+printf 'weights' > "$STUDENT/model.safetensors"
+# The file a backend serves, read back through the product itself.
+served() { "$APOGEE_BIN" config get "backends.$1.model_path"; }
 "$APOGEE_BIN" datasets create starter >/dev/null || fail "datasets create"
 
 # --- the run -----------------------------------------------------------------
@@ -94,8 +98,14 @@ grep -q "suite kit:reasoning" "$WORK_DIR/kit.out" || fail "kit suite label: $(ca
 # --- promote: byte-exact registration ------------------------------------------
 cp "$CONFIG" "$WORK_DIR/before.yaml"
 "$APOGEE_BIN" train promote "$RUN" --as tuned </dev/null >"$WORK_DIR/promote.out" 2>&1 || fail "train promote: $(cat "$WORK_DIR/promote.out")"
-V1="$TRAINING/versions/tuned/v1.gguf"
-[ -f "$V1" ] || fail "no v1.gguf"
+V1=$(served tuned)
+[ -f "$V1" ] || fail "no v1 GGUF at '$V1'"
+# In the model store, beside the model it was trained from, under its own id.
+case "$V1" in
+    "$APOGEE_HOME/models/tiny/gguf/"*/tuned-v1.gguf) ;;
+    *) fail "v1 is not in the model store: $V1" ;;
+esac
+[ -f "${V1%.gguf}.json" ] || fail "the promoted GGUF has no record beside it"
 [ -f "$TRAINING/versions/tuned.json" ] || fail "no ledger"
 grep -q "promoted to new backend tuned -> v1" "$WORK_DIR/promote.out" || fail "promote summary: $(cat "$WORK_DIR/promote.out")"
 [ ! -d "$TRAINING/runs/$RUN/fused" ] || fail "the fused checkpoint was kept without --keep-fused"
@@ -116,8 +126,9 @@ RUN2=$(ls -t "$TRAINING/runs" | head -1)
 "$APOGEE_BIN" train eval "$RUN2" --suite "$WORK_DIR/suite.jsonl" </dev/null >/dev/null 2>&1 || fail "second eval"
 cp "$CONFIG" "$WORK_DIR/before2.yaml"
 "$APOGEE_BIN" train promote "$RUN2" --as tuned </dev/null >"$WORK_DIR/promote2.out" 2>&1 || fail "second promote: $(cat "$WORK_DIR/promote2.out")"
-V2="$TRAINING/versions/tuned/v2.gguf"
-[ -f "$V2" ] || fail "no v2.gguf"
+V2=$(served tuned)
+[ -f "$V2" ] || fail "no v2 GGUF at '$V2'"
+[ "$V2" != "$V1" ] || fail "a second run's weights landed on the first's file"
 grep -q "updated backend tuned -> v2" "$WORK_DIR/promote2.out" || fail "second promote summary: $(cat "$WORK_DIR/promote2.out")"
 sed "s|$V1|$V2|" "$WORK_DIR/before2.yaml" > "$WORK_DIR/expected2.yaml"
 cmp "$WORK_DIR/expected2.yaml" "$CONFIG" || fail "the repoint changed more than the path: $(diff "$WORK_DIR/expected2.yaml" "$CONFIG")"
@@ -139,11 +150,14 @@ grep -q "nothing below it to roll back to" "$WORK_DIR/rollback2.err" || fail "ro
 # --- retention: retain_versions 1 prunes the inactive one, never the active ------
 printf '\ntraining:\n  retain_versions: 1\n' >> "$CONFIG"
 "$APOGEE_BIN" train promote "$RUN2" --as tuned --force </dev/null >"$WORK_DIR/promote3.out" 2>&1 || fail "third promote: $(cat "$WORK_DIR/promote3.out")"
-V3="$TRAINING/versions/tuned/v3.gguf"
-[ -f "$V3" ] || fail "no v3.gguf: numbers must be max + 1, never the count"
+V3=$(served tuned)
+grep -q "tuned -> v3" "$WORK_DIR/promote3.out" || fail "numbers must be max + 1, never the count: $(cat "$WORK_DIR/promote3.out")"
 grep -q "pruned:" "$WORK_DIR/promote3.out" || fail "nothing pruned: $(cat "$WORK_DIR/promote3.out")"
 [ ! -f "$V1" ] || fail "v1 survived retain_versions 1"
-[ ! -f "$V2" ] || fail "v2 survived retain_versions 1"
+# v3 is RUN2 promoted again: the same weights as v2, so one stored file --
+# which v2's pruning must not take from v3.
+[ "$V3" = "$V2" ] || fail "identical weights were stored twice: $V2 and $V3"
+[ -f "$V3" ] || fail "pruning v2 removed the file v3 serves"
 "$APOGEE_BIN" train versions tuned | grep -q "v1 .*(pruned)" || fail "the pruned entry is not shown as history"
 if "$APOGEE_BIN" train rollback tuned >/dev/null 2>"$WORK_DIR/rollback3.err"; then
     fail "rollback reached a pruned version"
@@ -226,7 +240,7 @@ cp "$TRAINING/datasets/starter.jsonl" "$TRAINING/datasets/regress.jsonl"
 grep -q "pipeline complete" "$WORK_DIR/resume.out" || fail "resume summary: $(cat "$WORK_DIR/resume.out")"
 grep -q '"status": "complete"' "$TRAINING/pipelines/$PIPE/manifest.json" || fail "resumed manifest status"
 "$APOGEE_BIN" train promote "$PIPE-s1" --as staged </dev/null >/dev/null 2>&1 || fail "promote of a stage run"
-[ -f "$TRAINING/versions/staged/v1.gguf" ] || fail "no staged v1.gguf"
+[ -f "$(served staged)" ] || fail "no staged v1 GGUF"
 if "$APOGEE_BIN" train pipeline resume "$PIPE" --pipeline "$WORK_DIR/pipe.yaml" </dev/null >/dev/null 2>"$WORK_DIR/resume2.err"; then
     fail "a complete pipeline resumed"
 fi
@@ -277,10 +291,10 @@ cp "$CONFIG" "$WORK_DIR/before-cycle.yaml"
 "$APOGEE_BIN" train cycle run </dev/null >"$WORK_DIR/cycle1.out" 2>&1 || fail "cycle run: $(cat "$WORK_DIR/cycle1.out")"
 grep -q "cycle PASSED -- nightly-model promoted to v1" "$WORK_DIR/cycle1.out" || fail "cycle pass: $(cat "$WORK_DIR/cycle1.out")"
 grep -q "anchor set to v1" "$WORK_DIR/cycle1.out" || fail "anchor not set"
-[ -f "$TRAINING/versions/nightly-model/v1.gguf" ] || fail "no nightly v1.gguf"
+[ -f "$(served nightly-model)" ] || fail "no nightly v1 GGUF"
 [ -f "$WORK_DIR/queue/consumed/day1.jsonl" ] || fail "the queue file was not consumed"
 [ "$(diff "$WORK_DIR/before-cycle.yaml" "$CONFIG" | grep -c '^<')" = "0" ] || fail "the cycle's promote removed config lines"
-"$APOGEE_BIN" config get backends.nightly-model.model_path | grep -q "nightly-model/v1.gguf" || fail "cycle backend not registered"
+served nightly-model | grep -q "/gguf/.*/nightly-model-v1.gguf" || fail "cycle backend not registered"
 "$APOGEE_BIN" train cycle status >"$WORK_DIR/cstatus.out" || fail "cycle status"
 grep -q "anchor:            v1" "$WORK_DIR/cstatus.out" || fail "cycle status anchor: $(cat "$WORK_DIR/cstatus.out")"
 grep -q "pass" "$WORK_DIR/cstatus.out" || fail "cycle status rows"
@@ -291,7 +305,9 @@ fi
 grep -q "cycle FAILED" "$WORK_DIR/cycle2.out" || fail "cycle fail: $(cat "$WORK_DIR/cycle2.out")"
 grep -q "nothing reached inference" "$WORK_DIR/cycle2.out" || fail "cycle discard wording"
 grep -q "the loop is halted" "$WORK_DIR/cycle2.out" || fail "breaker not tripped at k=1"
-[ ! -f "$TRAINING/versions/nightly-model/v2.gguf" ] || fail "a failed cycle promoted"
+if ls "$APOGEE_HOME"/models/*/gguf/*/nightly-model-v2.gguf >/dev/null 2>&1; then
+    fail "a failed cycle promoted"
+fi
 [ -f "$WORK_DIR/queue/day2.jsonl" ] || fail "a failed cycle consumed its file"
 if "$APOGEE_BIN" train cycle run </dev/null >/dev/null 2>"$WORK_DIR/cycle3.err"; then
     fail "a halted cycle ran"

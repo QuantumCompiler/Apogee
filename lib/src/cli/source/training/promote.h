@@ -62,10 +62,12 @@ struct PromotePlan {
     int version = 0;
     /// `runs/<id>/fused`.
     std::filesystem::path fused_dir;
-    /// `versions/<backend>/v<N>.gguf` -- what the ledger records.
+    /// `<output>/<backend>-v<N>.gguf`, built where the command says -- a
+    /// staging directory in the model store, which the command commits.
     std::filesystem::path gguf_path;
     /// Where the F16 conversion lands: `gguf_path` itself, or a sibling
-    /// `v<N>.f16.gguf` that the quantizer reads and that is removed after.
+    /// `<backend>-v<N>.f16.gguf` that the quantizer reads and that is removed
+    /// after.
     std::filesystem::path f16_path;
     /// Empty means F16 is the artifact.
     std::string quantize_type;
@@ -74,7 +76,7 @@ struct PromotePlan {
 
 [[nodiscard]] PromotePlan plan_promotion(const VersionLedger& ledger,
                                          const std::filesystem::path& run_dir,
-                                         const std::filesystem::path& versions_dir,
+                                         const std::filesystem::path& output_dir,
                                          std::string_view backend, std::string_view quantize_type,
                                          bool keep_fused);
 
@@ -109,11 +111,18 @@ struct PruneResult {
     std::vector<std::string> failed;
 };
 
+/// Removes a pruned version's artifacts. The error text, or empty. A closure
+/// because where they live is the model store's business, not this package's.
+using ArtifactRemover = std::function<std::string(const VersionEntry& entry)>;
+
 /// Appends `entry`, makes it active, and prunes per `retain`: each pruned
-/// entry's file is removed and the entry marked, never erased -- the ledger
-/// is history, and a rollback can name what is gone.
+/// entry's artifacts are removed (`remove`; by default its GGUF file) and the
+/// entry marked, never erased -- the ledger is history, and a rollback can
+/// name what is gone. A GGUF another kept version still records -- identical
+/// weights promoted twice share one stored file -- is never removed.
 [[nodiscard]] PruneResult record_promotion(VersionLedger& ledger, VersionEntry entry, int retain,
-                                           std::string pruned_at);
+                                           std::string pruned_at,
+                                           const ArtifactRemover& remove = {});
 
 struct RollbackTarget {
     /// The entry to repoint at, or null with `error` set.

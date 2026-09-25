@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdlib>
 #include <utility>
+#include <vector>
 
 namespace apogee::secrets {
 namespace {
@@ -66,6 +67,20 @@ std::optional<harness::BackendType> slot_type(std::string_view name) noexcept {
         return std::nullopt;
     }
     return type;
+}
+
+std::span<const std::string_view> slot_names() {
+    // The backend types that take a key -- the same test `slot_type` makes.
+    static const std::vector<std::string_view> names = [] {
+        std::vector<std::string_view> out;
+        for (const std::string_view name : harness::backend_type_names()) {
+            if (slot_type(name).has_value()) {
+                out.push_back(name);
+            }
+        }
+        return out;
+    }();
+    return names;
 }
 
 EnvSnapshot EnvSnapshot::capture(const Lookup& lookup) {

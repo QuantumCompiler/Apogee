@@ -3,26 +3,10 @@
 #include <algorithm>
 #include <chrono>
 #include <sstream>
+#include <utility>
 
 namespace apogee::commands {
 namespace {
-
-/// Length in bytes of the UTF-8 sequence starting at `lead`.
-std::size_t sequence_length(unsigned char lead) noexcept {
-    if ((lead & 0x80U) == 0) {
-        return 1;
-    }
-    if ((lead & 0xE0U) == 0xC0U) {
-        return 2;
-    }
-    if ((lead & 0xF0U) == 0xE0U) {
-        return 3;
-    }
-    if ((lead & 0xF8U) == 0xF0U) {
-        return 4;
-    }
-    return 1;  // a stray continuation byte: treat as one, never advance by zero
-}
 
 std::int64_t now_seconds() {
     return std::chrono::duration_cast<std::chrono::seconds>(
@@ -32,74 +16,20 @@ std::int64_t now_seconds() {
 
 }  // namespace
 
-std::size_t display_width(std::string_view text) {
-    std::size_t count = 0;
-    for (std::size_t i = 0; i < text.size();) {
-        i += sequence_length(static_cast<unsigned char>(text[i]));
-        ++count;
-    }
-    return count;
-}
-
-std::vector<std::string> wrap_tail(std::string_view text, std::size_t width,
-                                   std::size_t max_lines) {
-    if (width == 0 || max_lines == 0) {
-        return {};
-    }
-
-    std::vector<std::string> rows;
-    std::string current;
-    std::size_t cells = 0;
-
-    auto flush_row = [&rows, &current, &cells]() {
-        // Blank rows are dropped: a paragraph break inside the reasoning would
-        // otherwise spend one of only two precious rows painting nothing.
-        if (!current.empty()) {
-            rows.push_back(current);
-        }
-        current.clear();
-        cells = 0;
-    };
-
-    for (std::size_t i = 0; i < text.size();) {
-        if (text[i] == '\n') {
-            flush_row();
-            ++i;
-            continue;
-        }
-        if (text[i] == '\r') {
-            ++i;
-            continue;
-        }
-
-        // Advance a whole codepoint. Splitting one across rows corrupts the
-        // output, and a `std::string` makes that mistake easy to reach for.
-        const std::size_t length =
-            std::min(sequence_length(static_cast<unsigned char>(text[i])), text.size() - i);
-        current.append(text, i, length);
-        i += length;
-        ++cells;
-
-        if (cells >= width) {
-            flush_row();
-        }
-    }
-    flush_row();
-
-    if (rows.size() > max_lines) {
-        rows.erase(rows.begin(),
-                   rows.begin() + static_cast<std::ptrdiff_t>(rows.size() - max_lines));
-    }
-    return rows;
-}
-
 ThinkingView::ThinkingView(TerminalWriter& writer, Options options)
     : writer_{writer}, options_{std::move(options)}, clock_{now_seconds} {}
 
-std::size_t ThinkingView::content_width() const noexcept {
-    // Two columns of indent under the header.
+std::size_t ThinkingView::content_width() const {
+    // Two columns of indent under the header, and the terminal's last column
+    // never written. A row that fills it is where terminals disagree: most
+    // hold the cursor at the edge until the next character, some wrap at
+    // once -- and on those the newline after a full row lands a line lower
+    // than counted, so the erase misses the header and every repaint leaves
+    // a line behind (found live, 2026-09-23).
     constexpr std::size_t kIndent = 2;
-    return options_.width > kIndent + 1 ? options_.width - kIndent : 1;
+    constexpr std::size_t kMargin = 1;
+    const std::size_t width = options_.measure ? options_.measure() : options_.width;
+    return width > kIndent + kMargin + 1 ? width - kIndent - kMargin : 1;
 }
 
 void ThinkingView::write(std::string_view chunk) {
@@ -138,7 +68,7 @@ void ThinkingView::write(std::string_view chunk) {
 }
 
 void ThinkingView::repaint_locked(std::ostream& out) {
-    const std::vector<std::string> rows = wrap_tail(tail_, content_width(), kTailLines);
+    const std::vector<std::string> rows = ansi::wrap_tail(tail_, content_width(), kTailLines);
 
     erase_locked(out);
 

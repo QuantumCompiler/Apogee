@@ -160,17 +160,20 @@ TEST_CASE("version numbers are max + 1, never the count -- the reference's regre
     CHECK(ledger.kept() == 1);
     CHECK(apogee::training::next_version(ledger) == 4);
 
+    // Built where the command says -- a staging directory the model store
+    // commits -- and named for the backend and version, so the stored file
+    // says what it is wherever it lands.
     const PromotePlan plan = apogee::training::plan_promotion(
-        ledger, root.path() / "runs" / "r9", root.path() / "versions", "tuned", "", false);
+        ledger, root.path() / "runs" / "r9", root.path() / "stage", "tuned", "", false);
     CHECK(plan.version == 4);
     CHECK(plan.fused_dir == root.path() / "runs" / "r9" / "fused");
-    CHECK(plan.gguf_path == root.path() / "versions" / "tuned" / "v4.gguf");
+    CHECK(plan.gguf_path == root.path() / "stage" / "tuned-v4.gguf");
     CHECK(plan.f16_path == plan.gguf_path);
     CHECK_FALSE(plan.keep_fused);
     const PromotePlan quantized = apogee::training::plan_promotion(
-        ledger, root.path() / "runs" / "r9", root.path() / "versions", "tuned", "Q4_K_M", true);
-    CHECK(quantized.f16_path == root.path() / "versions" / "tuned" / "v4.f16.gguf");
-    CHECK(quantized.gguf_path == root.path() / "versions" / "tuned" / "v4.gguf");
+        ledger, root.path() / "runs" / "r9", root.path() / "stage", "tuned", "Q4_K_M", true);
+    CHECK(quantized.f16_path == root.path() / "stage" / "tuned-v4.f16.gguf");
+    CHECK(quantized.gguf_path == root.path() / "stage" / "tuned-v4.gguf");
     CHECK(quantized.quantize_type == "Q4_K_M");
     CHECK(quantized.keep_fused);
 }
@@ -298,7 +301,7 @@ TEST_CASE(
         {}, {});
     INFO(quantize_ok.error);
     REQUIRE(quantize_ok.ok);
-    CHECK(quantize_calls == std::vector<std::string>{"v1.f16.gguf->v1.gguf@Q4_K_M"});
+    CHECK(quantize_calls == std::vector<std::string>{"tuned-v1.f16.gguf->tuned-v1.gguf@Q4_K_M"});
     CHECK(std::filesystem::exists(quantized.gguf_path));
     CHECK_FALSE(std::filesystem::exists(quantized.f16_path));
     std::filesystem::remove(quantized.gguf_path);
@@ -412,4 +415,49 @@ TEST_CASE(
     CHECK(gone.entry == nullptr);
     CHECK(gone.error.find("v3") != std::string::npos);
     CHECK(gone.error.find("not at") != std::string::npos);
+}
+
+TEST_CASE("retention removes through the store's remover, and never a file another version keeps",
+          "[training][promote][retention]") {
+    // Identical weights promoted twice share one stored file. Pruning the
+    // older version must not take the file the newer one still records --
+    // and what "removing a version" means (its whole store directory, its
+    // kept fine-tune) is the store's to say, not this package's.
+    const apogee::testing::TempDir root{"shared-" + std::to_string(std::random_device{}())};
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    ledger.versions = {entry(1, root.path()), entry(2, root.path())};
+    ledger.versions[1].gguf_path = ledger.versions[0].gguf_path;  // v2 is v1's bytes again
+    ledger.active_version = 2;
+
+    std::vector<int> removed;
+    const apogee::training::ArtifactRemover remover = [&removed](const VersionEntry& old) {
+        removed.push_back(old.version);
+        return std::string{};
+    };
+    VersionEntry v3 = entry(3, root.path());
+    const apogee::training::PruneResult pruned =
+        apogee::training::record_promotion(ledger, v3, 2, "t", remover);
+    // v1 was pruned -- marked, recorded -- but its file is v2's, still kept.
+    CHECK(ledger.find(1)->pruned());
+    CHECK(pruned.removed == std::vector<std::string>{ledger.versions[0].gguf_path});
+    CHECK(removed.empty());
+    CHECK(std::filesystem::exists(ledger.versions[0].gguf_path));
+
+    // Once nothing kept records it, the remover is asked.
+    VersionEntry v4 = entry(4, root.path());
+    (void)apogee::training::record_promotion(ledger, v4, 2, "t", remover);
+    CHECK(removed == std::vector<int>{2});
+    CHECK(ledger.find(2)->pruned());
+
+    // A remover's failure is reported, and the entry left unpruned.
+    const apogee::training::ArtifactRemover refusing = [](const VersionEntry&) {
+        return std::string{"permission denied"};
+    };
+    VersionEntry v5 = entry(5, root.path());
+    const apogee::training::PruneResult failed =
+        apogee::training::record_promotion(ledger, v5, 2, "t", refusing);
+    REQUIRE(failed.failed.size() == 1);
+    CHECK(failed.failed.front().find("permission denied") != std::string::npos);
+    CHECK_FALSE(ledger.find(3)->pruned());
 }

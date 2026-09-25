@@ -41,6 +41,9 @@ struct QuantType {
 /// handful people actually use makes the error message for a typo useful.
 [[nodiscard]] std::vector<QuantType> quant_types();
 
+/// Their spellings alone, for completion.
+[[nodiscard]] std::vector<std::string> quant_type_names();
+
 /// What a quantization run produced.
 struct QuantizeResult {
     bool ok = false;

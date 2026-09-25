@@ -104,6 +104,8 @@ const std::map<std::string, Classification>& table() {
         {"models delete", backfill("models: the models plane")},
         {"models repair", backfill("models: the models plane")},
         {"models quantize", backfill("models: the models plane, an async job")},
+        {"models convert", backfill("models: the models plane, an async job")},
+        {"models migrate", backfill("models: the models plane")},
         {"datasets prepare",
          backfill("training: the datasets plane, a server-side conversion, an async job")},
         {"datasets pull", backfill("training: the datasets plane, an async job")},

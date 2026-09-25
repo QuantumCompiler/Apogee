@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -18,6 +19,7 @@
 #include "ansi/ansi.h"
 #include "backends/factory.h"
 #include "commands/ask_prompt.h"
+#include "commands/chat_completer.h"
 #include "commands/chat_history.h"
 #include "commands/cli_reporter.h"
 #include "commands/embed.h"
@@ -59,18 +61,6 @@ std::string trim(std::string_view text) {
     return std::string{text};
 }
 
-/// The slash commands, in one place.
-///
-/// Completion and `/help` both read this, so a command cannot be offered on Tab
-/// and then rejected -- or added and silently left uncompletable.
-const std::vector<std::string>& slash_commands() {
-    static const std::vector<std::string> commands{
-        "/help",    "/model", "/models", "/system",  "/temperature", "/max-tokens",
-        "/compact", "/title", "/branch", "/capture", "/exit",        "/quit",
-    };
-    return commands;
-}
-
 struct ChatFlags {
     std::string model;
     std::string system_prompt;
@@ -88,6 +78,7 @@ struct ChatFlags {
     bool tools = false;
     bool search = false;
     bool no_color = false;
+    bool raw = false;
     OutputFormat output_format = OutputFormat::Text;
     std::optional<InputFormat> input_format;
     bool verbose = false;
@@ -136,8 +127,9 @@ namespace {
 /// Extracted when machine mode landed. The terminal REPL and a JSONL-driven
 /// child differ entirely in how they READ input -- a line editor with slash
 /// commands versus one JSON object per line -- and not at all in what a turn
-/// *is*: measure the context, compact or warn, append, run the loop, persist,
-/// and title the conversation once.
+/// *is*: measure the context, compact or warn, append, run the loop, persist.
+/// (Titling is shared the same way, as `BackgroundTitle` below, but it outlives
+/// a turn: it runs while the next one is being typed.)
 ///
 /// Duplicating that for the driver would have been the parity failure the
 /// Reporter seam exists to prevent, one level up: context monitoring or the
@@ -275,24 +267,78 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     // completed turn on disk, and that is a property of writing here rather
     // than at exit.
     logger::save(session);
+}
 
-    // Auto-titling rides the first completed exchange. A side request so it
-    // never enters the conversation's own history.
-    if (session.title.empty() && session.custom_name.empty() && session.turns >= 1) {
-        harness::ChatRequest title_request;
-        title_request.model = session.backend;
-        title_request.messages = session.messages;
-        title_request.messages.push_back(harness::ChatMessage::user(title_prompt()));
-        title_request.transient.side_request = true;
-        try {
-            session.title =
-                sanitize_title(harness.chat(title_request).message.content.plain_text());
+/// The conversation's title, asked for once and off the prompt's path.
+///
+/// Auto-titling rides the first completed exchange, as a side request so it
+/// never enters the conversation's own history. It used to run in line, and
+/// the next prompt waited for it: on a local 27B that was fifteen seconds and
+/// more -- and every turn, because a reasoning model's title came back empty
+/// and was asked for again (found live, 2026-09-25). Now it runs while the
+/// user reads the answer and types the next question.
+///
+/// **One model call at a time is the rule this keeps.** A local provider is
+/// not safe to drive from two threads, so everything that may reach the model
+/// -- the next turn, a slash command, the exit -- calls `settle()` first. That
+/// waits for a title still in flight (seconds at most: a few dozen tokens with
+/// the reasoning skipped) and records it.
+class BackgroundTitle {
+public:
+    explicit BackgroundTitle(const harness::Harness& harness) : harness_{harness} {}
+
+    BackgroundTitle(const BackgroundTitle&) = delete;
+    BackgroundTitle& operator=(const BackgroundTitle&) = delete;
+    BackgroundTitle(BackgroundTitle&&) = delete;
+    BackgroundTitle& operator=(BackgroundTitle&&) = delete;
+
+    /// An unwinding command must not wait out a whole title: cancelled, then
+    /// joined (a future from std::async joins as it is destroyed).
+    ~BackgroundTitle() {
+        cancellation_.cancel();
+    }
+
+    /// Asks for a title when `session` has no name yet -- once per process, so
+    /// a model that cannot produce one is not asked again after every turn.
+    void start_if_due(const logger::Session& session) {
+        if (asked_ || session.turns < 1 || !session.title.empty() || !session.custom_name.empty()) {
+            return;
+        }
+        asked_ = true;
+        title_ = std::async(std::launch::async, [this, request = title_request(session)]() {
+            try {
+                return sanitize_title(
+                    harness_.chat(request, cancellation_).message.content.plain_text());
+            } catch (const std::exception&) {
+                return std::string{};  // a failed title is cosmetic; it never costs a turn
+            }
+        });
+    }
+
+    /// Waits for a title in flight and records it on `session`.
+    void settle(logger::Session& session) {
+        if (!title_.valid()) {
+            return;
+        }
+        const std::string title = title_.get();
+        if (!title.empty() && session.title.empty()) {
+            session.title = title;
             logger::save(session);
-        } catch (const harness::HarnessError&) {
-            // A failed title is cosmetic. It must never cost a turn.
         }
     }
-}
+
+    /// Abandons a title in flight: the user interrupted, and did not ask for a
+    /// model call to finish first.
+    void cancel() const noexcept {
+        cancellation_.cancel();
+    }
+
+private:
+    const harness::Harness& harness_;
+    harness::CancellationToken cancellation_ = harness::CancellationToken::create();
+    std::future<std::string> title_;
+    bool asked_ = false;
+};
 
 }  // namespace
 
@@ -308,16 +354,19 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     auto flags = std::make_shared<ChatFlags>();
 
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
-    cmd->add_option("-m,--model", flags->model, "Backend or model to use");
+    cmd->add_option("-m,--model", flags->model, "Backend or model to use")
+        ->type_name(kBackendValue);
     cmd->add_option("-s,--system", flags->system_prompt, "System prompt for the session");
     flags->rag_option =
         cmd->add_option("--rag", flags->rag,
                         "Retrieve context from this collection each turn (see 'apogee embed'); "
-                        "\"\" switches off the config's auto_rag for this session");
+                        "\"\" switches off the config's auto_rag for this session")
+            ->type_name(kCollectionValue);
     cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
     flags->retriever_option =
         cmd->add_option("--retriever", flags->retriever,
                         "How to search the collection: lexical, vector, hybrid, or auto")
+            ->type_name(words_value(agentloop::retriever_names()))
             ->check([](const std::string& value) {
                 return agentloop::valid_retriever(value)
                            ? std::string{}
@@ -325,8 +374,10 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             });
     flags->rerank_option =
         cmd->add_option("--rerank", flags->rerank,
-                        "Backend that reorders retrieved chunks with one generation call, or off");
+                        "Backend that reorders retrieved chunks with one generation call, or off")
+            ->type_name(kBackendValue);
     cmd->add_option("--image", flags->images, "Image to attach to the first message (repeatable)")
+        ->type_name(kPathValue)
         ->allow_extra_args(false);
     flags->temperature_option =
         cmd->add_option("-t,--temperature", flags->temperature, "Sampling temperature");
@@ -335,6 +386,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("--tools", flags->tools, "Let the model call tools");
     cmd->add_flag("--search", flags->search, "Enable the provider's server-side web search");
     cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
+    cmd->add_flag("--raw", flags->raw,
+                  "Show answers' Markdown as written instead of rendering it on the terminal");
     cmd->add_option_function<std::string>(
            "--output-format",
            [flags](const std::string& value) {
@@ -346,7 +399,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                flags->output_format = *parsed;
            },
            "Output format: text (default) or stream-json for a machine driver")
-        ->type_name("FORMAT");
+        ->type_name(words_value(format_names()));
     cmd->add_option_function<std::string>(
            "--input-format",
            [flags](const std::string& value) {
@@ -357,14 +410,18 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                flags->input_format = *parsed;
            },
            "Input format: text (default) or stream-json; follows --output-format if unset")
-        ->type_name("FORMAT");
+        ->type_name(words_value(format_names()));
     cmd->add_flag("-v,--verbose", flags->verbose, "Print progress notes");
-    cmd->add_option("--resume", flags->resume, "Resume a saved conversation by id or name");
+    cmd->add_option("--resume", flags->resume, "Resume a saved conversation by id or name")
+        ->type_name(kChatValue);
     cmd->add_flag("-c,--continue", flags->cont, "Resume the most recent conversation");
     cmd->add_option("--branch", flags->branch,
-                    "Branch under review for the git tools (the head); never checked out");
-    cmd->add_option("--base", flags->base, "Ref to compare against (default: the default branch)");
-    cmd->add_option("--remote", flags->remote, "Remote to resolve refs against (default origin)");
+                    "Branch under review for the git tools (the head); never checked out")
+        ->type_name(kGitRefValue);
+    cmd->add_option("--base", flags->base, "Ref to compare against (default: the default branch)")
+        ->type_name(kGitRefValue);
+    cmd->add_option("--remote", flags->remote, "Remote to resolve refs against (default origin)")
+        ->type_name(kGitRemoteValue);
     cmd->add_flag("--fetch", flags->fetch, "Always fetch the refs before diffing");
     cmd->add_flag("--no-fetch", flags->no_fetch, "Never fetch; refuse a ref that is absent");
 
@@ -406,6 +463,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         reporter_options.style =
             ansi::Style::detect(flags->no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
         reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
+        reporter_options.markdown = !flags->raw && config.ui.markdown;
+        reporter_options.hyperlinks = ansi::hyperlinks_supported();
         CliReporter reporter{status_writer, reporter_options};
         const ansi::Style& style = reporter_options.style;
 
@@ -538,6 +597,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + model +
                                          "  ·  chat " + session.chat_id +
                                          "  ·  /help for commands");
+            // The banner stands apart from the first prompt.
+            reporter.status().print_line("");
         }
 
         // --- machine mode ----------------------------------------------------
@@ -610,6 +671,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             const agentloop::AskFn driver_ask =
                 flags->tools ? make_driver_ask_fn(machine_reporter, std::cin) : agentloop::AskFn{};
 
+            BackgroundTitle title{harness};
             std::string line;
             while (std::getline(std::cin, line)) {
                 const DriverMessage message = parse_driver_line(line);
@@ -618,6 +680,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                     // tolerance this protocol asks of its own drivers.
                     continue;
                 }
+                title.settle(session);
 
                 // The driver reads structured input, so there IS someone to
                 // answer a question -- the loop's "nil AskFn <=> never
@@ -629,6 +692,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                                                       config_path, approvals)
                                                                 : agent::ConfirmFn{}},
                               machine_reporter, machine_notice, rag_settings, review_note);
+                title.start_if_due(session);
 
                 harness::ChatResponse response;
                 response.message = session.messages.empty() ? harness::ChatMessage::assistant("")
@@ -639,6 +703,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
 
             // stdin closed: the driver is done. Everything is already persisted
             // by the per-turn save, so exiting is clean by construction.
+            title.settle(session);
             logger::save(session);
             return;
         }
@@ -646,13 +711,20 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         // Once, immediately before the first prompt -- never between turns.
         discard_startup_typeahead();
 
+        // `/` lists the commands as they are typed, a command's values follow
+        // it, and `@` completes paths -- all from the one command table. A
+        // pipe gets none of it: the plain reader never asks.
         EditingLineReader::Options reader_options;
         reader_options.history_path = default_history_path();
-        reader_options.completions = slash_commands();
-        // Backend names complete too: `/model cla<Tab>` is the common case.
-        for (const std::string& backend : config.backend_names()) {
-            reader_options.completions.push_back(backend);
-        }
+        // A folder deleted under the process lists as nothing, never a throw.
+        std::error_code cwd_error;
+        reader_options.suggest =
+            [sources = chat_completion_sources(config, std::filesystem::current_path(cwd_error))](
+                std::string_view before_cursor) {
+                return suggest_chat_input(before_cursor, sources);
+            };
+        reader_options.live = true;
+        reader_options.color = style.color_enabled();
         const std::unique_ptr<LineReader> reader =
             make_line_reader(std::move(reader_options), std::cin);
 
@@ -697,6 +769,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         };
 
         // --- the REPL --------------------------------------------------------
+        BackgroundTitle title{harness};
         bool running = true;
         while (running) {
             // The editor draws its own prompt; the plain reader ignores it and
@@ -722,149 +795,194 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             // with blanks.
             reader->remember(input);
 
+            // Before anything below can reach the model.
+            title.settle(session);
+
             if (const std::optional<SlashCommand> command = parse_slash(input);
                 command.has_value()) {
-                const std::string& verb = command->name;
                 const std::string& argument = command->argument;
-
-                if (verb == "exit" || verb == "quit") {
-                    running = false;
-                } else if (verb == "help") {
-                    std::string help;
-                    for (const std::string& entry : slash_commands()) {
-                        help += help.empty() ? "" : "  ";
-                        help += entry;
-                    }
-                    reporter.status().print_line(help);
-                } else if (verb == "models") {
-                    for (const std::string& backend : config.backend_names()) {
-                        reporter.status().print_line((backend == session.backend ? "* " : "  ") +
-                                                     backend);
-                    }
-                } else if (verb == "model") {
-                    if (argument.empty()) {
-                        reporter.status().print_line(session.backend);
-                    } else if (config.find_backend(argument) == nullptr) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " no backend named '" + argument + "'");
-                    } else {
-                        // Instant, and history carries over: every backend was
-                        // constructed up front and history is neutral IR.
-                        session.backend = argument;
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                     " switched to " + argument);
-                    }
-                } else if (verb == "branch") {
-                    if (argument.empty()) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Apogee) + " review: " +
-                            (review.active() ? agentloop::review_summary(review)
-                                             : "off -- /branch <head>, <base>..<head>, or off"));
-                    } else {
-                        // Deterministic from the argument: the tools' defaults
-                        // and the note change together, the transcript not at
-                        // all. Free text in the next question changes nothing
-                        // about which diff the tools compare.
-                        review = agentloop::parse_branch_arg(argument, review);
-                        sync_review();
-                        review_note = agentloop::review_note(review);
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Apogee) + " review " +
-                            (review.active() ? agentloop::review_summary(review) : "off"));
-                    }
-                } else if (verb == "capture") {
-                    // An argument is a status when it is one, else a link.
-                    knowledge::Overrides overrides;
-                    if (!argument.empty()) {
-                        const std::string status = knowledge::normalize_status(argument);
-                        if (knowledge::is_valid_status(status)) {
-                            overrides.status = status;
-                        } else {
-                            overrides.link = argument;
-                        }
-                    }
-                    capture_session(std::move(overrides));
-                } else if (verb == "system") {
-                    session.params.system_prompt = argument;
-                    reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                 " system prompt updated");
-                } else if (verb == "temperature") {
-                    try {
-                        session.params.temperature = std::stod(argument);
-                    } catch (const std::exception&) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " not a number: '" + argument + "'");
-                    }
-                } else if (verb == "max-tokens") {
-                    try {
-                        session.params.max_tokens = std::stoll(argument);
-                    } catch (const std::exception&) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " not a number: '" + argument + "'");
-                    }
-                } else if (verb == "retriever") {
-                    if (argument.empty()) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Rag) + " retriever: " +
-                            (session.retriever.empty() ? "auto" : session.retriever) +
-                            (session.retriever.empty()
-                                 ? " -- vector when the collection's vectors match the "
-                                   "embedding backend, else lexical; hybrid only when asked"
-                                 : ""));
-                    } else if (!agentloop::valid_retriever(argument)) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Error) + " " +
-                            agentloop::retriever_values_message("/retriever", argument));
-                    } else {
-                        session.retriever = argument == "auto" ? std::string{} : argument;
-                        // Persisted now, so a resume continues with this.
-                        logger::save(session);
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Rag) + " retriever set to " +
-                            (session.retriever.empty() ? "auto" : session.retriever));
-                    }
-                } else if (verb == "rerank") {
-                    if (argument.empty()) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Rag) + " rerank: " +
-                            (session.rerank.empty() ? "following each collection's rerank: pin"
-                                                    : session.rerank) +
-                            " -- /rerank <backend>|off|auto");
-                    } else if (argument == "auto") {
-                        session.rerank.clear();
-                        logger::save(session);
-                        reporter.status().print_line(style.tag(ansi::Role::Rag) +
-                                                     " rerank follows the collection's pin");
-                    } else if (argument != agentloop::kRerankOff &&
-                               config.find_backend(argument) == nullptr) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " no backend named '" + argument + "'");
-                    } else {
-                        session.rerank = argument;
-                        logger::save(session);
-                        reporter.status().print_line(style.tag(ansi::Role::Rag) +
-                                                     " rerank set to " + argument);
-                    }
-                } else if (verb == "title") {
-                    session.custom_name = argument;
-                    logger::save(session);
-                    reporter.status().print_line(style.tag(ansi::Role::Apogee) + " renamed");
-                } else if (verb == "compact") {
-                    session.messages =
-                        agentloop::compact_history(harness, session.messages, session.backend);
-                    ++session.compactions;
-                    logger::save(session);
-                    reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                 " history compacted");
-                } else {
+                const ChatCommandSpec* spec = find_chat_command(command->name);
+                if (spec == nullptr) {
                     reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                 " unknown command '/" + verb +
+                                                 " unknown command '/" + command->name +
                                                  "' -- /help lists them");
+                    continue;
                 }
+
+                // Dispatched through the table: a verb only runs if the table
+                // names it, and a row added without a case here fails the
+                // build -- the one-table rule, held by the compiler.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wswitch"
+#endif
+                switch (spec->id) {
+                    case ChatVerb::Exit:
+                        running = false;
+                        break;
+                    case ChatVerb::Help:
+                        for (const std::string& row : chat_help_lines(
+                                 reader->interactive() ? static_cast<std::size_t>(
+                                                             platform::terminal_width().value_or(0))
+                                                       : 0)) {
+                            reporter.status().print_line(row);
+                        }
+                        break;
+                    case ChatVerb::Models:
+                        for (const std::string& backend : config.backend_names()) {
+                            reporter.status().print_line(
+                                (backend == session.backend ? "* " : "  ") + backend);
+                        }
+                        break;
+                    case ChatVerb::Model:
+                        if (argument.empty()) {
+                            reporter.status().print_line(session.backend);
+                        } else if (config.find_backend(argument) == nullptr) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " no backend named '" + argument + "'");
+                        } else {
+                            // Instant, and history carries over: every backend
+                            // was constructed up front and history is neutral IR.
+                            session.backend = argument;
+                            reporter.status().print_line(style.tag(ansi::Role::Apogee) +
+                                                         " switched to " + argument);
+                        }
+                        break;
+                    case ChatVerb::Branch:
+                        if (argument.empty()) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Apogee) + " review: " +
+                                (review.active()
+                                     ? agentloop::review_summary(review)
+                                     : "off -- /branch <head>, <base>..<head>, or off"));
+                        } else {
+                            // Deterministic from the argument: the tools'
+                            // defaults and the note change together, the
+                            // transcript not at all. Free text in the next
+                            // question changes nothing about which diff the
+                            // tools compare.
+                            review = agentloop::parse_branch_arg(argument, review);
+                            sync_review();
+                            review_note = agentloop::review_note(review);
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Apogee) + " review " +
+                                (review.active() ? agentloop::review_summary(review) : "off"));
+                        }
+                        break;
+                    case ChatVerb::Capture: {
+                        // An argument is a status when it is one, else a link.
+                        knowledge::Overrides overrides;
+                        if (!argument.empty()) {
+                            const std::string status = knowledge::normalize_status(argument);
+                            if (knowledge::is_valid_status(status)) {
+                                overrides.status = status;
+                            } else {
+                                overrides.link = argument;
+                            }
+                        }
+                        capture_session(std::move(overrides));
+                        break;
+                    }
+                    case ChatVerb::System:
+                        session.params.system_prompt = argument;
+                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
+                                                     " system prompt updated");
+                        break;
+                    case ChatVerb::Temperature:
+                        try {
+                            session.params.temperature = std::stod(argument);
+                        } catch (const std::exception&) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " not a number: '" + argument + "'");
+                        }
+                        break;
+                    case ChatVerb::MaxTokens:
+                        try {
+                            session.params.max_tokens = std::stoll(argument);
+                        } catch (const std::exception&) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " not a number: '" + argument + "'");
+                        }
+                        break;
+                    case ChatVerb::Retriever:
+                        if (argument.empty()) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Rag) + " retriever: " +
+                                (session.retriever.empty() ? "auto" : session.retriever) +
+                                (session.retriever.empty()
+                                     ? " -- vector when the collection's vectors match the "
+                                       "embedding backend, else lexical; hybrid only when asked"
+                                     : ""));
+                        } else if (!agentloop::valid_retriever(argument)) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Error) + " " +
+                                agentloop::retriever_values_message("/retriever", argument));
+                        } else {
+                            session.retriever = argument == "auto" ? std::string{} : argument;
+                            // Persisted now, so a resume continues with this.
+                            logger::save(session);
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Rag) + " retriever set to " +
+                                (session.retriever.empty() ? "auto" : session.retriever));
+                        }
+                        break;
+                    case ChatVerb::Rerank:
+                        if (argument.empty()) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Rag) + " rerank: " +
+                                (session.rerank.empty() ? "following each collection's rerank: pin"
+                                                        : session.rerank) +
+                                " -- /rerank <backend>|off|auto");
+                        } else if (argument == "auto") {
+                            session.rerank.clear();
+                            logger::save(session);
+                            reporter.status().print_line(style.tag(ansi::Role::Rag) +
+                                                         " rerank follows the collection's pin");
+                        } else if (argument != agentloop::kRerankOff &&
+                                   config.find_backend(argument) == nullptr) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " no backend named '" + argument + "'");
+                        } else {
+                            session.rerank = argument;
+                            logger::save(session);
+                            reporter.status().print_line(style.tag(ansi::Role::Rag) +
+                                                         " rerank set to " + argument);
+                        }
+                        break;
+                    case ChatVerb::Title:
+                        session.custom_name = argument;
+                        logger::save(session);
+                        reporter.status().print_line(style.tag(ansi::Role::Apogee) + " renamed");
+                        break;
+                    case ChatVerb::Compact:
+                        session.messages =
+                            agentloop::compact_history(harness, session.messages, session.backend);
+                        ++session.compactions;
+                        logger::save(session);
+                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
+                                                     " history compacted");
+                        break;
+                }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
                 continue;
             }
 
             // --- the turn ------------------------------------------------------
+            if (decorate) {
+                // One blank line between the question and whatever answers it
+                // -- the thinking block, or the answer itself -- as there is
+                // one after the answer.
+                reporter.status().print_line("");
+            }
+            // Keystrokes typed while the model answers stay unseen, queued for
+            // the next prompt, which shows them once -- instead of echoing into
+            // the answer and then again at the prompt (2026-09-23).
+            std::optional<platform::TypeaheadGuard> typeahead;
+            if (reader->interactive()) {
+                typeahead.emplace();
+            }
             run_chat_turn(
                 harness, session, input, attachments, flags->tools ? &registry : nullptr,
                 flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
@@ -876,8 +994,19 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                     reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
                 rag_settings, review_note);
+            title.start_if_due(session);
+            typeahead.reset();
+            if (decorate) {
+                // One blank line between an answer and the next prompt, so
+                // turns read as turns rather than one run of text.
+                reporter.status().print_line("");
+            }
         }
 
+        if (reader->interrupted()) {
+            title.cancel();
+        }
+        title.settle(session);
         logger::save(session);
         // Opt-in auto-capture on a CLEAN exit -- /exit, /quit, the end of the
         // input -- with the still-loaded model as the clerk. Never on an

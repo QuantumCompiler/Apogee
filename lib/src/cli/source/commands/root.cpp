@@ -29,6 +29,7 @@ RootCommand::RootCommand(CommandRegistry registry)
     // 'apogee config init'") rather than CLI11's generic one.
     app_->add_option("--config", context_.config_path,
                      "Path to the config file (default: ~/.apogee/config/config.yaml)")
+        ->type_name(kPathValue)
         ->envname("APOGEE_CONFIG");
 
     // At most one subcommand per invocation; zero is legal and prints help

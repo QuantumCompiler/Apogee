@@ -31,14 +31,14 @@ struct Home {
     }
 
     [[nodiscard]] int run(const std::vector<std::string>& args) const {
-        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        apogee::commands::RootCommand command{apogee::commands::default_registry()};
         std::vector<std::string> full{"--config", config.string()};
         full.insert(full.end(), args.begin(), args.end());
         std::vector<const char*> argv{"apogee"};
         for (const std::string& arg : full) {
             argv.push_back(arg.c_str());
         }
-        return root.run(static_cast<int>(argv.size()), argv.data());
+        return command.run(static_cast<int>(argv.size()), argv.data());
     }
 
     [[nodiscard]] std::string bytes() const {

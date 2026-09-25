@@ -5,7 +5,10 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
+#include <map>
 #include <random>
+#include <set>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -417,7 +420,7 @@ TEST_CASE("acquire_tree commits every file or nothing, and never leaves a stagin
     CHECK(ok.path == destination);
     CHECK(std::filesystem::exists(destination / "config.json"));
     CHECK(std::filesystem::exists(destination / "shards" / "model.safetensors"));
-    CHECK(std::filesystem::exists(apogee::models::sidecar_path_for(destination / "config.json")));
+    CHECK(ok.sidecars.size() == 2);
     CHECK_FALSE(std::filesystem::exists(scratch.root / "owner--repo.staging"));
     CHECK(seen == std::vector<std::size_t>{1, 2});
 
@@ -442,4 +445,58 @@ TEST_CASE("acquire_tree commits every file or nothing, and never leaves a stagin
     CHECK_FALSE(escape.ok);
     CHECK(escape.error.find("leaves the tree") != std::string::npos);
     CHECK_FALSE(std::filesystem::exists(scratch.root / "out.json"));
+}
+
+TEST_CASE("a tree download keeps every file it was given, byte for byte",
+          "[models][acquire][tree]") {
+    // The bug this pins: each file's download record was written beside it,
+    // named by swapping the extension for `.json` -- so `config.json` was
+    // replaced by its own record, and `tokenizer.model`'s record overwrote
+    // the real `tokenizer.json`. The snapshot reported "verified" and could
+    // not be converted or trained.
+    Scratch scratch;
+    const auto item = [](std::string relative, std::string payload) {
+        apogee::models::TreeItem out;
+        out.relative = std::move(relative);
+        out.promise.ref = "owner/repo:" + out.relative;
+        out.promise.source = "huggingface";
+        out.promise.size = static_cast<std::int64_t>(payload.size());
+        out.source = [payload](const std::function<bool(std::string_view)>& write, std::string&) {
+            return write(payload);
+        };
+        return out;
+    };
+    const std::map<std::string, std::string> files{
+        {"config.json", R"({"architectures": ["LlamaForCausalLM"]})"},
+        {"tokenizer.json", R"({"model": {"type": "BPE"}})"},
+        {"tokenizer.model", "sentencepiece bytes"},
+        {"merges.txt", "a b"},
+        {"model.safetensors", "weights"},
+    };
+    std::vector<apogee::models::TreeItem> items;
+    for (const auto& [relative, payload] : files) {
+        items.push_back(item(relative, payload));
+    }
+    const std::filesystem::path destination = scratch.root / "owner--repo";
+    const apogee::models::AcquireTreeResult result =
+        apogee::models::acquire_tree(destination, items);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    REQUIRE(result.sidecars.size() == files.size());
+
+    // Exactly the repository's files: nothing replaced, nothing added.
+    std::set<std::string> present;
+    for (const auto& entry : std::filesystem::directory_iterator(destination)) {
+        present.insert(entry.path().filename().string());
+    }
+    std::set<std::string> expected;
+    for (const auto& [relative, payload] : files) {
+        expected.insert(relative);
+        std::ifstream in{destination / relative, std::ios::binary};
+        const std::string bytes{std::istreambuf_iterator<char>{in},
+                                std::istreambuf_iterator<char>{}};
+        INFO(relative);
+        CHECK(bytes == payload);
+    }
+    CHECK(present == expected);
 }

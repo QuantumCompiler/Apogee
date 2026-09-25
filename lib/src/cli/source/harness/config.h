@@ -278,6 +278,8 @@ enum class AgentToolPolicy : std::uint8_t { ReadOnly, All, None };
 [[nodiscard]] std::string_view to_string(AgentToolPolicy policy) noexcept;
 [[nodiscard]] std::optional<AgentToolPolicy> agent_tool_policy_from_string(
     std::string_view name) noexcept;
+/// The words `agent_tool_policy_from_string` accepts, for completion.
+[[nodiscard]] std::vector<std::string_view> agent_tool_policy_names();
 
 /// How an agent's schema shapes its answer.
 ///
@@ -290,6 +292,12 @@ enum class AgentOutputFormat : std::uint8_t { Auto, Json, Markdown };
 [[nodiscard]] std::string_view to_string(AgentOutputFormat format) noexcept;
 [[nodiscard]] std::optional<AgentOutputFormat> agent_output_format_from_string(
     std::string_view name) noexcept;
+/// The words `agent_output_format_from_string` accepts, for completion.
+[[nodiscard]] std::vector<std::string_view> agent_output_format_names();
+
+/// A fine-tune's `method`: a pipeline or regime stage's `method:`, and `train
+/// run --method` -- one list, so the config and the flag accept the same.
+[[nodiscard]] std::span<const std::string_view> lora_methods() noexcept;
 
 /// One entry under `agents:` -- a named workflow `apogee analyze --agent`
 /// runs: a persona assembled from prompt files, an optional output schema,
@@ -328,6 +336,15 @@ struct AgentConfig {
     /// A directory under `save_dir` this agent's reports nest in, so agents
     /// do not all glob into one directory. Empty means flat.
     std::string save_subdir;
+};
+
+/// The `ui:` section -- how a terminal shows what Apogee prints.
+struct UiConfig {
+    /// Render answers' Markdown on a terminal (bold, lists, tables, code
+    /// blocks). A pipe, machine mode and the saved transcript always carry the
+    /// model's text as written; this only chooses what a terminal shows.
+    /// `--raw` turns it off for one run.
+    bool markdown = true;
 };
 
 /// The `knowledge:` section -- the organizational knowledge layer's two
@@ -596,6 +613,7 @@ struct Config {
     PermissionsConfig permissions;
     ToolsConfig tools;
     KnowledgeConfig knowledge;
+    UiConfig ui;
     TrainingConfig training;
 
     /// MCP servers keyed by name AS WRITTEN, compared case-insensitively

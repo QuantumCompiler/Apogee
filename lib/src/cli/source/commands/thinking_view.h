@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "ansi/ansi.h"
+#include "ansi/text_width.h"
 #include "commands/terminal.h"
 
 /// Live reasoning, rendered without letting it accumulate in scrollback.
@@ -26,29 +27,16 @@
 /// all that survives.
 namespace apogee::commands {
 
-/// Wraps `text` and returns the last `max_lines` non-blank rows.
-///
-/// Free function because it carries most of the subtlety and deserves direct
-/// tests: wrapping is **by codepoint, not byte** (a multi-byte character split
-/// across rows corrupts the output), and blank lines are dropped because a
-/// paragraph break inside the reasoning would otherwise spend one of only two
-/// rows painting nothing.
-[[nodiscard]] std::vector<std::string> wrap_tail(std::string_view text, std::size_t width,
-                                                 std::size_t max_lines);
-
-/// Number of display cells in a UTF-8 string, counting codepoints.
-///
-/// Not a full width calculation -- combining marks and wide CJK cells are not
-/// handled. Codepoint counting is a deliberate approximation: it is right for
-/// the Latin and accented text reasoning is overwhelmingly written in, and
-/// getting it wrong is cosmetic (a row wraps early) rather than corrupting.
-[[nodiscard]] std::size_t display_width(std::string_view text);
-
 class ThinkingView {
 public:
     struct Options {
-        /// Terminal width. Painted rows are wrapped to `width - indent`.
+        /// Terminal width. Painted rows are wrapped short of it (see
+        /// `content_width`).
         std::size_t width = 80;
+        /// When set, asked for the width at every repaint instead: a terminal
+        /// resized mid-turn otherwise wraps rows painted for the old width,
+        /// and the erase arithmetic goes wrong with them.
+        std::function<std::size_t()> measure;
         /// Whether to render at all. False on a pipe -- a non-TTY run emits no
         /// thinking, no escape codes, and no summary line.
         bool active = true;
@@ -98,7 +86,7 @@ public:
 private:
     void repaint_locked(std::ostream& out);
     void erase_locked(std::ostream& out);
-    [[nodiscard]] std::size_t content_width() const noexcept;
+    [[nodiscard]] std::size_t content_width() const;
 
     TerminalWriter& writer_;
     Options options_;

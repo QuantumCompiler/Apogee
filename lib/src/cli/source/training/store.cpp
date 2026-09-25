@@ -49,6 +49,9 @@ nlohmann::json ledger_to_json(const VersionLedger& ledger) {
         if (entry.pruned()) {
             row["pruned_at"] = entry.pruned_at;
         }
+        if (!entry.fused_path.empty()) {
+            row["fused_path"] = entry.fused_path;
+        }
         versions.push_back(std::move(row));
     }
     return nlohmann::json{{"backend_name", ledger.backend},
@@ -85,6 +88,7 @@ VersionLedger ledger_from_json(const nlohmann::json& json) {
                 entry.eval_passed = passed->get<bool>();
             }
             entry.pruned_at = row.value("pruned_at", std::string{});
+            entry.fused_path = row.value("fused_path", std::string{});
             ledger.versions.push_back(std::move(entry));
         }
     }

@@ -206,6 +206,60 @@ TEST_CASE("a reused prefix never claims more than the cache holds", "[backends][
     }
 }
 
+TEST_CASE("a model whose memory cannot be rewound decodes the whole prompt again",
+          "[backends][llamacpp][kv]") {
+    // Qwen3.5 on 2026-09-23: its linear-attention layers keep a running state
+    // llama.cpp can rewind only a few tokens, and a thinking model's template
+    // re-renders the last answer without its reasoning -- so turn two's prompt
+    // parts from the cache early, the trim is refused, and decoding on from
+    // the shared prefix failed every second turn ("for M-RoPE, it is required
+    // that the position satisfies: X < Y"). The cache is cleared instead and
+    // the prompt decoded from 0.
+    Fixture fixture;
+    fixture.runtime->rewindable = false;
+
+    // Turn one generates, so the cache holds tokens past its prompt.
+    (void)fixture.provider->chat(turn({ChatMessage::user("prime thinking answer")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    session->script = {fixture.runtime->model->id_for("thinking"),
+                       fixture.runtime->model->id_for("answer")};
+    session->sampled = 0;
+    (void)fixture.provider->chat(turn({ChatMessage::user("alpha beta")}), {});
+    const std::size_t decodes_before = session->decodes.size();
+
+    // The answer comes back re-rendered differently from what was generated,
+    // as a template that strips reasoning does.
+    const auto second = fixture.provider->chat(
+        turn({ChatMessage::user("alpha beta"), ChatMessage::assistant("restated"),
+              ChatMessage::user("gamma")}),
+        {});
+    REQUIRE(session->decodes.size() > decodes_before);
+    // A shared prefix was found, and asked for...
+    REQUIRE_FALSE(session->trims.empty());
+    CHECK(session->trims.back() > 0);
+    // ...but the cache could not be cut there, so the prompt decoded whole.
+    const apogee::backends::DecodeRecord& prompt = session->decodes.at(decodes_before);
+    CHECK(prompt.position == 0);
+    CHECK(prompt.count == second.usage.prompt_tokens);
+}
+
+TEST_CASE("a model whose memory cannot be rewound still reuses a prompt that only extends",
+          "[backends][llamacpp][kv]") {
+    // Nothing to cut, nothing refused: a turn that adds to what is cached
+    // decodes only what is new, rewindable or not.
+    Fixture fixture;
+    fixture.runtime->rewindable = false;
+
+    const auto first = fixture.provider->chat(turn({ChatMessage::user("alpha beta")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    const std::int64_t after_first = session->prompt_tokens_decoded();
+    const auto second = fixture.provider->chat(
+        turn({ChatMessage::user("alpha beta"), ChatMessage::assistant(first.message.content),
+              ChatMessage::user("gamma")}),
+        {});
+    CHECK(session->prompt_tokens_decoded() - after_first < second.usage.prompt_tokens);
+}
+
 TEST_CASE("usage is exact on both sides", "[backends][llamacpp][usage]") {
     // A local tokenizer is the model's own, so these are measurements rather
     // than the characters/4 estimate every other path falls back to.
@@ -780,4 +834,69 @@ TEST_CASE("a response schema is stated once in the prompt, and never twice",
     already_bound.transient.response_schema = request.transient.response_schema;
     const auto still_once = stated_again.provider->chat(already_bound, {});
     CHECK(still_once.usage.prompt_tokens == once.usage.prompt_tokens);
+}
+
+TEST_CASE("a side request's context holds the request, not the session's window",
+          "[backends][llamacpp][kv]") {
+    // A title used to get a context as large as the session's: on a model
+    // trained for 256K positions, gigabytes of cache for a few hundred tokens.
+    const auto provider_with = [](std::int64_t window, FakeLlamaRuntime*& runtime) {
+        auto owned = std::make_unique<FakeLlamaRuntime>();
+        runtime = owned.get();
+        LlamaCppProvider::Options options;
+        options.backend_name = "local";
+        options.model = "test-model";
+        options.model_path = "/models/test.gguf";
+        options.context_size = window;
+        return std::make_unique<LlamaCppProvider>(std::move(options), std::move(owned));
+    };
+    ChatRequest title = turn({ChatMessage::user("name this")});
+    title.max_tokens = 32;
+    title.transient.side_request = true;
+    ChatRequest long_side = title;
+    long_side.max_tokens = 10000;
+
+    FakeLlamaRuntime* runtime = nullptr;
+    const auto provider = provider_with(200000, runtime);
+    (void)provider->chat(turn({ChatMessage::user("alpha beta")}), {});
+    (void)provider->chat(title, {});
+    (void)provider->chat(long_side, {});
+    const std::vector<std::int64_t>& sizes = runtime->model->context_sizes;
+    REQUIRE(sizes.size() == 3);
+    CHECK(sizes[0] == 200000);  // the session keeps its whole window
+    CHECK(sizes[1] == 4096);    // a small request gets the floor
+    // Room for the prompt and the cap, with slack -- and no more.
+    CHECK(sizes[2] > 10000);
+    CHECK(sizes[2] < 10500);
+
+    // Never past the window the backend was given.
+    const auto narrow = provider_with(5000, runtime);
+    (void)narrow->chat(long_side, {});
+    CHECK(runtime->model->context_sizes.back() == 5000);
+}
+
+TEST_CASE("skipping reasoning closes the family's think block before the answer",
+          "[backends][llamacpp][profile]") {
+    // What Qwen's own template writes for enable_thinking=false: the model's
+    // first token is then the answer's, not the first of hundreds of reasoning.
+    const auto last_prompt = [](std::string model, bool skip) {
+        auto owned = std::make_unique<FakeLlamaRuntime>();
+        FakeLlamaRuntime* runtime = owned.get();
+        LlamaCppProvider::Options options;
+        options.backend_name = "local";
+        options.model = std::move(model);
+        options.model_path = "/models/test.gguf";
+        LlamaCppProvider provider{std::move(options), std::move(owned)};
+        ChatRequest request = turn({ChatMessage::user("name this")});
+        request.transient.side_request = true;
+        request.transient.skip_reasoning = skip;
+        (void)provider.chat(request, {});
+        return runtime->model->tokenized.back();
+    };
+    const std::string closed = "<think>\n\n</think>\n\n";
+    CHECK(last_prompt("qwen3-8b", true).ends_with(closed));
+    CHECK_FALSE(last_prompt("qwen3-8b", false).ends_with(closed));
+    // An uncharacterised family's switch is not guessed at: a wrong one would
+    // reach the model as text.
+    CHECK(last_prompt("test-model", true).find("<think>") == std::string::npos);
 }

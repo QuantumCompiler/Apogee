@@ -1,10 +1,19 @@
 #pragma once
 
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "commands/command.h"
+#include "harness/config.h"
 
 namespace apogee::commands {
+
+/// Every dotted key `config get` answers for `config`: the fixed ones, and
+/// each backend's, MCP server's and collection's fields by name -- what
+/// completion offers for `config get <TAB>`. Beside `lookup`, which it must
+/// agree with; a test asks `config get` for every key listed here.
+[[nodiscard]] std::vector<std::string> config_keys(const harness::Config& config);
 
 /// `apogee config` -- inspect and edit the config file.
 ///

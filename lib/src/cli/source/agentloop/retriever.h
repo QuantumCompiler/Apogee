@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -57,6 +58,14 @@ enum class Retriever : std::uint8_t { Lexical, Vector, Hybrid };
 /// pin checked by `apogee check`, the chat command -- so a value cannot be
 /// accepted on one surface and refused on another.
 [[nodiscard]] bool valid_retriever(std::string_view value) noexcept;
+
+/// The words `valid_retriever` accepts, `auto` last -- for completion to offer.
+[[nodiscard]] std::span<const std::string_view> retriever_names() noexcept;
+
+/// The ones an ingest takes: what gets built, `lexical` (the text index) or
+/// `vector` (every chunk embedded too), or `auto`. Hybrid is a way of
+/// searching, not of building.
+[[nodiscard]] std::span<const std::string_view> ingest_retriever_names() noexcept;
 
 /// The shared "not a retriever" message. `label` is how the surface spells the
 /// setting: `--retriever`, or `retriever` for a config field.

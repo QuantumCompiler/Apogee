@@ -152,7 +152,9 @@ void AuthCommand::bind(CLI::App& root, const RootContext& context) {
     auto add_flags = std::make_shared<AddFlags>();
     CLI::App* add =
         cmd->add_subcommand("add", "Store a provider's API key (never on the command line)");
-    add->add_option("provider", add_flags->provider, "anthropic, openai, or google")->required();
+    add->add_option("provider", add_flags->provider, "anthropic, openai, or google")
+        ->type_name(words_value(secrets::slot_names()))
+        ->required();
     add->add_flag("--stdin", add_flags->from_stdin, "Read the key from standard input");
     add->add_flag("--from-env", add_flags->from_env,
                   "Copy the key from the provider's conventional environment variable");
@@ -232,7 +234,9 @@ void AuthCommand::bind(CLI::App& root, const RootContext& context) {
     // --- clear -------------------------------------------------------------
     auto clear_provider = std::make_shared<std::string>();
     CLI::App* clear = cmd->add_subcommand("clear", "Remove a stored key");
-    clear->add_option("provider", *clear_provider, "anthropic, openai, or google")->required();
+    clear->add_option("provider", *clear_provider, "anthropic, openai, or google")
+        ->type_name(words_value(secrets::slot_names()))
+        ->required();
     clear->callback([&context, clear_provider]() {
         const harness::BackendType type = require_slot(*clear_provider);
         const std::string slot = *secrets::slot_name(type);

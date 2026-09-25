@@ -229,6 +229,9 @@ Lines format_backend_entry(std::string_view name, const BackendConfig& backend,
     if (!backend.model_path.empty()) {
         field("model_path", yaml_scalar(backend.model_path));
     }
+    if (!backend.mmproj_path.empty()) {
+        field("mmproj_path", yaml_scalar(backend.mmproj_path));
+    }
     if (!backend.embedding_model.empty()) {
         field("embedding_model", yaml_scalar(backend.embedding_model));
     }
@@ -731,7 +734,13 @@ std::vector<std::string_view> models_role_fields() {
     return {"default", "default_embedding", "default_extraction"};
 }
 
-std::string set_backend_model_path(std::string_view content, std::string_view name,
+namespace {
+
+/// Sets one path field of a backend entry in place, keeping any trailing
+/// comment; when the entry has none, it goes right after `after_field` (else
+/// after `type:`, else first) -- where a reader looks for it.
+std::string set_backend_path_field(std::string_view content, std::string_view name,
+                                   std::string_view key, std::string_view after_field,
                                    std::string_view path) {
     Lines lines = split_lines(content);
     const std::string terminator = dominant_terminator(lines);
@@ -746,7 +755,10 @@ std::string set_backend_model_path(std::string_view content, std::string_view na
     const auto [begin, end] = entry_extent(lines, *key_line, range.end);
     const std::string value = yaml_scalar(std::string{path});
 
+    const std::string prefix = std::string{key} + ":";
+    const std::string after_prefix = std::string{after_field} + ":";
     std::optional<std::size_t> type_line;
+    std::optional<std::size_t> after_line;
     for (std::size_t i = begin + 1; i < end; ++i) {
         const std::string_view line = body(lines[i]);
         if (is_blank(line) || is_comment(line) || indent_of(line) != kFieldIndent) {
@@ -756,7 +768,10 @@ std::string set_backend_model_path(std::string_view content, std::string_view na
         if (field.starts_with("type:")) {
             type_line = i;
         }
-        if (!field.starts_with("model_path:")) {
+        if (!after_field.empty() && field.starts_with(after_prefix)) {
+            after_line = i;
+        }
+        if (!field.starts_with(prefix)) {
             continue;
         }
         // Replace only the value token, keeping any trailing comment.
@@ -787,12 +802,24 @@ std::string set_backend_model_path(std::string_view content, std::string_view na
         lines[i] = replacement;
         return join_lines(lines);
     }
-    // No `model_path:` yet: it goes right after `type:`, else first in the
-    // entry -- where a reader looks for it.
-    const std::size_t at = type_line.has_value() ? *type_line + 1 : begin + 1;
+    const std::size_t at = after_line.has_value()  ? *after_line + 1
+                           : type_line.has_value() ? *type_line + 1
+                                                   : begin + 1;
     lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(at),
-                 std::string(kFieldIndent, ' ') + "model_path: " + value + terminator);
+                 std::string(kFieldIndent, ' ') + prefix + " " + value + terminator);
     return join_lines(lines);
+}
+
+}  // namespace
+
+std::string set_backend_model_path(std::string_view content, std::string_view name,
+                                   std::string_view path) {
+    return set_backend_path_field(content, name, "model_path", "", path);
+}
+
+std::string set_backend_mmproj_path(std::string_view content, std::string_view name,
+                                    std::string_view path) {
+    return set_backend_path_field(content, name, "mmproj_path", "model_path", path);
 }
 
 std::string set_embedding_graph_enabled(std::string_view content, std::string_view collection,

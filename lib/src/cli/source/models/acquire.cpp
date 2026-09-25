@@ -17,21 +17,6 @@
 namespace apogee::models {
 namespace {
 
-/// RFC3339, UTC.
-[[nodiscard]] std::string now_rfc3339() {
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t as_time = std::chrono::system_clock::to_time_t(now);
-    std::tm utc{};
-#if defined(_WIN32)
-    gmtime_s(&utc, &as_time);
-#else
-    gmtime_r(&as_time, &utc);
-#endif
-    std::ostringstream out;
-    out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
-    return out.str();
-}
-
 [[nodiscard]] std::string lowercase(std::string value) {
     std::ranges::transform(value, value.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -80,7 +65,8 @@ bool is_known_unrunnable(std::string_view architecture) noexcept {
 namespace {
 
 AcquireResult acquire_impl(const std::filesystem::path& destination, const SourcePromise& promise,
-                           const ByteSource& source, const ProgressFn& progress, bool expect_gguf) {
+                           const ByteSource& source, const ProgressFn& progress, bool expect_gguf,
+                           bool write_record) {
     AcquireResult result;
 
     std::error_code code;
@@ -205,7 +191,7 @@ AcquireResult acquire_impl(const std::filesystem::path& destination, const Sourc
     // The sidecar goes last, so it can never describe a file that is not there.
     // A failure here leaves a usable model with unknown provenance, which is a
     // warning rather than a reason to delete what was just downloaded.
-    if (!write_sidecar(destination, sidecar)) {
+    if (write_record && !write_sidecar(destination, sidecar)) {
         result.ok = true;
         result.path = destination;
         result.sidecar = sidecar;
@@ -223,12 +209,20 @@ AcquireResult acquire_impl(const std::filesystem::path& destination, const Sourc
 
 AcquireResult acquire(const std::filesystem::path& destination, const SourcePromise& promise,
                       const ByteSource& source, const ProgressFn& progress) {
-    return acquire_impl(destination, promise, source, progress, true);
+    return acquire_impl(destination, promise, source, progress, true, true);
 }
 
 AcquireResult acquire_file(const std::filesystem::path& destination, const SourcePromise& promise,
                            const ByteSource& source, const ProgressFn& progress) {
-    return acquire_impl(destination, promise, source, progress, false);
+    // No sidecar on disk. A sidecar is named by swapping the extension for
+    // `.json`, and in a repository that name is often taken: `config.json`'s
+    // sidecar IS `config.json`, and `tokenizer.model`'s is `tokenizer.json`.
+    // Written, it replaced the model's own configuration and tokenizer with
+    // download records -- every SafeTensors snapshot pulled that way was
+    // unconvertible and untrainable, while the pull reported "verified". The
+    // record is returned; a snapshot keeps every file's in one
+    // apogee-snapshot.json.
+    return acquire_impl(destination, promise, source, progress, false, false);
 }
 
 AcquireTreeResult acquire_tree(const std::filesystem::path& destination,

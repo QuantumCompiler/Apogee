@@ -58,9 +58,18 @@ public:
         return script[sampled++];
     }
 
-    void trim_to(std::int64_t position) override {
+    /// False plays a recurrent or hybrid model: a trim that would cut cached
+    /// positions is refused and the cache cleared, as the real context does.
+    bool rewindable = true;
+
+    [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
         trims.push_back(position);
+        if (!rewindable && position < resident) {
+            resident = 0;
+            return 0;
+        }
         resident = std::min(resident, position);
+        return position;
     }
 
     [[nodiscard]] std::int64_t eval_count() const noexcept override {
@@ -116,8 +125,8 @@ public:
         return state_->sample();
     }
 
-    void trim_to(std::int64_t position) override {
-        state_->trim_to(position);
+    [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
+        return state_->trim_to(position);
     }
 
     [[nodiscard]] std::int64_t eval_count() const noexcept override {
@@ -147,6 +156,7 @@ public:
     /// Applied to every context this model creates.
     std::int64_t batch_limit = 1000000;
     std::int64_t context_capacity = 1000000;
+    bool rewindable = true;
 
     /// What each new context should sample. Applied at creation.
     std::vector<std::int32_t> script;
@@ -156,9 +166,16 @@ public:
     /// texts appended — the "model ships its own template" path.
     std::string builtin_template_prefix;
 
+    /// Every text tokenized, in order: what the provider actually sent.
+    mutable std::vector<std::string> tokenized;
+
+    /// The window each context was asked for, in creation order.
+    std::vector<std::int64_t> context_sizes;
+
     [[nodiscard]] std::vector<std::int32_t> tokenize(std::string_view text,
                                                      bool add_special) const override {
         (void)add_special;
+        tokenized.emplace_back(text);
         std::vector<std::int32_t> tokens;
         std::string word;
         for (const char character : text) {
@@ -247,12 +264,13 @@ public:
 
     [[nodiscard]] std::unique_ptr<backends::LlamaContext> make_context(
         std::int64_t context_size) override {
-        (void)context_size;
+        context_sizes.push_back(context_size);
         auto state = std::make_shared<FakeLlamaContext>();
         state->script = script;
         state->eog_token = eog_token;
         state->batch_limit = batch_limit;
         state->context_capacity = context_capacity;
+        state->rewindable = rewindable;
         contexts.push_back(state);
         // The provider owns its contexts and destroys a side request's the
         // moment the call returns -- so the model keeps them ALIVE and hands
@@ -292,6 +310,8 @@ public:
 
     /// Applied to every model this runtime hands out.
     std::int64_t batch_limit = 1000000;
+    /// False plays a recurrent or hybrid model (see FakeLlamaContext).
+    bool rewindable = true;
     std::vector<std::int32_t> script;
     std::int32_t eog_token = -1;
     std::string builtin_template_prefix;
@@ -320,6 +340,7 @@ public:
         ++loads;
         auto loaded = std::make_unique<FakeLlamaModel>();
         loaded->batch_limit = batch_limit;
+        loaded->rewindable = rewindable;
         loaded->script = script;
         for (const std::string& piece : script_text) {
             loaded->script.push_back(loaded->id_for(piece));

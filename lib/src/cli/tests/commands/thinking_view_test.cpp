@@ -8,14 +8,14 @@
 #include "ansi/ansi.h"
 #include "commands/terminal.h"
 
+using apogee::ansi::display_width;
 using apogee::ansi::kEraseLine;
 using apogee::ansi::kUpAndErase;
 using apogee::ansi::Style;
-using apogee::commands::display_width;
+using apogee::ansi::wrap_tail;
 using apogee::commands::kTailLines;
 using apogee::commands::TerminalWriter;
 using apogee::commands::ThinkingView;
-using apogee::commands::wrap_tail;
 
 namespace {
 
@@ -195,7 +195,7 @@ TEST_CASE("a repaint erases exactly the rows it painted", "[ux][thinking]") {
 TEST_CASE("a scrolled-off line is absent from the final paint", "[ux][thinking]") {
     Harness h;
     ThinkingView::Options options;
-    options.width = 12;  // content width 10
+    options.width = 13;  // content width 10: two of indent, the last column never written
     ThinkingView view = h.make(options);
 
     view.write("AAAAAAAAAA");  // row 1
@@ -345,4 +345,73 @@ TEST_CASE("styling is applied only when colour is enabled", "[ux][thinking]") {
     view_color.write("text");
     view_color.finish();
     CHECK(colored.bytes().find(apogee::ansi::kDim) != std::string::npos);
+}
+
+TEST_CASE("a painted row never reaches the terminal's last column", "[ux][thinking]") {
+    // Found live on 2026-09-23: rows wrapped to exactly the terminal width,
+    // and a terminal that wraps as soon as the last column is written put the
+    // next newline a line lower than counted -- the erase then missed the
+    // header, and every repaint left a line behind.
+    Harness h;
+    ThinkingView::Options options;
+    options.width = 20;
+    ThinkingView view = h.make(options);
+    view.write(std::string(200, 'x'));
+
+    const std::string all = h.bytes();
+    const std::string final_paint = all.substr(all.rfind("✻ Thinking…"));
+    std::size_t widest = 0;
+    std::size_t start = 0;
+    while (start <= final_paint.size()) {
+        const std::size_t end = std::min(final_paint.find('\n', start), final_paint.size());
+        widest = std::max(widest, display_width(final_paint.substr(start, end - start)));
+        start = end + 1;
+    }
+    CHECK(widest == 19);
+}
+
+TEST_CASE("the width is measured again at every repaint", "[ux][thinking]") {
+    // A terminal resized mid-turn: rows painted for the old width would wrap
+    // in the new one.
+    Harness h;
+    std::size_t terminal = 40;
+    ThinkingView::Options options;
+    options.measure = [&terminal] { return terminal; };
+    ThinkingView view = h.make(options);
+
+    view.write(std::string(30, 'a'));
+    CHECK(h.bytes().find(std::string(30, 'a')) != std::string::npos);
+
+    terminal = 13;  // content width 10
+    const std::size_t before = h.bytes().size();
+    view.write("b");
+    const std::string repaint = h.bytes().substr(before);
+    CHECK(repaint.find(std::string(10, 'a')) != std::string::npos);
+    CHECK(repaint.find(std::string(11, 'a')) == std::string::npos);
+}
+
+TEST_CASE("wide characters count two cells, combining marks none", "[ux][wrap]") {
+    CHECK(display_width("思考") == 4);
+    CHECK(display_width("한국") == 4);
+    CHECK(display_width("e\u0301") == 1);  // e + combining acute
+    CHECK(display_width("…") == 1);
+    // The emoji models put in tables and lists are two cells, as terminals draw
+    // them: counted as one, every table holding a check mark goes out of line.
+    CHECK(display_width("✅") == 2);
+    CHECK(display_width("❌") == 2);
+    CHECK(display_width("⚡⭐✨") == 6);
+    CHECK(display_width("🚀") == 2);
+    // ...while the symbols in the same blocks that terminals draw narrow stay
+    // one: a check without emoji presentation, a star outline, a warning sign.
+    CHECK(display_width("✓") == 1);
+    CHECK(display_width("☆") == 1);
+    CHECK(display_width("⚠") == 1);
+
+    // A wide character that would straddle the edge starts the next row
+    // rather than overhanging it.
+    const auto rows = wrap_tail("ab思考", 3, 10);
+    REQUIRE(rows == std::vector<std::string>{"ab", "思", "考"});
+    for (const std::string& row : rows) {
+        CHECK(display_width(row) <= 3);
+    }
 }

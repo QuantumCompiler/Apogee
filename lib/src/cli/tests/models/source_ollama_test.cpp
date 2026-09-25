@@ -212,7 +212,7 @@ TEST_CASE("a projector layer is read as its own file", "[models][ollama][vision]
 
 TEST_CASE("a text-only model has no projector", "[models][ollama][vision]") {
     Store store;
-    store.add_model("llama3.2", "3b", "llama");
+    (void)store.add_model("llama3.2", "3b", "llama");
 
     const auto entry = find_in_store(store.root, "llama3.2:3b");
     REQUIRE(entry.has_value());
@@ -273,7 +273,7 @@ TEST_CASE("a template layer is recorded as a hint", "[models][ollama]") {
 
 TEST_CASE("listing a store finds models with local weights", "[models][ollama]") {
     Store store;
-    store.add_model("llama3.2", "3b", "llama");
+    (void)store.add_model("llama3.2", "3b", "llama");
 
     const auto entries = list_store(store.root);
     REQUIRE(entries.size() == 1);

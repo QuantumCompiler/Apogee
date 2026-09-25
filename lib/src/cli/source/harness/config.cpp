@@ -235,7 +235,8 @@ PipelineStageSpec parse_pipeline_stage(const YAML::Node& node, std::string_view 
                          "pipeline's contract");
     }
     stage.method = scalar(node["method"], origin, where + ".method");
-    if (!stage.method.empty() && stage.method != "lora" && stage.method != "qlora") {
+    if (!stage.method.empty() &&
+        std::ranges::find(lora_methods(), std::string_view{stage.method}) == lora_methods().end()) {
         fail(origin,
              where + ".method: unknown value '" + stage.method + "' (accepted: lora, qlora)");
     }
@@ -484,6 +485,27 @@ std::optional<AgentOutputFormat> agent_output_format_from_string(std::string_vie
         }
     }
     return std::nullopt;
+}
+
+std::vector<std::string_view> agent_tool_policy_names() {
+    std::vector<std::string_view> out;
+    for (const auto& [name, policy] : kAgentToolPolicyNames) {
+        out.push_back(name);
+    }
+    return out;
+}
+
+std::vector<std::string_view> agent_output_format_names() {
+    std::vector<std::string_view> out;
+    for (const auto& [name, format] : kAgentOutputFormatNames) {
+        out.push_back(name);
+    }
+    return out;
+}
+
+std::span<const std::string_view> lora_methods() noexcept {
+    static constexpr std::array<std::string_view, 2> kMethods{"lora", "qlora"};
+    return kMethods;
 }
 
 const NamedGraphConfig* Config::find_graph(std::string_view name) const noexcept {
@@ -971,6 +993,13 @@ Config parse_config(std::string_view content, std::string_view origin) {
                 config.tools.disabled.push_back(scalar(item, origin, "tools.disabled[]"));
             }
         }
+    }
+
+    if (const YAML::Node ui = root["ui"]; ui.IsDefined() && !ui.IsNull()) {
+        if (!ui.IsMap()) {
+            fail(origin, "ui: expected a mapping");
+        }
+        config.ui.markdown = boolean(ui["markdown"], origin, "ui.markdown", true);
     }
 
     if (const YAML::Node knowledge = root["knowledge"];

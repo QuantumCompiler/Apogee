@@ -43,11 +43,17 @@ add_executable(apogee_tests
     models/gguf_inspect_test.cpp
     models/sha256_test.cpp
     models/acquire_test.cpp
+    models/convert_test.cpp
+    models/store_test.cpp
+    models/migrate_test.cpp
     models/quantize_test.cpp
     models/sidecar_test.cpp
     models/source_ollama_test.cpp
     models/source_hf_test.cpp
     commands/models_pull_test.cpp
+    commands/models_migrate_test.cpp
+    commands/models_convert_test.cpp
+    commands/complete_sources_test.cpp
     commands/models_test.cpp
     commands/attachment_guard_test.cpp
     backends/jsonl_framer_test.cpp
@@ -68,13 +74,19 @@ add_executable(apogee_tests
     commands/helpers_test.cpp
     commands/thinking_view_test.cpp
     commands/status_line_test.cpp
+    commands/download_progress_test.cpp
     commands/cli_reporter_test.cpp
+    commands/answer_view_test.cpp
+    markdown/inline_test.cpp
+    markdown/stream_renderer_test.cpp
+    markdown/corpus_test.cpp
     ansi/ansi_test.cpp
     commands/chat_test.cpp
     commands/check_test.cpp
     commands/lifecycle_test.cpp
     commands/machine_mode_test.cpp
     commands/line_reader_test.cpp
+    commands/chat_completer_test.cpp
     logger/session_test.cpp
     agent/tool_test.cpp
     agentloop/loop_test.cpp
@@ -156,6 +168,7 @@ add_executable(apogee_tests
     training/store_test.cpp
     training/eval_test.cpp
     training/promote_test.cpp
+    training/convert_test.cpp
     httpserver/admin_training_test.cpp
     training/pipeline_test.cpp
     training/regime_test.cpp
@@ -164,12 +177,16 @@ add_executable(apogee_tests
     support/fake_command.cpp
     support/env_guard.h
     support/env_guard.cpp
+    support/file_time.h
+    support/file_time.cpp
     support/fake_mcp_server.cpp
     support/fake_transport.h
     support/fake_llama.h
     support/fake_child.h
     support/gguf_builder.h
     support/fake_transport.cpp
+    support/terminal_model.h
+    support/terminal_model.cpp
 )
 
 # The template-drift test reads the checked-in sample and compares it byte for
@@ -369,6 +386,17 @@ if(UNIX)
     )
     set_tests_properties(cli.install_parity PROPERTIES TIMEOUT 60)
 
+    # The completion stubs in the real shells (bash always; zsh and fish when
+    # present) against the real binary -- what a stub SENDS `__complete`, which
+    # the protocol's own tests cannot see. See the script for the two zsh bugs
+    # that hid nested verbs there.
+    add_test(NAME cli.shell_completion
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/shell_completion_check.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/shell-completion
+    )
+    set_tests_properties(cli.shell_completion PROPERTIES TIMEOUT 60)
+
     add_test(NAME cli.machine_mode
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/machine_mode_e2e.sh"
             $<TARGET_FILE:apogee>
@@ -517,7 +545,9 @@ if(UNIX)
         # Line editing. replxx engages only when stdin AND stdout are both
         # terminals, so none of this reproduces on a pipe -- which is the point:
         # before it was wired, an arrow key arrived in the message as a literal
-        # escape sequence.
+        # escape sequence. Since item 24 it also holds the suggestion rows to
+        # the screen: drawn, taken by Tab, never at the last column, never left
+        # behind -- and a pipe given none of it.
         add_test(NAME cli.chat_line_editing
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/pty_lineedit_check.py"

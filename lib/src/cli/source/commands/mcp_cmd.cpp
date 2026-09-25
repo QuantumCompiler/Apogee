@@ -73,7 +73,8 @@ void bind_create(CLI::App& parent, const RootContext& context) {
         "create", "Scaffold a runnable Python MCP server, or register an existing executable");
     cmd->add_option("name", *name, "The server's name (letters, digits, _ and -)")->required();
     cmd->add_option("--command", *command,
-                    "Register this executable instead of scaffolding a server");
+                    "Register this executable instead of scaffolding a server")
+        ->type_name(kPathValue);
     cmd->add_option("--args", *args, "Arguments for --command")->needs("--command");
     cmd->add_flag("--force", *force, "Replace an existing server of the same name");
     cmd->callback([&context, name, command, args, force]() {
@@ -138,7 +139,7 @@ void bind_test(CLI::App& parent, const RootContext& context) {
     auto arguments = std::make_shared<std::string>("{}");
     CLI::App* cmd =
         parent.add_subcommand("test", "Invoke one tool on one server, as the loop would");
-    cmd->add_option("server", *server, "The server's name")->required();
+    cmd->add_option("server", *server, "The server's name")->type_name(kServerValue)->required();
     cmd->add_option("tool", *tool, "The tool's name, un-namespaced")->required();
     cmd->add_option("arguments", *arguments, "JSON arguments (default {})");
     cmd->callback([&context, server, tool, arguments]() {
@@ -178,7 +179,7 @@ void bind_enable(CLI::App& parent, const RootContext& context, bool enabled) {
     CLI::App* cmd = parent.add_subcommand(
         enabled ? "enable" : "disable",
         enabled ? "Connect to this server on the next run" : "Stop connecting to this server");
-    cmd->add_option("name", *name, "The server's name")->required();
+    cmd->add_option("name", *name, "The server's name")->type_name(kServerValue)->required();
     cmd->callback([&context, name, enabled]() {
         const std::filesystem::path path = config_path_for(context);
         try {

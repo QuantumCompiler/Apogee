@@ -51,4 +51,27 @@ private:
 /// One-shot over an in-memory string. For tests and short values.
 [[nodiscard]] std::string sha256_hex(std::string_view bytes);
 
+/// The block function, both ways -- exposed so a test can hold the fast one
+/// to the portable one on the host that has both.
+///
+/// **Why a second way.** A converted 27B model is a 51 GiB file, and its id
+/// is its hash: the portable code does ~320 MB/s, so `models convert` spent
+/// three silent minutes on it (2026-09-24) -- read as a hang. ARMv8's SHA-256
+/// instructions do ~2 GB/s. Chosen at compile time (`__ARM_FEATURE_SHA2`, on
+/// for every Apple Silicon build), so there is nothing to detect at run time
+/// and nothing to get wrong on a CPU without them.
+namespace sha256_detail {
+
+/// Whether `compress` uses the CPU's SHA-256 instructions in this build.
+[[nodiscard]] bool accelerated() noexcept;
+
+/// `count` consecutive 64-byte blocks into `state`, the way this build does it.
+void compress(std::array<std::uint32_t, 8>& state, const std::uint8_t* blocks,
+              std::size_t count) noexcept;
+
+/// The same, always in portable C++.
+void compress_portable(std::array<std::uint32_t, 8>& state, const std::uint8_t* block) noexcept;
+
+}  // namespace sha256_detail
+
 }  // namespace apogee::models

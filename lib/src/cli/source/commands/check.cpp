@@ -18,14 +18,18 @@
 #include "agentloop/retriever.h"
 #include "agentloop/structured.h"
 #include "ansi/ansi.h"
+#include "commands/download_progress.h"
 #include "commands/embed.h"
 #include "commands/helpers.h"
+#include "commands/models_pull.h"
 #include "harness/assets.h"
 #include "harness/layout.h"
 #include "harness/paths.h"
 #include "httpserver/admin_auth.h"
 #include "knowledge/store.h"
 #include "models/gguf_inspect.h"
+#include "models/snapshot.h"
+#include "models/store.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
 #include "scaffold/agent.h"
@@ -297,42 +301,87 @@ void check_filesystem(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
+/// The model store's roots as `check` sees them: `paths.hf_dir` from the
+/// config when it sets one.
+[[nodiscard]] models::StoreRoots check_roots(const CheckInputs& inputs) {
+    models::StoreRoots roots = models::StoreRoots::at(inputs.home / "models");
+    if (!inputs.config.paths.hf_dir.empty()) {
+        roots.safetensors =
+            std::filesystem::path{harness::expand_env_and_home(inputs.config.paths.hf_dir)};
+    }
+    return roots;
+}
+
 void check_models(CheckReport& report, const CheckInputs& inputs) {
     std::error_code code;
-    const std::filesystem::path models = inputs.home / "models";
-    if (!std::filesystem::exists(models, code)) {
+    if (!std::filesystem::exists(inputs.home / "models", code)) {
         return;  // already reported by the filesystem section
     }
+    const models::StoreRoots roots = check_roots(inputs);
 
     int found = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(models, code)) {
-        if (code) {
-            break;
-        }
-        if (!entry.is_regular_file(code) || entry.path().extension() != ".gguf") {
-            continue;
-        }
+    for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
         ++found;
+        const std::string name = stored.model + "/gguf/" + stored.id;
         // A full header read, not the 4-byte magic check this used to do. The
         // failure that actually happens is a half-finished download, and that
         // file has perfectly valid magic -- so magic alone reported "valid
         // GGUF header" for exactly the file that cannot be loaded.
-        const models::GgufInfo info = models::inspect_gguf(entry.path());
+        const models::GgufInfo info = models::inspect_gguf(stored.file);
         if (!info.parsed) {
-            add(report, Status::Fail, "Models", entry.path().filename().string(),
-                "unreadable GGUF -- " + info.parse_error, "re-download the model");
+            add(report, Status::Fail, "Models", name, "unreadable GGUF -- " + info.parse_error,
+                "apogee models repair " + name);
         } else {
-            add(report, Status::Ok, "Models", entry.path().filename().string(),
+            add(report, Status::Ok, "Models", name,
                 info.architecture.empty() ? "valid GGUF header"
                                           : info.architecture + ", valid GGUF header");
         }
     }
+    for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
+        ++found;
+        const std::string name = stored.model + "/safetensors/" + stored.id;
+        if (models::config_is_download_record(stored.dir)) {
+            add(report, Status::Warn, "Models", name,
+                "damaged by an older pull: its config.json is a download record",
+                "apogee models repair " + name);
+        } else {
+            add(report, Status::Ok, "Models", name, "SafeTensors weights");
+        }
+    }
 
-    if (found == 0) {
+    // What the flat layout left is found, never read in place: say so, and
+    // name the one command that moves it -- `check` itself never edits the
+    // config that points at it.
+    const models::LegacyLayout legacy = models::find_legacy(roots);
+    if (!legacy.empty()) {
+        add(report, Status::Warn, "Models", "old layout",
+            std::to_string(legacy.ggufs.size() + legacy.snapshots.size()) +
+                " model(s) still in the flat layout, which nothing reads any more",
+            "apogee models migrate");
+    }
+
+    // What an interrupted pull, convert or quantize left: its whole staging
+    // directory, at full size -- two 52 GB copies of one model, the first
+    // time (2026-09-23). A live run's is claimed by its process and never
+    // listed, so the fix below cannot pull one out from under it.
+    const std::vector<models::AbandonedStaging> leftovers = models::find_abandoned_staging(roots);
+    if (!leftovers.empty()) {
+        std::uintmax_t bytes = 0;
+        for (const models::AbandonedStaging& leftover : leftovers) {
+            bytes += leftover.bytes;
+        }
+        add(report, Status::Warn, "Models", "leftovers",
+            std::to_string(leftovers.size()) +
+                " staging folder(s) an interrupted pull, convert or quantize left behind, " +
+                format_progress_size(static_cast<std::int64_t>(bytes)),
+            "apogee check --fix");
+    }
+
+    if (found == 0 && legacy.empty()) {
         // The fresh-install criterion in one row: no models is CORRECT.
         // Apogee bundles none and downloads none without being asked.
         add(report, Status::Ok, "Models", "models/",
-            "no models installed -- Apogee bundles none; add your own GGUF here");
+            "no models installed -- Apogee bundles none; pull one with 'apogee models pull'");
     }
 }
 
@@ -898,10 +947,24 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Warn, "Training", "converter",
                 "convert_hf_to_gguf.py is not seeded under " + converter.string(),
                 "apogee check --fix");
-        } else if (harness::is_unmodified_bundled_asset(inputs.home, converter)) {
+        } else if (const harness::ConverterTreeState tree =
+                       harness::inspect_converter_tree(converter);
+                   tree.current()) {
             add(report, Status::Ok, "Training", "converter",
                 "convert_hf_to_gguf.py matches the vendored copy (" + std::to_string(files) +
                     " files)");
+        } else if (tree.stale > 0 || tree.missing > 0) {
+            // An earlier Apogee's converter, or part of one: the fix updates
+            // it in place, and an edit elsewhere in the tree is kept. Stale,
+            // it is a failure waiting to happen -- its llama.cpp is older
+            // than the runtime's, and a model only the new one knows fails.
+            add(report, Status::Warn, "Training", "converter",
+                (tree.stale > 0 ? std::to_string(tree.stale) +
+                                      " file(s) are from an earlier Apogee's llama.cpp"
+                                : std::to_string(tree.missing) + " of the vendored converter's " +
+                                      std::to_string(files) + " files are missing") +
+                    " under " + converter.string(),
+                "apogee check --fix");
         } else {
             add(report, Status::Warn, "Training", "converter",
                 "differs from the vendored copy under " + converter.string() +
@@ -1021,24 +1084,16 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
     // present -- warnings, since a cycle's pipeline has its datasets
     // overridden and a student may be pulled later; a stage that names
     // nothing at all already failed the load.
-    const std::filesystem::path hf_root =
-        inputs.config.paths.hf_dir.empty()
-            ? inputs.home / "models"
-            : std::filesystem::path{harness::expand_env_and_home(inputs.config.paths.hf_dir)};
+    const models::StoreRoots roots = check_roots(inputs);
     for (const auto& [name, spec] : inputs.config.training.pipelines) {
         const std::string label = "pipeline: " + name;
         std::vector<std::string> problems;
         if (spec.student.empty()) {
             problems.emplace_back("no student named");
-        } else {
-            const std::filesystem::path given{spec.student};
-            bool found = std::filesystem::is_directory(given, code);
-            for (const std::filesystem::path& root : {hf_root, inputs.home / "models"}) {
-                found = found || std::filesystem::is_directory(root / spec.student, code);
-            }
-            if (!found) {
-                problems.push_back("student '" + spec.student + "' is not a snapshot directory");
-            }
+        } else if (const SnapshotChoice student = choose_snapshot(roots, spec.student);
+                   !student.error.empty()) {
+            // The same lookup `train` makes, so this row and a run agree.
+            problems.push_back("student '" + spec.student + "': " + student.error);
         }
         for (const harness::PipelineStageSpec& stage : spec.stages) {
             const std::filesystem::path given{stage.dataset};
@@ -1181,8 +1236,27 @@ std::vector<std::string> apply_fixes(const CheckInputs& inputs) {
     for (const std::string& name : seeded.created) {
         done.push_back("created " + (inputs.home / name).string());
     }
+    for (const std::string& name : seeded.updated) {
+        done.push_back("updated " + (inputs.home / name).string());
+    }
+    for (const std::string& name : seeded.removed) {
+        done.push_back("removed " + (inputs.home / name).string());
+    }
     if (!seeded.ok()) {
         done.push_back("could not finish: " + seeded.error);
+    }
+    // Staging an interrupted run left in the model store: Apogee's own
+    // scratch, never the user's file, and never a live run's (see the
+    // `leftovers` row). Removing it is a repair like seeding one.
+    for (const models::AbandonedStaging& leftover :
+         models::find_abandoned_staging(check_roots(inputs))) {
+        if (const std::string error = models::remove_weights(leftover.dir); error.empty()) {
+            done.push_back("removed " + leftover.dir.string() + " (" +
+                           format_progress_size(static_cast<std::int64_t>(leftover.bytes)) +
+                           ", left by an interrupted run)");
+        } else {
+            done.push_back(error);
+        }
     }
     // A scaffolded server that lost its execute bit is a repair of the same
     // kind: the file is the user's, its mode is the install's.

@@ -1,6 +1,8 @@
 #include "platform/platform.h"
 
+#include <array>
 #include <cerrno>
+#include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -13,11 +15,13 @@
 #elif defined(__APPLE__)
 #include <fcntl.h>
 #include <mach-o/dyld.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 #else
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -123,6 +127,26 @@ long current_process_id() noexcept {
 #endif
 }
 
+bool process_running(long pid) noexcept {
+    if (pid <= 0) {
+        return false;
+    }
+#if defined(_WIN32)
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    if (process == nullptr) {
+        // No such process -- or one this user may not look at, which exists.
+        return GetLastError() == ERROR_ACCESS_DENIED;
+    }
+    DWORD code = 0;
+    const bool running = GetExitCodeProcess(process, &code) != 0 && code == STILL_ACTIVE;
+    CloseHandle(process);
+    return running;
+#else
+    // Signal 0 checks without sending; EPERM means it exists, owned by another.
+    return ::kill(static_cast<pid_t>(pid), 0) == 0 || errno == EPERM;
+#endif
+}
+
 bool create_exclusive_file(const std::filesystem::path& path, std::string_view content,
                            bool& exists) {
     exists = false;
@@ -215,6 +239,145 @@ std::optional<int> terminal_width() noexcept {
         return static_cast<int>(size.ws_col);
     }
     return std::nullopt;
+#endif
+}
+
+std::optional<int> terminal_height() noexcept {
+#if defined(_WIN32)
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info) != 0) {
+        const int height = info.srWindow.Bottom - info.srWindow.Top + 1;
+        return height > 0 ? std::optional<int>{height} : std::nullopt;
+    }
+    return std::nullopt;
+#else
+    ::winsize size{};
+    if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_row > 0) {
+        return static_cast<int>(size.ws_row);
+    }
+    return std::nullopt;
+#endif
+}
+
+#if !defined(_WIN32)
+namespace {
+
+// The typeahead guard's state, read by its signal handlers: plain data, set
+// before a handler can run. One guard at a time owns it.
+volatile std::sig_atomic_t typeahead_live = 0;
+::termios typeahead_saved{};
+::termios typeahead_quiet{};
+
+constexpr std::array<int, 5> kRestoringSignals{SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGTSTP};
+std::array<struct ::sigaction, kRestoringSignals.size()> typeahead_previous{};
+
+[[nodiscard]] std::size_t signal_slot(int signal) noexcept {
+    for (std::size_t i = 0; i < kRestoringSignals.size(); ++i) {
+        if (kRestoringSignals[i] == signal) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+void unblock(int signal) noexcept {
+    ::sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, signal);
+    ::sigprocmask(SIG_UNBLOCK, &set, nullptr);
+}
+
+extern "C" void typeahead_signal(int signal);
+
+void install_typeahead_handler(int signal) noexcept {
+    struct ::sigaction action{};
+    action.sa_handler = typeahead_signal;
+    sigemptyset(&action.sa_mask);
+    ::sigaction(signal, &action, nullptr);
+}
+
+// Async-signal-safe throughout: tcsetattr, sigaction, sigprocmask and raise
+// are all on POSIX's list.
+extern "C" void typeahead_signal(int signal) {
+    ::tcsetattr(STDIN_FILENO, TCSANOW, &typeahead_saved);
+    if (signal == SIGTSTP) {
+        // Stop as the shell expects, with echo back on; hide again on resume.
+        struct ::sigaction stop{};
+        stop.sa_handler = SIG_DFL;
+        sigemptyset(&stop.sa_mask);
+        ::sigaction(SIGTSTP, &stop, nullptr);
+        unblock(SIGTSTP);
+        ::raise(SIGTSTP);
+        ::tcsetattr(STDIN_FILENO, TCSANOW, &typeahead_quiet);
+        install_typeahead_handler(SIGTSTP);
+        return;
+    }
+    // Whatever the process did with this signal before, it does now.
+    ::sigaction(signal, &typeahead_previous[signal_slot(signal)], nullptr);
+    unblock(signal);
+    ::raise(signal);
+    // Still here: the previous action was a handler that returned, or ignore.
+    if (typeahead_live != 0) {
+        ::tcsetattr(STDIN_FILENO, TCSANOW, &typeahead_quiet);
+        install_typeahead_handler(signal);
+    }
+}
+
+}  // namespace
+#endif
+
+TypeaheadGuard::TypeaheadGuard() noexcept {
+#if !defined(_WIN32)
+    if (typeahead_live != 0 || !is_terminal(StandardStream::In) ||
+        ::tcgetattr(STDIN_FILENO, &typeahead_saved) != 0) {
+        return;
+    }
+    typeahead_quiet = typeahead_saved;
+    typeahead_quiet.c_lflag &= ~static_cast<::tcflag_t>(ECHO | ECHONL);
+    for (std::size_t i = 0; i < kRestoringSignals.size(); ++i) {
+        ::sigaction(kRestoringSignals[i], nullptr, &typeahead_previous[i]);
+    }
+    typeahead_live = 1;
+    for (const int signal : kRestoringSignals) {
+        install_typeahead_handler(signal);
+    }
+    if (::tcsetattr(STDIN_FILENO, TCSANOW, &typeahead_quiet) != 0) {
+        for (std::size_t i = 0; i < kRestoringSignals.size(); ++i) {
+            ::sigaction(kRestoringSignals[i], &typeahead_previous[i], nullptr);
+        }
+        typeahead_live = 0;
+        return;
+    }
+    active_ = true;
+#endif
+}
+
+TypeaheadGuard::~TypeaheadGuard() {
+#if !defined(_WIN32)
+    if (!active_) {
+        return;
+    }
+    ::tcsetattr(STDIN_FILENO, TCSANOW, &typeahead_saved);
+    for (std::size_t i = 0; i < kRestoringSignals.size(); ++i) {
+        ::sigaction(kRestoringSignals[i], &typeahead_previous[i], nullptr);
+    }
+    typeahead_live = 0;
+#endif
+}
+
+EchoPause::EchoPause() noexcept {
+#if !defined(_WIN32)
+    if (typeahead_live != 0 && ::tcsetattr(STDIN_FILENO, TCSANOW, &typeahead_saved) == 0) {
+        paused_ = true;
+    }
+#endif
+}
+
+EchoPause::~EchoPause() {
+#if !defined(_WIN32)
+    if (paused_ && typeahead_live != 0) {
+        ::tcsetattr(STDIN_FILENO, TCSANOW, &typeahead_quiet);
+    }
 #endif
 }
 

@@ -14,6 +14,8 @@
 #include "commands/registry.h"
 #include "commands/root.h"
 #include "harness/config_edit.h"
+#include "models/sidecar.h"
+#include "models/snapshot.h"
 #include "support/env_guard.h"
 
 /// `apogee train setup` refusals -- an interpreter named in the config that
@@ -135,6 +137,19 @@ struct RunFixture {
     Fixture base;
     std::filesystem::path home = base.home.path();
     std::filesystem::path training = home / "training";
+    /// The student, where the model store keeps a SafeTensors set.
+    std::filesystem::path student = home / "models" / "tiny" / "safetensors" / "aaaaaaaaaaaa";
+
+    /// The GGUF a promoted version's ledger entry records -- in the model
+    /// store, beside the base model it was trained from.
+    [[nodiscard]] std::filesystem::path version_file(std::string_view backend, int version) const {
+        const std::optional<apogee::training::VersionLedger> ledger =
+            apogee::training::TrainingStore{training}.list_versions(backend);
+        if (!ledger.has_value() || ledger->find(version) == nullptr) {
+            return {};
+        }
+        return std::filesystem::path{ledger->find(version)->gguf_path};
+    }
 
     explicit RunFixture(std::string verdict = "A", std::string extra_config = {}) {
         write_file(home / "judge.json",
@@ -147,9 +162,9 @@ struct RunFixture {
         config += extra_config;
         write_file(base.config_path, config);
         REQUIRE(apogee::harness::seed_data_directory(home).ok());
-        write_file(home / "models" / "tiny" / "config.json",
+        write_file(student / "config.json",
                    R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
-        write_file(home / "models" / "tiny" / "model.safetensors", "w");
+        write_file(student / "model.safetensors", "w");
         write_file(training / "datasets" / "starter.jsonl",
                    "{\"messages\": [{\"role\": \"user\", \"content\": \"hi\"}, "
                    "{\"role\": \"assistant\", \"content\": \"hello\"}]}\n");
@@ -248,7 +263,7 @@ TEST_CASE(
     CHECK(m.iters == 4);
     CHECK(m.iterations == 4);
     CHECK(m.mask_prompt);
-    CHECK(m.base_model == (fixture.home / "models" / "tiny").string());
+    CHECK(m.base_model == fixture.student.string());
     CHECK(m.dataset == (fixture.training / "datasets" / "starter.jsonl").string());
     CHECK(m.dataset_hash.size() == 12);
     CHECK_FALSE(m.started_at.empty());
@@ -281,7 +296,8 @@ TEST_CASE(
     CHECK(err.find("backend entry (anthropic)") != std::string::npos);
     CHECK(fixture.run({"train", "run", "nope", "--dataset", "starter", "--trainer", "mock"},
                       nullptr, &err) == 1);
-    CHECK(err.find("not a snapshot directory") != std::string::npos);
+    CHECK(err.find("no model 'nope'") != std::string::npos);
+    CHECK(err.find("--safetensors") != std::string::npos);
     CHECK(fixture.run({"train", "run", "tiny", "--dataset", "nope", "--trainer", "mock"}, nullptr,
                       &err) == 1);
     CHECK(err.find("no dataset named 'nope'") != std::string::npos);
@@ -307,16 +323,35 @@ TEST_CASE(
     const apogee::harness::Config config = apogee::harness::load_config(fixture.base.config_path);
     const std::filesystem::path models = fixture.home / "models";
     const std::filesystem::path hf = fixture.home / "hf";
-    write_file(hf / "org--repo" / "config.json", "{}");
-    write_file(hf / "org--repo" / "a.safetensors", "w");
-    CHECK(apogee::commands::resolve_student(config, models, hf, "tiny").path == models / "tiny");
-    CHECK(apogee::commands::resolve_student(config, models, hf, "org--repo").path ==
-          hf / "org--repo");
-    CHECK(apogee::commands::resolve_student(config, models, hf, (models / "tiny").string()).path ==
-          models / "tiny");
+    const std::filesystem::path org = hf / "org--repo" / "safetensors" / "bbbbbbbbbbbb";
+    write_file(org / "config.json", "{}");
+    write_file(org / "a.safetensors", "w");
+    // A model's newest set, by name, by owner/repo, or by any path into it.
+    CHECK(apogee::commands::resolve_student(config, models, hf, "tiny").path == fixture.student);
+    CHECK(apogee::commands::resolve_student(config, models, hf, "org--repo").path == org);
+    CHECK(apogee::commands::resolve_student(config, models, hf, "org/repo").path == org);
+    CHECK(apogee::commands::resolve_student(config, models, hf, fixture.student.string()).path ==
+          fixture.student);
+    CHECK(apogee::commands::resolve_student(config, models, hf, "tiny/safetensors/aaaaaaaaaaaa")
+              .path == fixture.student);
     CHECK_FALSE(apogee::commands::resolve_student(config, models, hf, "../tiny").error.empty());
+    // The flat layout: refused with the migration named, not searched.
+    write_file(models / "flat" / "config.json", "{}");
+    write_file(models / "flat" / "a.safetensors", "w");
+    CHECK(apogee::commands::resolve_student(config, models, hf, "flat")
+              .error.find("apogee models migrate") != std::string::npos);
     CHECK(apogee::commands::resolve_student(config, models, hf, "judge")
               .error.find("backend entry") != std::string::npos);
+    // A snapshot an older `models pull --safetensors` damaged: its config.json
+    // is a download record. Refused by name, not failed on minutes into a run.
+    write_file(hf / "damaged" / "safetensors" / "cccccccccccc" / "config.json",
+               R"({"file": "config.json", "file_digest": "ab", "source_url": "https://x",
+                   "verification": {"size_checked": true}})");
+    write_file(hf / "damaged" / "safetensors" / "cccccccccccc" / "a.safetensors", "w");
+    const apogee::commands::StudentResolution damaged =
+        apogee::commands::resolve_student(config, models, hf, "damaged");
+    CHECK(damaged.path.empty());
+    CHECK(damaged.error.find("download record") != std::string::npos);
 
     std::string error;
     CHECK(apogee::commands::resolve_dataset(fixture.training / "datasets", "starter", error) ==
@@ -450,8 +485,16 @@ TEST_CASE(
     (void)fixture.evaluated(id);
     const std::string before = read_file(fixture.base.config_path);
     REQUIRE(fixture.run({"train", "promote", id, "--as", "tuned"}, &out, &err) == 0);
-    const std::filesystem::path v1 = fixture.training / "versions" / "tuned" / "v1.gguf";
+    const std::filesystem::path v1 = fixture.version_file("tuned", 1);
     CHECK(std::filesystem::exists(v1));
+    // In the model store, beside the model it was trained from, under its
+    // own id -- with the record every stored GGUF has.
+    CHECK(v1.filename() == "tuned-v1.gguf");
+    CHECK(v1.parent_path().parent_path() == fixture.home / "models" / "tiny" / "gguf");
+    const std::optional<apogee::models::Sidecar> v1_record = apogee::models::load_sidecar(v1);
+    REQUIRE(v1_record.has_value());
+    CHECK(v1_record->source == "train");
+    CHECK(v1_record->ref == "tuned v1");
     CHECK(out.find("promoted to new backend tuned -> v1") != std::string::npos);
     // The written path goes through the editor's one quoting rule (a Windows
     // drive colon makes it a quoted scalar), so the expectation does too.
@@ -475,13 +518,24 @@ TEST_CASE(
     const std::string registered = read_file(fixture.base.config_path);
     REQUIRE(fixture.run({"train", "promote", id2, "--as", "tuned", "--keep-fused"}, &out, &err) ==
             0);
-    const std::filesystem::path v2 = fixture.training / "versions" / "tuned" / "v2.gguf";
+    const std::filesystem::path v2 = fixture.version_file("tuned", 2);
     CHECK(out.find("updated backend tuned -> v2") != std::string::npos);
+    CHECK(v2 != v1);  // another run's weights: its own id beside the first
     std::string expected = registered;
     REQUIRE(expected.find(scalar(v1)) != std::string::npos);
     expected.replace(expected.find(scalar(v1)), scalar(v1).size(), scalar(v2));
     CHECK(read_file(fixture.base.config_path) == expected);
-    CHECK(std::filesystem::exists(fixture.training / "runs" / id2 / "fused" / "config.json"));
+    // Kept, the fine-tuned weights join the store too: a SafeTensors set of
+    // the base model, recorded as a training run's, out of the run directory.
+    const std::optional<apogee::training::VersionLedger> kept =
+        apogee::training::TrainingStore{fixture.training}.list_versions("tuned");
+    REQUIRE(kept.has_value());
+    REQUIRE(kept->find(2) != nullptr);
+    const std::filesystem::path fused{kept->find(2)->fused_path};
+    CHECK(std::filesystem::exists(fused / "config.json"));
+    CHECK(fused.parent_path() == fixture.home / "models" / "tiny" / "safetensors");
+    CHECK(apogee::models::load_snapshot(fused)->source == "train");
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "runs" / id2 / "fused"));
 
     // Soft mode warns through, hard refuses, --force skips a failed gate.
     const RunFixture failing{"B"};
@@ -496,11 +550,17 @@ TEST_CASE(
     CHECK(err.find("gate_mode is soft") != std::string::npos);
     REQUIRE(failing.run({"train", "promote", id3, "--as", "tuned", "--force"}, &out, &err) == 0);
     CHECK(out.find("pruned:") != std::string::npos);
-    CHECK_FALSE(std::filesystem::exists(failing.training / "versions" / "tuned" / "v1.gguf"));
-    CHECK(std::filesystem::exists(failing.training / "versions" / "tuned" / "v2.gguf"));
+    const std::optional<apogee::training::VersionLedger> retained =
+        apogee::training::TrainingStore{failing.training}.list_versions("tuned");
+    REQUIRE(retained.has_value());
+    CHECK(retained->find(1)->pruned());
+    // The same run promoted twice is the same weights -- one stored file,
+    // which v2 still records, so pruning v1 did not remove it.
+    CHECK(failing.version_file("tuned", 1) == failing.version_file("tuned", 2));
+    CHECK(std::filesystem::exists(failing.version_file("tuned", 2)));
     // max + 1 after the prune: the next is v3, never v2 again.
     REQUIRE(failing.run({"train", "promote", id3, "--as", "tuned", "--force"}, &out, &err) == 0);
-    CHECK(std::filesystem::exists(failing.training / "versions" / "tuned" / "v3.gguf"));
+    CHECK(std::filesystem::exists(failing.version_file("tuned", 3)));
     CHECK(fixture.run({"train", "promote", "nope", "--as", "x"}, &out, &err) == 1);
 }
 
@@ -524,12 +584,15 @@ TEST_CASE(
     REQUIRE(fixture.run({"train", "promote", id, "--as", "tuned"}, &out, &err) == 0);
     CHECK(fixture.run({"train", "rollback", "tuned"}, &out, &err) == 1);
     CHECK(err.find("only one promoted version") != std::string::npos);
-    REQUIRE(fixture.run({"train", "promote", id, "--as", "tuned"}, &out, &err) == 0);
+    const std::string second = fixture.trained(3);
+    (void)fixture.evaluated(second);
+    REQUIRE(fixture.run({"train", "promote", second, "--as", "tuned"}, &out, &err) == 0);
     const std::string at_v2 = read_file(fixture.base.config_path);
     REQUIRE(fixture.run({"train", "rollback", "tuned"}, &out, &err) == 0);
     CHECK(out.find("v2 -> v1") != std::string::npos);
-    const std::filesystem::path v1 = fixture.training / "versions" / "tuned" / "v1.gguf";
-    const std::filesystem::path v2 = fixture.training / "versions" / "tuned" / "v2.gguf";
+    const std::filesystem::path v1 = fixture.version_file("tuned", 1);
+    const std::filesystem::path v2 = fixture.version_file("tuned", 2);
+    CHECK(v1 != v2);
     CHECK(std::filesystem::exists(v1));
     CHECK(std::filesystem::exists(v2));
     const auto scalar = [](const std::filesystem::path& path) {
@@ -551,7 +614,7 @@ TEST_CASE(
     CHECK(out.find("<- active") != std::string::npos);
     CHECK(out.find("pass 100%") != std::string::npos);
     REQUIRE(fixture.run({"train", "status"}, &out, &err) == 0);
-    CHECK(out.find("Runs: 1 (0 running)") != std::string::npos);
+    CHECK(out.find("Runs: 2 (0 running)") != std::string::npos);
     CHECK(out.find("eval pass 100%") != std::string::npos);
     CHECK(out.find("active v1  (2 kept of 2)") != std::string::npos);
 
@@ -613,6 +676,8 @@ TEST_CASE(
     CHECK(read_file(fixture.base.config_path) == before);
     CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
     CHECK_FALSE(std::filesystem::exists(fixture.training / "runs" / id / "fused"));
+    // Nothing half-built left in the store either.
+    CHECK_FALSE(std::filesystem::exists(fixture.home / "models" / "tiny" / "gguf"));
 }
 
 // ---------------------------------------------------------------------------
@@ -781,7 +846,7 @@ TEST_CASE(
     REQUIRE(fixture.run({"train", "eval", id + "-s1", "--suite", "hello"}, &out, &err) == 0);
     CHECK(out.find("already ran") != std::string::npos);
     REQUIRE(fixture.run({"train", "promote", id + "-s1", "--as", "staged"}, &out, &err) == 0);
-    CHECK(std::filesystem::exists(fixture.training / "versions" / "staged" / "v1.gguf"));
+    CHECK(std::filesystem::exists(fixture.base.version_file("staged", 1)));
     CHECK(fixture.run({"train", "pipeline", "resume", id, "--pipeline", spec}, &out, &err) == 1);
     CHECK(err.find("already complete") != std::string::npos);
 
@@ -887,7 +952,7 @@ TEST_CASE(
                      "alpha", "--count", "2", "--trainer", "mock", "--as", "tuned", "--iters", "1"},
                     &out, &err) == 0);
     CHECK(out.find("regime regime complete -- tuned is now v1") != std::string::npos);
-    CHECK(std::filesystem::exists(fixture.training / "versions" / "tuned" / "v1.gguf"));
+    CHECK(std::filesystem::exists(fixture.base.version_file("tuned", 1)));
     CHECK(read_file(fixture.base.base.config_path).find("  tuned:\n    type: llamacpp\n") !=
           std::string::npos);
     CHECK(fixture.base.manifest(fixture.pipeline_since(seen) + "-s0").iters == 1);
@@ -983,10 +1048,10 @@ TEST_CASE(
     // The entry landed in the backends section through the one editor, and
     // not a line of the config was removed.
     const std::string after = read_file(fixture.base.base.config_path);
-    CHECK(after.find("  nightly-model:\n    type: llamacpp\n    model_path: " +
-                     apogee::harness::yaml_scalar(
-                         (fixture.training / "versions" / "nightly-model" / "v1.gguf").string()) +
-                     "\n") != std::string::npos);
+    CHECK(after.find(
+              "  nightly-model:\n    type: llamacpp\n    model_path: " +
+              apogee::harness::yaml_scalar(fixture.base.version_file("nightly-model", 1).string()) +
+              "\n") != std::string::npos);
     CHECK(after.find("  nightly-model:") < after.find("training:"));
     std::size_t cursor = 0;
     std::istringstream lines{before};

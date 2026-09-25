@@ -20,7 +20,7 @@ plus `git status` for anything uncommitted. The diff is the audit scope: every c
 Work through the system in this order (read [`CLAUDE.md`](../../../lib/documentation/assistant/CLAUDE.md) → Documentation and Status first — it defines the flow this skill enforces):
 
 1. **Backlog** ([`lib/documentation/backlog/`](../../../lib/documentation/backlog/README.md)):
-   - Any item this branch **completed** → its work is recorded in MILESTONES.md, its document is **deleted**, its index row removed, and the phase numbering/track preamble renumbered. A completed item still sitting in the backlog is the system's cardinal violation.
+   - Any item this branch **completed** → its work is recorded in MILESTONES.md, its document is **deleted**, its index row removed, and the track preamble above the index tables updated. A completed item still sitting in the backlog is the system's cardinal violation.
    - Any item this branch **started** → index row marked in progress.
    - Any **gate the branch satisfied** → downstream items' status lines updated.
    - Any decision made while building → a dated entry in the affected item's **Decisions made** (and `[default:]` calls that were exercised recorded as decisions).

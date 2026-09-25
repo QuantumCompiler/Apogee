@@ -19,10 +19,12 @@
 # With --fresh it performs a CI-style clean-room build: clone the repo at the
 # current branch into a temp directory and build there.
 #
-# The CI pipeline (user decisions, 2026-09-19 and 2026-09-20) is two stages,
-# each a call into this script: `--clone-llama` proves the llama.cpp pin
-# resolves, then one build per platform (`--platform T --no-defer`). The test
-# suite does not run on a runner; `--test` is the developer's gate.
+# The CI pipeline (user decisions, 2026-09-19 to 2026-09-25) calls this script
+# for each stage: `--clone-llama` proves the llama.cpp pin resolves and
+# `--unit-tests` runs the source suite per platform beside it, then one build
+# per platform (`--platform T --no-defer`), which .github/actions/package
+# turns into the archive a release ships. The full suite with its executable
+# checks (`--test`) is the developer's gate, not a runner's.
 #
 # Tab completion: source lib/scripts/cicd-completion.bash (see that file).
 set -euo pipefail
@@ -39,6 +41,7 @@ CLEAN=0
 RUN_TESTS=0
 UNIT_TESTS=0
 CLONE_LLAMA=0
+PRINT_HOST=0
 FRESH=0
 NO_DEFER=0
 BRANCH=""
@@ -66,6 +69,9 @@ Options:
       --clone-llama    Clone llama.cpp at the commit the CLI's third_party
                        build pins, prove it resolved, and stop: the first CI
                        stage. Nothing else runs.
+      --host           Print this machine's native target and stop -- the
+                       one host detection, for scripts that need the name
+                       (pr-ci.sh).
   -f, --fresh          CI-style clean-room build: clone ${REPO_URL}
                        at the current branch into a temp dir and build there
   -b, --branch NAME    Branch to build (implies --fresh; default: the branch
@@ -168,6 +174,7 @@ while [[ $# -gt 0 ]]; do
         -t|--test)   RUN_TESTS=1 ;;
         -u|--unit-tests) UNIT_TESTS=1 ;;
         --clone-llama) CLONE_LLAMA=1 ;;
+        --host)      PRINT_HOST=1 ;;
         -f|--fresh)  FRESH=1 ;;
         --no-defer)  NO_DEFER=1 ;;
         -b|--branch) [[ $# -ge 2 ]] || die "--branch needs a name"; BRANCH="$2"; FRESH=1; shift ;;
@@ -180,6 +187,10 @@ done
 
 HOST="$(host_target)"
 [[ ${#PLATFORMS[@]} -gt 0 ]] || PLATFORMS=("$HOST")
+if [[ $PRINT_HOST -eq 1 ]]; then
+    printf '%s\n' "$HOST"
+    exit 0
+fi
 
 # Stage one of the CI pipeline: prove the llama.cpp pin resolves. The pin lives
 # in ONE place -- the FetchContent_Declare in the CLI's third_party build --

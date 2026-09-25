@@ -159,6 +159,10 @@ enum class OutputFormat : std::uint8_t {
 [[nodiscard]] std::string_view to_string(OutputFormat format) noexcept;
 [[nodiscard]] std::optional<OutputFormat> output_format_from_string(std::string_view name) noexcept;
 
+/// The words `--output-format` and `--input-format` take -- the two parsers
+/// above accept the same pair -- for completion.
+[[nodiscard]] std::vector<std::string_view> format_names();
+
 /// One user turn read from a driver over stdin, in machine mode.
 struct DriverMessage {
     enum class Kind : std::uint8_t {

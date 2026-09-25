@@ -21,15 +21,83 @@
 #include <mtmd.h>
 
 #include <cmath>
-#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace apogee::backends {
 namespace {
+
+/// What llama.cpp and mtmd said at WARN and above, kept rather than printed.
+///
+/// It used to go straight to stderr, and inside a chat turn that lands on top
+/// of the live spinner -- "✻ Thinking…init: the tokens of sequence 0 in the
+/// input batch have inconsistent sequence positions:", then our own error
+/// below it (2026-09-23). A warning that is not a failure is only noise
+/// there. A failure's reason is worth having, so it rides on the error it
+/// explains instead: `with_llama_reason` appends what was said since the
+/// last `forget`.
+class LlamaLog {
+public:
+    void add(ggml_log_level level, std::string_view text) {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        // A continuation belongs to whatever it continues: kept only when
+        // that was.
+        if (level != GGML_LOG_LEVEL_CONT) {
+            keeping_ = level >= GGML_LOG_LEVEL_WARN;
+        }
+        if (!keeping_) {
+            return;
+        }
+        text_ += text;
+        if (text_.size() > kCap) {
+            text_.erase(0, text_.size() - kCap);
+        }
+    }
+
+    void forget() {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        text_.clear();
+    }
+
+    [[nodiscard]] std::string take() {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        std::string out = std::move(text_);
+        text_.clear();
+        while (!out.empty() && (out.back() == '\n' || out.back() == ' ')) {
+            out.pop_back();
+        }
+        return out;
+    }
+
+private:
+    static constexpr std::size_t kCap = 2048;
+    std::mutex mutex_;
+    std::string text_;
+    bool keeping_ = false;
+};
+
+LlamaLog& llama_log() {
+    static LlamaLog log;
+    return log;
+}
+
+void keep_llama_log(ggml_log_level level, const char* text, void* /*user_data*/) {
+    if (text != nullptr) {
+        llama_log().add(level, text);
+    }
+}
+
+/// `message`, with llama.cpp's own words on it when it said any.
+[[nodiscard]] std::string with_llama_reason(std::string message) {
+    if (const std::string said = llama_log().take(); !said.empty()) {
+        message += "\nllama.cpp said: " + said;
+    }
+    return message;
+}
 
 /// llama.cpp's global backend init, done once and never torn down.
 ///
@@ -41,41 +109,27 @@ namespace {
 void ensure_backend_init() {
     static std::once_flag once;
     std::call_once(once, [] {
-        // Silence llama.cpp's own logging below WARN before anything can emit.
+        // llama.cpp's own logging, kept rather than printed (`LlamaLog`),
+        // before anything can emit.
         //
         // Loading a model prints ~20 lines of Metal/ggml device capabilities at
         // INFO. On a CLI whose contract is "the answer, and nothing else", that
         // buries our error message in kernel chatter -- the acceptance criterion
         // here asks for a CLEAR error naming the file, and three useful lines
-        // preceded by twenty irrelevant ones does not qualify.
+        // preceded by twenty irrelevant ones does not qualify. WARN and ERROR
+        // are kept: when a model genuinely fails, llama.cpp's reason is more
+        // specific than anything we can infer, and it is appended to ours.
         //
-        // WARN and ERROR still pass through: when a model genuinely fails,
-        // llama.cpp's reason is more specific than anything we can infer, and
-        // it belongs on stderr next to ours.
-        llama_log_set(
-            [](ggml_log_level level, const char* text, void* /*user_data*/) {
-                if (level >= GGML_LOG_LEVEL_WARN && text != nullptr) {
-                    std::fputs(text, stderr);
-                }
-            },
-            nullptr);
-
         // mtmd logs through its OWN channels, which `llama_log_set` does not
         // reach -- and it is chattier: "encoding image slice...", "image
         // decoded (batch 1/1) in 55 ms". Found by running it: those lines
         // landed on STDOUT, interleaved with the answer. On a terminal that is
         // noise; in machine mode it is non-JSON in the middle of the event
-        // stream, which breaks the driver's parser at the worst moment.
-        //
-        // Same rule as above, applied to both of mtmd's loggers: WARN and above
-        // to stderr, everything below dropped.
-        const auto quiet = [](ggml_log_level level, const char* text, void* /*user_data*/) {
-            if (level >= GGML_LOG_LEVEL_WARN && text != nullptr) {
-                std::fputs(text, stderr);
-            }
-        };
-        mtmd_log_set(quiet, nullptr);
-        mtmd_helper_log_set(quiet, nullptr);
+        // stream, which breaks the driver's parser at the worst moment. Same
+        // rule for both of mtmd's loggers.
+        llama_log_set(keep_llama_log, nullptr);
+        mtmd_log_set(keep_llama_log, nullptr);
+        mtmd_helper_log_set(keep_llama_log, nullptr);
 
         llama_backend_init();
     });
@@ -153,12 +207,13 @@ public:
         // from. Asking for all of them allocates the full vocab per token.
         batch.logits[tokens.size() - 1] = 1;
 
+        llama_log().forget();
         const std::int32_t status = llama_decode(context_.get(), batch);
         if (status != 0) {
-            throw std::runtime_error(
+            throw std::runtime_error(with_llama_reason(
                 status == 1 ? "llama.cpp: no KV slot for the batch -- the prompt "
                               "exceeds this backend's context_size"
-                            : "llama.cpp: decode failed (" + std::to_string(status) + ")");
+                            : "llama.cpp: decode failed (" + std::to_string(status) + ")"));
         }
         evaluated_ += static_cast<std::int64_t>(tokens.size());
     }
@@ -169,10 +224,16 @@ public:
         return token;
     }
 
-    void trim_to(std::int64_t position) override {
+    [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
         // p1 < 0 means "to infinity": drop everything from `position` on.
-        llama_memory_seq_rm(llama_get_memory(context_.get()), 0, static_cast<llama_pos>(position),
-                            -1);
+        llama_memory_t memory = llama_get_memory(context_.get());
+        if (llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(position), -1)) {
+            return position;
+        }
+        // A running state that cannot be rewound this far (see the
+        // interface): refused, and untouched -- so start again from nothing.
+        llama_memory_clear(memory, true);
+        return 0;
     }
 
     [[nodiscard]] std::int64_t eval_count() const noexcept override {
@@ -204,8 +265,20 @@ private:
         owned.reserve(images.size());
         borrowed.reserve(images.size());
         for (const std::string& bytes : images) {
-            BitmapPtr bitmap{mtmd_helper_bitmap_init_from_buf(
-                vision_, reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size())};
+            // Since b11151 the helper also decodes video, handing back a
+            // video context beside the bitmap. An attachment here is an
+            // image; a video context is freed and the input refused.
+            const mtmd_helper_bitmap_wrapper decoded = mtmd_helper_bitmap_init_from_buf(
+                vision_, reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size(),
+                /*placeholder=*/false, mtmd_helper_init_opt_default());
+            BitmapPtr bitmap{decoded.bitmap};
+            if (decoded.video_ctx != nullptr) {
+                mtmd_helper_video_free(decoded.video_ctx);
+                error =
+                    "an attachment decoded as video, which this backend does not take -- "
+                    "attach an image";
+                return -1;
+            }
             if (bitmap == nullptr) {
                 error =
                     "an attached image could not be decoded -- it may be a format this "
@@ -225,24 +298,39 @@ private:
         mtmd_input_text input{};
         const std::string prompt{text};
         input.text = prompt.c_str();
+        // Since b11151 the text is read by length, not to its terminator:
+        // left at zero, mtmd saw an empty prompt with no image markers in it,
+        // and refused every image (found live, 2026-09-23 -- the compiler
+        // cannot, since the field value-initialises).
+        input.text_len = prompt.size();
         input.add_special = true;
         input.parse_special = true;
 
-        if (mtmd_tokenize(vision_, chunks.get(), &input, borrowed.data(), borrowed.size()) != 0) {
-            // The usual cause is a marker count that does not match the number
-            // of images, which is our bug rather than the user's -- so it says
-            // what went wrong rather than blaming the picture.
+        llama_log().forget();
+        const std::int32_t tokenized =
+            mtmd_tokenize(vision_, chunks.get(), &input, borrowed.data(), borrowed.size());
+        if (tokenized == 1) {
+            // A marker count that does not match the number of images: our
+            // bug rather than the user's, so it says what went wrong rather
+            // than blaming the picture.
             error = "the multimodal prompt could not be tokenized (marker/image mismatch)";
+            return -1;
+        }
+        if (tokenized != 0) {
+            // 2: the projector could not prepare an image -- mtmd says why.
+            error = with_llama_reason("an attached image could not be prepared for this projector");
             return -1;
         }
 
         llama_pos new_position = 0;
+        llama_log().forget();
         const std::int32_t status = mtmd_helper_eval_chunks(
             vision_, context_.get(), chunks.get(), static_cast<llama_pos>(position),
             /*seq_id=*/0, static_cast<std::int32_t>(llama_n_batch(context_.get())),
             /*logits_last=*/true, &new_position);
         if (status != 0) {
-            error = "evaluating the image failed -- the context may be too small to hold it";
+            error = with_llama_reason(
+                "evaluating the image failed -- the context may be too small to hold it");
             return -1;
         }
 
@@ -388,10 +476,12 @@ public:
         // two -- a message that names neither the cause nor the setting. Real
         // hardware found this; the scripted runtime cannot model an allocator.
 
+        llama_log().forget();
         std::unique_ptr<llama_context, ContextDeleter> context{
             llama_init_from_model(model_.get(), params)};
         if (context == nullptr) {
-            throw std::runtime_error("llama.cpp: could not create a context for this model");
+            throw std::runtime_error(
+                with_llama_reason("llama.cpp: could not create a context for this model"));
         }
 
         std::unique_ptr<llama_sampler, SamplerDeleter> sampler{
@@ -488,13 +578,15 @@ public:
             }
 
             llama_memory_clear(llama_get_memory(ctx), true);
+            llama_log().forget();
             const std::int32_t status =
                 llama_model_has_encoder(model_.get()) && !llama_model_has_decoder(model_.get())
                     ? llama_encode(ctx, batch)
                     : llama_decode(ctx, batch);
             if (status != 0) {
                 llama_batch_free(batch);
-                error = "llama.cpp: embedding decode failed (" + std::to_string(status) + ")";
+                error = with_llama_reason("llama.cpp: embedding decode failed (" +
+                                          std::to_string(status) + ")");
                 return {};
             }
 
@@ -560,9 +652,11 @@ private:
         // moved to cosine 0.56 of itself when a shorter text shared its batch,
         // and was exact whenever every batch-mate was at least as long.
         params.kv_unified = true;
+        llama_log().forget();
         embedding_context_.reset(llama_init_from_model(model_.get(), params));
         if (embedding_context_ == nullptr) {
-            error = "llama.cpp: could not create an embedding context for this model";
+            error = with_llama_reason(
+                "llama.cpp: could not create an embedding context for this model");
             return false;
         }
         return true;
@@ -587,13 +681,14 @@ public:
         llama_model_params params = llama_model_default_params();
         params.n_gpu_layers = static_cast<std::int32_t>(gpu_layers);
 
+        llama_log().forget();
         std::unique_ptr<llama_model, ModelDeleter> model{
             llama_model_load_from_file(path.c_str(), params)};
         if (model == nullptr) {
             // Naming the file is the acceptance criterion: "no such model" with
             // no path sends the user to check their config for the wrong key.
-            error = "could not load the model at '" + path +
-                    "' -- check that the file exists and is a valid GGUF";
+            error = with_llama_reason("could not load the model at '" + path +
+                                      "' -- check that the file exists and is a valid GGUF");
             return nullptr;
         }
         if (mmproj_path.empty()) {
@@ -610,8 +705,8 @@ public:
             // A projector that will not load is an ERROR, not a downgrade to
             // text: the user configured vision, and quietly answering without
             // looking at their picture is worse than saying why.
-            error = "could not load the multimodal projector at '" + mmproj_path +
-                    "' -- check that it is the mmproj file matching this model";
+            error = with_llama_reason("could not load the multimodal projector at '" + mmproj_path +
+                                      "' -- check that it is the mmproj file matching this model");
             return nullptr;
         }
         return std::make_unique<RealModel>(std::move(model), std::move(vision));

@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <array>
 #include <system_error>
 
 #include "platform/platform.h"
@@ -55,6 +57,11 @@ HostShape detect_host() {
     return host;
 }
 
+std::span<const std::string_view> trainer_names() noexcept {
+    static constexpr std::array<std::string_view, 4> kNames{"auto", "mlx", "peft", "mock"};
+    return kNames;
+}
+
 TrainerChoice select_trainer(std::string_view requested, const HostShape& host) {
     TrainerChoice choice;
     if (requested.empty() || requested == "auto") {
@@ -69,8 +76,8 @@ TrainerChoice select_trainer(std::string_view requested, const HostShape& host) 
         }
         return choice;
     }
-    if (requested == "mlx" || requested == "peft" || requested == "mock") {
-        choice.name = std::string{requested};
+    if (std::ranges::find(trainer_names(), requested) != trainer_names().end()) {
+        choice.name = std::string{requested};  // `auto` was taken above
         return choice;
     }
     choice.error =

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -172,6 +173,9 @@ struct TrainerChoice {
 /// `nvidia-smi` is on PATH, and refuses naming both when neither fits; a
 /// known name is taken as given; anything else is refused by name.
 [[nodiscard]] TrainerChoice select_trainer(std::string_view requested, const HostShape& host);
+
+/// The names `select_trainer` takes: `auto`, then each trainer by name.
+[[nodiscard]] std::span<const std::string_view> trainer_names() noexcept;
 
 /// Whether `dir` is something a trainer can take: a directory holding
 /// `config.json` and at least one `*.safetensors` shard. The error text

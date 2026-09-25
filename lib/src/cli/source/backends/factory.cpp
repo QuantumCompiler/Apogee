@@ -98,10 +98,10 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
                 provider->set_model_name(config.embedding_model);
                 return provider;
             }
-            MockProvider::Options options;
-            options.backend_name = name;
+            MockProvider::Options mock_options;
+            mock_options.backend_name = name;
             if (!config.model.empty()) {
-                options.model = config.model;
+                mock_options.model = config.model;
             }
             if (!config.model_path.empty()) {
                 // A script file: canned turns, tool calls included. The
@@ -109,14 +109,14 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
                 // installed, and a tool-using run needs a model that calls
                 // tools.
                 try {
-                    options.turns = load_mock_script(config.model_path);
-                    options.metered = load_mock_script_metered(config.model_path);
+                    mock_options.turns = load_mock_script(config.model_path);
+                    mock_options.metered = load_mock_script_metered(config.model_path);
                 } catch (const std::exception& e) {
                     reason = e.what();
                     return nullptr;
                 }
             }
-            return std::make_shared<MockProvider>(std::move(options));
+            return std::make_shared<MockProvider>(std::move(mock_options));
         }
         case harness::BackendType::OpenAI: {
             const std::optional<std::string> key = resolve_key(name, config, options, reason);

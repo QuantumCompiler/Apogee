@@ -15,6 +15,7 @@
 #include "agentloop/reporter.h"
 #include "backends/factory.h"
 #include "backends/http_client.h"
+#include "commands/download_progress.h"
 #include "commands/helpers.h"
 #include "commands/train.h"
 #include "harness/assets.h"
@@ -274,14 +275,19 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     auto prep_force = std::make_shared<bool>(false);
     CLI::App* prepare = cmd->add_subcommand(
         "prepare", "Convert a local JSONL/JSON/CSV/Parquet file into a trainer-ready dataset");
-    prepare->add_option("path", *prep_source, "A data file, or a directory of them")->required();
-    prepare->add_option("--format", *prep_format,
-                        "alpaca, sharegpt, chatml, oasst, or prompt-completion (auto-detected)");
+    prepare->add_option("path", *prep_source, "A data file, or a directory of them")
+        ->type_name(kPathValue)
+        ->required();
+    prepare
+        ->add_option("--format", *prep_format,
+                     "alpaca, sharegpt, chatml, oasst, or prompt-completion (auto-detected)")
+        ->type_name(words_value(training::prepare_formats()));
     prepare->add_option("--map", *prep_map, "Column renames: dest=src[,dest2=src2]");
     prepare->add_option("--split", *prep_split, "The split to read (default train)");
     prepare->add_flag("--as-eval", *prep_eval, "Emit an eval suite {prompt, expected}");
     prepare->add_flag("--flat", *prep_flat, "Emit {prompt, completion} instead of chat messages");
-    prepare->add_option("--out", *prep_out, "Output path (default training/datasets/<stem>.jsonl)");
+    prepare->add_option("--out", *prep_out, "Output path (default training/datasets/<stem>.jsonl)")
+        ->type_name(kPathValue);
     prepare->add_flag("-f,--force", *prep_force, "Overwrite an existing output");
     prepare->callback([&context, prep_source, prep_format, prep_map, prep_split, prep_eval,
                        prep_flat, prep_out, prep_force]() {
@@ -389,9 +395,12 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     auto create_force = std::make_shared<bool>(false);
     CLI::App* create = cmd->add_subcommand("create", "Scaffold a dataset");
     create->add_option("name", *create_name, "Dataset name")->required();
-    create->add_option("--from", *create_from,
-                       "template (two example lines), sessions (your chats), or empty");
-    create->add_option("--backend", *create_backend, "sessions: only chats on this backend");
+    create
+        ->add_option("--from", *create_from,
+                     "template (two example lines), sessions (your chats), or empty")
+        ->type_name(words_value(training::create_source_names()));
+    create->add_option("--backend", *create_backend, "sessions: only chats on this backend")
+        ->type_name(kBackendValue);
     create->add_option("--since", *create_since, "sessions: on or after YYYY-MM-DD");
     create->add_option("--until", *create_until, "sessions: on or before YYYY-MM-DD");
     create->add_flag("-f,--force", *create_force, "Overwrite an existing dataset");
@@ -438,8 +447,10 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
         "synth", "Distil a dataset from a teacher model for a training kit's skill");
     synth->add_option("name", *synth_name, "Dataset name")->required();
     synth->add_option("--teacher", *synth_teacher, "The backend that generates the examples")
+        ->type_name(kBackendValue)
         ->required();
     synth->add_option("--kit", *synth_kit, "A training kit name or path ('datasets kits')")
+        ->type_name(kKitValue)
         ->required();
     synth->add_option("--count", *synth_count, "Examples to generate (default: the kit's)");
     synth->add_option("--topic", *synth_topic, "Extra focus appended to every batch");
@@ -571,7 +582,7 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
 
     auto info_name = std::make_shared<std::string>();
     CLI::App* info = cmd->add_subcommand("info", "Show one dataset");
-    info->add_option("name", *info_name, "Dataset name")->required();
+    info->add_option("name", *info_name, "Dataset name")->type_name(kDatasetValue)->required();
     info->callback([info_name]() {
         const training::DatasetStore store{harness::training_datasets_dir()};
         const std::optional<training::DatasetInfo> found = store.info(*info_name);
@@ -588,7 +599,7 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     auto del_name = std::make_shared<std::string>();
     auto del_yes = std::make_shared<bool>(false);
     CLI::App* remove = cmd->add_subcommand("delete", "Remove a dataset");
-    remove->add_option("name", *del_name, "Dataset name")->required();
+    remove->add_option("name", *del_name, "Dataset name")->type_name(kDatasetValue)->required();
     remove->add_flag("-y,--yes", *del_yes, "Do not ask for confirmation");
     remove->callback([del_name, del_yes]() {
         const training::DatasetStore store{harness::training_datasets_dir()};
@@ -656,16 +667,14 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
             item.promise = promises.back();
             items.push_back(std::move(item));
         }
-        std::size_t last_index = 0;
+        DownloadProgress progress{std::cout, stdout_download_options()};
         const models::AcquireTreeResult result = models::acquire_tree(
             destination, items,
-            [&last_index](std::size_t index, std::size_t count, std::string_view relative,
-                          std::int64_t, std::int64_t) {
-                if (index != last_index) {
-                    last_index = index;
-                    std::cout << "  [" << index << "/" << count << "] " << relative << "\n";
-                }
+            [&progress](std::size_t index, std::size_t count, std::string_view relative,
+                        std::int64_t written, std::int64_t size) {
+                progress.file(index, count, relative, written, size);
             });
+        progress.finish();
         if (!result.ok) {
             fail_user(result.error);
         }

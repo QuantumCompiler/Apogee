@@ -56,6 +56,7 @@ struct CompleteFlags {
     /// A backend to rerank with, `off`, or empty for the collection's pin.
     std::string rerank;
     bool no_color = false;
+    bool raw = false;
     OutputFormat output_format = OutputFormat::Text;
 
     CLI::Option* temperature_option = nullptr;
@@ -203,6 +204,8 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     reporter_options.style =
         ansi::Style::detect(flags.no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
     reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
+    reporter_options.markdown = !flags.raw && config.ui.markdown;
+    reporter_options.hyperlinks = ansi::hyperlinks_supported();
 
     CliReporter reporter{status_writer, reporter_options};
 
@@ -310,7 +313,8 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
     cmd->add_option("prompt", flags->prompt, "The prompt. Read from stdin when omitted");
     cmd->add_option("-m,--model", flags->model,
-                    "Backend or model to use (default: models.default from config)");
+                    "Backend or model to use (default: models.default from config)")
+        ->type_name(kBackendValue);
     cmd->add_option("-s,--system", flags->system_prompt, "System prompt for this turn");
     cmd->add_option("--context", flags->context, "Extra context injected before the prompt");
     // allow_extra_args(false) is load-bearing: a CLI11 vector option is GREEDY
@@ -320,18 +324,22 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
     flags->rag_option =
         cmd->add_option("--rag", flags->rag,
                         "Retrieve context from this collection (see 'apogee embed'); "
-                        "\"\" switches off the config's auto_rag for this run");
+                        "\"\" switches off the config's auto_rag for this run")
+            ->type_name(kCollectionValue);
     cmd->add_option("--rag-limit", flags->rag_limit, "How many chunks to inject (default 4)");
     cmd->add_option("--retriever", flags->retriever,
                     "How to search the collection: lexical, vector, hybrid, or auto")
+        ->type_name(words_value(agentloop::retriever_names()))
         ->check([](const std::string& value) {
             return agentloop::valid_retriever(value)
                        ? std::string{}
                        : agentloop::retriever_values_message("", value);
         });
     cmd->add_option("--rerank", flags->rerank,
-                    "Backend that reorders retrieved chunks with one generation call, or off");
+                    "Backend that reorders retrieved chunks with one generation call, or off")
+        ->type_name(kBackendValue);
     cmd->add_option("--image", flags->images, "Image file to attach (repeatable)")
+        ->type_name(kPathValue)
         ->allow_extra_args(false);
     flags->temperature_option =
         cmd->add_option("-t,--temperature", flags->temperature, "Sampling temperature");
@@ -344,6 +352,8 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("--tools", flags->tools,
                   "Let the model call tools (fetch_url; ask_user on a terminal)");
     cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
+    cmd->add_flag("--raw", flags->raw,
+                  "Show the answer's Markdown as written instead of rendering it on the terminal");
     cmd->add_option_function<std::string>(
            "--output-format",
            [flags](const std::string& value) {
@@ -355,7 +365,7 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                flags->output_format = *parsed;
            },
            "Output format: text (default) or stream-json for a machine driver")
-        ->type_name("FORMAT");
+        ->type_name(words_value(format_names()));
     cmd->add_flag("--search", flags->search,
                   "Enable the provider's own server-side web search, where it has one");
 

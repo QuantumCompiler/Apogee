@@ -10,20 +10,40 @@
 # caller for exactly that reason: the CLI's build lives with the CLI.
 #
 # Gating policy (user decision, 2026-09-19, superseding 2026-08-24's
-# "macos-arm64 only"): EVERY job here is required for a pull request -- the
-# clone and all five builds. There is no `continue-on-error`
-# in this file and there must not be one; a platform that cannot pass is a
-# platform to fix, not to mark informational. GitHub enforces the requirement
-# through the branch protection rule on `stable`, which lists these checks by
-# their job names (`clone llama.cpp`, `build <name>`) -- a renamed job has to
-# be renamed there too.
+# "macos-arm64 only"): EVERY job that runs on a pull request is required for
+# it -- the version check, the clone, all five unit-test runs and all five
+# builds. (`what changed` is not listed: the matrix jobs need it, and a
+# matrix job skipped because it failed never reports its required name, so
+# its failure blocks the pull request anyway.) There is no
+# `continue-on-error` in this file and there must not be one; a platform that
+# cannot pass is a platform to fix, not to mark informational. GitHub enforces the requirement through the branch protection
+# rule on `stable`, which lists these checks by their job names
+# (`version bump`, `clone llama.cpp`, `unit tests <name>`, `build <name>`) --
+# a renamed job has to be renamed there too. `tag and release` is NOT one of
+# them: it only ever runs after the merge.
 #
-# Job policy (user decisions, 2026-09-19, 2026-09-20 and 2026-09-22): CI is
-# the llama.cpp clone, the source suite per platform, then one executable
-# build per platform -- five of them, the Intel Mac having been dropped -- and
-# nothing else, plus one pull-request-only check, `version bump`, which exists
-# because a merge to `stable` now publishes a release and a forgotten version
-# bump would otherwise merge and publish nothing, silently.
+# Job policy (user decisions, 2026-09-19, 2026-09-20, 2026-09-22 and
+# 2026-09-25): CI is the llama.cpp clone, the source suite per platform, then
+# one executable build per platform -- five of them, the Intel Mac having been
+# dropped -- each packaged into the archive a release ships; one
+# pull-request-only check, `version bump`; and, once a pull request into
+# `stable` is MERGED, `tag and release`, which publishes that pull request's
+# own archives. Nothing else.
+#
+# The release after a merge (user decision, 2026-09-25) rebuilds nothing. Each
+# build job packages its archive through .github/actions/package -- the same
+# action release.yml uses, so the two cannot package differently -- proves the
+# binary runs, and keeps the archive as an artifact of the run. When the pull
+# request merges, `tag and release` runs lib/scripts/release-from-pr.sh, which
+# finds that pull request's last green run, checks every archive was built
+# from exactly the merged source tree, reads the version from the executable
+# itself, and creates the tag `v<version>` at the merge commit together with
+# the release carrying those archives. A merge whose version is already
+# released publishes nothing, which is how a docs or hotfix merge declines to
+# cut one. The script's header has the full order of checks.
+#
+# `version bump` exists because of that: a pull request that forgets to bump
+# the version would otherwise merge and publish nothing, silently.
 #
 # The suite runs here again as of 2026-09-22, reversing 2026-09-20's "remove
 # the tests from the CI/CD" -- but ONLY the source-level suite. Nothing in
@@ -35,18 +55,28 @@
 # early bug class. They remain in tests/CMakeLists.txt and still run under
 # `make test`; they are simply not a gate here.
 #
-# Shape (user decisions, 2026-09-19, 2026-09-20 and 2026-09-22): three stages,
-# each a call into cicd.sh.
+# Shape (user decisions, 2026-09-19, 2026-09-20, 2026-09-22 and 2026-09-25):
+# two stages on a pull request, each a call into cicd.sh, and one job after
+# the merge -- all of them after one question:
 #
+#   0. what changed        -- lib/scripts/code-changed.sh: does the pull
+#                             request touch anything but documentation? If
+#                             not, every job below reports success and does
+#                             no work (2026-09-25; the job says how, and why
+#                             it cannot simply skip them).
 #   1. clone llama.cpp     -- prove the pin resolves. llama.cpp ships with the
 #                             tool, so a pin that no longer clones is a broken
 #                             product, and no platform is worth building on it.
 #   1. unit tests <plat>   -- `cicd.sh --unit-tests`: builds the apogee_tests
 #                             target ALONE, llama.cpp off, and runs the binary.
 #                             No executable is produced and ctest never runs.
-#                             Beside stage 1, not after it.
+#                             Beside the clone, not after it.
 #   2. build <platform>    -- one job per platform, llama.cpp linked in like
-#                             every build, once BOTH of the above agree.
+#                             every build, once BOTH of the above agree; then
+#                             packaged, run, and kept as an artifact.
+#   after the merge:
+#      tag and release     -- the merged pull request's own archives, tagged
+#                             and published. Nothing is built.
 #
 # Why running the binary rather than `ctest -E <something>`: the add_test()
 # entries live in CTest, not in the Catch2 binary, so invoking apogee_tests
@@ -78,9 +108,13 @@ name: CI
 # on a COMPLETED merge, or ON REQUEST -- and never on an ordinary push, so
 # work-in-progress commits on a branch with no PR open cost nothing:
 #
-#   pull_request       reviewing a merge before it happens (the gating one)
+#   pull_request       reviewing a merge before it happens (the gating one);
+#                      and, as `closed` with the pull request merged, the
+#                      release (2026-09-25) -- every other job skips that one
 #   push: [stable]     the merge itself, plus any direct push to stable
-#   workflow_dispatch  gh workflow run CI --ref <branch>
+#   workflow_dispatch  gh workflow run CI --ref <branch>; with
+#                      release_rehearsal_pr, a rehearsal of the release that
+#                      pull request's merge would publish, and nothing else
 #
 # The two branch lists are the same list on purpose: they name the integration
 # branches. Adding one means adding it BOTH places -- a PR into `v0.1.0`, or a
@@ -103,15 +137,109 @@ name: CI
 on:
   pull_request:
     branches: [stable]
+    # The default three, plus `closed` for the release after a merge.
+    types: [opened, synchronize, reopened, closed]
   push:
     branches: [stable]
   workflow_dispatch:
+    inputs:
+      release_rehearsal_pr:
+        description: >-
+          Pull request number: rehearse the release its merge would publish --
+          find its CI archives and check them, build nothing, publish nothing.
+          Leave empty for an ordinary run.
+        type: string
+        default: ""
 
+# Every job reads; the one that writes, `tag and release`, asks for its own.
+permissions:
+  contents: read
+
+# A newer push to a pull request supersedes a build still running for it. The
+# release after a merge is never superseded or cancelled: it has a group of
+# its own.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}${{ github.event.action == 'closed' && '-merged' || '' }}
+  cancel-in-progress: ${{ github.event.action != 'closed' }}
 
 jobs:
+  changes:
+    # Does this change touch anything but documentation? Every other job reads
+    # the answer (user decision, 2026-09-25: a documentation-only pull request
+    # must not build anything). "Documentation" is declared once, in
+    # lib/scripts/code-changed.sh -- lib/documentation/, .claude/, and Markdown
+    # at the repository root -- and nothing CI runs reads those paths.
+    #
+    # A pull request is judged by EVERYTHING it changes (base...head), not by
+    # its latest push: a documentation commit pushed onto a pull request that
+    # also changes code still runs every job, because what merges is the whole
+    # pull request and the release publishes that run's archives. `[skip ci]`
+    # in a commit message is the way to push documentation mid-review without
+    # a run; the pull request's last commit must still run, or nothing is
+    # tested and the merge has no archives to release.
+    #
+    # How a documentation-only pull request stays mergeable, and why it is not
+    # a job-level `if:`. The branch protection rule requires `unit tests
+    # <name>` and `build <name>` by name, and a MATRIX job skipped by its `if:`
+    # never expands: it reports once, as "build ${{ matrix.name }}", so the
+    # required "build macos-arm64" waits forever and the pull request cannot
+    # merge. So the matrix jobs, and `clone llama.cpp` which the builds need,
+    # always run and skip every STEP instead: each finishes in seconds, under
+    # its real name, successfully. `version bump` is not a matrix job and
+    # skips whole -- a skipped job counts as passing.
+    #
+    # `tag and release` does not ask. A documentation-only merge already
+    # publishes nothing -- its version is out, and release-from-pr.sh stops
+    # there successfully -- and the `closed` event is the one this answer
+    # cannot be trusted on: after the merge the payload's base can be the
+    # merge itself, and a diff from there reads as "nothing changed". So this
+    # job does not run for it, and neither does anything that needs it.
+    #
+    # On request (workflow_dispatch), everything runs. If this job fails, every
+    # job after it is skipped, the required checks never report, and the pull
+    # request cannot merge: fail closed.
+    name: what changed
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      # The whole history, so the pull request's merge base with its base
+      # branch is there to diff from. The history is small.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Does it touch anything but documentation?
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request)
+              # Both ends by id, in case a fork's head is not among the
+              # branches the checkout fetched.
+              git fetch --quiet --no-tags origin "$PR_BASE" "$PR_HEAD" || true
+              git diff --name-only "$PR_BASE...$PR_HEAD" | lib/scripts/code-changed.sh
+              ;;
+            push)
+              # A new branch has no "before"; judge it as code.
+              if [ -z "$BEFORE" ] || [ -z "${BEFORE//0/}" ]; then
+                echo "code=true" | tee -a "$GITHUB_OUTPUT"
+              else
+                git diff --name-only "$BEFORE" "$AFTER" | lib/scripts/code-changed.sh
+              fi
+              ;;
+            *)
+              echo "code=true" | tee -a "$GITHUB_OUTPUT"
+              ;;
+          esac
+
   version:
     # A merge into `stable` publishes a release, and what it publishes is
     # decided by `project(... VERSION x.y.z)` in lib/src/cli/CMakeLists.txt
@@ -120,39 +248,40 @@ jobs:
     # exactly like a deliberate skip, and is only noticed by its absence.
     # This job makes that case loud at review time instead.
     #
-    # It is a pull_request-only check on purpose. The same condition on a push
-    # to `stable` is not an error: it is precisely how a docs or hotfix merge
-    # declines to cut a release, and release.yml's gate handles it by doing
-    # nothing.
+    # It is a check on an open pull request on purpose. The same condition
+    # after the merge is not an error: it is precisely how a docs or hotfix
+    # merge declines to cut a release, and `tag and release` handles it by
+    # publishing nothing.
     name: version bump
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: >-
+      github.event_name == 'pull_request' && github.event.action != 'closed'
+      && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - name: The version must not already be released
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          version="v$(sed -n 's/^[[:space:]]*VERSION[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' lib/src/cli/CMakeLists.txt | head -1)"
-          if [ "$version" = "v" ]; then
-            echo "::error file=lib/src/cli/CMakeLists.txt::could not read VERSION"
-            exit 1
-          fi
-          if gh release view "$version" >/dev/null 2>&1; then
-            echo "::error file=lib/src/cli/CMakeLists.txt::$version is already released -- bump project(... VERSION x.y.z) or this merge will publish nothing"
-            exit 1
-          fi
-          echo "$version is unreleased; merging this PR will publish it" >> "$GITHUB_STEP_SUMMARY"
+        # lib/scripts/version-check.sh, so a local rehearsal (make pr-ci)
+        # runs the same check.
+        run: lib/scripts/version-check.sh
 
   clone-llama:
     # Stage one. The script reads the pin from the CLI's third_party build --
     # the one place it lives -- fetches that commit, and checks it resolved.
     name: clone llama.cpp
+    # Neither the release after a merge nor a rehearsal of one builds anything.
+    # A documentation-only change runs it with every step skipped: the builds
+    # need it, and see `changes` for why they must still run.
+    needs: changes
+    if: github.event.action != 'closed' && !inputs.release_rehearsal_pr
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+        if: needs.changes.outputs.code == 'true'
       - name: Clone llama.cpp at the pinned commit
+        if: needs.changes.outputs.code == 'true'
         run: lib/scripts/cicd.sh --clone-llama
 
   unit-tests:
@@ -172,6 +301,10 @@ jobs:
     # llamacpp backend through its injectable seam rather than the library,
     # and the build stage below still compiles it on every platform.
     name: unit tests ${{ matrix.name }}
+    # Every step asks `changes` first: a documentation-only change runs this
+    # job under its real name and skips the work (see `changes`).
+    needs: changes
+    if: github.event.action != 'closed' && !inputs.release_rehearsal_pr
     runs-on: ${{ matrix.runner }}
     env:
       APOGEE_CMAKE_ARGS: -DAPOGEE_ENABLE_LLAMA=OFF
@@ -199,13 +332,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        if: needs.changes.outputs.code == 'true'
 
       - name: Install libcurl headers (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
 
       - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
           msystem: ${{ matrix.msystem }}
@@ -219,7 +353,7 @@ jobs:
             curl-winssl:p
 
       - name: Unit tests
-        if: runner.os != 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os != 'Windows'
         shell: bash
         run: |
           set -eo pipefail
@@ -229,7 +363,7 @@ jobs:
           }
 
       - name: Unit tests (MSYS2 shell)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Windows'
         shell: msys2 {0}
         run: |
           git config --global --add safe.directory '*'
@@ -247,8 +381,12 @@ jobs:
     #
     # fail-fast is off so one failing row does not cancel the others: the PR
     # is blocked either way, and the full picture is worth the runner time.
+    #
+    # No `if:` of its own: when the stages it needs are skipped -- after a
+    # merge, or in a rehearsal -- so is it.
     name: build ${{ matrix.name }}
-    needs: [clone-llama, unit-tests]
+    # As with the unit tests, every step asks `changes` first.
+    needs: [changes, clone-llama, unit-tests]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -274,9 +412,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        if: needs.changes.outputs.code == 'true'
 
       - name: Install libcurl headers (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
 
       # `pacboy` prefixes each name for the environment: toolchain:p is
@@ -285,7 +424,7 @@ jobs:
       # built on Schannel -- the platform trust store, which is the whole
       # reason curl is found rather than fetched (cmake/ApogeeDependencies).
       - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
           msystem: ${{ matrix.msystem }}
@@ -306,7 +445,7 @@ jobs:
       # log needs admin rights, and a failure that only the owner can read is
       # a failure nobody else can fix.
       - name: Build
-        if: runner.os != 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os != 'Windows'
         shell: bash
         run: |
           set -eo pipefail
@@ -318,7 +457,7 @@ jobs:
       # The same command, in the MSYS2 shell the toolchain lives in. The
       # script sees a UCRT64_NT / CLANGARM64_NT host and maps it to Windows.
       - name: Build (MSYS2 shell)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Windows'
         shell: msys2 {0}
         # The checkout was made by Git for Windows under a different HOME, so
         # MSYS2's git has to be told the tree is safe before the script's
@@ -330,3 +469,50 @@ jobs:
             lib/scripts/ci-annotate.sh "build ${{ matrix.name }}" "$RUNNER_TEMP/cicd.log"
             exit 1
           }
+
+      # The archive a release ships, the binary proven to run, and both kept
+      # as the artifact `apogee-<target>` -- what `tag and release` publishes
+      # once this pull request merges. The same action release.yml packages
+      # with.
+      - name: Package
+        if: needs.changes.outputs.code == 'true'
+        uses: ./.github/actions/package
+        with:
+          target: ${{ matrix.target }}
+
+  release:
+    # After the merge: the pull request's own archives, published. Nothing is
+    # built -- lib/scripts/release-from-pr.sh finds the pull request's last
+    # green run, checks every archive against the merged source tree, reads
+    # the version from the executable, and creates the tag `v<version>` at
+    # the merge commit together with the release. A version already released
+    # publishes nothing.
+    #
+    # Dispatched with release_rehearsal_pr, the same script runs without
+    # --publish: every lookup and check, then what it would have published.
+    # Worth doing on a release branch's pull request before merging it.
+    #
+    # A pull request from a fork gets a read-only token, so its merge cannot
+    # publish; releases come from this repository's own version branches.
+    name: tag and release
+    if: >-
+      (github.event.action == 'closed' && github.event.pull_request.merged)
+      || inputs.release_rehearsal_pr
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # the tag and the release
+      actions: read     # the pull request's CI runs and their artifacts
+    steps:
+      # The merge commit, which carries the script; a rehearsal runs the
+      # script from the branch it was dispatched on.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
+      - name: Tag and publish the pull request's own archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number || inputs.release_rehearsal_pr }}
+          PUBLISH: ${{ github.event_name == 'pull_request' && '--publish' || '' }}
+        run: lib/scripts/release-from-pr.sh "$PR" $PUBLISH
