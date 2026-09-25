@@ -22,7 +22,7 @@ Requirements: CMake ≥ 3.25, a C++20 compiler, and git. `format` / `lint` addit
 
 Today that is `lib/src/cli`. The GUI applications land later as siblings (`lib/src/darwin|linux|windows`), each owning its build the same way, and each joining the `APPS` list in `lib/scripts/cicd.sh`.
 
-The one build-related file outside an app directory is `.github/workflows/ci.yml`, because GitHub requires workflows at `.github/workflows/`. It is deliberately a thin caller into `cicd.sh` for exactly that reason.
+The build-related files outside an app directory are the two workflows and the one packaging action under `.github/`, because GitHub requires them there. They are deliberately thin callers into `lib/scripts/` — `cicd.sh` to build, `release-from-pr.sh` to release — for exactly that reason.
 
 ---
 
@@ -31,9 +31,11 @@ The one build-related file outside an app directory is `.github/workflows/ci.yml
 ```
 Apogee/
 ├── .github/
-│   ├── workflows/ci.yml     — CI: three stages — clone llama.cpp + unit tests per platform (parallel), then build per platform; plus the PR-only `version bump` check (2026-09-22)
-│   └── workflows/release.yml — Release: gate → unit tests ×5 → build ×5 → publish; runs on a merge to stable or a v* tag (2026-09-22)
-│                              (thin caller into cicd.sh; here only because GitHub requires it)
+│   ├── workflows/ci.yml     — CI: clone llama.cpp + unit tests per platform (parallel), then build + package per platform;
+│   │                          the PR-only `version bump` check; and, after a merge, `tag and release` (2026-09-25)
+│   ├── workflows/release.yml — The manual release: a v* tag or a dry-run dispatch → gate → unit tests ×5 → build ×5 → publish
+│   │                          (thin callers into lib/scripts/; here only because GitHub requires it)
+│   └── actions/package/     — The one packaging step both workflows use: archive, run check, .source record, artifact
 ├── .claude/
 │   └── skills/
 │       ├── apogee-backlog-item/        — Repo-local skill: take the next backlog item per the docs-first process
@@ -54,10 +56,12 @@ Apogee/
     │   │                      targets (--platform linux|windows × x64|arm64, macos-arm64, or all;
     │   │                      non-native targets defer to the CI matrix, or fail with --no-defer), --fresh = clean-room
     │   │                      clone of github.com/QuantumCompiler/Apogee at that branch; --test, --clean;
-    │   │                      --clone-llama is the first CI stage (the suite never runs on a runner)
+    │   │                      --clone-llama is the first CI stage, --unit-tests the source suite beside it
     │   ├── cicd-completion.bash — Tab completion for cicd.sh's flags (source from your shell rc)
-    │   └── ci-annotate.sh   — On a failed CI step, publishes the ctest summary and each failed
-    │                          test's output as error annotations (public through the API; the log is not)
+    │   ├── ci-annotate.sh   — On a failed CI step, publishes the ctest summary and each failed
+    │   │                      test's output as error annotations (public through the API; the log is not)
+    │   └── release-from-pr.sh — The release after a merge: the PR's own CI archives, checked against the
+    │                          merged source tree, tagged with the executable's version; a rehearsal without --publish
     └── src/                 — Application source, one self-contained project per app
         ├── cli/             — The CLI application
         │   ├── CMakeLists.txt   — Build root: standard, options, target wiring, link-policy assertion
@@ -709,20 +713,32 @@ Vendored code goes under `lib/src/cli/third_party/` instead, and is **never edit
 
 ## Cutting a release
 
-**A merge into `stable` is a release** (user decision, 2026-09-22). The version in `project(... VERSION x.y.z)` — `lib/src/cli/CMakeLists.txt`, the one place it lives — decides which one, and whether there is one at all. Nothing else needs doing.
+**A merge into `stable` is a release** (user decision, 2026-09-22), **published from the pull request's own build** (user decision, 2026-09-25). The version in `project(... VERSION x.y.z)` — `lib/src/cli/CMakeLists.txt`, the one place it lives — decides which one, and whether there is one at all. Nothing else needs doing.
 
 ```
-bump VERSION on the branch  ->  PR  ->  merge  ->  release published
+bump VERSION on the branch  ->  PR (CI builds and packages)  ->  merge  ->  tag + release from those archives
 ```
 
-[`release.yml`](../../../.github/workflows/release.yml) runs on the push to `stable`. Its `gate` job reads `CMakeLists.txt`, and if that version has no release yet, the five builds run and `publish` creates **the tag and the release together**. If it does have one, the run stops at the gate and nothing is published — which is how a docs or hotfix merge into `stable` declines to cut a release, with no exception rule required.
+Every CI build packages its target ([`.github/actions/package`](../../../.github/actions/package/action.yml)) and keeps the archive as an artifact of the run. When the pull request merges, CI runs again for the `closed` event, and there only `tag and release` runs: [`lib/scripts/release-from-pr.sh`](../../../lib/scripts/release-from-pr.sh) `--publish`. Nothing is built. In order, each a hard stop:
+
+1. **The pull request** — into `stable`, and merged.
+2. **The version** — read from `CMakeLists.txt` at the merge commit. If its tag already exists at another commit, that version is out and the merge publishes nothing, successfully: how a docs or hotfix merge declines to cut a release, with no exception rule required. If the tag is at the merge commit itself, an earlier attempt made it, and this one finishes the release.
+3. **The run** — the newest successful CI run of the pull request's head holding an archive for every platform it built (its `build <target>` jobs, so the set follows the matrix).
+4. **The source** — every archive's `.source` record must name the merge commit's exact source **tree**. CI builds GitHub's *test merge*; if `stable` moved after the run, the archives are not the merged source and nothing is published.
+5. **The executable** — the binary for the runner's own platform is extracted and run; `apogee version` must report the version of step 2. The tag is `v` + what the executable says.
+6. **Publish** — the tag at the merge commit and the release, in one `gh release create --target <merge>`, with the five archives.
+
+The run page's summary lists each of those as it passes.
+
+**One consequence, recorded:** the binaries were built from the test merge, so `apogee version` names *its* commit — the same source tree as the merge commit on `stable`, a different hash, and one no branch points at. The tree check is what makes that safe; the release notes do not mention it.
 
 ### What you actually do
 
 1. **Bump `project(... VERSION x.y.z)`** on the version branch, committed with the rest of the release.
 2. **Open the PR.** CI's `version bump` check fails if that version is already released — that is the moment a forgotten bump surfaces, rather than after the merge when the release silently does not happen.
-3. **Merge.** The release publishes itself.
-4. **Open the next dev branch** from `stable`, named for the release being *built*:
+3. **Rehearse the release** once CI is green: Actions → CI → Run workflow, on the version branch, with the PR's number in `release_rehearsal_pr` (or `gh workflow run CI --ref vX.Y.Z -f release_rehearsal_pr=<PR>`). It runs steps 1–5 against the test merge and reports what it would publish; it builds nothing and publishes nothing. `lib/scripts/release-from-pr.sh <PR>` does the same from a terminal with `gh` signed in.
+4. **Merge** — keeping the branch up to date with `stable` first, or step 4's tree check refuses the archives. The release publishes itself.
+5. **Open the next dev branch** from `stable`, named for the release being *built*:
    ```sh
    git checkout stable && git pull && git checkout -b vX.Y.Z+1 && git push -u origin vX.Y.Z+1
    ```
@@ -735,19 +751,19 @@ Still supported, as the escape hatch — for re-cutting a release, or for taggin
 make -C lib/src/cli release VERSION=x.y.z
 ```
 
-Preflights the tree, branch, version and tag, asks once, then tags and pushes; the tag push triggers the same workflow. `make -C lib/src/cli release-check VERSION=x.y.z` runs the checks and pushes nothing. `VERSION` is the only required input; `REMOTE`, `RELEASE_BRANCH` and `CONFIRM=yes` are the overrides.
+Preflights the tree, branch, version and tag, asks once, then tags and pushes; the tag push runs [`release.yml`](../../../.github/workflows/release.yml), which — unlike the merge path — **rebuilds** every target from the tag. Use it when a merged pull request's own archives cannot be released: the tree check refused them, or the artifacts expired. `make -C lib/src/cli release-check VERSION=x.y.z` runs the checks and pushes nothing. `VERSION` is the only required input; `REMOTE`, `RELEASE_BRANCH` and `CONFIRM=yes` are the overrides.
 
 ### The version guard, and where it lives
 
-A tag whose name disagrees with `CMakeLists.txt` would publish a release whose binary reports a different version, and the build would stay green throughout — the pipeline's "Verify the staged binary runs" step runs `apogee version` but never reads what it printed. That hole is now closed in **two** places: `make release` refuses locally, and `release.yml`'s `gate` job fails the run before any runner starts. The gate is the one that cannot be skipped; a hand-pushed tag still meets it.
+A tag whose name disagrees with `CMakeLists.txt` would publish a release whose binary reports a different version, and the build would stay green throughout — the pipeline's "Verify the staged binary runs" step runs `apogee version` but never reads what it printed. That hole is now closed in **three** places: `make release` refuses locally, `release.yml`'s `gate` job fails the run before any runner starts, and on the merge path the tag is not a name anyone types at all — it is read from what the executable reports, and refused when that disagrees with `CMakeLists.txt`. The gate is the one a hand-pushed tag cannot skip.
 
 ### No orphaned tags
 
-`publish` creates the tag and the release in a single `gh release create --target <sha>`, and nothing earlier in the workflow pushes a tag. A blocking build failure therefore leaves nothing behind: fix the build and merge again, with no tag to delete first. This is the one real behavioural difference from the old flow, where the tag push was what started everything and a failed build stranded it.
+Both paths create the tag and the release in a single `gh release create --target <sha>`, and nothing earlier pushes a tag. A failure therefore leaves nothing behind: no tag without its release to delete first. A tag made with a run's `GITHUB_TOKEN` triggers no workflow, which is why the merge path's tag does not also start `release.yml`.
 
 ### Dry run
 
-`make release-check VERSION=x.y.z` is the local half — tree and version, no remote. For the pipeline, use the `workflow_dispatch` with `dry_run` (default on): Actions → Release → "Run workflow". A dispatch always builds, even when the version is already released, so a dry run is never silently skipped; only `publish` is. All five archives land as Actions artifacts to inspect. Worth doing whenever the pipeline itself changed.
+For the merge path, the rehearsal above is the dry run. For the manual path, `make release-check VERSION=x.y.z` is the local half — tree and version, no remote — and the pipeline's is the `workflow_dispatch` with `dry_run` (default on): Actions → Release → "Run workflow". A dispatch always builds, even when the version is already released, so a dry run is never silently skipped; only `publish` is. All five archives land as Actions artifacts to inspect. Worth doing whenever the pipeline itself changed.
 
 ### Pitfall: never name a branch after a tag
 
@@ -761,7 +777,11 @@ error: src refspec vX.Y.Z matches more than one
 
 ### Re-running a failed run
 
-Use GitHub's own **Re-run failed jobs** (run page, or `gh run rerun <id> --failed`). Nothing needs doing first — the pipeline is built to survive it:
+Use GitHub's own **Re-run failed jobs** (run page, or `gh run rerun <id> --failed`). Nothing needs doing first.
+
+**The merge path.** A failed `tag and release` re-runs as it is: the script decides from what exists, not from which attempt it is. No tag yet means create; a tag at the merge commit means an earlier attempt got that far, so it creates the release if missing and uploads the archives into it with `--clobber`; a tag anywhere else means the version is out and nothing is published. A re-run runs the workflow file of the original event — the merge commit's — so a *fix* to the script or the job cannot be re-run into that merge: release that version through the manual path instead.
+
+**The manual path** is built to survive it too:
 
 - **Artifacts are overwritable.** `upload-artifact` scopes artifacts to the *run*, not the attempt, and its default (`overwrite: false`) fails when a name already exists. Attempt 2 would rebuild everything and then die at the upload. `overwrite: true` is set for exactly this.
 - **The gate yields to an explicit re-run.** Normally it stops the run when the version is already released. On `GITHUB_RUN_ATTEMPT > 1` it proceeds anyway: pressing re-run *is* the statement of intent, and refusing it would leave a half-published release unfixable by the pipeline that made it.
@@ -770,9 +790,9 @@ Use GitHub's own **Re-run failed jobs** (run page, or `gh run rerun <id> --faile
 
 What a re-run does **not** bypass is the version guard: a tag disagreeing with `CMakeLists.txt` fails the gate on every attempt. That is a wrong input, not a flaky one.
 
-**The one case re-run-failed will not catch:** `windows-x64` and `windows-arm64` are `continue-on-error` in `release.yml`, so a Windows failure is reported as a *success* and is not a "failed job". To retry one, use **Re-run all jobs**, or fix the cause and merge again.
+**The one case re-run-failed will not catch:** `windows-x64` and `windows-arm64` are `continue-on-error` in `release.yml`, so a Windows failure is reported as a *success* and is not a "failed job". To retry one, use **Re-run all jobs**, or fix the cause and cut it again.
 
-In CI, re-runs are free of all this — no artifacts, no side effects. The only wrinkle is `concurrency: ci-<ref>` with `cancel-in-progress: true`: re-running an old run on a ref that has a newer run in flight will cancel one of them.
+In CI's build jobs, re-runs are free of all this: the only side effect is the artifact, and the packaging action uploads with `overwrite: true` for the same reason as above. The only wrinkle is `concurrency: ci-<ref>` with `cancel-in-progress: true`: re-running an old run on a ref that has a newer run in flight will cancel one of them. The release after a merge has a group of its own and is never cancelled.
 
 ### Re-cutting a bad release
 

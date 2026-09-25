@@ -19,10 +19,12 @@
 # With --fresh it performs a CI-style clean-room build: clone the repo at the
 # current branch into a temp directory and build there.
 #
-# The CI pipeline (user decisions, 2026-09-19 and 2026-09-20) is two stages,
-# each a call into this script: `--clone-llama` proves the llama.cpp pin
-# resolves, then one build per platform (`--platform T --no-defer`). The test
-# suite does not run on a runner; `--test` is the developer's gate.
+# The CI pipeline (user decisions, 2026-09-19 to 2026-09-25) calls this script
+# for each stage: `--clone-llama` proves the llama.cpp pin resolves and
+# `--unit-tests` runs the source suite per platform beside it, then one build
+# per platform (`--platform T --no-defer`), which .github/actions/package
+# turns into the archive a release ships. The full suite with its executable
+# checks (`--test`) is the developer's gate, not a runner's.
 #
 # Tab completion: source lib/scripts/cicd-completion.bash (see that file).
 set -euo pipefail

@@ -180,16 +180,19 @@ lint:
 # ---------------------------------------------------------------------------
 # Cutting a release
 #
-# Thin by the same rule as the rest of this file: the release is built and
-# published by .github/workflows/release.yml on GitHub's runners, and nothing
-# here builds, packages or uploads anything.
+# Thin by the same rule as the rest of this file: the tag this pushes runs
+# .github/workflows/release.yml, which builds and publishes on GitHub's
+# runners, and nothing here builds, packages or uploads anything.
 #
 # Since 2026-09-22 this is the ESCAPE HATCH, not the everyday path: a merge
-# into stable publishes the version CMakeLists.txt names, so the normal way to
-# cut a release is to bump that version and merge the PR. This target is for a
-# re-cut, or for tagging a commit that is not the tip of a merge. It remains
-# worth keeping because the preflight below is the same set of mistakes either
-# path can make, and it catches them before the remote hears about them.
+# into stable publishes the version CMakeLists.txt names -- since 2026-09-25
+# from the merged pull request's own CI archives (ci.yml's `tag and release`)
+# -- so the normal way to cut a release is to bump that version and merge the
+# PR. This target is for a re-cut, for a merge whose own archives could not be
+# released (the tree check refused them, or they expired), or for tagging a
+# commit that is not the tip of a merge. It remains worth keeping because the
+# preflight below is the same set of mistakes either path can make, and it
+# catches them before the remote hears about them.
 #
 #     make release-check VERSION=0.1.1   # preflight only, pushes nothing
 #     make release VERSION=0.1.1         # preflight, confirm, tag, push

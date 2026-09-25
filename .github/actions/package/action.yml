@@ -1,0 +1,96 @@
+# Package one target's build into the archive a release ships.
+#
+# Shared by ci.yml -- every build job packages, because since 2026-09-25 a
+# merged pull request's OWN artifacts are what the release publishes (user
+# decision) -- and by release.yml, the manual tag path. One definition, so the
+# two ways to cut a release cannot package differently.
+#
+# It expects the target already built in this job by
+# `lib/scripts/cicd.sh --platform <target>`, and uploads the artifact
+# `apogee-<target>` holding two files:
+#
+#   apogee-<target>.tar.gz | .zip   the archive: the binary and the four
+#                                   completion stubs (they are part of the
+#                                   install contract, so they ride along)
+#   apogee-<target>.source          the commit and the source TREE it was
+#                                   built from -- how the release after a
+#                                   merge proves the archive is exactly the
+#                                   merged source (lib/scripts/release-from-pr.sh)
+#
+# The tree, not the commit, is the identity that matters: CI builds a pull
+# request's test merge commit, and the merge GitHub then makes is a different
+# commit with the same tree.
+
+name: Package apogee
+description: Stage one target's release archive, prove the binary runs, and upload it as the artifact apogee-<target>.
+
+inputs:
+  target:
+    description: The release target, as cicd.sh --platform names it.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Stage the archive
+      id: stage
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        stage="$RUNNER_TEMP/stage"
+        mkdir -p "$stage/completions"
+
+        # The binary, wherever this generator put it.
+        binary=""
+        for candidate in \
+          "lib/src/cli/build/$TARGET/source/apogee" \
+          "lib/src/cli/build/$TARGET/source/apogee.exe" \
+          "lib/src/cli/build/$TARGET/source/Release/apogee.exe"; do
+          if [ -f "$candidate" ]; then binary="$candidate"; break; fi
+        done
+        [ -n "$binary" ] || { echo "no binary built for $TARGET" >&2; exit 1; }
+        cp "$binary" "$stage/"
+        cp lib/src/cli/completions/* "$stage/completions/"
+
+        case "$TARGET" in
+          windows-*) (cd "$stage" && 7z a -tzip "$RUNNER_TEMP/apogee-$TARGET.zip" .) ;;
+          *)         tar -czf "$RUNNER_TEMP/apogee-$TARGET.tar.gz" -C "$stage" . ;;
+        esac
+
+        {
+          echo "commit $(git rev-parse HEAD)"
+          echo "tree $(git rev-parse 'HEAD^{tree}')"
+        } > "$RUNNER_TEMP/apogee-$TARGET.source"
+
+        echo "files=$RUNNER_TEMP/apogee-$TARGET.*" >> "$GITHUB_OUTPUT"
+
+    # Proof the artifact RUNS, not merely that a file exists -- "distributed
+    # binaries are verified by RUNNING them post-install". A staged binary that
+    # cannot start is exactly what a file listing cannot tell you. This runs
+    # OUTSIDE the MSYS2 shell on Windows on purpose: a user's machine has no
+    # MSYS2, and the preset's static link is what makes the executable start
+    # there -- this is where that is proven.
+    - name: Verify the staged binary runs
+      shell: bash
+      run: |
+        set -euo pipefail
+        export APOGEE_HOME="$RUNNER_TEMP/verify-home"
+        exe="$RUNNER_TEMP/stage/apogee"
+        [ -f "$exe" ] || exe="$RUNNER_TEMP/stage/apogee.exe"
+        "$exe" version
+        "$exe" check --fix
+        "$exe" check
+
+    # v7: v4 and v5 still default to the Node 20 runtime, which the runners
+    # deprecated on 2025-09-19. `overwrite` is what makes a re-run possible:
+    # artifacts are scoped to the RUN, not the attempt, so attempt 1's upload
+    # is still there on attempt 2, and the default fails on the existing name
+    # after rebuilding everything.
+    - uses: actions/upload-artifact@v7
+      with:
+        name: apogee-${{ inputs.target }}
+        path: ${{ steps.stage.outputs.files }}
+        if-no-files-found: error
+        overwrite: true

@@ -1,9 +1,21 @@
-# Apogee releases.
+# Apogee releases -- the MANUAL path.
 #
 # Distribution host and pipeline shape are a user decision (2026-09-01): GitHub
-# Releases, built by GitHub Actions. A pushed tag builds every target on its own
-# native runner and uploads one archive per target; `install.sh` and
-# `install.ps1` then fetch the archive for the host.
+# Releases, built by GitHub Actions. `install.sh` and `install.ps1` fetch the
+# archive for the host from there.
+#
+# **The everyday release is not this file** (user decision, 2026-09-25): a
+# merge into `stable` no longer runs it. ci.yml's `tag and release` job
+# publishes the merged pull request's OWN archives -- the ones its CI run
+# built and proved -- tagged with the version the executable reports
+# (lib/scripts/release-from-pr.sh). What remains here is the escape hatch: a
+# hand-pushed `v*` tag (`make -C lib/src/cli release`) builds every target
+# from that tag and publishes, for a re-cut or for when the merged pull
+# request's archives cannot be used; and the dry-run dispatch.
+#
+# The tag that `tag and release` creates does NOT start this workflow: a tag
+# made with a run's GITHUB_TOKEN triggers no workflow, which is what keeps a
+# merge from publishing twice.
 #
 # **It builds through lib/scripts/cicd.sh, like every other job here.** The item
 # asked for that by name, and the reason is the same one the CI workflow gives:
@@ -11,13 +23,15 @@
 # from a tested one in ways nobody can reproduce locally.
 #
 # **Every target ships from the first tag** (user decision, 2026-09-01),
-# Windows included -- five since 2026-09-19, when the Intel Mac was dropped. Recorded caveat, because it is real: Apogee's Windows
-# portability work is incomplete -- the PTY tests, the tcflush typeahead flush,
-# the lsof no-listen poll, and 0600 file modes have no Windows equivalent yet,
-# and `apogee check` reports the mode rows as SKIPPED there rather than passing
-# them. A Windows build is verified more weakly than a POSIX one. That is why
-# `windows-*` is not `blocking` below: a Windows failure must not silently
-# withhold the five targets that ARE fully verified.
+# Windows included -- five since 2026-09-19, when the Intel Mac was dropped.
+# Recorded caveat, because it is real: Apogee's Windows portability work is
+# incomplete -- the PTY tests, the tcflush typeahead flush, the lsof no-listen
+# poll, and 0600 file modes have no Windows equivalent yet, and `apogee check`
+# reports the mode rows as SKIPPED there rather than passing them. A Windows
+# build is verified more weakly than a POSIX one. That is why `windows-*` is
+# not `blocking` below: a Windows failure must not withhold the three POSIX
+# targets that ARE fully verified. (The merge path has no such asymmetry: CI
+# requires all five builds, so a merged pull request always has five archives.)
 #
 # Nothing here signs anything. macOS ships unsigned (user decision, 2026-09-01):
 # a curl-driven install sets no quarantine attribute, and for the browser
@@ -28,16 +42,10 @@ name: Release
 
 on:
   push:
-    # A merge into `stable` IS a release (user decision, 2026-09-22). That is
-    # the branch convention stated plainly: development happens on a
-    # version-named branch and merges here when that release is done. What
-    # decides is `project(... VERSION x.y.z)` in lib/src/cli/CMakeLists.txt --
-    # already the one place the version lives -- so a merge whose version has
-    # been released publishes nothing, and docs or hotfix merges to `stable`
-    # need no exception rule to stay quiet.
-    branches: [stable]
     # The manual path, kept as the escape hatch: `make release` pushes a tag,
-    # and so can a person. Both paths meet in the same `gate` job below.
+    # and so can a person. Both it and the dispatch meet in the `gate` job.
+    # Not `branches: [stable]` (user decision, 2026-09-25): a merge publishes
+    # through ci.yml's `tag and release`, from the pull request's archives.
     tags:
       - "v*"
   # A dry run, so the pipeline can be exercised without cutting a release.
@@ -66,10 +74,9 @@ jobs:
     # What version is this, and should it ship? Both triggers land here, and
     # this is the only job that answers either question.
     #
-    # The idempotency key is the RELEASE, not the tag. That distinction is what
-    # lets one job serve both paths: on a tag push the tag necessarily exists
-    # already (pushing it is what started the run) while the release does not,
-    # and on a repeat push to `stable` both exist and nothing should happen.
+    # The idempotency key is the RELEASE, not the tag: on a tag push the tag
+    # necessarily exists already (pushing it is what started the run) while
+    # the release does not.
     #
     # On the tag path this also enforces the guard the pipeline never had: a
     # tag whose name disagrees with CMakeLists.txt fails HERE, before five
@@ -144,11 +151,10 @@ jobs:
 
   unit-tests:
     # The same source-level gate CI runs, in front of the release builds
-    # (user decision, 2026-09-22). It repeats what CI ran on this commit, and
-    # that is deliberate: a merge to `stable` starts BOTH workflows at once,
-    # so without this stage `publish` could finish before CI had an opinion.
-    # The stage is cheap -- one target, llama.cpp off, no executable -- which
-    # is what makes paying for it twice reasonable.
+    # (user decision, 2026-09-22). A hand-pushed tag can name a commit no CI
+    # run ever tested, so this path gates itself rather than trusting that one
+    # did. The stage is cheap -- one target, llama.cpp off, no executable --
+    # which is what makes paying for it a second time reasonable.
     name: unit tests ${{ matrix.target }}
     needs: gate
     if: needs.gate.outputs.proceed == 'true'
@@ -299,67 +305,13 @@ jobs:
             exit 1
           }
 
-      - name: Stage the archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          stage="$RUNNER_TEMP/stage"
-          mkdir -p "$stage/completions"
-
-          # The binary, wherever this generator put it.
-          binary=""
-          for candidate in \
-            "lib/src/cli/build/${{ matrix.target }}/source/apogee" \
-            "lib/src/cli/build/${{ matrix.target }}/source/apogee.exe" \
-            "lib/src/cli/build/${{ matrix.target }}/source/Release/apogee.exe"; do
-            if [ -f "$candidate" ]; then binary="$candidate"; break; fi
-          done
-          [ -n "$binary" ] || { echo "no binary built for ${{ matrix.target }}" >&2; exit 1; }
-          cp "$binary" "$stage/"
-
-          # Completions ride along: they are part of the install contract, so
-          # they ship in the same archive rather than being fetched separately.
-          cp lib/src/cli/completions/* "$stage/completions/"
-
-          case "${{ matrix.target }}" in
-            windows-*) (cd "$stage" && 7z a -tzip "$RUNNER_TEMP/apogee-${{ matrix.target }}.zip" .) ;;
-            *)         tar -czf "$RUNNER_TEMP/apogee-${{ matrix.target }}.tar.gz" -C "$stage" . ;;
-          esac
-
-      # Proof the artifact RUNS, not merely that a file exists -- the item's
-      # Core constraint: "distributed binaries are verified by RUNNING them
-      # post-install". A staged binary that cannot start is exactly what a file
-      # listing cannot tell you. This step runs OUTSIDE the MSYS2 shell on
-      # Windows on purpose: a user's machine has no MSYS2, and the preset's
-      # static link is what makes the executable start there -- this is where
-      # that is proven.
-      - name: Verify the staged binary runs
-        shell: bash
-        run: |
-          set -euo pipefail
-          export APOGEE_HOME="$RUNNER_TEMP/verify-home"
-          exe="$RUNNER_TEMP/stage/apogee"
-          [ -f "$exe" ] || exe="$RUNNER_TEMP/stage/apogee.exe"
-          "$exe" version
-          "$exe" check --fix
-          "$exe" check
-
-      # v7, not v4: v4 and v5 still default to the Node 20 runtime, which the
-      # runners deprecated on 2025-09-19 and now force onto Node 24 with a
-      # warning. v6 was the version that declared `runs.using: node24`; v7 is
-      # current. `archive` still defaults to true, so the upload is zipped
-      # exactly as before -- the only change here is the runtime.
-      # `overwrite` is what makes a re-run possible at all. Artifacts are
-      # immutable and scoped to the RUN, not the attempt, so the upload from
-      # attempt 1 is still there on attempt 2 -- and the default (`false`)
-      # fails the step when a name already exists. Re-running a failed build
-      # would die here, having rebuilt everything first.
-      - uses: actions/upload-artifact@v7
+      # Staged, proven to run, and uploaded as the artifact `apogee-<target>`
+      # by the one packaging action ci.yml uses too -- the merge path and this
+      # one cannot ship differently packaged archives.
+      - name: Package
+        uses: ./.github/actions/package
         with:
-          name: apogee-${{ matrix.target }}
-          path: ${{ runner.temp }}/apogee-${{ matrix.target }}.*
-          if-no-files-found: error
-          overwrite: true
+          target: ${{ matrix.target }}
 
   publish:
     name: publish release
@@ -385,9 +337,12 @@ jobs:
       # this workflow pushes a tag. A blocking build failure therefore leaves
       # NOTHING behind to clean up -- no orphaned tag whose release never came,
       # which is the state that otherwise has to be unpicked by hand before a
-      # retry. `--target` is the commit under test: the merge commit on a push
-      # to `stable`, the tagged commit on a tag push (where the tag already
-      # exists and `--target` is simply ignored).
+      # retry. `--target` is the commit under test: on a tag push the tag
+      # already exists and `--target` is simply ignored; a dispatch with
+      # dry_run off tags the dispatched commit.
+      #
+      # Only the archives are attached: each artifact also carries the
+      # `.source` record the merge path checks, which is not a release asset.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -395,6 +350,11 @@ jobs:
         run: |
           set -euo pipefail
           ls -la artifacts
+          # The archives, and only those; nullglob because a Windows build is
+          # allowed to fail here, and then there is no .zip to match.
+          shopt -s nullglob
+          assets=(artifacts/apogee-*.tar.gz artifacts/apogee-*.zip)
+          [ "${#assets[@]}" -gt 0 ] || { echo "::error::no archives were built"; exit 1; }
           # Create, or finish creating. `gh release create` is one call but not
           # one operation: it can make the release and then fail partway
           # through the asset uploads, which leaves a real release missing
@@ -402,12 +362,12 @@ jobs:
           # an existing release means uploading into it rather than failing.
           if gh release view "${VERSION}" >/dev/null 2>&1; then
             echo "release ${VERSION} exists; uploading assets into it"
-            gh release upload "${VERSION}" artifacts/* --clobber
+            gh release upload "${VERSION}" "${assets[@]}" --clobber
           else
             gh release create "${VERSION}" \
               --target "${GITHUB_SHA}" \
               --title "${VERSION}" \
               --generate-notes \
-              artifacts/*
+              "${assets[@]}"
           fi
           echo "published ${VERSION} at ${GITHUB_SHA} (attempt ${GITHUB_RUN_ATTEMPT})" >> "$GITHUB_STEP_SUMMARY"
