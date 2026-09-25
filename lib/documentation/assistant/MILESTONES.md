@@ -563,6 +563,37 @@ The guards were then removed one at a time (tree, merged, version, other-commit 
 
 **Not verified.** Nothing here has run on GitHub's runners yet. The first real exercise is the rehearsal on this release's own pull request; the first publish is its merge.
 
+### 2026-09-25 — A pull request's CI run, rehearsed locally (`make pr-ci`)
+
+Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the workflow when a PR is made." `act` was ruled out: it runs Linux containers, so it cannot run the macOS job that matters most here, or the Windows ones. The workflow is instead replayed natively for the host's own target, through the scripts the workflow calls.
+
+**What was built**
+
+- [x] **`lib/scripts/pr-ci.sh`**, behind **`make pr-ci`** (and `make pr-ci-clean`).
+  - It fetches `stable` and makes **GitHub's test merge** of the branch into it, since that, not the branch, is what CI builds. A branch that already contains `stable` is its own test merge; a conflicting one stops the run, as GitHub runs no CI on it.
+  - It runs `ci.yml`'s pull-request jobs on that merge, in the workflow's order: `version bump`, `clone llama.cpp`, `unit tests <host>` with llama.cpp off, then `build <host>` with its packaging. The build runs only when the clone and the unit tests passed (the workflow's `needs`); `version bump` gates only the verdict.
+  - It prints a checks-style summary, names the four targets this host cannot build as CI's own, keeps a log per job, and exits non-zero whenever CI would fail.
+  - The jobs run in two git worktrees under `~/.cache/apogee/pr-ci` (`APOGEE_PR_CI_DIR`), one per job as on the runners: the unit build has llama.cpp off and the build has it on, so one shared build directory would rebuild half the tree at every switch. They are reset to the new test merge each run and keep their ignored build directories, so every run after the first is incremental. The developer's own checkout and build directories are never touched.
+  - Uncommitted changes are left out, because a pull request carries commits; a note says so. **`UNCOMMITTED=1`** (`--uncommitted`) rehearses them anyway, as a commit object built through a scratch index that no branch, stash or reflog points at. `BASE=<ref>` merges into another base.
+- [x] **Two steps out of the YAML, so they run anywhere.**
+  - **`lib/scripts/package.sh`** is the staging, the `.source` record and the proof that the binary runs, moved out of `.github/actions/package`. The action now calls it and adds only the upload; `pr-ci.sh` calls it too. That keeps "one packaging definition" true: CI, the manual release and the rehearsal cannot package differently.
+  - **`lib/scripts/version-check.sh`** is `ci.yml`'s inline `version bump` step. It uses `gh release view` whenever a token is in the environment or `gh` is signed in; without `gh` it asks `origin` for the tag, which agrees because a release and its tag are only ever created in one call.
+- [x] **`cicd.sh --host`** prints the native target, so the host is detected in one place.
+
+**Verified.**
+- `version-check.sh` passes on this branch (v0.1.2 unreleased) and refuses a checkout of `stable` (v0.1.1 is released).
+- A synthetic base editing the same `VERSION` line stops the rehearsal, naming the conflicting file and the fix.
+- A synthetic base that only adds a file produces a two-parent test merge carrying both sides, with both worktrees on that one commit.
+- `--clean` removes the worktrees and unregisters them.
+- The whole run is exercised under bash 3.2, macOS's own `/bin/bash`, as well as bash 5.
+- A full `make pr-ci UNCOMMITTED=1` on the reference Mac passed every job this host can run: the version bump, the clone, the unit tests (27,767 assertions in 1,587 test cases) and the build, packaged and run.
+
+**What the first real pull request run found** (v0.1.2's own, run 21). macOS passed, and the other four platforms failed, which is exactly the gap a Mac-only rehearsal leaves.
+- **Linux and Windows x64 did not compile the tests.** `tests/models/store_test.cpp` called `std::ranges::sort` without `<algorithm>`. Apple's libc++ reaches the header through others, and GCC's libstdc++ does not. The include is added.
+  - To look for more of the same, every first-party file was compiled syntax-only by the MinGW GCC (`x86_64-w64-mingw32-g++ -fsyntax-only`, the real build's flags and include paths). That is the standard library the Linux and Windows x64 jobs use, and it takes the Windows branches of the code.
+  - With the include removed, it reproduces the runner's error exactly; with it, all 362 files are clean.
+- **Four test cases failed on Windows arm64**, and the job's public annotations could not say which. `ci-annotate.sh` still expected ctest's summary, but since 2026-09-22 CI runs the Catch2 binary directly. So a failing unit-test job published its last 25 lines: the totals, and no test's name. It now reads Catch2's own report: a summary annotation with the totals and every failed test case's name, then one annotation per failure (up to nine) with its location and each failed assertion and its expansion. Skipped test cases are left out, and CRLF logs are handled. Tested against a synthetic report in Catch2's format.
+
 ### 2026-09-01 — Layout, doctor, installers, completions, release pipeline
 
 **What was built**

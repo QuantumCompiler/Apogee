@@ -35,7 +35,7 @@ Apogee/
 │   │                          the PR-only `version bump` check; and, after a merge, `tag and release` (2026-09-25)
 │   ├── workflows/release.yml — The manual release: a v* tag or a dry-run dispatch → gate → unit tests ×5 → build ×5 → publish
 │   │                          (thin callers into lib/scripts/; here only because GitHub requires it)
-│   └── actions/package/     — The one packaging step both workflows use: archive, run check, .source record, artifact
+│   └── actions/package/     — The packaging step both workflows use: lib/scripts/package.sh, then the artifact upload
 ├── .claude/
 │   └── skills/
 │       ├── apogee-backlog-item/        — Repo-local skill: take the next backlog item per the docs-first process
@@ -57,17 +57,25 @@ Apogee/
     │   │                      targets (--platform linux|windows × x64|arm64, macos-arm64, or all;
     │   │                      non-native targets defer to the CI matrix, or fail with --no-defer), --fresh = clean-room
     │   │                      clone of github.com/QuantumCompiler/Apogee at that branch; --test, --clean;
-    │   │                      --clone-llama is the first CI stage, --unit-tests the source suite beside it
+    │   │                      --clone-llama is the first CI stage, --unit-tests the source suite beside it;
+    │   │                      --host prints the native target (the one host detection)
     │   ├── cicd-completion.bash — Tab completion for cicd.sh's flags (source from your shell rc)
-    │   ├── ci-annotate.sh   — On a failed CI step, publishes the ctest summary and each failed
-    │   │                      test's output as error annotations (public through the API; the log is not)
+    │   ├── version-check.sh — CI's `version bump` check: the version CMakeLists.txt names must be unreleased
+    │   │                      (gh when signed in, else the tag on origin)
+    │   ├── package.sh       — The one packaging definition: archive, .source record, the binary run
+    │   │                      (the package action and pr-ci.sh both call it)
+    │   ├── pr-ci.sh         — `make pr-ci`: a pull request's CI run rehearsed on this host -- the test
+    │   │                      merge into stable, then version bump, clone, unit tests, build + package
+    │   ├── ci-annotate.sh   — On a failed CI step, publishes the ctest summary -- or Catch2's, for the
+    │   │                      unit-test jobs -- and each failed test's output as error annotations
+    │   │                      (public through the API; the log is not)
     │   └── release-from-pr.sh — The release after a merge: the PR's own CI archives, checked against the
     │                          merged source tree, tagged with the executable's version; a rehearsal without --publish
     └── src/                 — Application source, one self-contained project per app
         ├── cli/             — The CLI application
         │   ├── CMakeLists.txt   — Build root: standard, options, target wiring, link-policy assertion
         │   ├── CMakePresets.json— One preset per release target + `default` (host native)
-        │   ├── Makefile         — Thin wrapper (build/install/test/lint/format/clean/fresh)
+        │   ├── Makefile         — Thin wrapper (build/install/test/lint/format/clean/fresh/pr-ci)
         │   ├── .clang-format    — Formatting rules (make format / make format-check)
         │   ├── .clang-tidy      — Static analysis, incl. the smart-pointer ownership gate
         │   ├── cmake/
@@ -653,6 +661,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 | `make lint` | clang-tidy over `source/` and `tests/`, including the ownership gate. |
 | `make no-llama` | The fast developer build: everything except llama.cpp, which is on by default and most of the compile time. |
 | `make clean` / `make fresh` | Drop a build dir / clean-room clone-and-build. |
+| `make pr-ci` | **The pull request's CI run, rehearsed on this host** (`lib/scripts/pr-ci.sh`, 2026-09-25). It makes GitHub's test merge of the branch into `stable` (fetched first) and runs `ci.yml`'s pull-request jobs on it, in its order and through the scripts the workflow calls: `version bump`, `clone llama.cpp`, `unit tests <host>` with llama.cpp off, then `build <host>` and its packaging, which run only if the clone and the unit tests passed. It prints a checks-style summary and exits non-zero if CI would fail. The four targets this host cannot build are named as CI's. The jobs run in two worktrees under `~/.cache/apogee/pr-ci` (`APOGEE_PR_CI_DIR`), one per job as on the runners, since the unit build has llama.cpp off and the build has it on. They are reset each run, so builds after the first are incremental. Uncommitted changes are left out, as a pull request would leave them; `UNCOMMITTED=1` rehearses them as a commit object no branch points at. `BASE=<ref>` merges elsewhere. A conflicting merge stops it, since GitHub runs no CI then. `make pr-ci-clean` removes it all. |
 
 `make install` is a thin caller into the `install()` rule in `source/CMakeLists.txt`, invoked with **`--component apogee`**. That flag is not optional: `FetchContent_MakeAvailable` adds every dependency's own `install()` rules to this project, so a component-less install also writes replxx's headers, library, and CMake package config into the prefix — and our `FIND_PACKAGE_ARGS` then prefers that broken installed copy on the next configure, so the project stops building. `cli.install_is_ours_only` guards both halves. It installs the executable (`apogee_core` is an implementation detail and is deliberately not installed), then the shell completions, and then runs **`apogee check --fix`** so the binary creates and verifies its own data directory. That last step is the parity rule in one line: the Makefile does not know what `~/.apogee/` contains, and neither installer does — all three reach the single declaration in `source/harness/layout.h`. See CLAUDE.md → *One layout declaration, and every install path reads it*.
 
@@ -736,7 +745,7 @@ The run page's summary lists each of those as it passes.
 ### What you actually do
 
 1. **Bump `project(... VERSION x.y.z)`** on the version branch, committed with the rest of the release.
-2. **Open the PR.** CI's `version bump` check fails if that version is already released — that is the moment a forgotten bump surfaces, rather than after the merge when the release silently does not happen.
+2. **Open the PR** — after `make pr-ci`, which runs the jobs the PR will start on this host's target, against the test merge, and says whether CI would pass. CI's `version bump` check fails if that version is already released — that is the moment a forgotten bump surfaces, rather than after the merge when the release silently does not happen.
 3. **Rehearse the release** once CI is green: Actions → CI → Run workflow, on the version branch, with the PR's number in `release_rehearsal_pr` (or `gh workflow run CI --ref vX.Y.Z -f release_rehearsal_pr=<PR>`). It runs steps 1–5 against the test merge and reports what it would publish; it builds nothing and publishes nothing. `lib/scripts/release-from-pr.sh <PR>` does the same from a terminal with `gh` signed in.
 4. **Merge** — keeping the branch up to date with `stable` first, or step 4's tree check refuses the archives. The release publishes itself.
 5. **Open the next dev branch** from `stable`, named for the release being *built*:

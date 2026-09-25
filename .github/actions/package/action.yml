@@ -32,56 +32,20 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Stage the archive
+    # Staging, the .source record and the proof that the binary runs are
+    # lib/scripts/package.sh -- the one packaging definition, which pr-ci.sh
+    # also runs to rehearse this workflow locally. This action adds only the
+    # upload. On Windows `shell: bash` is Git Bash, OUTSIDE the MSYS2 shell,
+    # which is where a static link is proven (see the script).
+    - name: Stage the archive and verify the binary runs
       id: stage
       shell: bash
       env:
         TARGET: ${{ inputs.target }}
       run: |
         set -euo pipefail
-        stage="$RUNNER_TEMP/stage"
-        mkdir -p "$stage/completions"
-
-        # The binary, wherever this generator put it.
-        binary=""
-        for candidate in \
-          "lib/src/cli/build/$TARGET/source/apogee" \
-          "lib/src/cli/build/$TARGET/source/apogee.exe" \
-          "lib/src/cli/build/$TARGET/source/Release/apogee.exe"; do
-          if [ -f "$candidate" ]; then binary="$candidate"; break; fi
-        done
-        [ -n "$binary" ] || { echo "no binary built for $TARGET" >&2; exit 1; }
-        cp "$binary" "$stage/"
-        cp lib/src/cli/completions/* "$stage/completions/"
-
-        case "$TARGET" in
-          windows-*) (cd "$stage" && 7z a -tzip "$RUNNER_TEMP/apogee-$TARGET.zip" .) ;;
-          *)         tar -czf "$RUNNER_TEMP/apogee-$TARGET.tar.gz" -C "$stage" . ;;
-        esac
-
-        {
-          echo "commit $(git rev-parse HEAD)"
-          echo "tree $(git rev-parse 'HEAD^{tree}')"
-        } > "$RUNNER_TEMP/apogee-$TARGET.source"
-
-        echo "files=$RUNNER_TEMP/apogee-$TARGET.*" >> "$GITHUB_OUTPUT"
-
-    # Proof the artifact RUNS, not merely that a file exists -- "distributed
-    # binaries are verified by RUNNING them post-install". A staged binary that
-    # cannot start is exactly what a file listing cannot tell you. This runs
-    # OUTSIDE the MSYS2 shell on Windows on purpose: a user's machine has no
-    # MSYS2, and the preset's static link is what makes the executable start
-    # there -- this is where that is proven.
-    - name: Verify the staged binary runs
-      shell: bash
-      run: |
-        set -euo pipefail
-        export APOGEE_HOME="$RUNNER_TEMP/verify-home"
-        exe="$RUNNER_TEMP/stage/apogee"
-        [ -f "$exe" ] || exe="$RUNNER_TEMP/stage/apogee.exe"
-        "$exe" version
-        "$exe" check --fix
-        "$exe" check
+        lib/scripts/package.sh "$TARGET" "$RUNNER_TEMP/package"
+        echo "files=$RUNNER_TEMP/package/apogee-$TARGET.*" >> "$GITHUB_OUTPUT"
 
     # v7: v4 and v5 still default to the Node 20 runtime, which the runners
     # deprecated on 2025-09-19. `overwrite` is what makes a re-run possible:
