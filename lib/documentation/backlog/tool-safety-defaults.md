@@ -55,4 +55,4 @@ Today `read_file` and `fetch_url` are both read-only in the gate, so neither eve
 - [ ] With `tools.fs_root` unset, `read_file` outside the launch folder is refused, and the refusal names the root and how to widen it.
 - [ ] `apogee check` shows the allowed hosts and the effective file root; `cli.config_lifecycle` round-trips an `always` answer.
 
-**Scope note.** Phase 4, item **25a**, the first of the local-agent-tools track; gated on nothing. Out of scope: taint tracking (asking only once private data has been read), per-path file permissions, and guarding MCP servers' own network use, which happens in their processes, not in Apogee's.
+**Scope note.** Item **25a**, the first of the local-agent-tools track; gated on nothing. Out of scope: taint tracking (asking only once private data has been read), per-path file permissions, and guarding MCP servers' own network use, which happens in their processes, not in Apogee's.

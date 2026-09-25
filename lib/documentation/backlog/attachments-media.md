@@ -67,4 +67,4 @@ Today:
 - [ ] An audio note is transcribed and questions about it are answered from the transcript.
 - [ ] On a vision chat model, the second turn after an image does not re-encode the image (visible in `--verbose` timings).
 
-**Scope note.** Phase 4, item **26e**; build after [26b](helper-model-roles.md) and [26d](attachments-documents.md). Out of scope: live capture (microphone, camera, screen), generating audio or images, and uploads over `serve`.
+**Scope note.** Item **26e**; build after [26b](helper-model-roles.md) and [26d](attachments-documents.md). Out of scope: live capture (microphone, camera, screen), generating audio or images, and uploads over `serve`.

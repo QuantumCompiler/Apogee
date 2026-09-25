@@ -48,7 +48,7 @@
 - [ ] Without `tools.search`, no `web_search` is offered, and `apogee check` shows how to configure it.
 - [ ] The tools reference documents the setup end to end.
 
-**Scope note.** Phase 4, item **25e**; build after 25a and 25b. Out of scope:
+**Scope note.** Item **25e**; build after 25a and 25b. Out of scope:
 - keyed providers (Brave, Tavily), the second implementation the seam exists for, each needing a credential-store slot;
 - image and news categories;
 - Ommi's `web-search` training kit, which rides the training tool kits that 25b unblocks.

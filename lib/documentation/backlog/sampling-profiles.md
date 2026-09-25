@@ -47,4 +47,4 @@ Proposed order of precedence:
 - [ ] `apogee models info` on Qwen3.8-27B shows its sampling and where each value came from.
 - [ ] The six-task battery passes on both acceptance models with the family defaults.
 
-**Scope note.** Phase 4, item **26h**; build after 25b. Out of scope: learning settings per task, and dynamic temperature.
+**Scope note.** Item **26h**; build after 25b. Out of scope: learning settings per task, and dynamic temperature.

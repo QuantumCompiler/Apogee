@@ -835,7 +835,7 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
         options.stream_answer = false;
         EditingLineReader::Options reader_options;
         reader_options.history_path = default_history_path();
-        reader_options.completions = {"/help", "/rag", "/rags", "/exit", "/quit"};
+        reader_options.suggest = word_suggester({"/help", "/rag", "/rags", "/exit", "/quit"});
         const std::unique_ptr<LineReader> reader =
             make_line_reader(std::move(reader_options), std::cin);
         if (reporter_options.decorate) {

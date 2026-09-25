@@ -20,7 +20,7 @@ Before touching the queue, read the contributor docs in `lib/documentation/assis
 
 Read [`lib/documentation/backlog/README.md`](../../../lib/documentation/backlog/README.md) — lifecycle, document format, the **gate convention**, and the priority-ordered index.
 
-- **The next item** is the topmost row that is not in progress, whose "Build after" gate is satisfied. A Phase-1 (v0.1.0) item needs only its gate chain; a Phase-2/3 item additionally assumes the complete v0.1.0 set has shipped.
+- **The next item** is the topmost 🟢 row of the earliest version's table (🔒 rows wait on the items their Status cell names; every pending item assumes everything already shipped, and needs only its own gate chain).
 - If the user named a specific item, take that one instead — but verify its gate is satisfied and say so if it isn't.
 
 ## 3. Read the item's document — it IS the working spec

@@ -35,8 +35,8 @@ Kebab-case filename in `lib/documentation/backlog/`, following the format in the
 
 ## 4. Place it and update the docs
 
-1. **Index** ([backlog README](../../../lib/documentation/backlog/README.md)): insert the row at its priority position — right phase, `Build after` column, **split first** marker if applicable — and renumber the affected rows and the phase preamble's track numbering. Confirm the position with the user if it isn't obvious.
-2. **[ROADMAP.md](../../../lib/documentation/assistant/ROADMAP.md)**: add the item's line in the right section (the in-progress release's list, Fast follow, or the ideas parking lots).
+1. **Index** ([backlog README](../../../lib/documentation/backlog/README.md)): insert the row into its **version's table** (creating that table if it is the version's first item), at its priority position within the table, following the index-table format the README defines — the number continuing from the highest ever assigned, the gate in the **Status** cell, **split first** marker if applicable — and update the track preamble above the tables. Confirm the position with the user if it isn't obvious.
+2. **[ROADMAP.md](../../../lib/documentation/assistant/ROADMAP.md)**: add the item's line in the right section (the in-progress release's board, the **Up next** release it targets, or the ideas parking lots).
 3. **[SPEC.md](../../../lib/documentation/assistant/SPEC.md)**: only if scope, non-goals, or principles actually changed — with a dated revision note, per the house style.
 4. Do **not** touch MILESTONES.md (finished work only) and do not start implementing — creating the item and building it are separate steps (`/apogee-backlog-item` handles the build).
 

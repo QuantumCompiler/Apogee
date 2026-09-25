@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Project context for coding agents. Read this before making changes. The root [`README.md`](../../../README.md) (not yet written) is the public-facing overview (what Apogee is + install/build); this file and the rest of `lib/documentation/assistant/` are the contributor-facing detail. This file tells you **how to work here**; the sibling documents tell you **what** and **why**.
+Project context for coding agents. Read this before making changes. The root [`README.md`](../../../README.md) is the public-facing overview (what Apogee is + install/quick start — the whole project, not only the CLI); this file and the rest of `lib/documentation/assistant/` are the contributor-facing detail. This file tells you **how to work here**; the sibling documents tell you **what** and **why**.
 
 ## Reading order & the docs system
 

@@ -42,30 +42,21 @@ Every item document follows this shape (sections in order; omit one only when it
 
 ## Index
 
-Rows are in the **suggested build order** — the topmost 🟢 row is the next item to take. Item numbers are identities (other documents cite them) and survive reordering. **Version** is the release the item is prescribed for; **File** links the item's document — the complete context. **Status:** 🟢 workable now (its gate is satisfied) · 🔒 blocked on the items named · 🚧 in progress · ❌ cancelled.
+**One table per version target, every table in one shape.** Each release the queue is prescribed against — `v0.1.2`, `v0.1.3`, and every `vx.x.x` after them — gets its own table, and the tables appear in release order, nearest first. This is the format **all** index tables follow, now and as new versions open:
 
-**Gate convention:** a v0.1.0 item is buildable from its transitive gate chain alone. A gated-ring or unscheduled item *additionally assumes the complete v0.1.0 set has shipped* — its "build after" names only the ring-internal ordering. Items marked **split first** must be groomed into their listed sub-documents before an agent takes them; do not build from the guard document directly.
+| Column | Contents |
+|---|---|
+| **#** | The item's number — its identity. Numbers ascend down the rows and across the tables; other documents cite them, so a renumber is a deliberate act, never a side effect of moving rows. Numbers are never reused: shipped items keep theirs in the [MILESTONES.md](../assistant/MILESTONES.md) record (1–23 are spent), so a new item continues from the highest number ever assigned. |
+| **Item** | Plain title — em dash — one-line description. No link here; the link lives in **File**. |
+| **Version** | The release the item is prescribed for. The column stays even inside a per-version table, so a row keeps its meaning when it moves between tables and every table keeps the same shape. |
+| **File** | The item's document, linked — the complete context for the item. |
+| **Status** | One emoji, plus the gate when blocked: 🟢 workable now (its gate is satisfied) · 🔒 blocked on the items named · 🚧 in progress · ❌ cancelled. |
 
-### Phase 1 — v0.1.0: complete
+Within a table, rows are in the **suggested build order**; the topmost 🟢 row of the earliest version's table is the next item to take. Moving an item to another version means moving its row to that version's table (and updating its Version cell) — creating the table if it is the version's first item.
 
-**Every v0.1.0 item has shipped.** Items 1–6 built strictly in order (each gating on the one before it — the skeleton proved config → harness → backend → terminal on exactly one provider before anything widened); after 6 the three branches **7, 8, 9** were independent; item 7 was split at grooming (2026-08-26) into 7a/7b/7c; and item 10, the release closer, landed 2026-09-01.
+**Gate convention:** every pending item builds on top of everything already shipped; a gate — the "build after" in a scope note, the 🔒 cell in a table — names only the ordering among the pending items here, and an item is buildable from its transitive gate chain alone. Items marked **split first** must be groomed into their listed sub-documents before an agent takes them; do not build from the guard document directly.
 
-*Items 1 (C++ project skeleton), 2 (config engine), 3 (harness core), 4 (Anthropic backend), 5 (`apogee complete`), 6 (the shared agent loop), 7a (the terminal UX layer), 7b (`apogee chat`), 7c (line editing), 8 (OpenAI + Google backends), 9 (the llama.cpp backend), and 10 (the install contract, `apogee check`, and completions) shipped 2026-08-25 through 2026-09-01 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestones A–K. Nothing in Phase 1 is pending; the numbering is preserved here because the gate references in the Phase-2 documents still read against it.*
-
-
-### Phase 2 — the gated ring (after v0.1.0 ships)
-
-Seven semi-independent tracks that can interleave: the **vendor-CLI family** — **complete**: 11 shipped 2026-09-02, and 12's three split items (12a codex, 12b gemini, 12c ollama) all shipped 2026-09-06, the **front-end contract** (13 — shipped 2026-09-06, and the GUI project gates on it), **local-model depth** (14, split at grooming 2026-09-06 into 14a/14b/14c/14d; **all four shipped 2026-09-07 — the track is complete**), **RAG** (15 → 16 → 17; **all three shipped, 2026-09-12 and 2026-09-13 — the track is complete**), **serving** (18 → 19a → 19b — server deployments only; **all shipped 2026-09-13**, 19 having been split at grooming that day into the admin plane and the provider credential store — **the track is complete**), and **tools/agents** (20 — **split at grooming 2026-09-13** into 20a native toolsets → 20b MCP stdio client → 20c analyze/agents; **all three shipped 2026-09-13 — the track is complete**), and the **knowledge track** (21 — **split at grooming 2026-09-13** into 21a records + capture → 21b query/lifecycle/HTTP → 21c graph build + expansion → 21d communities/dedupe/named graphs; **21a shipped 2026-09-13, 21b, 21c and 21d 2026-09-19 — the track is complete**). The numbering is the suggested serial order when working alone.
-
-**Every Phase-2 item has shipped.** The seven tracks are recorded in [MILESTONES.md](../assistant/MILESTONES.md) → Milestones L–Y; nothing in the ring is pending.
-
-### Phase 3 — the outer ring (scheduled for v0.1.0)
-
-The **training track** (22 — **split at grooming 2026-09-19** into 22a datasets/kits/the Python boundary → 22b runs → 22c pipelines/regime/cycle). Training is a confirmed direction (2026-08-24), **scheduled for v0.1.0 by the user on 2026-09-19**. **All three shipped 2026-09-19** ([MILESTONES.md](../assistant/MILESTONES.md) → Milestone Z) — **the track is complete, and nothing in the outer ring is pending.**
-
-### Phase 4 — after v0.1.x
-
-Three tracks, since **23** (terminal Markdown rendering) shipped on 2026-09-25 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestone G. **24, chat input completion**, asked for 2026-09-25: Claude Code's input affordances in `apogee chat` — typing `/` lists the chat's commands live with descriptions, `@` completes file paths and attaches the mention through the attachment core. Pulled to **v0.1.2** at the top of the stack the same day, ahead of the attachments item — what a sent `@` mention does until 26d ships is a **[user]** call on its document.
+Two tracks, since **24** (chat input completion) shipped on 2026-09-25 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestone H. Its handoff to the attachments item — wiring a sent `@` mention into the attach path — is recorded on [26d](attachments-documents.md).
 
 **25, local agent tools**, came out of a spike on 2026-09-25 and was split into six items the same day. The spike found that local models were never shown the tools every other backend already has, measured llama.cpp's own tool-calling layer on real weights (6/6 tasks on Qwen3.8-27B and Qwen3-VL-8B), and turned up an outbound-data exposure in today's tools. The user's four calls are recorded in the items: SearXNG for search, ask per new website, the launch folder as the file root, and 8B-class models and up. In build order: 25a first (it closes today's exposure); 25b is the unlock; 25c–25f follow it or 25a, as each names.
 
@@ -78,9 +69,10 @@ Three tracks, since **23** (terminal Markdown rendering) shipped on 2026-09-25 �
 
 The user's calls are recorded in the items: attachments kept with their chat and cached by hash, helper models used automatically, and external converters (`pdftotext`, `ffmpeg`).
 
+### v0.1.3
+
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| 24 | Chat input completion — `/` lists chat's commands live with descriptions, `@` completes paths and attaches the file; pipes byte-identical | v0.1.2 | [`chat-input-completion.md`](chat-input-completion.md) | 🟢 |
 | 25a | Tool safety defaults — `fetch_url` asks per new website, redirects hop by hop, and the file tools default to the launch folder | v0.1.3 | [`tool-safety-defaults.md`](tool-safety-defaults.md) | 🟢 |
 | 25b | Local tool calling — the llama.cpp backend renders tools through the model's own template, parses its calls, and constrains them by grammar, via llama.cpp's `common` chat layer linked in-process | v0.1.3 | [`local-tool-calling.md`](local-tool-calling.md) | 🔒 25a |
 | 25c | Hybrid prompt checkpoints — Qwen3.5/3.8 re-read only what is new each turn and tool step, via state checkpoints as llama-server keeps them | v0.1.3 | [`hybrid-prompt-checkpoints.md`](hybrid-prompt-checkpoints.md) | 🔒 25b |

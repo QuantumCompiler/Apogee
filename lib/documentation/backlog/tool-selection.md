@@ -41,4 +41,4 @@
 - [ ] A question needing an MCP tool outside the top few is answered after one `find_tools` call.
 - [ ] With 12 tools registered, requests are byte-identical to today's.
 
-**Scope note.** Phase 4, item **26g**; build after 25b. Out of scope: learning from which tools were actually used.
+**Scope note.** Item **26g**; build after 25b. Out of scope: learning from which tools were actually used.

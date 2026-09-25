@@ -86,6 +86,7 @@ add_executable(apogee_tests
     commands/lifecycle_test.cpp
     commands/machine_mode_test.cpp
     commands/line_reader_test.cpp
+    commands/chat_completer_test.cpp
     logger/session_test.cpp
     agent/tool_test.cpp
     agentloop/loop_test.cpp
@@ -542,7 +543,9 @@ if(UNIX)
         # Line editing. replxx engages only when stdin AND stdout are both
         # terminals, so none of this reproduces on a pipe -- which is the point:
         # before it was wired, an arrow key arrived in the message as a literal
-        # escape sequence.
+        # escape sequence. Since item 24 it also holds the suggestion rows to
+        # the screen: drawn, taken by Tab, never at the last column, never left
+        # behind -- and a pipe given none of it.
         add_test(NAME cli.chat_line_editing
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/pty_lineedit_check.py"

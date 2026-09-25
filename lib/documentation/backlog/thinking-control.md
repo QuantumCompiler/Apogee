@@ -19,7 +19,7 @@ Switching thinking off goes through the template's own `enable_thinking` once [l
 - `backends/llamacpp.cpp` and `llama_real.cpp`: `enable_thinking` into the render, and the budget sampler.
 - `backends/anthropic*.cpp`, `openai*.cpp`, `google*.cpp`: the vendor mappings.
 - `agentloop/`: `auto`'s decision, asked of the utility model as a side request when one is set.
-- `commands/chat.cpp`, `commands/complete.cpp`: the flag and the slash command, added to `slash_commands()`.
+- `commands/chat.cpp`, `commands/complete.cpp`: the flag and the slash command, a row in chat's command table (`commands/chat_completer.cpp`, which `/help`, completion and dispatch all read) with `on`, `off` and `auto` as its values.
 - `commands/thinking_view.cpp`: the budget note on the summary line.
 - `harness/config.*`: the per-backend default.
 
@@ -47,4 +47,4 @@ Switching thinking off goes through the template's own `enable_thinking` once [l
 - [ ] `--think-budget 256` stops thinking at 256 tokens and says so.
 - [ ] The same `--think off` on an Anthropic backend sends no thinking parameter, and on OpenAI the lowest effort.
 
-**Scope note.** Phase 4, item **26i**; build after 25b and 26h. Out of scope: per-tool-step thinking policies.
+**Scope note.** Item **26i**; build after 25b and 26h. Out of scope: per-tool-step thinking policies.

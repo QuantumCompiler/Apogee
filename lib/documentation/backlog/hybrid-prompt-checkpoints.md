@@ -50,4 +50,4 @@ It does that with **context checkpoints**:
 - [ ] A pure-attention model takes no checkpoints.
 - [ ] Checkpoint memory is capped, and `--verbose` reports it.
 
-**Scope note.** Phase 4, item **25c**; build after 25b. Out of scope: persisting checkpoints to disk across processes (a resumed chat re-reads once), and speculative-decoding checkpoints.
+**Scope note.** Item **25c**; build after 25b. Out of scope: persisting checkpoints to disk across processes (a resumed chat re-reads once), and speculative-decoding checkpoints.

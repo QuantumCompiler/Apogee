@@ -387,6 +387,45 @@ The typeahead check also needed restructuring to drain the PTY **while** waiting
 
 Verified against a build forced to always use the plain reader: the check failed with `an arrow key reached the message as text: ['remember this line', '\x1b[A']` — exactly the symptom this item existed to fix.
 
+### 2026-09-25 — Chat input completion (backlog item 24)
+
+Asked for directly (Taylor, 2026-09-25): Claude Code's `/` command list and `@` file mentions, in `apogee chat`. Specced and pulled to the top of v0.1.2 the same day, and built that day after the user's one call: until the attachments item ([26d](../backlog/attachments-documents.md)) lands, a sent `@file` mention stays plain text, with no stopgap that pastes the file's contents.
+
+**What was built**
+
+- [x] **Suggestions drawn as you type.** replxx's own hint rows sit under the input line (at most five, then a `+9 more — type to narrow` row), each a label and a one-line description in a shared column.
+  - `/` at the start of a line lists the commands, narrowing per keystroke.
+  - After a command, its own values are listed: backends after `/model` (each described by type and model), `auto`/`lexical`/`vector`/`hybrid` after `/retriever`, `off`/`auto`/backends after `/rerank`, statuses after `/capture`.
+  - `@` at the start of any word lists files and folders from the working directory. Folders get a trailing `/`, hidden entries appear only for a leading `.`, a name matches ignoring case unless it has a capital, and a path with a space completes quoted (a folder's quote stays open to go further). `me@example.com` never triggers it.
+  - Nothing is offered in the middle of prose, so backend names no longer complete there as they did.
+- [x] **Tab takes the top row.** On `/mo` it inserts `/model ` with the space, so the next rows are already the backends.
+- [x] **One command table** (`commands/chat_completer.h/.cpp`, new): verb, argument shape, description and argument values, declared once. `/help` prints it, completion offers it, and the REPL dispatches through it by a `switch` compiled with `-Werror=switch` for that block. A row without a handler fails the build (mutation-checked: deleting the `/title` case is a compile error). `/retriever` and `/rerank`, dispatched but in neither the old completion list nor `/help`, are in all three now. `/help` prints one command per row, its description wrapped under a shared column and short of the last column, or beneath the command on a terminal too narrow for a column.
+- [x] **One suggestion protocol for the line reader** (`commands/line_reader.h/.cpp`). `Options.completions`, a flat word list, became `Options.suggest`: text before the cursor in; the span to replace and the candidates, each with text, label and description, out. Both of replxx's mechanisms are wired to it.
+  - `layout_hints` lays the rows out, and `apply_suggestion` is what Tab does. Both are pure and tested with no terminal.
+  - `analyze`, the second consumer, keeps its behaviour through `word_suggester` and shows no rows, so its Tab still completes like a shell.
+- [x] **The pipe contract held.** Only `EditingLineReader` suggests; the plain reader is untouched.
+
+**What the real terminal found.** Every bug here was found under a pseudo-terminal replayed through a small screen model, not in the unit tests:
+- **replxx's own Tab prints a shell-style list into the scrollback** when completion is ambiguous, and that cannot be switched off in 0.0.4. With the rows already on screen, that was a second copy of them left in the transcript. In chat, Tab is bound to Apogee's own handler. replxx's row browsing (Ctrl-↑/↓) is off there too, because it marked a row that Tab would not take.
+- **A line sent faster than replxx repaints left its suggestion behind.** "Faster" means type-ahead released at the prompt, or a paste. replxx commits with one last repaint, and when earlier repaints were skipped, that repaint draws the suggestions afresh: `You: /exit  Save and leave` stayed in the transcript. Enter and Ctrl-C now mark the line as finishing, and the suggestion callback answers nothing. A repaint from replxx's cache never asks the callback; that case is Left, Right, Enter arriving in one burst over visible rows. For it, the reader clears the screen below each sent line. Without that clear, the stale row merged into the next prompt.
+- **A row that reaches the last column** leaves the cursor in the terminal's deferred-wrap state, and replxx's row count is then one short. Every row is measured against the live width (read on each keystroke, so a resize is honoured). The measure is the larger of cells and codepoints, which are replxx's two counters, and the cut leaves room for the `…`. A line whose `@` sits near the edge gets no rows rather than rows reading only `@li…`.
+
+**Verification.**
+- `chat_completer_test` (19 cases):
+  - goldens per context: bare `/`, `/mo`, `/model ` with a prefix and extra spaces, `/retriever `, `/rerank `, `/capture `, `@`, `@.`, `@src/`, a mid-line `@`, `me@li`, a lone `@` before a space, smart case, and quoting both typed and untyped;
+  - the one-table rule both ways (every row parses, resolves, is offered and is in `/help`; every handler has a row);
+  - `/help` at every width from 26 to 120;
+  - the real lister on a temporary directory.
+- `line_reader_test` (8 new cases): the protocol, the layout goldens, no row reaching the last column at any width from 4 to 90, the `N more` row, no room meaning no rows, and Tab's replacement.
+- **`cli.chat_line_editing` drives the real binary** in a 44-column PTY, replayed through a screen model that remembers every column a row ever touched:
+  - `/mo` draws described rows;
+  - Tab completes `/model ` and then the backend (`switched to mock`);
+  - `@li` lists a real folder and a real file, Tab picks the folder, and the message is saved as typed (`@library/`);
+  - nothing under the prompt touches the last column while typing;
+  - a burst over visible rows leaves none behind, and `/exit` sent in one burst keeps no suggestion on its line;
+  - a piped chat writes no escape sequence and no prompt, and its `/help` lists `/retriever`, described.
+  - **Mutation-checked:** without the clear below the line, the burst check fails; without the finishing flag, the `/exit` check fails; with rows allowed to reach the full width, the edge check and 910 unit assertions fail.
+
 ## Milestone I — The full cloud set
 
 **Goal.** Widen cloud coverage from one vendor to three, and in doing so settle the question the `LLMProvider` seam was built to answer: is a backend really just a translator? The answer is a cross-provider conformance table in which the loop, the tools, and the assertions are shared and only the wire fixture differs.

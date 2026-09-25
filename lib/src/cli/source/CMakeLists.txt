@@ -161,6 +161,8 @@ add_library(apogee_core STATIC
     commands/knowledge.cpp
     commands/chat.h
     commands/chat.cpp
+    commands/chat_completer.h
+    commands/chat_completer.cpp
     commands/chat_history.h
     commands/chat_history.cpp
     commands/input_gate.h

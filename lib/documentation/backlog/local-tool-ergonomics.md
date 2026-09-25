@@ -51,7 +51,7 @@
 - [ ] A local model with tools on answers today's date correctly.
 - [ ] `apogee check` lists `edit_file` among the gated tools; the shipped template lists it at `ask`.
 
-**Scope note.** Phase 4, item **25d**; build after 25b. Out of scope:
+**Scope note.** Item **25d**; build after 25b. Out of scope:
 - a persistent shell session (a `cd` that survives between calls; `run_command` already takes a `cwd`);
 - long-running background commands;
 - a sandbox for the shell itself (macOS seatbelt, Linux namespaces), which is its own larger item if `allow` for the shell is ever to be safe.

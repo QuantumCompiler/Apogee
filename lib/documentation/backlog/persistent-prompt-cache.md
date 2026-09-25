@@ -45,4 +45,4 @@ Two caches:
 - [ ] A new `--tools` chat's first prompt reads only the question, not the tool definitions, on its second launch.
 - [ ] Replacing the model file invalidates both caches with one line each.
 
-**Scope note.** Phase 4, item **26j**; build after 25c and 26a. Out of scope: sharing caches between machines, and caching for `serve`'s sessions (possible later on the same seam).
+**Scope note.** Item **26j**; build after 25c and 26a. Out of scope: sharing caches between machines, and caching for `serve`'s sessions (possible later on the same seam).

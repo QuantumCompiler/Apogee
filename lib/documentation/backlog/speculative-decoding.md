@@ -50,4 +50,4 @@ The GPU was shared with a terminal and a monitor drawing on it (55–83% busy wi
 - [ ] The idle-GPU measurement is run and recorded in MILESTONES, whatever it shows.
 - [ ] *(only if it meets the threshold)* The winning method is available per backend, off by default, and shows its measured speed-up on the acceptance model.
 
-**Scope note.** Phase 4, item **26k**; build after 25b (`llama-common`) and 25c. The build half is conditional on the measurement. Out of scope: training a draft model, and EAGLE-style heads that need separate weights.
+**Scope note.** Item **26k**; build after 25b (`llama-common`) and 25c. The build half is conditional on the measurement. Out of scope: training a draft model, and EAGLE-style heads that need separate weights.

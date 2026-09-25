@@ -19,6 +19,7 @@
 #include "ansi/ansi.h"
 #include "backends/factory.h"
 #include "commands/ask_prompt.h"
+#include "commands/chat_completer.h"
 #include "commands/chat_history.h"
 #include "commands/cli_reporter.h"
 #include "commands/embed.h"
@@ -58,18 +59,6 @@ std::string trim(std::string_view text) {
         text.remove_suffix(1);
     }
     return std::string{text};
-}
-
-/// The slash commands, in one place.
-///
-/// Completion and `/help` both read this, so a command cannot be offered on Tab
-/// and then rejected -- or added and silently left uncompletable.
-const std::vector<std::string>& slash_commands() {
-    static const std::vector<std::string> commands{
-        "/help",    "/model", "/models", "/system",  "/temperature", "/max-tokens",
-        "/compact", "/title", "/branch", "/capture", "/exit",        "/quit",
-    };
-    return commands;
 }
 
 struct ChatFlags {
@@ -722,13 +711,20 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         // Once, immediately before the first prompt -- never between turns.
         discard_startup_typeahead();
 
+        // `/` lists the commands as they are typed, a command's values follow
+        // it, and `@` completes paths -- all from the one command table. A
+        // pipe gets none of it: the plain reader never asks.
         EditingLineReader::Options reader_options;
         reader_options.history_path = default_history_path();
-        reader_options.completions = slash_commands();
-        // Backend names complete too: `/model cla<Tab>` is the common case.
-        for (const std::string& backend : config.backend_names()) {
-            reader_options.completions.push_back(backend);
-        }
+        // A folder deleted under the process lists as nothing, never a throw.
+        std::error_code cwd_error;
+        reader_options.suggest =
+            [sources = chat_completion_sources(config, std::filesystem::current_path(cwd_error))](
+                std::string_view before_cursor) {
+                return suggest_chat_input(before_cursor, sources);
+            };
+        reader_options.live = true;
+        reader_options.color = style.color_enabled();
         const std::unique_ptr<LineReader> reader =
             make_line_reader(std::move(reader_options), std::cin);
 
@@ -804,143 +800,172 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
 
             if (const std::optional<SlashCommand> command = parse_slash(input);
                 command.has_value()) {
-                const std::string& verb = command->name;
                 const std::string& argument = command->argument;
-
-                if (verb == "exit" || verb == "quit") {
-                    running = false;
-                } else if (verb == "help") {
-                    std::string help;
-                    for (const std::string& entry : slash_commands()) {
-                        help += help.empty() ? "" : "  ";
-                        help += entry;
-                    }
-                    reporter.status().print_line(help);
-                } else if (verb == "models") {
-                    for (const std::string& backend : config.backend_names()) {
-                        reporter.status().print_line((backend == session.backend ? "* " : "  ") +
-                                                     backend);
-                    }
-                } else if (verb == "model") {
-                    if (argument.empty()) {
-                        reporter.status().print_line(session.backend);
-                    } else if (config.find_backend(argument) == nullptr) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " no backend named '" + argument + "'");
-                    } else {
-                        // Instant, and history carries over: every backend was
-                        // constructed up front and history is neutral IR.
-                        session.backend = argument;
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                     " switched to " + argument);
-                    }
-                } else if (verb == "branch") {
-                    if (argument.empty()) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Apogee) + " review: " +
-                            (review.active() ? agentloop::review_summary(review)
-                                             : "off -- /branch <head>, <base>..<head>, or off"));
-                    } else {
-                        // Deterministic from the argument: the tools' defaults
-                        // and the note change together, the transcript not at
-                        // all. Free text in the next question changes nothing
-                        // about which diff the tools compare.
-                        review = agentloop::parse_branch_arg(argument, review);
-                        sync_review();
-                        review_note = agentloop::review_note(review);
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Apogee) + " review " +
-                            (review.active() ? agentloop::review_summary(review) : "off"));
-                    }
-                } else if (verb == "capture") {
-                    // An argument is a status when it is one, else a link.
-                    knowledge::Overrides overrides;
-                    if (!argument.empty()) {
-                        const std::string status = knowledge::normalize_status(argument);
-                        if (knowledge::is_valid_status(status)) {
-                            overrides.status = status;
-                        } else {
-                            overrides.link = argument;
-                        }
-                    }
-                    capture_session(std::move(overrides));
-                } else if (verb == "system") {
-                    session.params.system_prompt = argument;
-                    reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                 " system prompt updated");
-                } else if (verb == "temperature") {
-                    try {
-                        session.params.temperature = std::stod(argument);
-                    } catch (const std::exception&) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " not a number: '" + argument + "'");
-                    }
-                } else if (verb == "max-tokens") {
-                    try {
-                        session.params.max_tokens = std::stoll(argument);
-                    } catch (const std::exception&) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " not a number: '" + argument + "'");
-                    }
-                } else if (verb == "retriever") {
-                    if (argument.empty()) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Rag) + " retriever: " +
-                            (session.retriever.empty() ? "auto" : session.retriever) +
-                            (session.retriever.empty()
-                                 ? " -- vector when the collection's vectors match the "
-                                   "embedding backend, else lexical; hybrid only when asked"
-                                 : ""));
-                    } else if (!agentloop::valid_retriever(argument)) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Error) + " " +
-                            agentloop::retriever_values_message("/retriever", argument));
-                    } else {
-                        session.retriever = argument == "auto" ? std::string{} : argument;
-                        // Persisted now, so a resume continues with this.
-                        logger::save(session);
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Rag) + " retriever set to " +
-                            (session.retriever.empty() ? "auto" : session.retriever));
-                    }
-                } else if (verb == "rerank") {
-                    if (argument.empty()) {
-                        reporter.status().print_line(
-                            style.tag(ansi::Role::Rag) + " rerank: " +
-                            (session.rerank.empty() ? "following each collection's rerank: pin"
-                                                    : session.rerank) +
-                            " -- /rerank <backend>|off|auto");
-                    } else if (argument == "auto") {
-                        session.rerank.clear();
-                        logger::save(session);
-                        reporter.status().print_line(style.tag(ansi::Role::Rag) +
-                                                     " rerank follows the collection's pin");
-                    } else if (argument != agentloop::kRerankOff &&
-                               config.find_backend(argument) == nullptr) {
-                        reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                     " no backend named '" + argument + "'");
-                    } else {
-                        session.rerank = argument;
-                        logger::save(session);
-                        reporter.status().print_line(style.tag(ansi::Role::Rag) +
-                                                     " rerank set to " + argument);
-                    }
-                } else if (verb == "title") {
-                    session.custom_name = argument;
-                    logger::save(session);
-                    reporter.status().print_line(style.tag(ansi::Role::Apogee) + " renamed");
-                } else if (verb == "compact") {
-                    session.messages =
-                        agentloop::compact_history(harness, session.messages, session.backend);
-                    ++session.compactions;
-                    logger::save(session);
-                    reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                 " history compacted");
-                } else {
+                const ChatCommandSpec* spec = find_chat_command(command->name);
+                if (spec == nullptr) {
                     reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                                 " unknown command '/" + verb +
+                                                 " unknown command '/" + command->name +
                                                  "' -- /help lists them");
+                    continue;
                 }
+
+                // Dispatched through the table: a verb only runs if the table
+                // names it, and a row added without a case here fails the
+                // build -- the one-table rule, held by the compiler.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wswitch"
+#endif
+                switch (spec->id) {
+                    case ChatVerb::Exit:
+                        running = false;
+                        break;
+                    case ChatVerb::Help:
+                        for (const std::string& row : chat_help_lines(
+                                 reader->interactive() ? static_cast<std::size_t>(
+                                                             platform::terminal_width().value_or(0))
+                                                       : 0)) {
+                            reporter.status().print_line(row);
+                        }
+                        break;
+                    case ChatVerb::Models:
+                        for (const std::string& backend : config.backend_names()) {
+                            reporter.status().print_line(
+                                (backend == session.backend ? "* " : "  ") + backend);
+                        }
+                        break;
+                    case ChatVerb::Model:
+                        if (argument.empty()) {
+                            reporter.status().print_line(session.backend);
+                        } else if (config.find_backend(argument) == nullptr) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " no backend named '" + argument + "'");
+                        } else {
+                            // Instant, and history carries over: every backend
+                            // was constructed up front and history is neutral IR.
+                            session.backend = argument;
+                            reporter.status().print_line(style.tag(ansi::Role::Apogee) +
+                                                         " switched to " + argument);
+                        }
+                        break;
+                    case ChatVerb::Branch:
+                        if (argument.empty()) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Apogee) + " review: " +
+                                (review.active()
+                                     ? agentloop::review_summary(review)
+                                     : "off -- /branch <head>, <base>..<head>, or off"));
+                        } else {
+                            // Deterministic from the argument: the tools'
+                            // defaults and the note change together, the
+                            // transcript not at all. Free text in the next
+                            // question changes nothing about which diff the
+                            // tools compare.
+                            review = agentloop::parse_branch_arg(argument, review);
+                            sync_review();
+                            review_note = agentloop::review_note(review);
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Apogee) + " review " +
+                                (review.active() ? agentloop::review_summary(review) : "off"));
+                        }
+                        break;
+                    case ChatVerb::Capture: {
+                        // An argument is a status when it is one, else a link.
+                        knowledge::Overrides overrides;
+                        if (!argument.empty()) {
+                            const std::string status = knowledge::normalize_status(argument);
+                            if (knowledge::is_valid_status(status)) {
+                                overrides.status = status;
+                            } else {
+                                overrides.link = argument;
+                            }
+                        }
+                        capture_session(std::move(overrides));
+                        break;
+                    }
+                    case ChatVerb::System:
+                        session.params.system_prompt = argument;
+                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
+                                                     " system prompt updated");
+                        break;
+                    case ChatVerb::Temperature:
+                        try {
+                            session.params.temperature = std::stod(argument);
+                        } catch (const std::exception&) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " not a number: '" + argument + "'");
+                        }
+                        break;
+                    case ChatVerb::MaxTokens:
+                        try {
+                            session.params.max_tokens = std::stoll(argument);
+                        } catch (const std::exception&) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " not a number: '" + argument + "'");
+                        }
+                        break;
+                    case ChatVerb::Retriever:
+                        if (argument.empty()) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Rag) + " retriever: " +
+                                (session.retriever.empty() ? "auto" : session.retriever) +
+                                (session.retriever.empty()
+                                     ? " -- vector when the collection's vectors match the "
+                                       "embedding backend, else lexical; hybrid only when asked"
+                                     : ""));
+                        } else if (!agentloop::valid_retriever(argument)) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Error) + " " +
+                                agentloop::retriever_values_message("/retriever", argument));
+                        } else {
+                            session.retriever = argument == "auto" ? std::string{} : argument;
+                            // Persisted now, so a resume continues with this.
+                            logger::save(session);
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Rag) + " retriever set to " +
+                                (session.retriever.empty() ? "auto" : session.retriever));
+                        }
+                        break;
+                    case ChatVerb::Rerank:
+                        if (argument.empty()) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Rag) + " rerank: " +
+                                (session.rerank.empty() ? "following each collection's rerank: pin"
+                                                        : session.rerank) +
+                                " -- /rerank <backend>|off|auto");
+                        } else if (argument == "auto") {
+                            session.rerank.clear();
+                            logger::save(session);
+                            reporter.status().print_line(style.tag(ansi::Role::Rag) +
+                                                         " rerank follows the collection's pin");
+                        } else if (argument != agentloop::kRerankOff &&
+                                   config.find_backend(argument) == nullptr) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " no backend named '" + argument + "'");
+                        } else {
+                            session.rerank = argument;
+                            logger::save(session);
+                            reporter.status().print_line(style.tag(ansi::Role::Rag) +
+                                                         " rerank set to " + argument);
+                        }
+                        break;
+                    case ChatVerb::Title:
+                        session.custom_name = argument;
+                        logger::save(session);
+                        reporter.status().print_line(style.tag(ansi::Role::Apogee) + " renamed");
+                        break;
+                    case ChatVerb::Compact:
+                        session.messages =
+                            agentloop::compact_history(harness, session.messages, session.backend);
+                        ++session.compactions;
+                        logger::save(session);
+                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
+                                                     " history compacted");
+                        break;
+                }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
                 continue;
             }
 

@@ -54,4 +54,4 @@ What does not fit is trimmed or elided in reverse order. **Tool results from fin
 - [ ] A question with `--rag-limit 12` against a small window injects only what fits, and says how many chunks it dropped.
 - [ ] Behaviour on a large cloud window is unchanged for a short conversation.
 
-**Scope note.** Phase 4, item **26c**; gated on nothing. Out of scope: learning shares per model, and summarising history turn by turn.
+**Scope note.** Item **26c**; gated on nothing. Out of scope: learning shares per model, and summarising history turn by turn.

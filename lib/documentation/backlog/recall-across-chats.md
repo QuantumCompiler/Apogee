@@ -47,4 +47,4 @@ A small model has no memory beyond its window. This gives it the user's history 
 - [ ] `/recall off` stops it for the session; `apogee chats delete` of the earlier chat stops it for good.
 - [ ] `apogee serve` answers the same question without the recalled fact.
 
-**Scope note.** Phase 4, item **26l**; build after 26b and 26c. Out of scope: editing or pinning memories by hand (the knowledge layer is the deliberate path), and recall across machines.
+**Scope note.** Item **26l**; build after 26b and 26c. Out of scope: editing or pinning memories by hand (the knowledge layer is the deliberate path), and recall across machines.

@@ -45,4 +45,4 @@ llama.cpp's `common` library, linked by [local tool calling](local-tool-calling.
 - [ ] `apogee graph build` with a local extractor has no invalid-JSON retries on the same corpus.
 - [ ] A thinking model's structured answer still shows its thinking, and the JSON follows it.
 
-**Scope note.** Phase 4, item **26f**; build after 25b. Out of scope: grammars for free text (regex constraints), and constrained decoding on cloud backends (they have native JSON modes).
+**Scope note.** Item **26f**; build after 25b. Out of scope: grammars for free text (regex constraints), and constrained decoding on cloud backends (they have native JSON modes).

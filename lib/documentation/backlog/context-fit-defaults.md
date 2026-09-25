@@ -38,4 +38,4 @@
 - [ ] Generation speed and the spike's six-task results are unchanged within noise on both acceptance models.
 - [ ] `apogee models info` shows the window and the cache size for a local backend.
 
-**Scope note.** Phase 4, item **26a**; gated on nothing, and the `common_fit_params` step follows 25b. Out of scope: offloading the cache to system memory, and per-conversation windows.
+**Scope note.** Item **26a**; gated on nothing, and the `common_fit_params` step follows 25b. Out of scope: offloading the cache to system memory, and per-conversation windows.

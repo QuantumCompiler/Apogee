@@ -77,7 +77,7 @@ Llama 3.2 3B's calls were all well-formed; it re-read files, looped, and called 
 - [ ] `chat`, `complete`, `serve --tools` and an `analyze` agent all complete a tool task on a local backend.
 - [ ] The suite passes in both builds, and `cli.no_listen_symbols` passes.
 
-**Scope note.** Phase 4, item **25b**; build after 25a. It unblocks the two training tool kits (a separate item), [hybrid prompt checkpoints](hybrid-prompt-checkpoints.md) (25c), [local tool ergonomics](local-tool-ergonomics.md) (25d) and local use of [web search](web-search-searxng.md) (25e). Out of scope:
+**Scope note.** Item **25b**; build after 25a. It unblocks the two training tool kits (a separate item), [hybrid prompt checkpoints](hybrid-prompt-checkpoints.md) (25c), [local tool ergonomics](local-tool-ergonomics.md) (25d) and local use of [web search](web-search-searxng.md) (25e). Out of scope:
 - per-family sampling settings;
 - speculative decoding with a model's MTP layers;
 - the Ollama CLI backend, which has no tool interface.
