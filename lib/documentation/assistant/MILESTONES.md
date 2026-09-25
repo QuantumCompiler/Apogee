@@ -278,6 +278,57 @@ Two test-side bugs of my own, both caught by running them. A UTF-8 assertion I w
 
 The PTY check (`tests/pty_startup_check.py`) is the only test here that sees what the user sees. `apogee` asks whether stdout is a terminal before rendering anything, so a pipe-based test exercises the branch that deliberately emits nothing — it would pass on a build that rendered garbage interactively. The script replays the escape codes to reconstruct the final screen, then asserts the startup notice appears exactly once on one row and that **no spinner frame survived**. Verified against a build that also wrote the notice raw to stderr, in the way OMMI-14 forbade: the check failed it, naming both rows.
 
+
+### 2026-09-25 — Terminal Markdown rendering (backlog item 23)
+
+Asked for directly (Taylor, 2026-09-23, with a Qwen3.5 transcript): "the formatting here is HORRIBLE, and we need to plan out a markdown interpreter for the terminal view like this." Specced that day. Built 2026-09-25 on the v0.1.2 branch, after the user's calls: a hand-written parser rather than md4c; no syntax highlighting in the first cut; the recorded house style kept.
+
+**What was built**
+
+- [x] **`source/markdown/`**, a new package that includes only `ansi/` (a new `harness.layering` rule, mutation-checked). `StreamRenderer` produces **render operations** -- rows to commit, and the open area as it now stands -- never bytes.
+  - `render_inline` (`inline.h/.cpp`): emphasis by CommonMark's delimiter-run algorithm, so `snake_case_name` and `2 * 3 * 4` stay as written; code spans; links (`[text](url)`, `<url>`, bare URLs without their closing punctuation); escapes; images as `[image: alt]`; `~~strike~~`.
+  - `wrap` and `hard_wrap` (`layout.h/.cpp`): words, a first-row prefix and a hanging indent; code is cut at the width, never reflowed.
+  - The block state machine: ATX headings (bold, levels 1–2 cyan), lists with bullets `•`/`◦`/`▪` by depth, their numbers, task boxes, and hanging indents; nested lists under their parent's text; lazy continuation; quotes behind `│ `; fenced code as a dim block labelled with its language; rules; tables laid out with their alignment; blank lines collapsed, trimmed at both ends.
+- [x] **Line-at-a-time commits, the open line redrawn** (the 2026-09-23 decision): a line is final when its newline arrives, and only the line still arriving is repainted, with anything unclosed in it shown as written.
+- [x] **`commands/answer_view.h/.cpp`**, the painter.
+  - Committed rows are written once. The open area is erased by counted rows and repainted.
+  - Rows wrap one short of the width, measured at every paint.
+  - The open area never paints more rows than the screen holds (`platform::terminal_height`, new), so an erase never reaches scrollback; a single line taller than the screen shows its last rows until its newline commits it whole.
+  - A chunk that changes nothing visible costs no repaint.
+  - Links are OSC 8 hyperlinks on the terminals known to support them (`ansi::hyperlinks_supported`, an allow-list), and `text (url)` elsewhere.
+- [x] **`CliReporter`** renders through the view when it decorates and `markdown` is set. `chat` and `complete` opt in; `analyze` and the others do not yet. A pipe, `> file`, machine mode and the transcript receive the model's text byte for byte.
+  - **An answer still open is committed before any status takes the terminal**, so the spinner or a tool line no longer paints over "Let me look at that file." when a model writes before calling a tool.
+- [x] **`--raw`** on `chat` and `complete`, and **`ui.markdown: false`** (new section, gettable, in the template), switch rendering off. Off, the terminal shows the text with the layout it had before.
+- [x] **Type-ahead hidden during a turn**, which the item carried from the same report (the duplicated question).
+  - `platform::TypeaheadGuard` turns input echo off for the turn. Keystrokes typed while the model answers stay queued and appear once, at the next prompt.
+  - Ctrl-C, Ctrl-\, a hang-up and a termination restore the terminal before the signal's own action runs; Ctrl-Z restores it and hides it again on resume. All of this happens in async-signal-safe handlers.
+  - `platform::EchoPause` turns echo back on while a turn asks something (the permission prompt, `ask_user`), so the answer is seen as it is typed.
+- [x] **Shared width arithmetic.** `display_width`, `codepoint_cells` and `wrap_tail` moved from the thinking view to `ansi/text_width.h/.cpp`, and the wide table gained the emoji with default emoji presentation (✅ ❌ ⚡ ⭐ ✨ 🚀 …). Counted as one cell, every table holding a check mark went out of line.
+
+**What the tests found.** The terminal model the item asked for (`tests/support/terminal_model`: printable cells, `\r`, `\n`, erase-line, cursor-up, deferred wrap, and a record of the widest column and of any climb into scrollback) caught one real bug before any user could. **A chunk ending inside a UTF-8 sequence** put a fragment in the open area; the renderer counted it as one cell, the terminal did not, the row wrapped, and the erase left a line behind. Chunking invariance failed at every width, and the last column was reached. The open area now holds back an incomplete character until its remaining bytes arrive, as a terminal does.
+
+**What the real answers changed.** The item's bar was a corpus of real answers. Four were recorded with `apogee complete --raw` from the three local models: Qwen3.8-27B (twice: one of them its violin answer from the replayed four-question chat), Qwen3-VL-8B and Llama 3.2 3B. Two decisions moved because of them:
+- **A table wider than the screen now wraps its cells within narrower columns** (revising the 2026-09-23 "falls back to its raw rows", which was mine). Qwen3.8-27B's comparison table is about 160 columns wide, so it would have printed as raw pipes at every width, 120 included. Columns narrower than an even share keep their width, the wide ones divide the rest, and only a table that cannot fit even 8-column columns falls back to its rows as written.
+- **A setext underline is a rule.** Llama 3.2 writes its headings as `Title` / `=====`; line at a time, the title is committed before its underline arrives, so `===` draws a double rule `═` rather than a row of equals signs.
+
+**Known limits, recorded.**
+- An emoji ZWJ sequence (🧑‍💻) is counted as its parts (four cells) where terminals draw one glyph (two). Overcounting only wraps a row early, so it is safe for the erase arithmetic.
+- An open line taller than the screen shows only its tail until it ends.
+- Code blocks are not highlighted (the user's call).
+- HTML is shown as written.
+
+**Verification.**
+- New tests:
+  - inline (the flanking rules, unclosed markers, links, escapes);
+  - one renderer case per construct, plus a split UTF-8 character;
+  - chunking invariance: whole, per character and random splits, for the renderer and for the painted screen;
+  - the view: last column, a line taller than the screen, a resize mid-answer, hyperlinks;
+  - the reporter: the rendered path, the pipe path byte-identical with markdown on, and a status committing the open line;
+  - the corpus at 40, 80 and 120 columns on a 24-row screen: 2,333 assertions;
+  - emoji widths.
+- `cli.chat_typeahead_and_crash_safety` gains three PTY checks: `markdown` (no `**` around rendered bold, and `**bold**` with `--raw`), `typeahead-hidden` (words typed mid-reply absent from the reply, present at the prompt) and `interrupt` (echo off mid-turn, on after SIGINT). A build without the guard fails the second and third, and one whose signal handler does not restore echo fails the third.
+- On the real binary under a 100-column PTY, the Qwen3.8 fixture rendered with its table wrapped in columns.
+
 ---
 
 ## Milestone H — `apogee chat`
@@ -1153,7 +1204,7 @@ Asked for directly (Taylor, 2026-09-23): "Add the image projector to convert" --
 - [x] **A hybrid model's second turn.** Qwen3.5's linear-attention layers keep a running state that llama.cpp can rewind only a few tokens, and a thinking model's template re-renders the last answer without its reasoning -- so turn two's prompt leaves the cache 14 tokens in, the trim was refused, the refusal ignored, and decoding on from there failed: "for M-RoPE, it is required that the position satisfies: X < Y". `trim_to` now reports where the cache really ends, clearing it when the trim is refused, and the prompt decodes from there. Such a model re-reads its whole conversation each turn; correct, and slower on a long one.
 - [x] **llama.cpp's own log lines no longer reach the terminal.** They went to stderr at WARN and above and landed on top of the live spinner (`✻ Thinking…init: the tokens of sequence 0…`). They are kept instead and appended to the error of a failed load, context, decode or image evaluation. This revises the decision (Milestone J) that WARN and ERROR pass through: the reason still reaches the user, on the error it explains.
 - [x] **The chat display.** Replayed through a small terminal model, the recorded bytes of a real session showed the thinking view's rows filling exactly the terminal width: in a terminal that wraps as soon as the last column is written, the erase landed a row short and every repaint left a line behind -- and the width was measured once per session, so a resize did the same. Rows now stop one column short, the width is measured at every repaint, and `display_width` counts wide characters as two cells and combining marks as none. The answer's leading blank lines (the newlines after a model's reasoning -- a three-line gap under "Thought for") and trailing ones are dropped, the first line's indentation kept, and interactive chat leaves one blank line between an answer and the next prompt.
-- [x] **The Markdown renderer, planned** as backlog item 23 ([terminal-markdown.md](../backlog/terminal-markdown.md)): rendered as it streams on a terminal, one open line redrawn in place, pipes and history untouched. Two calls are the user's: a hand-written renderer or md4c, and code highlighting.
+- [x] **The Markdown renderer, planned** as backlog item 23 (shipped 2026-09-25 -- see Milestone G, "Terminal Markdown rendering"): rendered as it streams on a terminal, one open line redrawn in place, pipes and history untouched. Two calls are the user's: a hand-written renderer or md4c, and code highlighting.
 
 **Not done, on purpose.** The duplicated question in the same report is the terminal echoing what was typed while the answer printed. Hiding that echo means switching it off during a turn, and chat has no Ctrl-C handler during a turn: the default signal kills the process and would leave the user's shell with echo off -- the risk `platform::discard_pending_input` already documents. It rides with the renderer's painter work.
 

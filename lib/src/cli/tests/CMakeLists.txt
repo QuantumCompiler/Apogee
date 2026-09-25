@@ -76,6 +76,10 @@ add_executable(apogee_tests
     commands/status_line_test.cpp
     commands/download_progress_test.cpp
     commands/cli_reporter_test.cpp
+    commands/answer_view_test.cpp
+    markdown/inline_test.cpp
+    markdown/stream_renderer_test.cpp
+    markdown/corpus_test.cpp
     ansi/ansi_test.cpp
     commands/chat_test.cpp
     commands/check_test.cpp
@@ -178,6 +182,8 @@ add_executable(apogee_tests
     support/fake_child.h
     support/gguf_builder.h
     support/fake_transport.cpp
+    support/terminal_model.h
+    support/terminal_model.cpp
 )
 
 # The template-drift test reads the checked-in sample and compares it byte for

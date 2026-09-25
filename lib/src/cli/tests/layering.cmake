@@ -124,6 +124,33 @@ if(NOT VIOLATIONS STREQUAL "")
                         "secrets/ may include only harness/ and itself.")
 endif()
 
+# `markdown/` renders an answer for a terminal: it may include `ansi/` (the
+# attributes a span carries and the width arithmetic) and itself, and nothing
+# else. The logic is kept free of the terminal, the reporter and the command
+# line so it is testable as operations with no terminal at all -- the day it
+# includes `commands/`, the painter's bytes and the renderer's decisions have
+# become one thing again.
+file(GLOB_RECURSE markdown_sources "${APOGEE_SOURCE_DIR}/markdown/*.h"
+                                   "${APOGEE_SOURCE_DIR}/markdown/*.cpp")
+if(markdown_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/markdown — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS markdown_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(markdown|ansi)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  markdown/${name} reaches past ansi/: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the markdown package includes more than ansi/:\n${pretty}\n"
+                        "markdown/ may include only ansi/ and itself.")
+endif()
+
 # `knowledge/` is a domain core: it may include the chunk store, the loop,
 # the harness, the platform seam and itself -- never a surface. The day it
 # includes `commands/` or `httpserver/`, the record logic every surface

@@ -1,0 +1,49 @@
+# Chat input completion: `/` commands and `@` file mentions
+
+**What / why.** In Claude Code's terminal, typing `/` opens a live list of its commands — filtered as you type, each with a one-line description — and typing `@` completes file paths, attaching the picked file to the message. The user asked for both in `apogee chat` (2026-09-25); Apogee's equivalent of Claude Code's skills is chat's slash commands. Today chat has Tab completion over a flat word list: twelve slash commands plus every backend name, offered for the last token *anywhere* in the line, nothing shown until Tab is pressed, no descriptions, and `/help` prints bare names in a row. The list has also already drifted — `/retriever` and `/rerank` are dispatched (`chat.cpp`) but sit in neither the completion list nor `/help`. And `@` does not exist. This item delivers: suggestions that appear live as the user types — `/` at the start of a line lists the commands with their descriptions and narrows per keystroke; an argument position completes its own values (backend names after `/model`, retriever values after `/retriever`, paths after `/attach`); `@` anywhere completes paths from the working directory — and a sent message's `@` mentions are attached through the attachment core, so `summarize @report.pdf` does what it reads like.
+
+**Core constraint(s).**
+- **The pipe contract holds byte for byte.** Completion exists only in `EditingLineReader`; `PlainLineReader` — a pipe, a heredoc, the crash-safety suite driving chat — is untouched, no prompts, no hints, no escapes (the split in `line_reader.h` exists exactly for this).
+- **Not a TUI.** Suggestion rows are drawn by replxx itself (its hint rows under the input line), which already owns the line's repaint arithmetic — nothing is painted that the editor cannot erase, no absolute cursor positioning. And never the last column: hint rows are truncated against the live width so no row ever wraps (a wrapped row breaks the editor's erase count).
+- **One table.** Verb, argument shape, one-line description, argument completer — `/help`, the slash dispatch and completion all read the same table, so a command cannot be dispatchable yet uncompletable or undocumented (today's `/retriever`/`/rerank` drift is the exhibit; the existing `slash_commands()` comment promised this and a bare string list couldn't keep it).
+- **The message is what the user typed.** `@` completion inserts text; attaching on submit is a side effect through the one attachment core (the same call `/attach` makes — parity). The saved transcript and machine mode carry the message as typed. No completion over machine mode: the GUI builds its own input UI and uses the `attach` message.
+
+**Seam + files.**
+- `commands/line_reader.h/.cpp`: `Options.completions` (a flat word vector) becomes a suggestion callback — the whole line and cursor in, the span to replace plus candidates (text, description) out — wired to both replxx mechanisms: the completion callback (Tab inserts/cycles) and the hint callback with multi-row hints (the live list). Both consumers move: chat passes the full provider; `analyze.cpp`'s interactive loop, the second consumer, keeps its current behavior through the same callback shape.
+- `commands/chat_completer.h/.cpp` (new): the provider. The command table `{verb, argument spec, description, argument completer}` — `/model` → `config.backend_names()`, `/retriever`/`/rerank` → the values agentloop already names, `/attach` → paths, `/detach` → attached names (as those commands land with [26d](attachments-documents.md)) — and `@` path completion: working-directory-relative, directories get a trailing `/`, hidden entries only when the prefix names them. Pure functions over injected listings, so the unit tests never touch a real filesystem or config.
+- `commands/chat.cpp`: `slash_commands()` and the `/help` body are replaced by the table; `parse_slash`'s verbs validate against it; the submit path resolves `@` mentions and hands each existing path to the attachment core before the turn, leaving the mention text in place. Later items' commands (26d's `/attach` family, [26i](thinking-control.md)'s `/think`) register in this table — after this item, "added to `slash_commands()`" in their documents means the table.
+- Tests: `tests/commands/chat_completer_test.cpp` (new; goldens per context), `line_reader_test.cpp` extended for the callback protocol, `tests/pty_lineedit_check.py` extended to see a real terminal render and accept a suggestion.
+
+**Reference (Ommi).** No analog: Ommi's chat dispatched slash commands with no completion, no menu and no descriptions, and its file story was `--file` pasting one file's text into the first message (CHAT.md). The reference points are Claude Code's `/` command menu and `@` file mentions, translated to what a line editor can draw in a scrolling transcript.
+
+**Decisions made** (dated):
+- 2026-09-25 — Asked for by the user: mimic Claude Code's `/` (run commands) and `@` (attach files) completion in Apogee's chat.
+- 2026-09-25 — **Live rows over a navigable dropdown.** Suggestions render through replxx's own hint rows (bounded via `set_max_hint_rows`), appearing as the token is typed with no Tab needed; Tab accepts and cycles via the completion callback. An arrow-navigable overlay would mean custom painting underneath an editor that owns the line — TUI-adjacent and fragile. If the build finds replxx's hints cannot carry the multi-row list, the fallback is the completion menu on Tab, from the same table.
+- 2026-09-25 — **One table, structurally.** The drift it prevents has already happened once (`/retriever`, `/rerank`).
+- 2026-09-25 — **`@` rides the attachment core:** a mention is sugar for `/attach` plus the message as typed — which is why this item gates on 26d rather than inventing a second way to hand a file to the model.
+- 2026-09-25 — **Pulled to v0.1.2, top of the stack** (the user's call, later the same day): 24 now builds *before* the attachments item rather than after it, superseding the gating decision above. What `@` does on submit until 26d ships is the **[user]** open call below; [26d](attachments-documents.md)'s document owns wiring mentions into its core when it lands.
+
+**Open calls:**
+- **[user]** With 24 now ahead of 26d, what does a sent `@file` mention do before the attachment core exists? (a) It stays text: the completion UX ships whole, the message-is-what-you-typed constraint holds, a model running with the fs toolset can already read the path, and 26d upgrades mentions to real attachments when it lands. (b) A stopgap that pastes the file's text into the request — a second way to hand the model a file, built only for 26d to replace. *Recommendation: (a).*
+- [default: `/` suggests only at column 0, where a command is a command; `@` anywhere; at most 5 rows; prefix matching, no fuzzy in the first cut] The trigger and menu mechanics.
+- [default: a sent mention naming no existing path stays plain text, with a dim notice and never an error — people type `@` in prose] What a dangling mention does.
+- [default: paths with spaces complete quoted (`@"my file.pdf"`), matching how `/attach`'s argument is parsed] Path syntax.
+- [default: no config switch in the first cut; a `ui.hints: false` waits for someone to want it] Whether the rows can be switched off.
+
+**Guardrail(s).**
+- Golden tests over the provider per context — bare `/`, `/mo`, `/model ` + prefix, `/retriever `, `@`, `@dir/`, a mid-line `@`, a lone `@` before a space — pure, listings injected.
+- The table drives dispatch, or a test enumerates both and fails on a verb present in one and not the other — the one-table rule is structural, not audited.
+- Hint rows never wrap: descriptions truncated against the live width, asserted at narrow widths.
+- The pipe contract: the existing `PlainLineReader` tests and the piped-chat byte-identity checks stand unchanged.
+- The PTY check drives a real terminal: a hint row appears for `/mo`, Tab completes `/model`; `@li` completes a real directory entry.
+- Submit: a message with `@file` reaches the attachment core with exactly what `/attach file` would send (asserted at that seam), and the transcript records the message text as typed.
+
+**Acceptance criteria:**
+- [ ] Typing `/` at an empty chat prompt on a terminal lists every command with a one-line description, narrowing per keystroke; Tab completes the selection.
+- [ ] `/model ` offers backend names, `/retriever ` its values — and backend names no longer complete in mid-message prose.
+- [ ] Typing `@` offers files and folders from the working directory (directories with a trailing `/`), and the picked path lands in the message.
+- [ ] Sending `summarize @report.pdf` attaches `report.pdf` exactly as `/attach report.pdf` before the question would, and the saved transcript carries the message as typed. *(Lands with [26d](attachments-documents.md), which now builds after this item; until then a sent mention behaves per the **[user]** call above.)*
+- [ ] `/help` shows the same commands and descriptions completion offers — including `/retriever` and `/rerank`, which today appear in neither.
+- [ ] `apogee chat < script.txt` behaves byte-identically to today: no prompts, no hints, no escape sequences.
+
+**Scope note.** Item **24**, earmarked for **v0.1.2** — next after item 23 (shipped 2026-09-25, [MILESTONES.md](../assistant/MILESTONES.md) → Milestone G), pulled to the top of the stack 2026-09-25. No gate: the `/` menu and `@` path completion stand alone; the `@`→attachment wiring lands with [26d](attachments-documents.md) when it ships. Out of scope: fuzzy matching and suggestion ranking; machine mode and the GUI (their own UI over the `attach` message); shell-level completion of `apogee`'s own argv (shipped with the install contract); `@` for URLs (`fetch_url` and `/attach` own remote content).

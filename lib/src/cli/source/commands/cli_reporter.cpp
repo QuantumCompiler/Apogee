@@ -34,18 +34,47 @@ ThinkingView::Options thinking_options(const CliReporter::Options& options) {
     return out;
 }
 
+AnswerView::Options answer_options(const CliReporter::Options& options) {
+    AnswerView::Options out;
+    out.out = options.answer_stream;
+    out.style = options.style;
+    out.hyperlinks = options.hyperlinks;
+    out.width = options.width;
+    out.measure_width = []() -> std::size_t {
+        const std::optional<int> width = platform::terminal_width();
+        return width.has_value() && *width > 0 ? static_cast<std::size_t>(*width) : 0;
+    };
+    out.measure_height = []() -> std::size_t {
+        const std::optional<int> height = platform::terminal_height();
+        return height.has_value() && *height > 0 ? static_cast<std::size_t>(*height) : 0;
+    };
+    return out;
+}
+
 }  // namespace
 
 CliReporter::CliReporter(TerminalWriter& status_writer, Options options)
     : options_{std::move(options)},
       status_{status_writer, status_options(options_)},
-      thinking_{status_writer, thinking_options(options_)} {}
+      thinking_{status_writer, thinking_options(options_)} {
+    if (options_.decorate && options_.markdown && options_.answer_stream != nullptr) {
+        answer_view_.emplace(answer_options(options_));
+    }
+}
 
 CliReporter::~CliReporter() {
+    settle_answer();
     status_.stop_spinner();
 }
 
+void CliReporter::settle_answer() {
+    if (answer_view_.has_value() && answer_view_->open()) {
+        answer_view_->finish();
+    }
+}
+
 void CliReporter::on_thinking() {
+    settle_answer();
     // Back to the resting state: any open reasoning block collapses to its
     // summary before the spinner takes the line back.
     thinking_.finish();
@@ -71,12 +100,14 @@ void CliReporter::on_thinking_token(std::string_view chunk) {
 }
 
 void CliReporter::on_tool_status(std::string_view detail) {
+    settle_answer();
     thinking_.finish();
     status_.stop_spinner();
     status_.set(options_.style.tag(ansi::Role::Tool) + " " + std::string{detail});
 }
 
 void CliReporter::on_clear_status() {
+    settle_answer();
     thinking_.finish();
     status_.stop_spinner();
     status_.clear();
@@ -89,12 +120,21 @@ void CliReporter::on_answer_start() {
     thinking_.finish();
     status_.stop_spinner();
     status_.clear();
+    if (answer_view_.has_value()) {
+        answer_view_->begin();
+        return;
+    }
     answer_began_ = false;
     held_.clear();
 }
 
 void CliReporter::on_answer_token(std::string_view chunk) {
     if (chunk.empty() || options_.answer_stream == nullptr) {
+        return;
+    }
+    if (answer_view_.has_value()) {
+        answer_view_->write(chunk);
+        emitted_ = emitted_ || answer_view_->began();
         return;
     }
     constexpr std::string_view kSpace = " \t\r\n";
@@ -126,6 +166,10 @@ void CliReporter::on_answer_token(std::string_view chunk) {
 }
 
 void CliReporter::on_answer_end() {
+    if (answer_view_.has_value()) {
+        answer_view_->finish();
+        return;
+    }
     held_.clear();
     if (answer_began_ && options_.answer_stream != nullptr) {
         *options_.answer_stream << "\n";

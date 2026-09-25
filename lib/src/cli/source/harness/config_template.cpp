@@ -326,6 +326,15 @@ backends:
 #     # hops: 1                       # expansion depth at retrieval (1 or 2)
 #     # max_entities: 8               # neighbour entities an expansion injects, at most
 
+# ── Terminal display ─────────────────────────────────────────────────────────
+# Answers are Markdown. On a terminal, `chat` and `complete` render it as it
+# streams -- bold, lists, quotes, code blocks, tables -- and a pipe, machine
+# mode and the saved transcript always keep the model's text as written.
+# markdown: false shows the text as written on the terminal too; `--raw` does
+# the same for one run.
+# ui:
+#   markdown: true
+
 # ── Knowledge (captured decisions) ───────────────────────────────────────────
 # `apogee knowledge capture` distils a conversation into one canonical record
 # -- the why behind a decision, what was chosen, whether it shipped -- and

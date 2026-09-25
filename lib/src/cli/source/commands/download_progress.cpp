@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include "commands/thinking_view.h"
+#include "ansi/text_width.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -53,7 +53,7 @@ std::string format_download_progress(std::int64_t written, std::int64_t total) {
 }
 
 std::string fit_tail(std::string_view text, std::size_t width) {
-    const std::size_t cells = display_width(text);
+    const std::size_t cells = ansi::display_width(text);
     if (cells <= width) {
         return std::string{text};
     }
@@ -146,7 +146,8 @@ std::string DownloadProgress::live_line(std::int64_t written, std::int64_t total
     const std::string gap = "  ";
     // One column short of the width: writing the last column wraps the cursor
     // on some terminals, and a wrapped line is one the repaint cannot erase.
-    const std::size_t used = display_width(head) + gap.size() + display_width(progress) + 1;
+    const std::size_t used =
+        ansi::display_width(head) + gap.size() + ansi::display_width(progress) + 1;
     const std::size_t room = options_.width > used ? options_.width - used : 0;
     return head + fit_tail(name_, room) + gap + progress;
 }

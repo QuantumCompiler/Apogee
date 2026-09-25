@@ -995,6 +995,13 @@ Config parse_config(std::string_view content, std::string_view origin) {
         }
     }
 
+    if (const YAML::Node ui = root["ui"]; ui.IsDefined() && !ui.IsNull()) {
+        if (!ui.IsMap()) {
+            fail(origin, "ui: expected a mapping");
+        }
+        config.ui.markdown = boolean(ui["markdown"], origin, "ui.markdown", true);
+    }
+
     if (const YAML::Node knowledge = root["knowledge"];
         knowledge.IsDefined() && !knowledge.IsNull()) {
         if (!knowledge.IsMap()) {

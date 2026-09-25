@@ -56,6 +56,7 @@ struct CompleteFlags {
     /// A backend to rerank with, `off`, or empty for the collection's pin.
     std::string rerank;
     bool no_color = false;
+    bool raw = false;
     OutputFormat output_format = OutputFormat::Text;
 
     CLI::Option* temperature_option = nullptr;
@@ -203,6 +204,8 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     reporter_options.style =
         ansi::Style::detect(flags.no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
     reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
+    reporter_options.markdown = !flags.raw && config.ui.markdown;
+    reporter_options.hyperlinks = ansi::hyperlinks_supported();
 
     CliReporter reporter{status_writer, reporter_options};
 
@@ -349,6 +352,8 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("--tools", flags->tools,
                   "Let the model call tools (fetch_url; ask_user on a terminal)");
     cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
+    cmd->add_flag("--raw", flags->raw,
+                  "Show the answer's Markdown as written instead of rendering it on the terminal");
     cmd->add_option_function<std::string>(
            "--output-format",
            [flags](const std::string& value) {

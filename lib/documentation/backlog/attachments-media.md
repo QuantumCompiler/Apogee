@@ -29,7 +29,7 @@ Today:
 - **Transient and private as in [document attachments](attachments-documents.md):** descriptions, transcripts and timelines live in the chat's private index, and the session records the attachment by reference.
 
 **Seam + files.**
-- `agentloop/attachments.*` (from 25d): the media branch that picks native versus helper, and the timeline builder.
+- `agentloop/attachments.*` (from 26d): the media branch that picks native versus helper, and the timeline builder.
 - `backends/llamacpp.cpp`, `backends/llama_real.cpp`:
   - audio bitmaps (`mtmd_bitmap_init_from_audio`);
   - video frames as consecutive image bitmaps, marked mergeable for models that merge them;
@@ -67,4 +67,4 @@ Today:
 - [ ] An audio note is transcribed and questions about it are answered from the transcript.
 - [ ] On a vision chat model, the second turn after an image does not re-encode the image (visible in `--verbose` timings).
 
-**Scope note.** Phase 4, item **25e**; build after [25b](helper-model-roles.md) and [25d](attachments-documents.md). Out of scope: live capture (microphone, camera, screen), generating audio or images, and uploads over `serve`.
+**Scope note.** Phase 4, item **26e**; build after [26b](helper-model-roles.md) and [26d](attachments-documents.md). Out of scope: live capture (microphone, camera, screen), generating audio or images, and uploads over `serve`.

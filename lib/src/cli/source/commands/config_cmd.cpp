@@ -217,6 +217,9 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     if (key == "tools.fs_root") {
         return render(config.tools.fs_root);
     }
+    if (key == "ui.markdown") {
+        return config.ui.markdown ? "true" : "false";
+    }
     if (key == "tools.disabled") {
         std::string out;
         for (const std::string& name : config.tools.disabled) {
@@ -673,6 +676,7 @@ std::vector<std::string> config_keys(const harness::Config& config) {
                                   "paths.embeddings_dir",
                                   "tools.fs_root",
                                   "tools.disabled",
+                                  "ui.markdown",
                                   "training.python",
                                   "training.trainer",
                                   "training.judge_backend",

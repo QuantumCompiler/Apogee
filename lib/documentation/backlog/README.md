@@ -42,7 +42,7 @@ Every item document follows this shape (sections in order; omit one only when it
 
 ## Index
 
-Items are numbered in the **suggested order of implementation**. The rule stays the same: the topmost unbuilt item whose gate is satisfied is the next one to build.
+Rows are in the **suggested build order** — the topmost 🟢 row is the next item to take. Item numbers are identities (other documents cite them) and survive reordering. **Version** is the release the item is prescribed for; **File** links the item's document — the complete context. **Status:** 🟢 workable now (its gate is satisfied) · 🔒 blocked on the items named · 🚧 in progress · ❌ cancelled.
 
 **Gate convention:** a v0.1.0 item is buildable from its transitive gate chain alone. A gated-ring or unscheduled item *additionally assumes the complete v0.1.0 set has shipped* — its "build after" names only the ring-internal ordering. Items marked **split first** must be groomed into their listed sub-documents before an agent takes them; do not build from the guard document directly.
 
@@ -65,9 +65,11 @@ The **training track** (22 — **split at grooming 2026-09-19** into 22a dataset
 
 ### Phase 4 — after v0.1.x
 
-Three tracks. **23** stands alone. **24, local agent tools**, came out of a spike on 2026-09-25 and was split into six items the same day. The spike found that local models were never shown the tools every other backend already has, measured llama.cpp's own tool-calling layer on real weights (6/6 tasks on Qwen3.8-27B and Qwen3-VL-8B), and turned up an outbound-data exposure in today's tools. The user's four calls are recorded in the items: SearXNG for search, ask per new website, the launch folder as the file root, and 8B-class models and up. In build order: 24a first (it closes today's exposure); 24b is the unlock; 24c–24f follow it or 24a, as each names.
+Three tracks, since **23** (terminal Markdown rendering) shipped on 2026-09-25 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestone G. **24, chat input completion**, asked for 2026-09-25: Claude Code's input affordances in `apogee chat` — typing `/` lists the chat's commands live with descriptions, `@` completes file paths and attaches the mention through the attachment core. Pulled to **v0.1.2** at the top of the stack the same day, ahead of the attachments item — what a sent `@` mention does until 26d ships is a **[user]** call on its document.
 
-**25, small-model depth**, came out of a review on 2026-09-25 of what else would let small local models work at their best. It was split into twelve items the same day, with every group the review proposed taken by the user:
+**25, local agent tools**, came out of a spike on 2026-09-25 and was split into six items the same day. The spike found that local models were never shown the tools every other backend already has, measured llama.cpp's own tool-calling layer on real weights (6/6 tasks on Qwen3.8-27B and Qwen3-VL-8B), and turned up an outbound-data exposure in today's tools. The user's four calls are recorded in the items: SearXNG for search, ask per new website, the launch folder as the file root, and 8B-class models and up. In build order: 25a first (it closes today's exposure); 25b is the unlock; 25c–25f follow it or 25a, as each names.
+
+**26, small-model depth**, came out of a review on 2026-09-25 of what else would let small local models work at their best. It was split into twelve items the same day, with every group the review proposed taken by the user:
 - **automatic attachments**: documents, code and folders indexed by the embedding model and handed to the model per turn; images, audio and video read natively or through helper models;
 - **helper-model roles** (vision, transcription, utility);
 - **reliability**: grammar-constrained JSON, tool selection by relevance, sampling that reaches the model, and thinking control;
@@ -76,24 +78,24 @@ Three tracks. **23** stands alone. **24, local agent tools**, came out of a spik
 
 The user's calls are recorded in the items: attachments kept with their chat and cached by hash, helper models used automatically, and external converters (`pdftotext`, `ffmpeg`).
 
-| # | Item | Status |
-|---|---|---|
-| 23 | [Terminal markdown rendering](terminal-markdown.md) — an answer's Markdown rendered as it streams on a TTY; pipes, machine mode and history untouched | specced 2026-09-23; two **[user]** open calls (hand-written vs md4c, code highlighting) block the build |
-| 24a | [Tool safety defaults](tool-safety-defaults.md) — `fetch_url` asks per new website, redirects hop by hop, and the file tools default to the launch folder | specced 2026-09-25; no **[user]** calls open; gated on nothing |
-| 24b | [Local tool calling](local-tool-calling.md) — the llama.cpp backend renders tools through the model's own template, parses its calls, and constrains them by grammar, via llama.cpp's `common` chat layer linked in-process | specced 2026-09-25; build after 24a |
-| 24c | [Hybrid prompt checkpoints](hybrid-prompt-checkpoints.md) — Qwen3.5/3.8 re-read only what is new each turn and tool step, via state checkpoints as llama-server keeps them | specced 2026-09-25; build after 24b |
-| 24d | [Tool ergonomics](local-tool-ergonomics.md) — capped command output, line-range reads, `edit_file`, `grep_files`, and an environment note (date, OS, folder) | specced 2026-09-25; build after 24b |
-| 24e | [Web search via SearXNG](web-search-searxng.md) — `web_search` over the user's own SearXNG, pluggable, never silently empty | specced 2026-09-25; build after 24a and 24b |
-| 24f | [`fetch_url` as a reader](fetch-url-reader.md) — main content with its links as Markdown, paging, content types, a download cap | specced 2026-09-25; build after 24a |
-| 25a | [A context window sized to the machine](context-fit-defaults.md) — 32K by default instead of the trained window (16 GiB of cache on Qwen3.8), an 8-bit cache, and the cost shown | specced 2026-09-25; gated on nothing |
-| 25b | [Helper-model roles](helper-model-roles.md) — `vision`, `transcription` and `utility` in the one resolver; titles, compaction, query rewriting and big tool results move to the utility model | specced 2026-09-25; gated on nothing |
-| 25c | [A per-turn context budget](context-budget.md) — each source gets a share of the real window; finished turns' tool results sent as stubs | specced 2026-09-25; gated on nothing |
-| 25d | [Attachments: documents, code and folders](attachments-documents.md) — `/attach`, indexed with the embedding model, inlined when they fit, retrieved per turn with citations, kept with the chat | specced 2026-09-25; build after 25c |
-| 25e | [Attachments: images, audio and video](attachments-media.md) — native when the model can, a helper model when not; videos become searchable timelines | specced 2026-09-25; build after 25b and 25d |
-| 25f | [Structured output by grammar](local-structured-output.md) — JSON Schema constrained token by token on local models | specced 2026-09-25; build after 24b |
-| 25g | [Tool selection by relevance](tool-selection.md) — the relevant few tools per step, and `find_tools` for the rest | specced 2026-09-25; build after 24b |
-| 25h | [Sampling local models are meant to be run with](sampling-profiles.md) — `-t` reaches the model (it is silently ignored today), GGUF and family defaults | specced 2026-09-25; build after 24b |
-| 25i | [Thinking control](thinking-control.md) — `/think on\|off\|auto`, a thinking budget, mapped to every vendor | specced 2026-09-25; build after 24b and 25h |
-| 25j | [A persistent prompt cache](persistent-prompt-cache.md) — resumed chats and repeated tool prompts restored from disk | specced 2026-09-25; build after 24c and 25a |
-| 25k | [Speculative decoding, measured first](speculative-decoding.md) — MTP, a draft model or n-grams, built only on a clean ≥1.3× win | specced 2026-09-25; build after 24b and 24c; the build half is conditional |
-| 25l | [Recall across chats](recall-across-chats.md) — past chats summarised and retrieved per turn; never on `serve` | specced 2026-09-25; build after 25b and 25c |
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 24 | Chat input completion — `/` lists chat's commands live with descriptions, `@` completes paths and attaches the file; pipes byte-identical | v0.1.2 | [`chat-input-completion.md`](chat-input-completion.md) | 🟢 |
+| 25a | Tool safety defaults — `fetch_url` asks per new website, redirects hop by hop, and the file tools default to the launch folder | v0.1.3 | [`tool-safety-defaults.md`](tool-safety-defaults.md) | 🟢 |
+| 25b | Local tool calling — the llama.cpp backend renders tools through the model's own template, parses its calls, and constrains them by grammar, via llama.cpp's `common` chat layer linked in-process | v0.1.3 | [`local-tool-calling.md`](local-tool-calling.md) | 🔒 25a |
+| 25c | Hybrid prompt checkpoints — Qwen3.5/3.8 re-read only what is new each turn and tool step, via state checkpoints as llama-server keeps them | v0.1.3 | [`hybrid-prompt-checkpoints.md`](hybrid-prompt-checkpoints.md) | 🔒 25b |
+| 25d | Tool ergonomics — capped command output, line-range reads, `edit_file`, `grep_files`, and an environment note (date, OS, folder) | v0.1.3 | [`local-tool-ergonomics.md`](local-tool-ergonomics.md) | 🔒 25b |
+| 25e | Web search via SearXNG — `web_search` over the user's own SearXNG, pluggable, never silently empty | v0.1.3 | [`web-search-searxng.md`](web-search-searxng.md) | 🔒 25a, 25b |
+| 25f | `fetch_url` as a reader — main content with its links as Markdown, paging, content types, a download cap | v0.1.3 | [`fetch-url-reader.md`](fetch-url-reader.md) | 🔒 25a |
+| 26a | A context window sized to the machine — 32K by default instead of the trained window (16 GiB of cache on Qwen3.8), an 8-bit cache, and the cost shown | v0.1.3 | [`context-fit-defaults.md`](context-fit-defaults.md) | 🟢 |
+| 26b | Helper-model roles — `vision`, `transcription` and `utility` in the one resolver; titles, compaction, query rewriting and big tool results move to the utility model | v0.1.3 | [`helper-model-roles.md`](helper-model-roles.md) | 🟢 |
+| 26c | A per-turn context budget — each source gets a share of the real window; finished turns' tool results sent as stubs | v0.1.3 | [`context-budget.md`](context-budget.md) | 🟢 |
+| 26d | Attachments: documents, code and folders — `/attach`, indexed with the embedding model, inlined when they fit, retrieved per turn with citations, kept with the chat | v0.1.3 | [`attachments-documents.md`](attachments-documents.md) | 🔒 26c |
+| 26e | Attachments: images, audio and video — native when the model can, a helper model when not; videos become searchable timelines | v0.1.3 | [`attachments-media.md`](attachments-media.md) | 🔒 26b, 26d |
+| 26f | Structured output by grammar — JSON Schema constrained token by token on local models | v0.1.3 | [`local-structured-output.md`](local-structured-output.md) | 🔒 25b |
+| 26g | Tool selection by relevance — the relevant few tools per step, and `find_tools` for the rest | v0.1.3 | [`tool-selection.md`](tool-selection.md) | 🔒 25b |
+| 26h | Sampling local models are meant to be run with — `-t` reaches the model (it is silently ignored today), GGUF and family defaults | v0.1.3 | [`sampling-profiles.md`](sampling-profiles.md) | 🔒 25b |
+| 26i | Thinking control — `/think on\|off\|auto`, a thinking budget, mapped to every vendor | v0.1.3 | [`thinking-control.md`](thinking-control.md) | 🔒 25b, 26h |
+| 26j | A persistent prompt cache — resumed chats and repeated tool prompts restored from disk | v0.1.3 | [`persistent-prompt-cache.md`](persistent-prompt-cache.md) | 🔒 25c, 26a |
+| 26k | Speculative decoding, measured first — MTP, a draft model or n-grams, built only on a clean ≥1.3× win | v0.1.3 | [`speculative-decoding.md`](speculative-decoding.md) | 🔒 25b, 25c |
+| 26l | Recall across chats — past chats summarised and retrieved per turn; never on `serve` | v0.1.3 | [`recall-across-chats.md`](recall-across-chats.md) | 🔒 26b, 26c |

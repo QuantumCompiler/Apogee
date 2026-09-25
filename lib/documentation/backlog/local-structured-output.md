@@ -19,7 +19,7 @@ llama.cpp's `common` library, linked by [local tool calling](local-tool-calling.
 - **Tools and schema.** The loop applies the schema on its tools-less final pass (`agentloop/loop.cpp`), and the grammar follows the same rule, so a turn can still call tools first.
 
 **Seam + files.**
-- `backends/llama_runtime.h` and `llama_real.cpp`: `render_chat` (24b) takes the schema and returns the full, non-lazy grammar, which enters the sampler chain for that request.
+- `backends/llama_runtime.h` and `llama_real.cpp`: `render_chat` (25b) takes the schema and returns the full, non-lazy grammar, which enters the sampler chain for that request.
 - `backends/llamacpp.cpp`: `messages_with_schema` only as the fallback.
 - `tests/backends/llamacpp_test.cpp`: the scripted runtime asserts the grammar reaches the sampler and the prompt statement is absent.
 
@@ -27,7 +27,7 @@ llama.cpp's `common` library, linked by [local tool calling](local-tool-calling.
 
 **Decisions made:**
 - 2026-09-25 — Asked for by the user ("Reliability").
-- 2026-09-25 — After 24b, which links `llama-common` and adds grammar to the sampler chain.
+- 2026-09-25 — After 25b, which links `llama-common` and adds grammar to the sampler chain.
 
 **Open calls:**
 - [default: the grammar applies whenever `response_schema` is set on a local request] There is no reason to leave a local structured request unconstrained.
@@ -45,4 +45,4 @@ llama.cpp's `common` library, linked by [local tool calling](local-tool-calling.
 - [ ] `apogee graph build` with a local extractor has no invalid-JSON retries on the same corpus.
 - [ ] A thinking model's structured answer still shows its thinking, and the JSON follows it.
 
-**Scope note.** Phase 4, item **25f**; build after 24b. Out of scope: grammars for free text (regex constraints), and constrained decoding on cloud backends (they have native JSON modes).
+**Scope note.** Phase 4, item **26f**; build after 25b. Out of scope: grammars for free text (regex constraints), and constrained decoding on cloud backends (they have native JSON modes).

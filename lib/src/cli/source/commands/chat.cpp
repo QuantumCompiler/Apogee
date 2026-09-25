@@ -89,6 +89,7 @@ struct ChatFlags {
     bool tools = false;
     bool search = false;
     bool no_color = false;
+    bool raw = false;
     OutputFormat output_format = OutputFormat::Text;
     std::optional<InputFormat> input_format;
     bool verbose = false;
@@ -396,6 +397,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("--tools", flags->tools, "Let the model call tools");
     cmd->add_flag("--search", flags->search, "Enable the provider's server-side web search");
     cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
+    cmd->add_flag("--raw", flags->raw,
+                  "Show answers' Markdown as written instead of rendering it on the terminal");
     cmd->add_option_function<std::string>(
            "--output-format",
            [flags](const std::string& value) {
@@ -471,6 +474,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         reporter_options.style =
             ansi::Style::detect(flags->no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
         reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
+        reporter_options.markdown = !flags->raw && config.ui.markdown;
+        reporter_options.hyperlinks = ansi::hyperlinks_supported();
         CliReporter reporter{status_writer, reporter_options};
         const ansi::Style& style = reporter_options.style;
 
@@ -946,6 +951,13 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 // one after the answer.
                 reporter.status().print_line("");
             }
+            // Keystrokes typed while the model answers stay unseen, queued for
+            // the next prompt, which shows them once -- instead of echoing into
+            // the answer and then again at the prompt (2026-09-23).
+            std::optional<platform::TypeaheadGuard> typeahead;
+            if (reader->interactive()) {
+                typeahead.emplace();
+            }
             run_chat_turn(
                 harness, session, input, attachments, flags->tools ? &registry : nullptr,
                 flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
@@ -958,6 +970,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 },
                 rag_settings, review_note);
             title.start_if_due(session);
+            typeahead.reset();
             if (decorate) {
                 // One blank line between an answer and the next prompt, so
                 // turns read as turns rather than one run of text.

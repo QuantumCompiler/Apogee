@@ -106,6 +106,12 @@ enum class StandardStream : std::uint8_t { In, Out, Err };
 /// assume a conservative default rather than skip wrapping.
 [[nodiscard]] std::optional<int> terminal_width() noexcept;
 
+/// The terminal's height in rows, or nullopt when it cannot be determined.
+///
+/// The answer view needs it to keep its open area on screen: an erase cannot
+/// reach a row that has scrolled away, so what it repaints must fit.
+[[nodiscard]] std::optional<int> terminal_height() noexcept;
+
 /// Discards anything already typed at the terminal but not yet read.
 ///
 /// Chat startup is not instant — every backend is constructed before the first
@@ -123,6 +129,58 @@ enum class StandardStream : std::uint8_t { In, Out, Err };
 /// input, not typeahead. Failures are ignored — a session must never fail to
 /// start because a flush was refused.
 void discard_pending_input() noexcept;
+
+/// Keeps what the user types during a turn off the screen until the next
+/// prompt reads it.
+///
+/// While a model answers, the terminal is in its ordinary mode and echoes
+/// every keystroke into the middle of the answer; the line editor then takes
+/// the same keystrokes as type-ahead and shows them again at the prompt --
+/// the duplicated question of 2026-09-23. With echo off for the turn, the
+/// keystrokes stay queued, unseen, and appear once, at the prompt.
+///
+/// **The terminal is restored however the process ends.** Echo left off
+/// outlives the process -- the user's shell would take input blind -- so
+/// Ctrl-C, Ctrl-\, a hang-up and a termination restore it before the
+/// signal's own action runs, and Ctrl-Z restores it before stopping and hides
+/// it again on resume. Only one guard is live at a time; a second is inert.
+/// A no-op when stdin is not a terminal, and on Windows, whose console echoes
+/// only while a program is reading.
+class TypeaheadGuard {
+public:
+    TypeaheadGuard() noexcept;
+    ~TypeaheadGuard();
+
+    TypeaheadGuard(const TypeaheadGuard&) = delete;
+    TypeaheadGuard& operator=(const TypeaheadGuard&) = delete;
+    TypeaheadGuard(TypeaheadGuard&&) = delete;
+    TypeaheadGuard& operator=(TypeaheadGuard&&) = delete;
+
+    /// Whether this guard turned echo off (and will turn it back on).
+    [[nodiscard]] bool active() const noexcept {
+        return active_;
+    }
+
+private:
+    bool active_ = false;
+};
+
+/// Echo back on while a turn asks the user something -- a permission, a
+/// question -- so the answer is seen as it is typed; hidden again after. A
+/// no-op when no `TypeaheadGuard` is live.
+class EchoPause {
+public:
+    EchoPause() noexcept;
+    ~EchoPause();
+
+    EchoPause(const EchoPause&) = delete;
+    EchoPause& operator=(const EchoPause&) = delete;
+    EchoPause(EchoPause&&) = delete;
+    EchoPause& operator=(EchoPause&&) = delete;
+
+private:
+    bool paused_ = false;
+};
 
 /// Reads one line from standard input with echo off, for a secret.
 ///

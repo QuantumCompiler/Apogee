@@ -9,10 +9,10 @@
 #include <vector>
 
 #include "ansi/ansi.h"
-#include "commands/thinking_view.h"
+#include "ansi/text_width.h"
 
+using apogee::ansi::display_width;
 using apogee::ansi::kEraseLine;
-using apogee::commands::display_width;
 using apogee::commands::DownloadProgress;
 using apogee::commands::fit_tail;
 using apogee::commands::format_download_progress;

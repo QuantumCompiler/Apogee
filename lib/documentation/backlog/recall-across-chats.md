@@ -25,7 +25,7 @@ A small model has no memory beyond its window. This gives it the user's history 
 
 **Decisions made:**
 - 2026-09-25 — Asked for by the user ("Memory across chats").
-- 2026-09-25 — After [25b](helper-model-roles.md) (the summariser) and [25c](context-budget.md) (the share it injects within).
+- 2026-09-25 — After [26b](helper-model-roles.md) (the summariser) and [26c](context-budget.md) (the share it injects within).
 
 **Open calls:**
 - [default: on in `chat`, off in `complete` and in agents] A one-shot or an agent's run should be reproducible from its inputs; a conversation benefits from memory.
@@ -47,4 +47,4 @@ A small model has no memory beyond its window. This gives it the user's history 
 - [ ] `/recall off` stops it for the session; `apogee chats delete` of the earlier chat stops it for good.
 - [ ] `apogee serve` answers the same question without the recalled fact.
 
-**Scope note.** Phase 4, item **25l**; build after 25b and 25c. Out of scope: editing or pinning memories by hand (the knowledge layer is the deliberate path), and recall across machines.
+**Scope note.** Phase 4, item **26l**; build after 26b and 26c. Out of scope: editing or pinning memories by hand (the knowledge layer is the deliberate path), and recall across machines.

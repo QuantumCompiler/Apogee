@@ -51,7 +51,7 @@ Today it strips every tag (`strip_html`, "crude on purpose"), keeps the first 8,
 - [ ] A model follows a link from one fetched page to another in the same task.
 - [ ] A PDF URL returns a refusal that says PDFs are not read, not a page of noise.
 
-**Scope note.** Phase 4, item **24f**; build after 24a. Out of scope:
+**Scope note.** Phase 4, item **25f**; build after 25a. Out of scope:
 - JavaScript rendering (a page that is empty without its scripts reports "no readable text", as now);
 - PDF text extraction;
 - caching pages across calls.

@@ -1,5 +1,6 @@
 #include "ansi/ansi.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <utility>
@@ -120,6 +121,72 @@ std::string Style::colorize(std::string_view text, Color color) const {
 
 std::string Style::tag(Role role) const {
     return colorize("[" + std::string{to_string(role)} + "]", color_for(role));
+}
+
+std::string Style::paint(std::string_view text, const TextAttributes& attributes) const {
+    if (!enabled_ || attributes.plain()) {
+        return std::string{text};
+    }
+    std::string codes;
+    const auto add = [&codes](std::string_view code) {
+        codes += codes.empty() ? "" : ";";
+        codes += code;
+    };
+    if (attributes.bold) {
+        add("1");
+    }
+    if (attributes.dim) {
+        add("2");
+    }
+    if (attributes.italic) {
+        add("3");
+    }
+    if (attributes.underline) {
+        add("4");
+    }
+    if (attributes.strike) {
+        add("9");
+    }
+    if (const std::string_view color = color_code(attributes.color); !color.empty()) {
+        // color_code is a whole sequence ("\033[36m"); only its parameter goes
+        // into the combined one.
+        add(color.substr(2, color.size() - 3));
+    }
+    return "\033[" + codes + "m" + std::string{text} + std::string{kReset};
+}
+
+std::string hyperlink(std::string_view text, std::string_view url) {
+    return "\033]8;;" + std::string{url} + "\033\\" + std::string{text} + "\033]8;;\033\\";
+}
+
+bool hyperlinks_supported(const EnvLookup& env) {
+    const auto value = [&env](std::string_view name) {
+        return env ? env(name).value_or(std::string{}) : std::string{};
+    };
+    static constexpr std::array<std::string_view, 4> kPrograms{"iTerm.app", "WezTerm", "vscode",
+                                                               "ghostty"};
+    const std::string program = value("TERM_PROGRAM");
+    if (std::ranges::find(kPrograms, program) != kPrograms.end()) {
+        return true;
+    }
+    if (!value("KITTY_WINDOW_ID").empty() || value("TERM") == "xterm-kitty" ||
+        !value("WT_SESSION").empty()) {
+        return true;
+    }
+    // VTE (GNOME Terminal, Tilix, ...) gained OSC 8 in 0.50, which it
+    // announces as VTE_VERSION=5000.
+    const std::string vte = value("VTE_VERSION");
+    if (!vte.empty() && std::ranges::all_of(vte, [](char c) { return c >= '0' && c <= '9'; })) {
+        return vte.size() > 4 || (vte.size() == 4 && vte >= "5000");
+    }
+    return false;
+}
+
+bool hyperlinks_supported() {
+    return hyperlinks_supported([](std::string_view name) -> std::optional<std::string> {
+        const char* value = std::getenv(std::string{name}.c_str());
+        return value == nullptr ? std::nullopt : std::optional<std::string>{value};
+    });
 }
 
 }  // namespace apogee::ansi

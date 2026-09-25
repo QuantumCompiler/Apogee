@@ -338,6 +338,15 @@ struct AgentConfig {
     std::string save_subdir;
 };
 
+/// The `ui:` section -- how a terminal shows what Apogee prints.
+struct UiConfig {
+    /// Render answers' Markdown on a terminal (bold, lists, tables, code
+    /// blocks). A pipe, machine mode and the saved transcript always carry the
+    /// model's text as written; this only chooses what a terminal shows.
+    /// `--raw` turns it off for one run.
+    bool markdown = true;
+};
+
 /// The `knowledge:` section -- the organizational knowledge layer's two
 /// settings. Read-only here: hand-edited, like `auto_rag`.
 struct KnowledgeConfig {
@@ -604,6 +613,7 @@ struct Config {
     PermissionsConfig permissions;
     ToolsConfig tools;
     KnowledgeConfig knowledge;
+    UiConfig ui;
     TrainingConfig training;
 
     /// MCP servers keyed by name AS WRITTEN, compared case-insensitively

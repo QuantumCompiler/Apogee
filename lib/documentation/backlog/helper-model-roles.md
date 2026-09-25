@@ -49,4 +49,4 @@ Unset, each role falls back as `extraction` does today, to the chat backend, so 
 - [ ] `apogee models status` lists all six roles and the rung each resolved on.
 - [ ] `apogee check` names a role that points at a backend unable to do its job.
 
-**Scope note.** Phase 4, item **25b**; gated on nothing, though running helpers beside a large model assumes [25a](context-fit-defaults.md)'s memory. Out of scope: automatic selection of which model plays which role, and cloud backends as helpers beyond what the resolver already allows (any backend may be pointed at).
+**Scope note.** Phase 4, item **26b**; gated on nothing, though running helpers beside a large model assumes [26a](context-fit-defaults.md)'s memory. Out of scope: automatic selection of which model plays which role, and cloud backends as helpers beyond what the resolver already allows (any backend may be pointed at).

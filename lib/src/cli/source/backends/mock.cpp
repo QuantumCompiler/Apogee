@@ -6,6 +6,7 @@
 #include <functional>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 
 #include "harness/errors.h"
@@ -72,6 +73,7 @@ std::vector<MockTurn> parse_mock_script(const nlohmann::json& script) {
         }
         MockTurn turn;
         turn.text = entry.value("text", std::string{});
+        turn.delay = std::chrono::milliseconds{entry.value("delay_ms", 0)};
         if (const auto calls = entry.find("tool_calls"); calls != entry.end()) {
             if (!calls->is_array()) {
                 throw std::runtime_error("mock script: tool_calls must be a list");
@@ -198,6 +200,10 @@ harness::ChatResponse MockProvider::stream_chat(const harness::ChatRequest& requ
     const std::string text = expand_mock_text(turn.text, request);
     for (std::size_t offset = 0; offset < text.size(); offset += options_.chunk_size) {
         options.cancellation.throw_if_cancelled();
+        if (turn.delay.count() > 0) {
+            std::this_thread::sleep_for(turn.delay);
+            options.cancellation.throw_if_cancelled();
+        }
         if (options.on_token) {
             options.on_token(std::string_view{text}.substr(
                 offset, std::min(options_.chunk_size, text.size() - offset)));

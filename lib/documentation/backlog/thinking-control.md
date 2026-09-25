@@ -12,7 +12,7 @@ Switching thinking off goes through the template's own `enable_thinking` once [l
 - **Parity across backends.** The same setting maps to each vendor's own control: Anthropic's thinking budget, OpenAI's reasoning effort, Gemini's thinking budget. A backend with no control says so in `models info` rather than pretending.
 - **Thinking is displayed live and never persisted**, unchanged.
 - **Honest about budgets.** A budget that cut reasoning short is reported on the thinking line and in machine mode's thinking event, so an answer that suffered for it can be understood.
-- **One sampler chain** (with [25h](sampling-profiles.md)): the budget is a sampler in the chain, not a second generation loop.
+- **One sampler chain** (with [26h](sampling-profiles.md)): the budget is a sampler in the chain, not a second generation loop.
 
 **Seam + files.**
 - `harness/types.h`: `ChatRequest` gains a thinking setting (mode and budget); `transient.skip_reasoning` becomes its `off` case.
@@ -27,7 +27,7 @@ Switching thinking off goes through the template's own `enable_thinking` once [l
 
 **Decisions made:**
 - 2026-09-25 — Asked for by the user ("Reliability").
-- 2026-09-25 — After 24b (the template's switch) and [25h](sampling-profiles.md) (the chain the budget joins).
+- 2026-09-25 — After 25b (the template's switch) and [26h](sampling-profiles.md) (the chain the budget joins).
 
 **Open calls:**
 - [default: `on` unless configured] Today's behaviour; `auto` is opt-in until measured.
@@ -47,4 +47,4 @@ Switching thinking off goes through the template's own `enable_thinking` once [l
 - [ ] `--think-budget 256` stops thinking at 256 tokens and says so.
 - [ ] The same `--think off` on an Anthropic backend sends no thinking parameter, and on OpenAI the lowest effort.
 
-**Scope note.** Phase 4, item **25i**; build after 24b and 25h. Out of scope: per-tool-step thinking policies.
+**Scope note.** Phase 4, item **26i**; build after 25b and 26h. Out of scope: per-tool-step thinking policies.

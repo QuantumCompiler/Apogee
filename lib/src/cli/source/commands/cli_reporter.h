@@ -1,11 +1,13 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <string>
 
 #include "agentloop/reporter.h"
 #include "ansi/ansi.h"
+#include "commands/answer_view.h"
 #include "commands/status_line.h"
 #include "commands/terminal.h"
 #include "commands/thinking_view.h"
@@ -34,6 +36,12 @@ public:
         ansi::Style style;
         /// Terminal width for the thinking view's pre-wrapping.
         std::size_t width = 80;
+        /// Render the answer's Markdown where decorating. Off by default: the
+        /// surfaces that render opt in (`chat`, `complete`), and `--raw` or
+        /// `ui.markdown: false` turns it off there.
+        bool markdown = false;
+        /// Links in a rendered answer as OSC 8 hyperlinks.
+        bool hyperlinks = false;
     };
 
     /// `status_writer` is the progress channel (stderr); `options.answer_stream`
@@ -69,9 +77,17 @@ public:
     }
 
 private:
+    /// Commits an answer still open before anything else takes the terminal:
+    /// a tool status or a spinner painted over a half-written line would
+    /// erase it.
+    void settle_answer();
+
     Options options_;
     StatusLine status_;
     ThinkingView thinking_;
+    /// The rendered answer, present only when decorating with Markdown on.
+    /// Absent, answers go to the stream as written -- the pipe contract.
+    std::optional<AnswerView> answer_view_;
     std::int64_t thinking_characters_ = 0;
     bool emitted_ = false;
     /// Whether the current answer has shown any text yet. Until it has, its

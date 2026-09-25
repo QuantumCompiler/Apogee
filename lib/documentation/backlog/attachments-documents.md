@@ -5,7 +5,7 @@
 This item covers text, code, Markdown, PDF and HTML. Images, audio and video are [media attachments](attachments-media.md), on the same machinery.
 
 **How it works.**
-1. **Attach:** `chat --attach <path>` (repeatable), `/attach <path|folder|glob>` mid-chat, `/attachments` to list, `/detach <name>`; `complete --attach`; a machine-mode `attach` message for the GUI.
+1. **Attach:** `chat --attach <path>` (repeatable), `/attach <path|folder|glob>` mid-chat, `/attachments` to list, `/detach <name>`; `complete --attach`; a machine-mode `attach` message for the GUI; and a `@file` mention in a chat message — [item 24](chat-input-completion.md) ships the mention UX first (v0.1.2), and this item wires sent mentions into the attach path (the handoff recorded there, 2026-09-25).
 2. **Read:** text and code as they are (the ingest's binary sniff refuses what is not text); PDF through `pdftotext` with page breaks kept; HTML through the [reader](fetch-url-reader.md) when it has landed and `strip_html` until then. A folder is walked recursively, skipping hidden directories and, inside a git repository, what git ignores.
 3. **Index, always,** in the background, into the chat's own collection: chunked by the existing chunker, embedded by the `embedding` role when one is configured, and lexical-only (FTS5) when not, reported as such.
 4. **Inline when it fits.** An attachment whose text fits the [context budget](context-budget.md)'s attachment share also enters the conversation whole, at the point it was attached, so the model reads it as the user gave it and the prefix cache keeps it. When it no longer fits, because the budget drops it as history grows, retrieval takes over from the index.
@@ -24,7 +24,7 @@ This item covers text, code, Markdown, PDF and HTML. Images, audio and video are
 - `agentloop/attachments.h/.cpp` (new): the core that reads, decides inline or retrieve (asking the budget), indexes, retrieves and labels. A guarded package, so the embedder and generator arrive as closures, as they do for `knowledge/` and `graph/`.
 - `embedstore/ingest.h/.cpp`: a single-file and single-folder entry the attachment core calls, returning per-file reports. PDF page numbers are kept from `pdftotext`'s form feeds.
 - `logger/session.h/.cpp`: an `attachments` list in the session, under a `schema_version` bump (an absent list means none).
-- `commands/chat.cpp`, `commands/complete.cpp`, `commands/helpers.cpp`: the flags, the slash commands (added to `slash_commands()` so completion offers them), and the machine-mode message.
+- `commands/chat.cpp`, `commands/complete.cpp`, `commands/helpers.cpp`: the flags, the slash commands (registered in the command table [item 24](chat-input-completion.md) ships, so completion and `/help` offer them), the `@`-mention wiring into the attach path, and the machine-mode message.
 - `commands/chat_history.cpp` (`chats delete`): removes the chat's index. `commands/check.cpp`: converters, the layout row, index sizes.
 - `harness/layout.h`: the private row for chat indexes.
 
@@ -62,4 +62,4 @@ This item covers text, code, Markdown, PDF and HTML. Images, audio and video are
 - [ ] The same PDF attached in a second chat is not embedded again.
 - [ ] Resuming the chat and asking again embeds nothing; `apogee chats delete` removes the index.
 
-**Scope note.** Phase 4, item **25d**; build after [25c](context-budget.md). It uses [25b](helper-model-roles.md)'s query rewriting when present, and works without it. Out of scope: images, audio and video ([25e](attachments-media.md)); uploads over `serve`; Office formats; watching an attached folder for changes.
+**Scope note.** Phase 4, item **26d**; build after [26c](context-budget.md). It uses [26b](helper-model-roles.md)'s query rewriting when present, and works without it. Out of scope: images, audio and video ([26e](attachments-media.md)); uploads over `serve`; Office formats; watching an attached folder for changes.

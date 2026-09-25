@@ -8,14 +8,14 @@
 #include "ansi/ansi.h"
 #include "commands/terminal.h"
 
+using apogee::ansi::display_width;
 using apogee::ansi::kEraseLine;
 using apogee::ansi::kUpAndErase;
 using apogee::ansi::Style;
-using apogee::commands::display_width;
+using apogee::ansi::wrap_tail;
 using apogee::commands::kTailLines;
 using apogee::commands::TerminalWriter;
 using apogee::commands::ThinkingView;
-using apogee::commands::wrap_tail;
 
 namespace {
 
@@ -395,6 +395,17 @@ TEST_CASE("wide characters count two cells, combining marks none", "[ux][wrap]")
     CHECK(display_width("한국") == 4);
     CHECK(display_width("e\u0301") == 1);  // e + combining acute
     CHECK(display_width("…") == 1);
+    // The emoji models put in tables and lists are two cells, as terminals draw
+    // them: counted as one, every table holding a check mark goes out of line.
+    CHECK(display_width("✅") == 2);
+    CHECK(display_width("❌") == 2);
+    CHECK(display_width("⚡⭐✨") == 6);
+    CHECK(display_width("🚀") == 2);
+    // ...while the symbols in the same blocks that terminals draw narrow stay
+    // one: a check without emoji presentation, a star outline, a warning sign.
+    CHECK(display_width("✓") == 1);
+    CHECK(display_width("☆") == 1);
+    CHECK(display_width("⚠") == 1);
 
     // A wide character that would straddle the edge starts the next row
     // rather than overhanging it.

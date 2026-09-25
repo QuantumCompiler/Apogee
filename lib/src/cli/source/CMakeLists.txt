@@ -132,6 +132,8 @@ add_library(apogee_core STATIC
     commands/thinking_view.cpp
     commands/json_reporter.h
     commands/json_reporter.cpp
+    commands/answer_view.h
+    commands/answer_view.cpp
     commands/cli_reporter.h
     commands/cli_reporter.cpp
 
@@ -168,6 +170,15 @@ add_library(apogee_core STATIC
 
     ansi/ansi.h
     ansi/ansi.cpp
+    ansi/text_width.h
+    ansi/text_width.cpp
+    markdown/types.h
+    markdown/inline.h
+    markdown/inline.cpp
+    markdown/layout.h
+    markdown/layout.cpp
+    markdown/stream_renderer.h
+    markdown/stream_renderer.cpp
 
     logger/session.h
     logger/session.cpp

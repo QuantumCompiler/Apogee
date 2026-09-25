@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "ansi/ansi.h"
+#include "ansi/text_width.h"
 #include "commands/terminal.h"
 
 /// Live reasoning, rendered without letting it accumulate in scrollback.
@@ -25,27 +26,6 @@
 /// ends, the whole region is erased and one dimmed `✻ Thought for Ns` line is
 /// all that survives.
 namespace apogee::commands {
-
-/// Wraps `text` and returns the last `max_lines` non-blank rows.
-///
-/// Free function because it carries most of the subtlety and deserves direct
-/// tests: wrapping is **by codepoint, not byte** (a multi-byte character split
-/// across rows corrupts the output), and blank lines are dropped because a
-/// paragraph break inside the reasoning would otherwise spend one of only two
-/// rows painting nothing.
-[[nodiscard]] std::vector<std::string> wrap_tail(std::string_view text, std::size_t width,
-                                                 std::size_t max_lines);
-
-/// Number of display cells in a UTF-8 string: two for a wide codepoint (CJK,
-/// Hangul, fullwidth forms, most emoji), none for a combining mark or a
-/// zero-width one, one otherwise.
-///
-/// Still an approximation of what a terminal does -- a table of ranges, not
-/// the Unicode width data -- but no longer one that undercounts Chinese
-/// reasoning by half. Undercounting is not cosmetic here: a row wider than
-/// the terminal wraps, the view then erases one row too few, and every
-/// repaint leaves a line behind in the scrollback.
-[[nodiscard]] std::size_t display_width(std::string_view text);
 
 class ThinkingView {
 public:
