@@ -52,8 +52,10 @@ TEST_CASE("a converter that cannot run names the one command that fixes it",
           std::string::npos);
 
     // An environment without the convert set.
-    std::filesystem::create_directories(venv / "bin");
-    std::ofstream{venv / "bin" / "python"} << "";
+    // Where the platform's venv puts it: bin/python, or Scripts/python.exe.
+    const std::filesystem::path python = PythonEnv{venv}.interpreter();
+    std::filesystem::create_directories(python.parent_path());
+    std::ofstream{python} << "";
     std::ofstream{venv / "apogee.json"} << R"({"sets": ["prepare"]})";
     CHECK(converter_unavailable(PythonEnv{venv}, script).find("'convert' requirement set") !=
           std::string::npos);
@@ -69,7 +71,7 @@ TEST_CASE("a converter that cannot run names the one command that fixes it",
     for (const apogee::harness::BundledScript& file : apogee::harness::bundled_converter_files()) {
         const std::filesystem::path path = root.path() / std::string{file.name};
         std::filesystem::create_directories(path.parent_path());
-        std::ofstream{path} << file.text;
+        std::ofstream{path, std::ios::binary} << file.text;
     }
     std::filesystem::remove(package / "__init__.py");
     const std::string incomplete = converter_unavailable(PythonEnv{venv}, script);
@@ -88,18 +90,22 @@ TEST_CASE("a converter an earlier Apogee seeded is refused, naming the update",
     const apogee::testing::TempDir root{"convert-stale-" + std::to_string(std::random_device{}())};
     const std::filesystem::path venv = root.path() / "venv";
     const std::filesystem::path script = root.path() / "convert" / "convert_hf_to_gguf.py";
-    std::filesystem::create_directories(venv / "bin");
-    std::ofstream{venv / "bin" / "python"} << "";
+    // Where the platform's venv puts it: bin/python, or Scripts/python.exe.
+    const std::filesystem::path python = PythonEnv{venv}.interpreter();
+    std::filesystem::create_directories(python.parent_path());
+    std::ofstream{python} << "";
     std::ofstream{venv / "apogee.json"} << R"({"sets": ["convert"]})";
     for (const apogee::harness::BundledScript& file : apogee::harness::bundled_converter_files()) {
         const std::filesystem::path path = root.path() / std::string{file.name};
         std::filesystem::create_directories(path.parent_path());
-        std::ofstream{path} << file.text;
+        std::ofstream{path, std::ios::binary} << file.text;
     }
     CHECK(converter_unavailable(PythonEnv{venv}, script).empty());
 
     // The entry script as an earlier Apogee shipped it.
-    std::ofstream{script} << "# the old converter\n";
+    // Binary: a text-mode write on Windows would store "\r\n", whose digest
+    // is not the retired one.
+    std::ofstream{script, std::ios::binary} << "# the old converter\n";
     const std::string entry =
         "convert/convert_hf_to_gguf.py " + apogee::models::sha256_hex("# the old converter\n");
     const std::array<std::string_view, 1> retired{entry};

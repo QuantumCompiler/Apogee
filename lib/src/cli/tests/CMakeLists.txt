@@ -177,6 +177,8 @@ add_executable(apogee_tests
     support/fake_command.cpp
     support/env_guard.h
     support/env_guard.cpp
+    support/file_time.h
+    support/file_time.cpp
     support/fake_mcp_server.cpp
     support/fake_transport.h
     support/fake_llama.h

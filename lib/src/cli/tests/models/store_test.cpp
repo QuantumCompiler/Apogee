@@ -14,6 +14,7 @@
 #include "models/sidecar.h"
 #include "platform/platform.h"
 #include "support/env_guard.h"
+#include "support/file_time.h"
 
 using apogee::models::StoreRoots;
 using apogee::models::StoreTarget;
@@ -106,9 +107,9 @@ TEST_CASE("the store lists each format's weights, newest snapshot by when it lan
 
     // The older set landed an hour before the newer one.
     const auto now = std::filesystem::file_time_type::clock::now();
-    std::filesystem::last_write_time(model / "safetensors" / "aaaaaaaaaaaa",
-                                     now - std::chrono::hours{1});
-    std::filesystem::last_write_time(model / "safetensors" / "bbbbbbbbbbbb", now);
+    apogee::testing::set_modified_time(model / "safetensors" / "aaaaaaaaaaaa",
+                                       now - std::chrono::hours{1});
+    apogee::testing::set_modified_time(model / "safetensors" / "bbbbbbbbbbbb", now);
 
     const auto ggufs = apogee::models::list_store_ggufs(store.roots);
     REQUIRE(ggufs.size() == 1);
@@ -437,9 +438,13 @@ TEST_CASE("a staging directory is claimed by its process until it is committed o
         apogee::models::make_incoming_dir(store.roots, "gguf", "org--repo");
     const std::filesystem::path owner = apogee::models::staging_owner_path(staging);
     REQUIRE(std::filesystem::exists(owner));
-    std::ifstream in{owner};
     long pid = 0;
-    in >> pid;
+    {
+        // Closed before the commit: Windows refuses to remove a file that is
+        // still open, and the commit must remove this one.
+        std::ifstream in{owner};
+        in >> pid;
+    }
     CHECK(pid == apogee::platform::current_process_id());
     // Beside, not inside: the rename that commits it cannot carry the claim.
     CHECK(owner.parent_path() == staging.parent_path());
@@ -479,8 +484,8 @@ TEST_CASE("abandoned staging is what no running process owns", "[models][store][
     const std::filesystem::path stale = staging("safetensors", ".incoming-444444444444");
     // Made before markers existed, untouched since yesterday.
     const auto yesterday = std::filesystem::file_time_type::clock::now() - std::chrono::hours{24};
-    std::filesystem::last_write_time(stale / "big.gguf", yesterday);
-    std::filesystem::last_write_time(stale, yesterday);
+    apogee::testing::set_modified_time(stale / "big.gguf", yesterday);
+    apogee::testing::set_modified_time(stale, yesterday);
 
     std::vector<std::filesystem::path> found;
     for (const apogee::models::AbandonedStaging& leftover :

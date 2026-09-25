@@ -12,6 +12,7 @@
 #include "models/sidecar.h"
 #include "models/store.h"
 #include "support/env_guard.h"
+#include "support/file_time.h"
 #include "support/gguf_builder.h"
 
 /// The mutating verbs over the model store, and the boundary they must never
@@ -133,9 +134,18 @@ TEST_CASE("a name containing .. is refused before anything is touched",
 
 TEST_CASE("a path outside the store is refused", "[commands][models][delete][safety]") {
     const Store store;
-    const DeletePlan plan = plan_delete(store.roots, "/etc/hosts");
+    // A real file, made here: `/etc/hosts` exists on POSIX only, and on
+    // Windows the refusal came from the name lookup instead of this rule.
+    const apogee::testing::TempDir elsewhere{"outside-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path file = elsewhere.path() / "hosts";
+    std::ofstream{file} << "127.0.0.1 localhost\n";
+    const DeletePlan plan = plan_delete(store.roots, file.string());
     CHECK_FALSE(plan.ok);
     CHECK(plan.error.find("named, not pathed") != std::string::npos);
+    CHECK(std::filesystem::exists(file));
+
+    // And a path that does not exist is still no model.
+    CHECK_FALSE(plan_delete(store.roots, "/etc/hosts").ok);
 }
 
 TEST_CASE("a name that is not stored reports so", "[commands][models][delete]") {
@@ -238,8 +248,8 @@ TEST_CASE("convert reads a model's newest SafeTensors set unless told which",
     const std::filesystem::path older = store.add_snapshot("Qwen--Qwen3-8B", "aaaaaaaaaaaa");
     const std::filesystem::path newer = store.add_snapshot("Qwen--Qwen3-8B", "bbbbbbbbbbbb");
     const auto now = std::filesystem::file_time_type::clock::now();
-    std::filesystem::last_write_time(older, now - std::chrono::hours{1});
-    std::filesystem::last_write_time(newer, now);
+    apogee::testing::set_modified_time(older, now - std::chrono::hours{1});
+    apogee::testing::set_modified_time(newer, now);
 
     CHECK(choose_snapshot(store.roots, "Qwen/Qwen3-8B").path == newer);
     CHECK(choose_snapshot(store.roots, "Qwen--Qwen3-8B", "aaaaaaaaaaaa").path == older);

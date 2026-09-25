@@ -11,6 +11,8 @@
 # merges it into this branch's HEAD, and runs ci.yml's pull-request jobs on
 # the result, each through the script the workflow itself calls:
 #
+#   what changed        lib/scripts/code-changed.sh -- documentation only
+#                       means CI builds nothing, and neither does this
 #   version bump        lib/scripts/version-check.sh
 #   clone llama.cpp     lib/scripts/cicd.sh --clone-llama
 #   unit tests <host>   lib/scripts/cicd.sh --unit-tests, llama.cpp off
@@ -21,6 +23,13 @@
 # As in the workflow, `build` needs `clone llama.cpp` and `unit tests` to pass,
 # and `version bump` gates nothing but the verdict. Only this host's target can
 # be built here; the other four are CI's runners', and the summary says so.
+#
+# One check CI does not have, because this host needs it: `gcc compile`
+# (lib/scripts/gcc-check.py) compiles every first-party file with GCC's
+# standard library -- a stand-in for the Linux and Windows x64 compiles, which
+# a Mac's libc++ cannot vouch for (a missing #include lost four platforms on
+# 2026-09-25). It needs a GCC (`brew install mingw-w64`) and is reported as
+# skipped, never failed, without one.
 #
 # What it does NOT rehearse, on purpose: uncommitted changes -- a pull request
 # carries commits, and a note says when some are left out; --uncommitted
@@ -165,6 +174,20 @@ fi
 prepare_worktree "$build_wt" "$merged"
 tree="$(git -C "$root" rev-parse "$merged^{tree}")"
 
+# --- what changed -------------------------------------------------------------
+# CI's first job: a pull request that changes only documentation builds
+# nothing, and every job reports success. Asked of the test merge's own
+# script, as the workflow asks the one it checked out; a branch from before
+# the rule has none, and runs everything.
+code=true
+if [ -x "$unit_wt/lib/scripts/code-changed.sh" ]; then
+    answer="$(git -C "$root" diff --name-only "$base_sha...$head" | "$unit_wt/lib/scripts/code-changed.sh")"
+    printf '%s\n' "$answer" | sed 's/^/[pr-ci] /'
+    case "$(printf '%s\n' "$answer" | tail -1)" in
+        code=false) code=false ;;
+    esac
+fi
+
 # --- the jobs -----------------------------------------------------------------
 logs="$dir/logs"
 artifacts="$dir/artifacts"
@@ -199,28 +222,61 @@ run_job() {
     return "$status"
 }
 
-run_job "version bump" "$unit_wt" lib/scripts/version-check.sh || true
+if [ "$code" = false ]; then
+    record "what changed" "documentation only"
+    # As CI reports them: `version bump` skipped whole (a skip passes), the
+    # others run under their own names with every step skipped.
+    record "version bump" "skipped (documentation only)"
+    for job in "clone llama.cpp" "unit tests $host" "build $host"; do
+        record "$job" "passed (documentation only: no steps run)"
+    done
+fi
 
-clone_ok=0
-run_job "clone llama.cpp" "$unit_wt" lib/scripts/cicd.sh --clone-llama && clone_ok=1
+[ "$code" = false ] || run_job "version bump" "$unit_wt" lib/scripts/version-check.sh || true
 
-unit_ok=0
-run_job "unit tests $host" "$unit_wt" \
-    env APOGEE_CMAKE_ARGS=-DAPOGEE_ENABLE_LLAMA=OFF \
-    lib/scripts/cicd.sh --platform "$host" --unit-tests --no-defer ${jobs_args[@]+"${jobs_args[@]}"} &&
-    unit_ok=1
+if [ "$code" = true ]; then
+    clone_ok=0
+    run_job "clone llama.cpp" "$unit_wt" lib/scripts/cicd.sh --clone-llama && clone_ok=1
 
-if [ $clone_ok -eq 1 ] && [ $unit_ok -eq 1 ]; then
-    # The workflow's build job sets no configure arguments of its own; one
-    # left in this shell's environment must not leak into the rehearsal.
-    run_job "build $host" "$build_wt" \
-        env -u APOGEE_CMAKE_ARGS bash -c '
-            set -euo pipefail
-            lib/scripts/cicd.sh --platform "$1" --no-defer "${@:3}"
-            lib/scripts/package.sh "$1" "$2"
-        ' pr-ci "$host" "$artifacts" ${jobs_args[@]+"${jobs_args[@]}"} || true
-else
-    record "build $host" "skipped (needs clone llama.cpp and unit tests $host)"
+    unit_ok=0
+    run_job "unit tests $host" "$unit_wt" \
+        env APOGEE_CMAKE_ARGS=-DAPOGEE_ENABLE_LLAMA=OFF \
+        lib/scripts/cicd.sh --platform "$host" --unit-tests --no-defer ${jobs_args[@]+"${jobs_args[@]}"} &&
+        unit_ok=1
+
+    if [ $clone_ok -eq 1 ] && [ $unit_ok -eq 1 ]; then
+        # The workflow's build job sets no configure arguments of its own; one
+        # left in this shell's environment must not leak into the rehearsal.
+        run_job "build $host" "$build_wt" \
+            env -u APOGEE_CMAKE_ARGS bash -c '
+                set -euo pipefail
+                lib/scripts/cicd.sh --platform "$1" --no-defer "${@:3}"
+                lib/scripts/package.sh "$1" "$2"
+            ' pr-ci "$host" "$artifacts" ${jobs_args[@]+"${jobs_args[@]}"} || true
+    else
+        record "build $host" "skipped (needs clone llama.cpp and unit tests $host)"
+    fi
+
+    # Not a CI job: this host's stand-in for the Linux and Windows x64 compiles.
+    # The build's compile commands when it configured (llama.cpp on, as CI's
+    # builds), else the unit tests' (off).
+    database="$build_wt/lib/src/cli/build/$host"
+    [ -f "$database/compile_commands.json" ] || database="$unit_wt/lib/src/cli/build/$host"
+    if [ ! -x "$unit_wt/lib/scripts/gcc-check.py" ]; then
+        record "gcc compile (local)" "skipped (the branch has no lib/scripts/gcc-check.py)"
+    elif [ ! -f "$database/compile_commands.json" ]; then
+        record "gcc compile (local)" "skipped (nothing configured to take compile commands from)"
+    else
+        set +e
+        run_job "gcc compile (local)" "$unit_wt" \
+            python3 lib/scripts/gcc-check.py "$database" ${jobs_args[@]+"${jobs_args[@]}"}
+        status=$?
+        set -e
+        if [ "$status" -eq 3 ]; then
+            # No GCC on this host: say how to get one, and do not fail for it.
+            results[${#results[@]} - 1]="skipped (no GCC here: brew install mingw-w64)"
+        fi
+    fi
 fi
 
 # --- the verdict --------------------------------------------------------------
@@ -230,7 +286,9 @@ printf '[pr-ci]   source: %s, tree %s\n' "$(git -C "$root" rev-parse --short "$m
 i=0
 while [ $i -lt ${#names[@]} ]; do
     printf '[pr-ci]   %-22s %s\n' "${names[$i]}" "${results[$i]}"
-    case "${results[$i]}" in passed) ;; *) failed=1 ;; esac
+    # Only a job that ran and failed fails the verdict: a skip says why it
+    # was skipped, and the only one that follows a failure is the build's.
+    case "${results[$i]}" in FAILED*) failed=1 ;; esac
     i=$((i + 1))
 done
 others=""
@@ -238,6 +296,7 @@ for target in linux-x64 linux-arm64 macos-arm64 windows-x64 windows-arm64; do
     [ "$target" = "$host" ] || others="$others${others:+, }$target"
 done
 printf '[pr-ci]   not rehearsed: unit tests and build for %s -- each needs its own CI runner\n' "$others"
+[ "$code" = false ] || printf '[pr-ci]   (their compiles are what `gcc compile` stands in for; their tests are not)\n'
 if ls "$artifacts"/apogee-"$host".* >/dev/null 2>&1; then
     printf '[pr-ci]   archive: %s\n' "$(ls "$artifacts"/apogee-"$host".tar.gz "$artifacts"/apogee-"$host".zip 2>/dev/null | head -1)"
 fi

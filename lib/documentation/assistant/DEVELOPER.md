@@ -32,7 +32,8 @@ The build-related files outside an app directory are the two workflows and the o
 Apogee/
 ├── .github/
 │   ├── workflows/ci.yml     — CI: clone llama.cpp + unit tests per platform (parallel), then build + package per platform;
-│   │                          the PR-only `version bump` check; and, after a merge, `tag and release` (2026-09-25)
+│   │                          the PR-only `version bump` check; and, after a merge, `tag and release` (2026-09-25);
+│   │                          all behind `what changed`: a documentation-only PR runs every job with no work in it
 │   ├── workflows/release.yml — The manual release: a v* tag or a dry-run dispatch → gate → unit tests ×5 → build ×5 → publish
 │   │                          (thin callers into lib/scripts/; here only because GitHub requires it)
 │   └── actions/package/     — The packaging step both workflows use: lib/scripts/package.sh, then the artifact upload
@@ -65,7 +66,12 @@ Apogee/
     │   ├── package.sh       — The one packaging definition: archive, .source record, the binary run
     │   │                      (the package action and pr-ci.sh both call it)
     │   ├── pr-ci.sh         — `make pr-ci`: a pull request's CI run rehearsed on this host -- the test
-    │   │                      merge into stable, then version bump, clone, unit tests, build + package
+    │   │                      merge into stable, then version bump, clone, unit tests, build + package,
+    │   │                      and a GCC compile of every file standing in for the Linux/Windows compiles
+    │   ├── code-changed.sh  — Does a change touch anything but documentation? The one definition of
+    │   │                      "documentation" (lib/documentation/, .claude/, root *.md), for CI and pr-ci
+    │   ├── gcc-check.py     — Every first-party file compiled -fsyntax-only with GCC's standard library
+    │   │                      (MinGW-w64 preferred), from a build's compile_commands.json
     │   ├── ci-annotate.sh   — On a failed CI step, publishes the ctest summary -- or Catch2's, for the
     │   │                      unit-test jobs -- and each failed test's output as error annotations
     │   │                      (public through the API; the log is not)
@@ -566,6 +572,7 @@ Catch2 v3, discovered into ctest by `catch_discover_tests`. The directory mirror
 | `support/fake_transport.h/.cpp` | The scripted `HttpTransport` — the seam that makes cloud-backend tests hermetic. |
 | `support/fake_command.h/.cpp` | A `Command` defined in test code — the injectable seam, exercised. |
 | `support/env_guard.h/.cpp` | RAII environment-variable and temp-directory guards. Config resolution reads the environment, so exercising it means mutating the environment — and a leaked change would steer every test after it. |
+| `support/file_time.h/.cpp` | `set_modified_time`: ages a file **or a directory** for a test (2026-09-25). `std::filesystem::last_write_time` cannot set a directory's time under MinGW's libstdc++ (it goes through `_wutime`, which cannot open one), so on Windows a failed call falls back to the Win32 API with the FILETIME borrowed from a scratch file. Nothing in Apogee sets a time; only tests age what they build. |
 | `support/terminal_model.h/.cpp` | Enough of a terminal to replay what a view writes (2026-09-25): printable cells (wide ones two), `\r`, `\n` with the tty's CR-LF, cursor-up, erase-line, SGR and OSC 8 ignored, deferred wrap; records the widest column written, any climb above the screen, and every escape it does not understand. |
 
 Beyond those, `tests/CMakeLists.txt` registers `cli.*` ctest cases that run the built `apogee` binary as a subprocess, covering the contract as a user meets it (bare invocation prints help and exits 0; `--version`; unknown subcommand fails). Running a target is not linking it, so the link policy still holds.
@@ -661,7 +668,7 @@ Run from `lib/src/cli`, or with `make -C lib/src/cli <target>` from anywhere.
 | `make lint` | clang-tidy over `source/` and `tests/`, including the ownership gate. |
 | `make no-llama` | The fast developer build: everything except llama.cpp, which is on by default and most of the compile time. |
 | `make clean` / `make fresh` | Drop a build dir / clean-room clone-and-build. |
-| `make pr-ci` | **The pull request's CI run, rehearsed on this host** (`lib/scripts/pr-ci.sh`, 2026-09-25). It makes GitHub's test merge of the branch into `stable` (fetched first) and runs `ci.yml`'s pull-request jobs on it, in its order and through the scripts the workflow calls: `version bump`, `clone llama.cpp`, `unit tests <host>` with llama.cpp off, then `build <host>` and its packaging, which run only if the clone and the unit tests passed. It prints a checks-style summary and exits non-zero if CI would fail. The four targets this host cannot build are named as CI's. The jobs run in two worktrees under `~/.cache/apogee/pr-ci` (`APOGEE_PR_CI_DIR`), one per job as on the runners, since the unit build has llama.cpp off and the build has it on. They are reset each run, so builds after the first are incremental. Uncommitted changes are left out, as a pull request would leave them; `UNCOMMITTED=1` rehearses them as a commit object no branch points at. `BASE=<ref>` merges elsewhere. A conflicting merge stops it, since GitHub runs no CI then. `make pr-ci-clean` removes it all. |
+| `make pr-ci` | **The pull request's CI run, rehearsed on this host** (`lib/scripts/pr-ci.sh`, 2026-09-25). It makes GitHub's test merge of the branch into `stable` (fetched first) and runs `ci.yml`'s pull-request jobs on it, in its order and through the scripts the workflow calls: `version bump`, `clone llama.cpp`, `unit tests <host>` with llama.cpp off, then `build <host>` and its packaging, which run only if the clone and the unit tests passed. It prints a checks-style summary and exits non-zero if CI would fail. The four targets this host cannot build are named as CI's. The jobs run in two worktrees under `~/.cache/apogee/pr-ci` (`APOGEE_PR_CI_DIR`), one per job as on the runners, since the unit build has llama.cpp off and the build has it on. They are reset each run, so builds after the first are incremental. Uncommitted changes are left out, as a pull request would leave them; `UNCOMMITTED=1` rehearses them as a commit object no branch points at. `BASE=<ref>` merges elsewhere. A conflicting merge stops it, since GitHub runs no CI then. It follows CI's docs-only rule (`code-changed.sh`): a change that touches only documentation runs nothing. It adds one check CI doesn't have, **`gcc compile`** (`lib/scripts/gcc-check.py`): every first-party file compiled syntax-only with GCC's standard library, preferably the MinGW-w64 compiler (`brew install mingw-w64`), using the build's own compile commands. That is a Mac's stand-in for the Linux and Windows x64 compiles, which Apple's libc++ cannot vouch for; it takes about 30 seconds, and is reported as skipped without a GCC. `make pr-ci-clean` removes it all. |
 
 `make install` is a thin caller into the `install()` rule in `source/CMakeLists.txt`, invoked with **`--component apogee`**. That flag is not optional: `FetchContent_MakeAvailable` adds every dependency's own `install()` rules to this project, so a component-less install also writes replxx's headers, library, and CMake package config into the prefix — and our `FIND_PACKAGE_ARGS` then prefers that broken installed copy on the next configure, so the project stops building. `cli.install_is_ours_only` guards both halves. It installs the executable (`apogee_core` is an implementation detail and is deliberately not installed), then the shell completions, and then runs **`apogee check --fix`** so the binary creates and verifies its own data directory. That last step is the parity rule in one line: the Makefile does not know what `~/.apogee/` contains, and neither installer does — all three reach the single declaration in `source/harness/layout.h`. See CLAUDE.md → *One layout declaration, and every install path reads it*.
 
@@ -748,6 +755,8 @@ The run page's summary lists each of those as it passes.
 2. **Open the PR** — after `make pr-ci`, which runs the jobs the PR will start on this host's target, against the test merge, and says whether CI would pass. CI's `version bump` check fails if that version is already released — that is the moment a forgotten bump surfaces, rather than after the merge when the release silently does not happen.
 3. **Rehearse the release** once CI is green: Actions → CI → Run workflow, on the version branch, with the PR's number in `release_rehearsal_pr` (or `gh workflow run CI --ref vX.Y.Z -f release_rehearsal_pr=<PR>`). It runs steps 1–5 against the test merge and reports what it would publish; it builds nothing and publishes nothing. `lib/scripts/release-from-pr.sh <PR>` does the same from a terminal with `gh` signed in.
 4. **Merge** — keeping the branch up to date with `stable` first, or step 4's tree check refuses the archives. The release publishes itself.
+
+**Documentation-only changes** (2026-09-25). A pull request that changes nothing outside `lib/documentation/`, `.claude/` and root-level Markdown (the one definition: `lib/scripts/code-changed.sh`) runs CI's jobs with no work in them. The matrix jobs start and skip every step, so each reports success under its required name; `version bump` is skipped whole; a merge of it publishes nothing, as before. The PR is judged by everything it changes, so a docs commit pushed onto a PR that also changes code still runs everything. To push docs mid-review without a run, put `[skip ci]` in the commit message. The PR's last commit must still run, or its required checks never report and the merge has no archives to release.
 5. **Open the next dev branch** from `stable`, named for the release being *built*:
    ```sh
    git checkout stable && git pull && git checkout -b vX.Y.Z+1 && git push -u origin vX.Y.Z+1

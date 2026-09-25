@@ -12,9 +12,11 @@
 # Gating policy (user decision, 2026-09-19, superseding 2026-08-24's
 # "macos-arm64 only"): EVERY job that runs on a pull request is required for
 # it -- the version check, the clone, all five unit-test runs and all five
-# builds. There is no `continue-on-error` in this file and there must not be
-# one; a platform that cannot pass is a platform to fix, not to mark
-# informational. GitHub enforces the requirement through the branch protection
+# builds. (`what changed` is not listed: the matrix jobs need it, and a
+# matrix job skipped because it failed never reports its required name, so
+# its failure blocks the pull request anyway.) There is no
+# `continue-on-error` in this file and there must not be one; a platform that
+# cannot pass is a platform to fix, not to mark informational. GitHub enforces the requirement through the branch protection
 # rule on `stable`, which lists these checks by their job names
 # (`version bump`, `clone llama.cpp`, `unit tests <name>`, `build <name>`) --
 # a renamed job has to be renamed there too. `tag and release` is NOT one of
@@ -55,8 +57,13 @@
 #
 # Shape (user decisions, 2026-09-19, 2026-09-20, 2026-09-22 and 2026-09-25):
 # two stages on a pull request, each a call into cicd.sh, and one job after
-# the merge.
+# the merge -- all of them after one question:
 #
+#   0. what changed        -- lib/scripts/code-changed.sh: does the pull
+#                             request touch anything but documentation? If
+#                             not, every job below reports success and does
+#                             no work (2026-09-25; the job says how, and why
+#                             it cannot simply skip them).
 #   1. clone llama.cpp     -- prove the pin resolves. llama.cpp ships with the
 #                             tool, so a pin that no longer clones is a broken
 #                             product, and no platform is worth building on it.
@@ -156,6 +163,83 @@ concurrency:
   cancel-in-progress: ${{ github.event.action != 'closed' }}
 
 jobs:
+  changes:
+    # Does this change touch anything but documentation? Every other job reads
+    # the answer (user decision, 2026-09-25: a documentation-only pull request
+    # must not build anything). "Documentation" is declared once, in
+    # lib/scripts/code-changed.sh -- lib/documentation/, .claude/, and Markdown
+    # at the repository root -- and nothing CI runs reads those paths.
+    #
+    # A pull request is judged by EVERYTHING it changes (base...head), not by
+    # its latest push: a documentation commit pushed onto a pull request that
+    # also changes code still runs every job, because what merges is the whole
+    # pull request and the release publishes that run's archives. `[skip ci]`
+    # in a commit message is the way to push documentation mid-review without
+    # a run; the pull request's last commit must still run, or nothing is
+    # tested and the merge has no archives to release.
+    #
+    # How a documentation-only pull request stays mergeable, and why it is not
+    # a job-level `if:`. The branch protection rule requires `unit tests
+    # <name>` and `build <name>` by name, and a MATRIX job skipped by its `if:`
+    # never expands: it reports once, as "build ${{ matrix.name }}", so the
+    # required "build macos-arm64" waits forever and the pull request cannot
+    # merge. So the matrix jobs, and `clone llama.cpp` which the builds need,
+    # always run and skip every STEP instead: each finishes in seconds, under
+    # its real name, successfully. `version bump` is not a matrix job and
+    # skips whole -- a skipped job counts as passing.
+    #
+    # `tag and release` does not ask. A documentation-only merge already
+    # publishes nothing -- its version is out, and release-from-pr.sh stops
+    # there successfully -- and the `closed` event is the one this answer
+    # cannot be trusted on: after the merge the payload's base can be the
+    # merge itself, and a diff from there reads as "nothing changed". So this
+    # job does not run for it, and neither does anything that needs it.
+    #
+    # On request (workflow_dispatch), everything runs. If this job fails, every
+    # job after it is skipped, the required checks never report, and the pull
+    # request cannot merge: fail closed.
+    name: what changed
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      # The whole history, so the pull request's merge base with its base
+      # branch is there to diff from. The history is small.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Does it touch anything but documentation?
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request)
+              # Both ends by id, in case a fork's head is not among the
+              # branches the checkout fetched.
+              git fetch --quiet --no-tags origin "$PR_BASE" "$PR_HEAD" || true
+              git diff --name-only "$PR_BASE...$PR_HEAD" | lib/scripts/code-changed.sh
+              ;;
+            push)
+              # A new branch has no "before"; judge it as code.
+              if [ -z "$BEFORE" ] || [ -z "${BEFORE//0/}" ]; then
+                echo "code=true" | tee -a "$GITHUB_OUTPUT"
+              else
+                git diff --name-only "$BEFORE" "$AFTER" | lib/scripts/code-changed.sh
+              fi
+              ;;
+            *)
+              echo "code=true" | tee -a "$GITHUB_OUTPUT"
+              ;;
+          esac
+
   version:
     # A merge into `stable` publishes a release, and what it publishes is
     # decided by `project(... VERSION x.y.z)` in lib/src/cli/CMakeLists.txt
@@ -169,7 +253,10 @@ jobs:
     # merge declines to cut a release, and `tag and release` handles it by
     # publishing nothing.
     name: version bump
-    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    needs: changes
+    if: >-
+      github.event_name == 'pull_request' && github.event.action != 'closed'
+      && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -185,11 +272,16 @@ jobs:
     # the one place it lives -- fetches that commit, and checks it resolved.
     name: clone llama.cpp
     # Neither the release after a merge nor a rehearsal of one builds anything.
+    # A documentation-only change runs it with every step skipped: the builds
+    # need it, and see `changes` for why they must still run.
+    needs: changes
     if: github.event.action != 'closed' && !inputs.release_rehearsal_pr
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+        if: needs.changes.outputs.code == 'true'
       - name: Clone llama.cpp at the pinned commit
+        if: needs.changes.outputs.code == 'true'
         run: lib/scripts/cicd.sh --clone-llama
 
   unit-tests:
@@ -209,6 +301,9 @@ jobs:
     # llamacpp backend through its injectable seam rather than the library,
     # and the build stage below still compiles it on every platform.
     name: unit tests ${{ matrix.name }}
+    # Every step asks `changes` first: a documentation-only change runs this
+    # job under its real name and skips the work (see `changes`).
+    needs: changes
     if: github.event.action != 'closed' && !inputs.release_rehearsal_pr
     runs-on: ${{ matrix.runner }}
     env:
@@ -237,13 +332,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        if: needs.changes.outputs.code == 'true'
 
       - name: Install libcurl headers (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
 
       - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
           msystem: ${{ matrix.msystem }}
@@ -257,7 +353,7 @@ jobs:
             curl-winssl:p
 
       - name: Unit tests
-        if: runner.os != 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os != 'Windows'
         shell: bash
         run: |
           set -eo pipefail
@@ -267,7 +363,7 @@ jobs:
           }
 
       - name: Unit tests (MSYS2 shell)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Windows'
         shell: msys2 {0}
         run: |
           git config --global --add safe.directory '*'
@@ -289,7 +385,8 @@ jobs:
     # No `if:` of its own: when the stages it needs are skipped -- after a
     # merge, or in a rehearsal -- so is it.
     name: build ${{ matrix.name }}
-    needs: [clone-llama, unit-tests]
+    # As with the unit tests, every step asks `changes` first.
+    needs: [changes, clone-llama, unit-tests]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -315,9 +412,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        if: needs.changes.outputs.code == 'true'
 
       - name: Install libcurl headers (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
 
       # `pacboy` prefixes each name for the environment: toolchain:p is
@@ -326,7 +424,7 @@ jobs:
       # built on Schannel -- the platform trust store, which is the whole
       # reason curl is found rather than fetched (cmake/ApogeeDependencies).
       - name: Set up the MinGW-w64 toolchain in MSYS2 (Windows)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
           msystem: ${{ matrix.msystem }}
@@ -347,7 +445,7 @@ jobs:
       # log needs admin rights, and a failure that only the owner can read is
       # a failure nobody else can fix.
       - name: Build
-        if: runner.os != 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os != 'Windows'
         shell: bash
         run: |
           set -eo pipefail
@@ -359,7 +457,7 @@ jobs:
       # The same command, in the MSYS2 shell the toolchain lives in. The
       # script sees a UCRT64_NT / CLANGARM64_NT host and maps it to Windows.
       - name: Build (MSYS2 shell)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Windows'
         shell: msys2 {0}
         # The checkout was made by Git for Windows under a different HOME, so
         # MSYS2's git has to be told the tree is safe before the script's
@@ -377,6 +475,7 @@ jobs:
       # once this pull request merges. The same action release.yml packages
       # with.
       - name: Package
+        if: needs.changes.outputs.code == 'true'
         uses: ./.github/actions/package
         with:
           target: ${{ matrix.target }}

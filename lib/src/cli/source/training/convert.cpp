@@ -39,8 +39,11 @@ std::string converter_unavailable(const PythonEnv& env, const std::filesystem::p
     // which lags the pin, and then fails on the first tensor it cannot name.
     constexpr std::string_view tree_prefix = "convert/";
     for (const harness::BundledScript& file : harness::bundled_converter_files()) {
-        const std::filesystem::path path =
+        // The bundled name is written with '/'; the message names the file
+        // the way this platform writes paths.
+        std::filesystem::path path =
             script.parent_path() / std::string{file.name.substr(tree_prefix.size())};
+        path.make_preferred();
         if (!std::filesystem::is_regular_file(path, code)) {
             return "the vendored converter is incomplete: " + path.string() +
                    " is missing -- run 'apogee check --fix' to seed it";

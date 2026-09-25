@@ -594,6 +594,33 @@ Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the
   - With the include removed, it reproduces the runner's error exactly; with it, all 362 files are clean.
 - **Four test cases failed on Windows arm64**, and the job's public annotations could not say which. `ci-annotate.sh` still expected ctest's summary, but since 2026-09-22 CI runs the Catch2 binary directly. So a failing unit-test job published its last 25 lines: the totals, and no test's name. It now reads Catch2's own report: a summary annotation with the totals and every failed test case's name, then one annotation per failure (up to nine) with its location and each failed assertion and its expansion. Skipped test cases are left out, and CRLF logs are handled. Tested against a synthetic report in Catch2's format.
 
+**Then, the same day: documentation-only pull requests, and a GCC compile in the rehearsal** (the user's calls).
+- [x] **A documentation-only pull request builds nothing.**
+  - CI's new first job, `what changed`, pipes the PR's diff (`base...head`, everything it changes) through **`lib/scripts/code-changed.sh`**, the one definition of documentation: `lib/documentation/`, `.claude/`, and Markdown at the repository root. Nothing CI runs reads those paths; the two ctest checks that pin reference docs to code are `make test`'s.
+  - **It could not simply skip the jobs.** The previous run showed why: a matrix job skipped by its `if:` reports once, under the literal `build ${{ matrix.name }}`, so the required `build macos-arm64` would wait forever and the PR could never merge. So the matrix jobs and `clone llama.cpp`, which the builds need, always run and gate every **step** on the answer. Each finishes in seconds under its real name. `version bump`, not a matrix job, is skipped whole, and a skipped job counts as passing.
+  - **`tag and release` does not ask.** On the `closed` event the payload's base can already be the merge, and a diff from there reads as "nothing changed", which could suppress a real release. A docs-only merge already publishes nothing, because its version is out. So `what changed` does not run on that event either.
+  - It fails closed: if the job fails, the matrix jobs never report their names, and the PR cannot merge.
+  - The PR is judged by everything it changes, so a docs commit pushed onto a code PR still runs everything. `[skip ci]` in a commit message is the way to push docs mid-review, recorded with its catch: the last commit must run.
+- [x] **`gcc compile`, in `make pr-ci`.** **`lib/scripts/gcc-check.py`** compiles every first-party translation unit syntax-only with GCC's standard library, taking include paths and defines from a build's `compile_commands.json`, and borrowing only libcurl's headers from the host.
+  - The compiler is the MinGW-w64 GCC when present (the Windows x64 job's own compiler, taking the code's Windows branches), else a real GCC, else "skipped" with the install line. It is never a failure for lacking one.
+  - `pr-ci.sh` runs it after the build, on the build's compile commands (llama.cpp on, as CI's builds) or the unit tests' when the build never configured.
+  - `pr-ci.sh` also asks `code-changed.sh` about the test merge, as CI does, and a docs-only rehearsal runs nothing and passes.
+  - Its verdict now fails only on a job that ran and failed: a skip with its reason is not a failure.
+- **Verified.**
+  - `gcc-check.py` compiles all 362 files clean in about 27 seconds, and fails on `store_test.cpp` with its `<algorithm>` removed, with the runner's exact message. With no GCC on the `PATH` it exits 3 with the install line.
+  - `code-changed.sh` answers "documentation only" for docs, skills and root Markdown; code for a Markdown test fixture; and code for this branch (299 of 327 files).
+  - A rehearsal of a synthetic docs-only commit on top of the current code reported every job passing with no work.
+  - The workflow parses. Its behaviour on GitHub is proven by the next docs-only PR.
+
+**And the Windows failures, named at last** (run 22, the first with the Catch2 annotations). Linux passed on both architectures once the include was in. Windows x64 failed 7 test cases and Windows arm64 failed 4, all 4 among x64's 7, and none was a product bug except one message. Each was a POSIX assumption in a test:
+- **The converter tests** made their fake interpreter at `venv/bin/python`. A Windows virtual environment keeps it at `Scripts\python.exe`, so the code found no environment at all. They now ask `PythonEnv::interpreter()`, as `check_test` already did.
+  - They also wrote the "earlier Apogee's" converter in text mode, which on Windows stores `\r\n`, so its digest was never the retired one; they write binary now.
+  - The product fix: the "converter is incomplete" message appended a bundled name written with `/`, so a Windows user read `C:\…\convert\gguf-py/gguf/__init__.py`. It is `make_preferred` now.
+- **"A path outside the store is refused"** passed `/etc/hosts`, which exists on POSIX only. On Windows the refusal came from the name lookup, with another message. The test makes its own file outside the store now, and still checks that `/etc/hosts` is no model.
+- **"A staging directory is claimed by its process"** kept the owner marker open in an `ifstream` while the commit had to delete it. Windows refuses to delete an open file, so the marker stayed. It is closed before the commit now.
+- **Three tests aged a directory** with `std::filesystem::last_write_time`, which MinGW's libstdc++ cannot do: it goes through `_wutime`, which cannot open a directory ("cannot set file time: Permission denied"). libc++ on the ARM runner can, which is why arm64 passed them. `tests/support/file_time` (`set_modified_time`) falls back to the Win32 API there, with the FILETIME borrowed from a scratch file the standard call can stamp, so no clock is converted by hand.
+- **Verified here as far as a Mac allows.** The affected tests pass on macOS (1,305 assertions), and `gcc-check.py` compiles all 363 files, the helper's Windows branch included, with the MinGW GCC. Nothing on this Mac can run a Windows binary (`wine` is an Intel build and Rosetta is not installed), so the run that proves them is the next pull request run.
+
 ### 2026-09-01 — Layout, doctor, installers, completions, release pipeline
 
 **What was built**
