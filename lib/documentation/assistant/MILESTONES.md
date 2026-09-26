@@ -2079,7 +2079,24 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 
 **Verified on the real binary.** `cli.config_lifecycle` covers the full sequence. On a pipe the fetch is refused, and the model reads the refusal as a tool result. A driver's `always` in machine mode names the host in the question and adds exactly `[127.0.0.1]` to the config. The same pipe run then reaches the host, and `check` lists both rows. `delete-allowed-host` restores the file's bytes. By hand, against a local server: a redirect to a different host was refused, and the server never saw the request; a same-host redirect was followed; a 6 MB page was refused, naming the limit, and requested once. Under a pseudo-terminal, the prompt showed the host and the whole URL, and `a` wrote the host to the config.
 
-MUTATION_RESULTS_PLACEHOLDER
+**Guardrails, each mutation-tested (34 mutants: 31 caught outright, 2 caught once their tests were strengthened, 1 equivalent).**
+- **The host rule:** a suffix match in place of equality; a trailing dot kept; an empty label allowed.
+- **`fetch_url`:** a redirect hop not gated; the model's own URL fetched rather than the rebuilt one; the redirect bound off by one; control bytes passed raw; other schemes followed.
+- **The gate:** outbound not gated; an outbound call with no target allowed, at the gate and at dispatch; the hop gate always answering yes; an outbound tool without a target reader registered.
+- **The checker and answers:** the allow-list ignored; session hosts keyed by tool; outbound decided by the tool's level; a non-host asked about rather than denied; `session` remembering the tool; `always` writing a tool level.
+- **The fetcher:** curl following redirects itself; the body uncapped; an over-cap body read as a page; `Location` dropped.
+- **The editor:** a duplicate host added; the host written as typed; a missing key placed inside a nested list; a URL accepted as a host.
+- **The rest:** the unset root not the launch folder; machine mode's `outbound` dropped; the admin `PUT` never needing a restart; an unlisted `DELETE` not a 404.
+
+**The survivors, and what they taught.**
+- **The same host asked again.** A same-host hop that asked a second time was invisible, because the test's first host was on the allow-list, so the checker never reached the prompt. The case now allows the host by an answer.
+- **The first-item removal.** Removing the first of two hosts while leaving its separator went unseen, because the only first-item removal was followed by a second one, which tidied the stray comma. The case now checks the single removal's bytes.
+
+Both show the same gap: a check that another step can quietly repair proves nothing about the step before it.
+
+**The equivalent mutant.** Dropping `@` from the authority check changes nothing observable, because `canonical_host` refuses `@` as well. It stays as a second layer, stated in the code rather than relied on alone.
+
+**One incident, recorded.** The branch's commit of this work (`72c2d75`) was taken while the mutation run had the "allow-list ignored" mutant applied, so that commit's checker never allowed a listed host (it failed closed). The working tree was restored by the run, and the next commit carries the correct line.
 
 **Not verified.** The transport's new options (`follow_redirects`, `max_body_bytes`, the `Location` header) were exercised only on macOS's curl; the Linux and Windows builds set the same curl options. `apogee check`'s rows are asserted by the end-to-end test, not by a `check_test` case.
 

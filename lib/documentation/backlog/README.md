@@ -56,7 +56,7 @@ Within a table, rows are in the **suggested build order**; the topmost 🟢 row 
 
 **Gate convention:** every pending item builds on top of everything already shipped; a gate — the "build after" in a scope note, the 🔒 cell in a table — names only the ordering among the pending items here, and an item is buildable from its transitive gate chain alone. Items marked **split first** must be groomed into their listed sub-documents before an agent takes them; do not build from the guard document directly.
 
-Three tracks, since **24** (chat input completion) shipped on 2026-09-25 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestone H. Its handoff to the attachments item — wiring a sent `@` mention into the attach path — is recorded on [26d](attachments-documents.md).
+Four tracks, since **24** (chat input completion) shipped on 2026-09-25 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestone H. Its handoff to the attachments item — wiring a sent `@` mention into the attach path — is recorded on [26d](attachments-documents.md).
 
 **25, local agent tools**, came out of a spike on 2026-09-25 and was split into six items the same day. The spike found that local models were never shown the tools every other backend already has, measured llama.cpp's own tool-calling layer on real weights (6/6 tasks on Qwen3.8-27B and Qwen3-VL-8B), and turned up an outbound-data exposure in today's tools. The user's four calls are recorded in the items: SearXNG for search, ask per new website, the launch folder as the file root, and 8B-class models and up. In build order: 25a first (it closed today's exposure, and shipped 2026-09-25 — [MILESTONES.md](../assistant/MILESTONES.md#milestone-v--the-native-toolsets) → Milestone V); 25b is the unlock; 25c–25f follow it, as each names.
 
@@ -70,6 +70,8 @@ Three tracks, since **24** (chat input completion) shipped on 2026-09-25 — see
 The user's calls are recorded in the items: attachments kept with their chat and cached by hash, helper models used automatically, and external converters (`pdftotext`, `ffmpeg`).
 
 **27, machine-mode integrations**, asked for 2026-09-25 for **v0.1.4**: the CLI pluggable into other people's harnesses and applications — the native machine-mode protocol as the floor, a common protocol integrators extend from. **The spike ran the same day** ([MILESTONES.md](../assistant/MILESTONES.md#milestone-m--the-front-end-contract) → Milestone M): a naive external host, knowing only the protocol doc, completed a tool-using, permission-prompted conversation against the shipped binary; a host-run MCP server's tool round-tripped through the loop with zero prompts (host tools already work — the gap is wiring); seven walls were recorded. The recommendation: **grow the JSONL contract additively** — the tolerance rules make it retrofittable in both directions, verified live — with MCP as the host-tools sidecar, never a reframe that breaks `protocol_version: 1` drivers. Split into five: 27a the handshake and stability promise, 27b per-run integration wiring (walls W6/W8 — **its document is still to be written**; the Milestone M record carries its substance), 27c turn ids and cancel, 27d the schema artifact, 27e machine-readable reads. Parked with evidence, the user's call: the push channel.
+
+**28, autonomous tasks**, asked for 2026-09-25 for **v0.1.5**: the user states a goal and the application does the rest — plans, drives successive turns of the one shared agent loop, checks acceptance stated up front, composes corrective rounds, and stops on done or budget. The shape was proven the same day in a context-only spike (at the user's direction, so its findings are baked into the documents rather than a repo record): an outer loop over the shipped binary completed the full cycle with one user input, and the two gaps it exposed — task state living only in the driving process, and external drivers blind to tool work — set the design: in-binary, over a resumable ledger, with the training cycle's safety kit reused. Split into three: 28a the runner and its ledger (safe and narrow: deny-by-default, fail-on-question), 28b the declared autonomy policy (its two **[user]** calls are the feature's safety ceiling), 28c the surfaces.
 
 ### v0.1.3
 
@@ -101,3 +103,11 @@ The user's calls are recorded in the items: attachments kept with their chat and
 | 27c | Turn ids and cancel — a `turn` field on every turn-scoped event, and `{"type":"cancel"}` aborting an in-flight turn the way Ctrl-C does | v0.1.4 | [`machine-turn-control.md`](machine-turn-control.md) | 🔒 27a |
 | 27d | The schema artifact — `apogee __machine-schema` prints the protocol as JSON Schema, conformance-pinned to the code, shipped in the release archives | v0.1.4 | [`machine-schema-artifact.md`](machine-schema-artifact.md) | 🔒 27a, 27c |
 | 27e | Machine-readable reads — `--output-format json` on `models`/`chats`/`agents`/`mcp`/`check`, the same facts as the human view | v0.1.4 | [`machine-readable-reads.md`](machine-readable-reads.md) | 🟢 |
+
+### v0.1.5
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 28a | The task runner and its ledger — goal in; the application plans, drives successive agent-loop turns, checks stated acceptance, corrects, stops on done or budget; resumable from a manifest-per-transition ledger under a lock | v0.1.5 | [`task-runner-core.md`](task-runner-core.md) | 🟢 |
+| 28b | Task autonomy policy — pre-declared per-task grants and question answers, composed no wider than config × agent policy, every use recorded | v0.1.5 | [`task-autonomy-policy.md`](task-autonomy-policy.md) | 🔒 28a |
+| 28c | Task surfaces — machine-mode task events, `task status`/`list` as JSON, admin-plane reads; control stays CLI-only | v0.1.5 | [`task-surfaces.md`](task-surfaces.md) | 🔒 28a |

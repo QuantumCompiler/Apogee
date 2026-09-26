@@ -39,6 +39,7 @@ A **GUI ships as a sibling application** *(committed direction 2026-08-24; plann
 - **Open local models:** no forbidden or curated models — any user-supplied model runs; verification protects integrity (digests, loadability), never gates choice; unknown models are handled permissively through behavior profiles.
 - **Model & data sources:** direct Hugging Face downloads (models, GGUFs, SafeTensors, datasets) and pulls through the user's Ollama store.
 - **Agentic tool loop:** one shared model→tool→model loop behind all surfaces; MCP client and agent management in a later ring.
+- **Autonomous tasks** *(direction set 2026-09-25; targeted v0.1.5)*: `apogee task` — a goal in; the application plans, drives successive turns of the one shared agent loop, checks acceptance stated up front, and stops on done or budget. User- or scheduler-invoked, never a daemon; unattended runs keep deny-by-default until a per-task, recorded policy explicitly widens them.
 - **Sessions & context:** persistent resumable chats; Apogee-owned context monitoring and compaction on every backend.
 - **RAG & knowledge** *(gated ring)*: lexical-floor-first retrieval (BM25, then vector, then hybrid), and the knowledge/graph layers after it.
 - **Local-model depth** *(gated ring)*: model management and per-family behavior profiles.

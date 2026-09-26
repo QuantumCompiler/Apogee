@@ -161,6 +161,16 @@ TEST_CASE("a redirect to a new host is asked about hop by hop", "[agent][fetch][
         CHECK(web.requested ==
               std::vector<std::string>{"https://allowed.example/a", "https://allowed.example/b"});
     }
+    SECTION("a host allowed by an answer is not asked again on its own redirect") {
+        // Not listed, so the first question is a real one; the same-host hop
+        // must not become a second. (With the host on the allow-list the
+        // checker never reaches the prompt, and a repeat would go unseen.)
+        Gate gate{{}, true, {}};
+        CHECK_FALSE(fetch(web, gate, "https://allowed.example/a").is_error);
+        REQUIRE(gate.asked.size() == 2);
+        CHECK(gate.asked[0].first == "allowed.example");
+        CHECK(gate.asked[1].first == "new.example");
+    }
     SECTION("nobody to ask: the same refusal") {
         Gate gate{{"allowed.example"}, std::nullopt, {}};
         CHECK(fetch(web, gate, "https://allowed.example/a").is_error);

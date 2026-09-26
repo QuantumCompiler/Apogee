@@ -115,7 +115,7 @@ agent::PermissionChecker make_permission_checker(const harness::Config& config,
                 if (!host.has_value()) {
                     return agent::Permission::Deny;
                 }
-                if (false) {
+                if (harness::host_listed(hosts, *host)) {
                     return agent::Permission::Allow;
                 }
                 if (approvals != nullptr && approvals->hosts.contains(*host)) {

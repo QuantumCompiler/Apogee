@@ -71,6 +71,14 @@ Opened 2026-09-25 with its spike: Apogee as a **component in other people's appl
 - [ ] **The schema artifact** *([27d](../backlog/machine-schema-artifact.md))* — the protocol as JSON Schema, printed by the binary and conformance-pinned.
 - [ ] **Machine-readable reads** *([27e](../backlog/machine-readable-reads.md))* — `--output-format json` on the listings a host UI needs.
 
+### v0.1.5 — Autonomous tasks
+
+Opened 2026-09-25: `apogee task run "<goal>"` — the user states what they want; the application plans, drives successive turns of the one shared agent loop, checks acceptance stated up front, composes corrective rounds, and stops on done or budget. Proven in a context-only spike the same day (the user's call: findings live in the backlog documents rather than a repo record) — an outer loop over the shipped binary completed the whole cycle from a single user input, and what it exposed puts the runner **in the binary over a resumable ledger**: task state otherwise lives only in the driving process, and an external driver cannot verify tool work it did not do. The safety kit is the training cycle's, reused: a PID lock, budgets with no off switch, a no-progress breaker, halt/resume, never a daemon — and unattended runs keep deny-by-default until a declared policy widens them. In build order:
+
+- [ ] **The task runner and its ledger** *([28a](../backlog/task-runner-core.md))* — safe and narrow first: deny-by-default, fail-on-question, resumable, bounded by construction.
+- [ ] **Task autonomy policy** *([28b](../backlog/task-autonomy-policy.md))* — pre-declared per-task grants and question answers, recorded per use. **Its two [user] calls — the grant ceiling and the question-policy vocabulary — are the feature's safety ceiling and block its build.**
+- [ ] **Task surfaces** *([28c](../backlog/task-surfaces.md))* — machine-mode task events, JSON status/list, admin-plane reads; control stays CLI-only, the training precedent.
+
 ## Unspecced ideas
 
 - **GUI sibling applications** *(committed direction 2026-08-24; planned home `lib/src/darwin|linux|windows`, one app per platform)* — graphical front-ends shipped alongside the harness, powering the CLI directly over stdin/stdout via the structured JSONL machine mode (never a localhost port; mutations shell out to the same CLI commands). Its contract now exists — see the [machine-mode protocol](../reference/machine-mode.md) (shipped 2026-09-06); the GUI itself still needs its own planning pass. No TUI, ever.

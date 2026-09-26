@@ -1011,6 +1011,9 @@ TEST_CASE("add_allowed_host on the shipped template changes one line, and remove
     CHECK(six.find(R"([docs.python.org, pypi.org, "::1"])") != std::string::npos);
     CHECK(apogee::harness::parse_config(six, "six").tools.allowed_hosts.back() == "::1");
 
+    // Removing the first of two takes its separator with it.
+    CHECK(apogee::harness::remove_allowed_host(two, "docs.python.org")
+              .find("  allowed_hosts: [pypi.org]\n") != std::string::npos);
     // Every removal order returns the exact bytes.
     CHECK(apogee::harness::remove_allowed_host(six, "::1") == two);
     CHECK(apogee::harness::remove_allowed_host(two, "pypi.org") == one);
