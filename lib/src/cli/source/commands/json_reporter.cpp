@@ -48,6 +48,15 @@ void JsonReporter::on_thinking_token(std::string_view chunk) {
     write(object.dump());
 }
 
+void JsonReporter::on_notice(std::string_view text) {
+    if (text.empty()) {
+        return;
+    }
+    nlohmann::json object = event("notice");
+    object["text"] = std::string{text};
+    write(object.dump());
+}
+
 void JsonReporter::on_tool_status(std::string_view detail) {
     if (detail.empty()) {
         return;

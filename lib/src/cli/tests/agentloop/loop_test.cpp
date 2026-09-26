@@ -597,3 +597,139 @@ TEST_CASE("the final call's finish reason rides the result", "[agentloop][finish
     CHECK(result.finish_reason == apogee::harness::FinishReason::Length);
     CHECK(result.answer == "partial");
 }
+
+// ---------------------------------------------------------------------------
+// The repeated-call guard (25b)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the third identical call in a turn is answered without running", "[agentloop][repeat]") {
+    // The spike's 3B model read one file three times and ran the shell
+    // eight: the answer it needed was already in its history.
+    ToolRegistry registry;
+    int runs = 0;
+    Tool counted;
+    counted.name = "read_thing";
+    counted.description = "reads";
+    counted.run = [&runs](std::string_view) {
+        ++runs;
+        return ToolOutcome{"contents", false};
+    };
+    registry.add(std::move(counted));
+
+    // The same arguments three times -- the third with its keys spelled in
+    // another order, which is the same call -- then a different one.
+    Fixture f = make_fixture({
+        tool_turn({ToolCall{"c1", "read_thing", R"({"path":"a","lines":2})"}}),
+        tool_turn({ToolCall{"c2", "read_thing", R"({"path":"a","lines":2})"}}),
+        tool_turn({ToolCall{"c3", "read_thing", R"({"lines":2, "path":"a"})"}}),
+        tool_turn({ToolCall{"c4", "read_thing", R"({"path":"b","lines":2})"}}),
+        text_turn("done"),
+    });
+    (void)apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+
+    CHECK(runs == 3);  // c1, c2 and c4; never c3
+    std::string third;
+    for (const ChatMessage& message : f.history) {
+        if (message.role == Role::Tool && message.tool_call_id == "c3") {
+            third = message.content.plain_text();
+        }
+    }
+    CHECK(third.find("already called read_thing") != std::string::npos);
+    CHECK(apogee::agentloop::kRepeatedCallLimit == 3);
+}
+
+TEST_CASE("the repeated-call guard counts one turn, not the conversation", "[agentloop][repeat]") {
+    ToolRegistry registry;
+    int runs = 0;
+    Tool counted;
+    counted.name = "read_thing";
+    counted.description = "reads";
+    counted.run = [&runs](std::string_view) {
+        ++runs;
+        return ToolOutcome{"contents", false};
+    };
+    registry.add(std::move(counted));
+
+    Fixture f = make_fixture({
+        tool_turn({ToolCall{"c1", "read_thing", "{}"}}),
+        tool_turn({ToolCall{"c2", "read_thing", "{}"}}),
+        text_turn("first"),
+        tool_turn({ToolCall{"c3", "read_thing", "{}"}}),
+        text_turn("second"),
+    });
+    (void)apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+    f.history.push_back(ChatMessage::user("again"));
+    (void)apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+    CHECK(runs == 3);
+}
+
+// ---------------------------------------------------------------------------
+// Provider notices (25b)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A provider that says one thing through its status channel, then answers.
+class NoticingProvider final : public apogee::harness::LLMProvider {
+public:
+    [[nodiscard]] std::string_view backend_name() const noexcept override {
+        return "noticing";
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse chat(
+        const apogee::harness::ChatRequest&, const apogee::harness::CancellationToken&) override {
+        return answer();
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse stream_chat(
+        const apogee::harness::ChatRequest&,
+        const apogee::harness::StreamOptions& options) override {
+        apogee::harness::StatusEvent loading;
+        loading.type = apogee::harness::StatusEvent::Type::ModelLoading;
+        loading.detail = "not a notice";
+        options.on_status(loading);
+        apogee::harness::StatusEvent notice;
+        notice.type = apogee::harness::StatusEvent::Type::Notice;
+        notice.detail = "tiny-model is answering without tools: no template";
+        options.on_status(notice);
+        return answer();
+    }
+
+    [[nodiscard]] std::vector<apogee::harness::ModelInfo> list_models(
+        const apogee::harness::CancellationToken&) override {
+        return {};
+    }
+
+private:
+    static apogee::harness::ChatResponse answer() {
+        apogee::harness::ChatResponse response;
+        response.message = ChatMessage::assistant("fine");
+        return response;
+    }
+};
+
+class NoticeReporter final : public Reporter {
+public:
+    std::vector<std::string> notices;
+
+    void on_notice(std::string_view text) override {
+        notices.emplace_back(text);
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a provider's notice reaches the reporter; its other status does not",
+          "[agentloop][notice]") {
+    Harness harness{Config{}};
+    harness.register_provider("noticing", std::make_shared<NoticingProvider>());
+    harness.use_default_router();
+    std::vector<ChatMessage> history{ChatMessage::user("hi")};
+    Options options;
+    options.model = "noticing";
+    NoticeReporter reporter;
+    const RunResult result = apogee::agentloop::run(harness, history, options, reporter);
+    CHECK(result.answer == "fine");
+    CHECK(reporter.notices ==
+          std::vector<std::string>{"tiny-model is answering without tools: no template"});
+}

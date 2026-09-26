@@ -301,7 +301,19 @@ function(apogee_collect_static_archives target visited_var files_var)
         list(APPEND files "$<TARGET_FILE:${target}>")
     endif()
     set(deps "")
-    foreach(property LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+    # What the final link line actually carries. A static library has no link
+    # step of its own: what reaches the executable is its
+    # INTERFACE_LINK_LIBRARIES, where CMake records even a PRIVATE dependency
+    # (as $<LINK_ONLY:...>). Its LINK_LIBRARIES are compile-time usage only,
+    # and walking them scanned archives the linker never sees -- llama.cpp's
+    # vendored httplib, cut from `llama-common`'s interface (third_party/
+    # CMakeLists.txt, 25b), is the case. An executable or a shared library
+    # links its LINK_LIBRARIES into itself, so both lists are walked there.
+    set(link_properties LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+    if(type STREQUAL "STATIC_LIBRARY")
+        set(link_properties INTERFACE_LINK_LIBRARIES)
+    endif()
+    foreach(property IN LISTS link_properties)
         get_target_property(value "${target}" ${property})
         if(value)
             list(APPEND deps ${value})

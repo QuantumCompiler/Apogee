@@ -1,11 +1,14 @@
 #pragma once
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,6 +16,69 @@
 #include "backends/llama_runtime.h"
 
 namespace apogee::testing {
+
+/// A word-level stand-in for llama.cpp's template reader: `<think>...</think>`
+/// is reasoning, `<tool_call>{"name":...,"arguments":{...}}</tool_call>` is a
+/// call, everything else is content. Streaming (`partial`), an unclosed span
+/// is held back; finished, one is a format mismatch -- the two answers the
+/// real reader gives.
+class FakeReplyReader final : public backends::ReplyReader {
+public:
+    [[nodiscard]] bool read(std::string_view text, bool partial, backends::ParsedReply& out,
+                            std::string& error) const override {
+        out = {};
+        constexpr std::string_view kThink = "<think>";
+        constexpr std::string_view kThinkEnd = "</think>";
+        constexpr std::string_view kCall = "<tool_call>";
+        constexpr std::string_view kCallEnd = "</tool_call>";
+        std::string_view rest = text;
+        while (!rest.empty()) {
+            const std::size_t think = rest.find(kThink);
+            const std::size_t call = rest.find(kCall);
+            const std::size_t next = std::min(think, call);
+            out.content += std::string{rest.substr(0, next)};
+            if (next == std::string_view::npos) {
+                break;
+            }
+            if (next == think) {
+                rest.remove_prefix(think + kThink.size());
+                const std::size_t close = rest.find(kThinkEnd);
+                if (close == std::string_view::npos) {
+                    if (!partial) {
+                        error = "an unclosed think block";
+                        return false;
+                    }
+                    out.reasoning += std::string{rest};
+                    break;
+                }
+                out.reasoning += std::string{rest.substr(0, close)};
+                rest.remove_prefix(close + kThinkEnd.size());
+                continue;
+            }
+            rest.remove_prefix(call + kCall.size());
+            const std::size_t close = rest.find(kCallEnd);
+            if (close == std::string_view::npos) {
+                if (!partial) {
+                    error = "an unclosed tool call";
+                    return false;
+                }
+                break;  // held: nothing of it is content
+            }
+            const nlohmann::json body =
+                nlohmann::json::parse(rest.substr(0, close), nullptr, false);
+            if (body.is_discarded() || !body.is_object() || !body.contains("name")) {
+                error = "a malformed tool call";
+                return false;
+            }
+            harness::ToolCall parsed;
+            parsed.name = body.value("name", std::string{});
+            parsed.arguments = body.contains("arguments") ? body["arguments"].dump() : "{}";
+            out.tool_calls.push_back(std::move(parsed));
+            rest.remove_prefix(close + kCallEnd.size());
+        }
+        return true;
+    }
+};
 
 /// A scripted llama.cpp — the seam that makes the local backend testable on a
 /// build with no llama.cpp in it.
@@ -56,6 +122,21 @@ public:
             return eog_token;
         }
         return script[sampled++];
+    }
+
+    /// Every grammar set, in order -- including the empty ones that clear it.
+    std::vector<backends::SamplingGrammar> grammars;
+    /// When set, a non-empty grammar is refused with this.
+    std::string grammar_error;
+
+    [[nodiscard]] bool set_grammar(const backends::SamplingGrammar& grammar,
+                                   std::string& error) override {
+        grammars.push_back(grammar);
+        if (!grammar.gbnf.empty() && !grammar_error.empty()) {
+            error = grammar_error;
+            return false;
+        }
+        return true;
     }
 
     /// False plays a recurrent or hybrid model: a trim that would cut cached
@@ -125,6 +206,11 @@ public:
         return state_->sample();
     }
 
+    [[nodiscard]] bool set_grammar(const backends::SamplingGrammar& grammar,
+                                   std::string& error) override {
+        return state_->set_grammar(grammar, error);
+    }
+
     [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
         return state_->trim_to(position);
     }
@@ -166,6 +252,28 @@ public:
     /// texts appended — the "model ships its own template" path.
     std::string builtin_template_prefix;
 
+    /// Whether `render_chat` renders -- the model ships a template llama.cpp's
+    /// chat layer can read. Off, it answers as a GGUF with no template does.
+    bool chat_template = false;
+    /// When set, `render_chat` fails with it: a template that cannot render.
+    std::string chat_template_error;
+    /// Words `token_text` renders as nothing, the way a special token is --
+    /// `special_token_text` still renders them.
+    std::set<std::string> special_words;
+    /// The stop strings a rendering carries.
+    std::vector<std::string> stops;
+    /// A grammar rendering fails to compile with this, on every context.
+    std::string grammar_error;
+
+    /// What each `render_chat` call was given, in order.
+    struct ChatRender {
+        std::vector<harness::ChatMessage> messages;
+        std::vector<harness::Tool> tools;
+        bool enable_thinking = true;
+    };
+
+    mutable std::vector<ChatRender> chat_renders;
+
     /// Every text tokenized, in order: what the provider actually sent.
     mutable std::vector<std::string> tokenized;
 
@@ -196,7 +304,60 @@ public:
 
     [[nodiscard]] std::string token_text(std::int32_t token) const override {
         const auto it = text_.find(token);
+        if (it == text_.end() || special_words.contains(it->second)) {
+            return {};
+        }
+        return it->second;
+    }
+
+    [[nodiscard]] std::string special_token_text(std::int32_t token) const override {
+        const auto it = text_.find(token);
         return it == text_.end() ? std::string{} : it->second;
+    }
+
+    /// The word-level stand-in for the model's own template: every role, call
+    /// and result on the prompt as words, the tools named, and the thinking
+    /// switch visible -- so a test can read what the model was shown.
+    [[nodiscard]] bool render_chat(const std::vector<harness::ChatMessage>& messages,
+                                   const std::vector<harness::Tool>& tools, bool enable_thinking,
+                                   backends::ChatRendering& out,
+                                   std::string& error) const override {
+        chat_renders.push_back({messages, tools, enable_thinking});
+        if (!chat_template) {
+            error = "the model ships no chat template";
+            return false;
+        }
+        if (!chat_template_error.empty()) {
+            error = chat_template_error;
+            return false;
+        }
+        std::string prompt = "[template]";
+        for (const harness::ChatMessage& message : messages) {
+            prompt += " " + std::string{harness::to_string(message.role)} + ": ";
+            prompt += message.content.plain_text();
+            for (const harness::ToolCall& call : message.tool_calls) {
+                prompt += " call:" + call.name + "#" + call.id;
+            }
+            if (!message.tool_call_id.empty()) {
+                prompt += " answers:" + message.tool_call_id;
+            }
+        }
+        if (!tools.empty()) {
+            prompt += " tools:";
+            for (const harness::Tool& tool : tools) {
+                prompt += " " + tool.name;
+            }
+            out.grammar.gbnf = "root ::= fake-call";
+            out.grammar.lazy = true;
+            out.grammar.trigger_patterns = {"<tool_call>"};
+        }
+        prompt += enable_thinking ? " assistant:" : " assistant(no-think):";
+        out.prompt = std::move(prompt);
+        out.preserved_tokens = {id_for("<tool_call>"), id_for("</tool_call>")};
+        out.stops = stops;
+        out.format = "fake";
+        out.reader = std::make_unique<FakeReplyReader>();
+        return true;
     }
 
     [[nodiscard]] bool is_eog(std::int32_t token) const noexcept override {
@@ -271,6 +432,7 @@ public:
         state->batch_limit = batch_limit;
         state->context_capacity = context_capacity;
         state->rewindable = rewindable;
+        state->grammar_error = grammar_error;
         contexts.push_back(state);
         // The provider owns its contexts and destroys a side request's the
         // moment the call returns -- so the model keeps them ALIVE and hands
@@ -315,6 +477,12 @@ public:
     std::vector<std::int32_t> script;
     std::int32_t eog_token = -1;
     std::string builtin_template_prefix;
+    /// Applied to every model: see FakeLlamaModel.
+    bool chat_template = false;
+    std::string chat_template_error;
+    std::set<std::string> special_words;
+    std::vector<std::string> stops;
+    std::string grammar_error;
 
     /// Generation scripted as the exact PIECES a model emits, rather than as
     /// token ids.
@@ -347,6 +515,11 @@ public:
         }
         loaded->eog_token = eog_token;
         loaded->builtin_template_prefix = builtin_template_prefix;
+        loaded->chat_template = chat_template;
+        loaded->chat_template_error = chat_template_error;
+        loaded->special_words = special_words;
+        loaded->stops = stops;
+        loaded->grammar_error = grammar_error;
         model = loaded.get();
         return loaded;
     }

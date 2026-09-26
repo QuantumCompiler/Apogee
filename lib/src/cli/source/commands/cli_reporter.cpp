@@ -106,6 +106,14 @@ void CliReporter::on_tool_status(std::string_view detail) {
     status_.set(options_.style.tag(ansi::Role::Tool) + " " + std::string{detail});
 }
 
+void CliReporter::on_notice(std::string_view text) {
+    // A line that stays, above the spinner -- the way an MCP server that
+    // failed to connect stays readable once the prompt is up.
+    settle_answer();
+    thinking_.finish();
+    status_.print_line(options_.style.tag(ansi::Role::Warning) + " " + std::string{text});
+}
+
 void CliReporter::on_clear_status() {
     settle_answer();
     thinking_.finish();

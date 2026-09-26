@@ -151,6 +151,7 @@ indicator. The vocabulary is the same one the terminal status line shows.
 | `rag_search` | `start` / `done` | `name` = collection | Retrieval is running / has returned. |
 | `rag_result` | `done` | `collection`, `chunks_found`, `top_score`, `retriever`, `reranked`, `graph_entities` (when the collection's knowledge graph expanded the chunks), `detail` (notes) | What was injected. `retriever` sets `top_score`'s scale — lexical and vector scores are not comparable. |
 | `model_loading` / `model_ready` | `start` / `done` | `name` = backend | A local model is loading; loading finished. |
+| `notice` | `done` | `detail` = the line | Something the user should read that is neither progress nor an error: a local model whose chat template cannot take tools, so it is answering without them; a reply that did not match its template's format, kept as text with no tool call run. |
 | `thinking` | `start` | — | The model is working: the top of each loop iteration. |
 | `tool_call` | `start` / `done` | `name` = tool | A server-side tool call. |
 | `token_count` | `done` | `tokens`, `tokens_per_second`, `detail: "estimated"` when estimated | After the answer. |

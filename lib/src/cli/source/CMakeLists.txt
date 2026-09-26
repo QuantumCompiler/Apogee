@@ -478,7 +478,22 @@ if(APOGEE_ENABLE_LLAMA)
     # machine with llama.cpp installed via Homebrew that is a DIFFERENT
     # llama.cpp, and the build fails with a wall of ggml redefinitions that
     # names neither the real cause nor this file.
-    target_link_libraries(apogee_core PRIVATE llama mtmd)
+    #
+    # `apogee_llama_chat` is llama.cpp's chat layer behind an interface of
+    # standard types (backends/llama_chat.h): a library of its own so that
+    # `llama-common`'s include directories -- which carry its own copy of
+    # nlohmann/json, at another version -- reach that one translation unit and
+    # no other. Linked PRIVATE, so they never propagate into apogee_core.
+    add_library(apogee_llama_chat STATIC
+        backends/llama_chat.h
+        backends/llama_chat.cpp
+    )
+    target_include_directories(apogee_llama_chat PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(apogee_llama_chat PRIVATE llama llama-common)
+    target_compile_definitions(apogee_llama_chat PRIVATE APOGEE_ENABLE_LLAMA=1)
+    apogee_set_target_options(apogee_llama_chat)
+
+    target_link_libraries(apogee_core PRIVATE llama mtmd apogee_llama_chat)
     target_compile_definitions(apogee_core PRIVATE APOGEE_ENABLE_LLAMA=1)
 endif()
 

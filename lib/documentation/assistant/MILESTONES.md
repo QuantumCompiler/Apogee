@@ -503,6 +503,81 @@ Two smaller corrections came from the same run: llama.cpp's own logging is now r
 
 **Not verified:** performance. The KV cache is asserted by token counts, never by wall-clock, and no large model was run.
 
+### 2026-09-25 — `local-tool-calling` (backlog item 25b): tools through each model's own template
+
+**The gap.** The local-tools spike (2026-09-25) found that no local model had ever been shown a tool. `LlamaCppProvider` rendered its prompt with `llama_chat_apply_template`, llama.cpp's legacy template function, which has no tools input, so `request.tools` was dropped. Asked to use `read_file`, Qwen3.8-27B replied that it had no such tool. The one local call path was Milestone P's gpt-oss parser, and even gpt-oss was never shown the list. The spike measured the fix outside Apogee: llama.cpp's own chat layer (`common/chat.h`, which llama-server runs) passed six tasks out of six on Qwen3.8-27B and on Qwen3-VL-8B.
+
+**What was built**
+
+- [x] **`backends/llama_chat.h/.cpp`**: llama.cpp's chat layer behind an interface of standard types. It loads a model's templates once per load and renders messages and tools through the template. It converts the grammar triggers the way llama-server does and resolves the preserved special tokens. Its parser returns content, reasoning and calls, and gives `false` where llama.cpp would throw.
+  - It lives in **a library of its own**, `apogee_llama_chat`, because `llama-common` carries its own nlohmann/json at another version (3.12 against Apogee's pinned 3.11.3), and the two share an include guard. This is the one translation unit that sees those headers.
+  - `common`'s own logger, which writes straight to stderr, is silenced once.
+- [x] **The seam** (`llama_runtime.h`).
+  - `LlamaModel::render_chat` returns a `ChatRendering`: the prompt, a `SamplingGrammar`, the preserved tokens, the stop strings, and a `ReplyReader`.
+  - `special_token_text` renders a special token as text: a call's opener (`<tool_call>` on Qwen) is a special token, and without this the reader would see the call as bare JSON.
+  - `LlamaContext::set_grammar` installs the grammar for one generation.
+  - The defaults refuse, so a runtime without the layer falls back honestly.
+- [x] **The real runtime** (`llama_real.cpp`) builds a fresh sampler chain per generation (`make_sampler`): the lazy tool grammar when there is one, then greedy selection. It also **no longer accepts a token twice**: `llama_sampler_sample` already accepts, and the extra `llama_sampler_accept` had been harmless only because greedy selection keeps no state. A grammar does keep state, so it would have advanced twice per token.
+- [x] **The provider** (`llamacpp`). Every request renders through one function, `render_request`, whether it is a text turn, an image turn (tools included, per the default) or the token count (which now counts the tool definitions).
+  - With the model's own template, `TemplateReply` re-reads the whole reply after every token, as llama-server does. It emits only the difference: reasoning to the thinking sink, content to the answer, and a call held back entirely.
+  - Stop strings end the reply. A call the format left without an id gets a nine-character one, the shape Mistral's template insists on.
+  - The grammar is set for every generation and cleared on a request without tools, because the session's context outlives any one request.
+  - **The fallback** (the GGUF ships no template, or its template cannot render the request) is the path from before 25b: the name-matched registry and the profile filters. `common` would otherwise have rendered a template-less model with a generic ChatML template, and a guessed format is worse than the registry. When a request carried tools, the fallback says so in one line.
+- [x] **A notice channel.** `StatusEvent::Type::Notice`, forwarded by the loop to a new `Reporter::on_notice`. The terminal shows it as a lasting `[warn]` line, machine mode as a `notice` event, and `serve` as a `notice` meta-frame. It is used for the dropped-tools line, a grammar that did not compile (the turn then runs unconstrained), and a reply that did not match its format (kept as text, with no call run).
+- [x] **The repeated-call guard** (`agentloop/loop.cpp`). The same tool with the same arguments, compared as JSON, a third time in one turn gets a tool result saying it already has that answer (`kRepeatedCallLimit`).
+- [x] **The link**. `llama-common` is linked into `apogee_llama_chat` with its vendored httplib cut from its link interface (`third_party/CMakeLists.txt`), because the downloader that needs httplib is never reached. That is now structural: if a repin made the chat code need httplib, the link would fail by name. The no-listen check's link-graph walk was made exact to match: for a static library it follows `INTERFACE_LINK_LIBRARIES`, which is what reaches the final link, because its private `LINK_LIBRARIES` never do. The walk had been scanning an archive the linker never saw, so the change scans exactly what is linked, no less. The executable's link line and `nm` both confirm that no downloader or httplib code is in the binary. `cli.no_listen_symbols` now scans 16 libraries.
+- [x] **Tests**: 14 new cases -- the provider over the scripted runtime (which models the seam at word level: a template, a reader, special words, grammars), in both builds, and the loop's guard and notice.
+
+**On real weights** (`apogee chat --tools` in machine mode, a driver answering each permission prompt "yes" and recording it; a throwaway home; `context_size` 32768; Q4_K_M):
+
+| Task | Qwen3-VL-8B | Qwen3.8-27B | gpt-oss-20b (F16) | Llama-3.2-3B |
+|---|---|---|---|---|
+| read a file | pass, 6.5 s | pass, 75 s | pass | pass |
+| write a file (gate prompted) | pass, 7.1 s | pass, 124 s | pass | pass |
+| count lines with the shell (gate prompted) | pass, 7.1 s | pass, 121 s | right answer, read the file instead of using the shell | looped, and printed a call as text |
+| list a folder, then read | pass, 24 s | pass, 242 s | pass | reply matched no format: noticed |
+| find a URL, then fetch it (asked per website) | pass, 17 s | pass, 189 s | pass | wandered through twelve calls |
+| arithmetic, no tool | pass, 5.7 s | pass, 31 s | pass | used the shell for `17 * 3` |
+| | **6/6** | **6/6** | 5/6 | 2/6 (the spike measured 3/6) |
+
+Every saved transcript held its calls and results as IR, with no `<tool_call>`, `<think>` or template markup. `apogee complete --tools -m qwen8b "What does notes.txt say?"` called `read_file` and answered from the file. `serve -m qwen8b --tools` answered the same question over HTTP with `apogee_tool_calls: ["read_file"]`. `analyze --agent security-review -m qwen8b --branch feature` found the hardcoded password in a branch it had not checked out, so it had called `git_diff`. The 27B's times are the hybrid-model re-read that [25c](../backlog/hybrid-prompt-checkpoints.md) exists for. Below 8B there is no special effort (the user's call); the repeated-call guard is the only concession.
+
+**Found on the way.**
+- **An empty answer.** When a reply matched no format and nothing of it had been shown, the turn ended with a notice and an empty answer. Found on Llama 3.2 3B. The raw reply now comes out as the text it was, the same safety net the fallback's gate keeps; the exception is a model that was still thinking, whose reasoning never becomes the answer.
+- **A template-less GGUF.** `common` defaults such a model to ChatML. Found reading `common_chat_templates_init`, and answered by keeping the registry for it.
+- **The link graph.** The no-listen scan read an archive the linker never sees. Found on the first link.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Whose format | **Each model's own template, through `common`** (spike) | A model trained on tool tokens ignores an injected prose protocol (Ommi's `TOOL_CALL:`); `common` is maintained upstream with the pin. |
+| Link or copy | **Link `llama-common`**, never copy it (spike) | Part of the pinned tree; the link map pulls only chat, parser, Jinja, grammar and sampling objects. |
+| Acceptance models | **8B-class and up** (the user's call) | Qwen3-VL-8B and Qwen3.8-27B. |
+| Profile filters | Replaced by `common`'s parser wherever Jinja renders *(default taken)* | One parser per template, maintained upstream; the filters stay for the fallback. |
+| Streaming | Re-read per token, emit the difference *(default taken)* | llama-server's method; quadratic, and nothing at chat lengths. |
+| Sampling | Greedy, plus the lazy grammar *(default taken)* | Per-family sampling is [26h](../backlog/sampling-profiles.md); the chain it will extend is `make_sampler`. |
+| Tool choice | `auto`, parallel calls off *(default taken)* | One call per step is easier to gate and to show. |
+| Repeated calls | The third identical call is answered unrun *(default taken)* | The spike's 3B read one file three times and ran the shell eight. |
+| Image turns | Carry tools too *(default taken)* | A model asked about a picture can act on it (the Milestone O rule). |
+| `common`'s JSON | Isolated in `apogee_llama_chat` | Two nlohmann/json versions behind one include guard compile silently against whichever came first. |
+| httplib | Cut from `llama-common`'s link interface | Its only user is the downloader, never reached; cut, the link proves it. |
+| A template-less GGUF | The registry, not `common`'s ChatML | The model's own template when it has one, the name-matched guess before a generic one. |
+| An unmatched reply | Shown text stands; nothing shown → the raw text; no call runs | Never a turn with nothing in it; never a call run on a guess. |
+
+**Guardrails, each mutation-tested (20 mutants: 19 caught outright, 1 once its test was strengthened), run in a separate git worktree.**
+- **Rendering:** the tools dropped from the template (the guardrail's first named mutant); the template ignored for the fallback; the thinking switch ignored.
+- **Streaming:** a call printed as text, with the preserved opener not rendered (the second); reasoning in the answer (the third); content never shown; a stop string kept, or not stopping.
+- **The grammar:** never set; not cleared.
+- **The rest:** a call left without an id; tools dropped silently, or a notice with no tools to drop; an unshown reply left empty, or a thinking model's reasoning made the answer; the repeated-call guard off, early, or comparing arguments as text; notices dropped by the loop; and httplib put back on `llama-common`'s link interface, which `cli.no_listen_symbols` fails naming `libcpp-httplib.a`.
+
+**The survivor.** "Not cleared" survived because its test ran a templated request with no tools, whose grammar is empty anyway. The case that matters is a tool request followed by one that falls back, and the test now runs it.
+
+**Not verified.**
+- `common` on Linux and Windows. It builds on every target (LLAMA_BUILD_COMMON was already on), but the real-weights runs were on macOS only.
+- An image turn with tools on real weights; the scripted runtime covers the shared path.
+- The fallback's notice, on a real GGUF without a template: none is on this machine.
+
 ## Milestone K — The install contract
 
 **Goal.** Make v0.1.0 shippable, and do it by closing Ommi's dominant early bug class rather than by documenting it. Ommi lost real time to *silent install drift*: `make install` seeded one tree, `install.sh` another, the updater a third, and `check` validated a fourth — each list correct when written, diverging one commit at a time, and never failing loudly. The fix adopted here is structural: one layout declaration, and every install path reads it.
@@ -2043,7 +2118,7 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 
 ### 2026-09-25 — `tool-safety-defaults` (backlog item 25a): ask before a new website, work in the launch folder
 
-**Why it came first.** The local-tools spike (2026-09-25) found an exposure that already existed. `read_file` and `fetch_url` were both read-only to the gate, so neither ever asked, and the file tools reached the whole home directory. A model with `--tools` could read a file and send its contents out inside a URL with no prompt at any point, and a web page carrying hidden instructions was enough to set that off. Every cloud backend run with `--tools` had it. [Local tool calling](../backlog/local-tool-calling.md) would hand it to local models, and [web search](../backlog/web-search-searxng.md) would multiply the untrusted pages a model reads. So this went first in the local-agent-tools track.
+**Why it came first.** The local-tools spike (2026-09-25) found an exposure that already existed. `read_file` and `fetch_url` were both read-only to the gate, so neither ever asked, and the file tools reached the whole home directory. A model with `--tools` could read a file and send its contents out inside a URL with no prompt at any point, and a web page carrying hidden instructions was enough to set that off. Every cloud backend run with `--tools` had it. [Local tool calling](#milestone-j--local-inference) would hand it to local models, and [web search](../backlog/web-search-searxng.md) would multiply the untrusted pages a model reads. So this went first in the local-agent-tools track.
 
 **What was built**
 

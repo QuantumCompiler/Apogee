@@ -1,5 +1,8 @@
 #include "agentloop/loop.h"
 
+#include <nlohmann/json.hpp>
+
+#include <map>
 #include <stdexcept>
 #include <utility>
 
@@ -45,6 +48,13 @@ void append_result(std::vector<harness::ChatMessage>& history, const harness::To
     history.push_back(harness::ChatMessage::from_tool_result(result));
 }
 
+/// A call's identity for the repeated-call guard: the tool and its
+/// arguments as JSON, so `{"a":1, "b":2}` and `{"b":2,"a":1}` are one call.
+std::string call_key(const harness::ToolCall& call) {
+    const nlohmann::json parsed = nlohmann::json::parse(call.arguments, nullptr, false);
+    return call.name + '\x1f' + (parsed.is_discarded() ? call.arguments : parsed.dump());
+}
+
 }  // namespace
 
 std::vector<harness::Tool> advertised_tools(const Options& options) {
@@ -66,6 +76,13 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
     result.tokens.estimated = false;
 
     const std::vector<harness::Tool> tools = advertised_tools(options);
+
+    // How often each call has run in this turn. The third identical one is
+    // answered without running: a small local model re-reads the same file
+    // and re-runs the same command in a loop (the 25b spike's 3B model read
+    // one file three times and ran the shell eight), and the answer it needs
+    // is already in its history.
+    std::map<std::string, int> call_counts;
 
     agent::DispatchContext dispatch_context;
     dispatch_context.permission = options.permission;
@@ -120,6 +137,13 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
         stream.on_thinking = [&reporter](std::string_view chunk) {
             // Thinking goes to its own channel and never into the answer.
             reporter.on_thinking_token(chunk);
+        };
+        stream.on_status = [&reporter](const harness::StatusEvent& event) {
+            // Only notices cross here: a model's load progress is the
+            // surface's own business, reported before the turn.
+            if (event.type == harness::StatusEvent::Type::Notice && !event.detail.empty()) {
+                reporter.on_notice(event.detail);
+            }
         };
         stream.on_token = [&](std::string_view chunk) {
             if (chunk.empty()) {
@@ -217,6 +241,15 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
                                   "Error: no tool named '" + call.name +
                                       "'. No tools are "
                                       "available in this conversation.");
+                    continue;
+                }
+
+                if (++call_counts[call_key(call)] >= kRepeatedCallLimit) {
+                    append_result(history, call,
+                                  "You have already called " + call.name +
+                                      " with these same arguments in this turn, and its "
+                                      "result is above. Use that result instead of calling "
+                                      "it again.");
                     continue;
                 }
 

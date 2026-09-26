@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <functional>
+#include <optional>
+#include <random>
 #include <utility>
 
 #include "backends/llamacpp_embed.h"
@@ -161,6 +164,129 @@ void decode_in_batches(LlamaContext& context, const std::vector<std::int32_t>& t
     }
     return images;
 }
+
+/// Sends `text` as a notice, when anyone is listening.
+void notice(const harness::StreamOptions& options, std::string text) {
+    if (!options.on_status) {
+        return;
+    }
+    harness::StatusEvent event;
+    event.type = harness::StatusEvent::Type::Notice;
+    event.phase = harness::StatusEvent::Phase::Done;
+    event.detail = std::move(text);
+    options.on_status(event);
+}
+
+/// An id for a call the model's format left without one: nine letters and
+/// digits, the shape the strictest template in use (Mistral's) insists on, so
+/// the call and its result can be matched when the transcript renders again.
+[[nodiscard]] std::string make_call_id() {
+    static constexpr std::string_view kAlphabet =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    thread_local std::mt19937 generator{std::random_device{}()};
+    std::uniform_int_distribution<std::size_t> pick{0, kAlphabet.size() - 1};
+    std::string id(9, '0');
+    for (char& c : id) {
+        c = kAlphabet[pick(generator)];
+    }
+    return id;
+}
+
+/// A reply read through the model's own template format as it streams.
+///
+/// llama-server's method: the whole reply so far is re-read after every
+/// token and only the difference is emitted -- reasoning to the thinking
+/// sink, content to the answer, and a tool call held back entirely, so its
+/// markup never reaches a screen or a transcript. Quadratic in the reply's
+/// length, which is nothing at chat lengths (25b, default taken).
+class TemplateReply {
+public:
+    TemplateReply(const ChatRendering& chat, const harness::StreamOptions& options)
+        : chat_{chat}, options_{options} {}
+
+    /// Takes the next piece. True when a stop string ended the reply; the
+    /// stop string itself is not part of it.
+    [[nodiscard]] bool write(std::string_view piece) {
+        raw_ += piece;
+        bool stopped = false;
+        for (const std::string& stop : chat_.stops) {
+            if (!stop.empty() && raw_.size() >= stop.size() &&
+                raw_.compare(raw_.size() - stop.size(), stop.size(), stop) == 0) {
+                raw_.resize(raw_.size() - stop.size());
+                stopped = true;
+                break;
+            }
+        }
+        ParsedReply now;
+        std::string ignored;
+        if (chat_.reader->read(raw_, true, now, ignored)) {
+            show(now);
+        }
+        return stopped;
+    }
+
+    /// Reads the finished reply. False, with `error`, when it does not match
+    /// the format: what was already shown stands as the answer, and no call
+    /// is taken from it -- a malformed call is never run on a guess.
+    [[nodiscard]] bool finish(std::string& error) {
+        ParsedReply parsed;
+        if (!chat_.reader->read(raw_, false, parsed, error)) {
+            final_.content = shown_content_;
+            final_.tool_calls.clear();
+            // Nothing shown at all: the reply comes out as the text it was,
+            // rather than a turn with no answer, no tool and only a notice --
+            // the same safety net the fallback's gate keeps (found on
+            // Llama 3.2 3B, 2026-09-25). Not when the model was still
+            // thinking: reasoning never becomes the answer.
+            if (shown_content_.empty() && shown_reasoning_.empty() && !raw_.empty()) {
+                final_.content = raw_;
+                if (options_.on_token) {
+                    options_.on_token(raw_);
+                }
+            }
+            return false;
+        }
+        show(parsed);
+        final_ = std::move(parsed);
+        return true;
+    }
+
+    [[nodiscard]] const std::string& content() const noexcept {
+        return final_.content;
+    }
+
+    [[nodiscard]] std::vector<harness::ToolCall> calls() const {
+        return final_.tool_calls;
+    }
+
+private:
+    /// Emits what `now` adds to what was already shown. A re-read that
+    /// revises earlier text cannot take back what a screen already has, so
+    /// only a strict extension is emitted.
+    void show(const ParsedReply& now) {
+        const auto extend = [](std::string& shown, const std::string& next,
+                               const std::function<void(std::string_view)>& sink) {
+            if (next.size() <= shown.size() || next.compare(0, shown.size(), shown) != 0) {
+                return;
+            }
+            if (sink) {
+                sink(std::string_view{next}.substr(shown.size()));
+            }
+            shown = next;
+        };
+        // Reasoning never reaches the answer: it goes to its own sink, and
+        // the IR has no field to keep it in.
+        extend(shown_reasoning_, now.reasoning, options_.on_thinking);
+        extend(shown_content_, now.content, options_.on_token);
+    }
+
+    const ChatRendering& chat_;
+    const harness::StreamOptions& options_;
+    std::string raw_;
+    std::string shown_reasoning_;
+    std::string shown_content_;
+    ParsedReply final_;
+};
 
 }  // namespace
 
@@ -359,7 +485,48 @@ std::int64_t LlamaCppProvider::count_prompt_tokens(const harness::ChatRequest& r
     if (model_ == nullptr) {
         return -1;  // see the header: never load a model to answer a measurement
     }
-    return llama_tokens::count_prompt_tokens(*model_, options_.model, request.messages);
+    // The prompt a turn would actually send, tool definitions included -- on
+    // a local window they are not a rounding error.
+    return static_cast<std::int64_t>(model_->tokenize(render_request(request).text, true).size());
+}
+
+LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
+    const harness::ChatRequest& request) const {
+    RenderedRequest rendered;
+    const std::vector<harness::ChatMessage> messages = messages_with_schema(request);
+    // The template's own switch, where it has one; a family without one
+    // ignores it (Qwen's closed think block is exactly this switch).
+    const bool enable_thinking = !request.transient.skip_reasoning;
+    auto chat = std::make_unique<ChatRendering>();
+    if (model_->render_chat(messages, request.tools, enable_thinking, *chat,
+                            rendered.fallback_reason)) {
+        rendered.text = chat->prompt;
+        rendered.chat = std::move(chat);
+        return rendered;
+    }
+    // The fallback, as it was before 25b: llama.cpp's fixed template set or
+    // the name-matched registry, and the profile's filters on the reply.
+    rendered.text = llama_tokens::render_prompt(*model_, options_.model, messages, true);
+    if (request.transient.skip_reasoning) {
+        // After the generation prompt, so the model's first token is already
+        // the answer's.
+        rendered.text += reasoning_skip_for(profile());
+    }
+    return rendered;
+}
+
+void LlamaCppProvider::notice_if_toolless(const harness::ChatRequest& request,
+                                          const RenderedRequest& rendered,
+                                          const harness::StreamOptions& options) const {
+    if (request.tools.empty() || rendered.chat != nullptr) {
+        return;
+    }
+    // Unknown is permissive, and nothing is dropped silently: the turn still
+    // runs, and the user is told why the model cannot see its tools.
+    notice(options,
+           options_.model + " is answering without tools: " +
+               (rendered.fallback_reason.empty() ? std::string{"its template cannot take them"}
+                                                 : rendered.fallback_reason));
 }
 
 harness::ChatResponse LlamaCppProvider::chat(const harness::ChatRequest& request,
@@ -396,10 +563,26 @@ std::int64_t LlamaCppProvider::side_context_size(const harness::ChatRequest& req
 LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
                                                         std::int64_t prompt_end,
                                                         const harness::ChatRequest& request,
-                                                        const harness::StreamOptions& options) {
+                                                        const harness::StreamOptions& options,
+                                                        const ChatRendering* chat) {
     options.cancellation.throw_if_cancelled();
 
     const std::int64_t limit = generation_limit(request);
+
+    // The grammar is set every generation -- the session's context outlives
+    // any one request, and a call's grammar from the last turn must not
+    // constrain this one. None on the fallback path.
+    if (std::string error;
+        !context.set_grammar(chat != nullptr ? chat->grammar : SamplingGrammar{}, error)) {
+        // The reader still parses a call without it; unconstrained is the
+        // permissive reading, and the user is told.
+        (void)context.set_grammar(SamplingGrammar{}, error);
+        notice(options, "tool calls on " + options_.model + " run without their grammar: " + error);
+    }
+    std::optional<TemplateReply> reply;
+    if (chat != nullptr) {
+        reply.emplace(*chat, options);
+    }
 
     std::string answer;
     std::vector<std::int32_t> generated;
@@ -461,14 +644,26 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
         if (model_->is_eog(token)) {
             break;
         }
-
-        const std::string piece = model_->token_text(token);
         generated.push_back(token);
 
-        const std::string visible = pump(think.write(piece));
-        answer += visible;
-        if (options.on_token && !visible.empty()) {
-            options.on_token(visible);
+        if (reply.has_value()) {
+            // A preserved token is rendered as its text -- the call's opener
+            // among them -- or the reader would see a call as bare JSON.
+            const bool preserved =
+                std::find(chat->preserved_tokens.begin(), chat->preserved_tokens.end(), token) !=
+                chat->preserved_tokens.end();
+            const std::string piece =
+                preserved ? model_->special_token_text(token) : model_->token_text(token);
+            if (reply->write(piece)) {
+                break;  // a stop string: not fed back, the reply is over
+            }
+        } else {
+            const std::string piece = model_->token_text(token);
+            const std::string visible = pump(think.write(piece));
+            answer += visible;
+            if (options.on_token && !visible.empty()) {
+                options.on_token(visible);
+            }
         }
 
         // Feed the token back so the next sample sees it. Its position is the
@@ -483,14 +678,30 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     // parsed as nothing comes back out as text here, rather than leaving a turn
     // with no answer, no tool, and no error -- the least debuggable outcome
     // there is, and exactly how an unrecognised grammar variant presents.
-    std::string tail = markup.write(gate.write(think.flush()));
-    tail += markup.write(gate.flush());
-    tail += markup.flush();
-    if (!tail.empty()) {
-        answer += tail;
-        if (options.on_token) {
-            options.on_token(tail);
+    std::vector<harness::ToolCall> calls;
+    if (reply.has_value()) {
+        if (std::string error; !reply->finish(error)) {
+            notice(options, options_.model + "'s reply did not match its template's format (" +
+                                chat->format + "): it is kept as text, and no tool call in it ran");
         }
+        answer = reply->content();
+        calls = reply->calls();
+        for (harness::ToolCall& call : calls) {
+            if (call.id.empty()) {
+                call.id = make_call_id();
+            }
+        }
+    } else {
+        std::string tail = markup.write(gate.write(think.flush()));
+        tail += markup.write(gate.flush());
+        tail += markup.flush();
+        if (!tail.empty()) {
+            answer += tail;
+            if (options.on_token) {
+                options.on_token(tail);
+            }
+        }
+        calls = gate.calls();
     }
 
     // Reaching the cap without an end-of-generation token is a truncated
@@ -502,7 +713,7 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     Generation result;
     result.text = std::move(answer);
     result.tokens = std::move(generated);
-    result.tool_calls = gate.calls();
+    result.tool_calls = std::move(calls);
     result.finish = finish;
     if (!result.tool_calls.empty()) {
         // A native call ends the turn on the model's side (`<|call|>` is
@@ -536,8 +747,11 @@ harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatReques
         prompt += marker;
         prompt += "\n";
     }
-    prompt +=
-        llama_tokens::render_prompt(*model_, options_.model, messages_with_schema(request), true);
+    // Through the same renderer as a text turn, tools included: a model asked
+    // about a picture can act on it (the Milestone O rule, 25b default).
+    const RenderedRequest rendered = render_request(request);
+    notice_if_toolless(request, rendered, options);
+    prompt += rendered.text;
 
     // A fresh context every time. There is no prefix to reuse -- an image
     // occupies embedding positions that no token comparison can match -- so
@@ -551,7 +765,8 @@ harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatReques
         throw harness::ProviderError(options_.backend_name, error);
     }
 
-    const Generation generation = generate(context, prompt_end, request, options);
+    const Generation generation =
+        generate(context, prompt_end, request, options, rendered.chat.get());
 
     // The session's own KV is deliberately untouched: this turn ran on a
     // throwaway context, so `session_tokens_` still describes what the text
@@ -588,15 +803,10 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
         return run_multimodal(request, options, images);
     }
 
-    std::string text =
-        llama_tokens::render_prompt(*model_, options_.model, messages_with_schema(request), true);
-    if (request.transient.skip_reasoning) {
-        // After the generation prompt, so the model's first token is already
-        // the answer's.
-        text += reasoning_skip_for(profile());
-    }
+    const RenderedRequest rendered = render_request(request);
+    notice_if_toolless(request, rendered, options);
     // add_special: see llama_tokens::tokenize_prompt.
-    const std::vector<std::int32_t> prompt = model_->tokenize(text, true);
+    const std::vector<std::int32_t> prompt = model_->tokenize(rendered.text, true);
 
     // A side request -- a background title summary, a one-off clerk call -- is
     // not a turn of this conversation. It runs on its own throwaway context so
@@ -642,7 +852,8 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
     // The sampling loop is shared with the image path: extracted when vision
     // landed, because the alternative was a second copy that would drift the
     // first time a stop condition changed.
-    const Generation generation = generate(*context, prompt_end, request, options);
+    const Generation generation =
+        generate(*context, prompt_end, request, options, rendered.chat.get());
     const std::string& answer = generation.text;
 
     if (!side_request) {

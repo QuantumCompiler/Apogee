@@ -33,6 +33,56 @@ struct DecodeRecord {
     std::int64_t count = 0;     ///< how many tokens were decoded
 };
 
+/// The grammar one generation obeys. An empty `gbnf` constrains nothing.
+struct SamplingGrammar {
+    std::string gbnf;
+    /// Applied only once a trigger fires -- a tool call's opener -- so the
+    /// model's prose stays free and only the call is held to the format.
+    bool lazy = false;
+    std::vector<std::string> trigger_patterns;
+    std::vector<std::int32_t> trigger_tokens;
+};
+
+/// A reply, read back through the model's own template format.
+struct ParsedReply {
+    std::string content;
+    /// Shown live, never kept: the IR has no field for it.
+    std::string reasoning;
+    std::vector<harness::ToolCall> tool_calls;
+};
+
+/// Reads the replies to one rendered request.
+class ReplyReader {
+public:
+    ReplyReader() = default;
+    virtual ~ReplyReader() = default;
+    ReplyReader(const ReplyReader&) = delete;
+    ReplyReader& operator=(const ReplyReader&) = delete;
+    ReplyReader(ReplyReader&&) = delete;
+    ReplyReader& operator=(ReplyReader&&) = delete;
+
+    /// Reads `text`, everything generated so far. `partial` while it is still
+    /// streaming: an unfinished call is held back rather than refused. False
+    /// with `error` when a finished reply does not match the format.
+    [[nodiscard]] virtual bool read(std::string_view text, bool partial, ParsedReply& out,
+                                    std::string& error) const = 0;
+};
+
+/// A request rendered through the model's own chat template, tools and all.
+struct ChatRendering {
+    std::string prompt;
+    SamplingGrammar grammar;
+    /// Special tokens the reader must see as text (`<tool_call>` on Qwen). A
+    /// special token is otherwise rendered as nothing, and the call it opens
+    /// would reach the reader as bare JSON.
+    std::vector<std::int32_t> preserved_tokens;
+    /// Strings that end generation, besides end-of-generation itself.
+    std::vector<std::string> stops;
+    /// The template format's name, for a diagnostic.
+    std::string format;
+    std::unique_ptr<ReplyReader> reader;
+};
+
 /// One KV cache -- llama.cpp's `llama_context`.
 ///
 /// A context IS the conversation's warm state. Keeping one alive across turns
@@ -53,6 +103,20 @@ public:
 
     /// Samples the next token given the current state.
     [[nodiscard]] virtual std::int32_t sample() = 0;
+
+    /// The grammar every sample obeys from now on; an empty one removes it.
+    /// Set before each generation, since a grammar holds state across the
+    /// tokens of one reply. False with `error` when it does not compile.
+    ///
+    /// The default accepts only "none": a runtime that cannot constrain must
+    /// say so rather than sample freely under a grammar it ignored.
+    [[nodiscard]] virtual bool set_grammar(const SamplingGrammar& grammar, std::string& error) {
+        if (grammar.gbnf.empty()) {
+            return true;
+        }
+        error = "this context cannot apply a grammar";
+        return false;
+    }
 
     /// Drops every cached position at or after `position`, so the next decode
     /// re-establishes from there. `position == 0` clears the cache entirely.
@@ -135,6 +199,12 @@ public:
     /// no printable form.
     [[nodiscard]] virtual std::string token_text(std::int32_t token) const = 0;
 
+    /// Renders one token as text, a special token included -- for the ones a
+    /// rendering preserves.
+    [[nodiscard]] virtual std::string special_token_text(std::int32_t token) const {
+        return token_text(token);
+    }
+
     /// Whether `token` ends generation.
     [[nodiscard]] virtual bool is_eog(std::int32_t token) const noexcept = 0;
 
@@ -152,6 +222,27 @@ public:
     /// and a wrong guess produces fluent nonsense rather than an error.
     [[nodiscard]] virtual std::string apply_builtin_template(
         const std::vector<harness::ChatMessage>& messages, bool add_generation_prompt) const = 0;
+
+    /// Renders `messages` and `tools` through the model's own chat template,
+    /// with llama.cpp's chat layer (`common/chat.h`, the one llama-server
+    /// runs): the prompt, the grammar a tool call must follow, and a reader
+    /// for the reply. `enable_thinking` is the template's own switch.
+    ///
+    /// False with `error` when it cannot -- the GGUF ships no template, or
+    /// its template cannot render this request. The caller then renders
+    /// through `apply_builtin_template` and the registry, as before, and says
+    /// so when the request carried tools. The default cannot.
+    [[nodiscard]] virtual bool render_chat(const std::vector<harness::ChatMessage>& messages,
+                                           const std::vector<harness::Tool>& tools,
+                                           bool enable_thinking, ChatRendering& out,
+                                           std::string& error) const {
+        (void)messages;
+        (void)tools;
+        (void)enable_thinking;
+        (void)out;
+        error = "this runtime has no chat-template layer";
+        return false;
+    }
 
     /// Training context length, or 0 when unknown.
     [[nodiscard]] virtual std::int64_t context_length() const noexcept = 0;

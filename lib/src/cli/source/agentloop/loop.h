@@ -26,6 +26,11 @@
 /// that Anthropic calls it `tool_use` and OpenAI calls it `tool_calls`.
 namespace apogee::agentloop {
 
+/// The identical tool call -- same tool, same arguments -- this many times in
+/// one turn is answered with "you already have that result" instead of running
+/// again. `max_iterations` bounds the loop; this bounds its commonest waste.
+inline constexpr int kRepeatedCallLimit = 3;
+
 struct Options {
     /// Backend or model name; empty means the configured default.
     std::string model;

@@ -223,6 +223,23 @@ private:
     [[nodiscard]] std::int64_t side_context_size(const harness::ChatRequest& request,
                                                  std::size_t prompt_tokens) const;
 
+    /// A request's prompt, and how its reply is to be read.
+    struct RenderedRequest {
+        std::string text;
+        /// Set when the model's own template rendered it (llama.cpp's chat
+        /// layer), tools and all: the grammar and the reply reader come with
+        /// it. Null on the fallback path, where the profile's filters read
+        /// the reply as they always have.
+        std::unique_ptr<ChatRendering> chat;
+        /// Why the template path was not taken, when it was not.
+        std::string fallback_reason;
+    };
+
+    /// Renders `request` the one way every path uses -- the text turn, the
+    /// image turn, and the token count -- so the three cannot disagree about
+    /// what the model is shown.
+    [[nodiscard]] RenderedRequest render_request(const harness::ChatRequest& request) const;
+
     /// One turn's generated output.
     struct Generation {
         std::string text;
@@ -240,9 +257,13 @@ private:
     /// Shared by the text and image paths. Extracted when vision landed: the
     /// alternative was a second copy of the stop conditions, which would drift
     /// the first time one of them changed.
+    ///
+    /// `chat` is the rendering's grammar and reader, or null for the fallback
+    /// path's filters.
     [[nodiscard]] Generation generate(LlamaContext& context, std::int64_t prompt_end,
                                       const harness::ChatRequest& request,
-                                      const harness::StreamOptions& options);
+                                      const harness::StreamOptions& options,
+                                      const ChatRendering* chat);
 
     /// The turn when the request carries images.
     ///
@@ -253,6 +274,11 @@ private:
     [[nodiscard]] harness::ChatResponse run_multimodal(const harness::ChatRequest& request,
                                                        const harness::StreamOptions& options,
                                                        const std::vector<std::string>& images);
+
+    /// Says, once per turn, that a request carrying tools is answered without
+    /// them -- the fallback path cannot put them in the prompt.
+    void notice_if_toolless(const harness::ChatRequest& request, const RenderedRequest& rendered,
+                            const harness::StreamOptions& options) const;
 
     /// The resolved profile, and the architecture it was resolved from.
     ///

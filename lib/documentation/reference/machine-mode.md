@@ -49,6 +49,7 @@ One JSON object per line on stdout. Every object has a `type`.
 | `thinking` | The model began reasoning. No text. |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
 | `tool_status` | A tool is running, described in `text` for display. |
+| `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format. Show it and keep it; it never ends the turn. |
 | `answer_start` / `answer_end` | Bracket one answer's deltas. |
 | `answer_delta` | A chunk of answer text. Concatenate in order. |
 | `result` | Ends a turn. Carries the whole answer, so a driver that dropped every delta still has it. `usage` is **absent** when the provider reported none — absent is not zero. |

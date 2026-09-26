@@ -28,7 +28,7 @@ It does that with **context checkpoints**:
 
 **Decisions made:**
 - 2026-09-25 — **Checkpoints, as llama-server does them**, over two alternatives. Re-rendering each answer with its reasoning, so the prompt never diverges, would need reasoning in the IR, against "thinking is never persisted". It also would not help a template that changes earlier text for other reasons.
-- 2026-09-25 — Its own item, after [local tool calling](local-tool-calling.md): tool loops are where the cost multiplies, so that is where it is measured.
+- 2026-09-25 — Its own item, after [local tool calling](../assistant/MILESTONES.md#milestone-j--local-inference) (shipped 2026-09-25; Qwen3.8-27B's six tasks took 31–242 s there, the re-read this item removes): tool loops are where the cost multiplies, so that is where it is measured.
 
 **Open calls:**
 - [default: at most 8 checkpoints per context, keeping the newest] A chat needs the one before its latest answer. llama-server's 32 is for a server's slots, and each checkpoint is a copy of the recurrent state. Measure the size on Qwen3.8-27B and record it.
@@ -50,4 +50,4 @@ It does that with **context checkpoints**:
 - [ ] A pure-attention model takes no checkpoints.
 - [ ] Checkpoint memory is capped, and `--verbose` reports it.
 
-**Scope note.** Item **25c**; build after 25b. Out of scope: persisting checkpoints to disk across processes (a resumed chat re-reads once), and speculative-decoding checkpoints.
+**Scope note.** Item **25c**; gated on nothing pending (25b shipped 2026-09-25). Out of scope: persisting checkpoints to disk across processes (a resumed chat re-reads once), and speculative-decoding checkpoints.

@@ -6,7 +6,7 @@
 - **A thinking budget**: the most tokens a model may spend reasoning before it must answer. llama.cpp's reasoning-budget sampler (`common/reasoning-budget.h`) forces the end-of-thinking tag when the budget is spent.
 - **The display says what happened**: `✻ Thought for 8s` or `✻ Thought for 20s (budget reached)`.
 
-Switching thinking off goes through the template's own `enable_thinking` once [local tool calling](local-tool-calling.md) renders through Jinja, generalising the Qwen-only `skip_reasoning` added for titles on 2026-09-25.
+Switching thinking off goes through the template's own `enable_thinking` now that [local tool calling](../assistant/MILESTONES.md#milestone-j--local-inference) renders through Jinja (2026-09-25), generalising the Qwen-only `skip_reasoning` added for titles on 2026-09-25.
 
 **Core constraint(s).**
 - **Parity across backends.** The same setting maps to each vendor's own control: Anthropic's thinking budget, OpenAI's reasoning effort, Gemini's thinking budget. A backend with no control says so in `models info` rather than pretending.
@@ -47,4 +47,4 @@ Switching thinking off goes through the template's own `enable_thinking` once [l
 - [ ] `--think-budget 256` stops thinking at 256 tokens and says so.
 - [ ] The same `--think off` on an Anthropic backend sends no thinking parameter, and on OpenAI the lowest effort.
 
-**Scope note.** Item **26i**; build after 25b and 26h. Out of scope: per-tool-step thinking policies.
+**Scope note.** Item **26i**; build after 26h (25b shipped 2026-09-25). Out of scope: per-tool-step thinking policies.

@@ -26,7 +26,7 @@ constexpr std::array<std::pair<std::string_view, FinishReason>, 6> kFinishReason
     {"other", FinishReason::Other},
 }};
 
-constexpr std::array<std::pair<std::string_view, StatusEvent::Type>, 8> kStatusTypeNames{{
+constexpr std::array<std::pair<std::string_view, StatusEvent::Type>, 9> kStatusTypeNames{{
     {"model_loading", StatusEvent::Type::ModelLoading},
     {"model_ready", StatusEvent::Type::ModelReady},
     {"thinking", StatusEvent::Type::Thinking},
@@ -35,6 +35,7 @@ constexpr std::array<std::pair<std::string_view, StatusEvent::Type>, 8> kStatusT
     {"tool_call", StatusEvent::Type::ToolCall},
     {"token_count", StatusEvent::Type::TokenCount},
     {"context_warning", StatusEvent::Type::ContextWarning},
+    {"notice", StatusEvent::Type::Notice},
 }};
 
 /// Reads an optional string field, tolerating null.

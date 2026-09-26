@@ -284,6 +284,10 @@ struct StatusEvent {
         ToolCall,
         TokenCount,
         ContextWarning,
+        /// A line the user should read that is neither progress nor an
+        /// error -- a local model whose template cannot take tools, say, and
+        /// so answers without them. `detail` is the line.
+        Notice,
     };
     enum class Phase : std::uint8_t { Start, Done, Error };
 

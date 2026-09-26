@@ -20,7 +20,7 @@
 
 **Decisions made:**
 - 2026-09-25 — Asked for by the user ("Reliability").
-- 2026-09-25 — After [local tool calling](local-tool-calling.md): selection matters most where tools cost the most, and before that item local models see no tools at all.
+- 2026-09-25 — After [local tool calling](../assistant/MILESTONES.md#milestone-j--local-inference) (shipped 2026-09-25): selection matters most where tools cost the most, and before that item local models see no tools at all.
 
 **Open calls:**
 - [default: selection starts above 16 registered tools, offering the top 8 plus the core] Tuned against the six-task battery on both acceptance models, with the numbers recorded.
@@ -41,4 +41,4 @@
 - [ ] A question needing an MCP tool outside the top few is answered after one `find_tools` call.
 - [ ] With 12 tools registered, requests are byte-identical to today's.
 
-**Scope note.** Item **26g**; build after 25b. Out of scope: learning from which tools were actually used.
+**Scope note.** Item **26g**; gated on nothing pending (25b shipped 2026-09-25). Out of scope: learning from which tools were actually used.

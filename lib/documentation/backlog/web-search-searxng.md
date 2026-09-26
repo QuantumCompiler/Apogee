@@ -1,6 +1,6 @@
 # Web search through the user's own SearXNG
 
-**What / why.** A `web_search` tool, answered by a SearXNG instance the user runs, so a model with `--tools` can find pages as well as read them. SearXNG is a self-hosted metasearch engine: it queries the public engines itself and answers over a stable JSON API (`GET /search?q=…&format=json`). No key, no account, and the queries stay on hardware the user controls. Local models have no provider-side search, so today they can read a URL they are given (`fetch_url`) but cannot find one. The tool returns the top results (title, URL, snippet, and a date when the engine gives one), and the model reads pages through `fetch_url` behind the per-website prompt of [tool safety defaults](tool-safety-defaults.md). Any backend with tools on gets it, cloud ones included.
+**What / why.** A `web_search` tool, answered by a SearXNG instance the user runs, so a model with `--tools` can find pages as well as read them. SearXNG is a self-hosted metasearch engine: it queries the public engines itself and answers over a stable JSON API (`GET /search?q=…&format=json`). No key, no account, and the queries stay on hardware the user controls. Local models have no provider-side search, so today they can read a URL they are given (`fetch_url`) but cannot find one. The tool returns the top results (title, URL, snippet, and a date when the engine gives one), and the model reads pages through `fetch_url` behind the per-website prompt of [tool safety defaults](../assistant/MILESTONES.md#milestone-v--the-native-toolsets). Any backend with tools on gets it, cloud ones included.
 
 **Core constraint(s).**
 - **This revises the 2026-08-26 decision** ("provider server-side tools only"; DEVELOPER.md → `agent/`; MILESTONES → Milestone F). That decision rejected Ommi's search because scraping a results page breaks silently and returns nothing rather than erroring, and it left "the registry seam open for a pluggable one." A JSON API is not a page to scrape. SearXNG maintains its own engines against upstream markup changes, and its failures are explicit: an HTTP error, or `unresponsive_engines` in the response. DEVELOPER.md's "no local web-search tool" paragraph is rewritten when this ships.
@@ -26,7 +26,7 @@
 **Decisions made:**
 - 2026-09-25 — **SearXNG** (the user's call, over Brave's or Tavily's keyed APIs and over MCP-only). No key, private, local by default. MCP remains open to anyone who prefers a hosted search server; nothing here prevents it.
 - 2026-09-25 — **Pluggable from the start**: `provider:` is a field, and `SearchProvider` is the seam, so a keyed API can be added later as a second provider without reshaping the tool.
-- 2026-09-25 — After [tool safety defaults](../assistant/MILESTONES.md#milestone-v--the-native-toolsets) (shipped 2026-09-25), because search multiplies the untrusted pages a model reads. After [local tool calling](local-tool-calling.md), because local models are who it is for.
+- 2026-09-25 — After [tool safety defaults](../assistant/MILESTONES.md#milestone-v--the-native-toolsets) (shipped 2026-09-25), because search multiplies the untrusted pages a model reads. After [local tool calling](../assistant/MILESTONES.md#milestone-j--local-inference), because local models are who it is for.
 
 **Open calls:**
 - [default: 5 results, each with title, URL, snippet and date] A local model reads every result it is given; five is enough to choose one to open.
@@ -48,7 +48,7 @@
 - [ ] Without `tools.search`, no `web_search` is offered, and `apogee check` shows how to configure it.
 - [ ] The tools reference documents the setup end to end.
 
-**Scope note.** Item **25e**; build after 25b (25a, the per-website prompt it relies on, shipped 2026-09-25). Out of scope:
+**Scope note.** Item **25e**; gated on nothing pending (25a and 25b shipped 2026-09-25). Out of scope:
 - keyed providers (Brave, Tavily), the second implementation the seam exists for, each needing a credential-store slot;
 - image and news categories;
 - Ommi's `web-search` training kit, which rides the training tool kits that 25b unblocks.

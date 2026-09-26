@@ -82,6 +82,13 @@ void SseReporter::on_tool_status(std::string_view detail) {
                            last_tool_));
 }
 
+void SseReporter::on_notice(std::string_view text) {
+    harness::StatusEvent event =
+        simple_event(harness::StatusEvent::Type::Notice, harness::StatusEvent::Phase::Done);
+    event.detail = std::string{text};
+    emit_meta(event);
+}
+
 void SseReporter::on_clear_status() {
     model_ready_if_pending();
     if (in_tool_call_) {

@@ -15,7 +15,7 @@
 - `commands/models.cpp` (`models info`) and `commands/check.cpp`: the window a backend will get and the cache memory it costs, from the GGUF header (layers, KV heads, head size, the full-attention interval) without loading the weights.
 - `backends/llamacpp.cpp`: the effective window reported to context monitoring.
 
-**Reference (Ommi).** Ommi passed a fixed `-c` to `llama-completion` per turn (CHAT.md) and never sized the window to memory. llama.cpp's `common/fit.h` (`common_fit_params`, in the pinned tree) fits a context to free device memory, and is linkable once [local tool calling](local-tool-calling.md) links `llama-common`.
+**Reference (Ommi).** Ommi passed a fixed `-c` to `llama-completion` per turn (CHAT.md) and never sized the window to memory. llama.cpp's `common/fit.h` (`common_fit_params`, in the pinned tree) fits a context to free device memory, and is linkable once [local tool calling](../assistant/MILESTONES.md#milestone-j--local-inference) links `llama-common`.
 
 **Decisions made:**
 - 2026-09-25 — From the small-models review, asked for by the user ("Speed and memory"). The cache arithmetic above is from the Q4_K_M's own header.

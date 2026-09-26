@@ -2,6 +2,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -899,4 +901,262 @@ TEST_CASE("skipping reasoning closes the family's think block before the answer"
     // An uncharacterised family's switch is not guessed at: a wrong one would
     // reach the model as text.
     CHECK(last_prompt("test-model", true).find("<think>") == std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Tools through the model's own template (25b)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A provider over a model that ships a template the chat layer reads, with
+/// the tool-call markers special -- rendered as nothing unless preserved.
+struct TemplateFixture {
+    FakeLlamaRuntime* runtime = nullptr;
+    std::unique_ptr<LlamaCppProvider> provider;
+
+    explicit TemplateFixture(std::vector<std::string> pieces) {
+        auto owned = std::make_unique<FakeLlamaRuntime>();
+        owned->script_text = std::move(pieces);
+        owned->eog_token = -1;
+        owned->chat_template = true;
+        owned->special_words = {"<tool_call>", "</tool_call>"};
+        runtime = owned.get();
+
+        LlamaCppProvider::Options options;
+        options.backend_name = "local";
+        options.model = "qwen3-vl-8b";
+        provider = std::make_unique<LlamaCppProvider>(std::move(options), std::move(owned));
+    }
+};
+
+apogee::harness::Tool read_file_tool() {
+    apogee::harness::Tool tool;
+    tool.name = "read_file";
+    tool.description = "Read a file";
+    tool.parameters_schema = R"({"type":"object","properties":{"path":{"type":"string"}}})";
+    return tool;
+}
+
+ChatRequest with_tools(std::vector<ChatMessage> messages) {
+    ChatRequest request = turn(std::move(messages));
+    request.tools = {read_file_tool()};
+    return request;
+}
+
+/// What a turn showed and said, captured from every sink.
+struct Captured {
+    std::string streamed;
+    std::string thinking;
+    std::vector<std::string> notices;
+    apogee::harness::StreamOptions options;
+
+    Captured() {
+        options.on_token = [this](std::string_view piece) { streamed.append(piece); };
+        options.on_thinking = [this](std::string_view piece) { thinking.append(piece); };
+        options.on_status = [this](const apogee::harness::StatusEvent& event) {
+            if (event.type == apogee::harness::StatusEvent::Type::Notice) {
+                notices.push_back(event.detail);
+            }
+        };
+    }
+};
+
+const std::vector<std::string> kReadFileCall = {
+    "<tool_call>", R"({"name":"read_file","arguments":{"path":"notes.txt"}})", "</tool_call>"};
+
+}  // namespace
+
+TEST_CASE("a local model is shown its tools, and its call comes back as the IR's",
+          "[backends][llamacpp][tools]") {
+    // The gap the spike measured: the tools never reached the prompt, so no
+    // local model had ever been shown one.
+    TemplateFixture fixture{kReadFileCall};
+    Captured seen;
+    const auto response = fixture.provider->stream_chat(
+        with_tools({ChatMessage::user("what does it say")}), seen.options);
+
+    REQUIRE(fixture.runtime->model != nullptr);
+    REQUIRE_FALSE(fixture.runtime->model->chat_renders.empty());
+    const auto& rendered = fixture.runtime->model->chat_renders.back();
+    REQUIRE(rendered.tools.size() == 1);
+    CHECK(rendered.tools.front().name == "read_file");
+    CHECK(fixture.runtime->model->tokenized.back().find("tools: read_file") != std::string::npos);
+
+    REQUIRE(response.message.tool_calls.size() == 1);
+    const apogee::harness::ToolCall& call = response.message.tool_calls.front();
+    CHECK(call.name == "read_file");
+    CHECK(call.arguments == R"({"path":"notes.txt"})");
+    // An id the next render can match the result to: nine letters and digits.
+    CHECK(call.id.size() == 9);
+    CHECK(std::all_of(call.id.begin(), call.id.end(),
+                      [](char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0; }));
+    CHECK(response.finish_reason == apogee::harness::FinishReason::ToolCalls);
+    // No markup on either surface: the call was read, never shown.
+    CHECK(seen.streamed.empty());
+    CHECK(response.message.content.plain_text().empty());
+    CHECK(seen.notices.empty());
+}
+
+TEST_CASE("an assistant turn with calls, and their results, render back",
+          "[backends][llamacpp][tools]") {
+    TemplateFixture fixture{{"It", " says hi."}};
+    ChatMessage assistant = ChatMessage::assistant("");
+    apogee::harness::ToolCall call;
+    call.id = "abc123XYZ";
+    call.name = "read_file";
+    call.arguments = R"({"path":"notes.txt"})";
+    assistant.tool_calls = {call};
+    apogee::harness::ToolResult result;
+    result.tool_call_id = call.id;
+    result.name = call.name;
+    result.content = "hi";
+    const auto response =
+        fixture.provider->chat(with_tools({ChatMessage::user("what does it say"), assistant,
+                                           ChatMessage::from_tool_result(result)}),
+                               {});
+
+    const std::string& prompt = fixture.runtime->model->tokenized.back();
+    CHECK(prompt.find("call:read_file#abc123XYZ") != std::string::npos);
+    CHECK(prompt.find("answers:abc123XYZ") != std::string::npos);
+    CHECK(response.message.content.plain_text() == "It says hi.");
+    CHECK(response.message.tool_calls.empty());
+}
+
+TEST_CASE("the grammar rides a request with tools and is cleared on one without",
+          "[backends][llamacpp][tools]") {
+    TemplateFixture fixture{kReadFileCall};
+    (void)fixture.provider->chat(with_tools({ChatMessage::user("read it")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    REQUIRE_FALSE(session->grammars.empty());
+    CHECK(session->grammars.back().gbnf == "root ::= fake-call");
+    CHECK(session->grammars.back().lazy);
+    CHECK(session->grammars.back().trigger_patterns == std::vector<std::string>{"<tool_call>"});
+
+    // The session context outlives the request: the next one, with no tools,
+    // must not sample under the last one's grammar.
+    session->sampled = 0;
+    (void)fixture.provider->chat(turn({ChatMessage::user("just talk")}), {});
+    CHECK(session->grammars.back().gbnf.empty());
+
+    // And when the next request falls back -- a template that cannot render
+    // this one -- the last call's grammar is cleared there too.
+    session->sampled = 0;
+    (void)fixture.provider->chat(with_tools({ChatMessage::user("read it again")}), {});
+    REQUIRE_FALSE(session->grammars.back().gbnf.empty());
+    fixture.runtime->model->chat_template_error = "cannot render this one";
+    session->sampled = 0;
+    (void)fixture.provider->chat(turn({ChatMessage::user("plain")}), {});
+    CHECK(session->grammars.back().gbnf.empty());
+}
+
+TEST_CASE("thinking reaches only the thinking sink", "[backends][llamacpp][tools]") {
+    TemplateFixture fixture{{"<think>", "pondering", "</think>", "The", " answer"}};
+    Captured seen;
+    const auto response =
+        fixture.provider->stream_chat(turn({ChatMessage::user("think first")}), seen.options);
+    CHECK(seen.thinking == "pondering");
+    CHECK(seen.streamed == "The answer");
+    CHECK(response.message.content.plain_text() == "The answer");
+    CHECK(seen.streamed.find("pondering") == std::string::npos);
+}
+
+TEST_CASE("skipping reasoning is the template's own switch", "[backends][llamacpp][tools]") {
+    TemplateFixture fixture{{"Title"}};
+    ChatRequest request = turn({ChatMessage::user("name this chat")});
+    request.transient.skip_reasoning = true;
+    (void)fixture.provider->chat(request, {});
+    REQUIRE_FALSE(fixture.runtime->model->chat_renders.empty());
+    CHECK_FALSE(fixture.runtime->model->chat_renders.back().enable_thinking);
+    // The fallback's closed think block is not appended on top of it.
+    const std::string& prompt = fixture.runtime->model->tokenized.back();
+    CHECK(prompt.ends_with("assistant(no-think):"));
+}
+
+TEST_CASE("a template that cannot render falls back, and says so once when tools were asked for",
+          "[backends][llamacpp][tools]") {
+    TemplateFixture fixture{{"fine"}};
+    fixture.runtime->chat_template_error = "the template refused tools";
+    Captured seen;
+    const auto response =
+        fixture.provider->stream_chat(with_tools({ChatMessage::user("read it")}), seen.options);
+    CHECK(response.message.content.plain_text() == "fine");
+    REQUIRE(seen.notices.size() == 1);
+    CHECK(seen.notices.front().find("answering without tools") != std::string::npos);
+    CHECK(seen.notices.front().find("the template refused tools") != std::string::npos);
+    // The prompt came from the fallback, not the template.
+    CHECK(fixture.runtime->model->tokenized.back().find("[template]") == std::string::npos);
+
+    // With no tools asked for, the fallback is silent: nothing was withheld.
+    Captured quiet;
+    fixture.runtime->model->contexts.front()->sampled = 0;
+    (void)fixture.provider->stream_chat(turn({ChatMessage::user("hello")}), quiet.options);
+    CHECK(quiet.notices.empty());
+}
+
+TEST_CASE("a reply that does not match the format is kept as text and runs nothing",
+          "[backends][llamacpp][tools]") {
+    TemplateFixture fixture{{"Let me look.", "<tool_call>", R"({"name":)"}};
+    Captured seen;
+    const auto response =
+        fixture.provider->stream_chat(with_tools({ChatMessage::user("read it")}), seen.options);
+    CHECK(response.message.tool_calls.empty());
+    CHECK(response.message.content.plain_text() == "Let me look.");
+    CHECK(seen.streamed == "Let me look.");
+    REQUIRE(seen.notices.size() == 1);
+    CHECK(seen.notices.front().find("did not match") != std::string::npos);
+}
+
+TEST_CASE("a reply that matches nothing and showed nothing comes out as its text",
+          "[backends][llamacpp][tools]") {
+    // Never a turn with no answer, no tool and only a notice.
+    TemplateFixture fixture{{"<tool_call>", R"({"name":"read_file")"}};
+    Captured seen;
+    const auto response =
+        fixture.provider->stream_chat(with_tools({ChatMessage::user("read it")}), seen.options);
+    CHECK(response.message.tool_calls.empty());
+    CHECK(response.message.content.plain_text() == R"(<tool_call>{"name":"read_file")");
+    CHECK(seen.streamed == response.message.content.plain_text());
+    CHECK(seen.notices.size() == 1);
+
+    // Unless the model was thinking when it stopped: reasoning stays out.
+    TemplateFixture thinking{{"<think>", "still", "<tool_call>"}};
+    Captured quiet;
+    const auto cut =
+        thinking.provider->stream_chat(with_tools({ChatMessage::user("x")}), quiet.options);
+    CHECK(cut.message.content.plain_text().empty());
+    CHECK(quiet.thinking.find("still") != std::string::npos);
+}
+
+TEST_CASE("a stop string ends the reply and is not part of it", "[backends][llamacpp][tools]") {
+    TemplateFixture fixture{{"Hello", "<end>", "never"}};
+    fixture.runtime->stops = {"<end>"};
+    const auto response = fixture.provider->chat(turn({ChatMessage::user("hi")}), {});
+    CHECK(response.message.content.plain_text() == "Hello");
+    CHECK(response.usage.completion_tokens == 2);
+}
+
+TEST_CASE("a grammar that does not compile runs unconstrained, and says so",
+          "[backends][llamacpp][tools]") {
+    TemplateFixture fixture{kReadFileCall};
+    fixture.runtime->grammar_error = "bad grammar";
+    Captured seen;
+    const auto response =
+        fixture.provider->stream_chat(with_tools({ChatMessage::user("read it")}), seen.options);
+    // The reader still found the call.
+    REQUIRE(response.message.tool_calls.size() == 1);
+    REQUIRE(seen.notices.size() == 1);
+    CHECK(seen.notices.front().find("bad grammar") != std::string::npos);
+    const auto& grammars = fixture.runtime->model->contexts.front()->grammars;
+    REQUIRE(grammars.size() == 2);
+    CHECK(grammars.back().gbnf.empty());
+}
+
+TEST_CASE("a warm count includes the tool definitions", "[backends][llamacpp][tools]") {
+    TemplateFixture fixture{{"ok"}};
+    (void)fixture.provider->chat(turn({ChatMessage::user("warm up")}), {});
+    const std::int64_t bare = fixture.provider->count_prompt_tokens(turn({ChatMessage::user("x")}));
+    const std::int64_t tooled =
+        fixture.provider->count_prompt_tokens(with_tools({ChatMessage::user("x")}));
+    CHECK(tooled > bare);
 }

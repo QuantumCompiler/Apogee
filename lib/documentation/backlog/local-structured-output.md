@@ -10,7 +10,7 @@ Every structured task Apogee runs locally depends on this:
 - dataset synthesis with a local teacher;
 - the pairwise eval judge.
 
-llama.cpp's `common` library, linked by [local tool calling](local-tool-calling.md), converts a schema to a grammar (`json-schema-to-grammar`, or `common_chat_templates_inputs.json_schema`).
+llama.cpp's `common` library, linked by [local tool calling](../assistant/MILESTONES.md#milestone-j--local-inference) (into `apogee_llama_chat`, `backends/llama_chat.cpp`), converts a schema to a grammar (`json-schema-to-grammar`, or `common_chat_templates_inputs.json_schema`).
 
 **Core constraint(s).**
 - **Validation stays.** The client-side validator and its one corrective retry remain the backstop on every backend (Milestone X's rule); a grammar makes the retry rare, not unnecessary. A schema feature the converter cannot express (it covers most of JSON Schema, not all) falls back to prompt-and-validate with a logged note.
@@ -45,4 +45,4 @@ llama.cpp's `common` library, linked by [local tool calling](local-tool-calling.
 - [ ] `apogee graph build` with a local extractor has no invalid-JSON retries on the same corpus.
 - [ ] A thinking model's structured answer still shows its thinking, and the JSON follows it.
 
-**Scope note.** Item **26f**; build after 25b. Out of scope: grammars for free text (regex constraints), and constrained decoding on cloud backends (they have native JSON modes).
+**Scope note.** Item **26f**; gated on nothing pending (25b shipped 2026-09-25). Out of scope: grammars for free text (regex constraints), and constrained decoding on cloud backends (they have native JSON modes).

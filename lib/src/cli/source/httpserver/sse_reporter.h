@@ -20,7 +20,7 @@
 ///
 /// The meta vocabulary is `harness::StatusEvent`'s, the same one the terminal
 /// status line renders: `thinking`, `tool_call`, `model_loading`/`model_ready`,
-/// `rag_search`/`rag_result`, `token_count`, `context_warning`. Nothing is
+/// `rag_search`/`rag_result`, `token_count`, `context_warning`, `notice`. Nothing is
 /// invented here; a surface that invented its own progress taxonomy would be
 /// the second vocabulary the Reporter seam exists to prevent.
 namespace apogee::httpserver {
@@ -50,6 +50,8 @@ public:
     void on_thinking() override;
     void on_thinking_token(std::string_view chunk) override;
     void on_tool_status(std::string_view detail) override;
+    /// A `notice` meta-frame, `detail` the line.
+    void on_notice(std::string_view text) override;
     void on_clear_status() override;
     void on_answer_start() override;
     void on_answer_token(std::string_view chunk) override;

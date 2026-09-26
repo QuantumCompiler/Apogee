@@ -43,6 +43,12 @@ public:
     /// on_thinking.
     virtual void on_tool_status(std::string_view) {}
 
+    /// A line from the provider the user should read, and keep: neither
+    /// progress nor an error (`harness::StatusEvent::Type::Notice`). A local
+    /// model answering without the tools it was given says so here, rather
+    /// than quietly.
+    virtual void on_notice(std::string_view) {}
+
     /// Erase any transient status indicator. Called once immediately before the
     /// final answer, and on error paths.
     virtual void on_clear_status() {}

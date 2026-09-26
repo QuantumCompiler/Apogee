@@ -20,6 +20,7 @@
 #include <mtmd-helper.h>
 #include <mtmd.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -27,6 +28,8 @@
 #include <stdexcept>
 #include <string_view>
 #include <vector>
+
+#include "backends/llama_chat.h"
 
 namespace apogee::backends {
 namespace {
@@ -176,11 +179,76 @@ struct ChunksDeleter {
 
 using BitmapPtr = std::unique_ptr<mtmd_bitmap, BitmapDeleter>;
 using ChunksPtr = std::unique_ptr<mtmd_input_chunks, ChunksDeleter>;
+using SamplerPtr = std::unique_ptr<llama_sampler, SamplerDeleter>;
+
+/// The sampler chain for one generation: the grammar when there is one, then
+/// greedy selection. Greedy: deterministic, and per-family sampling belongs to
+/// its own item (sampling-profiles). Null with `error` when the grammar does
+/// not compile.
+SamplerPtr make_sampler(const llama_vocab* vocab, const SamplingGrammar& grammar,
+                        std::string& error) {
+    SamplerPtr chain{llama_sampler_chain_init(llama_sampler_chain_default_params())};
+    if (!grammar.gbnf.empty()) {
+        llama_log().forget();
+        llama_sampler* constrained = nullptr;
+        if (grammar.lazy) {
+            std::vector<const char*> patterns;
+            patterns.reserve(grammar.trigger_patterns.size());
+            for (const std::string& pattern : grammar.trigger_patterns) {
+                patterns.push_back(pattern.c_str());
+            }
+            std::vector<llama_token> tokens{grammar.trigger_tokens.begin(),
+                                            grammar.trigger_tokens.end()};
+            constrained = llama_sampler_init_grammar_lazy_patterns(
+                vocab, grammar.gbnf.c_str(), "root", patterns.data(), patterns.size(),
+                tokens.data(), tokens.size());
+        } else {
+            constrained = llama_sampler_init_grammar(vocab, grammar.gbnf.c_str(), "root");
+        }
+        if (constrained == nullptr) {
+            error = with_llama_reason("llama.cpp: the tool-call grammar did not compile");
+            return nullptr;
+        }
+        // The chain owns what is added to it.
+        llama_sampler_chain_add(chain.get(), constrained);
+    }
+    llama_sampler_chain_add(chain.get(), llama_sampler_init_greedy());
+    return chain;
+}
+
+/// A reply reader over llama.cpp's own parser for the rendered template.
+class RealReplyReader final : public ReplyReader {
+public:
+    explicit RealReplyReader(std::unique_ptr<llama_chat::ReplyParser> parser)
+        : parser_{std::move(parser)} {}
+
+    [[nodiscard]] bool read(std::string_view text, bool partial, ParsedReply& out,
+                            std::string& error) const override {
+        llama_chat::Reply reply;
+        if (!parser_->parse(std::string{text}, partial, reply, error)) {
+            return false;
+        }
+        out.content = std::move(reply.content);
+        out.reasoning = std::move(reply.reasoning);
+        out.tool_calls.clear();
+        for (llama_chat::ToolCall& call : reply.tool_calls) {
+            harness::ToolCall converted;
+            converted.id = std::move(call.id);
+            converted.name = std::move(call.name);
+            converted.arguments = call.arguments.empty() ? "{}" : std::move(call.arguments);
+            out.tool_calls.push_back(std::move(converted));
+        }
+        return true;
+    }
+
+private:
+    std::unique_ptr<llama_chat::ReplyParser> parser_;
+};
 
 class RealContext final : public LlamaContext {
 public:
-    RealContext(std::unique_ptr<llama_context, ContextDeleter> context,
-                std::unique_ptr<llama_sampler, SamplerDeleter> sampler, mtmd_context* vision)
+    RealContext(std::unique_ptr<llama_context, ContextDeleter> context, SamplerPtr sampler,
+                mtmd_context* vision)
         : context_{std::move(context)}, sampler_{std::move(sampler)}, vision_{vision} {}
 
     void decode(const std::vector<std::int32_t>& tokens, std::int64_t position) override {
@@ -219,9 +287,21 @@ public:
     }
 
     [[nodiscard]] std::int32_t sample() override {
-        const llama_token token = llama_sampler_sample(sampler_.get(), context_.get(), -1);
-        llama_sampler_accept(sampler_.get(), token);
-        return token;
+        // `llama_sampler_sample` accepts the token itself. A second accept
+        // here was harmless while the chain was greedy alone, and would
+        // advance a grammar twice per token (found by 25b, 2026-09-25).
+        return llama_sampler_sample(sampler_.get(), context_.get(), -1);
+    }
+
+    [[nodiscard]] bool set_grammar(const SamplingGrammar& grammar, std::string& error) override {
+        // A fresh chain every generation: a grammar's state is one reply's.
+        SamplerPtr chain =
+            make_sampler(llama_model_get_vocab(llama_get_model(context_.get())), grammar, error);
+        if (chain == nullptr) {
+            return false;
+        }
+        sampler_ = std::move(chain);
+        return true;
     }
 
     [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
@@ -339,7 +419,7 @@ private:
     }
 
     std::unique_ptr<llama_context, ContextDeleter> context_;
-    std::unique_ptr<llama_sampler, SamplerDeleter> sampler_;
+    SamplerPtr sampler_;
     std::int64_t evaluated_ = 0;
     /// Borrowed from the model, which outlives every context made from it.
     mtmd_context* vision_ = nullptr;
@@ -396,8 +476,73 @@ public:
         return piece;
     }
 
+    [[nodiscard]] std::string special_token_text(std::int32_t token) const override {
+        std::string piece(64, '\0');
+        std::int32_t written = llama_token_to_piece(
+            vocab_, token, piece.data(), static_cast<std::int32_t>(piece.size()), 0, true);
+        if (written < 0) {
+            piece.resize(static_cast<std::size_t>(-written));
+            written = llama_token_to_piece(vocab_, token, piece.data(),
+                                           static_cast<std::int32_t>(piece.size()), 0, true);
+            if (written < 0) {
+                return {};
+            }
+        }
+        piece.resize(static_cast<std::size_t>(written));
+        return piece;
+    }
+
     [[nodiscard]] bool is_eog(std::int32_t token) const noexcept override {
         return llama_vocab_is_eog(vocab_, token);
+    }
+
+    [[nodiscard]] bool render_chat(const std::vector<harness::ChatMessage>& messages,
+                                   const std::vector<harness::Tool>& tools, bool enable_thinking,
+                                   ChatRendering& out, std::string& error) const override {
+        if (!templates_loaded_) {
+            // Once per load: parsing a Jinja template is not free, and its
+            // answer cannot change while the weights are resident.
+            templates_loaded_ = true;
+            templates_ = llama_chat::Templates::load(model_.get(), templates_error_);
+        }
+        if (templates_ == nullptr) {
+            error = templates_error_;
+            return false;
+        }
+
+        llama_chat::Inputs inputs;
+        inputs.enable_thinking = enable_thinking;
+        inputs.messages.reserve(messages.size());
+        for (const harness::ChatMessage& message : messages) {
+            llama_chat::Message converted;
+            converted.role = std::string{harness::to_string(message.role)};
+            converted.content = message.content.plain_text();
+            converted.tool_call_id = message.tool_call_id;
+            converted.tool_name = message.name;
+            for (const harness::ToolCall& call : message.tool_calls) {
+                converted.tool_calls.push_back({call.id, call.name, call.arguments});
+            }
+            inputs.messages.push_back(std::move(converted));
+        }
+        inputs.tools.reserve(tools.size());
+        for (const harness::Tool& tool : tools) {
+            inputs.tools.push_back({tool.name, tool.description, tool.parameters_schema});
+        }
+
+        llama_chat::Rendered rendered;
+        if (!templates_->render(inputs, rendered, error)) {
+            return false;
+        }
+        out.prompt = std::move(rendered.prompt);
+        out.grammar.gbnf = std::move(rendered.grammar);
+        out.grammar.lazy = rendered.grammar_lazy;
+        out.grammar.trigger_patterns = std::move(rendered.trigger_patterns);
+        out.grammar.trigger_tokens = std::move(rendered.trigger_tokens);
+        out.preserved_tokens = std::move(rendered.preserved_tokens);
+        out.stops = std::move(rendered.stops);
+        out.format = std::move(rendered.format);
+        out.reader = std::make_unique<RealReplyReader>(std::move(rendered.parser));
+        return true;
     }
 
     [[nodiscard]] std::string apply_builtin_template(
@@ -484,12 +629,8 @@ public:
                 with_llama_reason("llama.cpp: could not create a context for this model"));
         }
 
-        std::unique_ptr<llama_sampler, SamplerDeleter> sampler{
-            llama_sampler_chain_init(llama_sampler_chain_default_params())};
-        // Greedy: deterministic, and the temperature/top-p knobs belong with
-        // the per-family sampling profiles in model-profiles-and-management.
-        llama_sampler_chain_add(sampler.get(), llama_sampler_init_greedy());
-
+        std::string error;
+        SamplerPtr sampler = make_sampler(vocab_, SamplingGrammar{}, error);
         return std::make_unique<RealContext>(std::move(context), std::move(sampler), vision_.get());
     }
 
@@ -669,6 +810,10 @@ private:
     MtmdPtr vision_;
     /// Lazily created; see ensure_embedding_context.
     std::unique_ptr<llama_context, ContextDeleter> embedding_context_;
+    /// The model's chat templates, parsed on first render; see render_chat.
+    mutable std::unique_ptr<llama_chat::Templates> templates_;
+    mutable std::string templates_error_;
+    mutable bool templates_loaded_ = false;
 };
 
 class RealRuntime final : public LlamaRuntime {

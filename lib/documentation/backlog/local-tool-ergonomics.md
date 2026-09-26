@@ -25,7 +25,7 @@
 
 **Decisions made:**
 - 2026-09-25 — From the local-tools spike: the costs that dominate locally are prompt reading and generation, so the tools should return less and ask for less generation.
-- 2026-09-25 — After [local tool calling](local-tool-calling.md), so that each change is verified on the local models it exists for. None of it depends on that item's code.
+- 2026-09-25 — After [local tool calling](../assistant/MILESTONES.md#milestone-j--local-inference) (shipped 2026-09-25), so that each change is verified on the local models it exists for. None of it depends on that item's code.
 
 **Open calls:**
 - [default: `run_command` keeps the first and last 8 KiB] That is enough for a compiler's first error and a test runner's summary, and it is stated in the tool's description.
@@ -51,7 +51,7 @@
 - [ ] A local model with tools on answers today's date correctly.
 - [ ] `apogee check` lists `edit_file` among the gated tools; the shipped template lists it at `ask`.
 
-**Scope note.** Item **25d**; build after 25b. Out of scope:
+**Scope note.** Item **25d**; gated on nothing pending (25b shipped 2026-09-25). Out of scope:
 - a persistent shell session (a `cd` that survives between calls; `run_command` already takes a `cwd`);
 - long-running background commands;
 - a sandbox for the shell itself (macOS seatbelt, Linux namespaces), which is its own larger item if `allow` for the shell is ever to be safe.
