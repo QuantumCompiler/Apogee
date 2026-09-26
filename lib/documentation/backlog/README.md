@@ -73,7 +73,7 @@ The user's calls are recorded in the items: attachments kept with their chat and
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| 25a | Tool safety defaults — `fetch_url` asks per new website, redirects hop by hop, and the file tools default to the launch folder | v0.1.3 | [`tool-safety-defaults.md`](tool-safety-defaults.md) | 🟢 |
+| 25a | Tool safety defaults — `fetch_url` asks per new website, redirects hop by hop, and the file tools default to the launch folder | v0.1.3 | [`tool-safety-defaults.md`](tool-safety-defaults.md) | 🚧 |
 | 25b | Local tool calling — the llama.cpp backend renders tools through the model's own template, parses its calls, and constrains them by grammar, via llama.cpp's `common` chat layer linked in-process | v0.1.3 | [`local-tool-calling.md`](local-tool-calling.md) | 🔒 25a |
 | 25c | Hybrid prompt checkpoints — Qwen3.5/3.8 re-read only what is new each turn and tool step, via state checkpoints as llama-server keeps them | v0.1.3 | [`hybrid-prompt-checkpoints.md`](hybrid-prompt-checkpoints.md) | 🔒 25b |
 | 25d | Tool ergonomics — capped command output, line-range reads, `edit_file`, `grep_files`, and an environment note (date, OS, folder) | v0.1.3 | [`local-tool-ergonomics.md`](local-tool-ergonomics.md) | 🔒 25b |

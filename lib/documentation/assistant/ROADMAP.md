@@ -53,7 +53,7 @@ The two tracks specced 2026-09-25, eighteen backlog items in all — see the [`b
 
 Landed on the branch so far:
 
-- [x] **The CLI pipeline** *(2026-09-25, [Milestone K](MILESTONES.md#milestone-k--the-install-contract))*: CI and the release are now the CLI's pipeline, one per deliverable, ahead of the GUI applications. It builds only when what the CLI is built from has changed since the latest release. Otherwise it copies that release's CLI into the run and into the next release. Releases take their name from a new `VERSION` file, and the CLI keeps its own version, which changes only with the CLI.
+- [x] **The CLI pipeline** *(2026-09-25, [Milestone K](MILESTONES.md#milestone-k--the-install-contract))*: CI and the release are now the CLI's pipeline, one per deliverable, ahead of the GUI applications. It builds only when what the CLI is built from has changed since the latest release. Otherwise it copies that release's CLI into the run and into the next release. Releases take their name from a new `lib/release/VERSION` file, and the CLI keeps its own version, which changes only with the CLI.
 
 ---
 

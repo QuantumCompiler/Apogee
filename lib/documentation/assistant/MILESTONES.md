@@ -634,12 +634,12 @@ Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the
 ### 2026-09-25 — The CLI pipeline: built only when the CLI changes, copied from the latest release when not
 
 **Goal.** The user's call, made with the GUI applications in view: what CI and the release do today is the **CLI pipeline**, one pipeline per deliverable. It must run only when what the CLI is built from changes. When it has not changed, the CLI deliverables are copied from the latest release, so a future pull request that changes only a GUI application runs that application's pipeline and takes the latest CLI as it is. A release that leaves the CLI alone needs a name the CLI does not give it, so the release got its own version (the user chose it from two options):
-- `VERSION` at the top of the repository names the release;
+- `lib/release/VERSION` names the release (first at the top of the repository; moved to `lib/release/` the same day, the user's call);
 - the CLI's `project(... VERSION)` changes only when the CLI does, and then equals the release it ships in.
 
 **What was built**
 
-- [x] **`VERSION`**, the release. It is one line, and deliberately not an input of the CLI's build, so bumping it alone runs no CLI pipeline.
+- [x] **`lib/release/VERSION`**, the release. It is one line, and deliberately not an input of the CLI's build, so bumping it alone runs no CLI pipeline.
 - [x] **`lib/scripts/changed.sh`: what each deliverable is built from, declared once.** `changed.sh cli <from> <to>` answers `cli=true|false`. The CLI's inputs are:
   - `lib/src/cli/` and `lib/scripts/`, which the user named;
   - the CLI pipeline's own `ci.yml`, `release.yml` and package action, because a change to how the CLI is built must be exercised by building it;
@@ -648,14 +648,14 @@ Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the
   A GUI application adds its own entry there. An empty `<from>`, or a commit the repository does not have, answers true: when in doubt, build. It replaces `code-changed.sh` and that morning's documentation-only rule, which it subsumes: documentation is simply not a CLI input.
 - [x] **Against the latest release, not the pull request's base.** CI's `what changed` job diffs the latest release's commit (**`lib/scripts/latest-release.sh`**: published releases only, the commit as `origin` has it, never a local tag) against the test merge. A copy of the release is only true while the CLI that would merge is the CLI that was released, so that is the comparison. In the everyday case it agrees with the pull request's own diff.
 - [x] **An unchanged CLI in CI.** The clone, the unit tests and the builds still run under their required names, with the build steps skipped (the reason the morning's rule found: a matrix job skipped whole never reports its name). Each `build <target>` then copies that platform's archive from the latest release (**`lib/scripts/cli-from-release.sh`**, through the package action's new `from-release` input) and runs the copied binary on its own platform. The copy goes into the same `apogee-<target>` artifact a build makes, so every run carries the CLI, built or copied, where a later job will look for it.
-- [x] **`version bump` on every pull request.** When the CLI changed, `VERSION` must be unreleased and the CLI's version must equal it. Otherwise the check passes and says what the merge will publish: a release with the CLI copied, or nothing.
-- [x] **`release-from-pr.sh` publishes `v<VERSION>`.** The name comes from `VERSION` at the merge. With the CLI changed since the latest release (the release being made excepted, for a retried attempt), it uses the pull request's own archives under the same checks as before, and the executable must now report `VERSION`. With the CLI unchanged, it downloads the latest release's archives, runs the host's binary to prove the copy starts, and publishes them again as they are.
-- [x] **The manual path reads `VERSION`.** `release.yml`'s gate and `make release`'s preflight compare the tag with `VERSION`. The manual path still rebuilds the CLI even when it is unchanged; that is deliberate for an escape hatch, and recorded in the workflow's header.
+- [x] **`version bump` on every pull request.** When the CLI changed, `lib/release/VERSION` must be unreleased and the CLI's version must equal it. Otherwise the check passes and says what the merge will publish: a release with the CLI copied, or nothing.
+- [x] **`release-from-pr.sh` publishes `v<VERSION>`.** The name comes from `lib/release/VERSION` at the merge. With the CLI changed since the latest release (the release being made excepted, for a retried attempt), it uses the pull request's own archives under the same checks as before, and the executable must now report that version. With the CLI unchanged, it downloads the latest release's archives, runs the host's binary to prove the copy starts, and publishes them again as they are.
+- [x] **The manual path reads `lib/release/VERSION`.** `release.yml`'s gate and `make release`'s preflight compare the tag with it. The manual path still rebuilds the CLI even when it is unchanged; that is deliberate for an escape hatch, and recorded in the workflow's header.
 - [x] **`pr-ci.sh` asks the same question.** With the CLI unchanged, it builds nothing and copies the host's archive from the latest release. It passes CI's answers to `version bump`.
 
 **Verified.**
 - The three scripts were driven through 56 checks in a throwaway repository, with a bare `origin`, real commits and tags, and a stand-in `gh` serving canned API responses and archives, under both bash 5 and macOS's bash 3.2:
-  - `changed.sh` against CLI, documentation-plus-`VERSION`, workflow and `.gitattributes` changes, and against no release, an unknown commit and an unknown deliverable;
+  - `changed.sh` against CLI, documentation-plus-`lib/release/VERSION`, workflow and `.gitattributes` changes, and against no release, an unknown commit and an unknown deliverable;
   - `version-check.sh` through every rule;
   - `release-from-pr.sh` through a built release, a copied release, a documentation merge, a binary reporting the wrong version, a run whose archive was itself a copy, a rehearsal, an open pull request refused, finishing an earlier attempt, a latest release with no archives, and no release at all.
 - Seven rules were removed one at a time (always copy, the empty-copy check, the release-being-made exclusion, the CLI-equals-`VERSION` rule, the released-`VERSION` rule, and two CLI inputs), and every removal failed a check.

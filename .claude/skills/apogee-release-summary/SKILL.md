@@ -8,12 +8,12 @@ argument-hint: "[vX.Y.Z]"
 
 Writes the notes a GitHub Release page shows for one Apogee version, in the format the published releases already use ([releases](https://github.com/QuantumCompiler/Apogee/releases)). A merge into `stable` publishes the release with GitHub's generated notes (ci.yml → `tag and release`); this summary is what replaces them. The **format** comes from the published releases, the **facts** from the repo's own record — never from memory of the session.
 
-The optional argument is the version (`v0.1.2` or `0.1.2`). With none, it is the release the checkout's `VERSION` file names — the release's own version since 2026-09-25; the CLI keeps a separate one in `lib/src/cli/CMakeLists.txt`, which moves only when the CLI changes.
+The optional argument is the version (`v0.1.2` or `0.1.2`). With none, it is the release the checkout's `lib/release/VERSION` names — the release's own version since 2026-09-25; the CLI keeps a separate one in `lib/src/cli/CMakeLists.txt`, which moves only when the CLI changes.
 
 ## 1. Pin the release and its range
 
 ```bash
-tr -d ' \r\n' < VERSION
+tr -d ' \r\n' < lib/release/VERSION
 ```
 
 - **The target** — `v<version>`, from the argument or the command above.

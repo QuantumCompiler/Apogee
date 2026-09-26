@@ -42,7 +42,7 @@
 # release`, which publishes the release it makes. Nothing else.
 #
 # The release after a merge (user decisions, 2026-09-25) rebuilds nothing. It
-# is named by `VERSION` at the top of the repository -- the release -- while
+# is named by `lib/release/VERSION` -- the release -- while
 # the CLI keeps its own version in lib/src/cli/CMakeLists.txt, which changes
 # only when the CLI does, and then to the release it ships in. Each build job
 # packages its archive through .github/actions/package -- the same action
@@ -51,14 +51,14 @@
 # request merges, `tag and release` runs lib/scripts/release-from-pr.sh: with
 # the CLI changed, it finds that pull request's last green run, checks every
 # archive was built from exactly the merged source tree and that the
-# executable reports VERSION; with it unchanged, it copies the latest
+# executable reports that version; with it unchanged, it copies the latest
 # release's CLI archives. Then it creates the tag `v<VERSION>` at the merge
-# commit together with the release. A merge whose VERSION is already released
+# commit together with the release. A merge whose version is already released
 # publishes nothing, which is how a docs or hotfix merge declines to cut one.
 # The script's header has the full order of checks.
 #
 # `version bump` exists because of that: a pull request that changes the CLI
-# and forgets to bump VERSION would otherwise merge and publish nothing,
+# and forgets to bump lib/release/VERSION would otherwise merge and publish nothing,
 # silently. It also says, on every pull request, what the merge will publish.
 #
 # The suite runs here again as of 2026-09-22, reversing 2026-09-20's "remove
@@ -95,7 +95,7 @@
 #                             for the platform, copied, run, and kept as the
 #                             same artifact.
 #   after the merge:
-#      tag and release     -- the release VERSION names, carrying the pull
+#      tag and release     -- the release lib/release/VERSION names, carrying the pull
 #                             request's own archives or, with the CLI
 #                             unchanged, the latest release's. Nothing is
 #                             built.
@@ -257,8 +257,9 @@ jobs:
 
   version:
     # A merge into `stable` publishes a release, and what it publishes is
-    # decided by `project(... VERSION x.y.z)` in lib/src/cli/CMakeLists.txt
-    # (user decision, 2026-09-22). A PR that forgets to bump it therefore
+    # decided by lib/release/VERSION (user decisions, 2026-09-22 and
+    # 2026-09-25; until then it was the CLI's own `project(... VERSION x.y.z)`
+    # in lib/src/cli/CMakeLists.txt). A PR that forgets to bump it therefore
     # merges cleanly and then releases NOTHING -- a silent no-op that looks
     # exactly like a deliberate skip, and is only noticed by its absence.
     # This job makes that case loud at review time instead.
@@ -269,7 +270,7 @@ jobs:
     # publishing nothing.
     #
     # It runs on every pull request, whatever changed: when the CLI did, it
-    # holds VERSION and the CLI's version to the rules; when it did not, it
+    # holds lib/release/VERSION and the CLI's version to the rules; when it did not, it
     # says what the merge will publish -- a release with the CLI copied, or
     # nothing.
     name: version bump
@@ -505,13 +506,13 @@ jobs:
           from-release: ${{ needs.changes.outputs.cli == 'false' && needs.changes.outputs.latest || '' }}
 
   release:
-    # After the merge: the release VERSION names, published. Nothing is built
+    # After the merge: the release lib/release/VERSION names, published. Nothing is built
     # -- lib/scripts/release-from-pr.sh decides, against the latest release,
     # whether the CLI changed: if so it takes the pull request's last green
     # run, checks every archive against the merged source tree and the
-    # executable against VERSION; if not it copies the latest release's CLI
+    # executable against it; if not it copies the latest release's CLI
     # archives. Then it creates the tag `v<VERSION>` at the merge commit
-    # together with the release. A VERSION already released publishes
+    # together with the release. A version already released publishes
     # nothing.
     #
     # Dispatched with release_rehearsal_pr, the same script runs without

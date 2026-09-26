@@ -17,7 +17,7 @@
 #
 #   1. The pull request: into `stable`, and merged when publishing. Its merge
 #      commit -- for an open one, GitHub's test merge -- is what is released.
-#   2. The release: `VERSION` at that commit names it. A tag v<VERSION> at
+#   2. The release: `lib/release/VERSION` at that commit names it. A tag v<VERSION> at
 #      ANOTHER commit means that version is out, and this merge publishes
 #      nothing -- how a docs or hotfix merge declines to cut a release (exit
 #      0). A tag at THIS commit was made by an earlier attempt, and publishing
@@ -29,7 +29,7 @@
 #      archive's .source naming the merge commit's exact source TREE (CI
 #      builds the test merge; if `stable` moved after that run, the archives
 #      are not the merged source, and nothing is published); and the binary
-#      for this host, run: `apogee version` must report VERSION -- a CLI
+#      for this host, run: `apogee version` must report that version -- a CLI
 #      that changed ships in this release and says so.
 #   4b. Unchanged -- the latest release's CLI archives, downloaded and
 #      re-published as they are. The binary for this host is run, to prove
@@ -138,10 +138,10 @@ fi
 
 # --- 2. The release, and whether it is already out ---------------------------
 
-version="$(git show "$merge_sha:VERSION" 2>/dev/null | tr -d ' \r\n')" ||
-    die "the merge $merge_sha has no VERSION file to name the release"
+version="$(git show "$merge_sha:lib/release/VERSION" 2>/dev/null | tr -d ' \r\n')" ||
+    die "the merge $merge_sha has no lib/release/VERSION to name the release"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
-    die "VERSION at $merge_sha must hold the release as x.y.z (got '$version')"
+    die "lib/release/VERSION at $merge_sha must hold the release as x.y.z (got '$version')"
 tag="v$version"
 
 # `git/ref/tags/<tag>` and never a bare name: the version branch shares it.
@@ -165,7 +165,7 @@ elif [ "$tag_sha" = "$merge_sha" ]; then
     note "- $tag already tags this commit: an earlier attempt made it, and this one finishes the release"
 else
     note "- **$tag is already released**, from \`${tag_sha:0:7}\`, so this merge publishes nothing."
-    note "  Bump \`VERSION\` to cut the next release."
+    note "  Bump \`lib/release/VERSION\` to cut the next release."
     exit 0
 fi
 

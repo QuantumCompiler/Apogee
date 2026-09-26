@@ -6,22 +6,22 @@
 #
 # Two versions, since 2026-09-25 (user decision):
 #
-#   VERSION                          at the top of the repository: the RELEASE.
-#                                    A merge into `stable` publishes v<VERSION>
-#                                    unless that is already released.
+#   lib/release/VERSION              the RELEASE. A merge into `stable`
+#                                    publishes v<VERSION> unless that is
+#                                    already released.
 #   project(... VERSION x.y.z) in    the CLI's own version, what `apogee version`
 #   lib/src/cli/CMakeLists.txt       reports. It changes only when the CLI does,
 #                                    and then to the release it ships in.
 #
 # So, with the CLI changed since the latest release (changed.sh cli):
 #
-#   - VERSION must be unreleased, or the merge publishes nothing and the CLI
+#   - lib/release/VERSION must be unreleased, or the merge publishes nothing and the CLI
 #     change ships in no release -- silently, which is why this check exists;
-#   - the CLI's version must equal VERSION: the binary this run built is the
+#   - the CLI's version must equal it: the binary this run built is the
 #     release's, and reports it.
 #
-# With the CLI unchanged, the release (if VERSION is unreleased) carries the
-# latest release's CLI archives, copied; if VERSION is released too, the merge
+# With the CLI unchanged, the release (if its version is unreleased) carries the
+# latest release's CLI archives, copied; if it is released too, the merge
 # publishes nothing -- a documentation merge, say -- and that is not an error.
 #
 # --cli and --latest are CI's `what changed` answers; without them this works
@@ -48,16 +48,16 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --cli) cli="${2:-}"; shift 2 ;;
         --latest) latest="${2:-}"; shift 2 ;;
-        *) fail VERSION "usage: version-check.sh [--cli true|false] [--latest <tag>]" ;;
+        *) fail lib/release/VERSION "usage: version-check.sh [--cli true|false] [--latest <tag>]" ;;
     esac
 done
 
-root="$(git rev-parse --show-toplevel 2>/dev/null)" || fail VERSION "not inside a git repository"
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || fail lib/release/VERSION "not inside a git repository"
 scripts="$(cd "$(dirname "$0")" && pwd)"
 
-version="$(tr -d ' \r\n' <"$root/VERSION" 2>/dev/null)" || true
+version="$(tr -d ' \r\n' <"$root/lib/release/VERSION" 2>/dev/null)" || true
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
-    fail VERSION "VERSION must hold the release as x.y.z (got '$version')"
+    fail lib/release/VERSION "lib/release/VERSION must hold the release as x.y.z (got '$version')"
 tag="v$version"
 cli_version="$(sed -n 's/^[[:space:]]*VERSION[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' \
     "$root/lib/src/cli/CMakeLists.txt" | head -1)"
@@ -66,7 +66,7 @@ cli_version="$(sed -n 's/^[[:space:]]*VERSION[[:space:]][[:space:]]*\([0-9][0-9.
 if [ -z "$cli" ]; then
     # A failed lookup fails the check: "no release" is an answer, "could not
     # ask" is not.
-    found="$("$scripts/latest-release.sh")" || fail VERSION "could not look up the latest release"
+    found="$("$scripts/latest-release.sh")" || fail lib/release/VERSION "could not look up the latest release"
     latest="" commit=""
     [ -z "$found" ] || read -r latest commit <<<"$found"
     cli="$("$scripts/changed.sh" cli "$commit" HEAD | tail -1)"
@@ -74,7 +74,7 @@ if [ -z "$cli" ]; then
 fi
 case "$cli" in
     true | false) ;;
-    *) fail VERSION "--cli must be true or false (got '$cli')" ;;
+    *) fail lib/release/VERSION "--cli must be true or false (got '$cli')" ;;
 esac
 
 # Is v<VERSION> released? A token in the environment is how a runner signs gh
@@ -92,14 +92,14 @@ else
     case "$status" in
         0) released=true ;;
         2) released=false ;;
-        *) fail VERSION "could not ask origin whether $tag is released (git ls-remote exited $status)" ;;
+        *) fail lib/release/VERSION "could not ask origin whether $tag is released (git ls-remote exited $status)" ;;
     esac
 fi
 
 since="${latest:-no release yet}"
 if [ "$cli" = true ]; then
     [ "$released" = false ] ||
-        fail VERSION "the CLI changed since $since, but $tag is already released -- bump VERSION (and the CLI's project(... VERSION) with it), or this merge publishes nothing and the change ships in no release"
+        fail lib/release/VERSION "the CLI changed since $since, but $tag is already released -- bump lib/release/VERSION (and the CLI's project(... VERSION) with it), or this merge publishes nothing and the change ships in no release"
     [ "$cli_version" = "$version" ] ||
         fail lib/src/cli/CMakeLists.txt "the CLI changed since $since, so it ships in $tag and must report it: set project(... VERSION $version) in lib/src/cli/CMakeLists.txt (it says $cli_version)"
     message="merging publishes $tag, with the CLI $cli_version this run builds (checked $how)"

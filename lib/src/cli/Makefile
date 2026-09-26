@@ -207,11 +207,11 @@ lint:
 # runners, and nothing here builds, packages or uploads anything.
 #
 # Since 2026-09-22 this is the ESCAPE HATCH, not the everyday path: a merge
-# into stable publishes the release VERSION names (the repository's top-level
-# file since 2026-09-25; the CLI keeps its own version in CMakeLists.txt) --
+# into stable publishes the release lib/release/VERSION names (since
+# 2026-09-25; the CLI keeps its own version in CMakeLists.txt) --
 # from the merged pull request's own CI archives, or the latest release's when
 # the CLI is unchanged (ci.yml's `tag and release`) -- so the normal way to cut
-# a release is to bump VERSION and merge the PR. This target is for a re-cut, for a merge whose own archives could not be
+# a release is to bump lib/release/VERSION and merge the PR. This target is for a re-cut, for a merge whose own archives could not be
 # released (the tree check refused them, or they expired), or for tagging a
 # commit that is not the tip of a merge. It remains worth keeping because the
 # preflight below is the same set of mistakes either path can make, and it
@@ -221,7 +221,7 @@ lint:
 #     make release VERSION=0.1.1         # preflight, confirm, tag, push
 #
 # The checks exist because each one is a real way to ship a broken release:
-# a tag that disagrees with VERSION publishes a release under a name the
+# a tag that disagrees with lib/release/VERSION publishes a release under a name the
 # repository does not give it, and a BRANCH sharing a
 # tag's name makes every later `git push origin vX.Y.Z` fail with
 # "src refspec ... matches more than one".
@@ -263,10 +263,10 @@ release-check:
 	git fetch --quiet $(REMOTE) $(RELEASE_BRANCH); \
 	if [ "$$(git rev-parse HEAD)" != "$$(git rev-parse $(REMOTE)/$(RELEASE_BRANCH))" ]; then \
 	    echo "error: $(RELEASE_BRANCH) is not in sync with $(REMOTE)/$(RELEASE_BRANCH)" >&2; exit 1; fi; \
-	release_version="$$(tr -d ' \r\n' < "$$(git rev-parse --show-toplevel)/VERSION")"; \
+	release_version="$$(tr -d ' \r\n' < "$$(git rev-parse --show-toplevel)/lib/release/VERSION")"; \
 	if [ "$$release_version" != "$(VERSION_NUM)" ]; then \
-	    echo "error: VERSION says $$release_version, but the tag would be $(TAG)" >&2; \
-	    echo "       bump VERSION to $(VERSION_NUM) and commit it first" >&2; exit 1; fi; \
+	    echo "error: lib/release/VERSION says $$release_version, but the tag would be $(TAG)" >&2; \
+	    echo "       bump lib/release/VERSION to $(VERSION_NUM) and commit it first" >&2; exit 1; fi; \
 	if git show-ref --verify --quiet "refs/heads/$(TAG)"; then \
 	    echo "error: a BRANCH named $(TAG) exists; git cannot then resolve the tag by name" >&2; \
 	    echo "       git branch -D $(TAG)" >&2; exit 1; fi; \
@@ -276,7 +276,7 @@ release-check:
 	    echo "error: tag $(TAG) is already on $(REMOTE) -- that release is cut" >&2; exit 1; fi; \
 	echo "preflight OK"; \
 	echo "  branch   $(RELEASE_BRANCH) @ $$(git rev-parse --short HEAD), in sync with $(REMOTE)"; \
-	echo "  version  VERSION $$release_version == $(TAG)"; \
+	echo "  version  lib/release/VERSION $$release_version == $(TAG)"; \
 	echo "  tag      $(TAG) is free locally and on $(REMOTE)"
 
 release: release-check

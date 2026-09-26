@@ -18,7 +18,7 @@
 # the merge path would copy that release's archives (user decision,
 # 2026-09-25). It is the escape hatch -- a re-cut, or a merge whose archives
 # could not be used -- and "build it again from source" is what an escape
-# hatch is for. The release it names is still `VERSION`, never the CLI's own
+# hatch is for. The release it names is still `lib/release/VERSION`, never the CLI's own
 # version.
 #
 # The tag that `tag and release` creates does NOT start this workflow: a tag
@@ -87,7 +87,7 @@ jobs:
     # the release does not.
     #
     # On the tag path this also enforces the guard the pipeline never had: a
-    # tag whose name disagrees with VERSION -- the release, since 2026-09-25;
+    # tag whose name disagrees with lib/release/VERSION -- the release, since 2026-09-25;
     # the CLI keeps its own version in its CMakeLists -- fails HERE, before
     # five runners spend ~82 minutes building. `make release` checks the same
     # thing locally; this is the copy that a hand-pushed tag cannot skip.
@@ -107,17 +107,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The release, as VERSION names it -- read the same way make release,
+          # The release, as lib/release/VERSION names it -- read the same way make release,
           # version-check.sh and release-from-pr.sh read it.
-          release_version="$(tr -d ' \r\n' < VERSION)"
+          release_version="$(tr -d ' \r\n' < lib/release/VERSION)"
           echo "$release_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
-            { echo "::error file=VERSION::VERSION must hold the release as x.y.z (got '$release_version')"; exit 1; }
+            { echo "::error file=lib/release/VERSION::lib/release/VERSION must hold the release as x.y.z (got '$release_version')"; exit 1; }
 
           case "${GITHUB_REF}" in
             refs/tags/v*)
               version="${GITHUB_REF_NAME}"
               if [ "$version" != "v${release_version}" ]; then
-                echo "::error::tag ${version} disagrees with VERSION ${release_version}; bump VERSION, or tag v${release_version}"
+                echo "::error::tag ${version} disagrees with lib/release/VERSION ${release_version}; bump it, or tag v${release_version}"
                 exit 1
               fi
               proceed=pending
@@ -151,12 +151,12 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| | |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| version | \`$version\` (VERSION: $release_version) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| version | \`$version\` (lib/release/VERSION: $release_version) |" >> "$GITHUB_STEP_SUMMARY"
           echo "| already released | $exists |" >> "$GITHUB_STEP_SUMMARY"
           echo "| building | $proceed |" >> "$GITHUB_STEP_SUMMARY"
           if [ "$proceed" != "true" ]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Nothing to do: \`$version\` is already published. Bump \`VERSION\` to cut the next one." >> "$GITHUB_STEP_SUMMARY"
+            echo "Nothing to do: \`$version\` is already published. Bump \`lib/release/VERSION\` to cut the next one." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   unit-tests:
