@@ -47,7 +47,7 @@ Llama 3.2 3B's calls were all well-formed; it re-read files, looped, and called 
 - 2026-09-25 — **Each model's own format, through llama.cpp's `common` chat layer**, not an injected protocol (spike evidence above).
 - 2026-09-25 — **Link `llama-common`, never copy it.** It is part of the pinned tree, and the link map shows only the chat objects are pulled in.
 - 2026-09-25 — **Built and tested against 8B-class models and up** (the user's call). Qwen3-VL-8B and Qwen3.8-27B are the acceptance models. Smaller models get tools but no special effort; the repeated-call guard is the only concession.
-- 2026-09-25 — **Gated on [tool safety defaults](tool-safety-defaults.md)**, so that when local models first reach `fetch_url`, the per-website prompt already exists.
+- 2026-09-25 — **Gated on [tool safety defaults](../assistant/MILESTONES.md#milestone-v--the-native-toolsets)** (shipped 2026-09-25), so that when local models first reach `fetch_url`, the per-website prompt already exists.
 
 **Open calls:**
 - [default: `common`'s parser replaces the profile filters for any template Jinja renders] The profiles stay as the fallback. One parser per template, maintained upstream, beats two that must agree.
@@ -77,7 +77,7 @@ Llama 3.2 3B's calls were all well-formed; it re-read files, looped, and called 
 - [ ] `chat`, `complete`, `serve --tools` and an `analyze` agent all complete a tool task on a local backend.
 - [ ] The suite passes in both builds, and `cli.no_listen_symbols` passes.
 
-**Scope note.** Item **25b**; build after 25a. It unblocks the two training tool kits (a separate item), [hybrid prompt checkpoints](hybrid-prompt-checkpoints.md) (25c), [local tool ergonomics](local-tool-ergonomics.md) (25d) and local use of [web search](web-search-searxng.md) (25e). Out of scope:
+**Scope note.** Item **25b**; gated on nothing pending (25a shipped 2026-09-25). It unblocks the two training tool kits (a separate item), [hybrid prompt checkpoints](hybrid-prompt-checkpoints.md) (25c), [local tool ergonomics](local-tool-ergonomics.md) (25d) and local use of [web search](web-search-searxng.md) (25e). Out of scope:
 - per-family sampling settings;
 - speculative decoding with a model's MTP layers;
 - the Ollama CLI backend, which has no tool interface.

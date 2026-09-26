@@ -4,7 +4,6 @@
 #include <system_error>
 
 #include "harness/layout.h"
-#include "platform/platform.h"
 #include "tools/fs.h"
 #include "tools/notes.h"
 #include "tools/rag_query.h"
@@ -26,17 +25,6 @@ bool disabled(const ToolsetOptions& options, std::string_view toolset) {
     return false;
 }
 
-std::filesystem::path effective_root(const ToolsetOptions& options) {
-    if (!options.fs_root.empty()) {
-        return options.fs_root;
-    }
-    if (const std::optional<std::string> home = platform::home_directory(); home.has_value()) {
-        return std::filesystem::path{*home};
-    }
-    std::error_code code;
-    return std::filesystem::current_path(code);
-}
-
 std::filesystem::path effective_cwd(const ToolsetOptions& options) {
     if (!options.working_directory.empty()) {
         return options.working_directory;
@@ -46,6 +34,20 @@ std::filesystem::path effective_cwd(const ToolsetOptions& options) {
 }
 
 }  // namespace
+
+FsRoot effective_fs_root(const std::filesystem::path& configured) {
+    if (!configured.empty()) {
+        return FsRoot{configured, true};
+    }
+    // The folder Apogee was started in (2026-09-25; it was the home
+    // directory): a chat started in a project works in that project, and a
+    // model cannot read the rest of the home directory without being given
+    // it. Nothing in Apogee changes the working directory after startup, so
+    // the current one is the launch folder -- and a resumed chat works where
+    // it was resumed: the folder is the process's, not the transcript's.
+    std::error_code code;
+    return FsRoot{std::filesystem::current_path(code), false};
+}
 
 std::span<const std::string_view> toolset_names() noexcept {
     return kToolsetNames;
@@ -57,7 +59,7 @@ std::span<const std::string_view> destructive_tool_names() noexcept {
 
 void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOptions& options) {
     if (!disabled(options, "fs")) {
-        register_fs_tools(registry, effective_root(options), options.read_limit);
+        register_fs_tools(registry, effective_fs_root(options.fs_root).path, options.read_limit);
     }
     if (!disabled(options, "shell")) {
         register_shell_tool(registry, effective_cwd(options), options.shell_timeout);

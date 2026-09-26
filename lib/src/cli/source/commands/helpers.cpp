@@ -191,6 +191,35 @@ agent::ToolRegistry apply_tool_policy(const agent::ToolRegistry& registry,
     return filtered;
 }
 
+agent::UrlFetcher make_http_fetcher(std::shared_ptr<backends::HttpClient> client) {
+    return [client = std::move(client)](std::string_view url) {
+        agent::FetchResult result;
+        backends::HttpRequest request;
+        request.method = "GET";
+        request.url = std::string{url};
+        request.timeout = std::chrono::seconds{30};
+        // One hop at a time: the tool follows a redirect only once its host
+        // has been through the gate.
+        request.follow_redirects = false;
+        request.max_body_bytes = kFetchMaxBodyBytes;
+        try {
+            const backends::HttpResponse response = client->send(request, {}, {});
+            if (response.body_limit_exceeded) {
+                result.error = "the response is larger than " +
+                               std::to_string(kFetchMaxBodyBytes / (1024 * 1024)) +
+                               " MB, the most fetch_url reads; nothing of it was kept";
+                return result;
+            }
+            result.status = response.status;
+            result.body = response.body;
+            result.location = response.location;
+        } catch (const std::exception& e) {
+            result.error = e.what();
+        }
+        return result;
+    };
+}
+
 agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
     agent::ToolRegistry registry;
     if (options.policy == harness::AgentToolPolicy::None) {
@@ -199,24 +228,8 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
         return registry;
     }
 
-    auto client =
-        std::make_shared<backends::HttpClient>(std::make_unique<backends::CurlTransport>());
-
-    registry.add(agent::make_fetch_url_tool([client](std::string_view url) {
-        agent::FetchResult result;
-        backends::HttpRequest request;
-        request.method = "GET";
-        request.url = std::string{url};
-        request.timeout = std::chrono::seconds{30};
-        try {
-            const backends::HttpResponse response = client->send(request, {}, {});
-            result.status = response.status;
-            result.body = response.body;
-        } catch (const std::exception& e) {
-            result.error = e.what();
-        }
-        return result;
-    }));
+    registry.add(agent::make_fetch_url_tool(make_http_fetcher(
+        std::make_shared<backends::HttpClient>(std::make_unique<backends::CurlTransport>()))));
 
     tools::ToolsetOptions toolsets;
     toolsets.harness = options.harness;

@@ -48,6 +48,7 @@ paths:
 #   deny    never run
 # The prompt's [a]lways answer rewrites the tool's line here to `allow`.
 # Read-only tools (read_file, git_diff, search_documents, ...) never prompt.
+# fetch_url is asked about per website instead: see allowed_hosts below.
 permissions:
   write_file: ask
   delete_file: ask
@@ -55,10 +56,16 @@ permissions:
   write_note: ask
   delete_note: ask
 
-# Where the native toolsets operate.
-# tools:
-#   fs_root: ~            # the filesystem tools cannot leave this directory
-#   disabled: [shell]     # switch a whole toolset off: fs, shell, git, notes, rag
+# Where the native toolsets operate, and which websites they may reach.
+tools:
+  # fs_root: ~            # the filesystem tools cannot leave this directory;
+  #                       # unset, it is the folder Apogee was started in
+  # disabled: [shell]     # switch a whole toolset off: fs, shell, git, notes, rag
+  # The websites fetch_url reaches without asking, by exact host name:
+  # docs.python.org admits neither python.org nor any other subdomain. Any
+  # other website asks first, and where nobody can answer (a pipe, `serve`)
+  # it is refused. The prompt's [a]lways answer adds the website here.
+  allowed_hosts: []
 
 # MCP servers: external tool servers spoken to over stdio (the Model Context
 # Protocol). Each one's tools appear to the model as mcp__<name>__<tool> and

@@ -23,21 +23,31 @@
 /// nothing at all (`serve`, a pipe), which the gate resolves to deny.
 namespace apogee::commands {
 
-/// Tools the user answered `session` for. Shared between the checker and the
+/// What the user answered `session` for. Shared between the checker and the
 /// prompt so an answer given once holds for the run and not the next.
-using SessionApprovals = std::set<std::string, std::less<>>;
+struct SessionApprovals {
+    /// Tools, for the ones that write.
+    std::set<std::string, std::less<>> tools;
+    /// Canonical hosts (`harness/host.h`), for the ones that reach out:
+    /// allowing one website is not allowing the next.
+    std::set<std::string, std::less<>> hosts;
+};
 
-/// The checker: the config's level for the tool, then the session's answers,
-/// then `Ask`. `approvals` may be null (nothing is remembered).
+/// The checker. For a tool that writes: the config's level for the tool, then
+/// the session's answers, then `Ask`. For an outbound one: the host in
+/// `tools.allowed_hosts`, then the session's hosts, then `Ask` -- so a
+/// surface with nobody to ask reaches only the listed hosts. `approvals` may
+/// be null (nothing is remembered).
 [[nodiscard]] agent::PermissionChecker make_permission_checker(
     const harness::Config& config, std::shared_ptr<SessionApprovals> approvals);
 
 /// The terminal prompt, or null when there is no terminal to prompt on -- and
 /// a null ConfirmFn is exactly what makes `ask` deny on a pipe.
 ///
-/// `always` is written to `permissions.<tool>: allow` through the config
-/// editor (one mutation path) and remembered for the session too; `session`
-/// is remembered only; `yes` allows this once; anything else denies.
+/// `always` is written through the config editor (one mutation path) and
+/// remembered for the session too -- `permissions.<tool>: allow` for a tool
+/// that writes, the host added to `tools.allowed_hosts` for an outbound one;
+/// `session` is remembered only; `yes` allows this once; anything else denies.
 [[nodiscard]] agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
                                                    std::filesystem::path config_path,
                                                    std::shared_ptr<SessionApprovals> approvals);

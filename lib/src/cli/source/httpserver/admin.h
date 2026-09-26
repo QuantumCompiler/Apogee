@@ -120,6 +120,10 @@ public:
 
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);
+    [[nodiscard]] HttpResponse list_allowed_hosts(const HttpRequest& request);
+    [[nodiscard]] HttpResponse put_allowed_host(const HttpRequest& request, std::string_view host);
+    [[nodiscard]] HttpResponse delete_allowed_host(const HttpRequest& request,
+                                                   std::string_view host);
 
     [[nodiscard]] HttpResponse list_credentials(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_credential(const HttpRequest& request,

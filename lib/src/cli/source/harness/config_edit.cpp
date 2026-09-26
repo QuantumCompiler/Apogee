@@ -8,6 +8,7 @@
 #include <system_error>
 #include <utility>
 
+#include "harness/host.h"
 #include "harness/layout.h"
 
 namespace apogee::harness {
@@ -1025,6 +1026,278 @@ std::string set_permission(std::string_view content, std::string_view tool,
                               "' is not a permission level (accepted: ask, allow, deny)");
     }
     return set_section_scalar(content, "permissions", tool, level);
+}
+
+namespace {
+
+constexpr std::string_view kAllowedHostsKey = "allowed_hosts";
+
+std::string checked_host(std::string_view host) {
+    const std::optional<std::string> canonical = canonical_host(host);
+    if (!canonical.has_value()) {
+        throw ConfigEditError("'" + std::string{host} +
+                              "' is not a host name: write the host alone, e.g. docs.python.org");
+    }
+    return *canonical;
+}
+
+/// A YAML scalar as written -- plain, `"double"` or `'single'` quoted --
+/// read back to its value. Only as much YAML as a host name can need.
+std::string unquote(std::string_view token) {
+    if (token.size() >= 2 && token.front() == '"' && token.back() == '"') {
+        std::string out;
+        for (std::size_t i = 1; i + 1 < token.size(); ++i) {
+            if (token[i] == '\\' && i + 2 < token.size()) {
+                ++i;
+            }
+            out.push_back(token[i]);
+        }
+        return out;
+    }
+    if (token.size() >= 2 && token.front() == '\'' && token.back() == '\'') {
+        std::string out;
+        for (std::size_t i = 1; i + 1 < token.size(); ++i) {
+            out.push_back(token[i]);
+            if (token[i] == '\'' && i + 2 < token.size() && token[i + 1] == '\'') {
+                ++i;
+            }
+        }
+        return out;
+    }
+    return std::string{token};
+}
+
+/// One item of a list, located in the file.
+struct ListItem {
+    std::string value;      ///< unquoted
+    std::size_t line = 0;   ///< the item's line (the key's line for a flow list)
+    std::size_t begin = 0;  ///< flow: the item's first byte in that line
+    std::size_t end = 0;    ///< flow: one past its last byte
+};
+
+/// `tools.allowed_hosts`, as the file spells it.
+struct HostList {
+    bool key_found = false;
+    std::size_t key_line = 0;
+    /// `[a, b]` on the key's line. Otherwise a block list (`- a` lines), or
+    /// nothing at all (`allowed_hosts:` alone, which YAML reads as null).
+    bool flow = false;
+    std::size_t open = 0;   ///< flow: the `[`
+    std::size_t close = 0;  ///< flow: the `]`
+    std::vector<ListItem> items;
+    /// Where a new `  allowed_hosts:` line goes when the key is absent: after
+    /// the section's last content line, nested lists included.
+    std::size_t insert_at = 0;
+};
+
+/// The byte where `line`'s YAML value ends: before a ` #` comment and any
+/// trailing whitespace or terminator.
+std::size_t value_end(std::string_view line, std::size_t from) {
+    std::size_t limit = line.size();
+    for (std::size_t i = from; i < line.size(); ++i) {
+        if (line[i] == '#' && (i == from || line[i - 1] == ' ' || line[i - 1] == '\t')) {
+            limit = i;
+            break;
+        }
+    }
+    while (limit > from && (line[limit - 1] == ' ' || line[limit - 1] == '\t' ||
+                            line[limit - 1] == '\r' || line[limit - 1] == '\n')) {
+        --limit;
+    }
+    return limit;
+}
+
+/// Splits `[a, "b", 'c']` into items. Throws when the list does not close on
+/// its own line: a flow list spread over lines is legal YAML, and rare enough
+/// that refusing it beats a splice that misreads it.
+void read_flow_items(HostList& list, std::string_view line) {
+    std::size_t i = list.open + 1;
+    while (true) {
+        while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) {
+            ++i;
+        }
+        if (i >= line.size() || line[i] == '\n' || line[i] == '\r' || line[i] == '#') {
+            throw ConfigEditError(
+                "tools.allowed_hosts is a list that does not close on its own line; "
+                "edit it by hand");
+        }
+        if (line[i] == ']') {
+            list.close = i;
+            return;
+        }
+        const std::size_t begin = i;
+        if (line[i] == '"' || line[i] == '\'') {
+            const char quote = line[i];
+            ++i;
+            while (i < line.size() && line[i] != quote) {
+                i += (quote == '"' && line[i] == '\\') ? 2 : 1;
+            }
+            ++i;
+        } else {
+            while (i < line.size() && line[i] != ',' && line[i] != ']' && line[i] != '\n') {
+                ++i;
+            }
+        }
+        std::size_t end = std::min(i, line.size());
+        while (end > begin && (line[end - 1] == ' ' || line[end - 1] == '\t')) {
+            --end;
+        }
+        list.items.push_back(
+            ListItem{unquote(line.substr(begin, end - begin)), list.key_line, begin, end});
+        while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) {
+            ++i;
+        }
+        if (i < line.size() && line[i] == ',') {
+            ++i;
+        }
+    }
+}
+
+HostList find_host_list(const Lines& lines, const SectionRange& section) {
+    HostList list;
+    list.insert_at = section.begin;
+    for (std::size_t i = section.begin; i < section.end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        list.insert_at = i + 1;
+        if (list.key_found || indent_of(line) != kEntryIndent) {
+            continue;
+        }
+        const std::string_view rest = line.substr(kEntryIndent);
+        if (!rest.starts_with(kAllowedHostsKey) || rest.size() <= kAllowedHostsKey.size() ||
+            rest[kAllowedHostsKey.size()] != ':') {
+            continue;
+        }
+        list.key_found = true;
+        list.key_line = i;
+        const std::string& original = lines[i];
+        const std::size_t colon = original.find(':', kEntryIndent);
+        std::size_t value = colon + 1;
+        while (value < original.size() && (original[value] == ' ' || original[value] == '\t')) {
+            ++value;
+        }
+        if (value < original.size() && original[value] == '[') {
+            list.flow = true;
+            list.open = value;
+            read_flow_items(list, original);
+            continue;
+        }
+        if (value_end(original, value) > value) {
+            throw ConfigEditError("tools.allowed_hosts is not a list; edit it by hand");
+        }
+        // A block list: the `- item` lines nested under the key.
+        for (std::size_t j = i + 1; j < section.end; ++j) {
+            const std::string_view item_line = body(lines[j]);
+            if (is_blank(item_line) || is_comment(item_line)) {
+                continue;
+            }
+            const std::size_t indent = indent_of(item_line);
+            if (indent <= kEntryIndent || item_line.substr(indent, 1) != "-") {
+                break;
+            }
+            const std::size_t start = indent + 1;
+            std::size_t token = start;
+            while (token < lines[j].size() && (lines[j][token] == ' ' || lines[j][token] == '\t')) {
+                ++token;
+            }
+            const std::size_t end = value_end(lines[j], token);
+            list.items.push_back(
+                ListItem{unquote(std::string_view{lines[j]}.substr(token, end - token)), j, 0, 0});
+        }
+    }
+    return list;
+}
+
+}  // namespace
+
+std::string add_allowed_host(std::string_view content, std::string_view host) {
+    const std::string canonical = checked_host(host);
+    const std::string written = yaml_scalar(canonical);
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange section = find_section(lines, "tools");
+
+    if (!section.found) {
+        if (!lines.empty()) {
+            std::string& last = lines.back();
+            if (!last.empty() && last.back() != '\n') {
+                last += terminator;
+            }
+            if (!is_blank(body(lines.back()))) {
+                lines.push_back(terminator);
+            }
+        }
+        lines.push_back("tools:" + terminator);
+        lines.push_back("  allowed_hosts: [" + written + "]" + terminator);
+        return join_lines(lines);
+    }
+
+    const HostList list = find_host_list(lines, section);
+    for (const ListItem& item : list.items) {
+        if (canonical_host(item.value) == canonical) {
+            return std::string{content};  // already there: nothing to write
+        }
+    }
+    if (!list.key_found) {
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(list.insert_at),
+                     "  allowed_hosts: [" + written + "]" + terminator);
+        return join_lines(lines);
+    }
+    std::string& line = lines[list.key_line];
+    if (list.flow) {
+        if (list.items.empty()) {
+            line.replace(list.open + 1, list.close - list.open - 1, written);
+        } else {
+            line.insert(list.items.back().end, ", " + written);
+        }
+        return join_lines(lines);
+    }
+    if (list.items.empty()) {
+        // `allowed_hosts:` alone reads as null; give it the one-line form.
+        const std::size_t colon = line.find(':', kEntryIndent);
+        line.replace(colon + 1, value_end(line, colon + 1) - colon - 1, " [" + written + "]");
+        if (line.back() != '\n') {
+            line += terminator;
+        }
+        return join_lines(lines);
+    }
+    const std::string& last = lines[list.items.back().line];
+    const std::string indent(indent_of(last), ' ');
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(list.items.back().line + 1),
+                 indent + "- " + written + terminator);
+    return join_lines(lines);
+}
+
+std::string remove_allowed_host(std::string_view content, std::string_view host) {
+    const std::string canonical = checked_host(host);
+    Lines lines = split_lines(content);
+    const SectionRange section = find_section(lines, "tools");
+    const HostList list = section.found ? find_host_list(lines, section) : HostList{};
+
+    for (std::size_t index = 0; index < list.items.size(); ++index) {
+        const ListItem& item = list.items[index];
+        if (canonical_host(item.value) != canonical) {
+            continue;
+        }
+        if (!list.flow) {
+            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(item.line));
+            return join_lines(lines);
+        }
+        // The exact inverse of the add: the first item takes the separator
+        // after it, any other the separator before it.
+        std::string& line = lines[list.key_line];
+        if (list.items.size() == 1) {
+            line.erase(list.open + 1, list.close - list.open - 1);
+        } else if (index == 0) {
+            line.erase(item.begin, list.items[1].begin - item.begin);
+        } else {
+            line.erase(list.items[index - 1].end, item.end - list.items[index - 1].end);
+        }
+        return join_lines(lines);
+    }
+    throw ConfigEditError("'" + canonical + "' is not in tools.allowed_hosts");
 }
 
 std::string format_config(std::string_view content) {

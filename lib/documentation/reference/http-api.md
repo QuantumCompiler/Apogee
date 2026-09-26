@@ -24,7 +24,7 @@ apogee serve --all-backends --rag notes        # every servable backend, retriev
 | `--bind HOST` / `--port N` | Where to listen. Loopback by default; `--port 0` picks a free port and prints it. |
 | `--allow-remote` | Permits a non-loopback `--bind`. **Without it the server refuses to start** — the inference plane is unauthenticated (for OpenAI-client compatibility), so exposing it is a decision the operator makes explicitly. Put it behind your own access control. |
 | `-m BACKEND` / `--all-backends` | Which backends a request may name. The default (or `-m`) alone unless `--all-backends`: adding an entry to the config never silently exposes it. Vendor-CLI backends (`claude-cli`, `codex-cli`, `gemini-cli`, `ollama-cli`) are **never served** — they run on a personal subscription. |
-| `--tools` | Run the tool loop server-side (`fetch_url`). Clients see only the final answer. |
+| `--tools` | Run the tool loop server-side (`fetch_url`). Clients see only the final answer. Nobody can answer a permission prompt on a served request, so `fetch_url` reaches **only the hosts in `tools.allowed_hosts`** — anything else, including a redirect to an unlisted host, comes back to the model as a refusal (since 2026-09-25; before that a served fetch reached any website). |
 | `--rag NAME`, `--rag-limit N`, `--retriever`, `--rerank` | Retrieval, fixed for the server's lifetime (`--rag ""` switches off the config's `auto_rag`). `?retriever=` and `?rerank=` override per request. |
 | `--preload` | Load every served local model now rather than on the first request. |
 | `--ignore-timeout` | Keep local models resident: ignore `idle_unload_seconds`. |
@@ -900,6 +900,30 @@ key.
 
 On a served request nobody can answer a prompt, so `ask` means deny there:
 `allow` in the config is the only way a destructive tool runs under `serve`.
+
+### `GET /v1/admin/allowed-hosts`
+
+The websites `fetch_url` reaches without asking — `tools.allowed_hosts`, as
+written — as `{"object":"list","data":[{host, valid}]}`. `valid` is `false` for
+an entry that is not a bare host name (a pasted URL, a pattern): it allows
+nothing, and `apogee check` names it. Hosts are compared exactly:
+`docs.python.org` admits neither `python.org` nor any other subdomain.
+
+### `PUT /v1/admin/allowed-hosts/{id}`
+
+The twin of `apogee config add-allowed-host <host>`, and the same edit the
+permission prompt's `always` answer makes for a website — one transform behind
+all three, so the bytes are identical. `{id}` is the host alone; no body.
+Idempotent: a host already listed, in any spelling, changes nothing. `200
+{host, allowed: true, restart_required}` with the host in its canonical form;
+`400` for anything that is not a bare host name. A served run reads the list
+once at startup, so `restart_required` is `true` when this server did not start
+with the host listed.
+
+### `DELETE /v1/admin/allowed-hosts/{id}`
+
+The twin of `apogee config delete-allowed-host <host>`. `200 {deleted,
+restart_required}`; `404` when the host is not listed.
 
 ### `GET /v1/admin/auth`
 

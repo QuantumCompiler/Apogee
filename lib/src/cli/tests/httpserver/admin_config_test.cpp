@@ -285,6 +285,53 @@ TEST_CASE("the permissions twin edits the same line the CLI edits, byte for byte
                                     .body)["restart_required"] == false);
 }
 
+TEST_CASE("the allowed-hosts twins leave the same bytes the CLI and the [a]lways answer leave",
+          "[httpserver][admin][hosts]") {
+    const Fixture fixture;
+    const std::string shipped = Fixture::bytes(fixture.http_config);
+    const HttpResponse empty = apogee::httpserver::admin_list_allowed_hosts(fixture.context());
+    REQUIRE(empty.status == 200);
+    CHECK(nlohmann::json::parse(empty.body)["data"].empty());
+
+    const HttpResponse added =
+        apogee::httpserver::admin_put_allowed_host(fixture.context(), "Docs.Python.org");
+    REQUIRE(added.status == 200);
+    const nlohmann::json body = nlohmann::json::parse(added.body);
+    CHECK(body["host"] == "docs.python.org");
+    CHECK(body["restart_required"] == true);  // the server read none at startup
+    fixture.cli({"config", "add-allowed-host", "Docs.Python.org"});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+    // The same bytes the prompt's [a]lways writes: one transform behind all three.
+    CHECK(Fixture::bytes(fixture.http_config) ==
+          apogee::harness::add_allowed_host(shipped, "docs.python.org"));
+
+    const nlohmann::json listed = nlohmann::json::parse(
+        apogee::httpserver::admin_list_allowed_hosts(fixture.context()).body)["data"];
+    REQUIRE(listed.size() == 1);
+    CHECK(listed[0]["host"] == "docs.python.org");
+    CHECK(listed[0]["valid"] == true);
+    // Idempotent: a second PUT changes nothing.
+    CHECK(
+        apogee::httpserver::admin_put_allowed_host(fixture.context(), "docs.python.org.").status ==
+        200);
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+
+    // Refusals, in the envelope; nothing written.
+    CHECK(
+        apogee::httpserver::admin_put_allowed_host(fixture.context(), "https://x.example").status ==
+        400);
+    CHECK(apogee::httpserver::admin_delete_allowed_host(fixture.context(), "pypi.org").status ==
+          404);
+
+    const HttpResponse removed =
+        apogee::httpserver::admin_delete_allowed_host(fixture.context(), "docs.python.org");
+    REQUIRE(removed.status == 200);
+    CHECK(nlohmann::json::parse(removed.body)["deleted"] == "docs.python.org");
+    fixture.cli({"config", "delete-allowed-host", "docs.python.org"});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+    CHECK(Fixture::bytes(fixture.http_config) == shipped);
+}
+
 TEST_CASE("the MCP server twins leave the same bytes the CLI leaves, and never list env values",
           "[httpserver][admin][mcp]") {
     const Fixture fixture;

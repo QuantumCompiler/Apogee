@@ -260,6 +260,9 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         for (const std::string_view tool : tools::destructive_tool_names()) {
             list.names.emplace_back(tool);
         }
+    } else if (kind == kAllowedHostValue) {
+        list.names = config.tools.allowed_hosts;
+        list.none = "no allowed hosts yet -- 'apogee config add-allowed-host'";
     } else {
         // A kind declared in `kNameValues` with no branch here: a test calls
         // every kind, so this is a failure there, never a silent nothing.

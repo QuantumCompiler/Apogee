@@ -74,6 +74,8 @@ const std::map<std::string, Classification>& table() {
         {"config set-default-extraction", twin("POST", "/v1/admin/backends/default-extraction")},
         {"config format", twin("POST", "/v1/admin/config/format")},
         {"config set-permission", twin("PUT", "/v1/admin/permissions/{id}")},
+        {"config add-allowed-host", twin("PUT", "/v1/admin/allowed-hosts/{id}")},
+        {"config delete-allowed-host", twin("DELETE", "/v1/admin/allowed-hosts/{id}")},
         {"config delete-mcp-server", twin("DELETE", "/v1/admin/mcp-servers/{id}")},
         {"mcp create", twin("POST", "/v1/admin/mcp-servers")},
         {"mcp enable", twin("PUT", "/v1/admin/mcp-servers/{id}")},

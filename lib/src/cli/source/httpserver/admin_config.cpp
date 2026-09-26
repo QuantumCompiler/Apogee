@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "harness/config_edit.h"
+#include "harness/host.h"
 #include "harness/roles.h"
 #include "scaffold/mcp_server.h"
 #include "tools/toolsets.h"
@@ -536,6 +537,68 @@ HttpResponse admin_put_permission(const AdminConfigContext& context, std::string
                  {"tool", std::string{tool}},
                  {"level", std::string{harness::to_string(after.config->permissions.level(tool))}},
                  {"restart_required", restart}});
+}
+
+HttpResponse admin_list_allowed_hosts(const AdminConfigContext& context) {
+    const Loaded loaded = load_now(context);
+    if (!loaded.config.has_value()) {
+        return loaded.failure;
+    }
+    nlohmann::json data = nlohmann::json::array();
+    for (const std::string& host : loaded.config->tools.allowed_hosts) {
+        data.push_back({{"host", host}, {"valid", harness::canonical_host(host).has_value()}});
+    }
+    return json_response(200, nlohmann::json{{"object", "list"}, {"data", data}});
+}
+
+HttpResponse admin_put_allowed_host(const AdminConfigContext& context, std::string_view host) {
+    const std::optional<std::string> canonical = harness::canonical_host(host);
+    if (!canonical.has_value()) {
+        return error_response(400, "'" + std::string{host} +
+                                       "' is not a host name: the host alone, e.g. "
+                                       "docs.python.org");
+    }
+    try {
+        harness::edit_config_file(context.config_path, [&](std::string_view content) {
+            return harness::add_allowed_host(content, host);
+        });
+    } catch (const harness::ConfigEditError& e) {
+        return error_response(400, e.what());
+    } catch (const harness::ConfigError& e) {
+        return error_response(400, e.what(), kConfigError);
+    }
+    // A served run reads the list once at startup, as it does the levels.
+    const bool restart = context.startup != nullptr &&
+                         !harness::host_listed(context.startup->tools.allowed_hosts, *canonical);
+    return json_response(
+        200,
+        nlohmann::json{{"host", *canonical}, {"allowed", true}, {"restart_required", restart}});
+}
+
+HttpResponse admin_delete_allowed_host(const AdminConfigContext& context, std::string_view host) {
+    const Loaded loaded = load_now(context);
+    if (!loaded.config.has_value()) {
+        return loaded.failure;
+    }
+    const std::optional<std::string> canonical = harness::canonical_host(host);
+    if (!canonical.has_value() ||
+        !harness::host_listed(loaded.config->tools.allowed_hosts, *canonical)) {
+        return error_response(404, "'" + std::string{host} + "' is not in tools.allowed_hosts",
+                              kNotFoundError);
+    }
+    try {
+        harness::edit_config_file(context.config_path, [&](std::string_view content) {
+            return harness::remove_allowed_host(content, host);
+        });
+    } catch (const harness::ConfigEditError& e) {
+        return error_response(400, e.what());
+    } catch (const harness::ConfigError& e) {
+        return error_response(400, e.what(), kConfigError);
+    }
+    const bool restart = context.startup != nullptr &&
+                         harness::host_listed(context.startup->tools.allowed_hosts, *canonical);
+    return json_response(200,
+                         nlohmann::json{{"deleted", *canonical}, {"restart_required", restart}});
 }
 
 HttpResponse admin_set_role(const AdminConfigContext& context, std::string_view field,

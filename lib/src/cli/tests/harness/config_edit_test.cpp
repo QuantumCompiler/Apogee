@@ -986,3 +986,115 @@ TEST_CASE("set_backend_mmproj_path replaces in place, or lands right after model
     CHECK_THROWS_AS(apogee::harness::set_backend_mmproj_path(kBase, "nope", "/x"),
                     apogee::harness::ConfigEditError);
 }
+
+// ---------------------------------------------------------------------------
+// tools.allowed_hosts -- the edit behind the fetch prompt's [a]lways
+// ---------------------------------------------------------------------------
+
+TEST_CASE("add_allowed_host on the shipped template changes one line, and remove undoes it",
+          "[config_edit][hosts]") {
+    const std::string shipped{apogee::harness::config_template()};
+    const std::string one = apogee::harness::add_allowed_host(shipped, "Docs.Python.org.");
+    std::string expected = shipped;
+    const std::size_t at = expected.find("  allowed_hosts: []");
+    REQUIRE(at != std::string::npos);
+    expected.replace(at, std::string{"  allowed_hosts: []"}.size(),
+                     "  allowed_hosts: [docs.python.org]");
+    CHECK(one == expected);  // canonical spelling written
+
+    const std::string two = apogee::harness::add_allowed_host(one, "pypi.org");
+    CHECK(two.find("  allowed_hosts: [docs.python.org, pypi.org]") != std::string::npos);
+    // Already listed, in any spelling: nothing changes.
+    CHECK(apogee::harness::add_allowed_host(two, "PYPI.ORG.") == two);
+    // IPv6 is written quoted, so YAML reads it back as the address.
+    const std::string six = apogee::harness::add_allowed_host(two, "[::1]");
+    CHECK(six.find(R"([docs.python.org, pypi.org, "::1"])") != std::string::npos);
+    CHECK(apogee::harness::parse_config(six, "six").tools.allowed_hosts.back() == "::1");
+
+    // Every removal order returns the exact bytes.
+    CHECK(apogee::harness::remove_allowed_host(six, "::1") == two);
+    CHECK(apogee::harness::remove_allowed_host(two, "pypi.org") == one);
+    CHECK(apogee::harness::remove_allowed_host(one, "docs.python.org") == shipped);
+    CHECK(apogee::harness::remove_allowed_host(
+              apogee::harness::remove_allowed_host(two, "docs.python.org"), "pypi.org") == shipped);
+    CHECK(apogee::harness::parse_config(two, "two").tools.allowed_hosts ==
+          std::vector<std::string>{"docs.python.org", "pypi.org"});
+}
+
+TEST_CASE("add_allowed_host handles block lists, missing keys and missing sections",
+          "[config_edit][hosts]") {
+    constexpr std::string_view kBlock =
+        "tools:\n"
+        "  disabled:\n"
+        "    - shell\n"
+        "  allowed_hosts:\n"
+        "    - a.example   # the first\n"
+        "    - \"b.example\"\n"
+        "ui:\n"
+        "  markdown: true\n";
+    const std::string added = apogee::harness::add_allowed_host(kBlock, "c.example");
+    CHECK(added ==
+          "tools:\n"
+          "  disabled:\n"
+          "    - shell\n"
+          "  allowed_hosts:\n"
+          "    - a.example   # the first\n"
+          "    - \"b.example\"\n"
+          "    - c.example\n"
+          "ui:\n"
+          "  markdown: true\n");
+    CHECK(apogee::harness::add_allowed_host(kBlock, "b.example") == kBlock);  // quoted: listed
+    CHECK(apogee::harness::remove_allowed_host(added, "c.example") == kBlock);
+    CHECK(apogee::harness::remove_allowed_host(kBlock, "a.example").find("a.example") ==
+          std::string::npos);
+
+    // A tools section without the key: inserted after the section's last
+    // line, nested list included -- never between `disabled:` and its items.
+    constexpr std::string_view kNoKey =
+        "tools:\n"
+        "  disabled:\n"
+        "    - shell\n"
+        "\n"
+        "ui:\n"
+        "  markdown: true\n";
+    const std::string inserted = apogee::harness::add_allowed_host(kNoKey, "a.example");
+    CHECK(inserted ==
+          "tools:\n"
+          "  disabled:\n"
+          "    - shell\n"
+          "  allowed_hosts: [a.example]\n"
+          "\n"
+          "ui:\n"
+          "  markdown: true\n");
+    CHECK(apogee::harness::parse_config(inserted, "x").tools.disabled ==
+          std::vector<std::string>{"shell"});
+
+    // No tools section: created. CRLF kept.
+    const std::string crlf =
+        apogee::harness::add_allowed_host("ui:\r\n  markdown: true\r\n", "a.example");
+    CHECK(crlf == "ui:\r\n  markdown: true\r\n\r\ntools:\r\n  allowed_hosts: [a.example]\r\n");
+
+    // `allowed_hosts:` alone reads as null; it gains the one-line form.
+    CHECK(
+        apogee::harness::add_allowed_host("tools:\n  allowed_hosts:   # none yet\n", "a.example") ==
+        "tools:\n  allowed_hosts: [a.example]   # none yet\n");
+}
+
+TEST_CASE("allowed-host edits refuse what is not a host, or not listed", "[config_edit][hosts]") {
+    const std::string shipped{apogee::harness::config_template()};
+    for (const char* bad : {"https://docs.python.org", "docs.python.org/x", "*.python.org",
+                            "a b.example", "", "host:8080"}) {
+        INFO(bad);
+        CHECK_THROWS_AS((void)apogee::harness::add_allowed_host(shipped, bad), ConfigEditError);
+    }
+    CHECK_THROWS_AS((void)apogee::harness::remove_allowed_host(shipped, "docs.python.org"),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)apogee::harness::remove_allowed_host("ui:\n  markdown: true\n", "a.b"),
+                    ConfigEditError);
+    // A flow list spread over lines is refused rather than misread.
+    CHECK_THROWS_AS(
+        (void)apogee::harness::add_allowed_host("tools:\n  allowed_hosts: [a.example,\n    "
+                                                "b.example]\n",
+                                                "c.example"),
+        ConfigEditError);
+}

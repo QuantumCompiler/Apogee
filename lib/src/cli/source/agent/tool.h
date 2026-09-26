@@ -27,19 +27,40 @@ struct ToolOutcome {
     bool is_error = false;
 };
 
-/// The permission decision for a destructive operation.
+/// The permission decision for a gated operation.
 enum class Permission : std::uint8_t { Allow, Deny, Ask };
 
-/// Consulted before a tool that declares `writes` runs.
+/// One question put to the gate: may this tool act on this target?
+struct GateRequest {
+    std::string_view tool;
+    /// What the decision is keyed on: a path, a command -- or, for an
+    /// outbound tool, a host.
+    std::string_view target;
+    /// Shown beside the target, never decided on: `fetch_url`'s whole URL,
+    /// so the person asked can see what would leave the machine in it.
+    std::string_view detail;
+    /// The tool sends data off the machine (`Tool::outbound`). Its answers
+    /// are per host rather than per tool: allowing one website is not
+    /// allowing the next.
+    bool outbound = false;
+};
+
+/// Consulted before a gated tool runs -- one that `writes`, or is `outbound`.
 ///
 /// Returns the decision for one operation on one target. Injected rather than
-/// read from config here: the config schema for permissions lands with the
-/// native filesystem toolsets, which are the gate's first real consumer.
-using PermissionChecker = std::function<Permission(std::string_view tool, std::string_view target)>;
+/// read from config here: `agent/` knows nothing about config files, and each
+/// surface makes its checker from the `permissions:` and `tools:` sections
+/// (`commands/permissions.h`).
+using PermissionChecker = std::function<Permission(const GateRequest& request)>;
 
-/// Prompts the user to confirm a destructive operation. Non-null only on an
-/// interactive surface.
-using ConfirmFn = std::function<bool(std::string_view tool, std::string_view target)>;
+/// Asks someone to confirm a gated operation. Non-null only on a surface with
+/// someone to ask.
+using ConfirmFn = std::function<bool(const GateRequest& request)>;
+
+/// Puts one more target through the gate while a tool runs: `fetch_url`'s
+/// redirect to a new host. The same checker and the same prompt the call's
+/// own target went through; true means go ahead.
+using TargetGate = std::function<bool(std::string_view target, std::string_view detail)>;
 
 /// One callable tool.
 struct Tool {
@@ -53,16 +74,39 @@ struct Tool {
     /// not, because prompting for every read trains the user to say yes.
     bool writes = false;
 
+    /// Whether this tool sends data off the machine -- `fetch_url`. Outbound
+    /// is its own risk, separate from `writes`: a read-only tool that can put
+    /// a file's contents into a URL is an exfiltration path, so it is gated
+    /// too, per target host, while a `read-only` agent policy (which drops
+    /// `writes` tools) still keeps it (2026-09-25).
+    bool outbound = false;
+
     /// The implementation. Receives the raw JSON argument string.
     ///
     /// **Must not throw for a bad argument** -- return an error outcome so the
     /// model can correct itself.
     std::function<ToolOutcome(std::string_view arguments)> run;
 
-    /// Extracts the operation's target (a path, a URL) for the permission
-    /// prompt. Optional; without it the prompt names only the tool.
+    /// The implementation for a tool that reaches further targets while it
+    /// runs, which it puts through `gate` one at a time -- a redirect's next
+    /// host. Set instead of `run`; dispatch hands it the gate.
+    std::function<ToolOutcome(std::string_view arguments, const TargetGate& gate)> run_gated;
+
+    /// Extracts the operation's target (a path, a command, a host) for the
+    /// permission gate. Optional for a `writes` tool; without it the prompt
+    /// names only the tool. **An outbound tool must have one**, and a call
+    /// it names no target for is refused unrun: an address the gate cannot
+    /// read is not one it can allow.
     std::function<std::string(std::string_view arguments)> describe_target;
+
+    /// More for the prompt to show than the target it is decided on -- the
+    /// URL beside the host. Optional.
+    std::function<std::string(std::string_view arguments)> describe_detail;
 };
+
+/// Whether `tool` goes through the permission gate: it writes, or it reaches
+/// off the machine.
+[[nodiscard]] bool gated(const Tool& tool) noexcept;
 
 /// The set of tools available to a run.
 class ToolRegistry {
@@ -111,8 +155,12 @@ struct DispatchContext {
 /// `Ask` with no confirm function resolves to **deny**. A non-interactive
 /// surface -- a pipe, a cron job, `serve` -- has nobody to ask, and silently
 /// allowing a destructive operation because no one was around to object is the
-/// wrong direction to fail.
+/// wrong direction to fail. An outbound call with no target is denied too.
 [[nodiscard]] bool permitted(const Tool& tool, std::string_view arguments,
                              const DispatchContext& context);
+
+/// The same resolution for one named target -- what a `TargetGate` asks.
+[[nodiscard]] bool permitted_target(const Tool& tool, std::string_view target,
+                                    std::string_view detail, const DispatchContext& context);
 
 }  // namespace apogee::agent

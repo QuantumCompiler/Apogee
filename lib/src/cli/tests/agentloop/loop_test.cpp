@@ -408,7 +408,7 @@ TEST_CASE("a write tool is gated; a read tool is not", "[agentloop][permission]"
         Fixture f =
             make_fixture({tool_turn({ToolCall{"c1", "write_thing", "{}"}}), text_turn("done")});
         Options options = options_with(registry);
-        options.permission = [](std::string_view, std::string_view) { return Permission::Allow; };
+        options.permission = [](const apogee::agent::GateRequest&) { return Permission::Allow; };
 
         (void)apogee::agentloop::run(*f.harness, f.history, options);
         CHECK(f.history[2].content.plain_text() == "wrote it");
@@ -418,7 +418,7 @@ TEST_CASE("a write tool is gated; a read tool is not", "[agentloop][permission]"
         Fixture f = make_fixture(
             {tool_turn({ToolCall{"c1", "write_thing", "{}"}}), text_turn("understood")});
         Options options = options_with(registry);
-        options.permission = [](std::string_view, std::string_view) { return Permission::Deny; };
+        options.permission = [](const apogee::agent::GateRequest&) { return Permission::Deny; };
 
         (void)apogee::agentloop::run(*f.harness, f.history, options);
         const std::string result = f.history[2].content.plain_text();
@@ -431,8 +431,8 @@ TEST_CASE("a write tool is gated; a read tool is not", "[agentloop][permission]"
             make_fixture({tool_turn({ToolCall{"c1", "write_thing", "{}"}}), text_turn("done")});
         bool asked = false;
         Options options = options_with(registry);
-        options.permission = [](std::string_view, std::string_view) { return Permission::Ask; };
-        options.confirm = [&asked](std::string_view, std::string_view) {
+        options.permission = [](const apogee::agent::GateRequest&) { return Permission::Ask; };
+        options.confirm = [&asked](const apogee::agent::GateRequest&) {
             asked = true;
             return true;
         };
@@ -447,7 +447,7 @@ TEST_CASE("a write tool is gated; a read tool is not", "[agentloop][permission]"
             make_fixture({tool_turn({ToolCall{"c1", "read_thing", "{}"}}), text_turn("done")});
         bool consulted = false;
         Options options = options_with(registry);
-        options.permission = [&consulted](std::string_view, std::string_view) {
+        options.permission = [&consulted](const apogee::agent::GateRequest&) {
             consulted = true;
             return Permission::Deny;
         };
@@ -473,7 +473,7 @@ TEST_CASE("non-interactive ask resolves to deny", "[agentloop][permission]") {
     Fixture f = make_fixture({tool_turn({ToolCall{"c1", "write_thing", "{}"}}), text_turn("ok")});
 
     Options options = options_with(registry);
-    options.permission = [](std::string_view, std::string_view) { return Permission::Ask; };
+    options.permission = [](const apogee::agent::GateRequest&) { return Permission::Ask; };
     // No confirm function -- nobody to ask.
     REQUIRE_FALSE(options.confirm);
 

@@ -1260,6 +1260,30 @@ The general lesson is the one this repo already applies elsewhere and had not ap
 
 **What this deliberately does not do.** No push channel (a driving GUI performs its own mutations by shelling out to `apogee config …`, so it already knows when to re-read); no socket, ever (`lsof`, sampled continuously while the child lives); no protocol representation of slash commands, which are terminal-REPL affordances a driver replaces with its own UI.
 
+### 2026-09-25 — The integration spike: a naive host embeds the binary (backlog item 27, for v0.1.4)
+
+Asked for by the user (2026-09-25): the CLI pluggable into **other people's** harnesses and applications, with the native machine mode as the floor and a common protocol integrators extend from. The spike's instrument is [`tests/naive_host_driver.py`](../../src/cli/tests/naive_host_driver.py) — a third-party-style host, kept as evidence and re-runnable (`naive_host_driver.py <binary> <work-dir>`), that knows **only what machine-mode.md says**: it may not learn from Apogee's source, and where the documented contract leaves it blind it records a wall instead of peeking. It ran against the installed `v0.1.2` binary (the shipped contract an integrator meets today) in a throwaway `APOGEE_HOME`, with a scripted `mock` backend as the model actor.
+
+**What worked, exactly as documented.** The host completed a tool-using conversation end to end: `ask_user` flowed out as a `question` event and the answer back in; the permission gate's `question` (`kind:"permission"`, `tool`, `target`) arrived, was answered `yes`, and the tool ran; a failed tool came back **as a tool result the model read**, and the turn continued to a clean `result` — the denial-semantics contract holding under a real failure. One child served both turns; stdout carried nothing but JSONL; an unknown *inbound* line was ignored exactly as the doc promises. And the headline measurement: **host-supplied tools already work today** — the host ran a 40-line MCP stdio server, registered it with `apogee mcp create`, and its tool round-tripped through the loop (`mcp__host__host_lookup` → `host-answer:…` in the final text) with **zero prompts**, the `readOnlyHint` honoured.
+
+**The seven walls** (full evidence in the probe's `findings/walls.md`):
+
+| # | Wall |
+|---|---|
+| W1 | No handshake or discovery: the host learns `protocol_version` only from the `session` event after spawning, and cannot declare itself or ask what the binary supports (`session` carries only `model` + `protocol_version`) |
+| W2 | No machine-readable schema: the host hand-transcribes the event vocabulary from prose; nothing ships to validate a stream against |
+| W3 | No turn or correlation ids: events belong to "the current turn" by position only, so a host cannot pipeline or attribute after a race |
+| W4 | No cancel: the only exits from an in-flight turn are killing the child or failing the turn by closing stdin |
+| W6 | Host tools need a config mutation: `mcp create` edits the install's config — global state a host must mutate and clean up to wire tools for one child; no per-run flag |
+| W7 | Reads are prose: "everything else is a CLI command", but the read commands emit human text, so a host UI screen-scrapes `apogee models` or re-reads config files |
+| W8 | The child's tool sandbox is scoped to the *user's* config, not the host's workspace: `write_file` into the host's own project was refused ("outside the allowed root `/Users/taylor`") because `tools.fs_root` defaults to the user's home — no per-run scoping exists |
+
+(W5 — undocumented outbound events — did not fire: the v0.1.2 stream is exactly its documented vocabulary.)
+
+**The recommendation: grow the JSONL contract; do not reframe it.** JSON-RPC/LSP framing would break every `protocol_version: 1` driver to buy request/response multiplexing the walls do not demand — turns serialize by design, and the one axis that wants a peer protocol (host tools) is **already answered by MCP as a sidecar**, proven above, wanting only per-run wiring. The decisive finding is that the existing tolerance rules make the contract **retrofittable in both directions**: an unknown inbound line is ignored (verified live), so a new host can send a `hello` to an old binary harmlessly, and rule 1 means an old host survives every additive event. The gaps close as additions: a handshake and a written stability promise (W1), a schema artifact pinned like the prose doc (W2), turn ids and an inbound cancel (W3, W4), per-run wiring for host MCP servers and the file-tool root (W6, W8 — W8's *default* also changes under item 25a's launch-folder rule, which shipped later the same day, [Milestone V](#milestone-v--the-native-toolsets); the spike's evidence is the v0.1.2 binary, and the per-run declaration remains the integration half), and `--output-format json` on the read commands a host UI needs (W7).
+
+**Split (2026-09-25), all five specced into the v0.1.4 table:** 27a the handshake and the stability promise → 27b per-run integration wiring → 27c turn ids and cancel → 27d the schema artifact → 27e machine-readable reads. **Parked with evidence, the user's call:** a push channel (v1's "events arrive in response to turns, never unprompted" held comfortably for an embedding host — the case for push is config/model change notification for long-lived embeds, and 27a's capability field is where it would negotiate if ever wanted). A SPEC revision naming third-party embedding as a product surface is proposed alongside the split rather than made unilaterally.
+
 ---
 
 ## Milestone N — Model operations
@@ -2003,7 +2027,7 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 | The shell | **Gated**, default `ask` | Ommi shipped it unrestricted with a docstring warning; a tool that can `rm -rf` is what the gate is for. `allow` is one config line. |
 | Git | Shell out *(default taken)* | libgit2 is a dependency on six targets and a second ref resolver, for nothing the user's `git` lacks. |
 | Permissions keyed by | **Tool name** | A two-field struct would need a new field per gated tool; a namespaced MCP tool fits the same key. |
-| `fs_root` default | The home directory *(default taken)* | Ommi's default; a chat started from `/` would otherwise sandbox nothing. |
+| `fs_root` default | The home directory *(default taken)* | Ommi's default; a chat started from `/` would otherwise sandbox nothing. **Reversed 2026-09-25** (the user's call): the folder Apogee was started in — see *Tool safety defaults* below. |
 | The machine-mode prompt | The existing `question` event *(default taken)* | A `kind` field, no new channel; the "advertised iff someone can answer" rule already covers the no-driver case. |
 | `always` | Per tool, not per target *(default taken)* | A per-path allow-list is a larger schema for a case `session` covers. |
 | `git_diff` with a fetch | Read-only for the gate *(default taken)* | It updates remote-tracking refs, never the tree or history; prompting on every review diff trains the reflex the gate avoids. |
@@ -2016,6 +2040,48 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 **Guardrails, each mutation-tested (36 mutations: 35 caught outright, 1 caught after its test was strengthened).** The sandbox as a string prefix, or gone; `write_file`, `delete_file` and the shell ungated; hidden directories searched; the read cap silent; the shell's positionals visible to the command; a timeout reported as an ordinary exit; a ref allowed to start with a dash; the file argument reaching git unchecked; `never` fetching anyway; `auto` never fetching; the review defaults ignored; a note key holding a slash; the resolver's error ignored; hits not naming their retriever; a disabled toolset registered anyway; `run_command` dropped from the destructive list; a config `deny` reading as allow; session answers forgotten; `always` not written; an unknown answer allowing; the terminal prompt existing on a pipe; a closed driver denying instead of failing the turn; `tools.disabled` ignored by the registry; the served checker dropped; ask with nobody to ask allowing; the loader accepting `yes` as a level; `set_permission` accepting any level, or a path as a tool name; the doctor blind to a misspelt key; `restart_required` always false; the `PUT` permissions row ungated; `notes/` not a layout row; and `tools/` including a backend.
 
 **The one survivor, and what it taught.** "`never` fetches anyway" survived because the test's `never` case asked for a ref that existed *nowhere*, so the real code and the mutant refused it with the same message. The case now names a branch only the remote has: the real code refuses, a mutant that quietly fetched would succeed. A refusal test has to use something that *could* have been found.
+
+### 2026-09-25 — `tool-safety-defaults` (backlog item 25a): ask before a new website, work in the launch folder
+
+**Why it came first.** The local-tools spike (2026-09-25) found an exposure that already existed. `read_file` and `fetch_url` were both read-only to the gate, so neither ever asked, and the file tools reached the whole home directory. A model with `--tools` could read a file and send its contents out inside a URL with no prompt at any point, and a web page carrying hidden instructions was enough to set that off. Every cloud backend run with `--tools` had it. [Local tool calling](../backlog/local-tool-calling.md) would hand it to local models, and [web search](../backlog/web-search-searxng.md) would multiply the untrusted pages a model reads. So this went first in the local-agent-tools track.
+
+**What was built**
+
+- [x] **Outbound, as its own kind of gated tool** (`agent/tool.h`). `Tool::outbound` sits beside `writes`. The gate is asked a `GateRequest`: the tool, the target it decides on, a `detail` it shows but never decides on, and whether the tool is outbound. An outbound tool must name a target (`ToolRegistry::add` refuses one that cannot), and a call it names none for is refused unrun. `run_gated` hands a running tool a `TargetGate`, so each further target goes through the same checker and the same prompt.
+- [x] **`fetch_url`, outbound** (`agent/fetch_url`). The target is the URL's host and the detail is the whole URL. `parse_http_url` is the one URL parser: userinfo, a backslash or a percent escape in the authority, a host that is not a bare host name, and a port outside 1–65535 are refused, and path bytes that are not printable ASCII are percent-encoded. **The URL fetched is rebuilt from those parts**, so the host asked about is the host the transport reaches. Redirects are followed one hop at a time (`resolve_redirect`, at most ten). A hop to a new host goes through the gate before anything is fetched from it, a hop on the same host does not ask again, and a redirect to any other scheme is refused. A redirected page's text starts with `[X redirected to Y]`.
+- [x] **The fetcher** (`commands/helpers`, `make_http_fetcher`): one GET with `follow_redirects = false` and `max_body_bytes` at 5 MB, both new on `HttpRequest`. `HttpResponse` gained `location` and `body_limit_exceeded`. Stopping at the cap is reported, not failed, so it is never retried. `CurlTransport`'s header callback now resets at each status line, so only the last response's headers count.
+- [x] **One definition of a host** (`harness/host.h`). `canonical_host` lowercases, drops one trailing dot and IPv6 brackets, and refuses anything else. `host_listed` compares in that form, **exactly**. The config, the checker, the URL parser, `check` and the editor all ask it.
+- [x] **Answers per website** (`commands/permissions`). For an outbound call the checker asks, in order: is the host in `tools.allowed_hosts`, has this session allowed it, else ask. `permissions.fetch_url` is not a key: `check` warns that it does nothing and names the list. `SessionApprovals` keeps tools and hosts apart, so `session` allows that one website. `always` adds the host through the editor. The terminal prompt shows the whole URL under the host (`Allow reaching this website?`), and machine mode's permission question gains `outbound` and `detail`.
+- [x] **`tools.allowed_hosts`**. The template's `tools:` section is active now, holding `allowed_hosts: []` with the rule in its comment, so `always` changes exactly one line. `add_allowed_host`/`remove_allowed_host` are exact inverses over flow and block lists, a missing key or section, and CRLF. `config add-allowed-host` and `delete-allowed-host` (the latter completing to the listed hosts, a new `ALLOWED_HOST` kind) have admin twins: `GET`, `PUT` and `DELETE /v1/admin/allowed-hosts[/{id}]`.
+- [x] **The launch folder** (`tools/toolsets`, `effective_fs_root`). `tools.fs_root` unset now means the folder Apogee was started in, not the home directory. A refusal names the root and both ways to widen it: start in a folder that contains the file, or set `tools.fs_root`.
+- [x] **`check`** reports the allowed hosts (an entry that is not a host is a warning, never a load failure), and the file root with where it came from.
+- [x] **The references**: [http-api.md](../reference/http-api.md) (the three routes, and the `serve --tools` behaviour change) and [machine-mode.md](../reference/machine-mode.md) (the per-website question). Each is pinned by its conformance check.
+- [x] **21 new test cases** (1608 in all), and `cli.config_lifecycle` drives the real binary.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Ask when | **Per new website** (the user's call) | Over asking only once a file has been read, an allow-list with no prompt, or no guard. A known site stays fast; a new one is always a visible choice. |
+| The file root | **The launch folder** (the user's call) | A chat started in a project works in that project; `tools.fs_root` still widens it. |
+| How `fetch_url` is gated | A new `Tool::outbound` flag *(default taken)* | Outbound is a different risk from mutation. A `read-only` agent (Milestone X's policy, which drops `writes` tools) keeps `fetch_url`, gated per website, so with nobody to ask it reaches only the listed hosts and still never blocks. |
+| `always` and `session` | The host into `tools.allowed_hosts`; the host for this process *(default taken)* | What the two answers already mean for a tool, applied to a host. |
+| Nobody to ask | Only `tools.allowed_hosts` *(default taken)* | `serve --tools` fetched anything before; the change is recorded in http-api.md. |
+| The search provider's host | Trusted by configuration *(default taken; nothing to build until [25e](../backlog/web-search-searxng.md))* | The user named it. The pages a search returns are ordinary fetches and ask. |
+| `chat --resume` | The folder it is resumed in *(default taken)* | The root is a property of the process, not the transcript. It falls out: nothing in Apogee changes directory after startup. |
+| `permissions.fetch_url` | Not a key | A tool-level `allow` would reopen every website at once, which is what per-website asking exists to prevent. |
+| The URL handed to the transport | Rebuilt from the parsed parts | Two URL parsers that disagree about a host are the classic way round a host check; here the second parser has nothing ambiguous to read. |
+| A redirect on the same host | Not asked again | It was just allowed; asking again teaches the reflex the gate avoids. |
+| Redirect limit | Ten | It bounds a loop, not the guard: every new host is asked about anyway. |
+| Download cap | 5 MB, refused naming the size | 25a's seam named a cap and [25f](../backlog/fetch-url-reader.md) had recorded the size, so it was taken here and marked consumed there. |
+| Where the host rule lives | `harness/host.h` | `agent/`, `commands/`, `httpserver/` and the editor all need it, and `harness/` is the one layer every one of them may include. |
+| A pasted URL in the list | Loads, and `check` warns | Refusing the whole config over one entry would take every other command down with it. |
+
+**Verified on the real binary.** `cli.config_lifecycle` covers the full sequence. On a pipe the fetch is refused, and the model reads the refusal as a tool result. A driver's `always` in machine mode names the host in the question and adds exactly `[127.0.0.1]` to the config. The same pipe run then reaches the host, and `check` lists both rows. `delete-allowed-host` restores the file's bytes. By hand, against a local server: a redirect to a different host was refused, and the server never saw the request; a same-host redirect was followed; a 6 MB page was refused, naming the limit, and requested once. Under a pseudo-terminal, the prompt showed the host and the whole URL, and `a` wrote the host to the config.
+
+MUTATION_RESULTS_PLACEHOLDER
+
+**Not verified.** The transport's new options (`follow_redirects`, `max_body_bytes`, the `Location` header) were exercised only on macOS's curl; the Linux and Windows builds set the same curl options. `apogee check`'s rows are asserted by the end-to-end test, not by a `check_test` case.
 
 ## Milestone W — The MCP client
 

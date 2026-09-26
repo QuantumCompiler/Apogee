@@ -198,6 +198,8 @@ add_library(apogee_core STATIC
     harness/config_template.cpp
     harness/config_edit.h
     harness/config_edit.cpp
+    harness/host.h
+    harness/host.cpp
     harness/assets.h
     harness/assets.cpp
     harness/assets_training.cpp

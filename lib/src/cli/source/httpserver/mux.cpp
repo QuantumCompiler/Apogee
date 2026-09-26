@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 67> kRoutes{{
+constexpr std::array<Route, 70> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -279,6 +279,18 @@ constexpr std::array<Route, 67> kRoutes{{
     {"PUT", "/v1/admin/permissions/{id}", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->put_permission(r, id);
+     }},
+    {"GET", "/v1/admin/allowed-hosts", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_allowed_hosts(r);
+     }},
+    {"PUT", "/v1/admin/allowed-hosts/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->put_allowed_host(r, id);
+     }},
+    {"DELETE", "/v1/admin/allowed-hosts/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->delete_allowed_host(r, id);
      }},
     {"GET", "/v1/admin/auth", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {

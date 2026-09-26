@@ -397,6 +397,75 @@ if(NOT FORMATTED_ONCE STREQUAL FORMATTED_TWICE)
     message(FATAL_ERROR "config format is not idempotent")
 endif()
 
+# --- fetch_url asks per website ---------------------------------------------
+# A scripted model fetches from 127.0.0.1:9 -- loopback, a port nothing
+# listens on, so the fetch fails fast and nothing leaves the machine -- and
+# answers with the tool result it got, which is what these assertions read.
+file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
+file(WRITE "${APOGEE_WORK_DIR}/fetch.json" [=[{"turns": [
+  {"text": "", "tool_calls": [{"name": "fetch_url", "arguments": {"url": "http://127.0.0.1:9/page"}}]},
+  {"text": "RESULT: {{last_tool_result}}"}
+]}]=])
+apogee_run(0 config add-backend fetcher --type mock --model-path "${APOGEE_WORK_DIR}/fetch.json")
+file(READ "${CONFIG_FILE}" BEFORE_ALWAYS)
+
+# On a pipe nobody can answer: an unlisted host is refused, and the model is
+# told -- a tool result, never a failed turn.
+apogee_run(0 complete -m fetcher --tools "read the page")
+if(NOT APOGEE_OUT MATCHES "permission to reach 127\\.0\\.0\\.1 was not given")
+    message(FATAL_ERROR "a pipe fetched from an unlisted host:\n${APOGEE_OUT}\n${APOGEE_ERR}")
+endif()
+
+# A driver answers `always`: the question names the host, and the config gains
+# exactly that host through the editor -- the file plus one changed line.
+file(WRITE "${APOGEE_WORK_DIR}/always.jsonl"
+    "{\"type\":\"user\",\"text\":\"read the page\"}\n{\"type\":\"answer\",\"text\":\"always\"}\n")
+execute_process(
+    COMMAND "${APOGEE_BIN}" chat -m fetcher --tools --output-format stream-json
+            --input-format stream-json
+    INPUT_FILE "${APOGEE_WORK_DIR}/always.jsonl"
+    RESULT_VARIABLE always_code
+    OUTPUT_VARIABLE always_out
+    ERROR_VARIABLE always_err
+)
+if(NOT always_code EQUAL 0)
+    message(FATAL_ERROR "the driven chat failed: ${always_out}\n${always_err}")
+endif()
+if(NOT always_out MATCHES "\"kind\":\"permission\"[^\n]*\"target\":\"127\\.0\\.0\\.1\"")
+    message(FATAL_ERROR "the permission question did not name the host:\n${always_out}")
+endif()
+file(READ "${CONFIG_FILE}" AFTER_ALWAYS)
+string(REPLACE "  allowed_hosts: []" "  allowed_hosts: [127.0.0.1]" EXPECTED_ALWAYS
+    "${BEFORE_ALWAYS}")
+if(NOT AFTER_ALWAYS STREQUAL EXPECTED_ALWAYS)
+    message(FATAL_ERROR "`always` did not add exactly the host:\n${AFTER_ALWAYS}")
+endif()
+
+# Listed now, so the same pipe run reaches it (and fails to connect, which is
+# the proof it was attempted rather than refused).
+apogee_run(0 complete -m fetcher --tools "read the page")
+if(APOGEE_OUT MATCHES "permission to reach" OR NOT APOGEE_OUT MATCHES "Error fetching")
+    message(FATAL_ERROR "a listed host was not fetched:\n${APOGEE_OUT}")
+endif()
+
+# The doctor shows the list and the file root; the CLI twin removes the host
+# and the file is back to its bytes. (--fix: this throwaway home has none of
+# the layout, and `check` would fail on that, not on anything here.)
+apogee_run(0 check --fix)
+if(NOT APOGEE_OUT MATCHES "allowed_hosts[^\n]*127\\.0\\.0\\.1")
+    message(FATAL_ERROR "check does not report the allowed host:\n${APOGEE_OUT}")
+endif()
+if(NOT APOGEE_OUT MATCHES "fs_root[^\n]*the folder Apogee was started in")
+    message(FATAL_ERROR "check does not report the launch folder as the file root:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 config delete-allowed-host 127.0.0.1)
+file(READ "${CONFIG_FILE}" AFTER_FORGET)
+if(NOT AFTER_FORGET STREQUAL BEFORE_ALWAYS)
+    message(FATAL_ERROR "delete-allowed-host did not restore the bytes")
+endif()
+apogee_run(1 config delete-allowed-host 127.0.0.1)
+apogee_run(1 config add-allowed-host https://example.com/)
+
 # --- delete restores the original bytes ------------------------------------
 # Rebuild from pristine so the role edits above do not muddy the comparison.
 file(WRITE "${CONFIG_FILE}" "${PRISTINE}")

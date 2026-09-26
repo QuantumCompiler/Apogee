@@ -19,6 +19,7 @@ add_executable(apogee_tests
     commands/root_test.cpp
     harness/config_test.cpp
     harness/config_edit_test.cpp
+    harness/host_test.cpp
     harness/paths_test.cpp
     harness/types_test.cpp
     harness/harness_test.cpp
@@ -89,6 +90,7 @@ add_executable(apogee_tests
     commands/chat_completer_test.cpp
     logger/session_test.cpp
     agent/tool_test.cpp
+    agent/fetch_url_test.cpp
     agentloop/loop_test.cpp
     agentloop/anthropic_loop_test.cpp
     agentloop/content_test.cpp

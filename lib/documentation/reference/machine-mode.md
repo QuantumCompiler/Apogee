@@ -132,6 +132,21 @@ Where there is no driver — `complete --output-format stream-json` is one-shot
 and cannot be asked — `ask` resolves to deny, and only `allow` in the config
 lets a destructive tool run.
 
+`fetch_url` is asked about **per website** rather than per tool, because a URL
+can carry out anything the model has read. The first time a run reaches a host
+not in `tools.allowed_hosts`, the event's `target` is that host, `outbound` is
+`true`, and `detail` is the whole URL — show it, since what would leave the
+machine is in it. A redirect to a new host asks again, before anything is
+fetched from it:
+
+```jsonl
+{"type":"question","kind":"permission","tool":"fetch_url","target":"docs.python.org","outbound":true,"detail":"https://docs.python.org/3/library/os.html","questions":[{"header":"Permission","question":"Allow fetch_url to reach docs.python.org?","multi_select":false,"options":[{"label":"yes","description":"Allow this once"},{"label":"no","description":"Deny"},{"label":"always","description":"Allow, and add the website to tools.allowed_hosts"},{"label":"session","description":"Allow this website for the rest of this session"}]}]}
+```
+
+The answers are the same words: `session` allows that host for the rest of the
+run, and `always` adds it to `tools.allowed_hosts`. With no driver, only the
+listed hosts are reached.
+
 ## Everything else is a CLI command
 
 There is no second protocol for mutations. A driving GUI shells out to the same

@@ -56,9 +56,9 @@ Within a table, rows are in the **suggested build order**; the topmost 🟢 row 
 
 **Gate convention:** every pending item builds on top of everything already shipped; a gate — the "build after" in a scope note, the 🔒 cell in a table — names only the ordering among the pending items here, and an item is buildable from its transitive gate chain alone. Items marked **split first** must be groomed into their listed sub-documents before an agent takes them; do not build from the guard document directly.
 
-Two tracks, since **24** (chat input completion) shipped on 2026-09-25 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestone H. Its handoff to the attachments item — wiring a sent `@` mention into the attach path — is recorded on [26d](attachments-documents.md).
+Three tracks, since **24** (chat input completion) shipped on 2026-09-25 — see [MILESTONES.md](../assistant/MILESTONES.md) → Milestone H. Its handoff to the attachments item — wiring a sent `@` mention into the attach path — is recorded on [26d](attachments-documents.md).
 
-**25, local agent tools**, came out of a spike on 2026-09-25 and was split into six items the same day. The spike found that local models were never shown the tools every other backend already has, measured llama.cpp's own tool-calling layer on real weights (6/6 tasks on Qwen3.8-27B and Qwen3-VL-8B), and turned up an outbound-data exposure in today's tools. The user's four calls are recorded in the items: SearXNG for search, ask per new website, the launch folder as the file root, and 8B-class models and up. In build order: 25a first (it closes today's exposure); 25b is the unlock; 25c–25f follow it or 25a, as each names.
+**25, local agent tools**, came out of a spike on 2026-09-25 and was split into six items the same day. The spike found that local models were never shown the tools every other backend already has, measured llama.cpp's own tool-calling layer on real weights (6/6 tasks on Qwen3.8-27B and Qwen3-VL-8B), and turned up an outbound-data exposure in today's tools. The user's four calls are recorded in the items: SearXNG for search, ask per new website, the launch folder as the file root, and 8B-class models and up. In build order: 25a first (it closed today's exposure, and shipped 2026-09-25 — [MILESTONES.md](../assistant/MILESTONES.md#milestone-v--the-native-toolsets) → Milestone V); 25b is the unlock; 25c–25f follow it, as each names.
 
 **26, small-model depth**, came out of a review on 2026-09-25 of what else would let small local models work at their best. It was split into twelve items the same day, with every group the review proposed taken by the user:
 - **automatic attachments**: documents, code and folders indexed by the embedding model and handed to the model per turn; images, audio and video read natively or through helper models;
@@ -69,16 +69,17 @@ Two tracks, since **24** (chat input completion) shipped on 2026-09-25 — see [
 
 The user's calls are recorded in the items: attachments kept with their chat and cached by hash, helper models used automatically, and external converters (`pdftotext`, `ffmpeg`).
 
+**27, machine-mode integrations**, asked for 2026-09-25 for **v0.1.4**: the CLI pluggable into other people's harnesses and applications — the native machine-mode protocol as the floor, a common protocol integrators extend from. **The spike ran the same day** ([MILESTONES.md](../assistant/MILESTONES.md#milestone-m--the-front-end-contract) → Milestone M): a naive external host, knowing only the protocol doc, completed a tool-using, permission-prompted conversation against the shipped binary; a host-run MCP server's tool round-tripped through the loop with zero prompts (host tools already work — the gap is wiring); seven walls were recorded. The recommendation: **grow the JSONL contract additively** — the tolerance rules make it retrofittable in both directions, verified live — with MCP as the host-tools sidecar, never a reframe that breaks `protocol_version: 1` drivers. Split into five: 27a the handshake and stability promise, 27b per-run integration wiring (walls W6/W8 — **its document is still to be written**; the Milestone M record carries its substance), 27c turn ids and cancel, 27d the schema artifact, 27e machine-readable reads. Parked with evidence, the user's call: the push channel.
+
 ### v0.1.3
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| 25a | Tool safety defaults — `fetch_url` asks per new website, redirects hop by hop, and the file tools default to the launch folder | v0.1.3 | [`tool-safety-defaults.md`](tool-safety-defaults.md) | 🚧 |
-| 25b | Local tool calling — the llama.cpp backend renders tools through the model's own template, parses its calls, and constrains them by grammar, via llama.cpp's `common` chat layer linked in-process | v0.1.3 | [`local-tool-calling.md`](local-tool-calling.md) | 🔒 25a |
+| 25b | Local tool calling — the llama.cpp backend renders tools through the model's own template, parses its calls, and constrains them by grammar, via llama.cpp's `common` chat layer linked in-process | v0.1.3 | [`local-tool-calling.md`](local-tool-calling.md) | 🟢 |
 | 25c | Hybrid prompt checkpoints — Qwen3.5/3.8 re-read only what is new each turn and tool step, via state checkpoints as llama-server keeps them | v0.1.3 | [`hybrid-prompt-checkpoints.md`](hybrid-prompt-checkpoints.md) | 🔒 25b |
 | 25d | Tool ergonomics — capped command output, line-range reads, `edit_file`, `grep_files`, and an environment note (date, OS, folder) | v0.1.3 | [`local-tool-ergonomics.md`](local-tool-ergonomics.md) | 🔒 25b |
-| 25e | Web search via SearXNG — `web_search` over the user's own SearXNG, pluggable, never silently empty | v0.1.3 | [`web-search-searxng.md`](web-search-searxng.md) | 🔒 25a, 25b |
-| 25f | `fetch_url` as a reader — main content with its links as Markdown, paging, content types, a download cap | v0.1.3 | [`fetch-url-reader.md`](fetch-url-reader.md) | 🔒 25a |
+| 25e | Web search via SearXNG — `web_search` over the user's own SearXNG, pluggable, never silently empty | v0.1.3 | [`web-search-searxng.md`](web-search-searxng.md) | 🔒 25b |
+| 25f | `fetch_url` as a reader — main content with its links as Markdown, paging, content types, a download cap | v0.1.3 | [`fetch-url-reader.md`](fetch-url-reader.md) | 🟢 |
 | 26a | A context window sized to the machine — 32K by default instead of the trained window (16 GiB of cache on Qwen3.8), an 8-bit cache, and the cost shown | v0.1.3 | [`context-fit-defaults.md`](context-fit-defaults.md) | 🟢 |
 | 26b | Helper-model roles — `vision`, `transcription` and `utility` in the one resolver; titles, compaction, query rewriting and big tool results move to the utility model | v0.1.3 | [`helper-model-roles.md`](helper-model-roles.md) | 🟢 |
 | 26c | A per-turn context budget — each source gets a share of the real window; finished turns' tool results sent as stubs | v0.1.3 | [`context-budget.md`](context-budget.md) | 🟢 |
@@ -91,3 +92,12 @@ The user's calls are recorded in the items: attachments kept with their chat and
 | 26j | A persistent prompt cache — resumed chats and repeated tool prompts restored from disk | v0.1.3 | [`persistent-prompt-cache.md`](persistent-prompt-cache.md) | 🔒 25c, 26a |
 | 26k | Speculative decoding, measured first — MTP, a draft model or n-grams, built only on a clean ≥1.3× win | v0.1.3 | [`speculative-decoding.md`](speculative-decoding.md) | 🔒 25b, 25c |
 | 26l | Recall across chats — past chats summarised and retrieved per turn; never on `serve` | v0.1.3 | [`recall-across-chats.md`](recall-across-chats.md) | 🔒 26b, 26c |
+
+### v0.1.4
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 27a | The handshake and the stability promise — an optional `hello` line, `capabilities` on the `session` event, and the additivity guarantees in writing | v0.1.4 | [`machine-handshake.md`](machine-handshake.md) | 🟢 |
+| 27c | Turn ids and cancel — a `turn` field on every turn-scoped event, and `{"type":"cancel"}` aborting an in-flight turn the way Ctrl-C does | v0.1.4 | [`machine-turn-control.md`](machine-turn-control.md) | 🔒 27a |
+| 27d | The schema artifact — `apogee __machine-schema` prints the protocol as JSON Schema, conformance-pinned to the code, shipped in the release archives | v0.1.4 | [`machine-schema-artifact.md`](machine-schema-artifact.md) | 🔒 27a, 27c |
+| 27e | Machine-readable reads — `--output-format json` on `models`/`chats`/`agents`/`mcp`/`check`, the same facts as the human view | v0.1.4 | [`machine-readable-reads.md`](machine-readable-reads.md) | 🟢 |

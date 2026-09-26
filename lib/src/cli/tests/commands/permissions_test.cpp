@@ -22,11 +22,13 @@
 #include "platform/platform.h"
 #include "support/env_guard.h"
 #include "support/fake_mcp_server.h"
+#include "support/fake_transport.h"
 
 /// The gate's two halves as the surfaces make them: the checker's precedence
 /// and the machine-mode prompt, driven over string streams.
 namespace {
 
+using apogee::agent::GateRequest;
 using apogee::agent::Permission;
 using apogee::commands::make_driver_confirm_fn;
 using apogee::commands::make_permission_checker;
@@ -51,16 +53,49 @@ TEST_CASE("the checker: config level, then the session's answers, then ask",
     const auto approvals = std::make_shared<SessionApprovals>();
     const apogee::agent::PermissionChecker check = make_permission_checker(config, approvals);
 
-    CHECK(check("write_file", "x") == Permission::Allow);
-    CHECK(check("run_command", "x") == Permission::Deny);
-    CHECK(check("delete_file", "x") == Permission::Ask);  // unlisted: the default
-    approvals->insert("delete_file");
-    CHECK(check("delete_file", "x") == Permission::Allow);
+    CHECK(check(GateRequest{"write_file", "x"}) == Permission::Allow);
+    CHECK(check(GateRequest{"run_command", "x"}) == Permission::Deny);
+    CHECK(check(GateRequest{"delete_file", "x"}) == Permission::Ask);  // unlisted: the default
+    approvals->tools.insert("delete_file");
+    CHECK(check(GateRequest{"delete_file", "x"}) == Permission::Allow);
     // A session answer never overrides a config deny.
-    approvals->insert("run_command");
-    CHECK(check("run_command", "x") == Permission::Deny);
+    approvals->tools.insert("run_command");
+    CHECK(check(GateRequest{"run_command", "x"}) == Permission::Deny);
     // No approvals at all is fine: a served run has none.
-    CHECK(make_permission_checker(config, nullptr)("delete_file", "x") == Permission::Ask);
+    CHECK(make_permission_checker(config, nullptr)(GateRequest{"delete_file", "x"}) ==
+          Permission::Ask);
+}
+
+TEST_CASE("an outbound call is decided by host: the allow-list, then the session, then ask",
+          "[commands][permissions][outbound]") {
+    Config config;
+    config.tools.allowed_hosts = {"docs.python.org", "Example.COM."};
+    // A level for the tool is not how websites are allowed: it has no effect.
+    config.permissions.levels["fetch_url"] = PermissionLevel::Allow;
+    const auto approvals = std::make_shared<SessionApprovals>();
+    const apogee::agent::PermissionChecker check = make_permission_checker(config, approvals);
+    const auto fetch = [](std::string_view host) {
+        return GateRequest{"fetch_url", host, "https://example/", true};
+    };
+
+    CHECK(check(fetch("docs.python.org")) == Permission::Allow);
+    CHECK(check(fetch("example.com")) == Permission::Allow);  // either spelling
+    CHECK(check(fetch("pypi.org")) == Permission::Ask);
+    // Exact hosts: no parent, child, prefix or suffix admits another.
+    CHECK(check(fetch("python.org")) == Permission::Ask);
+    CHECK(check(fetch("evil.docs.python.org")) == Permission::Ask);
+    CHECK(check(fetch("docs.python.org.evil.example")) == Permission::Ask);
+    // Not a host at all: refused outright, never asked about.
+    CHECK(check(fetch("")) == Permission::Deny);
+    CHECK(check(fetch("https://docs.python.org")) == Permission::Deny);
+
+    // `session` for one host is that host, not the tool.
+    approvals->hosts.insert("pypi.org");
+    CHECK(check(fetch("pypi.org")) == Permission::Allow);
+    CHECK(check(fetch("files.pypi.org")) == Permission::Ask);
+    // And a tool-level session answer allows no website.
+    approvals->tools.insert("fetch_url");
+    CHECK(check(fetch("other.example")) == Permission::Ask);
 }
 
 TEST_CASE("the machine-mode prompt is a permission question answered by one line",
@@ -80,7 +115,7 @@ TEST_CASE("the machine-mode prompt is a permission question answered by one line
                               "\n"};
         const apogee::agent::ConfirmFn confirm =
             make_driver_confirm_fn(reporter, in, config_path, approvals);
-        CHECK(confirm("write_file", "/tmp/x"));
+        CHECK(confirm(GateRequest{"write_file", "/tmp/x"}));
         const nlohmann::json event = nlohmann::json::parse(out.str());
         CHECK(event["type"] == "question");
         CHECK(event["kind"] == "permission");
@@ -88,7 +123,8 @@ TEST_CASE("the machine-mode prompt is a permission question answered by one line
         CHECK(event["target"] == "/tmp/x");
         REQUIRE(event["questions"].size() == 1);
         CHECK(event["questions"][0]["options"].size() == 4);
-        CHECK(approvals->empty());
+        CHECK(approvals->tools.empty());
+        CHECK(approvals->hosts.empty());
         CHECK(read_all(config_path) == shipped);
     }
     SECTION("no denies; an unknown word denies; a non-answer line is skipped") {
@@ -96,20 +132,23 @@ TEST_CASE("the machine-mode prompt is a permission question answered by one line
                               "\n"
                               R"({"type":"answer","text":"nope"})"
                               "\n"};
-        CHECK_FALSE(make_driver_confirm_fn(reporter, in, config_path, approvals)("write_file", ""));
+        CHECK_FALSE(make_driver_confirm_fn(reporter, in, config_path,
+                                           approvals)(GateRequest{"write_file", ""}));
     }
     SECTION("session is remembered for the run and not written") {
         std::istringstream in{R"({"type":"answer","text":"session"})"
                               "\n"};
-        CHECK(make_driver_confirm_fn(reporter, in, config_path, approvals)("run_command", "ls"));
-        CHECK(approvals->contains("run_command"));
+        CHECK(make_driver_confirm_fn(reporter, in, config_path,
+                                     approvals)(GateRequest{"run_command", "ls"}));
+        CHECK(approvals->tools.contains("run_command"));
         CHECK(read_all(config_path) == shipped);
     }
     SECTION("always is written through the config editor: the shipped file plus one changed line") {
         std::istringstream in{R"({"type":"answer","text":"always"})"
                               "\n"};
-        CHECK(make_driver_confirm_fn(reporter, in, config_path, approvals)("write_file", "x"));
-        CHECK(approvals->contains("write_file"));
+        CHECK(make_driver_confirm_fn(reporter, in, config_path,
+                                     approvals)(GateRequest{"write_file", "x"}));
+        CHECK(approvals->tools.contains("write_file"));
         const std::string after = read_all(config_path);
         CHECK(after != shipped);
         std::string expected = shipped;
@@ -120,10 +159,111 @@ TEST_CASE("the machine-mode prompt is a permission question answered by one line
     }
     SECTION("a driver that hangs up with the prompt outstanding fails the turn") {
         std::istringstream in{""};
-        CHECK_THROWS_AS(
-            make_driver_confirm_fn(reporter, in, config_path, approvals)("write_file", ""),
-            std::runtime_error);
+        CHECK_THROWS_AS(make_driver_confirm_fn(reporter, in, config_path,
+                                               approvals)(GateRequest{"write_file", ""}),
+                        std::runtime_error);
     }
+
+    const GateRequest website{"fetch_url", "docs.python.org", "https://docs.python.org/3/", true};
+    SECTION("an outbound session answer remembers the host, not the tool") {
+        std::istringstream in{R"({"type":"answer","text":"session"})"
+                              "\n"};
+        CHECK(make_driver_confirm_fn(reporter, in, config_path, approvals)(website));
+        CHECK(approvals->hosts.contains("docs.python.org"));
+        CHECK_FALSE(approvals->tools.contains("fetch_url"));
+        CHECK(read_all(config_path) == shipped);
+    }
+    SECTION("an outbound always adds the host through the editor, byte-exact") {
+        std::istringstream in{R"({"type":"answer","text":"always"})"
+                              "\n"};
+        CHECK(make_driver_confirm_fn(reporter, in, config_path, approvals)(website));
+        CHECK(approvals->hosts.contains("docs.python.org"));
+        std::string expected = shipped;
+        const std::size_t at = expected.find("  allowed_hosts: []");
+        REQUIRE(at != std::string::npos);
+        expected.replace(at, std::string{"  allowed_hosts: []"}.size(),
+                         "  allowed_hosts: [docs.python.org]");
+        CHECK(read_all(config_path) == expected);
+        // The permissions section is untouched: no `fetch_url: allow` line.
+        CHECK(read_all(config_path).find("fetch_url: allow") == std::string::npos);
+        const nlohmann::json event = nlohmann::json::parse(out.str());
+        CHECK(event["target"] == "docs.python.org");
+        CHECK(event["outbound"] == true);
+    }
+}
+
+TEST_CASE("a pipe and a driverless session reach only the listed websites",
+          "[commands][permissions][outbound]") {
+    // Where nobody can answer, the surfaces pass no confirm function: the
+    // checker alone decides, and ask is deny. `complete` on a pipe, chat's
+    // machine mode without a driver and `serve` all wire it this way.
+    Config config;
+    config.tools.allowed_hosts = {"docs.python.org"};
+    std::vector<std::string> fetched;
+    apogee::agent::ToolRegistry registry;
+    registry.add(apogee::agent::make_fetch_url_tool([&fetched](std::string_view url) {
+        fetched.emplace_back(url);
+        return apogee::agent::FetchResult{200, "<p>text</p>", "", ""};
+    }));
+    apogee::agent::DispatchContext context;
+    context.permission = make_permission_checker(config, std::make_shared<SessionApprovals>());
+
+    const auto call = [](std::string_view url) {
+        return apogee::harness::ToolCall{"c", "fetch_url",
+                                         R"({"url":")" + std::string{url} + R"("})"};
+    };
+    const apogee::agent::ToolOutcome refused =
+        apogee::agent::dispatch(registry, call("https://pypi.org/simple/"), context);
+    CHECK(refused.is_error);
+    CHECK(fetched.empty());
+    const apogee::agent::ToolOutcome listed =
+        apogee::agent::dispatch(registry, call("https://docs.python.org/3/"), context);
+    CHECK_FALSE(listed.is_error);
+    CHECK(fetched == std::vector<std::string>{"https://docs.python.org/3/"});
+}
+
+TEST_CASE("the real fetcher asks for one hop and a bounded body",
+          "[commands][permissions][fetch]") {
+    apogee::testing::FakeTransport::Reply moved;
+    moved.status = 302;
+    moved.location = "https://elsewhere.example/";
+    apogee::testing::FakeTransport::Reply huge;
+    huge.body = std::string(apogee::commands::kFetchMaxBodyBytes + 1, 'x');
+    auto transport = std::make_unique<apogee::testing::FakeTransport>(
+        std::vector<apogee::testing::FakeTransport::Reply>{moved, huge});
+    const apogee::testing::FakeTransport& seen = *transport;
+    const apogee::agent::UrlFetcher fetcher = apogee::commands::make_http_fetcher(
+        std::make_shared<apogee::backends::HttpClient>(std::move(transport)));
+
+    const apogee::agent::FetchResult redirect = fetcher("https://a.example/");
+    CHECK(redirect.status == 302);
+    CHECK(redirect.location == "https://elsewhere.example/");
+    REQUIRE(seen.requests().size() == 1);
+    CHECK_FALSE(seen.requests()[0].follow_redirects);
+    CHECK(seen.requests()[0].max_body_bytes == apogee::commands::kFetchMaxBodyBytes);
+    CHECK(seen.requests()[0].method == "GET");
+
+    const apogee::agent::FetchResult too_big = fetcher("https://a.example/big");
+    CHECK(too_big.error.find("larger than 5 MB") != std::string::npos);
+    CHECK(too_big.body.empty());
+    CHECK(seen.requests().size() == 2);  // stopping is not a failure: never retried
+}
+
+TEST_CASE("the file tools default to the folder Apogee was started in",
+          "[commands][permissions][tools]") {
+    const apogee::agent::ToolRegistry registry = apogee::commands::make_built_in_tools({});
+    const std::string launch = std::filesystem::current_path().string();
+    REQUIRE(registry.find("read_file") != nullptr);
+    CHECK(registry.find("read_file")->description.find(launch) != std::string::npos);
+    const std::optional<std::string> home = apogee::platform::home_directory();
+    if (home.has_value() && *home != launch) {
+        CHECK(registry.find("read_file")->description.find(*home + " ") == std::string::npos);
+    }
+    // Set, it wins; unset, `check` and the tools agree on where it came from.
+    CHECK(apogee::tools::effective_fs_root("/srv/sandbox").path == "/srv/sandbox");
+    CHECK(apogee::tools::effective_fs_root("/srv/sandbox").from_config);
+    CHECK(apogee::tools::effective_fs_root("").path == std::filesystem::current_path());
+    CHECK_FALSE(apogee::tools::effective_fs_root("").from_config);
 }
 
 TEST_CASE("the terminal prompt is null where there is no terminal", "[commands][permissions]") {
@@ -207,11 +347,15 @@ TEST_CASE("a read-only policy keeps only tools that never write, MCP included; n
                                              .mcp_servers = std::vector<std::string>{"srv"},
                                              .mcp = mcp,
                                              .mcp_spawn = apogee::testing::fake_fleet()});
-    // Nothing that writes is registered -- so nothing can ever prompt.
+    // Nothing that writes is registered. The outbound fetch stays, gated per
+    // website -- with nobody to ask it reaches only tools.allowed_hosts, so a
+    // non-interactive agent still never blocks.
     for (const std::string& name : read_only.names()) {
         INFO(name);
         CHECK_FALSE(read_only.find(name)->writes);
     }
+    REQUIRE(read_only.find("fetch_url") != nullptr);
+    CHECK(read_only.find("fetch_url")->outbound);
     CHECK(read_only.find("read_file") != nullptr);
     CHECK(read_only.find("git_diff") != nullptr);
     CHECK(read_only.find("write_file") == nullptr);

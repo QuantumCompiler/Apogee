@@ -112,6 +112,18 @@ HttpResponse AdminHandler::put_permission(const HttpRequest& request, std::strin
     return admin_put_permission(config_context(), tool, request);
 }
 
+HttpResponse AdminHandler::list_allowed_hosts(const HttpRequest&) {
+    return admin_list_allowed_hosts(config_context());
+}
+
+HttpResponse AdminHandler::put_allowed_host(const HttpRequest&, std::string_view host) {
+    return admin_put_allowed_host(config_context(), host);
+}
+
+HttpResponse AdminHandler::delete_allowed_host(const HttpRequest&, std::string_view host) {
+    return admin_delete_allowed_host(config_context(), host);
+}
+
 HttpResponse AdminHandler::set_default(const HttpRequest& request) {
     return admin_set_role(config_context(), "default", request);
 }

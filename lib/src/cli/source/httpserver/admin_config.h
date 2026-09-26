@@ -81,6 +81,22 @@ struct AdminConfigContext {
 [[nodiscard]] HttpResponse admin_put_permission(const AdminConfigContext& context,
                                                 std::string_view tool, const HttpRequest& request);
 
+/// `GET /v1/admin/allowed-hosts`: `tools.allowed_hosts` as written, each
+/// with whether it is a host at all (`valid`) -- the websites `fetch_url`
+/// reaches without asking.
+[[nodiscard]] HttpResponse admin_list_allowed_hosts(const AdminConfigContext& context);
+
+/// `PUT /v1/admin/allowed-hosts/{id}` -- the `config add-allowed-host` twin,
+/// and the edit the prompt's `[a]lways` makes: the same transform, so the
+/// same bytes. Idempotent; no body.
+[[nodiscard]] HttpResponse admin_put_allowed_host(const AdminConfigContext& context,
+                                                  std::string_view host);
+
+/// `DELETE /v1/admin/allowed-hosts/{id}` -- the `config delete-allowed-host`
+/// twin. `404` when the host is not listed.
+[[nodiscard]] HttpResponse admin_delete_allowed_host(const AdminConfigContext& context,
+                                                     std::string_view host);
+
 /// `POST /v1/admin/backends` -- the `config add-backend` twin. `force` in the
 /// body is `--force`. A literal `api_key` is accepted from a loopback peer
 /// only (`403` otherwise): the `${ENV}` reference the CLI recommends is not a

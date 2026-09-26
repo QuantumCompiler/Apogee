@@ -14,6 +14,7 @@
 #include <sstream>
 #include <system_error>
 
+#include "agent/fetch_url.h"
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
 #include "agentloop/structured.h"
@@ -23,6 +24,7 @@
 #include "commands/helpers.h"
 #include "commands/models_pull.h"
 #include "harness/assets.h"
+#include "harness/host.h"
 #include "harness/layout.h"
 #include "harness/paths.h"
 #include "httpserver/admin_auth.h"
@@ -492,6 +494,14 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
         const bool known =
             std::find(destructive.begin(), destructive.end(), tool) != destructive.end();
         const bool namespaced = tool.starts_with("mcp__");
+        if (tool == agent::kFetchUrlToolName) {
+            // The key someone reaches for first, and it does nothing: fetch_url
+            // is decided per website, not per tool.
+            add(report, Status::Warn, "Tools", "permissions." + tool,
+                "has no effect: fetch_url asks per website",
+                "list the websites it may reach without asking in tools.allowed_hosts");
+            continue;
+        }
         if (!known && !namespaced) {
             std::string names;
             for (const std::string_view name : destructive) {
@@ -513,15 +523,30 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
         }
     }
 
-    const std::string root = harness::expand_env(config.tools.fs_root);
+    const tools::FsRoot root = tools::effective_fs_root(harness::expand_env(config.tools.fs_root));
     std::error_code code;
-    if (root.empty()) {
-        add(report, Status::Ok, "Tools", "fs_root", "unset -- the home directory");
-    } else if (!std::filesystem::is_directory(root, code)) {
-        add(report, Status::Warn, "Tools", "fs_root", root + " is not a directory",
+    if (!root.from_config) {
+        add(report, Status::Ok, "Tools", "fs_root",
+            root.path.string() + " -- unset, so the folder Apogee was started in");
+    } else if (!std::filesystem::is_directory(root.path, code)) {
+        add(report, Status::Warn, "Tools", "fs_root", root.path.string() + " is not a directory",
             "set tools.fs_root to an existing directory, or remove it");
     } else {
-        add(report, Status::Ok, "Tools", "fs_root", root);
+        add(report, Status::Ok, "Tools", "fs_root", root.path.string() + " -- from tools.fs_root");
+    }
+
+    if (config.tools.allowed_hosts.empty()) {
+        add(report, Status::Ok, "Tools", "allowed_hosts",
+            "none -- every website asks first, and a pipe or `serve` fetches nothing");
+    }
+    for (const std::string& host : config.tools.allowed_hosts) {
+        if (harness::canonical_host(host).has_value()) {
+            add(report, Status::Ok, "Tools", "allowed_hosts", host);
+        } else {
+            add(report, Status::Warn, "Tools", "allowed_hosts",
+                "'" + host + "' is not a host name, so it allows nothing",
+                "write the host alone, e.g. docs.python.org, not a URL or a pattern");
+        }
     }
 
     const std::span<const std::string_view> toolsets = tools::toolset_names();

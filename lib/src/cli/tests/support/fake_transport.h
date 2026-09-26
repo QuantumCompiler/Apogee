@@ -41,6 +41,8 @@ public:
         /// delivery guard exists for, and it cannot be provoked on demand
         /// against a live endpoint.
         std::optional<std::size_t> fail_after_bytes;
+        /// Sent as the `Location` header value.
+        std::string location;
     };
 
     /// Replies are served in order; the last one repeats once exhausted.

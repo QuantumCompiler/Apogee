@@ -24,6 +24,10 @@ struct WriteContext {
     CURL* handle = nullptr;
     bool aborted_by_sink = false;
     bool cancelled = false;
+    /// `HttpRequest::max_body_bytes`, and what has arrived against it.
+    std::size_t max_body_bytes = 0;
+    std::size_t received = 0;
+    bool limit_exceeded = false;
     /// Resolved once, on the first write: whether this response is a success
     /// and therefore eligible to be streamed to the sink.
     std::optional<bool> streamable;
@@ -37,6 +41,14 @@ std::size_t write_callback(char* data, std::size_t size, std::size_t nmemb, void
     if (context->cancellation != nullptr && context->cancellation->stop_requested()) {
         context->cancelled = true;
         return 0;  // any short count aborts the transfer
+    }
+
+    // The cap counts every body byte, streamed or accumulated: an error body
+    // can be as large as any other.
+    context->received += length;
+    if (context->max_body_bytes != 0 && context->received > context->max_body_bytes) {
+        context->limit_exceeded = true;
+        return 0;
     }
 
     if (!context->streamable.has_value()) {
@@ -62,31 +74,46 @@ std::size_t write_callback(char* data, std::size_t size, std::size_t nmemb, void
 
 struct HeaderContext {
     std::string retry_after;
+    std::string location;
 };
+
+/// The value of `line` when it is the header `field` (lowercase, colon
+/// included), trimmed; nullopt otherwise.
+std::optional<std::string_view> header_value(std::string_view line, std::string_view field) {
+    if (line.size() <= field.size()) {
+        return std::nullopt;
+    }
+    for (std::size_t i = 0; i < field.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(line[i])) != field[i]) {
+            return std::nullopt;
+        }
+    }
+    std::string_view value = line.substr(field.size());
+    while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() &&
+           (value.back() == '\r' || value.back() == '\n' || value.back() == ' ')) {
+        value.remove_suffix(1);
+    }
+    return value;
+}
 
 std::size_t header_callback(char* data, std::size_t size, std::size_t nmemb, void* user_data) {
     auto* context = static_cast<HeaderContext*>(user_data);
     const std::size_t length = size * nmemb;
     const std::string_view line{data, length};
 
-    constexpr std::string_view kRetryAfterField = "retry-after:";
-    if (line.size() > kRetryAfterField.size()) {
-        std::string lowered;
-        lowered.reserve(kRetryAfterField.size());
-        for (std::size_t i = 0; i < kRetryAfterField.size(); ++i) {
-            lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(line[i]))));
-        }
-        if (lowered == kRetryAfterField) {
-            std::string_view value = line.substr(kRetryAfterField.size());
-            while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) {
-                value.remove_prefix(1);
-            }
-            while (!value.empty() &&
-                   (value.back() == '\r' || value.back() == '\n' || value.back() == ' ')) {
-                value.remove_suffix(1);
-            }
-            context->retry_after = std::string{value};
-        }
+    // A status line starts the next response's headers, which is what a
+    // followed redirect produces: only the last response's headers count.
+    if (line.starts_with("HTTP/")) {
+        *context = HeaderContext{};
+        return length;
+    }
+    if (const auto value = header_value(line, "retry-after:"); value.has_value()) {
+        context->retry_after = std::string{*value};
+    } else if (const auto target = header_value(line, "location:"); target.has_value()) {
+        context->location = std::string{*target};
     }
     return length;
 }
@@ -179,6 +206,7 @@ HttpResponse CurlTransport::send(const HttpRequest& request, const BodySink& sin
     write.accumulator = &response.body;
     write.cancellation = &cancellation;
     write.handle = handle.get();
+    write.max_body_bytes = request.max_body_bytes;
     HeaderContext headers;
 
     CurlSlist header_list;
@@ -211,7 +239,7 @@ HttpResponse CurlTransport::send(const HttpRequest& request, const BodySink& sin
     curl_easy_setopt(handle.get(), CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(handle.get(), CURLOPT_XFERINFOFUNCTION, progress_callback);
     curl_easy_setopt(handle.get(), CURLOPT_XFERINFODATA, &cancellation);
-    curl_easy_setopt(handle.get(), CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(handle.get(), CURLOPT_FOLLOWLOCATION, request.follow_redirects ? 1L : 0L);
     curl_easy_setopt(handle.get(), CURLOPT_CONNECTTIMEOUT,
                      static_cast<long>(request.connect_timeout.count()));
     curl_easy_setopt(handle.get(), CURLOPT_TIMEOUT, static_cast<long>(request.timeout.count()));
@@ -225,7 +253,7 @@ HttpResponse CurlTransport::send(const HttpRequest& request, const BodySink& sin
     if (write.cancelled || cancellation.stop_requested()) {
         throw harness::CancelledError();
     }
-    if (code != CURLE_OK && !write.aborted_by_sink) {
+    if (code != CURLE_OK && !write.aborted_by_sink && !write.limit_exceeded) {
         // curl_easy_strerror never contains request data, so this cannot leak
         // an API key -- headers are not echoed into it.
         throw HttpError(std::string{"request failed: "} + curl_easy_strerror(code));
@@ -237,6 +265,8 @@ HttpResponse CurlTransport::send(const HttpRequest& request, const BodySink& sin
     if (!headers.retry_after.empty()) {
         response.retry_after = parse_retry_after(headers.retry_after);
     }
+    response.location = std::move(headers.location);
+    response.body_limit_exceeded = write.limit_exceeded;
     return response;
 }
 

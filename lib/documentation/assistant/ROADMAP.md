@@ -54,12 +54,22 @@ The two tracks specced 2026-09-25, eighteen backlog items in all — see the [`b
 Landed on the branch so far:
 
 - [x] **The CLI pipeline** *(2026-09-25, [Milestone K](MILESTONES.md#milestone-k--the-install-contract))*: CI and the release are now the CLI's pipeline, one per deliverable, ahead of the GUI applications. It builds only when what the CLI is built from has changed since the latest release. Otherwise it copies that release's CLI into the run and into the next release. Releases take their name from a new `lib/release/VERSION` file, and the CLI keeps its own version, which changes only with the CLI.
+- [x] **Tool safety defaults** — backlog item 25a, shipped 2026-09-25 *([Milestone V](MILESTONES.md#milestone-v--the-native-toolsets))*: `fetch_url` asks the first time a run reaches each new website, showing the whole URL, and `always` adds the host to a new `tools.allowed_hosts` list. Where nobody can answer (a pipe, `serve`, a machine-mode run with no driver), only the listed websites are reached. Redirects are followed one hop at a time, and a hop to a new host is asked about like a direct fetch. Hosts are compared exactly, and the URL fetched is rebuilt from the one the gate saw. Downloads are capped at 5 MB. The file tools now default to the folder Apogee was started in, not the home directory. `check` reports both, and `config add-allowed-host` / `delete-allowed-host` have admin twins.
 
 ---
 
 ## Up next
 
-Nothing is prescribed past v0.1.3 yet. The next release's section opens here when its first item is specced.
+### v0.1.4 — Machine-mode integrations
+
+Opened 2026-09-25 with its spike: Apogee as a **component in other people's applications**. Machine mode shipped as the sibling GUI's contract; v0.1.4 turns it into a contract for anyone's harness — spawn the binary, speak JSONL over its pipes (never a socket), and extend from a common protocol.
+
+- [x] **The integration-contract spike** — *ran 2026-09-25, recorded in [Milestone M](MILESTONES.md#milestone-m--the-front-end-contract)*: a naive external host, knowing only [machine-mode.md](../reference/machine-mode.md), completed a tool-using, `ask_user`-answering, permission-prompted conversation against the shipped v0.1.2 binary — and a host-run MCP server's tool round-tripped through the agent loop with **zero prompts**, proving host-supplied tools already work and the gap is wiring. Seven walls recorded (no handshake, no schema artifact, no turn ids or cancel, config-mutation-only tool wiring, a user-scoped fs root, prose-only reads). The recommendation: **grow the JSONL contract additively** — the tolerance rules make it retrofittable in both directions, verified live against the shipped binary — with MCP as the host-tools sidecar; no JSON-RPC reframe, every `protocol_version: 1` driver keeps working. The probe (`tests/naive_host_driver.py`) is kept and re-runnable. **Parked with evidence, the user's call: the push channel.** The split, in build order:
+- [ ] **The handshake and the stability promise** *([27a](../backlog/machine-handshake.md))* — an optional `hello`, `capabilities` on `session`, and v1's guarantees in writing.
+- [ ] **Per-run integration wiring** *(27b — walls W6/W8; its backlog document is still to be written, the Milestone M record carries its substance)*.
+- [ ] **Turn ids and cancel** *([27c](../backlog/machine-turn-control.md))* — event attribution and a host's Stop button, both additive.
+- [ ] **The schema artifact** *([27d](../backlog/machine-schema-artifact.md))* — the protocol as JSON Schema, printed by the binary and conformance-pinned.
+- [ ] **Machine-readable reads** *([27e](../backlog/machine-readable-reads.md))* — `--output-format json` on the listings a host UI needs.
 
 ## Unspecced ideas
 

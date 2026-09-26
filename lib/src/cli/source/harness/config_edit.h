@@ -213,6 +213,23 @@ public:
 [[nodiscard]] std::string set_permission(std::string_view content, std::string_view tool,
                                          std::string_view level);
 
+/// Adds `host` to `tools.allowed_hosts` -- the websites `fetch_url` reaches
+/// without asking. The one path by which the prompt's `[a]lways` answer,
+/// `config add-allowed-host`, and the admin twin write.
+///
+/// `host` must be a bare host name (`harness/host.h`) and is written in its
+/// canonical form; anything else is refused before the file is touched. A
+/// host already listed, in any spelling, leaves the text unchanged. A flow
+/// list (`[a, b]`, the template's form) gains `, host`; a block list gains a
+/// `- host` line; a missing key or `tools:` section is created with the
+/// one-line form.
+[[nodiscard]] std::string add_allowed_host(std::string_view content, std::string_view host);
+
+/// Removes `host` from `tools.allowed_hosts`: the exact inverse of
+/// add_allowed_host, so an add and a remove leave the file byte-identical.
+/// Throws ConfigEditError when the host is not listed.
+[[nodiscard]] std::string remove_allowed_host(std::string_view content, std::string_view host);
+
 /// Tidies whitespace without touching content: strips trailing spaces, folds
 /// runs of blank lines down to one, and ends the file with exactly one
 /// newline.

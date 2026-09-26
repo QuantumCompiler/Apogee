@@ -88,15 +88,18 @@ inline constexpr const char* kGitRemoteValue = "REMOTE";
 inline constexpr const char* kConfigKeyValue = "KEY";
 /// A tool a `permissions:` entry can name.
 inline constexpr const char* kToolValue = "TOOL";
+/// A host in `tools.allowed_hosts`.
+inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 25> kNameValues{
+inline constexpr std::array<std::string_view, 26> kNameValues{
     kCollectionValue, kCollectionListValue, kGraphValue,      kNamedGraphValue, kAgentValue,
     kChatValue,       kServerValue,         kDatasetValue,    kKitValue,        kSuiteValue,
     kRunValue,        kPipelineRunValue,    kPipelineValue,   kRegimeValue,     kModelValue,
     kSnapshotValue,   kGgufValue,           kSnapshotIdValue, kGgufIdValue,     kPullRefValue,
-    kRecordValue,     kGitRefValue,         kGitRemoteValue,  kConfigKeyValue,  kToolValue};
+    kRecordValue,     kGitRefValue,         kGitRemoteValue,  kConfigKeyValue,  kToolValue,
+    kAllowedHostValue};
 
 /// The type name for free text with a known set of usual words: the parser
 /// still takes any word -- the command validates it, with its own message,

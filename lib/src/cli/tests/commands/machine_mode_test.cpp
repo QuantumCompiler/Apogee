@@ -396,7 +396,7 @@ TEST_CASE("a permission prompt is a question event with kind, tool and target",
           "[commands][machine][permission]") {
     std::ostringstream out;
     JsonReporter reporter{out};
-    reporter.emit_permission_question("run_command", "rm -rf build");
+    reporter.emit_permission_question(apogee::agent::GateRequest{"run_command", "rm -rf build"});
     const nlohmann::json event = nlohmann::json::parse(out.str());
     CHECK(event["type"] == "question");
     CHECK(event["kind"] == "permission");
@@ -410,4 +410,29 @@ TEST_CASE("a permission prompt is a question event with kind, tool and target",
         labels.push_back(option["label"].get<std::string>());
     }
     CHECK(labels == std::vector<std::string>{"yes", "no", "always", "session"});
+}
+
+TEST_CASE("an outbound permission prompt names the host, flags it, and carries the URL",
+          "[commands][machine][permission]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.emit_permission_question(apogee::agent::GateRequest{
+        "fetch_url", "docs.python.org", "https://docs.python.org/3/", true});
+    const nlohmann::json event = nlohmann::json::parse(out.str());
+    CHECK(event["kind"] == "permission");
+    CHECK(event["tool"] == "fetch_url");
+    CHECK(event["target"] == "docs.python.org");
+    CHECK(event["outbound"] == true);
+    CHECK(event["detail"] == "https://docs.python.org/3/");
+    CHECK(event["questions"][0]["question"] == "Allow fetch_url to reach docs.python.org?");
+    CHECK(event["questions"][0]["options"][2]["description"].get<std::string>().find(
+              "tools.allowed_hosts") != std::string::npos);
+
+    // A writing tool's event carries neither field.
+    std::ostringstream plain;
+    JsonReporter plain_reporter{plain};
+    plain_reporter.emit_permission_question(apogee::agent::GateRequest{"write_file", "x"});
+    const nlohmann::json write_event = nlohmann::json::parse(plain.str());
+    CHECK_FALSE(write_event.contains("outbound"));
+    CHECK_FALSE(write_event.contains("detail"));
 }

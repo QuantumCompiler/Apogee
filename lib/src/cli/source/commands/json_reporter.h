@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "agent/tool.h"
 #include "agentloop/question.h"
 #include "agentloop/reporter.h"
 #include "harness/types.h"
@@ -110,8 +111,10 @@ public:
 
     /// A `question` event with `"kind": "permission"`, `tool` and `target`:
     /// the permission gate asking the driver. Answered like any question,
-    /// with one `answer` line -- `yes`, `no`, `always`, or `session`.
-    void emit_permission_question(std::string_view tool, std::string_view target);
+    /// with one `answer` line -- `yes`, `no`, `always`, or `session`. An
+    /// outbound tool's target is a host, with `"outbound": true` and the URL
+    /// as `detail`; its `always` adds the host to `tools.allowed_hosts`.
+    void emit_permission_question(const agent::GateRequest& request);
 
     /// Emits an `error` event. Diagnostics also go to stderr; this is the
     /// machine-readable half, so a driver need not scrape prose.

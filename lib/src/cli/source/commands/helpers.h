@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -9,8 +10,10 @@
 #include <string_view>
 #include <vector>
 
+#include "agent/fetch_url.h"
 #include "agent/tool.h"
 #include "agentloop/rag.h"
+#include "backends/http_client.h"
 #include "commands/status_line.h"
 #include "harness/cancellation.h"
 #include "harness/config.h"
@@ -162,9 +165,10 @@ struct BuiltInToolOptions {
 
     /// **The agent's permission model.** `ReadOnly` keeps only tools that
     /// declare no `writes` -- MCP tools included, which are read-only exactly
-    /// when their server said so -- so there is nothing to prompt for and a
-    /// non-interactive run never blocks. `None` builds nothing and dials no
-    /// server. `All` is every tool, under the gate, as `chat` has it.
+    /// when their server said so. An `outbound` tool stays, gated per
+    /// website: with nobody to ask it reaches only `tools.allowed_hosts`, so a
+    /// non-interactive run still never blocks. `None` builds nothing and
+    /// dials no server. `All` is every tool, under the gate, as `chat` has it.
     harness::AgentToolPolicy policy = harness::AgentToolPolicy::All;
     /// Which `mcp_servers:` entries to connect: null means every enabled one
     /// (the interactive surfaces), a list means only those (an agent names
@@ -193,6 +197,16 @@ struct BuiltInToolOptions {
 /// transient line, a warning stays -- a server that failed to connect is
 /// something the user should still be able to read once the prompt is up.
 [[nodiscard]] std::function<void(std::string_view)> mcp_status_line(StatusLine& status);
+
+/// The most of a response `fetch_url` reads: past it the fetch is refused,
+/// naming the size, rather than holding an unbounded body in memory to keep
+/// its first 8 KB (5 MB, the reader item's recorded default, 2026-09-25).
+inline constexpr std::size_t kFetchMaxBodyBytes = std::size_t{5} * 1024 * 1024;
+
+/// `fetch_url`'s fetcher over `client`: one GET, redirects NOT followed (their
+/// `Location` is handed back for the tool to gate), the body capped at
+/// kFetchMaxBodyBytes. `make_built_in_tools` wires it to a real transport.
+[[nodiscard]] agent::UrlFetcher make_http_fetcher(std::shared_ptr<backends::HttpClient> client);
 
 /// `fetch_url` plus the native toolsets, honouring `tools.disabled`. The one
 /// place that decides which tools a `--tools` run has.

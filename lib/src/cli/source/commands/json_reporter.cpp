@@ -124,21 +124,34 @@ void JsonReporter::emit_question(const agentloop::QuestionRequest& request) {
     write(object.dump());
 }
 
-void JsonReporter::emit_permission_question(std::string_view tool, std::string_view target) {
+void JsonReporter::emit_permission_question(const agent::GateRequest& request) {
+    const std::string tool{request.tool};
+    const std::string target{request.target};
     nlohmann::json object = event("question");
     object["kind"] = "permission";
-    object["tool"] = std::string{tool};
-    object["target"] = std::string{target};
+    object["tool"] = tool;
+    object["target"] = target;
+    if (request.outbound) {
+        object["outbound"] = true;
+    }
+    if (!request.detail.empty()) {
+        object["detail"] = std::string{request.detail};
+    }
     nlohmann::json entry;
     entry["header"] = "Permission";
-    entry["question"] =
-        "Allow " + std::string{tool} + (target.empty() ? "" : " on " + std::string{target}) + "?";
+    entry["question"] = request.outbound
+                            ? "Allow " + tool + " to reach " + target + "?"
+                            : "Allow " + tool + (target.empty() ? "" : " on " + target) + "?";
     entry["multi_select"] = false;
     entry["options"] = nlohmann::json::array(
         {{{"label", "yes"}, {"description", "Allow this once"}},
          {{"label", "no"}, {"description", "Deny"}},
-         {{"label", "always"}, {"description", "Allow, and remember it in the config"}},
-         {{"label", "session"}, {"description", "Allow for the rest of this session"}}});
+         {{"label", "always"},
+          {"description", request.outbound ? "Allow, and add the website to tools.allowed_hosts"
+                                           : "Allow, and remember it in the config"}},
+         {{"label", "session"},
+          {"description", request.outbound ? "Allow this website for the rest of this session"
+                                           : "Allow for the rest of this session"}}});
     object["questions"] = nlohmann::json::array({std::move(entry)});
     write(object.dump());
 }

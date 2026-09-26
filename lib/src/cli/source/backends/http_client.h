@@ -47,6 +47,17 @@ struct HttpRequest {
     /// Connect-phase timeout. Bounded even when `timeout` is not -- an
     /// unreachable host should fail in seconds, not hang forever.
     std::chrono::seconds connect_timeout{30};
+
+    /// Whether the transport follows redirects itself. On for the backends,
+    /// whose endpoints and model downloads redirect by design; off for
+    /// `fetch_url`, which follows them one hop at a time so each new host
+    /// goes through the permission gate (`HttpResponse::location`).
+    bool follow_redirects = true;
+
+    /// The most body bytes read before the transfer stops, whatever the
+    /// status; 0 is no limit. Stopping is not a transport failure -- it is
+    /// reported as `HttpResponse::body_limit_exceeded`, so it is never retried.
+    std::size_t max_body_bytes = 0;
 };
 
 /// Receives response body bytes as they arrive.
@@ -61,6 +72,14 @@ struct HttpResponse {
     /// The server's `retry-after`, when it sent one in the delta-seconds form.
     /// A server that says when to come back knows better than a backoff curve.
     std::optional<std::chrono::milliseconds> retry_after;
+
+    /// The `Location` header, as sent: where a redirect points when the
+    /// request did not follow it. Empty when there was none.
+    std::string location;
+
+    /// The body passed `HttpRequest::max_body_bytes` and the transfer was
+    /// stopped there; `body` holds what arrived before it.
+    bool body_limit_exceeded = false;
 
     [[nodiscard]] bool ok() const noexcept {
         return status >= 200 && status < 300;

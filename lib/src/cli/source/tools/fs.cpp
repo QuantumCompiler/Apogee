@@ -79,7 +79,10 @@ std::optional<std::filesystem::path> resolve_in_root(const std::filesystem::path
     }
     if (!is_within(canonical_root, resolved)) {
         error = "'" + std::string{path} + "' is outside the allowed root " +
-                canonical_root.string() + ". Set tools.fs_root in the config to expand access.";
+                canonical_root.string() +
+                ". The file tools work in the folder Apogee was started in unless "
+                "tools.fs_root in the config says otherwise: start Apogee in a folder that "
+                "contains it, or set tools.fs_root to expand access.";
         return std::nullopt;
     }
     return resolved;

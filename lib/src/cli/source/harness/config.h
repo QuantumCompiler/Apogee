@@ -550,12 +550,19 @@ struct TrainingConfig {
 /// The `tools:` section: where the native toolsets operate.
 struct ToolsConfig {
     /// The directory the filesystem tools are sandboxed to. Empty means the
-    /// user's home directory. `${ENV_VAR}` references are expanded.
+    /// folder Apogee was started in (2026-09-25; it was the home directory).
+    /// `${ENV_VAR}` references are expanded.
     std::string fs_root;
 
     /// Toolsets switched off by name (`fs`, `shell`, `git`, `notes`, `rag`).
     /// Enablement, not safety: the permission gate is the safety.
     std::vector<std::string> disabled;
+
+    /// The websites `fetch_url` reaches without asking, by exact host
+    /// (`harness/host.h`). Any other host asks first, and where nobody can
+    /// answer -- a pipe, `serve` -- it is refused. As written; an entry that
+    /// is not a bare host matches nothing, and `check` reports it.
+    std::vector<std::string> allowed_hosts;
 
     [[nodiscard]] bool is_disabled(std::string_view toolset) const noexcept;
 };

@@ -10,8 +10,8 @@ Today it strips every tag (`strip_html`, "crude on purpose"), keeps the first 8,
 - **No new dependency by default.** The stripper's rationale ("a real HTML parser would be a dependency and a parsing-difference surface") still holds for extraction by tag and landmark. A parser library is the fallback if the fixture corpus below cannot be met without one.
 - **Honest about what was cut and what was refused.** Every truncation says so, and says how to read on (`offset`). A content type the reader cannot read (PDF, images, archives) is refused by name, never returned as bytes.
 - **`agent/` includes no transport,** and the extraction is a pure function tested on saved pages.
-- **Bounded.** The download is capped (the body is read whole today), and each call returns at most one page of text.
-- **The per-website prompt** of [tool safety defaults](tool-safety-defaults.md) wraps every fetch, including the redirect hops it adds.
+- **Bounded.** The download is capped — 5 MB, refused past that naming the size, shipped with 25a (`kFetchMaxBodyBytes`) — and each call returns at most one page of text.
+- **The per-website prompt** of [tool safety defaults](../assistant/MILESTONES.md#milestone-v--the-native-toolsets) wraps every fetch, including the redirect hops it follows one at a time (shipped 2026-09-25: `FetchResult::location`, `resolve_redirect`, and a `[X redirected to Y]` line above a redirected page's text, which the header line below replaces).
 
 **Seam + files.**
 - `agent/fetch_url.h/.cpp`:
@@ -26,13 +26,13 @@ Today it strips every tag (`strip_html`, "crude on purpose"), keeps the first 8,
 
 **Decisions made:**
 - 2026-09-25 — From the local-tools spike: the page reader is half of "search the internet and read the content from the pages", and the half that exists today returns mostly menus.
-- 2026-09-25 — After [tool safety defaults](tool-safety-defaults.md), whose redirect handling this shares; independent of the other items otherwise.
+- 2026-09-25 — After [tool safety defaults](../assistant/MILESTONES.md#milestone-v--the-native-toolsets), whose redirect handling this shares; independent of the other items otherwise.
 
 **Open calls:**
 - [default: a hand-written landmark extractor, no library] Revisit with a parser (lexbor or gumbo) only if the fixture corpus fails; that would be a dependency across all five targets.
 - [default: 12 KiB per page of text] Big enough for a documentation section, small enough for a local model to read in seconds; the tool's description states it.
 - [default: PDFs refused with a note] Text extraction from PDF is its own dependency decision and its own item.
-- [default: a 5 MB download cap] Past that the fetch is refused, naming the size.
+- (consumed decision) The 5 MB download cap, refused past that naming the size, shipped with 25a on 2026-09-25.
 - [default: links kept inline as Markdown] A trailing numbered link list costs the model a lookup for every link it wants to follow.
 
 **Guardrail(s).**
@@ -51,7 +51,7 @@ Today it strips every tag (`strip_html`, "crude on purpose"), keeps the first 8,
 - [ ] A model follows a link from one fetched page to another in the same task.
 - [ ] A PDF URL returns a refusal that says PDFs are not read, not a page of noise.
 
-**Scope note.** Item **25f**; build after 25a. Out of scope:
+**Scope note.** Item **25f**; gated on nothing pending (25a shipped 2026-09-25). Out of scope:
 - JavaScript rendering (a page that is empty without its scripts reports "no readable text", as now);
 - PDF text extraction;
 - caching pages across calls.

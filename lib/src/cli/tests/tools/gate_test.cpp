@@ -130,15 +130,15 @@ TEST_CASE("the checker's answer decides: allow runs, deny refuses, ask consults 
     {
         World world{script()};
         Options allow;
-        allow.permission = [](std::string_view, std::string_view) { return Permission::Allow; };
+        allow.permission = [](const apogee::agent::GateRequest&) { return Permission::Allow; };
         (void)world.run(allow);
         CHECK(std::filesystem::exists(world.root / "out.txt"));
     }
     {
         World world{script()};
         Options deny;
-        deny.permission = [](std::string_view, std::string_view) { return Permission::Deny; };
-        deny.confirm = [](std::string_view, std::string_view) { return true; };  // never asked
+        deny.permission = [](const apogee::agent::GateRequest&) { return Permission::Deny; };
+        deny.confirm = [](const apogee::agent::GateRequest&) { return true; };  // never asked
         (void)world.run(deny);
         CHECK_FALSE(std::filesystem::exists(world.root / "out.txt"));
     }
@@ -147,10 +147,10 @@ TEST_CASE("the checker's answer decides: allow runs, deny refuses, ask consults 
         std::string asked_tool;
         std::string asked_target;
         Options ask;
-        ask.permission = [](std::string_view, std::string_view) { return Permission::Ask; };
-        ask.confirm = [&](std::string_view tool, std::string_view target) {
-            asked_tool = tool;
-            asked_target = target;
+        ask.permission = [](const apogee::agent::GateRequest&) { return Permission::Ask; };
+        ask.confirm = [&](const apogee::agent::GateRequest& request) {
+            asked_tool = request.tool;
+            asked_target = request.target;
             return true;
         };
         (void)world.run(ask);

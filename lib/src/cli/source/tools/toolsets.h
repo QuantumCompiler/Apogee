@@ -23,7 +23,7 @@
 namespace apogee::tools {
 
 struct ToolsetOptions {
-    /// The filesystem sandbox. Empty means the user's home directory.
+    /// The filesystem sandbox. Empty means the folder Apogee was started in.
     std::filesystem::path fs_root;
     /// Where the shell runs and where the git walk starts. Empty means the
     /// process's working directory.
@@ -44,6 +44,18 @@ struct ToolsetOptions {
     /// Toolsets switched off, by name.
     std::vector<std::string> disabled;
 };
+
+/// Where the filesystem tools are sandboxed, and whether the config said so.
+struct FsRoot {
+    std::filesystem::path path;
+    /// `tools.fs_root` set it; otherwise it is the launch folder.
+    bool from_config = false;
+};
+
+/// `configured` (`tools.fs_root`, already `${ENV}`-expanded) when set, else
+/// the folder Apogee was started in. The one answer the toolsets and `check`
+/// share.
+[[nodiscard]] FsRoot effective_fs_root(const std::filesystem::path& configured);
 
 /// The toolset names `tools.disabled` accepts: fs, shell, git, notes, rag.
 [[nodiscard]] std::span<const std::string_view> toolset_names() noexcept;

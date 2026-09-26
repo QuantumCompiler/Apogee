@@ -233,7 +233,7 @@ void McpToolsServerCommand::bind(CLI::App& root, const RootContext& context) {
         try {
             config = harness::load_config(config_path_for(context));
         } catch (const std::exception&) {
-            // No config is fine: the defaults sandbox to the home directory.
+            // No config is fine: the defaults sandbox to the launch folder.
         }
         agent::ToolRegistry registry;
         tools::ToolsetOptions options;

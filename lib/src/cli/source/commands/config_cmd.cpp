@@ -14,6 +14,7 @@
 #include "commands/graph.h"
 #include "harness/config.h"
 #include "harness/config_edit.h"
+#include "harness/host.h"
 #include "harness/paths.h"
 #include "tools/toolsets.h"
 
@@ -625,6 +626,36 @@ void bind_set_permission(CLI::App& parent, const RootContext& context) {
     });
 }
 
+void bind_add_allowed_host(CLI::App& parent, const RootContext& context) {
+    auto host = std::make_shared<std::string>();
+    CLI::App* cmd = parent.add_subcommand(
+        "add-allowed-host", "Let fetch_url reach a website without asking (tools.allowed_hosts)");
+    cmd->add_option("host", *host, "The host alone, e.g. docs.python.org")->required();
+    cmd->callback([&context, host]() {
+        const std::filesystem::path path = config_path_for(context);
+        apply_edit(path, [host](std::string_view content) {
+            return harness::add_allowed_host(content, *host);
+        });
+        std::cout << "tools.allowed_hosts includes " << *harness::canonical_host(*host) << "\n";
+    });
+}
+
+void bind_delete_allowed_host(CLI::App& parent, const RootContext& context) {
+    auto host = std::make_shared<std::string>();
+    CLI::App* cmd = parent.add_subcommand("delete-allowed-host",
+                                          "Make fetch_url ask again before reaching a website");
+    cmd->add_option("host", *host, "A host in tools.allowed_hosts")
+        ->type_name(kAllowedHostValue)
+        ->required();
+    cmd->callback([&context, host]() {
+        const std::filesystem::path path = config_path_for(context);
+        apply_edit(path, [host](std::string_view content) {
+            return harness::remove_allowed_host(content, *host);
+        });
+        std::cout << "removed " << *harness::canonical_host(*host) << " from tools.allowed_hosts\n";
+    });
+}
+
 void bind_get(CLI::App& parent, const RootContext& context) {
     auto key = std::make_shared<std::string>();
     auto reveal = std::make_shared<bool>(false);
@@ -741,6 +772,8 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
     bind_set_role(*cmd, context, "set-default-extraction", "default_extraction",
                   "Set the backend used for structured extraction");
     bind_set_permission(*cmd, context);
+    bind_add_allowed_host(*cmd, context);
+    bind_delete_allowed_host(*cmd, context);
     bind_delete_mcp_server(*cmd, context);
     bind_add_graph(*cmd, context);
     bind_delete_graph(*cmd, context);

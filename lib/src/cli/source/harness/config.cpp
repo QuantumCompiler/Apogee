@@ -993,6 +993,17 @@ Config parse_config(std::string_view content, std::string_view origin) {
                 config.tools.disabled.push_back(scalar(item, origin, "tools.disabled[]"));
             }
         }
+        // Kept as written. An entry that is not a bare host matches nothing
+        // (harness/host.h) and `check` names it; refusing the whole config
+        // over one pasted URL would take every other command down with it.
+        if (const YAML::Node hosts = tools["allowed_hosts"]; hosts.IsDefined() && !hosts.IsNull()) {
+            if (!hosts.IsSequence()) {
+                fail(origin, "tools.allowed_hosts: expected a list of host names");
+            }
+            for (const YAML::Node& item : hosts) {
+                config.tools.allowed_hosts.push_back(scalar(item, origin, "tools.allowed_hosts[]"));
+            }
+        }
     }
 
     if (const YAML::Node ui = root["ui"]; ui.IsDefined() && !ui.IsNull()) {

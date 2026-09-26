@@ -9,6 +9,7 @@
 using apogee::agent::dispatch;
 using apogee::agent::DispatchContext;
 using apogee::agent::FetchResult;
+using apogee::agent::GateRequest;
 using apogee::agent::make_fetch_url_tool;
 using apogee::agent::Permission;
 using apogee::agent::permitted;
@@ -71,20 +72,20 @@ TEST_CASE("permission: read tools bypass, write tools are gated", "[agent][tool]
     CHECK_FALSE(permitted(writer, "{}", none));
 
     DispatchContext allow;
-    allow.permission = [](std::string_view, std::string_view) { return Permission::Allow; };
+    allow.permission = [](const GateRequest&) { return Permission::Allow; };
     CHECK(permitted(writer, "{}", allow));
 
     DispatchContext deny;
-    deny.permission = [](std::string_view, std::string_view) { return Permission::Deny; };
+    deny.permission = [](const GateRequest&) { return Permission::Deny; };
     CHECK_FALSE(permitted(writer, "{}", deny));
 
     DispatchContext ask_yes;
-    ask_yes.permission = [](std::string_view, std::string_view) { return Permission::Ask; };
-    ask_yes.confirm = [](std::string_view, std::string_view) { return true; };
+    ask_yes.permission = [](const GateRequest&) { return Permission::Ask; };
+    ask_yes.confirm = [](const GateRequest&) { return true; };
     CHECK(permitted(writer, "{}", ask_yes));
 
     DispatchContext ask_no = ask_yes;
-    ask_no.confirm = [](std::string_view, std::string_view) { return false; };
+    ask_no.confirm = [](const GateRequest&) { return false; };
     CHECK_FALSE(permitted(writer, "{}", ask_no));
 }
 
@@ -99,10 +100,11 @@ TEST_CASE("the permission prompt is given the operation's target", "[agent][tool
     std::string seen_tool;
     std::string seen_target;
     DispatchContext context;
-    context.permission = [](std::string_view, std::string_view) { return Permission::Ask; };
-    context.confirm = [&](std::string_view tool, std::string_view target) {
-        seen_tool = tool;
-        seen_target = target;
+    context.permission = [](const GateRequest&) { return Permission::Ask; };
+    context.confirm = [&](const GateRequest& request) {
+        seen_tool = request.tool;
+        seen_target = request.target;
+        CHECK_FALSE(request.outbound);
         return true;
     };
 
@@ -128,8 +130,21 @@ TEST_CASE("dispatch reports progress and clears it", "[agent][tool]") {
 }
 
 // ---------------------------------------------------------------------------
-// fetch_url
+// fetch_url (its gate, redirects and URL parsing are in fetch_url_test.cpp)
 // ---------------------------------------------------------------------------
+
+namespace {
+
+/// The tool body with a gate that allows every hop -- what these cases test
+/// is the page handling, not the guard.
+ToolOutcome run_fetch(const Tool& tool, std::string_view arguments) {
+    const apogee::agent::TargetGate allow_all = [](std::string_view, std::string_view) {
+        return true;
+    };
+    return tool.run_gated(arguments, allow_all);
+}
+
+}  // namespace
 
 TEST_CASE("strip_html keeps prose and drops markup", "[agent][fetch]") {
     CHECK(strip_html("<p>Hello <b>world</b></p>") == "Hello world");
@@ -154,26 +169,28 @@ TEST_CASE("fetch_url returns page text through the injected fetcher", "[agent][f
         return FetchResult{200, "<html><body><h1>Title</h1><p>Body text</p></body></html>", ""};
     });
 
-    const ToolOutcome outcome = tool.run(R"({"url":"https://example.test/page"})");
+    const ToolOutcome outcome = run_fetch(tool, R"({"url":"https://example.test/page"})");
 
     CHECK(requested == "https://example.test/page");
     CHECK_FALSE(outcome.is_error);
     CHECK(outcome.content.find("Title") != std::string::npos);
     CHECK(outcome.content.find("Body text") != std::string::npos);
     CHECK(outcome.content.find("<h1>") == std::string::npos);
-    // Reading a page changes nothing, so it never prompts.
+    // Reading a page changes nothing on this machine, so it does not write;
+    // but the URL leaves it, so the tool is gated as outbound.
     CHECK_FALSE(tool.writes);
+    CHECK(tool.outbound);
 }
 
 TEST_CASE("fetch_url reports bad arguments as fixable errors", "[agent][fetch]") {
     const Tool tool =
         make_fetch_url_tool([](std::string_view) { return FetchResult{200, "ok", ""}; });
 
-    CHECK(tool.run("not json").is_error);
-    CHECK(tool.run("{}").is_error);
+    CHECK(run_fetch(tool, "not json").is_error);
+    CHECK(run_fetch(tool, "{}").is_error);
     // It cannot search -- a query where a URL belongs is a clear error, not a
     // confusing empty result.
-    const auto outcome = tool.run(R"({"url":"how do I sort a list"})");
+    const auto outcome = run_fetch(tool, R"({"url":"how do I sort a list"})");
     CHECK(outcome.is_error);
     CHECK(outcome.content.find("not an http or https URL") != std::string::npos);
 }
@@ -181,13 +198,13 @@ TEST_CASE("fetch_url reports bad arguments as fixable errors", "[agent][fetch]")
 TEST_CASE("fetch_url surfaces transport and HTTP failures", "[agent][fetch]") {
     const Tool failing = make_fetch_url_tool(
         [](std::string_view) { return FetchResult{0, "", "connection refused"}; });
-    const auto transport = failing.run(R"({"url":"https://x.test"})");
+    const auto transport = run_fetch(failing, R"({"url":"https://x.test"})");
     CHECK(transport.is_error);
     CHECK(transport.content.find("connection refused") != std::string::npos);
 
     const Tool not_found =
         make_fetch_url_tool([](std::string_view) { return FetchResult{404, "gone", ""}; });
-    const auto http = not_found.run(R"({"url":"https://x.test"})");
+    const auto http = run_fetch(not_found, R"({"url":"https://x.test"})");
     CHECK(http.is_error);
     CHECK(http.content.find("404") != std::string::npos);
 }
@@ -198,7 +215,7 @@ TEST_CASE("fetch_url truncates and says so", "[agent][fetch]") {
     const Tool tool = make_fetch_url_tool(
         [](std::string_view) { return FetchResult{200, std::string(5000, 'x'), ""}; }, 100);
 
-    const auto outcome = tool.run(R"({"url":"https://x.test"})");
+    const auto outcome = run_fetch(tool, R"({"url":"https://x.test"})");
     CHECK_FALSE(outcome.is_error);
     CHECK(outcome.content.find("[truncated]") != std::string::npos);
     CHECK(outcome.content.size() < 200);
@@ -207,14 +224,14 @@ TEST_CASE("fetch_url truncates and says so", "[agent][fetch]") {
 TEST_CASE("fetch_url reports an empty page rather than an empty result", "[agent][fetch]") {
     const Tool tool = make_fetch_url_tool(
         [](std::string_view) { return FetchResult{200, "<html><body></body></html>", ""}; });
-    const auto outcome = tool.run(R"({"url":"https://x.test"})");
+    const auto outcome = run_fetch(tool, R"({"url":"https://x.test"})");
     CHECK_FALSE(outcome.is_error);
     CHECK(outcome.content.find("no readable text") != std::string::npos);
 }
 
 TEST_CASE("fetch_url with no fetcher wired says so", "[agent][fetch]") {
     const Tool tool = make_fetch_url_tool(nullptr);
-    const auto outcome = tool.run(R"({"url":"https://x.test"})");
+    const auto outcome = run_fetch(tool, R"({"url":"https://x.test"})");
     CHECK(outcome.is_error);
     CHECK(outcome.content.find("not available") != std::string::npos);
 }
