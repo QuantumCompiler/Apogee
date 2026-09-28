@@ -884,10 +884,10 @@ have no route.
 
 What the permission gate does for each destructive native tool — `ask`,
 `allow`, or `deny` — as `{"object":"list","data":[{tool, level}]}`: every tool
-that declares itself destructive (`write_file`, `delete_file`, `run_command`,
-`write_note`, `delete_note`) at its effective level, `ask` when the config does
-not list it, plus any other key the config carries (a namespaced MCP tool, once
-the MCP client lands).
+that declares itself destructive (`write_file`, `edit_file`, `delete_file`,
+`run_command`, `write_note`, `delete_note`) at its effective level, `ask` when
+the config does not list it, plus any other key the config carries (a
+namespaced MCP tool, once the MCP client lands).
 
 ### `PUT /v1/admin/permissions/{id}`
 

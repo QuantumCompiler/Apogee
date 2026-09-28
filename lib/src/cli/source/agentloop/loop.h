@@ -53,7 +53,8 @@ struct Options {
     agent::ConfirmFn confirm;
 
     /// Injected into each outgoing request at `transient_at`, never appended to
-    /// history. The seam RAG will ride; see splice_transient.
+    /// history. The seam RAG will ride; see splice_transient. The tools'
+    /// environment note (`ToolRegistry::environment`) is put ahead of it.
     std::vector<harness::ChatMessage> transient_prefix;
     std::size_t transient_at = 0;
 

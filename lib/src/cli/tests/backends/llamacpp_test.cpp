@@ -1415,3 +1415,36 @@ TEST_CASE("the checkpoint policy: replaced at a position, capped, never restored
     CHECK(held.back().position == 5);
     CHECK(held.size() == 3);
 }
+
+TEST_CASE("the system messages opening a conversation reach a local template as one",
+          "[backends][llamacpp][tools][system]") {
+    // Qwen3.5 and 3.8's templates raise on a second system message, and a
+    // failed render drops the model to the fallback template -- and its tools
+    // with it. The environment note (25d) ahead of a chat's own system prompt
+    // is the ordinary case, so the leading run is joined into one.
+    TemplateFixture fixture{{"fine"}};
+    fixture.runtime->system_first_only = true;
+    Captured seen;
+    (void)fixture.provider->stream_chat(
+        with_tools({ChatMessage::system("Environment: today"), ChatMessage::system(""),
+                    ChatMessage::system("You are terse."), ChatMessage::user("hi")}),
+        seen.options);
+
+    REQUIRE(fixture.runtime->model != nullptr);
+    const auto& rendered = fixture.runtime->model->chat_renders.back();
+    REQUIRE(rendered.messages.size() == 2);
+    CHECK(rendered.messages[0].role == apogee::harness::Role::System);
+    CHECK(rendered.messages[0].content.plain_text() == "Environment: today\n\nYou are terse.");
+    CHECK(rendered.messages[1].content.plain_text() == "hi");
+    // The template rendered, tools and all: nothing fell back.
+    CHECK(fixture.runtime->model->tokenized.back().find("tools: read_file") != std::string::npos);
+    CHECK(seen.notices.empty());
+
+    // One system message, or none, is passed through as it came.
+    (void)fixture.provider->stream_chat(
+        with_tools({ChatMessage::system("You are terse."), ChatMessage::user("again")}),
+        seen.options);
+    CHECK(fixture.runtime->model->chat_renders.back().messages.size() == 2);
+    CHECK(fixture.runtime->model->chat_renders.back().messages[0].content.plain_text() ==
+          "You are terse.");
+}

@@ -115,6 +115,7 @@ add_executable(apogee_tests
     tools/git_test.cpp
     tools/rag_query_test.cpp
     tools/gate_test.cpp
+    tools/environment_test.cpp
     commands/permissions_test.cpp
     mcp/types_test.cpp
     mcp/transport_test.cpp

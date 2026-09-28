@@ -57,6 +57,38 @@ std::vector<harness::ChatMessage> messages_with_schema(const harness::ChatReques
     return out;
 }
 
+/// The messages a local prompt is rendered from: the schema instruction
+/// where one is asked for, and the system messages that open the
+/// conversation joined into one, a blank line apart.
+///
+/// A template may take one system message, and only first: Qwen3.5 and
+/// 3.8's raise "System message must be at the beginning" on a second, and
+/// the render failing drops the model to the fallback template -- and its
+/// tools with it. A second is the ordinary case: the environment note
+/// (25d), a retrieval block or a review note ahead of a chat's own system
+/// prompt. The Anthropic and Google wires join theirs the same way.
+std::vector<harness::ChatMessage> prompt_messages(const harness::ChatRequest& request) {
+    std::vector<harness::ChatMessage> messages = messages_with_schema(request);
+    std::size_t leading = 0;
+    while (leading < messages.size() && messages[leading].role == harness::Role::System) {
+        ++leading;
+    }
+    if (leading < 2) {
+        return messages;
+    }
+    std::string joined;
+    for (std::size_t i = 0; i < leading; ++i) {
+        const std::string text = messages[i].content.plain_text();
+        if (text.empty()) {
+            continue;
+        }
+        joined += (joined.empty() ? "" : "\n\n") + text;
+    }
+    messages.erase(messages.begin() + 1, messages.begin() + static_cast<std::ptrdiff_t>(leading));
+    messages.front() = harness::ChatMessage::system(joined);
+    return messages;
+}
+
 /// A context has to hold at least one token whose logits we can sample from.
 ///
 /// The edge case this exists for: a request whose token sequence is an exact
@@ -528,7 +560,7 @@ std::int64_t LlamaCppProvider::count_prompt_tokens(const harness::ChatRequest& r
 LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
     const harness::ChatRequest& request) const {
     RenderedRequest rendered;
-    const std::vector<harness::ChatMessage> messages = messages_with_schema(request);
+    const std::vector<harness::ChatMessage> messages = prompt_messages(request);
     // The template's own switch, where it has one; a family without one
     // ignores it (Qwen's closed think block is exactly this switch).
     const bool enable_thinking = !request.transient.skip_reasoning;
@@ -564,7 +596,7 @@ std::vector<std::int64_t> LlamaCppProvider::checkpoint_marks(
     // it, alone, and keeping its length only if it really is a token prefix
     // of the prompt -- a template that renders earlier messages differently
     // once they are not last gives no usable boundary, and none is taken.
-    const std::vector<harness::ChatMessage> messages = messages_with_schema(request);
+    const std::vector<harness::ChatMessage> messages = prompt_messages(request);
     std::size_t last_user = messages.size();
     for (std::size_t i = messages.size(); i-- > 0;) {
         if (messages[i].role == harness::Role::User) {

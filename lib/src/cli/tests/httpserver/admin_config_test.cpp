@@ -249,15 +249,21 @@ TEST_CASE("the permissions twin edits the same line the CLI edits, byte for byte
     const HttpResponse listed = admin_list_permissions(fixture.context());
     REQUIRE(listed.status == 200);
     const nlohmann::json data = nlohmann::json::parse(listed.body)["data"];
-    REQUIRE(data.size() == 5);
+    REQUIRE(data.size() == 6);
     bool saw_write = false;
+    bool saw_edit = false;
     for (const nlohmann::json& row : data) {
         if (row["tool"] == "write_file") {
             saw_write = true;
             CHECK(row["level"] == "ask");
         }
+        if (row["tool"] == "edit_file") {
+            saw_edit = true;
+            CHECK(row["level"] == "ask");
+        }
     }
     CHECK(saw_write);
+    CHECK(saw_edit);
 
     HttpRequest put;
     put.method = "PUT";

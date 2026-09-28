@@ -359,8 +359,13 @@ TEST_CASE("a read-only policy keeps only tools that never write, MCP included; n
     CHECK(read_only.find("read_file") != nullptr);
     CHECK(read_only.find("git_diff") != nullptr);
     CHECK(read_only.find("write_file") == nullptr);
+    CHECK(read_only.find("edit_file") == nullptr);
     CHECK(read_only.find("run_command") == nullptr);
     CHECK(read_only.find("delete_note") == nullptr);
+    CHECK(read_only.find("grep_files") != nullptr);
+    // The filtered registry keeps the environment note: a read-only agent
+    // needs the date as much as any other.
+    CHECK(read_only.environment().starts_with("Environment:\n- Today is "));
     CHECK(read_only.find("mcp__srv__echo") != nullptr);   // the server said read-only
     CHECK(read_only.find("mcp__srv__write") == nullptr);  // it did not
     // What the loop advertises IS the filtered set.

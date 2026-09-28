@@ -77,6 +77,17 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
 
     const std::vector<harness::Tool> tools = advertised_tools(options);
 
+    // The environment note rides first, ahead of any retrieval, whenever
+    // there are tools (25d). Rendered once per turn: it changes once a day,
+    // so a local model's cached prompt survives from turn to turn and step
+    // to step.
+    std::vector<harness::ChatMessage> transient = options.transient_prefix;
+    if (options.tools != nullptr) {
+        if (std::string note = options.tools->environment(); !note.empty()) {
+            transient.insert(transient.begin(), harness::ChatMessage::system(std::move(note)));
+        }
+    }
+
     // How often each call has run in this turn. The third identical one is
     // answered without running: a small local model re-reads the same file
     // and re-runs the same command in a loop (the 25b spike's 3B model read
@@ -109,13 +120,12 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
         request.model = options.model;
         request.temperature = options.temperature;
         request.max_tokens = options.max_tokens;
-        request.messages =
-            splice_transient(history, options.transient_prefix, options.transient_at);
-        if (!options.transient_prefix.empty()) {
+        request.messages = splice_transient(history, transient, options.transient_at);
+        if (!transient.empty()) {
             // The markers a provider with a persistent prompt cache reads to
             // keep injected context out of its cached prefix.
             request.transient.start = options.transient_at;
-            request.transient.length = options.transient_prefix.size();
+            request.transient.length = transient.size();
         }
         // On the final pass the tools are withdrawn, which is what forces an
         // answer instead of another tool call.

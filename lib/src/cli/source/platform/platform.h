@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -67,6 +68,26 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 /// attribute), and `apogee uninstall` has to delete it -- both need the real
 /// path, and a wrong one there means uninstall removes the wrong file.
 [[nodiscard]] std::filesystem::path executable_path();
+
+/// A day on the local calendar, and the time zone it is in.
+struct LocalDate {
+    int year = 0;
+    /// 1-12.
+    int month = 0;
+    /// 1-31.
+    int day = 0;
+    /// 0 is Sunday.
+    int weekday = 0;
+    /// The zone as the system names it: `MDT` on POSIX, its long name on
+    /// Windows.
+    std::string zone;
+    /// Minutes east of UTC, daylight saving included.
+    int utc_offset_minutes = 0;
+};
+
+/// `when` on the local calendar, by the system's own time-zone settings
+/// (`TZ`, `/etc/localtime`, the Windows zone).
+[[nodiscard]] LocalDate local_date(std::chrono::system_clock::time_point when);
 
 /// This process's id, for a PID lock file (`train cycle`'s) and nothing
 /// else -- a number a person can `kill`, never an identity.

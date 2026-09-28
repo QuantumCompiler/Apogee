@@ -113,10 +113,10 @@ to answer it.
 ### Answering a permission prompt
 
 The same event carries the permission gate's question. When the model calls a
-destructive tool — `write_file`, `delete_file`, `run_command`, `write_note`,
-`delete_note` — whose level in `permissions:` is `ask`, the child emits a
-`question` with `"kind": "permission"`, the `tool` and its `target` (the path,
-the command), and **blocks until answered**:
+destructive tool — `write_file`, `edit_file`, `delete_file`, `run_command`,
+`write_note`, `delete_note` — whose level in `permissions:` is `ask`, the child
+emits a `question` with `"kind": "permission"`, the `tool` and its `target`
+(the path, the command), and **blocks until answered**:
 
 ```jsonl
 {"type":"question","kind":"permission","tool":"write_file","target":"notes/todo.md","questions":[{"header":"Permission","question":"Allow write_file on notes/todo.md?","multi_select":false,"options":[{"label":"yes","description":"Allow this once"},{"label":"no","description":"Deny"},{"label":"always","description":"Allow, and remember it in the config"},{"label":"session","description":"Allow for the rest of this session"}]}]}

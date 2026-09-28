@@ -51,6 +51,7 @@ paths:
 # fetch_url is asked about per website instead: see allowed_hosts below.
 permissions:
   write_file: ask
+  edit_file: ask
   delete_file: ask
   run_command: ask
   write_note: ask

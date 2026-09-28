@@ -46,12 +46,12 @@ public:
                 "s");
         }
         if (outcome.exit_code.value_or(1) != 0) {
-            const std::string what = rstrip(outcome.err);
+            const std::string what = rstrip(outcome.err.text());
             throw GitError(what.empty()
                                ? "git exited " + std::to_string(outcome.exit_code.value_or(-1))
                                : what);
         }
-        const std::string out = rstrip(outcome.out);
+        const std::string out = rstrip(outcome.out.text());
         return out.empty() ? "(no output)" : out;
     }
 
@@ -62,7 +62,7 @@ public:
             outcome.exit_code.value_or(1) != 0) {
             return {};
         }
-        return rstrip(outcome.out);
+        return rstrip(outcome.out.text());
     }
 
     [[nodiscard]] bool is_local_ref(const std::string& ref) const {

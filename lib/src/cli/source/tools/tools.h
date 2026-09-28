@@ -15,6 +15,7 @@
 /// the package's own headers so a broken include path fails the day it breaks.
 
 #include "tools/args.h"
+#include "tools/environment.h"
 #include "tools/fs.h"
 #include "tools/git.h"
 #include "tools/notes.h"

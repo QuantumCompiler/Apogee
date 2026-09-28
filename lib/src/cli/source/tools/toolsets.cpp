@@ -1,9 +1,12 @@
 #include "tools/toolsets.h"
 
 #include <array>
+#include <chrono>
 #include <system_error>
 
 #include "harness/layout.h"
+#include "platform/platform.h"
+#include "tools/environment.h"
 #include "tools/fs.h"
 #include "tools/notes.h"
 #include "tools/rag_query.h"
@@ -13,8 +16,8 @@ namespace apogee::tools {
 namespace {
 
 constexpr std::array<std::string_view, 5> kToolsetNames{"fs", "shell", "git", "notes", "rag"};
-constexpr std::array<std::string_view, 5> kDestructiveTools{
-    "write_file", "delete_file", "run_command", "write_note", "delete_note"};
+constexpr std::array<std::string_view, 6> kDestructiveTools{
+    "write_file", "edit_file", "delete_file", "run_command", "write_note", "delete_note"};
 
 bool disabled(const ToolsetOptions& options, std::string_view toolset) {
     for (const std::string& name : options.disabled) {
@@ -79,6 +82,22 @@ void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOption
     if (!disabled(options, "rag")) {
         register_rag_tools(registry, options.harness, options.config);
     }
+
+    // Set whatever is switched off: fetch_url and MCP tools ride the same
+    // registry, and a model with any tool needs the date as much as one
+    // with all of them.
+    Environment environment;
+    environment.working_directory = effective_cwd(options);
+    if (!disabled(options, "shell")) {
+        environment.shell = std::string{shell_program()};
+    }
+    if (!disabled(options, "fs")) {
+        environment.fs_root = effective_fs_root(options.fs_root).path;
+    }
+    registry.set_environment([environment] {
+        return render_environment_note(environment,
+                                       platform::local_date(std::chrono::system_clock::now()));
+    });
 }
 
 std::vector<std::string> native_tool_names(const ToolsetOptions& options) {

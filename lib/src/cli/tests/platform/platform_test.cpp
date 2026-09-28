@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <string>
 #include <string_view>
 
@@ -60,4 +61,24 @@ TEST_CASE("a process is running while it runs, and an id nothing holds is not", 
     CHECK_FALSE(apogee::platform::process_running(0));
     CHECK_FALSE(apogee::platform::process_running(-1));
     CHECK_FALSE(apogee::platform::process_running(999999999));
+}
+
+TEST_CASE("local_date is the calendar day at the offset it reports", "[platform][environment]") {
+    // Checked against the standard calendar rather than a fixed zone: the
+    // day, the month, the year and the weekday must all be the UTC moment
+    // moved by the offset the same call reported.
+    using namespace std::chrono;
+    for (const system_clock::time_point when :
+         {system_clock::time_point{}, system_clock::time_point{seconds{1'790'000'000}},
+          system_clock::now()}) {
+        const apogee::platform::LocalDate date = apogee::platform::local_date(when);
+        const sys_days day = floor<days>(when + minutes{date.utc_offset_minutes});
+        const year_month_day calendar{day};
+        CHECK(static_cast<int>(calendar.year()) == date.year);
+        CHECK(static_cast<unsigned>(calendar.month()) == static_cast<unsigned>(date.month));
+        CHECK(static_cast<unsigned>(calendar.day()) == static_cast<unsigned>(date.day));
+        CHECK(weekday{day}.c_encoding() == static_cast<unsigned>(date.weekday));
+        CHECK(date.utc_offset_minutes >= -12 * 60);
+        CHECK(date.utc_offset_minutes <= 14 * 60);
+    }
 }

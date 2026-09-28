@@ -426,7 +426,7 @@ TEST_CASE("permissions: and tools: parse, and a bad level fails at load",
     // The shipped template lists every destructive tool at ask.
     const Config shipped = load_text(apogee::harness::config_template());
     for (const char* tool :
-         {"write_file", "delete_file", "run_command", "write_note", "delete_note"}) {
+         {"write_file", "edit_file", "delete_file", "run_command", "write_note", "delete_note"}) {
         INFO(tool);
         CHECK(shipped.permissions.levels.contains(tool));
         CHECK(shipped.permissions.level(tool) == apogee::harness::PermissionLevel::Ask);

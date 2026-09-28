@@ -2,7 +2,7 @@
 
 **What / why.** Each turn's request is assembled against the model's real window, by priority, instead of from fixed caps. Today every source that adds to a request picks its own size:
 - RAG injects `--rag-limit` chunks (4);
-- `read_file` returns up to 64 KiB, and `fetch_url` 8 KB;
+- `read_file` returns up to 64 KiB (a file larger than that is refused with its size, since [25d](../assistant/MILESTONES.md#milestone-v--the-native-toolsets)), `run_command` its first and last 8 KiB, `grep_files` 16 KiB, and `fetch_url` 8 KB;
 - tool results stay in history at full size for the rest of the chat;
 - the history itself is measured only to warn at 80% and compact at 90% (`agentloop/content.h`).
 

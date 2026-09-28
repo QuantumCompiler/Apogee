@@ -129,8 +129,25 @@ public:
     /// The registry rendered as IR tool definitions, for the outgoing request.
     [[nodiscard]] std::vector<harness::Tool> definitions() const;
 
+    /// The note the loop hands a model beside these tools, each turn: where
+    /// they act and what day it is (25d). Rendered when asked, so a
+    /// conversation that crosses midnight is told the new date. Set where
+    /// the tools are registered, so no surface can build a registry without
+    /// it.
+    void set_environment(std::function<std::string()> render);
+
+    /// The note, or empty when none was set.
+    [[nodiscard]] std::string environment() const;
+
+    /// What renders it -- for a registry built from this one, which must
+    /// carry it.
+    [[nodiscard]] const std::function<std::string()>& environment_source() const noexcept {
+        return environment_;
+    }
+
 private:
     std::map<std::string, Tool, std::less<>> tools_;
+    std::function<std::string()> environment_;
 };
 
 /// Everything dispatch needs beyond the registry itself.

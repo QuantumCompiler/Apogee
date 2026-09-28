@@ -331,6 +331,9 @@ public:
     /// same messages inside a full prompt -- its render without the
     /// generation prompt is not a token prefix of the full one.
     bool unstable_prefix = false;
+    /// A template that refuses a system message anywhere but first, as
+    /// Qwen3.5 and 3.8's raise "System message must be at the beginning".
+    bool system_first_only = false;
     /// Words `token_text` renders as nothing, the way a special token is --
     /// `special_token_text` still renders them.
     std::set<std::string> special_words;
@@ -405,6 +408,12 @@ public:
         if (!chat_template_error.empty()) {
             error = chat_template_error;
             return false;
+        }
+        for (std::size_t i = 1; system_first_only && i < messages.size(); ++i) {
+            if (messages[i].role == harness::Role::System) {
+                error = "System message must be at the beginning.";
+                return false;
+            }
         }
         // Tools first, as a real template puts them in its system block: a
         // render of the messages before the last user one is then a prefix.
@@ -562,6 +571,7 @@ public:
     bool chat_template = false;
     std::string chat_template_error;
     bool unstable_prefix = false;
+    bool system_first_only = false;
     std::set<std::string> special_words;
     std::vector<std::string> stops;
     std::string grammar_error;
@@ -600,6 +610,7 @@ public:
         loaded->chat_template = chat_template;
         loaded->chat_template_error = chat_template_error;
         loaded->unstable_prefix = unstable_prefix;
+        loaded->system_first_only = system_first_only;
         loaded->special_words = special_words;
         loaded->stops = stops;
         loaded->grammar_error = grammar_error;

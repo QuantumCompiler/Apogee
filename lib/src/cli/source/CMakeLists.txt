@@ -340,6 +340,8 @@ add_library(apogee_core STATIC
     tools/notes.cpp
     tools/rag_query.h
     tools/rag_query.cpp
+    tools/environment.h
+    tools/environment.cpp
     tools/toolsets.h
     tools/toolsets.cpp
     mcp/types.h

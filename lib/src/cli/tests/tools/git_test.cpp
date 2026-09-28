@@ -45,9 +45,9 @@ std::string git(const std::filesystem::path& repo, std::vector<std::string> argu
         {"GIT_COMMITTER_NAME", "t"},        {"GIT_COMMITTER_EMAIL", "t@example.com"}};
     const apogee::tools::ProcessOutcome outcome =
         apogee::tools::run_to_completion(command, std::chrono::seconds{30});
-    INFO("git " << command.arguments[2] << ": " << outcome.err);
+    INFO("git " << command.arguments[2] << ": " << outcome.err.text());
     REQUIRE(outcome.exit_code.value_or(1) == 0);
-    return outcome.out;
+    return outcome.out.text();
 }
 
 /// A repository with `main` (README) and two feature branches off it, each

@@ -182,6 +182,7 @@ agent::ToolRegistry apply_tool_policy(const agent::ToolRegistry& registry,
     if (policy == harness::AgentToolPolicy::None) {
         return filtered;
     }
+    filtered.set_environment(registry.environment_source());
     for (const std::string& name : registry.names()) {
         const agent::Tool* tool = registry.find(name);
         if (tool != nullptr && !tool->writes) {

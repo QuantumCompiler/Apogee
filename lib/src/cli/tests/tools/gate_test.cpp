@@ -1,12 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <random>
 #include <string>
 #include <vector>
 
+#include "agent/fetch_url.h"
 #include "agent/tool.h"
 #include "agentloop/loop.h"
 #include "agentloop/reporter.h"
@@ -181,4 +184,98 @@ TEST_CASE("every destructive native tool is gated and every other one is not",
     CHECK(world.registry.find("run_command") != nullptr);
     CHECK(world.registry.find("git_diff") != nullptr);
     CHECK(world.registry.find("write_note") != nullptr);
+}
+
+TEST_CASE("edit_file asks through the gate where someone can answer and is refused where not",
+          "[tools][gate][permission][edit]") {
+    const auto script = [] {
+        return std::vector<MockTurn>{
+            calls({ToolCall{"e", "edit_file",
+                            R"({"path":"in.txt","old_string":"readable","new_string":"edited"})"}}),
+            says("done")};
+    };
+    const auto contents = [](const World& world) {
+        std::ifstream in{world.root / "in.txt"};
+        return std::string{std::istreambuf_iterator<char>{in}, {}};
+    };
+    {
+        // A terminal: the config says ask, the user is asked -- the tool and
+        // the file it would change -- and says yes.
+        World world{script()};
+        std::string asked_tool;
+        std::string asked_target;
+        Options terminal;
+        terminal.permission = [](const apogee::agent::GateRequest&) { return Permission::Ask; };
+        terminal.confirm = [&](const apogee::agent::GateRequest& request) {
+            asked_tool = request.tool;
+            asked_target = request.target;
+            return true;
+        };
+        (void)world.run(terminal);
+        CHECK(asked_tool == "edit_file");
+        CHECK(asked_target == "in.txt");
+        CHECK(contents(world) == "edited");
+    }
+    {
+        // A pipe: ask, and nobody to answer -- denied, the file untouched,
+        // and the model told so.
+        World world{script()};
+        Options pipe;
+        pipe.permission = [](const apogee::agent::GateRequest&) { return Permission::Ask; };
+        const std::vector<ChatMessage> history = world.run(pipe);
+        CHECK(tool_result(history, "e").find("denied permission") != std::string::npos);
+        CHECK(contents(world) == "readable");
+    }
+}
+
+TEST_CASE("every request with tools carries the environment note, and history never does",
+          "[tools][environment][transient]") {
+    World world{{calls({ToolCall{"r", "read_file", R"({"path":"in.txt"})"}}), says("done")}};
+    const std::vector<ChatMessage> history = world.run(Options{});
+
+    // Both steps of the turn: the same note, first, marked transient.
+    REQUIRE(world.provider->requests().size() == 2);
+    for (const apogee::harness::ChatRequest& request : world.provider->requests()) {
+        REQUIRE_FALSE(request.messages.empty());
+        const std::string note = request.messages.front().content.plain_text();
+        CHECK(request.messages.front().role == apogee::harness::Role::System);
+        CHECK(note.starts_with("Environment:\n- Today is "));
+        CHECK(note.find("- Working directory: " + world.root.string()) != std::string::npos);
+        CHECK(note.find("- The file tools reach " + world.root.string()) != std::string::npos);
+        CHECK(request.is_transient(0));
+    }
+    CHECK(world.provider->requests()[0].messages.front().content.plain_text() ==
+          world.provider->requests()[1].messages.front().content.plain_text());
+    for (const ChatMessage& message : history) {
+        CHECK(message.content.plain_text().find("Environment:") == std::string::npos);
+    }
+}
+
+TEST_CASE("every built-in tool's parameters are a JSON Schema a template can read",
+          "[tools][schema]") {
+    // A schema that does not parse fails the whole tool list at render time:
+    // a local model's template then answers without any tool (found on real
+    // weights, 2026-09-28 -- a `\s` in an example inside a description).
+    const apogee::testing::TempDir temp{"tools-schema-" + std::to_string(std::random_device{}())};
+    apogee::tools::ToolsetOptions options;
+    options.fs_root = temp.path();
+    options.working_directory = temp.path();
+    options.notes_dir = temp.path() / "notes";
+    ToolRegistry registry;
+    apogee::tools::register_native_toolsets(registry, options);
+    registry.add(apogee::agent::make_fetch_url_tool(
+        [](std::string_view) { return apogee::agent::FetchResult{}; }));
+    REQUIRE(registry.size() >= 18);
+
+    for (const apogee::harness::Tool& tool : registry.definitions()) {
+        INFO(tool.name << ": " << tool.parameters_schema);
+        const nlohmann::json schema = nlohmann::json::parse(tool.parameters_schema, nullptr, false);
+        REQUIRE_FALSE(schema.is_discarded());
+        CHECK(schema.value("type", "") == "object");
+        REQUIRE(schema.contains("properties"));
+        for (const nlohmann::json& required : schema.value("required", nlohmann::json::array())) {
+            CHECK(schema["properties"].contains(required.get<std::string>()));
+        }
+        CHECK_FALSE(tool.description.empty());
+    }
 }

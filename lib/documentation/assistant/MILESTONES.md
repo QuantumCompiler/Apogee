@@ -2233,6 +2233,76 @@ Both show the same gap: a check that another step can quietly repair proves noth
 
 **Not verified.** The transport's new options (`follow_redirects`, `max_body_bytes`, the `Location` header) were exercised only on macOS's curl; the Linux and Windows builds set the same curl options. `apogee check`'s rows are asserted by the end-to-end test, not by a `check_test` case.
 
+### 2026-09-28 — `local-tool-ergonomics` (backlog item 25d): tools that return less and ask for less
+
+**Why.** The native tools were built for cloud models, with large windows and fast prompt reading. The local-tools spike (2026-09-25) measured the two costs that dominate on a local model instead: every byte a tool returns is read at roughly 100 tokens/s on a 27B model before the model can act on it, and a model that has to rewrite a whole file to change one line spends generation, at 10–15 tokens/s, on text it is not changing. So the tools return less, and ask for less. Every backend gets the change, since the tools are shared.
+
+**What was built**
+
+- [x] **`run_command`'s output, capped** (`tools/shell`, `tools/process`). The runner keeps each stream's first and last 8 KiB (`CapturedOutput`, bounded by an `OutputLimit`), so a command that prints gigabytes costs the kept bytes and a count. `git` keeps its last 256 KiB, as before. `render_command_output` cuts the rendered result — stdout, `[stderr]`, `[exit N]` — to its first and last 8 KiB, joined by a line naming exactly how many bytes were left out and how to see them: redirect to a file and read it in ranges, or search it. Each seam falls at a line break when one is in the kept half, and otherwise between characters, never through one. A 5.7 MB command returns under 17 KiB.
+- [x] **`read_file` in ranges** (`tools/fs`). `offset` and `limit`, in lines. Each line comes back prefixed with its number and a tab, `cat -n`'s shape, and a footer says `[lines A-B of T. Read on with offset B+1]`. A range is exact at both edges of the file. An offset past the end is an error naming the file's length. A range stops on a whole line at the 64 KiB cap and says so. The file is streamed, never held. A read without a range is unnumbered, byte for byte.
+- [x] **A plain read past the cap returns the file's size, not its first 64 KiB.** It names the size and line count and points at ranges and `grep_files`. This was decided on real weights; see below.
+- [x] **`edit_file`** replaces an exact string. It refuses when the string is absent, or when it occurs more than once without `replace_all`, saying how many times it occurs. Either refusal leaves the file untouched. The result names the lines it changed. The file is written beside itself and renamed into place (`write_file_atomically`), with its mode carried over, so an edited script stays executable. When the file has Windows line endings and the given text has none, the text still matches, and the replacement is written with the file's line endings. It declares `writes`, joins `destructive_tool_names()`, and the shipped template lists it at `ask`, so `check`, the admin view and machine mode's permission question all know it.
+- [x] **`grep_files`** searches file contents with an ECMAScript regular expression under the file root. Each match comes back as `path:line: text`, the path relative to the root, the files in sorted order. It takes a folder or one file, a `glob` and `ignore_case`. It skips hidden folders and binary files (a NUL byte in the first 8 KiB), and says how many binary files it skipped. A linked file or folder is judged by where it points, like any path. It returns at most 100 matches and 16 KiB, stops at the first match that does not fit (so what comes back has no gaps), and says how many more there were.
+- [x] **The environment note** (`tools/environment`, `agent::ToolRegistry`, `agentloop/loop`). It gives the date and weekday, the time zone's name and UTC offset (`platform::local_date`), the system, the working folder and the shell, and the file root. `register_native_toolsets` sets it on the registry it fills, even with every toolset switched off. `apply_tool_policy` carries it onto an agent's filtered registry. The loop renders it once per turn and puts it first in the request's transient block, ahead of any retrieval. It is never in history. It never gives the time of day.
+- [x] **The system messages opening a conversation reach a local template as one** (`backends/llamacpp`, `prompt_messages`). Qwen3.5 and 3.8's templates raise "System message must be at the beginning" on a second system message, and a failed render dropped the model to the fallback template, and its tools with it. The note ahead of a chat's own system prompt is the ordinary case. A retrieval block or review note ahead of one was already a case, so this fixes a latent bug too. They are joined a blank line apart, as the Anthropic and Google wires already join theirs.
+- [x] **Descriptions state the limits**: `read_file`'s cap and ranges, `run_command`'s kept ends, `grep_files`' caps and what it skips, `edit_file`'s rule of one exact match.
+- [x] **The references**: [machine-mode.md](../reference/machine-mode.md) and [http-api.md](../reference/http-api.md) name `edit_file` among the gated tools.
+- [x] **15 new test cases**: 1,681 pass under `make test`, and 1,646 in the unit suite built without llama.cpp, which is what CI gates on.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| What `run_command` keeps | The first and last 8 KiB *(default taken)* | Enough for a compiler's first error and a test runner's summary; stated in the description. |
+| What the cap measures | The whole rendered result, not each stream | A total bound. Capping each stream alone would let two long ones cost 32 KiB. The tail always ends in the exit status. |
+| `grep_files`' caps | 100 matches and 16 KiB *(default taken)* | Past either, it says how many more there were and to narrow the search. |
+| Line numbers | Only when a range is asked for *(default taken)* | A plain read stays byte for byte, for a model about to quote or edit it. |
+| The environment note | On whenever tools are *(default taken)* | About ninety tokens a turn, and a date a model cannot otherwise know. |
+| The note's time | **The date, never the time of day** | The note heads every request. A line that changed each turn would make every local turn re-read the whole conversation, since the KV cache and 25c's checkpoints both match from the first token. A model that needs the time can run `date`. |
+| A plain read past 64 KiB | **None of it, with its size and line count** *(decided on real weights, 2026-09-28)* | The item kept the cap, and it stays. What changed is what comes back past it. The first 64 KiB of an 80 KB file was 38,502 tokens, more than a 32K window, so the turn ended before the model could act. Refused, Qwen3.8-27B searched and read a range instead. Claude Code's Read tool refuses the same way. A cloud model pays one more step on a big file. |
+| Where the note is set | On the registry, by `register_native_toolsets` | Built once, where the tools are. Every surface builds its registry through `make_built_in_tools`, so no surface can have tools without the note. |
+| Joining system messages | On the local path only | The cloud wires already lift and join them, and OpenAI's API accepts several. The restriction is the local template's. |
+| `grep_files`' paths | Relative to the root | What `read_file` and `edit_file` resolve against. `search_files` gives paths relative to the folder it searched; that difference is recorded, not changed. |
+| The regular-expression engine | `std::regex`, ECMAScript | No new dependency. A line is searched in its first 4 KiB, because the engine recurses per character and a minified megabyte line would overflow the stack. |
+| `edit_file` on a missing file | Refused, naming `write_file` | One tool creates files and one changes them. |
+
+**Verified on real weights.** Two models, each with a 32K context: Qwen3.8-27B, a hybrid, and Qwen3-VL-8B. Every run used `complete --tools` at temperature 0 on the real binary, with `edit_file` allowed, in a folder holding a 2,000-line `settings.py` and a small Python package:
+
+| Task | Qwen3.8-27B | Qwen3-VL-8B |
+|---|---|---|
+| "What is today's date?" | "Monday, September 28, 2026 (MDT, UTC-06:00)", 29 s | "Monday, 2026-09-28", 7 s |
+| Change `TIMEOUT_SECONDS` from 30 to 45 | read refused → `grep_files` → a ranged read → `edit_file` → `grep_files` to check; 58 s | read refused → `grep_files` → `edit_file`; 12 s |
+| …the file afterwards | Line 1234 changed; the other 1,999 byte-identical | The same |
+| Where is `compute_checksum` defined? | One `grep_files` call, line 46; 37 s | One `grep_files` call, line 46; 9 s |
+
+Also checked:
+- On Qwen3.8, a system prompt and the note together rendered with the tools; nothing fell back.
+- A six-turn hybrid chat carrying the note read 39–171 new tokens per later turn, so the note leaves the cache intact.
+- `check` on a fresh config lists `permissions.edit_file ask`.
+
+**What real weights caught that the suite had not.**
+- **An invalid schema.** `grep_files`' parameter schema carried `int\s+main` in an example, and `\s` is not a JSON escape. The whole tool list then failed to render, and Qwen3.8 answered without tools (with the right date, from the note). A test now requires every built-in tool's parameters to parse as an object schema whose required properties are declared.
+- **The plain-read overflow** above.
+- **A phrasing trap, not a tool fault.** Asked where "the function `compute_checksum`" is defined, the 8B looked for a tool of that name. Qwen's template calls tools "functions". Asked where in the project's code it is defined, it found it in one call.
+
+**Guardrails, each mutation-tested (40 mutants).** 36 were caught outright, 2 once their test was strengthened, and 2 after mistakes in the run itself were fixed. The mutants, by area:
+- **The cap:** the capture's head never filling, or its tail never dropping bytes; the shell keeping no head; the output never cut; a gap left out of the count; the head not ended at a line; either cut going through a character.
+- **The ranges:** starting a line late; one line too many; "read on" offered at the end; a range past the end not refused; the byte cap ignored; a plain read past the cap returning its first 64 KiB again.
+- **`edit_file`:** an ambiguous match replaced; `replace_all` ignored; an absent match not refused; whitespace trimmed from the match; the tool ungated; the file's mode lost; the CRLF fallback gone.
+- **`grep_files`:** hidden folders walked; binary files read; a link out of the root followed; either cap removed; gaps in the shown matches after the cap; the schema's original `\s`.
+- **The rest:** `edit_file` dropped from the gated list or the template; the note never set, missing from the request, written into history, or lost by an agent's policy; the offset's sign flipped; the shell line shown with the shell off; the month counted from zero; the offset dropped; the system messages never joined, or an empty one kept.
+
+**The survivors, and what they taught.**
+- **The two character cuts.** The test shifted its text with a leading prefix. The head's cut lands at the stream's own head, where the runner stops. The tail is measured from the end, so its alignment against the characters never moved with that shift. The test now shifts both ends, with and without a gap, so each cut meets every alignment. A test that sweeps an input has to sweep the thing the cut is actually measured against.
+- **The two mistakes in the run.** The run filtered tests by tag, and the read-only-policy test is tagged `[permissions]` where the filter said `[permission]`, so it never ran. The schema mutant had a doubled backslash, which is valid JSON. Rerun against the whole suite with the original spelling, both were caught.
+
+**Not verified.**
+- **Windows.** Its paths (`cmd`, `localtime_s` and `_mkgmtime`, the zone's long name) are built by CI only.
+- **The 5 MB acceptance** is proven by a test that runs a real `awk` through the real shell. No model was asked to run one, since `run_command` asks first.
+- **Two tools stay uncapped.** `search_files` and `list_directory` were outside the item.
+- **A file under 64 KiB can still fill a small window.** Sizing tool results to the real window is [26c](../backlog/context-budget.md)'s work.
+
 ## Milestone W — The MCP client
 
 **Goal.** The model picking up anyone else's tools: a from-scratch client for stdio MCP servers whose tools join the shared loop as first-class registry entries, with the subprocess discipline Ommi earned the hard way, `apogee mcp` and its admin twins over one scaffold core, and Apogee hosting a server of its own.

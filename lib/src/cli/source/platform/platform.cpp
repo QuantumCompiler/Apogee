@@ -5,6 +5,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <string>
 #include <system_error>
@@ -117,6 +118,33 @@ std::filesystem::path executable_path() {
     }
     return resolved;
 #endif
+}
+
+LocalDate local_date(std::chrono::system_clock::time_point when) {
+    const std::time_t seconds = std::chrono::system_clock::to_time_t(when);
+    std::tm local{};
+#if defined(_WIN32)
+    localtime_s(&local, &seconds);
+    // The offset is how far the local calendar reads ahead of UTC: the
+    // local fields read back as if they were UTC, less the moment itself.
+    std::tm as_utc = local;
+    const long offset_seconds = static_cast<long>(_mkgmtime(&as_utc) - seconds);
+#else
+    localtime_r(&seconds, &local);
+    const long offset_seconds = local.tm_gmtoff;
+#endif
+    std::array<char, 64> zone{};
+    if (std::strftime(zone.data(), zone.size(), "%Z", &local) == 0) {
+        zone[0] = '\0';
+    }
+    LocalDate date;
+    date.year = local.tm_year + 1900;
+    date.month = local.tm_mon + 1;
+    date.day = local.tm_mday;
+    date.weekday = local.tm_wday;
+    date.zone = zone.data();
+    date.utc_offset_minutes = static_cast<int>(offset_seconds / 60);
+    return date;
 }
 
 long current_process_id() noexcept {
