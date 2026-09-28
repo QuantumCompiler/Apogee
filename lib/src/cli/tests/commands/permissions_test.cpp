@@ -339,8 +339,11 @@ TEST_CASE("the real fetcher asks for one hop and a bounded body",
     moved.location = "https://elsewhere.example/";
     apogee::testing::FakeTransport::Reply huge;
     huge.body = std::string(apogee::commands::kFetchMaxBodyBytes + 1, 'x');
+    apogee::testing::FakeTransport::Reply typed;
+    typed.body = "<p>page</p>";
+    typed.content_type = "text/html; charset=utf-8";
     auto transport = std::make_unique<apogee::testing::FakeTransport>(
-        std::vector<apogee::testing::FakeTransport::Reply>{moved, huge});
+        std::vector<apogee::testing::FakeTransport::Reply>{moved, huge, typed});
     const apogee::testing::FakeTransport& seen = *transport;
     const apogee::agent::UrlFetcher fetcher = apogee::commands::make_http_fetcher(
         std::make_shared<apogee::backends::HttpClient>(std::move(transport)));
@@ -357,6 +360,11 @@ TEST_CASE("the real fetcher asks for one hop and a bounded body",
     CHECK(too_big.error.find("larger than 5 MB") != std::string::npos);
     CHECK(too_big.body.empty());
     CHECK(seen.requests().size() == 2);  // stopping is not a failure: never retried
+
+    // The type travels with the body: the reader decides by it (25f).
+    const apogee::agent::FetchResult page = fetcher("https://a.example/page");
+    CHECK(page.content_type == "text/html; charset=utf-8");
+    CHECK(page.body == "<p>page</p>");
 }
 
 TEST_CASE("the file tools default to the folder Apogee was started in",

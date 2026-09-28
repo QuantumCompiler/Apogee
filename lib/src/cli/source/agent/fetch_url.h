@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -36,6 +37,9 @@ struct FetchResult {
     /// NOT follow redirects itself: the tool follows them one hop at a time,
     /// so each new host goes through the permission gate like a direct fetch.
     std::string location;
+    /// The `Content-Type`, as sent: what the reader does with the body --
+    /// HTML extracted, text passed through, anything else refused by name.
+    std::string content_type;
 };
 
 /// Fetches ONE URL, without following redirects.
@@ -76,20 +80,35 @@ struct HttpUrl {
 [[nodiscard]] std::optional<HttpUrl> resolve_redirect(const HttpUrl& base,
                                                       std::string_view location);
 
-/// Strips HTML tags, scripts, styles, and entity escapes, collapsing whitespace.
-///
-/// Crude on purpose. The model wants the prose, and a real HTML parser would be
-/// a dependency and a parsing-difference surface for a job where "roughly the
-/// text" is entirely sufficient.
-[[nodiscard]] std::string strip_html(std::string_view html);
+/// How much of a page one call returns (25f): big enough for a
+/// documentation section, small enough for a local model to read in
+/// seconds. A longer page is read on with `offset`.
+inline constexpr std::size_t kFetchPageBytes = 12 * 1024;
 
-/// Builds the tool. `max_bytes` caps the text handed back — an unbounded page
-/// would blow the context window on one call.
+/// What a response's body is, for the reader.
+enum class BodyKind : std::uint8_t {
+    /// Extracted: `text/html`, XHTML, or no type and markup that says so.
+    Html,
+    /// Passed through: `text/*`, JSON, XML, YAML and the like.
+    Text,
+    /// Refused by name: a PDF, an image, an archive, anything binary.
+    Refused,
+};
+
+/// How `content_type` and the body's first bytes classify it; for a refusal,
+/// `what` names it for the model ("a PDF", "an image (image/png)").
+[[nodiscard]] BodyKind classify_body(std::string_view content_type, std::string_view body,
+                                     std::string& what);
+
+/// Builds the tool. `max_bytes` is one call's page of text: a longer page
+/// says so and gives the `offset` to read on from.
 ///
+/// It reads a page as a model should (`agent/readable.h`): the main content
+/// as Markdown, links absolute, the menus and banners around it left out.
 /// The tool is `outbound`: every call goes through the permission gate with
 /// its URL's host as the target and the URL as the detail, and every redirect
 /// to a different host goes through it again before anything is fetched from
 /// there.
-[[nodiscard]] Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes = 8000);
+[[nodiscard]] Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes = kFetchPageBytes);
 
 }  // namespace apogee::agent

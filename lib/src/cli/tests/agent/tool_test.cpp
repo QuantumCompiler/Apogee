@@ -5,6 +5,7 @@
 #include <string>
 
 #include "agent/fetch_url.h"
+#include "agent/readable.h"
 
 using apogee::agent::dispatch;
 using apogee::agent::DispatchContext;
@@ -13,7 +14,6 @@ using apogee::agent::GateRequest;
 using apogee::agent::make_fetch_url_tool;
 using apogee::agent::Permission;
 using apogee::agent::permitted;
-using apogee::agent::strip_html;
 using apogee::agent::Tool;
 using apogee::agent::ToolOutcome;
 using apogee::agent::ToolRegistry;
@@ -146,18 +146,25 @@ ToolOutcome run_fetch(const Tool& tool, std::string_view arguments) {
 
 }  // namespace
 
-TEST_CASE("strip_html keeps prose and drops markup", "[agent][fetch]") {
-    CHECK(strip_html("<p>Hello <b>world</b></p>") == "Hello world");
-    // script and style contain code, not prose.
-    CHECK(strip_html("a<script>var x = 1;</script>b") == "a b");
-    CHECK(strip_html("a<style>p{color:red}</style>b") == "a b");
-    // Entities are decoded.
-    CHECK(strip_html("&lt;tag&gt; &amp; more") == "<tag> & more");
-    // A tag boundary is a word boundary -- without that, "a</b>b" becomes "ab".
-    CHECK(strip_html("a</b>b") == "a b");
+TEST_CASE("the reader keeps prose and drops markup", "[agent][fetch]") {
+    const auto read = [](std::string_view html) {
+        return apogee::agent::extract_readable(
+                   html, *apogee::agent::parse_http_url("https://example.test/"))
+            .text;
+    };
+    CHECK(read("<p>Hello <b>world</b></p>") == "Hello world");
+    // script and style contain code, not prose; they still part the words.
+    CHECK(read("a<script>var x = 1;</script>b") == "a b");
+    CHECK(read("a<style>p{color:red}</style>b") == "a b");
+    // Entities are decoded, numeric ones too.
+    CHECK(read("&lt;tag&gt; &amp; more &#233;&#x2014;") == "<tag> & more \u00e9\u2014");
+    // A block is a break; an inline tag, as a browser shows it, is not.
+    CHECK(read("<p>a</p><p>b</p>") == "a\n\nb");
+    CHECK(read("a<br>b") == "a\nb");
+    CHECK(read("<b>Hel</b>lo") == "Hello");
     // Whitespace collapses.
-    CHECK(strip_html("a   \n\n  b") == "a b");
-    CHECK(strip_html("").empty());
+    CHECK(read("a   \n\n  b") == "a b");
+    CHECK(read("").empty());
 }
 
 TEST_CASE("fetch_url returns page text through the injected fetcher", "[agent][fetch]") {
@@ -209,7 +216,7 @@ TEST_CASE("fetch_url surfaces transport and HTTP failures", "[agent][fetch]") {
     CHECK(http.content.find("404") != std::string::npos);
 }
 
-TEST_CASE("fetch_url truncates and says so", "[agent][fetch]") {
+TEST_CASE("fetch_url pages a long text and says where to read on", "[agent][fetch]") {
     // A model handed silently truncated text will confidently answer about the
     // part it never saw.
     const Tool tool = make_fetch_url_tool(
@@ -217,8 +224,9 @@ TEST_CASE("fetch_url truncates and says so", "[agent][fetch]") {
 
     const auto outcome = run_fetch(tool, R"({"url":"https://x.test"})");
     CHECK_FALSE(outcome.is_error);
-    CHECK(outcome.content.find("[truncated]") != std::string::npos);
-    CHECK(outcome.content.size() < 200);
+    CHECK(outcome.content.find("Page 1 of 50") != std::string::npos);
+    CHECK(outcome.content.find("offset 100.]") != std::string::npos);
+    CHECK(outcome.content.size() < 400);
 }
 
 TEST_CASE("fetch_url reports an empty page rather than an empty result", "[agent][fetch]") {

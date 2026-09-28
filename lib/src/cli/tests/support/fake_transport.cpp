@@ -35,6 +35,7 @@ backends::HttpResponse FakeTransport::send(const backends::HttpRequest& request,
     response.status = reply.status;
     response.retry_after = reply.retry_after;
     response.location = reply.location;
+    response.content_type = reply.content_type;
 
     // The real transport's cap: the transfer stops once the body passes
     // `max_body_bytes`, whatever the status, and says so rather than failing.

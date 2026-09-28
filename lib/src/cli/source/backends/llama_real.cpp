@@ -253,8 +253,8 @@ public:
                 mtmd_context* vision, bool checkpoints)
         : context_{std::move(context)},
           sampler_{std::move(sampler)},
-          vision_{vision},
-          checkpoints_needed_{checkpoints} {}
+          checkpoints_needed_{checkpoints},
+          vision_{vision} {}
 
     void decode(const std::vector<std::int32_t>& tokens, std::int64_t position) override {
         if (tokens.empty()) {

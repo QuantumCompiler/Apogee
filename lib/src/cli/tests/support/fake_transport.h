@@ -43,6 +43,8 @@ public:
         std::optional<std::size_t> fail_after_bytes;
         /// Sent as the `Location` header value.
         std::string location;
+        /// Sent as the `Content-Type` header value.
+        std::string content_type;
     };
 
     /// Replies are served in order; the last one repeats once exhausted.

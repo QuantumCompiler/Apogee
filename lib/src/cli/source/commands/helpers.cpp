@@ -215,6 +215,7 @@ agent::UrlFetcher make_http_fetcher(std::shared_ptr<backends::HttpClient> client
             result.status = response.status;
             result.body = response.body;
             result.location = response.location;
+            result.content_type = response.content_type;
         } catch (const std::exception& e) {
             result.error = e.what();
         }

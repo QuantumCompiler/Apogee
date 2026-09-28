@@ -2206,7 +2206,7 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 | The URL handed to the transport | Rebuilt from the parsed parts | Two URL parsers that disagree about a host are the classic way round a host check; here the second parser has nothing ambiguous to read. |
 | A redirect on the same host | Not asked again | It was just allowed; asking again teaches the reflex the gate avoids. |
 | Redirect limit | Ten | It bounds a loop, not the guard: every new host is asked about anyway. |
-| Download cap | 5 MB, refused naming the size | 25a's seam named a cap and [25f](../backlog/fetch-url-reader.md) had recorded the size, so it was taken here and marked consumed there. |
+| Download cap | 5 MB, refused naming the size | 25a's seam named a cap and 25f had recorded the size, so it was taken here and marked consumed there ([25f](#2026-09-28--fetch-url-reader-backlog-item-25f-fetch_url-reads-a-page-as-a-model-should) shipped the reader). |
 | Where the host rule lives | `harness/host.h` | `agent/`, `commands/`, `httpserver/` and the editor all need it, and `harness/` is the one layer every one of them may include. |
 | A pasted URL in the list | Loads, and `check` warns | Refusing the whole config over one entry would take every other command down with it. |
 
@@ -2362,6 +2362,63 @@ Also checked:
 - **Cloud backends.** They get the tool; no cloud model was run with it.
 - **The redirect, 429 and refused-connection messages** are proven against a scripted instance, not a real one.
 - **Found along the way, not fixed here.** On a turn that reaches the step limit, a local model can write its call as raw markup on the forced final step, where tools are withdrawn, and that markup reaches the answer. It predates this item (25b), and is recorded for its own fix.
+
+### 2026-09-28 — `fetch-url-reader` (backlog item 25f): fetch_url reads a page as a model should
+
+**Why.** `fetch_url` was Ommi's design, ported unchanged in Milestone F. It stripped every tag, kept the first 8,000 bytes, and marked the rest `[truncated]`. On a documentation or news page those bytes were mostly menu text, the links were gone, and whatever lay past the cut could not be reached. A local model also pays twice for the noise, once more to read it. The spike found two smaller faults as well: the cut could split a UTF-8 character, and no content type was checked, so a PDF was "stripped" into noise.
+
+**What was built**
+
+- [x] **The reader** (`agent/readable`), hand-written with no parser library (the recorded default).
+  - **Parsing.** A forgiving tokenizer builds a flat tree of the page: indices rather than pointers, HTML's implied end tags, scripts and styles skipped (still parting the words either side), and nesting capped at 256.
+  - **The content landmark.** `<main>` or `role="main"`; within it, an article holding at least half of all the articles' text (the story, not a list of teasers); else the body.
+  - **What is dropped.** Page furniture:
+    - by element: `nav`, `aside` (but never a footnote), and a form that doesn't hold the content;
+    - by role;
+    - `hidden`, `aria-hidden` and `display:none`;
+    - a short list of class and id names (consent banners, ad slots, share bars, sidebars, MediaWiki's menus and edit links). A name match never drops what holds the page's heading or half its text.
+  - **What is written.** Light Markdown: `#` headings, `-` and `1.` list items, fenced code with its whitespace, `|` table rows (a layout table as paragraphs), blockquotes, and links as `[text](absolute URL)`. Dot segments are resolved and `<base href>` honoured. In-page links keep their words, and a lone pilcrow or back-arrow goes.
+  - **Characters.** Every numeric and Latin-1 named entity is decoded, and any declared charset is converted to valid UTF-8 (`as_utf8`, `charset_of`, `meta_charset`); a stray byte becomes U+FFFD, since a tool result is serialized as JSON downstream.
+- [x] **Pages** (`page_of`). One call returns at most 12 KiB. The cut falls at a paragraph break in the page's second half, else a line break, else a space, and never inside a character. The tool takes `offset`, says `Page N of M`, and ends a continuing page with the exact offset to read on from. Walking the offsets covers the text with no gap and no overlap.
+- [x] **A header line**: the title, and the final URL, with where a redirect came from. It replaces 25a's `[X redirected to Y]` line.
+- [x] **Content types** (`classify_body`). The response's `Content-Type` now travels through `HttpResponse` and `FetchResult`.
+  - HTML is extracted; `text/*`, JSON, XML and YAML pass through.
+  - An unlabelled or `octet-stream` body is read for what it is.
+  - A PDF (by type, or by its `%PDF-` bytes whatever it is labelled), an image, audio, a video, an archive or binary data is **refused by name**, never returned as bytes.
+- [x] **The description** says what it reads, the page size and how to read on.
+- [x] **The corpus** (`tests/fixtures/web/`), its sources and licences in its README:
+  - two pages recorded (a Python documentation page, PSF licence; a Wikipedia article, CC BY-SA), with the user's approval;
+  - three hand-written in real sites' structure with invented text, so no newspaper's copyright enters the repository: a news story, a GitHub release, a page built by scripts.
+- [x] **@@TESTS@@**
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The extractor | Hand-written, no library *(default taken)* | The corpus passes without one. lexbor or gumbo stay the fallback, and each would be a dependency on five targets. |
+| One call's page | 12 KiB *(default taken)* | A documentation section, read by a local model in seconds. The Python `json` page is three calls. |
+| PDFs | Refused with a note *(default taken)* | Reading PDFs is its own dependency and its own item. |
+| Links | Inline Markdown *(default taken)* | A numbered list at the end costs a lookup per link. |
+| The download cap | 5 MB *(consumed: 25a)* | Unchanged. |
+| The code layout | A new `agent/readable` pair beside `fetch_url` | The reader is most of the item. `fetch_url` stays the tool: gate, redirects, classification and paging. |
+| What `offset` counts | Bytes of the extracted text, from the start | A model copies the number the last page gave; the pages are counted from the start, so it is always "N of M". |
+| Refusing a body | After it is downloaded | The fetcher returns the whole body. Refusing on the headers alone would save the bandwidth, but it is not needed for correctness. |
+| Footnotes | Kept, even in `<aside>` | Sphinx wraps them so, and they are the text's. Found on the live page, where "Footnotes" stood alone. |
+| The corpus | Two recorded pages, three hand-written | The user's call on licensing: recorded where the licence allows, and never a newspaper's article. |
+
+**Verified on real pages.** Every run used Qwen3-VL-8B on the real binary, with `docs.python.org` and `arxiv.org` allowed.
+- **Paging.** Asked for the last command-line option on Python's `json` page (29 KB of text), the model read page 1 of 3, then offsets 12208 and 24127, and quoted from the last section. It named `--indent … --compact` rather than `-h, --help`, which follows it on the same page. Qwen3.8-27B read the same three pages and quoted the last option, `-h, --help`, "Show the help message.", exactly (196 s).
+- **Following a link.** The model read the `json` page, followed its (now absolute) link to `pickle`, and quoted pickle's first sentence exactly.
+- **A PDF.** `arxiv.org/pdf/1706.03762` was refused by name. The model searched, found the paper's HTML abstract page, read it, and summarized the paper correctly.
+
+**Guardrails, each mutation-tested.** @@MUTANTS@@
+
+**Not verified, and known limits.**
+- **A page built by JavaScript still has no text.** The item keeps it out of scope; the tool now says it may need JavaScript.
+- **Pages go stale between calls.** Each page is a fresh fetch, so a page that changes between calls can shift the offsets.
+- **Answered `yes`, the next page asks again.** `session` is the answer for reading a whole page.
+- **An offset past the end** is an error that says to start again.
+- **What a real news site or GitHub looks like today** was not recorded; those fixtures copy their structure by hand.
 
 ## Milestone W — The MCP client
 

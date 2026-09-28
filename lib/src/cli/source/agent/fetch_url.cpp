@@ -7,6 +7,7 @@
 #include <charconv>
 #include <utility>
 
+#include "agent/readable.h"
 #include "harness/host.h"
 
 namespace apogee::agent {
@@ -24,113 +25,6 @@ bool starts_with_ci(std::string_view text, std::string_view prefix) {
     }
     return true;
 }
-
-/// Skips an entire element including its content, for tags whose text is markup
-/// rather than prose.
-std::size_t skip_element(std::string_view html, std::size_t open_start, std::string_view tag) {
-    const std::string closing = "</" + std::string{tag};
-    std::size_t i = open_start;
-    while (i < html.size()) {
-        if (html[i] == '<' && starts_with_ci(html.substr(i), closing)) {
-            const std::size_t close = html.find('>', i);
-            return close == std::string_view::npos ? html.size() : close + 1;
-        }
-        ++i;
-    }
-    return html.size();
-}
-
-void append_entity(std::string& out, std::string_view name) {
-    static const std::array<std::pair<std::string_view, std::string_view>, 6> kEntities{{
-        {"amp", "&"},
-        {"lt", "<"},
-        {"gt", ">"},
-        {"quot", "\""},
-        {"apos", "'"},
-        {"nbsp", " "},
-    }};
-    for (const auto& [entity, replacement] : kEntities) {
-        if (name == entity) {
-            out += replacement;
-            return;
-        }
-    }
-    if (!name.empty() && name.front() == '#') {
-        // Numeric entities are dropped rather than decoded: getting UTF-8
-        // encoding right here is not worth it for prose the model will read
-        // past anyway.
-        out += ' ';
-        return;
-    }
-    out += ' ';
-}
-
-}  // namespace
-
-std::string strip_html(std::string_view html) {
-    std::string out;
-    out.reserve(html.size() / 2);
-
-    for (std::size_t i = 0; i < html.size();) {
-        if (html[i] == '<') {
-            // script and style contain code, not prose. Skipping the whole
-            // element still leaves a word boundary behind: without it,
-            // "a<script>…</script>b" becomes "ab" and two unrelated words
-            // merge into one the model then treats as a term.
-            if (starts_with_ci(html.substr(i), "<script")) {
-                if (!out.empty() && out.back() != ' ' && out.back() != '\n') {
-                    out.push_back(' ');
-                }
-                i = skip_element(html, i, "script");
-                continue;
-            }
-            if (starts_with_ci(html.substr(i), "<style")) {
-                if (!out.empty() && out.back() != ' ' && out.back() != '\n') {
-                    out.push_back(' ');
-                }
-                i = skip_element(html, i, "style");
-                continue;
-            }
-            const std::size_t close = html.find('>', i);
-            if (close == std::string_view::npos) {
-                break;
-            }
-            // A tag boundary is a word boundary; without this, "a</b>b" becomes
-            // "ab".
-            if (!out.empty() && out.back() != ' ' && out.back() != '\n') {
-                out.push_back(' ');
-            }
-            i = close + 1;
-            continue;
-        }
-        if (html[i] == '&') {
-            const std::size_t semicolon = html.find(';', i);
-            if (semicolon != std::string_view::npos && semicolon - i <= 10) {
-                append_entity(out, html.substr(i + 1, semicolon - i - 1));
-                i = semicolon + 1;
-                continue;
-            }
-        }
-
-        const char c = html[i];
-        if (c == '\n' || c == '\r' || c == '\t' || c == ' ') {
-            if (!out.empty() && out.back() != ' ' && out.back() != '\n') {
-                out.push_back(' ');
-            }
-            ++i;
-            continue;
-        }
-        out.push_back(c);
-        ++i;
-    }
-
-    while (!out.empty() && out.back() == ' ') {
-        out.pop_back();
-    }
-    return out;
-}
-
-namespace {
 
 std::string_view trim(std::string_view text) {
     while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) {
@@ -174,6 +68,23 @@ bool is_redirect(long status) {
     return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
 }
 
+/// Whether the first bytes of `body` read as text rather than binary: no
+/// NUL byte, grep's own rule.
+bool looks_like_text(std::string_view body) {
+    return body.substr(0, 8192).find('\0') == std::string_view::npos;
+}
+
+/// Whether `body` opens as an HTML document, whatever its type says.
+bool looks_like_html(std::string_view body) {
+    std::string head;
+    for (const char c : body.substr(0, 1024)) {
+        head += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return head.find("<!doctype html") != std::string::npos ||
+           head.find("<html") != std::string::npos || head.find("<body") != std::string::npos ||
+           head.find("<head") != std::string::npos;
+}
+
 /// The `url` argument, or empty.
 std::string url_argument(std::string_view arguments) {
     const nlohmann::json parsed = nlohmann::json::parse(arguments, nullptr, false);
@@ -185,6 +96,61 @@ std::string url_argument(std::string_view arguments) {
 }
 
 }  // namespace
+
+BodyKind classify_body(std::string_view content_type, std::string_view body, std::string& what) {
+    std::string media;
+    for (const char c : content_type.substr(0, content_type.find(';'))) {
+        if (c != ' ' && c != '\t') {
+            media += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+    }
+    const auto refused = [&what](std::string description) {
+        what = std::move(description);
+        return BodyKind::Refused;
+    };
+    // By its bytes before its label: a PDF served as anything is a PDF.
+    if (body.starts_with("%PDF-") || media == "application/pdf") {
+        return refused("a PDF");
+    }
+    if (media == "text/html" || media == "application/xhtml+xml") {
+        return BodyKind::Html;
+    }
+    if (media.starts_with("text/") || media.ends_with("+json") || media.ends_with("+xml")) {
+        return BodyKind::Text;
+    }
+    for (const std::string_view text :
+         {"application/json", "application/xml", "application/javascript",
+          "application/x-javascript", "application/ecmascript", "application/yaml",
+          "application/x-yaml", "application/toml"}) {
+        if (media == text) {
+            return BodyKind::Text;
+        }
+    }
+    if (media.empty() || media == "application/octet-stream" || media == "binary/octet-stream") {
+        // Unlabelled, or labelled as anything: read what it is.
+        if (looks_like_text(body)) {
+            return looks_like_html(body) ? BodyKind::Html : BodyKind::Text;
+        }
+        return refused("binary data" + (media.empty() ? std::string{} : " (" + media + ")"));
+    }
+    if (media.starts_with("image/")) {
+        return refused("an image (" + media + ")");
+    }
+    if (media.starts_with("audio/")) {
+        return refused("audio (" + media + ")");
+    }
+    if (media.starts_with("video/")) {
+        return refused("a video (" + media + ")");
+    }
+    if (media.starts_with("font/")) {
+        return refused("a font (" + media + ")");
+    }
+    if (media.find("zip") != std::string::npos || media.find("tar") != std::string::npos ||
+        media.find("compressed") != std::string::npos || media.find("7z") != std::string::npos) {
+        return refused("an archive (" + media + ")");
+    }
+    return refused(media);
+}
 
 std::string HttpUrl::str() const {
     std::string out = scheme + "://";
@@ -303,14 +269,25 @@ Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes) {
     Tool tool;
     tool.name = std::string{kFetchUrlToolName};
     tool.description =
-        "Fetch a web page and return its text content with HTML markup removed. Use it to "
-        "read a URL you already have -- from the user, or from a search result. It cannot "
-        "search: give it a URL, not a query. A website the user has not allowed is asked "
-        "about first, and may be refused.";
+        "Fetch a web page and read its main content as Markdown: its headings, lists, code, "
+        "tables and links (absolute URLs you can fetch next), without the menus, banners and "
+        "footers around it. One call returns at most " +
+        std::to_string(max_bytes / 1024) +
+        " KB of text: a longer page says so and gives the offset to read on from. It reads "
+        "HTML and text (plain, Markdown, JSON, XML); a PDF, an image or any other file is "
+        "refused. Use it to read a URL you already have -- from the user, or from a search "
+        "result. It cannot search: give it a URL, not a query. A website the user has not "
+        "allowed is asked about first, and may be refused.";
     tool.parameters_schema = nlohmann::json{
         {"type", "object"},
         {"properties",
-         {{"url", {{"type", "string"}, {"description", "The absolute URL to fetch."}}}}},
+         {{"url", {{"type", "string"}, {"description", "The absolute URL to fetch."}}},
+          {"offset",
+           {{"type", "integer"},
+            {"minimum", 0},
+            {"description",
+             "Where to read on from in a long page: the offset the previous page ended "
+             "with. Leave it out for the start."}}}}},
         {"required",
          nlohmann::json::array(
              {"url"})}}.dump();
@@ -341,6 +318,27 @@ Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes) {
         }
         if (!starts_with_ci(trim(url), "http://") && !starts_with_ci(trim(url), "https://")) {
             return ToolOutcome{"Error: '" + url + "' is not an http or https URL.", true};
+        }
+        std::size_t offset = 0;
+        if (const auto it = parsed.find("offset"); it != parsed.end() && !it->is_null()) {
+            std::int64_t value = -1;
+            if (it->is_number_integer()) {
+                value = it->get<std::int64_t>();
+            } else if (it->is_string()) {
+                const std::string text = it->get<std::string>();
+                const auto [end, error] =
+                    std::from_chars(text.data(), text.data() + text.size(), value);
+                if (error != std::errc{} || end != text.data() + text.size()) {
+                    value = -1;
+                }
+            }
+            if (value < 0) {
+                return ToolOutcome{
+                    "Error: offset is the number a previous page of this URL "
+                    "ended with, 0 or more.",
+                    true};
+            }
+            offset = static_cast<std::size_t>(value);
         }
         std::optional<HttpUrl> current = parse_http_url(url);
         if (!current.has_value()) {
@@ -399,21 +397,70 @@ Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes) {
                     "Error fetching " + address + ": HTTP " + std::to_string(result.status), true};
             }
 
-            std::string text = strip_html(result.body);
-            if (text.size() > max_bytes) {
-                text.resize(max_bytes);
-                // Saying so matters: a model handed silently truncated text will
-                // confidently answer about the part it never saw.
-                text += "\n\n[truncated]";
+            std::string what;
+            const BodyKind kind = classify_body(result.content_type, result.body, what);
+            if (kind == BodyKind::Refused) {
+                return ToolOutcome{"Error: " + address + " is " + what +
+                                       ", which fetch_url does not read: it reads web pages "
+                                       "and text (HTML, plain text, Markdown, JSON, XML). "
+                                       "Continue without it, or look for a web page with the "
+                                       "same content.",
+                                   true};
             }
-            if (text.empty()) {
-                return ToolOutcome{"The page at " + address + " contained no readable text.",
+            std::string charset = charset_of(result.content_type);
+            if (charset.empty() && kind == BodyKind::Html) {
+                charset = meta_charset(result.body);
+            }
+            const std::string body = as_utf8(result.body, charset);
+            ReadablePage readable;
+            if (kind == BodyKind::Html) {
+                readable = extract_readable(body, *current);
+            } else {
+                readable.text = body;
+            }
+
+            std::string header;
+            if (!readable.title.empty()) {
+                header += "Title: " + readable.title + "\n";
+            }
+            header += "URL: " + address;
+            if (address != requested) {
+                header += " (redirected from " + requested + ")";
+            }
+            header += "\n";
+
+            const TextPage page = page_of(readable.text, offset, max_bytes);
+            if (page.count == 0) {
+                return ToolOutcome{"Error: offset " + std::to_string(offset) +
+                                       " is past the end of the text at " + address + " (" +
+                                       std::to_string(readable.text.size()) +
+                                       " bytes); read it from the start, without an offset.",
+                                   true};
+            }
+            if (page.text.empty()) {
+                return ToolOutcome{header +
+                                       "\nThe page has no readable text. It may be built "
+                                       "by JavaScript, which fetch_url does not run.",
                                    false};
             }
-            if (address != requested) {
-                text = "[" + requested + " redirected to " + address + "]\n\n" + text;
+            std::string out = header;
+            if (page.count > 1) {
+                out += "Page " + std::to_string(page.number) + " of " + std::to_string(page.count) +
+                       "\n";
             }
-            return ToolOutcome{text, false};
+            out += "\n" + page.text;
+            // Saying so matters: a model handed silently truncated text will
+            // confidently answer about the part it never saw.
+            if (page.next != 0) {
+                out += "\n\n[Page " + std::to_string(page.number) + " of " +
+                       std::to_string(page.count) +
+                       ". The page continues: call fetch_url with the same url and offset " +
+                       std::to_string(page.next) + ".]";
+            } else if (page.count > 1) {
+                out += "\n\n[Page " + std::to_string(page.number) + " of " +
+                       std::to_string(page.count) + ": the end of the page.]";
+            }
+            return ToolOutcome{out, false};
         }
     };
 

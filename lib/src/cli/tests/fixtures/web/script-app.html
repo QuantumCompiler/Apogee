@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dashboard · Acme Cloud</title>
+<link rel="stylesheet" href="/static/css/main.8e1f.css">
+<script>window.__CONFIG__={"apiBase":"https://api.acme.example","release":"2026.09.3","features":{"billing":true,"teams":true}};</script>
+</head>
+<body>
+<noscript>You need to enable JavaScript to run this app.</noscript>
+<div id="root"></div>
+<div id="modal-root"></div>
+<script src="/static/js/runtime.4a2c.js"></script>
+<script src="/static/js/vendor.91d0.js"></script>
+<script>
+  (function () {
+    var root = document.getElementById("root");
+    root.innerHTML = "<p>Loading your dashboard...</p>";
+    fetch(window.__CONFIG__.apiBase + "/v1/session").then(function (r) { return r.json(); });
+  })();
+</script>
+<script src="/static/js/main.7b33.js"></script>
+</body>
+</html>

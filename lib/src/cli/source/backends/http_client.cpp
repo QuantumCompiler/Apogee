@@ -75,6 +75,7 @@ std::size_t write_callback(char* data, std::size_t size, std::size_t nmemb, void
 struct HeaderContext {
     std::string retry_after;
     std::string location;
+    std::string content_type;
 };
 
 /// The value of `line` when it is the header `field` (lowercase, colon
@@ -114,6 +115,8 @@ std::size_t header_callback(char* data, std::size_t size, std::size_t nmemb, voi
         context->retry_after = std::string{*value};
     } else if (const auto target = header_value(line, "location:"); target.has_value()) {
         context->location = std::string{*target};
+    } else if (const auto type = header_value(line, "content-type:"); type.has_value()) {
+        context->content_type = std::string{*type};
     }
     return length;
 }
@@ -266,6 +269,7 @@ HttpResponse CurlTransport::send(const HttpRequest& request, const BodySink& sin
         response.retry_after = parse_retry_after(headers.retry_after);
     }
     response.location = std::move(headers.location);
+    response.content_type = std::move(headers.content_type);
     response.body_limit_exceeded = write.limit_exceeded;
     return response;
 }

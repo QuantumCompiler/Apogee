@@ -92,6 +92,7 @@ add_executable(apogee_tests
     agent/tool_test.cpp
     agent/fetch_url_test.cpp
     agent/web_search_test.cpp
+    agent/readable_test.cpp
     agentloop/loop_test.cpp
     agentloop/anthropic_loop_test.cpp
     agentloop/content_test.cpp

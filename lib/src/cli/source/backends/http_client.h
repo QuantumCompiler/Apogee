@@ -77,6 +77,10 @@ struct HttpResponse {
     /// request did not follow it. Empty when there was none.
     std::string location;
 
+    /// The `Content-Type` header, as sent (`text/html; charset=utf-8`).
+    /// Empty when there was none.
+    std::string content_type;
+
     /// The body passed `HttpRequest::max_body_bytes` and the transfer was
     /// stopped there; `body` holds what arrived before it.
     bool body_limit_exceeded = false;

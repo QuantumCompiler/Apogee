@@ -147,7 +147,8 @@ TEST_CASE("a redirect to a new host is asked about hop by hop", "[agent][fetch][
         const ToolOutcome outcome = fetch(web, gate, "https://allowed.example/a");
         CHECK_FALSE(outcome.is_error);
         CHECK(contains(outcome.content, "arrived"));
-        CHECK(contains(outcome.content, "redirected to https://new.example/c"));
+        CHECK(contains(outcome.content,
+                       "URL: https://new.example/c (redirected from https://allowed.example/a)"));
         // Only the new host was asked about: the same host was just allowed.
         REQUIRE(gate.asked.size() == 1);
         CHECK(gate.asked[0].first == "new.example");
@@ -271,4 +272,159 @@ TEST_CASE("an outbound tool with no target reader cannot be registered", "[agent
     CHECK_FALSE(apogee::agent::permitted(tool, "{}", allow_all));
     CHECK_FALSE(apogee::agent::permitted_target(tool, "", "", allow_all));
     CHECK(apogee::agent::permitted_target(tool, "a.example", "", allow_all));
+}
+
+namespace {
+
+FetchResult typed(std::string body, std::string content_type) {
+    FetchResult result{200, std::move(body), "", ""};
+    result.content_type = std::move(content_type);
+    return result;
+}
+
+ToolOutcome read_page(const FetchResult& reply, std::string_view arguments,
+                      std::size_t max_bytes = apogee::agent::kFetchPageBytes) {
+    const apogee::agent::Tool tool =
+        make_fetch_url_tool([reply](std::string_view) { return reply; }, max_bytes);
+    return tool.run_gated(arguments, [](std::string_view, std::string_view) { return true; });
+}
+
+}  // namespace
+
+TEST_CASE("a page reads as its content under a header naming where it came from",
+          "[agent][fetch][readable]") {
+    const ToolOutcome outcome = read_page(
+        typed("<html><head><title>The Title</title></head><body><nav>menu</nav><main><h1>Heading"
+              "</h1><p>Body with <a href=\"/next\">a link</a>.</p></main></body></html>",
+              "text/html; charset=utf-8"),
+        R"({"url":"https://site.test/dir/page"})");
+    REQUIRE_FALSE(outcome.is_error);
+    CHECK(outcome.content ==
+          "Title: The Title\nURL: https://site.test/dir/page\n\n# Heading\n\n"
+          "Body with [a link](https://site.test/next).");
+
+    // After a redirect: the final address, and where it came from.
+    Web web;
+    web.pages["https://old.test/"] = redirect("https://old.test/moved");
+    web.pages["https://old.test/moved"] = typed("<p>moved text</p>", "text/html");
+    Gate gate;
+    gate.allowed = {"old.test"};
+    const ToolOutcome moved = fetch(web, gate, "https://old.test/");
+    CHECK(moved.content.starts_with(
+        "URL: https://old.test/moved (redirected from https://old.test/)\n\nmoved text"));
+}
+
+TEST_CASE("text passes through, and anything that is not a page is refused by name",
+          "[agent][fetch][readable]") {
+    const std::string url = R"({"url":"https://files.test/x"})";
+    SECTION("text types are read as they are") {
+        CHECK(read_page(typed("{\"a\": 1}", "application/json"), url)
+                  .content.ends_with("\n\n{\"a\": 1}"));
+        CHECK(read_page(typed("# Notes\n\n- one", "text/markdown"), url)
+                  .content.ends_with("\n\n# Notes\n\n- one"));
+        CHECK(read_page(typed("<a><b/></a>", "application/atom+xml"), url)
+                  .content.ends_with("<a><b/></a>"));  // XML is text, not a page to extract
+        CHECK(read_page(typed("plain <b>not markup</b>", "text/plain"), url)
+                  .content.ends_with("plain <b>not markup</b>"));
+    }
+    SECTION("an unlabelled body is read for what it is") {
+        CHECK(
+            read_page(typed("<!doctype html><p>page</p>", ""), url).content.ends_with("\n\npage"));
+        CHECK(read_page(typed("just text", "application/octet-stream"), url)
+                  .content.ends_with("just text"));
+    }
+    SECTION("a PDF, by type or by its first bytes, an image, an archive, binary") {
+        for (const FetchResult& reply :
+             {typed("%PDF-1.7 ...", "application/pdf"), typed("%PDF-1.4 ...", "text/html")}) {
+            const ToolOutcome pdf = read_page(reply, url);
+            CHECK(pdf.is_error);
+            CHECK(pdf.content.find("is a PDF, which fetch_url does not read") != std::string::npos);
+            CHECK(pdf.content.find("PDF-1") == std::string::npos);  // never its bytes
+        }
+        CHECK(read_page(typed(std::string("\x89PNG\r\n\x1a\n\0", 9), "image/png"), url)
+                  .content.find("is an image (image/png)") != std::string::npos);
+        CHECK(read_page(typed("PK\x03\x04", "application/zip"), url)
+                  .content.find("is an archive (application/zip)") != std::string::npos);
+        CHECK(read_page(typed(std::string("\x7f"
+                                          "ELF\0\0",
+                                          6),
+                              ""),
+                        url)
+                  .content.find("is binary data") != std::string::npos);
+        CHECK(read_page(typed("x", "application/vnd.ms-excel"), url)
+                  .content.find("is application/vnd.ms-excel") != std::string::npos);
+    }
+    SECTION("a declared charset is honoured, and stray bytes never reach the model") {
+        CHECK(read_page(typed("caf\xE9", "text/plain; charset=ISO-8859-1"), url)
+                  .content.ends_with("café"));
+        CHECK(read_page(typed("<meta charset=\"windows-1252\"><p>\x93hi\x94</p>", "text/html"), url)
+                  .content.ends_with("“hi”"));
+        CHECK(read_page(typed("ok\xFF", "text/plain"), url).content.ends_with("ok�"));
+    }
+    SECTION("a page with nothing to read says so, and why that may be") {
+        const ToolOutcome empty = read_page(typed("<html><head><title>App</title></head><body><div "
+                                                  "id=\"root\"></div><script>x()</script>"
+                                                  "</body></html>",
+                                                  "text/html"),
+                                            url);
+        CHECK_FALSE(empty.is_error);
+        CHECK(empty.content.find("Title: App") != std::string::npos);
+        CHECK(empty.content.find("no readable text") != std::string::npos);
+        CHECK(empty.content.find("JavaScript") != std::string::npos);
+    }
+}
+
+TEST_CASE("a long page is read in pages with offset, to its last section",
+          "[agent][fetch][readable][paging]") {
+    std::string html = "<html><head><title>Long</title></head><body><main>";
+    for (int i = 1; i <= 30; ++i) {
+        html += "<h2>Section " + std::to_string(i) + "</h2><p>" + std::string(180, 's') +
+                " end of "
+                "section " +
+                std::to_string(i) + ".</p>";
+    }
+    html += "</main></body></html>";
+    const FetchResult reply = typed(html, "text/html");
+
+    std::size_t offset = 0;
+    std::string everything;
+    int calls = 0;
+    for (;;) {
+        ++calls;
+        REQUIRE(calls < 20);
+        const ToolOutcome outcome = read_page(
+            reply, R"({"url":"https://long.test/","offset":)" + std::to_string(offset) + "}", 1024);
+        REQUIRE_FALSE(outcome.is_error);
+        CHECK(outcome.content.starts_with("Title: Long\nURL: https://long.test/\nPage " +
+                                          std::to_string(calls) + " of "));
+        everything += outcome.content;
+        const std::size_t at = outcome.content.find("with the same url and offset ");
+        if (at == std::string::npos) {
+            CHECK(outcome.content.ends_with(": the end of the page.]"));
+            break;
+        }
+        const std::size_t next = std::stoul(outcome.content.substr(at + 29));
+        CHECK(next > offset);
+        offset = next;
+    }
+    CHECK(calls > 3);
+    for (int i = 1; i <= 30; ++i) {
+        INFO(i);
+        // Every section once: no gap, no overlap.
+        const std::string heading = "## Section " + std::to_string(i) + "\n";
+        CHECK(everything.find(heading) != std::string::npos);
+        CHECK(everything.find(heading) == everything.rfind(heading));
+    }
+    CHECK(everything.find("end of section 30.") != std::string::npos);
+
+    // An offset past the end, and one that is not a number, are errors.
+    const ToolOutcome past =
+        read_page(reply, R"({"url":"https://long.test/","offset":999999})", 1024);
+    CHECK(past.is_error);
+    CHECK(past.content.find("past the end") != std::string::npos);
+    const ToolOutcome negative = read_page(reply, R"({"url":"https://long.test/","offset":-1})");
+    CHECK(negative.is_error);
+    CHECK(negative.content.find("0 or more") != std::string::npos);
+    CHECK(read_page(reply, R"({"url":"https://long.test/","offset":"soon"})").is_error);
+    CHECK_FALSE(read_page(reply, R"({"url":"https://long.test/","offset":"0"})").is_error);
 }
