@@ -92,6 +92,32 @@ nlohmann::json parsed(const HttpResponse& response) {
 
 }  // namespace
 
+TEST_CASE("a cache type added over HTTP is byte-identical to the CLI's, and a bad one refused",
+          "[httpserver][admin][parity][cache]") {
+    const Fixture fixture;
+    fixture.cli({"config", "add-backend", "local", "--type", "llamacpp", "--model-path",
+                 "/m/a.gguf", "--context-size", "65536", "--cache-type", "q4_0"});
+    const HttpResponse created =
+        admin_create_backend(fixture.context(), post(nlohmann::json{{"name", "local"},
+                                                                    {"type", "llamacpp"},
+                                                                    {"model_path", "/m/a.gguf"},
+                                                                    {"context_size", 65536},
+                                                                    {"cache_type", "q4_0"}}));
+    REQUIRE(created.status == 201);
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    CHECK(Fixture::bytes(fixture.http_config).find("    cache_type: q4_0\n") != std::string::npos);
+    CHECK(parsed(created)["cache_type"] == "q4_0");
+
+    const HttpResponse refused =
+        admin_create_backend(fixture.context(), post(nlohmann::json{{"name", "other"},
+                                                                    {"type", "llamacpp"},
+                                                                    {"model_path", "/m/a.gguf"},
+                                                                    {"cache_type", "q8"}}));
+    CHECK(refused.status == 400);
+    CHECK(refused.body.find("q8") != std::string::npos);
+    CHECK(Fixture::bytes(fixture.http_config).find("other:") == std::string::npos);
+}
+
 TEST_CASE("an HTTP add-backend is byte-identical to the CLI's on the same file",
           "[httpserver][admin][parity]") {
     // The parity invariant's first end-to-end proof: not "the same fields",

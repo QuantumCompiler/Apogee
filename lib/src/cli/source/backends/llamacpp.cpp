@@ -378,7 +378,12 @@ std::unique_ptr<LlamaCppProvider> LlamaCppProvider::from_config(
     if (runtime == nullptr) {
         throw harness::ProviderError(backend_name, reason);
     }
+    return std::make_unique<LlamaCppProvider>(options_from(backend_name, config),
+                                              std::move(runtime));
+}
 
+LlamaCppProvider::Options LlamaCppProvider::options_from(const std::string& backend_name,
+                                                         const harness::BackendConfig& config) {
     Options options;
     options.backend_name = backend_name;
     options.model = config.model.empty() ? config.model_path : config.model;
@@ -387,13 +392,17 @@ std::unique_ptr<LlamaCppProvider> LlamaCppProvider::from_config(
     if (config.context_size.has_value()) {
         options.context_size = *config.context_size;
     }
+    if (config.cache_type.has_value()) {
+        options.cache_type = *config.cache_type;
+        options.cache_type_named = true;
+    }
     if (config.max_tokens.has_value()) {
         options.max_tokens = *config.max_tokens;
     }
     if (config.idle_unload_seconds.has_value() && *config.idle_unload_seconds > 0) {
         options.idle_unload = std::chrono::seconds{*config.idle_unload_seconds};
     }
-    return std::make_unique<LlamaCppProvider>(std::move(options), std::move(runtime));
+    return options;
 }
 
 std::string_view LlamaCppProvider::backend_name() const noexcept {
@@ -409,13 +418,39 @@ const ModelProfile* LlamaCppProvider::profile() const {
     // Read here rather than through the runtime seam because it is a few
     // kilobytes and needs no model load: `model_behavior()` is asked before a
     // turn, and loading weights to answer it would be absurd.
-    if (!options_.model_path.empty()) {
-        architecture_ =
-            models::inspect_gguf(std::filesystem::path{options_.model_path}).architecture;
-    }
+    architecture_ = header().architecture;
     profile_ = resolve_profile({}, architecture_, options_.model);
     profile_resolved_ = true;
     return profile_;
+}
+
+const models::GgufInfo& LlamaCppProvider::header() const {
+    if (!header_.has_value()) {
+        header_ = options_.model_path.empty()
+                      ? models::GgufInfo{}
+                      : models::inspect_gguf(std::filesystem::path{options_.model_path});
+    }
+    return *header_;
+}
+
+std::int64_t LlamaCppProvider::context_window() const {
+    if (options_.context_size > 0) {
+        return options_.context_size;
+    }
+    if (model_ != nullptr) {
+        return session_window();
+    }
+    // Before a load, the header's trained window is all there is; free
+    // memory can only lower it, and the first turn's measurement is exact.
+    const models::GgufInfo& info = header();
+    return info.parsed ? models::default_local_window(info.attention.context_length, 0) : 0;
+}
+
+std::int64_t LlamaCppProvider::session_window() const {
+    if (options_.context_size > 0) {
+        return options_.context_size;
+    }
+    return models::default_local_window(model_->context_length(), model_->fitted_window());
 }
 
 harness::ModelBehavior LlamaCppProvider::model_behavior() const {
@@ -521,8 +556,17 @@ void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
         on_status(event);
     }
 
+    ModelLoad load;
+    load.path = options_.model_path;
+    load.gpu_layers = options_.gpu_layers;
+    load.mmproj_path = options_.mmproj_path;
+    load.cache_type = options_.cache_type;
+    load.cache_type_named = options_.cache_type_named;
+    // Only the default window is fitted to memory: a context_size the user
+    // wrote is used as written.
+    load.fit_window = options_.context_size <= 0;
     std::string error;
-    model_ = runtime_->load(options_.model_path, options_.gpu_layers, options_.mmproj_path, error);
+    model_ = runtime_->load(load, error);
     if (model_ == nullptr) {
         if (on_status) {
             harness::StatusEvent failed;
@@ -652,6 +696,10 @@ void LlamaCppProvider::report_cache(const harness::StreamOptions& options,
         event.detail += " · " + std::to_string(context.checkpoint_count()) + " of " +
                         std::to_string(kMaxCheckpoints) + " checkpoints, " + size + " MiB";
     }
+    // The window this conversation has and how its cache is kept (26a): the
+    // memory behind the numbers above.
+    event.detail += " · window " + std::to_string(context.capacity()) + ", " +
+                    std::string{harness::to_string(context.cache_type())} + " cache";
     options.on_status(event);
 }
 
@@ -693,8 +741,7 @@ std::int64_t LlamaCppProvider::side_context_size(const harness::ChatRequest& req
     // (llama_real.cpp, make_context) -- and a small window costs nothing.
     constexpr std::int64_t kFloor = 4096;
     constexpr std::int64_t kSlack = 256;
-    const std::int64_t window =
-        options_.context_size > 0 ? options_.context_size : model_->context_length();
+    const std::int64_t window = session_window();
     const std::int64_t needed =
         static_cast<std::int64_t>(prompt_tokens) + generation_limit(request) + kSlack;
     return std::min(window, std::max(needed, kFloor));
@@ -896,7 +943,7 @@ harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatReques
     // A fresh context every time. There is no prefix to reuse -- an image
     // occupies embedding positions that no token comparison can match -- so
     // pretending otherwise would corrupt the cache rather than save work.
-    std::unique_ptr<LlamaContext> scratch = model_->make_context(options_.context_size);
+    std::unique_ptr<LlamaContext> scratch = model_->make_context(session_window());
     LlamaContext& context = *scratch;
 
     std::string error;
@@ -964,7 +1011,7 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
         decode_in_batches(*context, prompt, 0);
     } else {
         if (session_ == nullptr) {
-            session_ = model_->make_context(options_.context_size);
+            session_ = model_->make_context(session_window());
             session_tokens_.clear();
         }
         context = session_.get();

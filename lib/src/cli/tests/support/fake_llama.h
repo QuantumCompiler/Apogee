@@ -227,6 +227,13 @@ public:
         return context_capacity;
     }
 
+    /// The cache type the model made this context with.
+    harness::KvCacheType kept_as = harness::KvCacheType::F16;
+
+    [[nodiscard]] harness::KvCacheType cache_type() const noexcept override {
+        return kept_as;
+    }
+
     /// Every trim position, in order.
     std::vector<std::int64_t> trims;
 
@@ -295,6 +302,10 @@ public:
 
     [[nodiscard]] std::int64_t capacity() const noexcept override {
         return state_->capacity();
+    }
+
+    [[nodiscard]] harness::KvCacheType cache_type() const noexcept override {
+        return state_->cache_type();
     }
 
 private:
@@ -471,8 +482,32 @@ public:
         return out;
     }
 
+    /// The window the model was trained for.
+    std::int64_t trained_length = 4096;
+    /// What the load found free memory holds; 0 when it fits.
+    std::int64_t fitted = 0;
+    /// The cache the load asked for, given to every context.
+    harness::KvCacheType cache_type = harness::KvCacheType::Q8_0;
+
     [[nodiscard]] std::int64_t context_length() const noexcept override {
-        return 4096;
+        return trained_length;
+    }
+
+    [[nodiscard]] std::int64_t fitted_window() const noexcept override {
+        return fitted;
+    }
+
+    /// Whether the model claims a projector that does images. Its contexts
+    /// still refuse to decode one, so an image turn fails after its context
+    /// is made -- enough to see what window that context got.
+    bool vision = false;
+
+    [[nodiscard]] bool supports_vision() const noexcept override {
+        return vision;
+    }
+
+    [[nodiscard]] std::string image_marker() const override {
+        return vision ? "<image>" : std::string{};
     }
 
     /// Width of the vectors the fake produces. Settable so a test can stage a
@@ -520,7 +555,9 @@ public:
         state->script = script;
         state->eog_token = eog_token;
         state->batch_limit = batch_limit;
-        state->context_capacity = context_capacity;
+        // A window the test did not pin is the one asked for.
+        state->context_capacity = context_capacity > 0 ? context_capacity : context_size;
+        state->kept_as = cache_type;
         state->rewindable = rewindable;
         state->grammar_error = grammar_error;
         contexts.push_back(state);
@@ -586,13 +623,11 @@ public:
     /// Each string becomes one token, so the split is the test's to choose.
     std::vector<std::string> script_text;
 
-    [[nodiscard]] std::unique_ptr<backends::LlamaModel> load(const std::string& path,
-                                                             std::int64_t gpu_layers,
-                                                             const std::string& mmproj_path,
+    [[nodiscard]] std::unique_ptr<backends::LlamaModel> load(const backends::ModelLoad& request,
                                                              std::string& error) override {
-        last_mmproj_path = mmproj_path;
-        (void)gpu_layers;
-        last_path = path;
+        last_mmproj_path = request.mmproj_path;
+        last_path = request.path;
+        last_load = request;
         if (!load_error.empty()) {
             error = load_error;
             return nullptr;
@@ -614,11 +649,24 @@ public:
         loaded->special_words = special_words;
         loaded->stops = stops;
         loaded->grammar_error = grammar_error;
+        loaded->trained_length = trained_length;
+        loaded->fitted = request.fit_window ? fitted : 0;
+        loaded->cache_type = request.cache_type;
+        loaded->vision = vision;
         model = loaded.get();
         return loaded;
     }
 
+    /// Applied to every model: the window it was trained for, and what a
+    /// load asked to fit finds free memory holds (0: the default fits).
+    std::int64_t trained_length = 4096;
+    std::int64_t fitted = 0;
+    bool vision = false;
+
     std::string last_path;
+
+    /// Everything the last load was asked for.
+    backends::ModelLoad last_load;
 
     /// The projector the provider asked for, so a test can assert the config
     /// field reaches the runtime rather than being dropped on the way.

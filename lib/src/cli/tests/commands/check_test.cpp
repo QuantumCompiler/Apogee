@@ -292,6 +292,42 @@ TEST_CASE("a valid GGUF header passes", "[commands][check]") {
     CHECK(report.passed());
 }
 
+TEST_CASE("a local backend's row states its window and what its cache costs",
+          "[commands][check][cache]") {
+    // Memory a user never asked for, shown where they look (26a).
+    Install install;
+    install.seed();
+    install.write("models/qwen.gguf", apogee::testing::qwen38_like_gguf());
+    const std::string path = (install.root / "models" / "qwen.gguf").string();
+
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml",
+                  "backends:\n  local:\n    type: llamacpp\n    model_path: " + path +
+                      "\n  pinned:\n    type: llamacpp\n    model_path: " + path +
+                      "\n    context_size: 65536\n    cache_type: f16\n"
+                      "  plain:\n    type: llamacpp\n    model_path: " +
+                      (install.root / "models" / "plain.gguf").string() + "\n");
+    install.write("models/plain.gguf", apogee::testing::minimal_gguf("llama"));
+    load_into(inputs);
+
+    const CheckReport report = run_checks(inputs);
+    const auto* local = row_with(report, "backend: local");
+    REQUIRE(local != nullptr);
+    CHECK(local->status == Status::Ok);
+    CHECK(local->detail.find("(qwen35); 32768-token window, 1088 MiB q8_0 cache") !=
+          std::string::npos);
+
+    const auto* pinned = row_with(report, "backend: pinned");
+    REQUIRE(pinned != nullptr);
+    CHECK(pinned->detail.find("65536-token window, 4096 MiB f16 cache") != std::string::npos);
+
+    // A header that cannot size its cache says so, and still passes.
+    const auto* plain = row_with(report, "backend: plain");
+    REQUIRE(plain != nullptr);
+    CHECK(plain->status == Status::Ok);
+    CHECK(plain->detail.find("cache size not known for this architecture") != std::string::npos);
+}
+
 TEST_CASE("a cloud backend with no key warns and never prints the key",
           "[commands][check][secrets]") {
     // Two claims. First, severity: a missing key is a WARNING, because a

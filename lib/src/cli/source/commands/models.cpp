@@ -16,6 +16,7 @@
 #include "harness/layout.h"
 #include "harness/paths.h"
 #include "harness/roles.h"
+#include "models/kv_cache.h"
 #include "models/sidecar.h"
 #include "models/snapshot.h"
 #include "models/store.h"
@@ -96,6 +97,28 @@ void pad(std::ostringstream& out, const std::string& value, std::size_t width, b
     // "no record" rather than "unverified": a model placed by hand is
     // legitimate, it simply has nothing to be rechecked against.
     return sidecar.has_value() ? sidecar->verification.summary() : "no record";
+}
+
+/// `info`'s window and cache lines: what a conversation costs on top of the
+/// weights -- memory a user never asked for, visible where they look (26a).
+void render_window(std::ostream& out, const models::GgufInfo& info,
+                   const harness::BackendConfig& backend) {
+    const models::LocalWindow window = models::local_window(info, backend);
+    out << "window:       " << window.window << " tokens ("
+        << (window.configured ? "context_size" : "the default");
+    if (window.trained > 0) {
+        out << "; trained for " << window.trained;
+    }
+    out << ")\n";
+    out << "cache:        ";
+    if (!window.cache_bytes.has_value()) {
+        out << "not known for this architecture\n";
+    } else if (*window.cache_bytes == 0) {
+        out << "none -- no attention layers\n";
+    } else {
+        out << models::mib(*window.cache_bytes) << " at " << harness::to_string(window.cache_type)
+            << (backend.cache_type.has_value() ? "" : " (the default)") << "\n";
+    }
 }
 
 }  // namespace
@@ -458,6 +481,9 @@ std::string render_model_info(const harness::Config& config, std::string_view ba
     }
     out << "tensors:      " << info.tensors << " total, " << info.text_tensors << " text\n";
     out << "size:         " << (info.file_size / (1024LL * 1024)) << " MiB\n";
+    if (!info.is_projector()) {
+        render_window(out, info, value);
+    }
     if (info.is_projector()) {
         out << "note:         a multimodal projector -- belongs on mmproj_path, not model_path\n";
     } else if (info.has_vision_tensors()) {

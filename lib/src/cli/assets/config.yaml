@@ -202,15 +202,22 @@ backends:
   # model_path is any GGUF you supply -- Apogee ships none and curates none, so
   # any model you point it at will run.
   #
-  # context_size unset means "whatever this model was trained for", which is
-  # usually what you want; set it to trade memory against conversation length.
+  # context_size unset means 32768 tokens, or the model's trained window when
+  # that is smaller, or less when free memory cannot hold it. Set it to trade
+  # memory against conversation length: the cache is allocated up front, and a
+  # model's whole trained window can cost gigabytes -- 16 GiB on Qwen3.8-27B.
+  # cache_type is how that cache is kept: q8_0 (the default) takes about half
+  # of f16's memory, q4_0 about a quarter. A model that cannot take q8_0 falls
+  # back to f16; a type you name is used as written. `apogee models info
+  # <backend>` shows the window and what its cache costs.
   # idle_unload_seconds releases the weights after a quiet spell -- worth
   # setting if you switch between a local and a cloud backend in one session,
   # since the model is the largest thing the process holds.
   # local:
   #   type: llamacpp
   #   model_path: "${HOME}/.cache/llms/my-model.gguf"
-  #   # context_size: 8192
+  #   # context_size: 65536
+  #   # cache_type: q8_0
   #   # idle_unload_seconds: 900
 
   # ── Local vision ────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 /// Builds GGUF bytes a piece at a time, for tests.
 ///
@@ -56,6 +57,39 @@ public:
         return *this;
     }
 
+    /// One metadata pair whose value is an array of i32 -- a per-layer key.
+    GgufBuilder& i32_array_kv(std::string_view key, const std::vector<std::int32_t>& values) {
+        text(key);
+        u32(9);  // Array
+        u32(5);  // of Int32
+        u64(values.size());
+        for (const std::int32_t value : values) {
+            bytes_.append(std::string_view{reinterpret_cast<const char*>(&value), sizeof(value)});
+        }
+        return *this;
+    }
+
+    /// One metadata pair whose value is an array of bools -- a per-layer flag.
+    GgufBuilder& bool_array_kv(std::string_view key, const std::vector<bool>& flags) {
+        text(key);
+        u32(9);  // Array
+        u32(7);  // of Bool
+        u64(flags.size());
+        for (const bool flag : flags) {
+            bytes_.push_back(flag ? '\x01' : '\x00');
+        }
+        return *this;
+    }
+
+    /// One metadata pair whose value is a float32 -- a key that is not an
+    /// integer, which the attention read must step over.
+    GgufBuilder& f32_kv(std::string_view key, float value) {
+        text(key);
+        u32(6);  // Float32
+        bytes_.append(std::string_view{reinterpret_cast<const char*>(&value), sizeof(value)});
+        return *this;
+    }
+
     /// One tensor descriptor: name, dim count, dims, ggml type, offset.
     GgufBuilder& tensor(std::string_view name, std::uint32_t dimensions = 2) {
         text(name);
@@ -91,6 +125,25 @@ private:
     GgufBuilder builder;
     builder.magic().u32(3).u64(1).u64(1);
     builder.string_kv("general.architecture", architecture);
+    builder.tensor("token_embd.weight");
+    return builder.bytes();
+}
+
+/// A header with Qwen3.8-27B's attention geometry (26a): trained for 262,144
+/// positions, full attention every 4th of 64 blocks plus a prediction layer,
+/// 4 key-value heads of 256. Its cache is 1,088 MiB at 32K and q8_0.
+[[nodiscard]] inline std::string qwen38_like_gguf() {
+    GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(9);
+    builder.string_kv("general.architecture", "qwen35");
+    builder.u32_kv("qwen35.context_length", 262144);
+    builder.u32_kv("qwen35.block_count", 65);
+    builder.u32_kv("qwen35.attention.head_count", 24);
+    builder.u32_kv("qwen35.attention.head_count_kv", 4);
+    builder.u32_kv("qwen35.attention.key_length", 256);
+    builder.u32_kv("qwen35.attention.value_length", 256);
+    builder.u32_kv("qwen35.full_attention_interval", 4);
+    builder.u32_kv("qwen35.nextn_predict_layers", 1);
     builder.tensor("token_embd.weight");
     return builder.bytes();
 }

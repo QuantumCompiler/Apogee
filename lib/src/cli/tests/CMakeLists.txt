@@ -42,6 +42,7 @@ add_executable(apogee_tests
     backends/gemini_cli_test.cpp
     harness/roles_test.cpp
     models/gguf_inspect_test.cpp
+    models/kv_cache_test.cpp
     models/sha256_test.cpp
     models/acquire_test.cpp
     models/convert_test.cpp

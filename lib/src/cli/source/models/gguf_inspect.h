@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 /// Reading a GGUF file's header — architecture, tensor counts, and whether it
 /// parses at all.
@@ -65,6 +66,38 @@ namespace apogee::models {
 /// `general.file_type` was absent from the header.
 inline constexpr std::uint32_t kUnknownFileType = 0xFFFFFFFFU;
 
+/// What the header says about the model's attention -- what a context's
+/// cache is made of (26a). Each field is the architecture's own key
+/// (`<arch>.attention.head_count_kv`, ...), read as llama.cpp reads it; an
+/// absent key is 0 or empty. `models/kv_cache.h` turns it into bytes.
+struct AttentionHeader {
+    /// `<arch>.context_length` -- the window the model was trained for.
+    std::int64_t context_length = 0;
+    std::int64_t block_count = 0;
+    std::int64_t embedding_length = 0;
+    /// One value for every layer, or one per layer.
+    std::vector<std::int64_t> head_count;
+    std::vector<std::int64_t> head_count_kv;
+    std::int64_t key_length = 0;
+    std::int64_t value_length = 0;
+    /// The key and value widths of a sliding-window layer, where they differ.
+    std::int64_t key_length_swa = 0;
+    std::int64_t value_length_swa = 0;
+    /// Which layers slide: one flag per layer, or one value -- a period, in
+    /// which every layer but the last slides.
+    std::vector<std::int64_t> sliding_window_pattern;
+    /// Every this-many layers is full attention and the rest recurrent
+    /// (Qwen3.5 and 3.8, Qwen3-Next).
+    std::int64_t full_attention_interval = 0;
+    /// Multi-token prediction layers after the main stack.
+    std::int64_t nextn_predict_layers = 0;
+    /// The last this-many layers reuse an earlier layer's cache (Gemma 3n, 4).
+    std::int64_t shared_kv_layers = 0;
+    /// `attention.kv_lora_rank` is present: latent attention (DeepSeek's),
+    /// whose cache is not the heads-times-widths this reads.
+    bool latent_attention = false;
+};
+
 /// What a header read found. `parsed == false` always carries a `parse_error`.
 struct GgufInfo {
     /// The header was understood end to end.
@@ -105,6 +138,9 @@ struct GgufInfo {
     /// tensors are stored. 0 is all-F32, 1 is mostly-F16, 32 is BF16;
     /// everything else is a quantized model. `kUnknownFileType` when absent.
     std::uint32_t file_type = kUnknownFileType;
+
+    /// The attention geometry, when `parsed`.
+    AttentionHeader attention;
 
     /// Whether the weights are already quantized.
     ///

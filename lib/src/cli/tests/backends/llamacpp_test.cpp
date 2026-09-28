@@ -5,14 +5,17 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "agentloop/content.h"
 #include "backends/llamacpp_tokens.h"
 #include "harness/errors.h"
 #include "harness/harness.h"
 #include "support/fake_llama.h"
+#include "support/gguf_builder.h"
 
 /// The local backend's contract, asserted against a scripted runtime.
 ///
@@ -1447,4 +1450,271 @@ TEST_CASE("the system messages opening a conversation reach a local template as 
     CHECK(fixture.runtime->model->chat_renders.back().messages.size() == 2);
     CHECK(fixture.runtime->model->chat_renders.back().messages[0].content.plain_text() ==
           "You are terse.");
+}
+
+// --- The window and its cache (26a) -------------------------------------------
+
+namespace {
+
+/// A provider over a model trained for `trained` positions, with the
+/// backend's `context_size` and what a load finds free memory holds.
+struct Sized {
+    FakeLlamaRuntime* runtime = nullptr;
+    std::unique_ptr<LlamaCppProvider> provider;
+
+    explicit Sized(std::int64_t trained, std::int64_t context_size = 0, std::int64_t fitted = 0,
+                   std::string model_path = "/models/test.gguf") {
+        auto owned = std::make_unique<FakeLlamaRuntime>();
+        owned->trained_length = trained;
+        owned->fitted = fitted;
+        runtime = owned.get();
+        LlamaCppProvider::Options options;
+        options.backend_name = "local";
+        options.model = "test-model";
+        options.model_path = std::move(model_path);
+        options.context_size = context_size;
+        provider = std::make_unique<LlamaCppProvider>(std::move(options), std::move(owned));
+    }
+
+    /// The window the conversation's context was made with.
+    [[nodiscard]] std::int64_t session_window() {
+        (void)provider->chat(turn({ChatMessage::user("alpha beta")}), {});
+        REQUIRE_FALSE(runtime->model->context_sizes.empty());
+        return runtime->model->context_sizes.front();
+    }
+};
+
+/// A GGUF header naming `trained` as its context length, in a scratch file.
+[[nodiscard]] std::filesystem::path header_trained_for(std::uint32_t trained,
+                                                       const std::string& name) {
+    apogee::testing::GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(2);
+    builder.string_kv("general.architecture", "qwen35");
+    builder.u32_kv("qwen35.context_length", trained);
+    builder.tensor("token_embd.weight");
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / ("apogee-window-" + name + ".gguf");
+    REQUIRE(builder.write_to(path));
+    return path;
+}
+
+}  // namespace
+
+TEST_CASE("an unset window is 32K on a large model and the trained window on a small one",
+          "[backends][llamacpp][window]") {
+    // Left at the trained window, Qwen3.8-27B's cache was 16 GiB before the
+    // first word.
+    Sized large{262144};
+    CHECK(large.session_window() == 32768);
+    CHECK(large.provider->context_window() == 32768);
+    CHECK(large.runtime->last_load.fit_window);
+
+    Sized small{8192};
+    CHECK(small.session_window() == 8192);
+    CHECK(small.provider->context_window() == 8192);
+
+    Sized unknown{0};
+    CHECK(unknown.session_window() == 32768);
+}
+
+TEST_CASE("an explicit context_size is used exactly as written, and never fitted",
+          "[backends][llamacpp][window]") {
+    Sized set{262144, 200000, /*fitted=*/20000};
+    CHECK(set.session_window() == 200000);
+    CHECK(set.provider->context_window() == 200000);
+    CHECK_FALSE(set.runtime->last_load.fit_window);
+
+    // Past the trained window too: the user knows something Apogee does not.
+    Sized past{4096, 5000};
+    CHECK(past.session_window() == 5000);
+}
+
+TEST_CASE("free memory lowers the default window and never raises it",
+          "[backends][llamacpp][window]") {
+    Sized short_of_memory{262144, 0, /*fitted=*/20000};
+    CHECK(short_of_memory.session_window() == 20000);
+    CHECK(short_of_memory.provider->context_window() == 20000);
+
+    Sized roomy{262144, 0, /*fitted=*/100000};
+    CHECK(roomy.session_window() == 32768);
+}
+
+TEST_CASE("every context over the model stays inside the session's window",
+          "[backends][llamacpp][window]") {
+    Sized large{262144};
+    (void)large.session_window();
+
+    ChatRequest side = turn({ChatMessage::user("name this")});
+    side.transient.side_request = true;
+    side.max_tokens = 100000;
+    (void)large.provider->chat(side, {});
+    // Not the trained 262,144: a side request asking for more than the
+    // window gets the window.
+    CHECK(large.runtime->model->context_sizes.back() == 32768);
+
+    side.max_tokens = 32;
+    (void)large.provider->chat(side, {});
+    CHECK(large.runtime->model->context_sizes.back() == 4096);
+}
+
+TEST_CASE("the cache type reaches the load: q8_0 unnamed by default, a named one as named",
+          "[backends][llamacpp][window]") {
+    Fixture fixture;
+    (void)fixture.provider->chat(turn({ChatMessage::user("alpha")}), {});
+    CHECK(fixture.runtime->last_load.cache_type == apogee::harness::KvCacheType::Q8_0);
+    CHECK_FALSE(fixture.runtime->last_load.cache_type_named);
+    CHECK(fixture.runtime->model->contexts.front()->cache_type() ==
+          apogee::harness::KvCacheType::Q8_0);
+
+    auto owned = std::make_unique<FakeLlamaRuntime>();
+    FakeLlamaRuntime* runtime = owned.get();
+    LlamaCppProvider::Options options;
+    options.backend_name = "local";
+    options.model_path = "/models/test.gguf";
+    options.cache_type = apogee::harness::KvCacheType::F16;
+    options.cache_type_named = true;
+    LlamaCppProvider provider{std::move(options), std::move(owned)};
+    (void)provider.chat(turn({ChatMessage::user("alpha")}), {});
+    CHECK(runtime->last_load.cache_type == apogee::harness::KvCacheType::F16);
+    CHECK(runtime->last_load.cache_type_named);
+    CHECK(runtime->last_load.path == "/models/test.gguf");
+}
+
+TEST_CASE("before a load, the window comes from the model file's header",
+          "[backends][llamacpp][window]") {
+    // Asked before every turn, so it must never load 16 GB of weights.
+    const std::filesystem::path large_file = header_trained_for(262144, "large");
+    Sized large{262144, 0, 0, large_file.string()};
+    CHECK(large.provider->context_window() == 32768);
+    CHECK(large.runtime->loads == 0);
+
+    const std::filesystem::path small_file = header_trained_for(2048, "small");
+    Sized small{2048, 0, 0, small_file.string()};
+    CHECK(small.provider->context_window() == 2048);
+
+    // No readable header: unknown, never a guess.
+    Sized missing{262144};
+    CHECK(missing.provider->context_window() == 0);
+
+    std::error_code code;
+    std::filesystem::remove(large_file, code);
+    std::filesystem::remove(small_file, code);
+}
+
+TEST_CASE("the chat measures against the window the backend allocated",
+          "[backends][llamacpp][window][harness]") {
+    // Context monitoring warns at 80% and compacts at 90% of this number; for
+    // a local model the fallback table has no row, so without the backend's
+    // answer a long chat was never warned or compacted at all.
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig entry;
+    entry.type = apogee::harness::BackendType::LlamaCpp;
+    entry.model_path = "/models/test.gguf";
+    config.backends["local"] = entry;
+    entry.context_size = 4096;
+    config.backends["pinned"] = entry;
+
+    Sized local{262144};
+    // Pinned in the config alone: the entry's context_size is the harness's
+    // to honour, whatever the provider would say.
+    Sized pinned{262144};
+    LlamaCppProvider& loaded = *local.provider;
+    LlamaCppProvider& pinned_provider = *pinned.provider;
+    apogee::harness::Harness harness{config};
+    harness.register_provider("local", std::move(local.provider));
+    harness.register_provider("pinned", std::move(pinned.provider));
+    harness.use_default_router();
+
+    CHECK(harness.context_window_for_model("local") == 0);  // no header, not loaded
+    (void)loaded.chat(turn({ChatMessage::user("alpha")}), {});
+    (void)pinned_provider.chat(turn({ChatMessage::user("alpha")}), {});
+    CHECK(harness.context_window_for_model("local") == 32768);
+    CHECK(harness.context_window_for_model("pinned") == 4096);
+}
+
+TEST_CASE("the verbose cache line states the window and how the cache is kept",
+          "[backends][llamacpp][window]") {
+    Sized large{262144};
+    std::vector<std::string> lines;
+    apogee::harness::StreamOptions options;
+    options.on_status = [&lines](const apogee::harness::StatusEvent& event) {
+        if (event.type == apogee::harness::StatusEvent::Type::PromptCache) {
+            lines.push_back(event.detail);
+        }
+    };
+    (void)large.provider->stream_chat(turn({ChatMessage::user("alpha beta")}), options);
+    REQUIRE(lines.size() == 1);
+    // The fake's context holds what the test pinned; the type is the model's.
+    CHECK(lines.front().find(" · window 1000000, q8_0 cache") != std::string::npos);
+}
+
+TEST_CASE("a backend entry's window and cache reach the provider as written",
+          "[backends][llamacpp][window]") {
+    apogee::harness::BackendConfig entry;
+    entry.type = apogee::harness::BackendType::LlamaCpp;
+    entry.model_path = "/models/test.gguf";
+
+    const LlamaCppProvider::Options unset = LlamaCppProvider::options_from("local", entry);
+    CHECK(unset.context_size == 0);
+    CHECK(unset.cache_type == apogee::harness::KvCacheType::Q8_0);
+    CHECK_FALSE(unset.cache_type_named);
+
+    entry.context_size = 65536;
+    entry.cache_type = apogee::harness::KvCacheType::F16;
+    const LlamaCppProvider::Options named = LlamaCppProvider::options_from("local", entry);
+    CHECK(named.context_size == 65536);
+    CHECK(named.cache_type == apogee::harness::KvCacheType::F16);
+    CHECK(named.cache_type_named);
+    CHECK(named.backend_name == "local");
+    CHECK(named.model_path == "/models/test.gguf");
+}
+
+TEST_CASE("an image turn's context is the session's window, not the trained one",
+          "[backends][llamacpp][window]") {
+    Sized large{262144};
+    large.runtime->vision = true;
+    ChatMessage asked = ChatMessage::user("what is this?");
+    asked.content = apogee::harness::MessageContent::from_parts(
+        {apogee::harness::ContentPart::from_text("what is this?"),
+         apogee::harness::ContentPart::from_image_url("data:image/png;base64,UE5H")});
+    const ChatRequest image = turn({asked});
+    // The fake's contexts decode no image, so the turn fails -- after its
+    // context was made, which is what is asked here.
+    CHECK_THROWS(large.provider->chat(image, {}));
+    REQUIRE_FALSE(large.runtime->model->context_sizes.empty());
+    CHECK(large.runtime->model->context_sizes.back() == 32768);
+}
+
+TEST_CASE("a local chat past 90% of its default window is compacted, not run into the wall",
+          "[backends][llamacpp][window][harness]") {
+    // Before 26a a backend with no context_size had no window the chat knew
+    // of -- the table has no local rows -- so it was never warned or
+    // compacted, and a long chat ran into the wall instead.
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig entry;
+    entry.type = apogee::harness::BackendType::LlamaCpp;
+    entry.model_path = "/models/test.gguf";
+    config.backends["local"] = entry;
+
+    Sized small{4096};
+    LlamaCppProvider& provider = *small.provider;
+    apogee::harness::Harness harness{config};
+    harness.register_provider("local", std::move(small.provider));
+    harness.use_default_router();
+    (void)provider.chat(turn({ChatMessage::user("alpha")}), {});
+
+    std::string words;
+    for (int i = 0; i < 3800; ++i) {
+        words += "word ";
+    }
+    const std::vector<ChatMessage> history{ChatMessage::user(words)};
+    const apogee::agentloop::ContextUsage usage =
+        apogee::agentloop::measure_context(harness, history, "local");
+    CHECK(usage.window == 4096);
+    CHECK(usage.exact);
+    CHECK(usage.should_warn());
+    CHECK(usage.should_compact());
+
+    const std::vector<ChatMessage> short_history{ChatMessage::user("alpha beta")};
+    CHECK_FALSE(apogee::agentloop::measure_context(harness, short_history, "local").should_warn());
 }

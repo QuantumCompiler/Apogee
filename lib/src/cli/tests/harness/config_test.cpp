@@ -234,6 +234,39 @@ TEST_CASE("every backend type round-trips through its name", "[config]") {
     CHECK_FALSE(apogee::harness::backend_type_from_string("Anthropic").has_value());
 }
 
+TEST_CASE("a local backend's cache_type parses, and anything else is refused by name",
+          "[config][cache]") {
+    using apogee::harness::KvCacheType;
+    const Config config = load_text(
+        "backends:\n"
+        "  eight:\n    type: llamacpp\n    model_path: /m/a.gguf\n    cache_type: q8_0\n"
+        "  four:\n    type: llamacpp\n    model_path: /m/a.gguf\n    cache_type: q4_0\n"
+        "  full:\n    type: llamacpp\n    model_path: /m/a.gguf\n    cache_type: f16\n"
+        "  unset:\n    type: llamacpp\n    model_path: /m/a.gguf\n");
+    CHECK(config.find_backend("eight")->cache_type == KvCacheType::Q8_0);
+    CHECK(config.find_backend("four")->cache_type == KvCacheType::Q4_0);
+    CHECK(config.find_backend("full")->cache_type == KvCacheType::F16);
+    // Unset stays unset: the backend's default is not the config's to fix.
+    CHECK_FALSE(config.find_backend("unset")->cache_type.has_value());
+
+    for (const char* bad : {"q8", "Q8_0", "bf16", "q5_1"}) {
+        try {
+            (void)load_text(std::string{"backends:\n  x:\n    type: llamacpp\n    cache_type: "} +
+                            bad + "\n");
+            FAIL("expected a ConfigError for " << bad);
+        } catch (const ConfigError& e) {
+            const std::string message = e.what();
+            CHECK(message.find(std::string{"'"} + bad + "'") != std::string::npos);
+            CHECK(message.find("backends.x.cache_type") != std::string::npos);
+            CHECK(message.find("f16, q8_0, q4_0") != std::string::npos);
+        }
+    }
+
+    for (const KvCacheType type : {KvCacheType::F16, KvCacheType::Q8_0, KvCacheType::Q4_0}) {
+        CHECK(apogee::harness::cache_type_from_string(apogee::harness::to_string(type)) == type);
+    }
+}
+
 TEST_CASE("the shipped sample config byte-matches the embedded template", "[config][template]") {
     // Ommi's template-drift test, ported. It exists because the failure it
     // catches is invisible: `config init` quietly stops writing an option the

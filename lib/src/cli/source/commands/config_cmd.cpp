@@ -351,6 +351,11 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
         return backend->context_size.has_value() ? std::to_string(*backend->context_size)
                                                  : std::string{};
     }
+    if (field == "cache_type") {
+        return backend->cache_type.has_value()
+                   ? std::string{harness::to_string(*backend->cache_type)}
+                   : std::string{};
+    }
     if (field == "max_tokens") {
         return backend->max_tokens.has_value() ? std::to_string(*backend->max_tokens)
                                                : std::string{};
@@ -373,6 +378,7 @@ struct AddBackendFlags {
     std::string mmproj_path;
     std::string embedding_model;
     std::string system_prompt;
+    std::string cache_type;
     std::int64_t context_size = 0;
     std::int64_t max_tokens = 0;
     double temperature = 0.0;
@@ -433,6 +439,10 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
     cmd->add_option("--system-prompt", flags->system_prompt, "Default system prompt");
     flags->context_size_option =
         cmd->add_option("--context-size", flags->context_size, "Context window, in tokens");
+    cmd->add_option("--cache-type", flags->cache_type,
+                    "How a local model keeps its attention cache: f16, q8_0 (the default) or "
+                    "q4_0")
+        ->check(CLI::IsMember({"f16", "q8_0", "q4_0"}));
     flags->max_tokens_option =
         cmd->add_option("--max-tokens", flags->max_tokens, "Maximum tokens to generate");
     flags->temperature_option =
@@ -457,6 +467,9 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
         backend.system_prompt = flags->system_prompt;
         if (flags->context_size_option->count() > 0) {
             backend.context_size = flags->context_size;
+        }
+        if (!flags->cache_type.empty()) {
+            backend.cache_type = harness::cache_type_from_string(flags->cache_type);
         }
         if (flags->max_tokens_option->count() > 0) {
             backend.max_tokens = flags->max_tokens;
@@ -738,7 +751,7 @@ std::vector<std::string> config_keys(const harness::Config& config) {
     for (const std::string& name : config.backend_names()) {
         entry("backends", name,
               {"type", "api_key", "model", "model_path", "mmproj_path", "embedding_model",
-               "system_prompt", "context_size", "max_tokens", "temperature"});
+               "system_prompt", "context_size", "cache_type", "max_tokens", "temperature"});
     }
     for (const std::string& name : config.mcp_server_names()) {
         entry("mcp_servers", name, {"command", "enabled", "args", "env"});

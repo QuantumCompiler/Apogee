@@ -114,6 +114,9 @@ nlohmann::json backend_view(std::string_view name, const harness::BackendConfig&
     if (backend.context_size.has_value()) {
         out["context_size"] = *backend.context_size;
     }
+    if (backend.cache_type.has_value()) {
+        out["cache_type"] = harness::to_string(*backend.cache_type);
+    }
     if (backend.max_tokens.has_value()) {
         out["max_tokens"] = *backend.max_tokens;
     }
@@ -216,6 +219,17 @@ HttpResponse admin_create_backend(const AdminConfigContext& context, const HttpR
                 backend.max_tokens = it->get<std::int64_t>();
             }
         }
+    }
+    if (const std::optional<std::string> cache = optional_string(body, "cache_type", error);
+        cache.has_value() && !cache->empty()) {
+        backend.cache_type = harness::cache_type_from_string(*cache);
+        if (!backend.cache_type.has_value()) {
+            return error_response(
+                400, "cache_type: unknown value '" + *cache + "' (accepted: f16, q8_0, q4_0)");
+        }
+    }
+    if (!error.empty()) {
+        return error_response(400, error);
     }
     if (const auto it = body.find("temperature"); it != body.end() && !it->is_null()) {
         if (!it->is_number()) {

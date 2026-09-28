@@ -276,10 +276,11 @@ says whether one is configured — plus `roles`, each named by the backend that
 
 The twin of `apogee config add-backend`. Body: `name` and `type` (required),
 then any of `model`, `model_path`, `api_key`, `embedding_model`,
-`system_prompt`, `context_size`, `max_tokens`, `temperature`, and `force`
+`system_prompt`, `context_size`, `cache_type` (a local model's attention
+cache: `f16`, `q8_0` or `q4_0`), `max_tokens`, `temperature`, and `force`
 (the `--force` twin: replace an existing entry). `201` with the view; `409`
-(`type: conflict`) on a name collision without `force`; `400` on a bad type or
-body.
+(`type: conflict`) on a name collision without `force`; `400` on a bad type,
+cache type or body.
 
 A **literal** `api_key` is accepted from loopback peers only (`403` otherwise),
 judged from the connection's own peer address and never from a forwarded

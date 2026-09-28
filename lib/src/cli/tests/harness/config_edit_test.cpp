@@ -273,6 +273,20 @@ TEST_CASE("a projector is written right after its model", "[config_edit]") {
     CHECK(config.find_backend("vision")->mmproj_path == backend.mmproj_path);
 }
 
+TEST_CASE("a cache type is written after the window it keeps", "[config_edit][cache]") {
+    BackendConfig backend;
+    backend.type = BackendType::LlamaCpp;
+    backend.model_path = "/m/Qwen.gguf";
+    backend.context_size = 65536;
+    backend.cache_type = apogee::harness::KvCacheType::Q4_0;
+    const std::string added = append_backend("backends:\n", "local", backend, false);
+    CHECK(added ==
+          "backends:\n  local:\n    type: llamacpp\n    model_path: /m/Qwen.gguf\n"
+          "    context_size: 65536\n    cache_type: q4_0\n");
+    CHECK(apogee::harness::parse_config(added, "<test>").find_backend("local")->cache_type ==
+          apogee::harness::KvCacheType::Q4_0);
+}
+
 TEST_CASE("an api_key is stored literally, not expanded, on write", "[config_edit]") {
     const apogee::testing::EnvGuard key{"NEW_KEY", "sk-should-not-appear"};
     const std::string added = append_backend("", "a", anthropic_backend(), false);

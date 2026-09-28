@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,8 @@
 #include "backends/model_profile.h"
 #include "harness/config.h"
 #include "harness/provider.h"
+#include "models/gguf_inspect.h"
+#include "models/kv_cache.h"
 
 /// Local inference: llama.cpp linked into this process.
 ///
@@ -44,7 +47,8 @@ class LlamaCppProvider final : public harness::LLMProvider,
                                public harness::VisionCapable,
                                public harness::InTextToolCalling,
                                public harness::EmbeddingCapable,
-                               public harness::StatusReporting {
+                               public harness::StatusReporting,
+                               public harness::ContextWindowReporting {
 public:
     /// Reads the wall clock. Injected so the idle-unload policy is testable
     /// without a test that sleeps.
@@ -64,10 +68,18 @@ public:
         /// Empty means text-only.
         std::string mmproj_path;
 
-        /// KV context size in tokens. **0 means the model's own training
-        /// length**, which is the right default: a fixed number warns on a
-        /// model trained shorter and truncates one trained longer.
+        /// The conversation's window in tokens, used exactly as written. **0
+        /// means the default** (26a): 32K, or the model's trained window when
+        /// that is smaller, or what free memory holds when that is smaller
+        /// still -- never the trained window of a model trained for 256K, whose
+        /// cache would be gigabytes nobody asked for.
         std::int64_t context_size = 0;
+
+        /// How every context keeps its keys and values, and whether the config
+        /// named it: a named type is used or refused, the default gives way
+        /// to `f16` on a model that cannot take it.
+        harness::KvCacheType cache_type = models::kDefaultCacheType;
+        bool cache_type_named = false;
 
         /// Layers to offload to the GPU. The default offloads everything,
         /// which is what Metal wants; 0 forces CPU.
@@ -96,6 +108,11 @@ public:
     [[nodiscard]] static std::unique_ptr<LlamaCppProvider> from_config(
         const std::string& backend_name, const harness::BackendConfig& config);
 
+    /// What a backend entry configures, as `from_config` builds it: with no
+    /// runtime, so the mapping is testable in a build without llama.cpp.
+    [[nodiscard]] static Options options_from(const std::string& backend_name,
+                                              const harness::BackendConfig& config);
+
     [[nodiscard]] std::string_view backend_name() const noexcept override;
 
     /// Costs nothing per call.
@@ -123,6 +140,13 @@ public:
     /// display detail into the slowest thing in the session. Counts are exact
     /// from the first turn onward, which is when they start mattering.
     [[nodiscard]] std::int64_t count_prompt_tokens(const harness::ChatRequest& request) override;
+
+    // --- ContextWindowReporting ----------------------------------------------
+
+    /// The window the conversation has: `context_size` when set; once the
+    /// model is loaded, the default fitted at load; before, the default from
+    /// the GGUF header, which a load can only lower. 0 when neither says.
+    [[nodiscard]] std::int64_t context_window() const override;
 
     // --- VisionCapable ------------------------------------------------------
 
@@ -213,6 +237,14 @@ private:
     [[nodiscard]] harness::ChatResponse run(const harness::ChatRequest& request,
                                             const harness::StreamOptions& options);
 
+    /// The window the conversation's context is made with: `context_size`, or
+    /// the default for the loaded model (26a). Needs the model loaded.
+    [[nodiscard]] std::int64_t session_window() const;
+
+    /// The model file's header, read once: the architecture and the window it
+    /// was trained for, without a load.
+    [[nodiscard]] const models::GgufInfo& header() const;
+
     /// How many tokens `request` may generate: its own cap, else the backend's.
     [[nodiscard]] std::int64_t generation_limit(const harness::ChatRequest& request) const;
 
@@ -301,6 +333,7 @@ private:
 
     Options options_;
     std::unique_ptr<LlamaRuntime> runtime_;
+    mutable std::optional<models::GgufInfo> header_;
     /// `general.architecture` of the loaded model, empty before the first load.
     mutable std::string architecture_;
     mutable const ModelProfile* profile_ = nullptr;

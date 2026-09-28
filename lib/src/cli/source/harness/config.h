@@ -64,6 +64,20 @@ enum class BackendType : std::uint8_t {
 /// messages and to drive tests that must stay honest as the enum widens.
 [[nodiscard]] std::span<const std::string_view> backend_type_names() noexcept;
 
+/// How a local model stores its attention cache: the keys and values it keeps
+/// for every position of the window, in every attention layer (26a).
+///
+/// `q8_0` is the default -- about half of `f16`'s memory, with flash attention
+/// on, which a quantized cache needs. `q4_0` halves it again, at a cost to
+/// long-context recall worth measuring before it is chosen.
+enum class KvCacheType : std::uint8_t { F16, Q8_0, Q4_0 };
+
+/// The spelling of `cache_type:` for `value`, e.g. "q8_0".
+[[nodiscard]] std::string_view to_string(KvCacheType value) noexcept;
+
+/// Parses a `cache_type:` value; nullopt for anything else.
+[[nodiscard]] std::optional<KvCacheType> cache_type_from_string(std::string_view name) noexcept;
+
 /// Whether `type` drives a vendor's official CLI on a personal subscription.
 ///
 /// One predicate, in the harness, because two surfaces refuse these by type
@@ -116,6 +130,11 @@ struct BackendConfig {
     /// too. The model->window fallback table is harness-core's, not this
     /// item's: unset here means "ask the fallback", not "unlimited".
     std::optional<std::int64_t> context_size;
+
+    /// A local backend's attention cache (26a). Unset is `q8_0`, and a model
+    /// that cannot take it falls back to `f16`; a value written here is used
+    /// as written or refused, never swapped.
+    std::optional<KvCacheType> cache_type;
 
     std::optional<std::int64_t> max_tokens;
     std::optional<double> temperature;

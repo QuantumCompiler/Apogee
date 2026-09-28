@@ -59,6 +59,12 @@ constexpr std::array<std::pair<std::string_view, AgentOutputFormat>, 3> kAgentOu
     {"markdown", AgentOutputFormat::Markdown},
 }};
 
+constexpr std::array<std::pair<std::string_view, KvCacheType>, 3> kCacheTypeNames{{
+    {"f16", KvCacheType::F16},
+    {"q8_0", KvCacheType::Q8_0},
+    {"q4_0", KvCacheType::Q4_0},
+}};
+
 std::string accepted_backend_types() {
     std::string out;
     for (const auto& [name, unused] : kBackendTypeNames) {
@@ -141,6 +147,15 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     backend.mmproj_path = scalar(node["mmproj_path"], origin, where + ".mmproj_path");
     backend.system_prompt = scalar(node["system_prompt"], origin, where + ".system_prompt");
     backend.context_size = integer(node["context_size"], origin, where + ".context_size");
+    if (const std::string cache = scalar(node["cache_type"], origin, where + ".cache_type");
+        !cache.empty()) {
+        const std::optional<KvCacheType> parsed = cache_type_from_string(cache);
+        if (!parsed.has_value()) {
+            fail(origin, where + ".cache_type: '" + cache +
+                             "' is not a cache type (accepted: f16, q8_0, q4_0)");
+        }
+        backend.cache_type = parsed;
+    }
     backend.max_tokens = integer(node["max_tokens"], origin, where + ".max_tokens");
     backend.temperature = number(node["temperature"], origin, where + ".temperature");
     backend.binary = scalar(node["binary"], origin, where + ".binary");
@@ -427,6 +442,24 @@ std::string_view to_string(BackendType value) noexcept {
 
 std::optional<BackendType> backend_type_from_string(std::string_view name) noexcept {
     for (const auto& [candidate, type] : kBackendTypeNames) {
+        if (candidate == name) {
+            return type;
+        }
+    }
+    return std::nullopt;
+}
+
+std::string_view to_string(KvCacheType value) noexcept {
+    for (const auto& [name, type] : kCacheTypeNames) {
+        if (type == value) {
+            return name;
+        }
+    }
+    return "unknown";
+}
+
+std::optional<KvCacheType> cache_type_from_string(std::string_view name) noexcept {
+    for (const auto& [candidate, type] : kCacheTypeNames) {
         if (candidate == name) {
             return type;
         }

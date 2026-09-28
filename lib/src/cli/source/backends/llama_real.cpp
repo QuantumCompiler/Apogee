@@ -23,13 +23,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
 
 #include "backends/llama_chat.h"
+#include "models/gguf_inspect.h"
+#include "models/kv_cache.h"
 
 namespace apogee::backends {
 namespace {
@@ -250,11 +254,12 @@ public:
     /// `checkpoints` is whether this context's memory needs them: a
     /// recurrent or hybrid model's running state cannot be rewound (25c).
     RealContext(std::unique_ptr<llama_context, ContextDeleter> context, SamplerPtr sampler,
-                mtmd_context* vision, bool checkpoints)
+                mtmd_context* vision, bool checkpoints, harness::KvCacheType cache_type)
         : context_{std::move(context)},
           sampler_{std::move(sampler)},
           checkpoints_needed_{checkpoints},
-          vision_{vision} {}
+          vision_{vision},
+          cache_type_{cache_type} {}
 
     void decode(const std::vector<std::int32_t>& tokens, std::int64_t position) override {
         if (tokens.empty()) {
@@ -391,6 +396,10 @@ public:
         return static_cast<std::int64_t>(llama_n_ctx(context_.get()));
     }
 
+    [[nodiscard]] harness::KvCacheType cache_type() const noexcept override {
+        return cache_type_;
+    }
+
 private:
     std::int64_t decode_multimodal(const std::vector<std::string>& images, std::string_view text,
                                    std::int64_t position, std::string& error) override {
@@ -495,17 +504,39 @@ private:
     std::vector<Checkpoint> checkpoints_;
     /// Borrowed from the model, which outlives every context made from it.
     mtmd_context* vision_ = nullptr;
+    harness::KvCacheType cache_type_ = harness::KvCacheType::F16;
 };
+
+/// How a model's generation contexts are made (26a).
+struct ContextSettings {
+    harness::KvCacheType cache_type = harness::KvCacheType::Q8_0;
+    /// Named in the config: used as written, or the context is refused.
+    bool cache_type_named = false;
+    /// What free memory held at load, or 0; see `fitted_window`.
+    std::int64_t fitted_window = 0;
+};
+
+[[nodiscard]] ggml_type ggml_type_of(harness::KvCacheType type) noexcept {
+    switch (type) {
+        case harness::KvCacheType::F16:
+            return GGML_TYPE_F16;
+        case harness::KvCacheType::Q8_0:
+            return GGML_TYPE_Q8_0;
+        case harness::KvCacheType::Q4_0:
+            return GGML_TYPE_Q4_0;
+    }
+    return GGML_TYPE_F16;
+}
 
 class RealModel final : public LlamaModel {
 public:
-    explicit RealModel(std::unique_ptr<llama_model, ModelDeleter> model)
-        : model_{std::move(model)}, vocab_{llama_model_get_vocab(model_.get())} {}
-
-    RealModel(std::unique_ptr<llama_model, ModelDeleter> model, MtmdPtr vision)
+    /// `vision` may be null: a text-only model.
+    RealModel(std::unique_ptr<llama_model, ModelDeleter> model, MtmdPtr vision,
+              ContextSettings settings)
         : model_{std::move(model)},
           vocab_{llama_model_get_vocab(model_.get())},
-          vision_{std::move(vision)} {}
+          vision_{std::move(vision)},
+          settings_{settings} {}
 
     [[nodiscard]] std::vector<std::int32_t> tokenize(std::string_view text,
                                                      bool add_special) const override {
@@ -674,33 +705,34 @@ public:
         return llama_model_n_ctx_train(model_.get());
     }
 
+    [[nodiscard]] std::int64_t fitted_window() const noexcept override {
+        return settings_.fitted_window;
+    }
+
     [[nodiscard]] std::unique_ptr<LlamaContext> make_context(std::int64_t context_size) override {
-        // Unset means "whatever this model was trained for", resolved HERE
-        // rather than left as llama.cpp's 0 sentinel because n_batch below
-        // needs the real number. Defaulting to a fixed 4096 instead was wrong
-        // in both directions: it warns on a 2048-context model and silently
-        // truncates one trained for 128K.
+        // The provider always names the window (26a); 0 is kept meaning the
+        // trained one, resolved here because n_batch needs a real number.
         const std::int64_t resolved =
             context_size > 0 ? context_size : llama_model_n_ctx_train(model_.get());
 
-        llama_context_params params = llama_context_default_params();
-        params.n_ctx = static_cast<std::uint32_t>(resolved);
-        // n_batch is left at llama.cpp's own default, and the provider chunks
-        // its prompt to `max_batch_tokens()` instead.
-        //
-        // Setting `n_batch = n_ctx` was tried first and is WRONG: llama.cpp
-        // reserves batch-sized headroom inside the KV cache, so making the two
-        // equal leaves no slot for the first generated token. It fails as
-        // `decode: failed to find a memory slot for batch of size 1` on turn
-        // two -- a message that names neither the cause nor the setting. Real
-        // hardware found this; the scripted runtime cannot model an allocator.
-
-        llama_log().forget();
-        std::unique_ptr<llama_context, ContextDeleter> context{
-            llama_init_from_model(model_.get(), params)};
+        harness::KvCacheType cache_type = settings_.cache_type;
+        std::unique_ptr<llama_context, ContextDeleter> context = create(resolved, cache_type);
+        if (context == nullptr && cache_type != harness::KvCacheType::F16 &&
+            !settings_.cache_type_named) {
+            // The default gives way rather than failing: a quantized cache
+            // needs every head width to divide into its blocks of 32, and
+            // flash attention for them. A cache_type the user named is theirs
+            // and is refused below instead.
+            cache_type = harness::KvCacheType::F16;
+            context = create(resolved, cache_type);
+        }
         if (context == nullptr) {
-            throw std::runtime_error(
-                with_llama_reason("llama.cpp: could not create a context for this model"));
+            std::string message = "llama.cpp: could not create a context for this model";
+            if (settings_.cache_type_named && cache_type != harness::KvCacheType::F16) {
+                message += " with cache_type " + std::string{harness::to_string(cache_type)} +
+                           " -- try cache_type: f16";
+            }
+            throw std::runtime_error(with_llama_reason(message));
         }
 
         std::string error;
@@ -712,7 +744,7 @@ public:
         const bool checkpoints =
             llama_model_is_recurrent(model_.get()) || llama_model_is_hybrid(model_.get());
         return std::make_unique<RealContext>(std::move(context), std::move(sampler), vision_.get(),
-                                             checkpoints);
+                                             checkpoints, cache_type);
     }
 
     [[nodiscard]] bool supports_vision() const noexcept override {
@@ -842,6 +874,36 @@ public:
     }
 
 private:
+    /// A generation context of `window` positions whose keys and values are
+    /// kept as `cache_type`; null when llama.cpp will not make one.
+    [[nodiscard]] std::unique_ptr<llama_context, ContextDeleter> create(
+        std::int64_t window, harness::KvCacheType cache_type) const {
+        llama_context_params params = llama_context_default_params();
+        params.n_ctx = static_cast<std::uint32_t>(window);
+        // n_batch is left at llama.cpp's own default, and the provider chunks
+        // its prompt to `max_batch_tokens()` instead.
+        //
+        // Setting `n_batch = n_ctx` was tried first and is WRONG: llama.cpp
+        // reserves batch-sized headroom inside the KV cache, so making the two
+        // equal leaves no slot for the first generated token. It fails as
+        // `decode: failed to find a memory slot for batch of size 1` on turn
+        // two -- a message that names neither the cause nor the setting. Real
+        // hardware found this; the scripted runtime cannot model an allocator.
+        params.type_k = ggml_type_of(cache_type);
+        params.type_v = ggml_type_of(cache_type);
+        // A quantized cache needs flash attention, so it is turned on rather
+        // than left to detection -- which, where a device lacked the kernel,
+        // would turn it off and fail the context. An f16 cache leaves it to
+        // llama.cpp, which turns it on where the device has it (every model
+        // measured on Metal) and off rather than running attention on the CPU.
+        params.flash_attn_type = cache_type == harness::KvCacheType::F16
+                                     ? LLAMA_FLASH_ATTN_TYPE_AUTO
+                                     : LLAMA_FLASH_ATTN_TYPE_ENABLED;
+        llama_log().forget();
+        return std::unique_ptr<llama_context, ContextDeleter>{
+            llama_init_from_model(model_.get(), params)};
+    }
+
     /// Creates the embedding context on first use.
     ///
     /// Separate from `make_context`'s on purpose: embeddings need pooling on
@@ -889,6 +951,7 @@ private:
     /// The projector, when one was configured. Outlives every context made
     /// from this model, which is why contexts may borrow it raw.
     MtmdPtr vision_;
+    ContextSettings settings_;
     /// Lazily created; see ensure_embedding_context.
     std::unique_ptr<llama_context, ContextDeleter> embedding_context_;
     /// The model's chat templates, parsed on first render; see render_chat.
@@ -897,12 +960,89 @@ private:
     mutable bool templates_loaded_ = false;
 };
 
+/// Free memory across the devices a model offloads to; 0 when it runs on
+/// the CPU, or no device says.
+[[nodiscard]] std::int64_t free_device_memory(std::int64_t gpu_layers) {
+    if (gpu_layers <= 0) {
+        return 0;
+    }
+    std::int64_t total = 0;
+    for (std::size_t index = 0; index < ggml_backend_dev_count(); ++index) {
+        ggml_backend_dev_t device = ggml_backend_dev_get(index);
+        const enum ggml_backend_dev_type type = ggml_backend_dev_type(device);
+        if (type != GGML_BACKEND_DEVICE_TYPE_GPU && type != GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            continue;
+        }
+        std::size_t free = 0;
+        std::size_t size = 0;
+        ggml_backend_dev_memory(device, &free, &size);
+        total += static_cast<std::int64_t>(free);
+    }
+    return total;
+}
+
+/// The smallest window the fitter may lower one to: the side contexts'
+/// floor, below which a conversation is hardly one.
+constexpr std::uint32_t kMinimumFittedWindow = 4096;
+
+/// What free memory holds, for a backend with no `context_size` (26a): 0
+/// when the default window fits, else the fitter's answer -- the positions
+/// that fit, up to the trained window, which the provider caps at the default.
+///
+/// llama.cpp's fitter is the one that answers, but it reads the model over to
+/// project it -- 0.13 to 0.72 s on the models measured -- and on a
+/// machine that holds the default it only ever says so. So a check that costs
+/// nothing goes first: the weights, the default window's cache from the
+/// header, and llama-server's 1 GiB margin, against what the devices have
+/// free. Only a model that fails it, or whose cache the header cannot size,
+/// is handed to the fitter.
+[[nodiscard]] std::int64_t fit_default_window(const ModelLoad& request) {
+    constexpr std::int64_t kMargin = std::int64_t{1024} * 1024 * 1024;
+    const std::int64_t free = free_device_memory(request.gpu_layers);
+    if (free <= 0) {
+        // On the CPU: nothing to fit to, and system memory pages.
+        return 0;
+    }
+    const models::GgufInfo info = models::inspect_gguf(request.path);
+    if (const std::optional<std::int64_t> values =
+            info.parsed ? models::kv_values_per_position(info.architecture, info.attention)
+                        : std::nullopt;
+        values.has_value()) {
+        const std::int64_t window = models::default_local_window(info.attention.context_length, 0);
+        std::int64_t needed =
+            info.file_size +
+            models::cache_bytes(*values * models::allocated_positions(window), request.cache_type) +
+            kMargin;
+        if (!request.mmproj_path.empty()) {
+            std::error_code code;
+            const std::uintmax_t projector = std::filesystem::file_size(request.mmproj_path, code);
+            needed += code ? 0 : static_cast<std::int64_t>(projector);
+        }
+        if (needed <= free) {
+            return 0;
+        }
+    }
+    const std::int64_t fitted = llama_chat::fit_window(
+        request.path, static_cast<std::int32_t>(request.gpu_layers),
+        static_cast<std::int32_t>(ggml_type_of(request.cache_type)), kMinimumFittedWindow);
+    return std::max<std::int64_t>(fitted, 0);
+}
+
 class RealRuntime final : public LlamaRuntime {
 public:
-    [[nodiscard]] std::unique_ptr<LlamaModel> load(const std::string& path, std::int64_t gpu_layers,
-                                                   const std::string& mmproj_path,
+    [[nodiscard]] std::unique_ptr<LlamaModel> load(const ModelLoad& request,
                                                    std::string& error) override {
         ensure_backend_init();
+        const std::string& path = request.path;
+        const std::int64_t gpu_layers = request.gpu_layers;
+        const std::string& mmproj_path = request.mmproj_path;
+
+        ContextSettings settings;
+        settings.cache_type = request.cache_type;
+        settings.cache_type_named = request.cache_type_named;
+        if (request.fit_window) {
+            settings.fitted_window = fit_default_window(request);
+        }
 
         llama_model_params params = llama_model_default_params();
         params.n_gpu_layers = static_cast<std::int32_t>(gpu_layers);
@@ -918,7 +1058,7 @@ public:
             return nullptr;
         }
         if (mmproj_path.empty()) {
-            return std::make_unique<RealModel>(std::move(model));
+            return std::make_unique<RealModel>(std::move(model), nullptr, settings);
         }
 
         mtmd_context_params vision_params = mtmd_context_params_default();
@@ -935,7 +1075,7 @@ public:
                                       "' -- check that it is the mmproj file matching this model");
             return nullptr;
         }
-        return std::make_unique<RealModel>(std::move(model), std::move(vision));
+        return std::make_unique<RealModel>(std::move(model), std::move(vision), settings);
     }
 };
 

@@ -138,4 +138,17 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+/// What free memory holds of the model at `path` (26a): llama.cpp's own
+/// fitter (`common/fit.h`, `common_fit_params`, the one llama-server runs),
+/// which projects the weights, the cache and the compute buffers onto each
+/// device's free memory without loading anything. `cache_type` is the ggml
+/// type the keys and values are kept in, with flash attention on.
+///
+/// The most positions that fit, up to the trained window and never below
+/// `minimum`; -1 when it cannot say. It reads the model once or twice over --
+/// 0.13 to 0.72 s on the models measured -- so a caller asks only when it has
+/// reason to think the answer is not "it fits".
+[[nodiscard]] std::int64_t fit_window(const std::string& path, std::int32_t gpu_layers,
+                                      std::int32_t cache_type, std::uint32_t minimum);
+
 }  // namespace apogee::backends::llama_chat

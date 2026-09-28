@@ -279,6 +279,51 @@ TEST_CASE("info on a readable model reports the header and its resolved profile"
     CHECK(body.find("1 total, 1 text") != std::string::npos);
 }
 
+TEST_CASE("info states the window a local backend gets and what its cache costs",
+          "[commands][models][info][cache]") {
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "apogee-models-info-qwen38.gguf";
+    {
+        const std::string bytes = apogee::testing::qwen38_like_gguf();
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        REQUIRE(out.good());
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+    Config config = sample_config();
+    BackendConfig local;
+    local.type = BackendType::LlamaCpp;
+    local.model_path = path.string();
+    config.backends["local"] = local;
+    local.context_size = 5000;
+    local.cache_type = apogee::harness::KvCacheType::Q4_0;
+    config.backends["pinned"] = local;
+
+    const std::string unset = render_model_info(config, "local");
+    CHECK(unset.find("window:       32768 tokens (the default; trained for 262144)\n") !=
+          std::string::npos);
+    CHECK(unset.find("cache:        1088 MiB at q8_0 (the default)\n") != std::string::npos);
+
+    // Exactly as written; the cache is what llama.cpp allocates for it, 5,120
+    // positions at 18 bytes per 32 values.
+    const std::string pinned = render_model_info(config, "pinned");
+    CHECK(pinned.find("window:       5000 tokens (context_size; trained for 262144)\n") !=
+          std::string::npos);
+    CHECK(pinned.find("cache:        90 MiB at q4_0\n") != std::string::npos);
+
+    std::error_code code;
+    std::filesystem::remove(path, code);
+
+    // A header with no attention geometry cannot be sized, and says so.
+    const RealModel model{"llama"};
+    BackendConfig plain;
+    plain.type = BackendType::LlamaCpp;
+    plain.model_path = model.path.string();
+    config.backends["plain"] = plain;
+    CHECK(render_model_info(config, "plain")
+              .find("cache:        not known for this "
+                    "architecture\n") != std::string::npos);
+}
+
 TEST_CASE("a model on disk is listed even when no backend points at it",
           "[commands][models][listing]") {
     // Found by running it: after a 460 MB pull, `models list` said "no backends

@@ -31,6 +31,7 @@
 #include "httpserver/admin_auth.h"
 #include "knowledge/store.h"
 #include "models/gguf_inspect.h"
+#include "models/kv_cache.h"
 #include "models/snapshot.h"
 #include "models/store.h"
 #include "platform/child_process.h"
@@ -163,7 +164,8 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
             }
             add(report, Status::Ok, "Config", label,
                 std::string{type} + " -- GGUF header ok" +
-                    (info.architecture.empty() ? "" : " (" + info.architecture + ")"));
+                    (info.architecture.empty() ? "" : " (" + info.architecture + ")") + "; " +
+                    models::describe(models::local_window(info, backend)));
             continue;
         }
 

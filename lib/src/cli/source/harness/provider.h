@@ -176,6 +176,26 @@ public:
     [[nodiscard]] virtual std::int64_t count_prompt_tokens(const ChatRequest& request) = 0;
 };
 
+/// Implemented by a provider that sizes its own conversation window.
+///
+/// A cloud window is a fact about a model name, which the fallback table in
+/// `context_windows.h` knows; a local one is not -- it is the backend's
+/// default fitted to the model and the machine at load (26a), which no table
+/// of names could hold. Context monitoring warns and compacts against the
+/// window a backend actually allocated, so the backend is asked.
+class ContextWindowReporting {
+public:
+    ContextWindowReporting() = default;
+    virtual ~ContextWindowReporting() = default;
+    ContextWindowReporting(const ContextWindowReporting&) = delete;
+    ContextWindowReporting& operator=(const ContextWindowReporting&) = delete;
+    ContextWindowReporting(ContextWindowReporting&&) = delete;
+    ContextWindowReporting& operator=(ContextWindowReporting&&) = delete;
+
+    /// The window in tokens, or 0 when this provider cannot say.
+    [[nodiscard]] virtual std::int64_t context_window() const = 0;
+};
+
 /// Implemented by a provider that can accept image content parts.
 ///
 /// Exists so no surface has to ask "what type is this backend?" before

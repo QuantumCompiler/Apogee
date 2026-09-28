@@ -3,6 +3,8 @@
 #include <array>
 #include <cstring>
 #include <fstream>
+#include <map>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -179,6 +181,153 @@ void skip_value(Cursor& cursor, ValueType type) {
     throw GgufError("unknown metadata value type");
 }
 
+/// The attention keys worth materialising, after the architecture's prefix.
+constexpr std::array<std::string_view, 14> kAttentionKeys{
+    "context_length",
+    "block_count",
+    "embedding_length",
+    "attention.head_count",
+    "attention.head_count_kv",
+    "attention.key_length",
+    "attention.value_length",
+    "attention.key_length_swa",
+    "attention.value_length_swa",
+    "attention.sliding_window_pattern",
+    "full_attention_interval",
+    "nextn_predict_layers",
+    "attention.shared_kv_layers",
+    "attention.kv_lora_rank",
+};
+
+/// Whether `key` is one of `kAttentionKeys` under some prefix. The prefix is
+/// the architecture, which the header may name later than these keys, so
+/// they are gathered under every prefix and picked out at the end.
+[[nodiscard]] bool is_attention_key(std::string_view key) noexcept {
+    const std::size_t dot = key.find('.');
+    if (dot == std::string_view::npos) {
+        return false;
+    }
+    const std::string_view rest = key.substr(dot + 1);
+    for (const std::string_view wanted : kAttentionKeys) {
+        if (rest == wanted) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Reads one integer of `type`, or nullopt (having read nothing) for a type
+/// that is not one.
+[[nodiscard]] std::optional<std::int64_t> read_integer(Cursor& cursor, ValueType type) {
+    switch (type) {
+        case ValueType::UInt8:
+        case ValueType::Bool:
+            return cursor.number<std::uint8_t>();
+        case ValueType::Int8:
+            return cursor.number<std::int8_t>();
+        case ValueType::UInt16:
+            return cursor.number<std::uint16_t>();
+        case ValueType::Int16:
+            return cursor.number<std::int16_t>();
+        case ValueType::UInt32:
+            return cursor.number<std::uint32_t>();
+        case ValueType::Int32:
+            return cursor.number<std::int32_t>();
+        case ValueType::UInt64:
+            return static_cast<std::int64_t>(cursor.number<std::uint64_t>());
+        case ValueType::Int64:
+            return cursor.number<std::int64_t>();
+        case ValueType::Float32:
+        case ValueType::Float64:
+        case ValueType::String:
+        case ValueType::Array:
+            return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+/// A per-layer array is one entry per block; this bounds what is kept.
+constexpr std::uint64_t kMaxLayerValues = 1U << 16U;
+
+/// Reads an integer, a bool, or an array of either, as integers. Anything
+/// else is stepped over and comes back empty.
+[[nodiscard]] std::vector<std::int64_t> read_integers(Cursor& cursor, ValueType type) {
+    if (type != ValueType::Array) {
+        if (fixed_width(type) == 0 || type == ValueType::Float32 || type == ValueType::Float64) {
+            skip_value(cursor, type);
+            return {};
+        }
+        return {*read_integer(cursor, type)};
+    }
+    const auto element = static_cast<ValueType>(cursor.number<std::uint32_t>());
+    const auto count = cursor.number<std::uint64_t>();
+    const std::size_t width = fixed_width(element);
+    const bool integral =
+        width > 0 && element != ValueType::Float32 && element != ValueType::Float64;
+    if (!integral || count > kMaxLayerValues) {
+        if (count > kMaxCount) {
+            throw GgufError("a metadata array claims an implausible element count");
+        }
+        if (width == 0) {
+            if (element == ValueType::Array) {
+                throw GgufError("nested metadata arrays are not supported");
+            }
+            if (element != ValueType::String) {
+                throw GgufError("unknown metadata array element type");
+            }
+            for (std::uint64_t i = 0; i < count; ++i) {
+                const auto length = cursor.number<std::uint64_t>();
+                if (length > kMaxStringBytes) {
+                    throw GgufError("a metadata string claims an implausible length");
+                }
+                cursor.skip(length);
+            }
+            return {};
+        }
+        cursor.skip(width * count);
+        return {};
+    }
+    std::vector<std::int64_t> values;
+    values.reserve(static_cast<std::size_t>(count));
+    for (std::uint64_t i = 0; i < count; ++i) {
+        values.push_back(*read_integer(cursor, element));
+    }
+    return values;
+}
+
+/// The architecture's attention keys, out of everything gathered.
+[[nodiscard]] AttentionHeader attention_of(
+    const std::string& architecture,
+    const std::map<std::string, std::vector<std::int64_t>, std::less<>>& gathered) {
+    AttentionHeader out;
+    const auto values = [&](std::string_view key) -> std::vector<std::int64_t> {
+        const auto it = gathered.find(architecture + "." + std::string{key});
+        return it == gathered.end() ? std::vector<std::int64_t>{} : it->second;
+    };
+    const auto one = [&](std::string_view key) -> std::int64_t {
+        const std::vector<std::int64_t> found = values(key);
+        return found.size() == 1 ? found.front() : 0;
+    };
+    if (architecture.empty()) {
+        return out;
+    }
+    out.context_length = one("context_length");
+    out.block_count = one("block_count");
+    out.embedding_length = one("embedding_length");
+    out.head_count = values("attention.head_count");
+    out.head_count_kv = values("attention.head_count_kv");
+    out.key_length = one("attention.key_length");
+    out.value_length = one("attention.value_length");
+    out.key_length_swa = one("attention.key_length_swa");
+    out.value_length_swa = one("attention.value_length_swa");
+    out.sliding_window_pattern = values("attention.sliding_window_pattern");
+    out.full_attention_interval = one("full_attention_interval");
+    out.nextn_predict_layers = one("nextn_predict_layers");
+    out.shared_kv_layers = one("attention.shared_kv_layers");
+    out.latent_attention = gathered.contains(architecture + ".attention.kv_lora_rank");
+    return out;
+}
+
 /// Whether a tensor name belongs to a vision tower or a multimodal projector
 /// rather than to the text model.
 ///
@@ -226,13 +375,20 @@ GgufInfo inspect_gguf(const std::filesystem::path& path) {
         }
         info.tensors = static_cast<std::int64_t>(tensor_count);
 
+        std::map<std::string, std::vector<std::int64_t>, std::less<>> attention;
         for (std::uint64_t i = 0; i < kv_count; ++i) {
             const std::string key = cursor.string();
             const auto type = static_cast<ValueType>(cursor.number<std::uint32_t>());
 
-            // Only two keys are worth materialising. Everything else is stepped
-            // over -- the vocabulary alone is megabytes of strings, and reading
-            // it would turn a cheap check into an expensive one.
+            if (is_attention_key(key)) {
+                attention.insert_or_assign(key, read_integers(cursor, type));
+                continue;
+            }
+
+            // Only these keys and the attention geometry are worth
+            // materialising. Everything else is stepped over -- the vocabulary
+            // alone is megabytes of strings, and reading it would turn a cheap
+            // check into an expensive one.
             if (type == ValueType::UInt32 && key == "general.file_type") {
                 info.file_type = cursor.number<std::uint32_t>();
                 continue;
@@ -265,6 +421,7 @@ GgufInfo inspect_gguf(const std::filesystem::path& path) {
             }
         }
 
+        info.attention = attention_of(info.architecture, attention);
         info.parsed = true;
     } catch (const GgufError& e) {
         info.parsed = false;

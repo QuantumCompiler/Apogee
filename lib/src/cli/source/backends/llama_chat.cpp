@@ -11,6 +11,7 @@
 
 #include <chat.h>
 #include <common.h>
+#include <fit.h>
 #include <llama.h>
 #include <log.h>
 
@@ -214,6 +215,40 @@ bool Templates::render(const Inputs& inputs, Rendered& out, std::string& error) 
     }
     out.parser = std::make_unique<ReplyParser>(std::move(parser));
     return true;
+}
+
+std::int64_t fit_window(const std::string& path, std::int32_t gpu_layers, std::int32_t cache_type,
+                        std::uint32_t minimum) {
+    silence_common_log();
+    llama_model_params model = llama_model_default_params();
+    model.n_gpu_layers = gpu_layers;
+    llama_context_params context = llama_context_default_params();
+    // 0 asks the fitter to choose the window; anything else it leaves alone.
+    context.n_ctx = 0;
+    context.type_k = static_cast<ggml_type>(cache_type);
+    context.type_v = static_cast<ggml_type>(cache_type);
+    context.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+
+    // Writable space the fitter may fill in for a split across devices; the
+    // split itself is not used -- the model loads with its own settings.
+    std::vector<float> split(llama_max_devices(), 0.0F);
+    std::vector<llama_model_tensor_buft_override> overrides(llama_max_tensor_buft_overrides());
+    // What to leave free on each device: llama-server's default, 1 GiB.
+    std::vector<std::size_t> margins(llama_max_devices(), std::size_t{1024} * 1024 * 1024);
+
+    const common_params_fit_status status =
+        common_fit_params(path.c_str(), &model, &context, split.data(), overrides.data(),
+                          margins.data(), minimum, /*extra=*/nullptr, GGML_LOG_LEVEL_ERROR);
+    if (status == COMMON_PARAMS_FIT_STATUS_ERROR) {
+        return -1;
+    }
+    if (status == COMMON_PARAMS_FIT_STATUS_FAILURE && context.n_ctx == 0) {
+        // Nothing fits, not even the weights at the smallest window: the
+        // smallest window is still the least there is to ask for.
+        return minimum;
+    }
+    // A failure to fit lowers the window as far as it will go first.
+    return static_cast<std::int64_t>(context.n_ctx);
 }
 
 }  // namespace apogee::backends::llama_chat

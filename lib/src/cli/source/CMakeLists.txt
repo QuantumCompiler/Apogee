@@ -34,6 +34,8 @@ add_library(apogee_core STATIC
     commands/command.h
     models/gguf_inspect.h
     models/gguf_inspect.cpp
+    models/kv_cache.h
+    models/kv_cache.cpp
     models/sha256.h
     models/sha256.cpp
     models/sidecar.h

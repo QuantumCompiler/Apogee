@@ -204,8 +204,9 @@ public:
     /// the load itself fails.
     bool preload_model(std::string_view backend_name, const StatusSink& on_status) const;
 
-    /// The effective context window for `model`: the backend entry\'s
-    /// `context_size` when set, else the compiled fallback table.
+    /// The effective context window for `model`: the backend entry's
+    /// `context_size` when set, else the window the backend reports sizing
+    /// itself (`ContextWindowReporting`), else the compiled fallback table.
     /// 0 means unknown — never unlimited.
     [[nodiscard]] std::int64_t context_window_for_model(std::string_view model) const;
 

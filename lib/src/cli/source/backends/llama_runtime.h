@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "harness/config.h"
 #include "harness/types.h"
 
 /// The slice of llama.cpp the local backend needs, behind an interface.
@@ -219,6 +220,12 @@ public:
     /// especially in-process, where there is no child to lose instead.
     [[nodiscard]] virtual std::int64_t capacity() const noexcept = 0;
 
+    /// The cache this context keeps its keys and values in: the model's
+    /// (26a), or `f16` where a quantized one could not be made.
+    [[nodiscard]] virtual harness::KvCacheType cache_type() const noexcept {
+        return harness::KvCacheType::F16;
+    }
+
     /// Decodes an interleaved text-and-image prompt, extending the KV cache
     /// from `position`. Returns the new position, or -1 with `error` filled.
     ///
@@ -326,7 +333,15 @@ public:
     /// Training context length, or 0 when unknown.
     [[nodiscard]] virtual std::int64_t context_length() const noexcept = 0;
 
-    /// A fresh context over this model, with its own empty KV cache.
+    /// The most positions free memory held when this model was loaded, where
+    /// the load was asked to find out (`ModelLoad::fit_window`) and the
+    /// default window would not fit; 0 when it fits, or nobody asked (26a).
+    [[nodiscard]] virtual std::int64_t fitted_window() const noexcept {
+        return 0;
+    }
+
+    /// A fresh context of `context_size` positions over this model, with its
+    /// own empty KV cache, kept in the model's cache type.
     [[nodiscard]] virtual std::unique_ptr<LlamaContext> make_context(std::int64_t context_size) = 0;
 
     /// Whether a multimodal projector was loaded alongside this model AND it
@@ -366,6 +381,26 @@ public:
         const std::vector<std::string>& texts, std::string& error) = 0;
 };
 
+/// What a model is loaded from and with.
+struct ModelLoad {
+    /// The GGUF.
+    std::string path;
+    /// Layers to offload to the GPU; 0 forces CPU.
+    std::int64_t gpu_layers = 999;
+    /// The multimodal projector; empty loads a text-only model, which is the
+    /// common case.
+    std::string mmproj_path;
+    /// The cache every generation context of this model keeps (26a).
+    harness::KvCacheType cache_type = harness::KvCacheType::Q8_0;
+    /// Whether the backend's config named the cache type. A named type is used
+    /// as written or refused; the default gives way to `f16` on a model that
+    /// cannot take it.
+    bool cache_type_named = false;
+    /// Whether to find what free memory holds, for a backend whose window is
+    /// the default: `LlamaModel::fitted_window` reports it.
+    bool fit_window = false;
+};
+
 /// Loads models. One per process in practice.
 class LlamaRuntime {
 public:
@@ -376,19 +411,16 @@ public:
     LlamaRuntime(LlamaRuntime&&) = delete;
     LlamaRuntime& operator=(LlamaRuntime&&) = delete;
 
-    /// Loads the GGUF at `path`.
+    /// Loads `request.path`.
     ///
     /// Returns nullptr and fills `error` on failure rather than throwing: a
     /// missing or corrupt model file is an ordinary user mistake with an
     /// obvious fix, and the acceptance criterion for it is a clear message
     /// naming the file -- never a crash.
-    /// `mmproj_path` empty loads a text-only model, which is the common case.
     /// A projector that fails to load is an error rather than a downgrade to
     /// text: the user asked for vision, and silently answering without looking
     /// at their picture is worse than saying why.
-    [[nodiscard]] virtual std::unique_ptr<LlamaModel> load(const std::string& path,
-                                                           std::int64_t gpu_layers,
-                                                           const std::string& mmproj_path,
+    [[nodiscard]] virtual std::unique_ptr<LlamaModel> load(const ModelLoad& request,
                                                            std::string& error) = 0;
 };
 

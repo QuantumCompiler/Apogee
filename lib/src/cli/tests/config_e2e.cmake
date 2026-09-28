@@ -170,6 +170,23 @@ expect_equal("${APOGEE_OUT}" "200000" "get a numeric key")
 
 # A cloud entry can name the model it embeds with, separately from the one it
 # chats with.
+# A local model's attention cache (26a): written as named, read back, and
+# anything but the three types refused before the file is touched.
+apogee_run(0 config add-backend cached --type llamacpp --model-path /m/a.gguf --cache-type q4_0)
+apogee_run(0 config get backends.cached.cache_type)
+expect_equal("${APOGEE_OUT}" "q4_0" "the cache type is its own field")
+apogee_run(0 config delete-backend cached)
+# The parser refuses it (CLI11 exits 105 on a value outside its set), naming
+# the three.
+apogee_run(105 config add-backend cached --type llamacpp --model-path /m/a.gguf --cache-type q8)
+if(NOT APOGEE_ERR MATCHES "f16,q8_0,q4_0")
+    message(FATAL_ERROR "a refused cache type did not name the accepted ones: ${APOGEE_ERR}")
+endif()
+file(READ "${CONFIG_FILE}" AFTER_REFUSAL)
+if(AFTER_REFUSAL MATCHES "cached:")
+    message(FATAL_ERROR "a refused cache type still wrote its entry")
+endif()
+
 apogee_run(0 config add-backend gpt --type openai --api-key "\${OPENAI_API_KEY}"
            --model gpt-5 --embedding-model text-embedding-3-large)
 apogee_run(0 config get backends.gpt.embedding_model)

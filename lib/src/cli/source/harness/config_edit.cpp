@@ -239,6 +239,9 @@ Lines format_backend_entry(std::string_view name, const BackendConfig& backend,
     if (backend.context_size.has_value()) {
         field("context_size", std::to_string(*backend.context_size));
     }
+    if (backend.cache_type.has_value()) {
+        field("cache_type", std::string{to_string(*backend.cache_type)});
+    }
     if (backend.max_tokens.has_value()) {
         field("max_tokens", std::to_string(*backend.max_tokens));
     }

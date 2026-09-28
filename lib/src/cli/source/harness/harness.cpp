@@ -324,19 +324,37 @@ bool Harness::preload_model(std::string_view backend_name, const StatusSink& on_
 std::int64_t Harness::context_window_for_model(std::string_view model) const {
     const std::string resolved = resolve_chat_backend(config_, model);
     const std::string_view name{resolved};
+    const BackendConfig* backend = config_.find_backend(name);
 
-    // An explicit context_size on the backend entry always wins over the
-    // table: the user knows something we do not, such as a model served with a
-    // deliberately shortened window.
-    if (const BackendConfig* backend = config_.find_backend(name); backend != nullptr) {
-        const std::int64_t configured = backend->context_size.value_or(0);
-        // Fall back on the entry's model name, not the routing key -- the table
-        // is keyed by model family, and the backend key is often a nickname.
-        const std::string_view model_name =
-            backend->model.empty() ? name : std::string_view{backend->model};
-        return resolve_context_window(configured, model_name);
+    // An explicit context_size on the backend entry always wins: the user
+    // knows something we do not, such as a model served with a deliberately
+    // shortened window.
+    const std::int64_t configured = backend != nullptr ? backend->context_size.value_or(0) : 0;
+    if (configured > 0) {
+        return configured;
     }
-    return context_window_for(name);
+
+    // Then a backend that sizes its own window: a local model's is fitted to
+    // the model and the machine at load (26a), which no table of names knows.
+    if (const auto it = providers_.find(resolved);
+        it != providers_.end() && it->second != nullptr) {
+        if (const auto* reporter = dynamic_cast<const ContextWindowReporting*>(it->second.get());
+            reporter != nullptr) {
+            try {
+                if (const std::int64_t window = reporter->context_window(); window > 0) {
+                    return window;
+                }
+            } catch (const std::exception&) {
+                // Unknown, as the table below says for a model it lacks.
+            }
+        }
+    }
+
+    // Fall back on the entry's model name, not the routing key -- the table
+    // is keyed by model family, and the backend key is often a nickname.
+    const std::string_view model_name =
+        backend != nullptr && !backend->model.empty() ? std::string_view{backend->model} : name;
+    return resolve_context_window(configured, model_name);
 }
 
 }  // namespace apogee::harness

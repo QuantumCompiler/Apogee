@@ -636,6 +636,73 @@ Every saved transcript held its calls and results as IR, with no `<tool_call>`, 
 - A Mamba or RWKV model: none is on this machine. They are recurrent, so they take checkpoints the same way.
 - The retrieval block at the conversation's start (`transient_at` 0, the default) still re-reads from 0 on a hybrid model whenever it changes: no checkpoint can be before position 0. Moving that block later is its own question.
 
+### 2026-09-28 — `context-fit-defaults` (backlog item 26a): a window sized to the machine
+
+**The memory nobody asked for.** A local backend with no `context_size` got its model's whole trained window, and llama.cpp allocates a context's attention cache up front. Qwen3.8-27B was trained for 262,144 positions: 16 GiB of cache at `f16` beside 16 GB of weights, before the first word. That is the memory helper models and attachments need next. And without a `context_size` the chat never knew the window at all: a local entry has no row in the fallback table, so a long local chat was never warned or compacted, only run into the wall.
+
+**What was built**
+
+- [x] **The default window** (`models/kv_cache.h`). Unset, a local backend's window is 32,768 tokens, or the trained window when that is smaller, or what free memory holds when that is smaller still (`default_local_window`). A `context_size` is used exactly as written, past the trained window too, and is never fitted.
+- [x] **Fitted only when it has to be** (`llama_real.cpp`, `fit_default_window`). llama.cpp's own fitter (`common/fit.h`, `common_fit_params`, the one llama-server runs) is the lowering step, behind `llama_chat::fit_window`. It projects the model onto each device's free memory by reading it over, which took 0.13–0.72 s on the models measured and, on a machine that holds the default, only ever answers "it fits". So a check that costs nothing goes first: the weights, the default window's cache from the header, the projector and llama-server's 1 GiB margin against what the GPU has free. Only a model that fails it, or whose cache the header cannot size, is handed to the fitter.
+- [x] **An 8-bit cache** (`cache_type` on a llamacpp backend: `f16`, `q8_0`, `q4_0`; unset is `q8_0`). A quantized cache needs flash attention, so it is turned on for one rather than left to detection, which on a device without the kernel would turn it off and fail the context. An `f16` cache leaves it to llama.cpp as before. When the default `q8_0` cannot be made (a head width its blocks of 32 do not divide, say), the context is made at `f16` instead; a type the config names is used or refused, with the way out in the message. `config add-backend --cache-type` and its admin twin write it, byte-identical; `config get` reads it.
+- [x] **The cost, stated** (`models/kv_cache.h`, `gguf_inspect`). The header reader now keeps the attention geometry, and `kv_values_per_position` counts what the cache keeps per position over the layers llama.cpp gives one: a Qwen3.5 or 3.8 every `full_attention_interval` layers of the main stack (its prediction layers excluded), none for a layer with no key-value heads or one sharing an earlier layer's cache (Gemma's `shared_kv_layers`), a sliding layer at its own widths. Latent attention (DeepSeek's) is unknown, never a guess. `models info` prints `window:` and `cache:`; `check`'s backend row ends with the same. `--verbose`'s per-turn cache line now ends with the window and how the cache is kept.
+- [x] **The window the chat measures against** (`ContextWindowReporting` in `provider.h`). `Harness::context_window_for_model` asks the entry's `context_size`, then the backend, then the table. The llamacpp provider answers with its session window once loaded, and before that with the default from the header, read once. Side contexts, image turns and the session all stay inside it; a side request could previously ask for up to the trained window.
+- [x] **Tests**: 24 new cases: the arithmetic rule by rule and against llama.cpp's own sizes, the header read, the provider's window and cache over the scripted runtime (which now has a trained length, a fitted window, a cache type and a vision switch), the harness asking it, a local chat at 90% flagged for compaction, the config, `check`, `models info`, the admin parity, and `config_lifecycle` on the real binary.
+
+**Checked against llama.cpp** (its own `llama_kv_cache: size` line creating a 32,768-position context at the pinned `b11151`, and `kv_values_per_position` on each model's header; every one equal to the MiB):
+
+| Model | `q8_0` | `f16` | Layers with a cache |
+|---|---|---|---|
+| Qwen3.8-27B | 1,088 MiB | 2,048 MiB | 16 of 64, plus 150 MiB of fixed recurrent state |
+| Qwen3-VL-8B | 2,448 MiB | 4,608 MiB | 36 |
+| Gemma 4 12B | 5,712 MiB | 10,752 MiB | 8 full, 40 sliding |
+| Gemma 4 31B | 14,960 MiB | 28,160 MiB | 10 full, 50 sliding |
+| Llama 3.1 8B | 2,176 MiB | 4,096 MiB | 32 |
+| Llama 3.2 3B | 1,904 MiB | 3,584 MiB | 28 |
+| gpt-oss-20b | 816 MiB | 1,536 MiB | 12 full, 12 sliding |
+
+**On real weights**
+
+- **Qwen3.8-27B, no `context_size`**: peak memory footprint (`/usr/bin/time -l`) **16.7 GiB before, 1.7 GiB after**, for the same one-word answer. The weights are memory-mapped and not counted, so the difference is the cache: 16 GiB at the trained window in `f16`, 1.06 GiB at 32K in `q8_0`. `--verbose` reads `window 32768, q8_0 cache`; `check` reads `32768-token window, 1088 MiB q8_0 cache`.
+- **The spike's six tasks** (`apogee complete --tools`, greedy, a throwaway home with writes and the shell allowed, both at the new 32K default): **6/6 on Qwen3-VL-8B and 6/6 on Qwen3.8-27B with the `q8_0` cache, and 6/6 on each with `f16`** -- read a file, write one, count lines with the shell, list a folder and read from it, find a URL and fetch it (a website asked about and allowed), and `17 * 3` without a tool. **Every answer was byte-identical between the two caches**, on both models. Peak memory per run: 2.8 GiB against 4.9 GiB on the 8B, 2.0 against 2.9 GiB on the 27B (which also holds its checkpoints).
+- **Speed** (llama-bench at the pin, flash attention on, 512-token prompt and 128 generated, at an empty cache and at 4,096 tokens deep; each cache type run twice, interleaved `q8_0`, `f16`, `f16`, `q8_0` so the GPU's heat falls on both alike -- it was hot, after an hour of runs, so every absolute number is below the quiet ones):
+
+  | | prompt, empty | generation, empty | prompt at 4K | generation at 4K |
+  |---|---|---|---|---|
+  | Qwen3-VL-8B, `q8_0` | 376.9 t/s | 32.1 | 297.6 | 28.8 |
+  | Qwen3-VL-8B, `f16` | 373.0 | 32.4 | 301.2 | 29.4 |
+  | Qwen3.8-27B, `q8_0` | 97.6 | 9.62 | 92.0 | 9.04 |
+  | Qwen3.8-27B, `f16` | 95.0 | 9.47 | 86.6 | 9.07 |
+
+  Within 2% either way, which is the noise between the two passes of one type, except that the 27B reads a prompt 6% faster at depth with the smaller cache. The six tasks' wall times favoured `q8_0` by more (60.9 s against 83.7 s on the 8B, 328 s against 404 s on the 27B), but those ran first, on a cooler GPU, so they are not the measurement.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The unset window | 32,768, or the trained window when smaller, lowered only when free memory cannot hold it *(default taken)* | Predictable beats clever: a long chat compacts at 90% rather than the cache taking gigabytes. |
+| Who lowers it | llama.cpp's fitter, as the item said — **asked only when a free check fails** *(refinement of the default)* | The fitter reads the model over (0.13–0.72 s a load) and, on this machine, never changed an answer. The free check is the same arithmetic `check` shows. |
+| The cache | `q8_0` keys and values *(default taken)*, measured against `f16` below | Half the memory; the answers and speed below. |
+| Flash attention | On for a quantized cache, llama.cpp's choice for `f16` *(the default, made precise)* | A quantized cache needs it, and auto-detection would fail such a context on a device without the kernel. For `f16` it is not needed, and forcing it on such a device would run attention on the CPU. Auto turned it on for every model measured on Metal. |
+| A model that cannot take `q8_0` | The default falls back to `f16`; a named type is refused | The default is ours to adjust; a named one is the user's. |
+| Showing the cost | `models info`, `check`, and `--verbose` *(default taken)* | Memory a user never asked for is visible where they look. |
+| The window the chat measures | Asked of the backend, after the entry's `context_size` | A local window is fitted at load; no table of names can hold it. |
+| Sliding-window layers | Kept at full size (`swa_full`), as before | Out of scope; see below. |
+
+**Guardrails, each mutation-tested (44 mutants, all caught, one only after its test was strengthened), run in a separate git worktree against the whole unit suite.**
+- **The window:** the trained window, or what fits, ignored; what fits raising the window; positions not padded; an explicit `context_size` fitted, or ignored for `models info`; the session, a side request or an image turn at the trained window; the fitted window ignored after a load; the window before a load taken from the trained one, or not asked of a loaded model.
+- **The layers:** a hybrid's prediction layers kept; no default interval; Qwen3.5 MoE and Qwen3-Next not hybrids; shared layers kept; an absent key-value head count unknown; sliding widths ignored; a sliding period off by one; latent attention sized; the pattern or the whole geometry dropped from the header read, and latent attention unnoticed there.
+- **The bytes:** `q8_0` at one byte a value; `q4_0` at `q8_0`'s size.
+- **The cache type:** any value accepted at load, or dropped; not written by the entry writer, `add-backend` or the admin twin, or missing from the view; not mapped from the config, not marked named, or not passed to the load.
+- **The window the chat measures:** the backend not asked; the backend asked before the entry's `context_size`.
+- **The display:** `models info` without its cache line or its "the default"; `check` without the window; an unsized cache shown as a size; the verbose line without the window.
+- **The survivor:** a width fallback that overrode a width the header did give. The test's value width equalled the fallback's by chance; it now differs.
+
+**Not verified, and found on the way.**
+- **The lowering itself** has not run on real hardware: this machine has 128 GB, and no model here fails the free check. The fitter was run directly: at the trained window it lowered Gemma 4 31B at F16 (62 GB of weights) to 105,728 positions, which the default then caps at 32K anyway.
+- **The `f16` fallback** has not met a model that needs it: every head width here divides into 32.
+- **Gemma 4's sliding layers are most of its cache**: 13.3 of Gemma 4 31B's 14.6 GiB at 32K, because contexts keep a full-size sliding-window cache (`swa_full`) so they can trim. A window-sized one would be about 0.6 GiB, but it cannot be rewound, so it needs the checkpoints 25c built for hybrid models. That is its own item.
+
 ## Milestone K — The install contract
 
 **Goal.** Make v0.1.0 shippable, and do it by closing Ommi's dominant early bug class rather than by documenting it. Ommi lost real time to *silent install drift*: `make install` seeded one tree, `install.sh` another, the updater a third, and `check` validated a fourth — each list correct when written, diverging one commit at a time, and never failing loudly. The fix adopted here is structural: one layout declaration, and every install path reads it.
