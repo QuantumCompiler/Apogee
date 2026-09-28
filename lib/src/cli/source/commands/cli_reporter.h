@@ -60,6 +60,9 @@ public:
     void on_thinking_token(std::string_view chunk) override;
     void on_tool_status(std::string_view detail) override;
     void on_notice(std::string_view text) override;
+    /// Printed, and kept, only under `--verbose`: in an ordinary run the
+    /// spinner owns the line.
+    void on_progress(std::string_view text) override;
     void on_clear_status() override;
     void on_answer_start() override;
     void on_answer_token(std::string_view chunk) override;

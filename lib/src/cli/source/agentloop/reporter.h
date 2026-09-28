@@ -49,6 +49,11 @@ public:
     /// than quietly.
     virtual void on_notice(std::string_view) {}
 
+    /// A progress note from the provider that is not worth keeping in the
+    /// ordinary run -- what a local model's cache reused of the prompt, say.
+    /// The terminal prints it under `--verbose`; everything else drops it.
+    virtual void on_progress(std::string_view) {}
+
     /// Erase any transient status indicator. Called once immediately before the
     /// final answer, and on error paths.
     virtual void on_clear_status() {}

@@ -692,6 +692,10 @@ public:
         notice.type = apogee::harness::StatusEvent::Type::Notice;
         notice.detail = "tiny-model is answering without tools: no template";
         options.on_status(notice);
+        apogee::harness::StatusEvent cache;
+        cache.type = apogee::harness::StatusEvent::Type::PromptCache;
+        cache.detail = "prompt 120 tokens: 100 from the cache, 20 read";
+        options.on_status(cache);
         return answer();
     }
 
@@ -711,9 +715,14 @@ private:
 class NoticeReporter final : public Reporter {
 public:
     std::vector<std::string> notices;
+    std::vector<std::string> progress;
 
     void on_notice(std::string_view text) override {
         notices.emplace_back(text);
+    }
+
+    void on_progress(std::string_view text) override {
+        progress.emplace_back(text);
     }
 };
 
@@ -732,4 +741,7 @@ TEST_CASE("a provider's notice reaches the reporter; its other status does not",
     CHECK(result.answer == "fine");
     CHECK(reporter.notices ==
           std::vector<std::string>{"tiny-model is answering without tools: no template"});
+    // A cache report is progress, not a notice (25c).
+    CHECK(reporter.progress ==
+          std::vector<std::string>{"prompt 120 tokens: 100 from the cache, 20 read"});
 }

@@ -1,9 +1,12 @@
 #pragma once
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "harness/types.h"
@@ -83,6 +86,49 @@ struct ChatRendering {
     std::unique_ptr<ReplyReader> reader;
 };
 
+/// The most checkpoints one context keeps; the oldest goes first (25c,
+/// default taken). A chat needs the one before its latest answer; llama-server
+/// keeps 32 because a server shares a context across many slots.
+inline constexpr std::size_t kMaxCheckpoints = 8;
+
+/// The checkpoint policy every runtime shares (25c), over any `Checkpoint`
+/// with a `position`: the state after exactly that many tokens. One place, so
+/// the real runtime and the scripted one cannot keep different rules.
+///
+/// Adding: one at the same position is replaced, and past kMaxCheckpoints
+/// the oldest goes. Positions only grow along the list -- a trim drops every
+/// checkpoint past where the cache ends, and new ones are taken beyond it.
+template <typename Checkpoint>
+void keep_checkpoint(std::vector<Checkpoint>& held, Checkpoint added) {
+    std::erase_if(held, [&added](const Checkpoint& old) { return old.position == added.position; });
+    while (held.size() >= kMaxCheckpoints) {
+        held.erase(held.begin());
+    }
+    held.push_back(std::move(added));
+}
+
+/// The checkpoint a trim to `position` restores: the newest at or before it,
+/// never one past it -- that one holds a state the new prompt does not share
+/// -- or `held.end()` when there is none.
+template <typename Checkpoint>
+[[nodiscard]] typename std::vector<Checkpoint>::iterator checkpoint_for(
+    std::vector<Checkpoint>& held, std::int64_t position) {
+    for (auto it = held.end(); it != held.begin();) {
+        --it;
+        if (it->position <= position && it->position > 0) {
+            return it;
+        }
+    }
+    return held.end();
+}
+
+/// Drops every checkpoint past `position`: they describe a cache that no
+/// longer exists.
+template <typename Checkpoint>
+void forget_checkpoints_after(std::vector<Checkpoint>& held, std::int64_t position) {
+    std::erase_if(held, [position](const Checkpoint& old) { return old.position > position; });
+}
+
 /// One KV cache -- llama.cpp's `llama_context`.
 ///
 /// A context IS the conversation's warm state. Keeping one alive across turns
@@ -121,13 +167,43 @@ public:
     /// Drops every cached position at or after `position`, so the next decode
     /// re-establishes from there. `position == 0` clears the cache entirely.
     ///
-    /// Returns where the cache now ends -- `position`, or 0. A recurrent or
-    /// hybrid model (Qwen3.5's linear-attention layers, Mamba, RWKV) keeps a
-    /// running state rather than one entry per token, and llama.cpp can rewind
-    /// it only a few tokens; asked for more it refuses and changes nothing.
-    /// The cache is then cleared, and the caller decodes the whole prompt
-    /// from 0 -- slower, where decoding on from `position` would fail.
+    /// Returns where the cache now ends, which the caller decodes on from. A
+    /// recurrent or hybrid model (Qwen3.5's linear-attention layers, Mamba,
+    /// RWKV) keeps a running state rather than one entry per token, and
+    /// llama.cpp can rewind it only a few tokens; asked for more it refuses.
+    /// Then the newest `checkpoint` at or before `position` is restored and
+    /// its position returned; with none, the cache is cleared and 0 returned
+    /// -- slower, where decoding on from `position` would be wrong.
     [[nodiscard]] virtual std::int64_t trim_to(std::int64_t position) = 0;
+
+    /// Saves the part of the cache `trim_to` cannot rewind, as it stands --
+    /// the state after decoding exactly positions `[0, position)` -- so a
+    /// later prompt that diverges at or after `position` decodes on from here
+    /// instead of from 0. llama-server's context checkpoints (25c).
+    ///
+    /// A no-op answering false on a context whose memory rewinds anyway: a
+    /// pure-attention model never pays for one. At most kMaxCheckpoints are
+    /// kept, the oldest evicted; one at the same position is replaced.
+    [[nodiscard]] virtual bool checkpoint(std::int64_t position) {
+        (void)position;
+        return false;
+    }
+
+    /// Whether `checkpoint` does anything here -- the memory cannot be
+    /// rewound. A caller skips the work of finding where to take them when
+    /// it would be thrown away.
+    [[nodiscard]] virtual bool needs_checkpoints() const noexcept {
+        return false;
+    }
+
+    /// How many checkpoints are held, and the host memory they take.
+    [[nodiscard]] virtual std::size_t checkpoint_count() const noexcept {
+        return 0;
+    }
+
+    [[nodiscard]] virtual std::size_t checkpoint_bytes() const noexcept {
+        return 0;
+    }
 
     /// Total tokens this context has ever decoded.
     ///
@@ -232,13 +308,16 @@ public:
     /// its template cannot render this request. The caller then renders
     /// through `apply_builtin_template` and the registry, as before, and says
     /// so when the request carried tools. The default cannot.
+    /// `add_generation_prompt` off renders the messages alone -- a prefix of
+    /// the full prompt, whose length is where its next message starts.
     [[nodiscard]] virtual bool render_chat(const std::vector<harness::ChatMessage>& messages,
                                            const std::vector<harness::Tool>& tools,
-                                           bool enable_thinking, ChatRendering& out,
-                                           std::string& error) const {
+                                           bool enable_thinking, bool add_generation_prompt,
+                                           ChatRendering& out, std::string& error) const {
         (void)messages;
         (void)tools;
         (void)enable_thinking;
+        (void)add_generation_prompt;
         (void)out;
         error = "this runtime has no chat-template layer";
         return false;

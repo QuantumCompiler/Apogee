@@ -114,6 +114,13 @@ void CliReporter::on_notice(std::string_view text) {
     status_.print_line(options_.style.tag(ansi::Role::Warning) + " " + std::string{text});
 }
 
+void CliReporter::on_progress(std::string_view text) {
+    if (options_.verbosity != ansi::Verbosity::Verbose) {
+        return;
+    }
+    status_.print_line(options_.style.tag(ansi::Role::Apogee) + " " + std::string{text});
+}
+
 void CliReporter::on_clear_status() {
     settle_answer();
     thinking_.finish();

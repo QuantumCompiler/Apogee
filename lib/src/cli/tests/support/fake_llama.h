@@ -1,5 +1,6 @@
 #pragma once
 
+#include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -140,17 +141,70 @@ public:
     }
 
     /// False plays a recurrent or hybrid model: a trim that would cut cached
-    /// positions is refused and the cache cleared, as the real context does.
+    /// positions is refused, and the newest checkpoint at or before it is
+    /// restored -- or, with none, the cache cleared -- as the real context
+    /// does.
     bool rewindable = true;
+
+    /// A checkpoint: only its position, which is all a word-level cache has.
+    struct Checkpoint {
+        std::int64_t position = 0;
+    };
+
+    /// Checkpoints held, oldest first, under the runtimes' shared policy
+    /// (`keep_checkpoint`); and each restore, in order.
+    std::vector<Checkpoint> held;
+    std::vector<std::int64_t> restores;
+
+    [[nodiscard]] std::vector<std::int64_t> checkpoints() const {
+        std::vector<std::int64_t> positions;
+        for (const Checkpoint& checkpoint : held) {
+            positions.push_back(checkpoint.position);
+        }
+        return positions;
+    }
 
     [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
         trims.push_back(position);
         if (!rewindable && position < resident) {
+            if (const auto it = backends::checkpoint_for(held, position); it != held.end()) {
+                const std::int64_t restored = it->position;
+                resident = restored;
+                backends::forget_checkpoints_after(held, restored);
+                restores.push_back(restored);
+                return restored;
+            }
             resident = 0;
+            held.clear();
             return 0;
         }
         resident = std::min(resident, position);
+        backends::forget_checkpoints_after(held, position);
         return position;
+    }
+
+    [[nodiscard]] bool checkpoint(std::int64_t position) override {
+        if (rewindable || position <= 0) {
+            return false;
+        }
+        // Taken where the cache really ends -- anything else is a checkpoint
+        // of a state that was never there.
+        REQUIRE(position == resident);
+        backends::keep_checkpoint(held, Checkpoint{position});
+        return true;
+    }
+
+    [[nodiscard]] bool needs_checkpoints() const noexcept override {
+        return !rewindable;
+    }
+
+    [[nodiscard]] std::size_t checkpoint_count() const noexcept override {
+        return held.size();
+    }
+
+    /// A kilobyte each: enough for a report to have something to say.
+    [[nodiscard]] std::size_t checkpoint_bytes() const noexcept override {
+        return held.size() * 1024;
     }
 
     [[nodiscard]] std::int64_t eval_count() const noexcept override {
@@ -215,6 +269,22 @@ public:
         return state_->trim_to(position);
     }
 
+    [[nodiscard]] bool checkpoint(std::int64_t position) override {
+        return state_->checkpoint(position);
+    }
+
+    [[nodiscard]] bool needs_checkpoints() const noexcept override {
+        return state_->needs_checkpoints();
+    }
+
+    [[nodiscard]] std::size_t checkpoint_count() const noexcept override {
+        return state_->checkpoint_count();
+    }
+
+    [[nodiscard]] std::size_t checkpoint_bytes() const noexcept override {
+        return state_->checkpoint_bytes();
+    }
+
     [[nodiscard]] std::int64_t eval_count() const noexcept override {
         return state_->eval_count();
     }
@@ -257,6 +327,10 @@ public:
     bool chat_template = false;
     /// When set, `render_chat` fails with it: a template that cannot render.
     std::string chat_template_error;
+    /// A template that renders a conversation-so-far differently from the
+    /// same messages inside a full prompt -- its render without the
+    /// generation prompt is not a token prefix of the full one.
+    bool unstable_prefix = false;
     /// Words `token_text` renders as nothing, the way a special token is --
     /// `special_token_text` still renders them.
     std::set<std::string> special_words;
@@ -270,6 +344,7 @@ public:
         std::vector<harness::ChatMessage> messages;
         std::vector<harness::Tool> tools;
         bool enable_thinking = true;
+        bool add_generation_prompt = true;
     };
 
     mutable std::vector<ChatRender> chat_renders;
@@ -320,9 +395,9 @@ public:
     /// switch visible -- so a test can read what the model was shown.
     [[nodiscard]] bool render_chat(const std::vector<harness::ChatMessage>& messages,
                                    const std::vector<harness::Tool>& tools, bool enable_thinking,
-                                   backends::ChatRendering& out,
+                                   bool add_generation_prompt, backends::ChatRendering& out,
                                    std::string& error) const override {
-        chat_renders.push_back({messages, tools, enable_thinking});
+        chat_renders.push_back({messages, tools, enable_thinking, add_generation_prompt});
         if (!chat_template) {
             error = "the model ships no chat template";
             return false;
@@ -331,7 +406,18 @@ public:
             error = chat_template_error;
             return false;
         }
+        // Tools first, as a real template puts them in its system block: a
+        // render of the messages before the last user one is then a prefix.
         std::string prompt = "[template]";
+        if (!tools.empty()) {
+            prompt += " tools:";
+            for (const harness::Tool& tool : tools) {
+                prompt += " " + tool.name;
+            }
+            out.grammar.gbnf = "root ::= fake-call";
+            out.grammar.lazy = true;
+            out.grammar.trigger_patterns = {"<tool_call>"};
+        }
         for (const harness::ChatMessage& message : messages) {
             prompt += " " + std::string{harness::to_string(message.role)} + ": ";
             prompt += message.content.plain_text();
@@ -342,16 +428,11 @@ public:
                 prompt += " answers:" + message.tool_call_id;
             }
         }
-        if (!tools.empty()) {
-            prompt += " tools:";
-            for (const harness::Tool& tool : tools) {
-                prompt += " " + tool.name;
-            }
-            out.grammar.gbnf = "root ::= fake-call";
-            out.grammar.lazy = true;
-            out.grammar.trigger_patterns = {"<tool_call>"};
+        if (add_generation_prompt) {
+            prompt += enable_thinking ? " assistant:" : " assistant(no-think):";
+        } else if (unstable_prefix) {
+            prompt += " [partial]";
         }
-        prompt += enable_thinking ? " assistant:" : " assistant(no-think):";
         out.prompt = std::move(prompt);
         out.preserved_tokens = {id_for("<tool_call>"), id_for("</tool_call>")};
         out.stops = stops;
@@ -480,6 +561,7 @@ public:
     /// Applied to every model: see FakeLlamaModel.
     bool chat_template = false;
     std::string chat_template_error;
+    bool unstable_prefix = false;
     std::set<std::string> special_words;
     std::vector<std::string> stops;
     std::string grammar_error;
@@ -517,6 +599,7 @@ public:
         loaded->builtin_template_prefix = builtin_template_prefix;
         loaded->chat_template = chat_template;
         loaded->chat_template_error = chat_template_error;
+        loaded->unstable_prefix = unstable_prefix;
         loaded->special_words = special_words;
         loaded->stops = stops;
         loaded->grammar_error = grammar_error;

@@ -220,3 +220,20 @@ TEST_CASE("a status taking the terminal commits the answer line under it first",
     CHECK(screen.lines() ==
           std::vector<std::string>{"Let me look at that file.", "It says hello."});
 }
+
+TEST_CASE("a progress note is printed only under --verbose", "[ux][reporter]") {
+    // What a local model's cache reused (25c): a log line for someone who
+    // asked for the log, and nothing in an ordinary run, where the spinner
+    // owns the line.
+    Harness plain;
+    CliReporter quiet = plain.make(true, Verbosity::Line);
+    quiet.on_progress("prompt 120 tokens: 100 from the cache, 20 read");
+    CHECK(plain.progress.str().find("from the cache") == std::string::npos);
+
+    Harness verbose;
+    CliReporter loud = verbose.make(true, Verbosity::Verbose);
+    loud.on_progress("prompt 120 tokens: 100 from the cache, 20 read");
+    CHECK(verbose.progress.str().find("prompt 120 tokens: 100 from the cache, 20 read") !=
+          std::string::npos);
+    CHECK(verbose.answer.str().empty());
+}

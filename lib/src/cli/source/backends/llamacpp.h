@@ -275,6 +275,18 @@ private:
                                                        const harness::StreamOptions& options,
                                                        const std::vector<std::string>& images);
 
+    /// Where the session's context takes checkpoints for `request`'s prompt
+    /// (25c): a few tokens short of its end, and where its last user message
+    /// starts when that is a real token boundary.
+    [[nodiscard]] std::vector<std::int64_t> checkpoint_marks(
+        const harness::ChatRequest& request, const RenderedRequest& rendered,
+        const std::vector<std::int32_t>& prompt) const;
+
+    /// A `PromptCache` status: what the cache kept of this prompt and what
+    /// was read again, with the checkpoints held (`--verbose` prints it).
+    void report_cache(const harness::StreamOptions& options, std::size_t prompt_tokens,
+                      std::int64_t kept, const LlamaContext& context) const;
+
     /// Says, once per turn, that a request carrying tools is answered without
     /// them -- the fallback path cannot put them in the prompt.
     void notice_if_toolless(const harness::ChatRequest& request, const RenderedRequest& rendered,

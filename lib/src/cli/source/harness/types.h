@@ -288,6 +288,11 @@ struct StatusEvent {
         /// error -- a local model whose template cannot take tools, say, and
         /// so answers without them. `detail` is the line.
         Notice,
+        /// What a local model's cache kept of this prompt and what it read
+        /// again, with its checkpoints (25c). `detail` is the line, `tokens`
+        /// the prompt, `used_tokens` the part reused. Progress: shown where
+        /// the user asked for it (`--verbose`).
+        PromptCache,
     };
     enum class Phase : std::uint8_t { Start, Done, Error };
 

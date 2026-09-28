@@ -105,7 +105,7 @@ std::unique_ptr<Templates> Templates::load(const llama_model* model, std::string
 bool Templates::render(const Inputs& inputs, Rendered& out, std::string& error) const {
     common_chat_templates_inputs request;
     request.use_jinja = true;
-    request.add_generation_prompt = true;
+    request.add_generation_prompt = inputs.add_generation_prompt;
     request.enable_thinking = inputs.enable_thinking;
     // Reasoning separated into its own field, set on the inputs as well as
     // the parser: the template's rendering and the parser's reading both key

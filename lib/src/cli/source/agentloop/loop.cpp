@@ -139,10 +139,15 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
             reporter.on_thinking_token(chunk);
         };
         stream.on_status = [&reporter](const harness::StatusEvent& event) {
-            // Only notices cross here: a model's load progress is the
-            // surface's own business, reported before the turn.
-            if (event.type == harness::StatusEvent::Type::Notice && !event.detail.empty()) {
+            // Only notices and progress notes cross here: a model's load
+            // progress is the surface's own business, reported before the turn.
+            if (event.detail.empty()) {
+                return;
+            }
+            if (event.type == harness::StatusEvent::Type::Notice) {
                 reporter.on_notice(event.detail);
+            } else if (event.type == harness::StatusEvent::Type::PromptCache) {
+                reporter.on_progress(event.detail);
             }
         };
         stream.on_token = [&](std::string_view chunk) {

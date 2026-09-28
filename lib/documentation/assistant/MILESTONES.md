@@ -540,7 +540,7 @@ Two smaller corrections came from the same run: llama.cpp's own logging is now r
 | arithmetic, no tool | pass, 5.7 s | pass, 31 s | pass | used the shell for `17 * 3` |
 | | **6/6** | **6/6** | 5/6 | 2/6 (the spike measured 3/6) |
 
-Every saved transcript held its calls and results as IR, with no `<tool_call>`, `<think>` or template markup. `apogee complete --tools -m qwen8b "What does notes.txt say?"` called `read_file` and answered from the file. `serve -m qwen8b --tools` answered the same question over HTTP with `apogee_tool_calls: ["read_file"]`. `analyze --agent security-review -m qwen8b --branch feature` found the hardcoded password in a branch it had not checked out, so it had called `git_diff`. The 27B's times are the hybrid-model re-read that [25c](../backlog/hybrid-prompt-checkpoints.md) exists for. Below 8B there is no special effort (the user's call); the repeated-call guard is the only concession.
+Every saved transcript held its calls and results as IR, with no `<tool_call>`, `<think>` or template markup. `apogee complete --tools -m qwen8b "What does notes.txt say?"` called `read_file` and answered from the file. `serve -m qwen8b --tools` answered the same question over HTTP with `apogee_tool_calls: ["read_file"]`. `analyze --agent security-review -m qwen8b --branch feature` found the hardcoded password in a branch it had not checked out, so it had called `git_diff`. The 27B's times are the hybrid-model re-read that [25c](#milestone-j--local-inference) exists for. Below 8B there is no special effort (the user's call); the repeated-call guard is the only concession.
 
 **Found on the way.**
 - **An empty answer.** When a reply matched no format and nothing of it had been shown, the turn ended with a notice and an empty answer. Found on Llama 3.2 3B. The raw reply now comes out as the text it was, the same safety net the fallback's gate keeps; the exception is a model that was still thinking, whose reasoning never becomes the answer.
@@ -577,6 +577,64 @@ Every saved transcript held its calls and results as IR, with no `<tool_call>`, 
 - `common` on Linux and Windows. It builds on every target (LLAMA_BUILD_COMMON was already on), but the real-weights runs were on macOS only.
 - An image turn with tools on real weights; the scripted runtime covers the shared path.
 - The fallback's notice, on a real GGUF without a template: none is on this machine.
+
+### 2026-09-28 — `hybrid-prompt-checkpoints` (backlog item 25c): a hybrid model reads only what is new
+
+**The re-read.** Qwen3.5 and 3.8 mix attention layers with linear-attention layers, whose running state llama.cpp cannot rewind. A thinking model's template re-renders the last answer without its reasoning, so every turn's prompt parts from the cache inside that answer. The trim to the shared prefix was refused, the cache cleared, and the whole conversation read again. That has been correct since 2026-09-23, and slow: at 25b, Qwen3.8-27B spent 31–242 s per tool task, most of it re-reading.
+
+**What was built**
+
+- [x] **Checkpoints, as llama-server takes them.** The seam is in `llama_runtime.h`.
+  - `LlamaContext::checkpoint(position)` saves the part of the cache that cannot be rewound, as it stands after exactly `position` tokens. It uses `llama_state_seq_get_data_ext` with `LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY`: the running state only, while the attention half stays in the cache and trims like any other.
+  - `trim_to`, when refused, restores the newest checkpoint at or before the position and trims to it. The restored state ends exactly there, so the cut succeeds. It returns where the cache really ends. With no checkpoint to go back to, it clears as before.
+  - `needs_checkpoints()` answers true only for a recurrent or hybrid model (`llama_model_is_recurrent/hybrid`). A sliding-window model would qualify, but contexts keep a full-size window cache by default (`swa_full`), which trims.
+- [x] **One policy, shared** (`keep_checkpoint`, `checkpoint_for`, `forget_checkpoints_after`: templates in `llama_runtime.h`). A checkpoint at a held position replaces it. Past `kMaxCheckpoints` (8) the oldest goes. A restore takes the newest at or before the divergence, never one past it, and a trim drops every checkpoint past where the cache ends. The real runtime and the scripted one both use it, so the tests hold the real rules.
+- [x] **Where they are taken** (`LlamaCppProvider::checkpoint_marks`). `decode_in_batches` ends a batch at each mark and saves there.
+  - **Four tokens short of the prompt's end**, llama-server's offset. The next prompt diverges inside the generation prompt that opens this answer (`<|im_start|>assistant\n<think>\n` on Qwen), so a checkpoint at the very end would lie past the divergence.
+  - **Where the last user message starts.** It is found by rendering the conversation before it alone (`render_chat`, and the fallback's `render_prompt`, gained `add_generation_prompt`). It is kept only if it really is a token prefix of the prompt, because a template that renders earlier messages differently once they are not last gives no position.
+  - None on a side request's context, an image turn's, or a pure-attention model's, where finding the marks is skipped entirely.
+- [x] **The report.** A `PromptCache` status event per turn gives the prompt, the tokens reused and read, and the checkpoints held with their size. The loop hands it to a new `Reporter::on_progress`, and the terminal prints it under `--verbose` only; machine mode and `serve` drop it.
+- [x] **Tests**: 10 new cases, over the scripted runtime (`rewindable = false` now restores through the shared policy) and the policy itself, plus the loop's progress hand-off and the verbose-only print. The old "reads everything again" case now holds the invariant it was written for: decoding resumes exactly where the cache really ends, never past an uncut prefix.
+
+**On real weights** (Qwen3.8-27B Q4_K_M, `context_size` 32768, greedy; `--verbose` lines):
+
+| | prompt | from the cache | read | checkpoints held |
+|---|---|---|---|---|
+| chat, turn 1 | 61 | 0 | 61 | 1 (150 MiB) |
+| turn 2 | 115 | 57 | 58 | 3 |
+| turn 3 | 136 | 111 | 25 | 5 |
+| turn 4 | 168 | 132 | 36 | 7 (1047 MiB) |
+| tool loop, step 1 | 2752 | 0 | 2752 | 1 |
+| steps 2–6 | 2860–3142 | all but the new | 112, 140, 53, 51, 54 | 2–6 |
+
+- The four-turn chat's answers, and the tool loop's (list a folder, read its three files, name the color), were **byte-identical** to a build without checkpoints (25b, `1aa702d`) on the same prompts.
+- Wall time was 21.6 s against 33.7 s for the chat, and **46.5 s against 156.3 s** for the tool loop.
+- Qwen3-VL-8B (pure attention) took no checkpoints, and its turns reused the cache by trimming, as before.
+- **Measured: one checkpoint of Qwen3.8-27B's state is 149.6 MiB**, so the cap of 8 is about 1.2 GiB of host memory at most. A chat adds two per turn, the user-start one and the end one, and a tool step adds one.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| How | **Checkpoints, as llama-server does them** | Keeping reasoning in the IR so the prompt never diverges would break "thinking is never persisted", and would not help a template that changes earlier text for another reason. |
+| How many | 8 per context, the newest kept *(default taken)* | A chat needs the one before its latest answer. llama-server's 32 is for a server's slots; at 150 MiB each, 8 is already 1.2 GiB. |
+| Where | Four tokens short of the prompt's end, and the last user message's start *(default taken; the end one placed as llama-server places it)* | The two divergence points a chat and a tool loop produce. A checkpoint at the exact end would be past the thinking model's divergence and never usable. |
+| Image turns | None *(default taken)* | They run on a throwaway context. |
+| Which models | Recurrent or hybrid only | A pure-attention cache trims; `swa_full` makes a sliding-window one trim too. |
+| The policy's home | Templates in `llama_runtime.h`, shared by both runtimes | The cap and "never past the divergence" are tested where they run, not on a copy. |
+| A user-start mark that is not a prefix | Not taken | A checkpoint at a position the prompt never passed through holds a state no later prompt shares. |
+| The report | `--verbose` only | Memory the user never asked for is visible where they look for it, and silent otherwise. |
+
+**Guardrails, each mutation-tested (17 mutants, all caught), run in a separate git worktree.**
+- **The restore:** a checkpoint past the divergence restored (the guardrail's first named mutant); the restore skipped (the second).
+- **The policy:** the cap never evicting, or off by one; a same-position checkpoint doubled; stale checkpoints kept after a trim.
+- **The marks:** no checkpoint near the end, or one at the very end; the user-start mark taken without the prefix check (caught by a case added for it before the run: a template whose conversation-so-far renders differently), or not at all.
+- **The decode:** no batch split at a mark; a mark passed without a checkpoint.
+- **The rest:** a pure-attention model paying to find marks; a side request taking checkpoints; the report never sent; the loop dropping progress; the terminal printing it without `--verbose`.
+
+**Not verified.**
+- A Mamba or RWKV model: none is on this machine. They are recurrent, so they take checkpoints the same way.
+- The retrieval block at the conversation's start (`transient_at` 0, the default) still re-reads from 0 on a hybrid model whenever it changes: no checkpoint can be before position 0. Moving that block later is its own question.
 
 ## Milestone K — The install contract
 

@@ -208,15 +208,16 @@ TEST_CASE("a reused prefix never claims more than the cache holds", "[backends][
     }
 }
 
-TEST_CASE("a model whose memory cannot be rewound decodes the whole prompt again",
+TEST_CASE("a model whose memory cannot be rewound never decodes on from an uncut prefix",
           "[backends][llamacpp][kv]") {
     // Qwen3.5 on 2026-09-23: its linear-attention layers keep a running state
     // llama.cpp can rewind only a few tokens, and a thinking model's template
     // re-renders the last answer without its reasoning -- so turn two's prompt
     // parts from the cache early, the trim is refused, and decoding on from
     // the shared prefix failed every second turn ("for M-RoPE, it is required
-    // that the position satisfies: X < Y"). The cache is cleared instead and
-    // the prompt decoded from 0.
+    // that the position satisfies: X < Y"). The cache is cleared then -- or,
+    // since 25c, a checkpoint at or before the prefix restored -- and the
+    // prompt decodes from exactly where the cache really ends.
     Fixture fixture;
     fixture.runtime->rewindable = false;
 
@@ -239,10 +240,19 @@ TEST_CASE("a model whose memory cannot be rewound decodes the whole prompt again
     // A shared prefix was found, and asked for...
     REQUIRE_FALSE(session->trims.empty());
     CHECK(session->trims.back() > 0);
-    // ...but the cache could not be cut there, so the prompt decoded whole.
+    // ...but the cache could not be cut there: it went back to a checkpoint
+    // at or before the prefix, and the prompt decoded on from exactly there.
     const apogee::backends::DecodeRecord& prompt = session->decodes.at(decodes_before);
-    CHECK(prompt.position == 0);
-    CHECK(prompt.count == second.usage.prompt_tokens);
+    const std::int64_t restored = session->restores.empty() ? 0 : session->restores.back();
+    CHECK(restored <= session->trims.back());
+    CHECK(prompt.position == restored);
+    std::int64_t decoded = 0;
+    for (std::size_t i = decodes_before; i < session->decodes.size(); ++i) {
+        if (session->decodes[i].position < second.usage.prompt_tokens) {
+            decoded += session->decodes[i].count;
+        }
+    }
+    CHECK(decoded == second.usage.prompt_tokens - restored);
 }
 
 TEST_CASE("a model whose memory cannot be rewound still reuses a prompt that only extends",
@@ -521,7 +531,10 @@ TEST_CASE("the model load reports status through the sink", "[backends][llamacpp
     std::vector<apogee::harness::StatusEvent> events;
     apogee::harness::StreamOptions options;
     options.on_status = [&events](const apogee::harness::StatusEvent& event) {
-        events.push_back(event);
+        // The load's own events; the turn's cache report follows them.
+        if (event.type != apogee::harness::StatusEvent::Type::PromptCache) {
+            events.push_back(event);
+        }
     };
 
     (void)fixture.provider->stream_chat(turn({ChatMessage::user("hi")}), options);
@@ -1159,4 +1172,246 @@ TEST_CASE("a warm count includes the tool definitions", "[backends][llamacpp][to
     const std::int64_t tooled =
         fixture.provider->count_prompt_tokens(with_tools({ChatMessage::user("x")}));
     CHECK(tooled > bare);
+}
+
+// ---------------------------------------------------------------------------
+// Checkpoints for a model whose memory cannot be rewound (25c)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Prompt tokens the context decoded since record `from`, and where the first
+/// of those decodes started -- the prompt phase only, which ends where
+/// generation begins (`prompt_end`).
+struct PromptDecode {
+    std::int64_t start = -1;
+    std::int64_t count = 0;
+};
+
+PromptDecode prompt_decode(const apogee::testing::FakeLlamaContext& context, std::size_t from,
+                           std::int64_t prompt_end) {
+    PromptDecode out;
+    for (std::size_t i = from; i < context.decodes.size(); ++i) {
+        const apogee::backends::DecodeRecord& record = context.decodes[i];
+        if (record.position >= prompt_end) {
+            break;
+        }
+        if (out.start < 0) {
+            out.start = record.position;
+        }
+        out.count += record.count;
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a hybrid model's second turn reads only what is new",
+          "[backends][llamacpp][checkpoint]") {
+    // The re-read 25c removes: the template re-renders turn one's answer
+    // without its reasoning, so turn two parts from the cache at the answer,
+    // the running state cannot be cut there, and the whole conversation was
+    // read again. Now the checkpoint just short of turn one's prompt end is
+    // restored and only the rest is read.
+    TemplateFixture fixture{{"<think>", "pondering", "</think>", "first", " answer"}};
+    fixture.runtime->rewindable = false;
+    const std::vector<ChatMessage> opening{ChatMessage::system("be brief"),
+                                           ChatMessage::user("one two three four five")};
+    const auto first = fixture.provider->chat(turn(opening), {});
+    auto session = fixture.runtime->model->contexts.front();
+    const std::int64_t first_prompt = first.usage.prompt_tokens;
+    // Where the last user message starts ("[template] system: be brief"), and
+    // four tokens short of the prompt's end.
+    CHECK(session->checkpoints() == std::vector<std::int64_t>{4, first_prompt - 4});
+
+    const std::size_t mark = session->decodes.size();
+    session->sampled = 0;
+    std::vector<ChatMessage> next = opening;
+    next.push_back(ChatMessage::assistant(first.message.content));
+    next.push_back(ChatMessage::user("six seven"));
+    const auto second = fixture.provider->chat(turn(next), {});
+
+    CHECK(session->restores == std::vector<std::int64_t>{first_prompt - 4});
+    const PromptDecode read = prompt_decode(*session, mark, second.usage.prompt_tokens);
+    CHECK(read.start == first_prompt - 4);
+    CHECK(read.count == second.usage.prompt_tokens - (first_prompt - 4));
+}
+
+TEST_CASE("a hybrid model's tool step reads only the call and its result",
+          "[backends][llamacpp][checkpoint]") {
+    TemplateFixture fixture{kReadFileCall};
+    fixture.runtime->rewindable = false;
+    const std::vector<ChatMessage> asked{ChatMessage::user("what does notes.txt say, please")};
+    const auto step = fixture.provider->chat(with_tools(asked), {});
+    REQUIRE(step.message.tool_calls.size() == 1);
+    auto session = fixture.runtime->model->contexts.front();
+    const std::int64_t first_prompt = step.usage.prompt_tokens;
+
+    const std::size_t mark = session->decodes.size();
+    session->sampled = 0;
+    ChatMessage call = ChatMessage::assistant("");
+    call.tool_calls = step.message.tool_calls;
+    apogee::harness::ToolResult result;
+    result.tool_call_id = step.message.tool_calls.front().id;
+    result.name = "read_file";
+    result.content = "hi there";
+    std::vector<ChatMessage> next = asked;
+    next.push_back(call);
+    next.push_back(ChatMessage::from_tool_result(result));
+    const auto answer = fixture.provider->chat(with_tools(next), {});
+
+    CHECK(session->restores == std::vector<std::int64_t>{first_prompt - 4});
+    const PromptDecode read = prompt_decode(*session, mark, answer.usage.prompt_tokens);
+    CHECK(read.start == first_prompt - 4);
+    CHECK(read.count == answer.usage.prompt_tokens - (first_prompt - 4));
+}
+
+TEST_CASE("a checkpoint past the divergence is never restored",
+          "[backends][llamacpp][checkpoint]") {
+    // The last user message itself changed: turn two parts from the cache
+    // inside it, before the checkpoint near the prompt's end. That one holds
+    // a state the new prompt does not share; the one at the message's start
+    // is the newest that is safe.
+    TemplateFixture fixture{{"ok"}};
+    fixture.runtime->rewindable = false;
+    (void)fixture.provider->chat(
+        turn({ChatMessage::system("S"), ChatMessage::user("q one two three four five six")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    // "[template] system: S" is three tokens; twelve in all, so 3 and 8.
+    REQUIRE(session->checkpoints() == std::vector<std::int64_t>{3, 8});
+
+    session->sampled = 0;
+    (void)fixture.provider->chat(
+        turn({ChatMessage::system("S"), ChatMessage::user("q ONE two three four five six")}), {});
+    CHECK(session->restores == std::vector<std::int64_t>{3});
+    // Nothing past the restored point survives it.
+    for (const std::int64_t held : session->checkpoints()) {
+        CHECK(held >= 3);
+    }
+}
+
+TEST_CASE("the last user message's checkpoint is taken only at a real token boundary",
+          "[backends][llamacpp][checkpoint]") {
+    // A template that renders the conversation before the last user message
+    // differently on its own gives a length that is no position in the
+    // prompt: a checkpoint there would hold a state no prompt ever reached.
+    TemplateFixture fixture{{"ok"}};
+    fixture.runtime->rewindable = false;
+    fixture.runtime->unstable_prefix = true;
+    const auto response = fixture.provider->chat(
+        turn({ChatMessage::system("S"), ChatMessage::user("q one two three four five six")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    // Only the one near the prompt's end.
+    CHECK(session->checkpoints() == std::vector<std::int64_t>{response.usage.prompt_tokens - 4});
+}
+
+TEST_CASE("with no checkpoint before the divergence the prompt is read again from 0",
+          "[backends][llamacpp][checkpoint]") {
+    TemplateFixture fixture{{"ok"}};
+    fixture.runtime->rewindable = false;
+    (void)fixture.provider->chat(turn({ChatMessage::user("alpha beta gamma delta epsilon")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    const std::size_t mark = session->decodes.size();
+    session->sampled = 0;
+    // Parts at the second token, before any checkpoint.
+    const auto second = fixture.provider->chat(turn({ChatMessage::system("new")}), {});
+    CHECK(session->restores.empty());
+    CHECK(prompt_decode(*session, mark, second.usage.prompt_tokens).start == 0);
+}
+
+TEST_CASE("a side request leaves the session's checkpoints untouched",
+          "[backends][llamacpp][checkpoint]") {
+    TemplateFixture fixture{{"ok"}};
+    fixture.runtime->rewindable = false;
+    (void)fixture.provider->chat(
+        turn({ChatMessage::system("S"), ChatMessage::user("q one two three four five six")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    const std::vector<std::int64_t> before = session->checkpoints();
+    REQUIRE_FALSE(before.empty());
+
+    ChatRequest title = turn({ChatMessage::user("name this conversation in three words")});
+    title.transient.side_request = true;
+    (void)fixture.provider->chat(title, {});
+    REQUIRE(fixture.runtime->model->contexts.size() == 2);
+    CHECK(session->checkpoints() == before);
+    CHECK(session->restores.empty());
+    // The side request's own throwaway context takes none either: nothing
+    // would ever go back to it.
+    CHECK(fixture.runtime->model->contexts.back()->checkpoints().empty());
+}
+
+TEST_CASE("a pure-attention model takes no checkpoints, and pays nothing to find them",
+          "[backends][llamacpp][checkpoint]") {
+    TemplateFixture fixture{{"ok"}};
+    (void)fixture.provider->chat(
+        turn({ChatMessage::system("S"), ChatMessage::user("q one two three four five six")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    CHECK(session->checkpoints().empty());
+    // No second render to find the last user message's start.
+    for (const auto& render : fixture.runtime->model->chat_renders) {
+        CHECK(render.add_generation_prompt);
+    }
+}
+
+TEST_CASE("each turn reports what the cache kept and the checkpoints it holds",
+          "[backends][llamacpp][checkpoint]") {
+    TemplateFixture fixture{{"ok"}};
+    fixture.runtime->rewindable = false;
+    std::vector<apogee::harness::StatusEvent> reports;
+    apogee::harness::StreamOptions options;
+    options.on_status = [&reports](const apogee::harness::StatusEvent& event) {
+        if (event.type == apogee::harness::StatusEvent::Type::PromptCache) {
+            reports.push_back(event);
+        }
+    };
+    const auto response = fixture.provider->stream_chat(
+        turn({ChatMessage::system("S"), ChatMessage::user("q one two three four five six")}),
+        options);
+    REQUIRE(reports.size() == 1);
+    CHECK(reports.front().tokens == response.usage.prompt_tokens);
+    CHECK(reports.front().used_tokens == 0);
+    CHECK(reports.front().detail.find("0 from the cache") != std::string::npos);
+    CHECK(reports.front().detail.find("2 of 8 checkpoints, 0.0 MiB") != std::string::npos);
+
+    // A pure-attention model has no checkpoints to report.
+    TemplateFixture plain{{"ok"}};
+    std::vector<std::string> lines;
+    apogee::harness::StreamOptions quiet;
+    quiet.on_status = [&lines](const apogee::harness::StatusEvent& event) {
+        if (event.type == apogee::harness::StatusEvent::Type::PromptCache) {
+            lines.push_back(event.detail);
+        }
+    };
+    (void)plain.provider->stream_chat(turn({ChatMessage::user("hello")}), quiet);
+    REQUIRE(lines.size() == 1);
+    CHECK(lines.front().find("checkpoints") == std::string::npos);
+}
+
+TEST_CASE("the checkpoint policy: replaced at a position, capped, never restored past",
+          "[backends][llamacpp][checkpoint]") {
+    struct Held {
+        std::int64_t position = 0;
+        int tag = 0;
+    };
+
+    std::vector<Held> held;
+    for (std::int64_t position = 1; position <= 10; ++position) {
+        apogee::backends::keep_checkpoint(held, Held{position, 0});
+    }
+    // The cap keeps the newest eight: the two oldest went first.
+    REQUIRE(held.size() == apogee::backends::kMaxCheckpoints);
+    CHECK(held.front().position == 3);
+    CHECK(held.back().position == 10);
+    // One at a position already held replaces it rather than doubling it.
+    apogee::backends::keep_checkpoint(held, Held{10, 7});
+    CHECK(held.size() == apogee::backends::kMaxCheckpoints);
+    CHECK(held.back().tag == 7);
+
+    // The newest at or before the divergence -- never one past it.
+    CHECK(apogee::backends::checkpoint_for(held, 6)->position == 6);
+    CHECK(apogee::backends::checkpoint_for(held, 100)->position == 10);
+    CHECK(apogee::backends::checkpoint_for(held, 2) == held.end());
+    apogee::backends::forget_checkpoints_after(held, 5);
+    CHECK(held.back().position == 5);
+    CHECK(held.size() == 3);
 }

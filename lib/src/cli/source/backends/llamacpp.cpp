@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -92,18 +93,52 @@ void reject_if_too_long(const LlamaContext& context, std::size_t prompt_tokens,
     }
 }
 
+///
+/// `checkpoints` are absolute positions at which to take a checkpoint (25c):
+/// a batch ends exactly there, and the context saves the state after
+/// `[0, mark)` before the next begins. Positions outside what this call
+/// decodes are skipped -- one at `position` itself is taken first, since the
+/// cache already ends there.
 void decode_in_batches(LlamaContext& context, const std::vector<std::int32_t>& tokens,
-                       std::int64_t position) {
+                       std::int64_t position, std::vector<std::int64_t> checkpoints = {}) {
     const auto limit =
         static_cast<std::size_t>(std::max<std::int64_t>(context.max_batch_tokens(), 1));
-    for (std::size_t offset = 0; offset < tokens.size(); offset += limit) {
-        const std::size_t count = std::min(limit, tokens.size() - offset);
+    const std::int64_t end = position + static_cast<std::int64_t>(tokens.size());
+    std::sort(checkpoints.begin(), checkpoints.end());
+    std::erase_if(checkpoints,
+                  [position, end](std::int64_t mark) { return mark < position || mark >= end; });
+    auto next_mark = checkpoints.begin();
+    if (next_mark != checkpoints.end() && *next_mark == position) {
+        (void)context.checkpoint(position);
+        ++next_mark;
+    }
+    std::size_t offset = 0;
+    while (offset < tokens.size()) {
+        std::size_t count = std::min(limit, tokens.size() - offset);
+        const std::int64_t at = position + static_cast<std::int64_t>(offset);
+        if (next_mark != checkpoints.end() && *next_mark < at + static_cast<std::int64_t>(count)) {
+            count = static_cast<std::size_t>(*next_mark - at);
+        }
         const std::vector<std::int32_t> slice{
             tokens.begin() + static_cast<std::ptrdiff_t>(offset),
             tokens.begin() + static_cast<std::ptrdiff_t>(offset + count)};
-        context.decode(slice, position + static_cast<std::int64_t>(offset));
+        context.decode(slice, at);
+        offset += count;
+        if (next_mark != checkpoints.end() &&
+            *next_mark == position + static_cast<std::int64_t>(offset)) {
+            (void)context.checkpoint(*next_mark);
+            ++next_mark;
+        }
     }
 }
+
+/// How far short of a prompt's end its checkpoint is taken. A thinking
+/// model's next prompt re-renders this turn's answer without its reasoning,
+/// so it diverges inside the generation prompt that opens the answer
+/// (`<|im_start|>assistant\n<think>\n` on Qwen) -- a checkpoint at the very
+/// end would lie past the divergence and never be usable. llama-server's
+/// offset (`checkpoint_offsets`, tools/server/server-context.cpp).
+constexpr std::int64_t kCheckpointTail = 4;
 
 /// Decodes the base64 payload of a `data:` URI. Empty for anything else.
 ///
@@ -498,7 +533,7 @@ LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
     // ignores it (Qwen's closed think block is exactly this switch).
     const bool enable_thinking = !request.transient.skip_reasoning;
     auto chat = std::make_unique<ChatRendering>();
-    if (model_->render_chat(messages, request.tools, enable_thinking, *chat,
+    if (model_->render_chat(messages, request.tools, enable_thinking, true, *chat,
                             rendered.fallback_reason)) {
         rendered.text = chat->prompt;
         rendered.chat = std::move(chat);
@@ -513,6 +548,79 @@ LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
         rendered.text += reasoning_skip_for(profile());
     }
     return rendered;
+}
+
+std::vector<std::int64_t> LlamaCppProvider::checkpoint_marks(
+    const harness::ChatRequest& request, const RenderedRequest& rendered,
+    const std::vector<std::int32_t>& prompt) const {
+    std::vector<std::int64_t> marks;
+    const auto size = static_cast<std::int64_t>(prompt.size());
+    if (size > kCheckpointTail) {
+        marks.push_back(size - kCheckpointTail);
+    }
+
+    // The last user message's start: where a template that restyles the
+    // final user turn diverges. Found by rendering the conversation before
+    // it, alone, and keeping its length only if it really is a token prefix
+    // of the prompt -- a template that renders earlier messages differently
+    // once they are not last gives no usable boundary, and none is taken.
+    const std::vector<harness::ChatMessage> messages = messages_with_schema(request);
+    std::size_t last_user = messages.size();
+    for (std::size_t i = messages.size(); i-- > 0;) {
+        if (messages[i].role == harness::Role::User) {
+            last_user = i;
+            break;
+        }
+    }
+    if (last_user == 0 || last_user == messages.size()) {
+        return marks;
+    }
+    const std::vector<harness::ChatMessage> before{
+        messages.begin(), messages.begin() + static_cast<std::ptrdiff_t>(last_user)};
+    std::string text;
+    if (rendered.chat != nullptr) {
+        ChatRendering prefix;
+        std::string ignored;
+        if (!model_->render_chat(before, request.tools, !request.transient.skip_reasoning, false,
+                                 prefix, ignored)) {
+            return marks;
+        }
+        text = std::move(prefix.prompt);
+    } else {
+        text = llama_tokens::render_prompt(*model_, options_.model, before, false);
+    }
+    const std::vector<std::int32_t> head = model_->tokenize(text, true);
+    if (!head.empty() && head.size() < prompt.size() &&
+        std::equal(head.begin(), head.end(), prompt.begin())) {
+        marks.push_back(static_cast<std::int64_t>(head.size()));
+    }
+    return marks;
+}
+
+void LlamaCppProvider::report_cache(const harness::StreamOptions& options,
+                                    std::size_t prompt_tokens, std::int64_t kept,
+                                    const LlamaContext& context) const {
+    if (!options.on_status) {
+        return;
+    }
+    harness::StatusEvent event;
+    event.type = harness::StatusEvent::Type::PromptCache;
+    event.phase = harness::StatusEvent::Phase::Done;
+    event.name = options_.model;
+    event.tokens = static_cast<std::int64_t>(prompt_tokens);
+    event.used_tokens = kept;
+    const std::int64_t decoded = static_cast<std::int64_t>(prompt_tokens) - kept;
+    event.detail = "prompt " + std::to_string(prompt_tokens) + " tokens: " + std::to_string(kept) +
+                   " from the cache, " + std::to_string(decoded) + " read";
+    if (context.needs_checkpoints()) {
+        // The memory the user never asked for, where it exists at all.
+        const double mib = static_cast<double>(context.checkpoint_bytes()) / (1024.0 * 1024.0);
+        char size[32];
+        std::snprintf(size, sizeof size, "%.1f", mib);
+        event.detail += " · " + std::to_string(context.checkpoint_count()) + " of " +
+                        std::to_string(kMaxCheckpoints) + " checkpoints, " + size + " MiB";
+    }
+    options.on_status(event);
 }
 
 void LlamaCppProvider::notice_if_toolless(const harness::ChatRequest& request,
@@ -841,8 +949,13 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
 
         const std::vector<std::int32_t> suffix{prompt.begin() + static_cast<std::ptrdiff_t>(kept),
                                                prompt.end()};
-        decode_in_batches(*context, suffix, kept);
+        // Checkpoints only where the memory cannot be rewound (25c): a
+        // pure-attention model's trim already works, and it pays nothing.
+        decode_in_batches(*context, suffix, kept,
+                          context->needs_checkpoints() ? checkpoint_marks(request, rendered, prompt)
+                                                       : std::vector<std::int64_t>{});
         session_tokens_ = prompt;
+        report_cache(options, prompt.size(), kept, *context);
     }
 
     // Either path leaves the KV holding exactly positions [0, prompt.size()),

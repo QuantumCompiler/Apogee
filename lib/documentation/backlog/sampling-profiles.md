@@ -10,7 +10,7 @@ Proposed order of precedence:
 5. Greedy, for an unprofiled model.
 
 **Core constraint(s).**
-- **Deterministic when asked.** Temperature 0 means greedy, byte-for-byte reproducible, which the tests and the hybrid [checkpoints](hybrid-prompt-checkpoints.md)' equivalence check rely on. A seed is settable.
+- **Deterministic when asked.** Temperature 0 means greedy, byte-for-byte reproducible, which the tests and the hybrid [checkpoints](../assistant/MILESTONES.md#milestone-j--local-inference)' equivalence check rely on. A seed is settable.
 - **One sampler chain.** The grammar (25b's lazy tool grammar, [26f](local-structured-output.md)'s schema grammar) and the [reasoning budget](thinking-control.md) share the chain these settings build; `common_sampler` (`common/sampling.h`) is the upstream implementation and is linked with 25b.
 - **Profiles are evidence.** A family default carries its source (the model card) in the profile's evidence line, as profiles already do, and `models info` shows the settings in force and where each came from.
 - **Parity.** `temperature` means the same on every backend; the new knobs (`top_p`, `top_k`, `min_p`, `repeat_penalty`, `presence_penalty`) are ignored by a cloud backend that lacks them, and `models info` says so.

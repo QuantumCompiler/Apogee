@@ -55,6 +55,9 @@ struct Inputs {
     /// The template's own switch. Off asks a thinking model to answer
     /// without reasoning first, where its template has that switch.
     bool enable_thinking = true;
+    /// Off renders the messages alone, without the assistant's opening:
+    /// a prefix of the full prompt (25c measures where a message starts).
+    bool add_generation_prompt = true;
 };
 
 /// A reply, read back through the template's format.

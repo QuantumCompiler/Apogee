@@ -247,9 +247,14 @@ private:
 
 class RealContext final : public LlamaContext {
 public:
+    /// `checkpoints` is whether this context's memory needs them: a
+    /// recurrent or hybrid model's running state cannot be rewound (25c).
     RealContext(std::unique_ptr<llama_context, ContextDeleter> context, SamplerPtr sampler,
-                mtmd_context* vision)
-        : context_{std::move(context)}, sampler_{std::move(sampler)}, vision_{vision} {}
+                mtmd_context* vision, bool checkpoints)
+        : context_{std::move(context)},
+          sampler_{std::move(sampler)},
+          vision_{vision},
+          checkpoints_needed_{checkpoints} {}
 
     void decode(const std::vector<std::int32_t>& tokens, std::int64_t position) override {
         if (tokens.empty()) {
@@ -308,12 +313,70 @@ public:
         // p1 < 0 means "to infinity": drop everything from `position` on.
         llama_memory_t memory = llama_get_memory(context_.get());
         if (llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(position), -1)) {
+            forget_checkpoints_after(checkpoints_, position);
             return position;
         }
         // A running state that cannot be rewound this far (see the
-        // interface): refused, and untouched -- so start again from nothing.
+        // interface): refused, and untouched. The newest checkpoint at or
+        // before `position` holds that state as it was there -- llama-server's
+        // restore (tools/server/server-context.cpp). Once it is back, the
+        // attention half trims to it like any other cache, and the running
+        // state already ends there, so the cut succeeds.
+        if (const auto it = checkpoint_for(checkpoints_, position); it != checkpoints_.end()) {
+            llama_log().forget();
+            const std::size_t loaded =
+                llama_state_seq_set_data_ext(context_.get(), it->data.data(), it->data.size(), 0,
+                                             LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+            // A restore that did not take falls through: start again below.
+            if (loaded != 0 &&
+                llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(it->position), -1)) {
+                const std::int64_t restored = it->position;
+                forget_checkpoints_after(checkpoints_, restored);
+                return restored;
+            }
+        }
+        // No checkpoint to go back to -- start again from nothing.
         llama_memory_clear(memory, true);
+        checkpoints_.clear();
         return 0;
+    }
+
+    [[nodiscard]] bool checkpoint(std::int64_t position) override {
+        if (!checkpoints_needed_ || position <= 0) {
+            return false;
+        }
+        // Only the part that cannot be rewound: the attention half stays in
+        // the cache and is trimmed like any other.
+        const std::size_t size =
+            llama_state_seq_get_size_ext(context_.get(), 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        if (size == 0) {
+            return false;
+        }
+        Checkpoint saved;
+        saved.position = position;
+        saved.data.resize(size);
+        if (llama_state_seq_get_data_ext(context_.get(), saved.data.data(), size, 0,
+                                         LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) == 0) {
+            return false;
+        }
+        keep_checkpoint(checkpoints_, std::move(saved));
+        return true;
+    }
+
+    [[nodiscard]] bool needs_checkpoints() const noexcept override {
+        return checkpoints_needed_;
+    }
+
+    [[nodiscard]] std::size_t checkpoint_count() const noexcept override {
+        return checkpoints_.size();
+    }
+
+    [[nodiscard]] std::size_t checkpoint_bytes() const noexcept override {
+        std::size_t total = 0;
+        for (const Checkpoint& held : checkpoints_) {
+            total += held.data.size();
+        }
+        return total;
     }
 
     [[nodiscard]] std::int64_t eval_count() const noexcept override {
@@ -418,9 +481,18 @@ private:
         return static_cast<std::int64_t>(new_position);
     }
 
+    /// The saved running state after exactly `position` tokens.
+    struct Checkpoint {
+        std::int64_t position = 0;
+        std::vector<std::uint8_t> data;
+    };
+
     std::unique_ptr<llama_context, ContextDeleter> context_;
     SamplerPtr sampler_;
     std::int64_t evaluated_ = 0;
+    bool checkpoints_needed_ = false;
+    /// Oldest first; at most kMaxCheckpoints.
+    std::vector<Checkpoint> checkpoints_;
     /// Borrowed from the model, which outlives every context made from it.
     mtmd_context* vision_ = nullptr;
 };
@@ -498,7 +570,8 @@ public:
 
     [[nodiscard]] bool render_chat(const std::vector<harness::ChatMessage>& messages,
                                    const std::vector<harness::Tool>& tools, bool enable_thinking,
-                                   ChatRendering& out, std::string& error) const override {
+                                   bool add_generation_prompt, ChatRendering& out,
+                                   std::string& error) const override {
         if (!templates_loaded_) {
             // Once per load: parsing a Jinja template is not free, and its
             // answer cannot change while the weights are resident.
@@ -512,6 +585,7 @@ public:
 
         llama_chat::Inputs inputs;
         inputs.enable_thinking = enable_thinking;
+        inputs.add_generation_prompt = add_generation_prompt;
         inputs.messages.reserve(messages.size());
         for (const harness::ChatMessage& message : messages) {
             llama_chat::Message converted;
@@ -631,7 +705,14 @@ public:
 
         std::string error;
         SamplerPtr sampler = make_sampler(vocab_, SamplingGrammar{}, error);
-        return std::make_unique<RealContext>(std::move(context), std::move(sampler), vision_.get());
+        // Checkpoints only where the memory cannot be rewound: a recurrent or
+        // hybrid model. A sliding-window model would qualify too, but
+        // contexts keep a full-size window cache by default (`swa_full`),
+        // which trims like any other.
+        const bool checkpoints =
+            llama_model_is_recurrent(model_.get()) || llama_model_is_hybrid(model_.get());
+        return std::make_unique<RealContext>(std::move(context), std::move(sampler), vision_.get(),
+                                             checkpoints);
     }
 
     [[nodiscard]] bool supports_vision() const noexcept override {
