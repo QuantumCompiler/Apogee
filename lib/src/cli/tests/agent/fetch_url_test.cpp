@@ -374,6 +374,34 @@ TEST_CASE("text passes through, and anything that is not a page is refused by na
     }
 }
 
+TEST_CASE("the first page is the smaller: a lookup reads less, reading on reads more",
+          "[agent][fetch][readable][paging]") {
+    std::string body;
+    for (int i = 0; i < 400; ++i) {
+        body += "Paragraph " + std::to_string(i) + " " + std::string(60, 'p') + ".\n\n";
+    }
+    const FetchResult reply = typed(body, "text/plain");
+    const apogee::agent::Tool tool =
+        make_fetch_url_tool([reply](std::string_view) { return reply; });
+    const auto run = [&tool](std::string_view arguments) {
+        return tool.run_gated(arguments, [](std::string_view, std::string_view) { return true; });
+    };
+    CHECK(tool.description.find("The first call returns up to 6 KB") != std::string::npos);
+    CHECK(tool.description.find("reading on up to 12 KB a call") != std::string::npos);
+    const ToolOutcome first = run(R"({"url":"https://text.test/"})");
+    const std::size_t at = first.content.find("offset ");
+    REQUIRE(at != std::string::npos);
+    const std::size_t next = std::stoul(first.content.substr(at + 7));
+    CHECK(next <= apogee::agent::kFetchFirstPageBytes);
+    CHECK(next > apogee::agent::kFetchFirstPageBytes / 2);
+    const ToolOutcome second =
+        run(R"({"url":"https://text.test/","offset":)" + std::to_string(next) + "}");
+    const std::size_t at2 = second.content.find("offset ", second.content.find("continues"));
+    const std::size_t after = std::stoul(second.content.substr(at2 + 7));
+    CHECK(after - next > apogee::agent::kFetchFirstPageBytes);
+    CHECK(after - next <= apogee::agent::kFetchPageBytes);
+}
+
 TEST_CASE("a long page is read in pages with offset, to its last section",
           "[agent][fetch][readable][paging]") {
     std::string html = "<html><head><title>Long</title></head><body><main>";

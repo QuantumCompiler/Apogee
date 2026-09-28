@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
@@ -265,15 +266,17 @@ std::optional<HttpUrl> resolve_redirect(const HttpUrl& base, std::string_view lo
     return parse_http_url(origin + std::string{directory} + std::string{location});
 }
 
-Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes) {
+Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes, std::size_t first_bytes) {
+    first_bytes = std::min(first_bytes, max_bytes);
     Tool tool;
     tool.name = std::string{kFetchUrlToolName};
     tool.description =
         "Fetch a web page and read its main content as Markdown: its headings, lists, code, "
         "tables and links (absolute URLs you can fetch next), without the menus, banners and "
-        "footers around it. One call returns at most " +
+        "footers around it. The first call returns up to " +
+        std::to_string(first_bytes / 1024) + " KB of the page, and reading on up to " +
         std::to_string(max_bytes / 1024) +
-        " KB of text: a longer page says so and gives the offset to read on from. It reads "
+        " KB a call: a longer page says so and gives the offset to read on from. It reads "
         "HTML and text (plain, Markdown, JSON, XML); a PDF, an image or any other file is "
         "refused. Use it to read a URL you already have -- from the user, or from a search "
         "result. It cannot search: give it a URL, not a query. A website the user has not "
@@ -305,7 +308,7 @@ Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes) {
         return url.has_value() ? url->str() : std::string{};
     };
 
-    tool.run_gated = [fetcher = std::move(fetcher), max_bytes](
+    tool.run_gated = [fetcher = std::move(fetcher), max_bytes, first_bytes](
                          std::string_view arguments, const TargetGate& gate) -> ToolOutcome {
         const nlohmann::json parsed = nlohmann::json::parse(arguments, nullptr, false);
         if (parsed.is_discarded() || !parsed.is_object()) {
@@ -429,7 +432,7 @@ Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes) {
             }
             header += "\n";
 
-            const TextPage page = page_of(readable.text, offset, max_bytes);
+            const TextPage page = page_of(readable.text, offset, max_bytes, first_bytes);
             if (page.count == 0) {
                 return ToolOutcome{"Error: offset " + std::to_string(offset) +
                                        " is past the end of the text at " + address + " (" +

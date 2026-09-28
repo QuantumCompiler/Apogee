@@ -57,11 +57,12 @@ struct TextPage {
     std::size_t next = 0;
 };
 
-/// The page of `text` that starts at `offset`: at most `limit` bytes, cut at
-/// a paragraph break in its second half, else a line break, else a space,
-/// else between characters. Walking `next` from 0 covers the whole text with
-/// no gap and no overlap; an offset past the end is nullopt-like -- `count`
-/// is 0.
-[[nodiscard]] TextPage page_of(std::string_view text, std::size_t offset, std::size_t limit);
+/// The page of `text` that starts at `offset`: at most `limit` bytes -- or
+/// `first_limit`, when non-zero, for the first page -- cut at a paragraph
+/// break in its second half, else a line break, else a space, else between
+/// characters. Walking `next` from 0 covers the whole text with no gap and no
+/// overlap; an offset past the end is nullopt-like -- `count` is 0.
+[[nodiscard]] TextPage page_of(std::string_view text, std::size_t offset, std::size_t limit,
+                               std::size_t first_limit = 0);
 
 }  // namespace apogee::agent

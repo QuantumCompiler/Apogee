@@ -1272,9 +1272,16 @@ ReadablePage extract_readable(std::string_view html, const HttpUrl& page) {
     return readable;
 }
 
-TextPage page_of(std::string_view text, std::size_t offset, std::size_t limit) {
+TextPage page_of(std::string_view text, std::size_t offset, std::size_t limit,
+                 std::size_t first_limit) {
     TextPage page;
     limit = std::max<std::size_t>(limit, 1);
+    const std::size_t first = skip_space(text, 0);
+    // The first page may be smaller than the rest: a lookup reads only the
+    // start of a page, and a model reading on wants more of it at once.
+    const auto limit_at = [&](std::size_t at) {
+        return at == first && first_limit > 0 ? first_limit : limit;
+    };
     if (offset > text.size()) {
         page.count = 0;
         return page;
@@ -1290,11 +1297,11 @@ TextPage page_of(std::string_view text, std::size_t offset, std::size_t limit) {
     // Pages are counted from the start, so a page is always "N of M"; an
     // offset that is not a page's own start is counted from where it lands.
     std::size_t before = 0;
-    for (std::size_t at = skip_space(text, 0); at < start;
-         at = skip_space(text, page_end(text, at, limit))) {
+    for (std::size_t at = first; at < start;
+         at = skip_space(text, page_end(text, at, limit_at(at)))) {
         ++before;
     }
-    const std::size_t end = page_end(text, start, limit);
+    const std::size_t end = page_end(text, start, limit_at(start));
     std::string_view slice = text.substr(start, end - start);
     while (!slice.empty() && is_space(slice.back())) {
         slice.remove_suffix(1);
@@ -1305,7 +1312,7 @@ TextPage page_of(std::string_view text, std::size_t offset, std::size_t limit) {
     page.next = next < text.size() ? next : 0;
     page.count = page.number;
     for (std::size_t at = next; at < text.size();
-         at = skip_space(text, page_end(text, at, limit))) {
+         at = skip_space(text, page_end(text, at, limit_at(at)))) {
         ++page.count;
     }
     return page;

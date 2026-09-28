@@ -2379,7 +2379,7 @@ Also checked:
     - a short list of class and id names (consent banners, ad slots, share bars, sidebars, MediaWiki's menus and edit links). A name match never drops what holds the page's heading or half its text.
   - **What is written.** Light Markdown: `#` headings, `-` and `1.` list items, fenced code with its whitespace, `|` table rows (a layout table as paragraphs), blockquotes, and links as `[text](absolute URL)`. Dot segments are resolved and `<base href>` honoured. In-page links keep their words, and a lone pilcrow or back-arrow goes.
   - **Characters.** Every numeric and Latin-1 named entity is decoded, and any declared charset is converted to valid UTF-8 (`as_utf8`, `charset_of`, `meta_charset`); a stray byte becomes U+FFFD, since a tool result is serialized as JSON downstream.
-- [x] **Pages** (`page_of`). One call returns at most 12 KiB. The cut falls at a paragraph break in the page's second half, else a line break, else a space, and never inside a character. The tool takes `offset`, says `Page N of M`, and ends a continuing page with the exact offset to read on from. Walking the offsets covers the text with no gap and no overlap.
+- [x] **Pages** (`page_of`). The first call returns at most 6 KiB of the page, and each call reading on at most 12 KiB. The cut falls at a paragraph break in the page's second half, else a line break, else a space, and never inside a character. The tool takes `offset`, says `Page N of M`, and ends a continuing page with the exact offset to read on from. Walking the offsets covers the text with no gap and no overlap.
 - [x] **A header line**: the title, and the final URL, with where a redirect came from. It replaces 25a's `[X redirected to Y]` line.
 - [x] **Content types** (`classify_body`). The response's `Content-Type` now travels through `HttpResponse` and `FetchResult`.
   - HTML is extracted; `text/*`, JSON, XML and YAML pass through.
@@ -2389,14 +2389,14 @@ Also checked:
 - [x] **The corpus** (`tests/fixtures/web/`), its sources and licences in its README:
   - two pages recorded (a Python documentation page, PSF licence; a Wikipedia article, CC BY-SA), with the user's approval;
   - three hand-written in real sites' structure with invented text, so no newspaper's copyright enters the repository: a news story, a GitHub release, a page built by scripts.
-- [x] **@@TESTS@@**
+- [x] **13 new test cases**: 1,706 pass under `make test`, and 1,671 in the unit suite built without llama.cpp, which CI gates on.
 
 **Decisions**
 
 | Decision | Choice | Why |
 |---|---|---|
 | The extractor | Hand-written, no library *(default taken)* | The corpus passes without one. lexbor or gumbo stay the fallback, and each would be a dependency on five targets. |
-| One call's page | 12 KiB *(default taken)* | A documentation section, read by a local model in seconds. The Python `json` page is three calls. |
+| One call's page | **6 KiB for the start of a page, then 12 KiB a call** *(the user's call, 2026-09-28: "whatever is fastest"; it replaced the recorded 12 KiB)* | A lookup reads only the start of a page, and every byte is read before the model can act: 12 KiB was about 3,000 tokens, ~40 s on a hot M3 Max running Qwen3.8-27B. Halving only the first page halves a lookup's reading (1,484 tokens for the start of the Python `json` page, where 12 KiB was about 3,000), while a model reading on gets 12 KiB at a time, so a long document costs no more calls, and no more reasoning steps, than before. The `json` page is four calls now: 6 + 12 + 12 KiB, and its end. |
 | PDFs | Refused with a note *(default taken)* | Reading PDFs is its own dependency and its own item. |
 | Links | Inline Markdown *(default taken)* | A numbered list at the end costs a lookup per link. |
 | The download cap | 5 MB *(consumed: 25a)* | Unchanged. |
@@ -2411,7 +2411,28 @@ Also checked:
 - **Following a link.** The model read the `json` page, followed its (now absolute) link to `pickle`, and quoted pickle's first sentence exactly.
 - **A PDF.** `arxiv.org/pdf/1706.03762` was refused by name. The model searched, found the paper's HTML abstract page, read it, and summarized the paper correctly.
 
-**Guardrails, each mutation-tested.** @@MUTANTS@@
+**What makes a local answer slow on this machine** (investigated 2026-09-28, the user's question: a price lookup on Qwen3.8-27B took 2½ minutes).
+- **Heat, first.** Measured with `macmon`, the 14-inch M3 Max's GPU reaches 95–97 °C within about 25 s of steady generation, and its clock falls from 1,372 MHz to about 610 MHz after two minutes. Generation fell from 17.5 to 12.3 tokens/s over those two minutes and was still falling. After an hour of builds and model runs, it measured 5.2 tokens/s generating and 73 reading, against 13.6 and 152 when cool.
+- **Ruled out.** CPU load from builds (12 busy cores cost 7%). Graphics from the terminal and this desktop app, which kept the GPU "96% busy" at rest yet cost the model little. Apogee itself: llama.cpp's own benchmark, at the same pin, matches it.
+- **This machine supports High Power mode** (`pmset -g cap`), which runs the fans harder. It is the user's setting to change, not Apogee's.
+- **The rest is tokens.** Qwen3.8's reasoning before every step, and every byte a tool returns. That is what the smaller first page, and [thinking control](../backlog/thinking-control.md), address.
+
+**Guardrails, each mutation-tested (51 mutants, every one run against the whole unit suite).** 48 were caught outright, and 3 once their tests were strengthened. The mutants, by area:
+- **Landmarks:** `<main>` ignored; no dominant article, or any largest article taken.
+- **Furniture:** a page's header kept, or a section's dropped; `hidden`, roles or `display:none` ignored; class names ignored, or their content guard removed; every form, or no form, dropped; footnotes dropped.
+- **Links:** left relative; dot segments kept; `<base>` ignored; in-page links kept as links; a lone symbol kept; image alt text ignored.
+- **Markdown:** code blocks collapsed; no backticks; no table header rule; a layout table as rows; ordered lists as bullets; a marker's line broken; no quote prefix.
+- **Characters:** numeric entities, Latin-1 names, or C1 references not decoded; stray bytes kept; overlong sequences accepted; Latin-1 not converted; the `meta` charset ignored.
+- **The parser:** `li` or a block not closing what HTML closes; a script parting no words; no depth limit.
+- **Paging:** no seam; a cut through a character; overlapping pages; numbering from the offset.
+- **The tool:** a PDF by its bytes missed; an image unnamed; binary read as text; an unlabelled page not sniffed; the charset ignored; no offset to read on from; the redirect's source unnamed; the offset ignored; a negative offset accepted; the fetcher dropping the type.
+
+**The survivors, and what they taught.**
+- **"Any largest article."** The listing test's teasers were all under the 200-character floor, so none could ever be chosen whatever the dominance rule said. The listing now has entries long enough to be chosen.
+- **A list marker's line broken inside `block`.** No test put a heading directly in a list item, the one way to reach it.
+- **A paragraph not closed by a block.** It changes the tree, not the text, since every block writes its own breaks. Where it does show is `<p hidden>gone<div>shown</div>`: a browser closes the paragraph, so the `div` is seen.
+
+**Two mistakes in the run itself.** The run crashed on its 30th mutant when the tests printed a byte its script could not decode; its cleanup restored the file, and the rest was rerun. It was paused, not killed, while the speed was investigated.
 
 **Not verified, and known limits.**
 - **A page built by JavaScript still has no text.** The item keeps it out of scope; the tool now says it may need JavaScript.

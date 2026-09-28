@@ -80,9 +80,13 @@ struct HttpUrl {
 [[nodiscard]] std::optional<HttpUrl> resolve_redirect(const HttpUrl& base,
                                                       std::string_view location);
 
-/// How much of a page one call returns (25f): big enough for a
-/// documentation section, small enough for a local model to read in
-/// seconds. A longer page is read on with `offset`.
+/// How much of a page one call returns (25f). The first page is the smaller:
+/// a lookup reads only the start of a page, and every byte is read by a
+/// local model before it can act (a 12 KiB page was ~40 s on a hot M3 Max
+/// running Qwen3.8-27B). A model reading on has decided it wants the page,
+/// so it gets more at once -- a long document costs no more calls, and so no
+/// more reasoning steps, than it did.
+inline constexpr std::size_t kFetchFirstPageBytes = 6 * 1024;
 inline constexpr std::size_t kFetchPageBytes = 12 * 1024;
 
 /// What a response's body is, for the reader.
@@ -100,8 +104,9 @@ enum class BodyKind : std::uint8_t {
 [[nodiscard]] BodyKind classify_body(std::string_view content_type, std::string_view body,
                                      std::string& what);
 
-/// Builds the tool. `max_bytes` is one call's page of text: a longer page
-/// says so and gives the `offset` to read on from.
+/// Builds the tool. `max_bytes` is one call's page of text, and
+/// `first_bytes` the first page's (never more than `max_bytes`): a longer
+/// page says so and gives the `offset` to read on from.
 ///
 /// It reads a page as a model should (`agent/readable.h`): the main content
 /// as Markdown, links absolute, the menus and banners around it left out.
@@ -109,6 +114,7 @@ enum class BodyKind : std::uint8_t {
 /// its URL's host as the target and the URL as the detail, and every redirect
 /// to a different host goes through it again before anything is fetched from
 /// there.
-[[nodiscard]] Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes = kFetchPageBytes);
+[[nodiscard]] Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes = kFetchPageBytes,
+                                       std::size_t first_bytes = kFetchFirstPageBytes);
 
 }  // namespace apogee::agent

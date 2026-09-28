@@ -203,10 +203,18 @@ TEST_CASE("the content landmark: main, a dominant article, else the body",
         const std::string teaser = "<article><p>teaser " + std::string(60, 't') + "</p></article>";
         CHECK(read("<body><article><p>" + filler + "</p></article>" + teaser + teaser + "</body>")
                   .text == filler);
+        // Teasers long enough to be chosen, none holding half the articles'
+        // text: a listing, not a story, so every one is kept.
+        const std::string entry = "<article><p>entry " + std::string(250, 'e') + "</p></article>";
         const std::string listing =
-            read("<body><h1>Index</h1>" + teaser + teaser + teaser + "</body>").text;
+            read("<body><h1>Index</h1>" + entry + entry + entry + "</body>").text;
         CHECK(listing.find("# Index") != std::string::npos);
-        CHECK(listing.find("teaser") != std::string::npos);
+        std::size_t entries = 0;
+        for (std::size_t at = listing.find("entry "); at != std::string::npos;
+             at = listing.find("entry ", at + 1)) {
+            ++entries;
+        }
+        CHECK(entries == 3);
     }
     SECTION("a page's header and footer go; a section's stay") {
         const std::string text =
@@ -253,6 +261,7 @@ TEST_CASE("markup becomes light Markdown", "[agent][fetch][readable]") {
         CHECK(read("<ul><li><p>para</p><p>more</p></li><li>next</li></ul>").text ==
               "- para\nmore\n- next");
         CHECK(read("<ol><li><div><p>deep</p></div></li></ol>").text == "1. deep");
+        CHECK(read("<ul><li><h3>A heading item</h3></li></ul>").text == "- ### A heading item");
     }
     SECTION("code: fenced blocks keep their whitespace; inline code is backticked") {
         CHECK(read("<pre>  a  <b>b</b>\n    c&lt;d</pre>").text == "```\n  a  b\n    c<d\n```");
@@ -291,6 +300,9 @@ TEST_CASE("markup becomes light Markdown", "[agent][fetch][readable]") {
     SECTION("broken markup still reads") {
         CHECK(read("<p>one<p>two<div>three").text == "one\n\ntwo\n\nthree");
         CHECK(read("<ul><li>a<li>b</ul>").text == "- a\n- b");
+        // A block closes an open paragraph, as a browser does: the div here
+        // is not inside the hidden paragraph, so it is seen.
+        CHECK(read("<p hidden>gone<div>shown</div>").text == "shown");
         CHECK(read("x < y</p></span></div>z").text == "x < yz");  // stray ends close nothing
         CHECK(read("<!-- hidden --><p>shown</p><![CDATA[x]]><?php echo 1 ?>").text == "shown");
         CHECK(read("<p title='x > y'>quoted</p>").text == "quoted");
@@ -364,6 +376,30 @@ TEST_CASE("paging walks the whole text with no gap, no overlap, and never inside
         for (std::size_t limit = 4; limit < 60; ++limit) {
             walk(text, limit);
         }
+    }
+    SECTION("a smaller first page, then larger ones, still covering it all") {
+        std::string text;
+        for (int i = 0; i < 60; ++i) {
+            text += "Line " + std::to_string(i) + " " + std::string(40, 'l') + ".\n";
+        }
+        const apogee::agent::TextPage first = page_of(text, 0, 800, 300);
+        CHECK(first.text.size() <= 300);
+        CHECK(first.text.size() > 150);
+        const apogee::agent::TextPage second = page_of(text, first.next, 800, 300);
+        CHECK(second.text.size() > 300);
+        CHECK(second.text.size() <= 800);
+        CHECK(second.number == 2);
+        CHECK(second.count == first.count);
+        std::string joined;
+        for (std::size_t offset = 0;;) {
+            const apogee::agent::TextPage page = page_of(text, offset, 800, 300);
+            joined += page.text;
+            if (page.next == 0) {
+                break;
+            }
+            offset = page.next;
+        }
+        CHECK(without_space(joined) == without_space(text));
     }
     SECTION("the edges") {
         CHECK(page_of("short", 0, 100).text == "short");
