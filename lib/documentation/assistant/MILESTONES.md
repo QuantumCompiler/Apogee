@@ -223,7 +223,7 @@ Both were verified against a build that deliberately calls `listen()`. The symbo
 
 | Decision | Choice | Why |
 |---|---|---|
-| Web search | **Provider server-side tools only** | User decision. Ommi's local search meant scraping DuckDuckGo's HTML results page with regexes; the markup changes and the tool returns *nothing* rather than erroring. `fetch_url` — the durable half — is ported; searching is the vendors' job. Local models get `fetch_url` but no search in v0.1.0, and the registry seam stays open for a pluggable one. |
+| Web search | **Provider server-side tools only** | User decision. Ommi's local search meant scraping DuckDuckGo's HTML results page with regexes; the markup changes and the tool returns *nothing* rather than erroring. `fetch_url` — the durable half — is ported; searching is the vendors' job. Local models get `fetch_url` but no search in v0.1.0, and the registry seam stays open for a pluggable one. **Revised 2026-09-28** (25e): `web_search` over a SearXNG the user runs, a JSON API rather than a page — see [Milestone V](#milestone-v--the-native-toolsets). |
 | GBNF grammar sampling | Deferred | The stated default. Cloud tool calls arrive structured, so nothing here depends on it; `model-profiles` decides. |
 | `agent/` as its own package | Split from `agentloop/` | The loop needs a registry; a registry needs no loop. MCP and native toolsets land in a third package and register into the same place. |
 | Iteration bound | 12, then answer with tools withdrawn | A model can call the same tool forever, and the only symptom is a request that never returns while spending money. Withdrawing the tools forces a text answer, so the user gets something usable rather than an error. |
@@ -2176,7 +2176,7 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 
 ### 2026-09-25 — `tool-safety-defaults` (backlog item 25a): ask before a new website, work in the launch folder
 
-**Why it came first.** The local-tools spike (2026-09-25) found an exposure that already existed. `read_file` and `fetch_url` were both read-only to the gate, so neither ever asked, and the file tools reached the whole home directory. A model with `--tools` could read a file and send its contents out inside a URL with no prompt at any point, and a web page carrying hidden instructions was enough to set that off. Every cloud backend run with `--tools` had it. [Local tool calling](#milestone-j--local-inference) would hand it to local models, and [web search](../backlog/web-search-searxng.md) would multiply the untrusted pages a model reads. So this went first in the local-agent-tools track.
+**Why it came first.** The local-tools spike (2026-09-25) found an exposure that already existed. `read_file` and `fetch_url` were both read-only to the gate, so neither ever asked, and the file tools reached the whole home directory. A model with `--tools` could read a file and send its contents out inside a URL with no prompt at any point, and a web page carrying hidden instructions was enough to set that off. Every cloud backend run with `--tools` had it. [Local tool calling](#milestone-j--local-inference) would hand it to local models, and [web search](#2026-09-28--web-search-searxng-backlog-item-25e-search-through-the-users-own-searxng) would multiply the untrusted pages a model reads. So this went first in the local-agent-tools track.
 
 **What was built**
 
@@ -2200,7 +2200,7 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 | How `fetch_url` is gated | A new `Tool::outbound` flag *(default taken)* | Outbound is a different risk from mutation. A `read-only` agent (Milestone X's policy, which drops `writes` tools) keeps `fetch_url`, gated per website, so with nobody to ask it reaches only the listed hosts and still never blocks. |
 | `always` and `session` | The host into `tools.allowed_hosts`; the host for this process *(default taken)* | What the two answers already mean for a tool, applied to a host. |
 | Nobody to ask | Only `tools.allowed_hosts` *(default taken)* | `serve --tools` fetched anything before; the change is recorded in http-api.md. |
-| The search provider's host | Trusted by configuration *(default taken; nothing to build until [25e](../backlog/web-search-searxng.md))* | The user named it. The pages a search returns are ordinary fetches and ask. |
+| The search provider's host | Trusted by configuration *(default taken; built in 25e, below: the checker counts the instance's host as listed)* | The user named it. The pages a search returns are ordinary fetches and ask. |
 | `chat --resume` | The folder it is resumed in *(default taken)* | The root is a property of the process, not the transcript. It falls out: nothing in Apogee changes directory after startup. |
 | `permissions.fetch_url` | Not a key | A tool-level `allow` would reopen every website at once, which is what per-website asking exists to prevent. |
 | The URL handed to the transport | Rebuilt from the parsed parts | Two URL parsers that disagree about a host are the classic way round a host check; here the second parser has nothing ambiguous to read. |
@@ -2302,6 +2302,66 @@ Also checked:
 - **The 5 MB acceptance** is proven by a test that runs a real `awk` through the real shell. No model was asked to run one, since `run_command` asks first.
 - **Two tools stay uncapped.** `search_files` and `list_directory` were outside the item.
 - **A file under 64 KiB can still fill a small window.** Sizing tool results to the real window is [26c](../backlog/context-budget.md)'s work.
+
+### 2026-09-28 — `web-search-searxng` (backlog item 25e): search through the user's own SearXNG
+
+**Why.** Local models have no provider-side search. With tools they could read a URL they were given, but they could not find one. On 2026-08-26 search had been left to the providers' own server-side tools, because Ommi's DuckDuckGo search scraped a results page, which breaks silently and returns nothing rather than failing. **This revises that decision** (the user's call, 2026-09-25: SearXNG, over Brave's or Tavily's keyed APIs and over MCP only). SearXNG is a metasearch engine the user runs. It answers over a JSON API, keeps its own engines working against upstream changes, and fails out loud: an HTTP status, or the engines it names in `unresponsive_engines`. So the rule the tool is built on is **never an empty success**.
+
+**What was built**
+
+- [x] **`web_search`** (`agent/web_search`). It takes a `query` and an optional `time_range` (day, week, month, year). It returns up to `results` results, each with its title, URL, date when the engine gave one, and a snippet. Any direct answer and fact box an engine gave comes too, and the engines that failed are named. It is `outbound`, and the instance's host is the target of every call.
+- [x] **The seam.** `SearchProvider` is a closure, so a keyed API would be a second implementation of it, never a reshaping of the tool. `make_searxng_provider` asks one GET per search through a `UrlFetcher`, so `agent/` includes no transport and everything is tested with no network. The search path is the instance's own path plus `search`, the query form-encoded, `format=json` always, and the instance's own `safesearch` and language.
+- [x] **`parse_searxng_response`**, pure. It reads results, answers in both the string and object forms SearXNG has used, infoboxes, and failing engines as `name (reason)`. A body that is not that JSON is an error that shows how it began.
+- [x] **Every failure says what to change.**
+  - Nothing matched: a result that says so and names the query.
+  - Every engine asked failed: an error naming them.
+  - HTTP 403, SearXNG's default with JSON off: an error naming `search.formats` in its `settings.yml`.
+  - HTTP 429: an error naming `server.limiter`.
+  - A refused connection: an error naming the configured URL.
+  - A redirect: an error naming where it went.
+- [x] **A tool that cannot work is withdrawn for the rest of the turn** (`ToolOutcome::unavailable`, `agentloop/loop`). An instance failure sets it. The loop then leaves the tool out of the turn's later requests, and answers a call that still names it without running it. The next turn offers it again. This was found on real weights; see below.
+- [x] **`tools.search`** (`harness/config`): `provider`, `url` (with `${ENV}`) and `results` (1 to 20, default 5). It is kept as written. `search_instance` is the one reading of it, used three places:
+  - registration: `make_built_in_tools` adds the tool beside `fetch_url`, over the same HTTP client, only for a usable instance, so a model is never offered a tool that can only fail;
+  - the checker: `make_permission_checker` counts the instance's host as listed (25a's recorded default, built here);
+  - `check`: the `Tools` section's `search` row says how to add search, where it points, or what is wrong, and makes no request.
+- [x] **The shipped config** carries the section commented out under `tools:`, with the JSON setting SearXNG needs.
+- [x] **[tools.md](../reference/tools.md)**, a new reference: running SearXNG in a container on a local port, its JSON output and limiter, the `tools.search` lines, `check`, what the model gets, and where a query goes. [http-api.md](../reference/http-api.md)'s `--tools` row names it.
+- [x] **Fixtures recorded from a real instance** (`tests/fixtures/searxng/`, the version pinned in their README): ordinary results with a failing engine, dated results, an answer, an infobox, nothing found, nothing because the one engine failed, and the 403 page.
+- [x] **12 new test cases**: 1,693 pass under `make test`, and 1,658 in the unit suite built without llama.cpp, which is what CI gates on.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Results per search | 5, each with title, URL, snippet and date *(default taken)* | A local model reads every result it is given; five is enough to choose one to open. `results` changes it, 1 to 20. |
+| `time_range` | Optional: day, week, month, year *(default taken)* | "What changed recently" is the commonest search a model makes. |
+| `check` | Configuration only, no request *(default taken)* | `check` never waits on the network. A failing instance is reported by the tool when used. |
+| `safesearch` and language | The instance's own *(default taken)* | Its owner already chose them. |
+| Backends | Every backend with tools on *(default taken)* | A cloud backend with `--search` has its provider's search as well; the model may use either. |
+| The instance's host | Counted as listed by the checker | "Trusted by configuration" (25a) made concrete: a search never asks, on any surface. A section that cannot be used trusts nothing. |
+| An absent `provider` | Means `searxng` | The one provider there is; `url` alone is enough. |
+| An unknown provider or unusable URL | Loads, registers nothing, and `check` warns | As with a pasted URL in `allowed_hosts`: refusing the whole config over one section would take every other command down with it. `results` out of range is a load error, as other numbers are. |
+| **An instance failure** | **The tool withdrawn for the rest of the turn** *(decided on real weights, 2026-09-28)* | Told in words to stop, Qwen3-VL-8B rephrased the query 12 times until the step limit (149 s). The repeated-call guard only catches identical calls. Withdrawn, the model searched once and answered in 77 s. Every engine failing does not withdraw the tool, because engines come back. |
+| Fixtures | Recorded, then cut to six results | As the vendor-CLI fixtures are. A change in the API's shape is detected, not silently absorbed. |
+
+**Verified on the real binary.** Two SearXNG containers (`searxng/searxng`, version `2026.9.25-12f8b6515`) ran on loopback: one with JSON on, one as shipped. The model was Qwen3-VL-8B, 32K context, temperature 0.
+- **Search, open, cite.** Asked, under a pseudo-terminal, what changed in llama.cpp release b11151, the model called `web_search`. It got five dated results, and opened a write-up of b11151 with `fetch_url`, which asked about the website first, showing its host and whole URL. The answer summarized the release and cited that URL. An earlier run on b6000 went through the same steps: a search, then two fetches, each asked about.
+- **JSON off.** Against the instance as shipped, the tool result named `search.formats` in `settings.yml`, and the model searched once more and answered without it.
+- **`check`.** With no `tools.search`, `check` shows the lines to add. With it, the row shows where search points and that its host is reached without asking.
+
+**Guardrails, each mutation-tested (34 mutants, every one run against the whole unit suite).** 33 were caught outright, and 1 once its test was strengthened. The mutants, by area:
+- **The parser:** a body without `results` accepted; a result with no URL kept; any `publishedDate` taken as a date; failing engines not read; answers in their object form ignored; an infobox's page not read from `urls`.
+- **The provider:** a 403, a 429, a refused connection or a redirect not explained; another status parsed as a success; more results than the count.
+- **The search URL:** no `format=json`; the query not encoded; `time_range` dropped; a `+` kept raw.
+- **The tool:** an instance failure not `unavailable`; every engine failing reported as nothing found; any `time_range` accepted; the tool not outbound; any provider accepted; a query in the instance's URL kept; a snippet not shortened, or cut through a character; nothing found without naming the query.
+- **The rest:** a withdrawn tool still offered, or still run; `unavailable` ignored; the instance's host not trusted; the tool never registered; a broken section reported ok, or no way to add search named; `results` unbounded; the section not read.
+
+**The survivor, and what it taught.** The snippet's cut through a character went unseen. The test's text of two- and three-byte characters put the 300-byte cut on a character boundary every time. It now shifts the text by up to four bytes, so the cut meets every position within a character. This is 25d's lesson again: a test that cuts text at a fixed length has to sweep the alignment.
+
+**Not verified.**
+- **Cloud backends.** They get the tool; no cloud model was run with it.
+- **The redirect, 429 and refused-connection messages** are proven against a scripted instance, not a real one.
+- **Found along the way, not fixed here.** On a turn that reaches the step limit, a local model can write its call as raw markup on the forced final step, where tools are withdrawn, and that markup reaches the answer. It predates this item (25b), and is recorded for its own fix.
 
 ## Milestone W — The MCP client
 

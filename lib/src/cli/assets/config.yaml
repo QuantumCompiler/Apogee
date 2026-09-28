@@ -67,6 +67,14 @@ tools:
   # other website asks first, and where nobody can answer (a pipe, `serve`)
   # it is refused. The prompt's [a]lways answer adds the website here.
   allowed_hosts: []
+  # Web search for the model (web_search), answered by a SearXNG instance you
+  # run. Its JSON output is off by default: add json under search.formats in
+  # its settings.yml. The instance's host is reached without asking; the
+  # pages a search finds are asked about like any other website.
+  # search:
+  #   provider: searxng
+  #   url: http://127.0.0.1:8888
+  #   results: 5          # 1 to 20
 
 # MCP servers: external tool servers spoken to over stdio (the Model Context
 # Protocol). Each one's tools appear to the model as mcp__<name>__<tool> and

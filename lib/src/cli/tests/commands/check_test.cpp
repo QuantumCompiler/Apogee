@@ -766,6 +766,41 @@ TEST_CASE("the doctor's Tools section: keys, the root, the switches, and git",
     }
 }
 
+TEST_CASE("the doctor reports web search: how to add it, where it points, or what is wrong",
+          "[commands][check][tools][search]") {
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    const auto search_row = [&inputs] {
+        const CheckReport report = run_checks(inputs);
+        const auto* row = row_with(report, "search");
+        REQUIRE(row != nullptr);
+        return *row;
+    };
+
+    install.write("config/config.yaml", apogee::harness::config_template());
+    load_into(inputs);
+    const apogee::commands::CheckRow off = search_row();
+    CHECK(off.status == Status::Ok);
+    CHECK(off.detail.find("not configured -- no web_search") != std::string::npos);
+    CHECK(off.detail.find("provider: searxng, url: http://127.0.0.1:8888") != std::string::npos);
+
+    install.write("config/config.yaml",
+                  "tools:\n  search:\n    provider: searxng\n    url: http://127.0.0.1:1\n");
+    load_into(inputs);
+    const apogee::commands::CheckRow on = search_row();
+    CHECK(on.status == Status::Ok);  // configuration only: nothing is listening, and no request
+    CHECK(on.detail.find("searxng at http://127.0.0.1:1/, 5 results") != std::string::npos);
+    CHECK(on.detail.find("127.0.0.1 is reached without asking") != std::string::npos);
+
+    install.write("config/config.yaml", "tools:\n  search:\n    provider: bing\n");
+    load_into(inputs);
+    const apogee::commands::CheckRow broken = search_row();
+    CHECK(broken.status == Status::Warn);
+    CHECK(broken.detail.find("'bing'") != std::string::npos);
+    CHECK(broken.detail.find("no web_search") != std::string::npos);
+}
+
 TEST_CASE("the doctor's MCP section: PATH lookup, a missing file, a lost execute bit fixed",
           "[commands][check][mcp]") {
     Install install;

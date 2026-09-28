@@ -1,0 +1,14 @@
+{
+ "query": "llama.cpp release",
+ "results": [],
+ "answers": [],
+ "corrections": [],
+ "infoboxes": [],
+ "suggestions": [],
+ "unresponsive_engines": [
+  [
+   "duckduckgo",
+   "CAPTCHA"
+  ]
+ ]
+}

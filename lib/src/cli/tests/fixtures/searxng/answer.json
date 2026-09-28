@@ -1,0 +1,17 @@
+{
+ "query": "avg 1 2 3",
+ "results": [],
+ "answers": [
+  {
+   "url": null,
+   "engine": "answerer: avg",
+   "parsed_url": null,
+   "template": "answer/legacy.html",
+   "answer": "[en] avg(1, 2, 3) = 2 "
+  }
+ ],
+ "corrections": [],
+ "infoboxes": [],
+ "suggestions": [],
+ "unresponsive_engines": []
+}

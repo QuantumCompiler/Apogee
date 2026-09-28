@@ -1004,6 +1004,23 @@ Config parse_config(std::string_view content, std::string_view origin) {
                 config.tools.allowed_hosts.push_back(scalar(item, origin, "tools.allowed_hosts[]"));
             }
         }
+        if (const YAML::Node search = tools["search"]; search.IsDefined() && !search.IsNull()) {
+            if (!search.IsMap()) {
+                fail(origin, "tools.search: expected a mapping with provider and url");
+            }
+            config.tools.search.provider =
+                scalar(search["provider"], origin, "tools.search.provider");
+            config.tools.search.url = scalar(search["url"], origin, "tools.search.url");
+            if (const std::optional<std::int64_t> results =
+                    integer(search["results"], origin, "tools.search.results");
+                results.has_value()) {
+                if (*results < 1 || *results > 20) {
+                    fail(origin,
+                         "tools.search.results: expected 1 to 20, got " + std::to_string(*results));
+                }
+                config.tools.search.results = static_cast<int>(*results);
+            }
+        }
     }
 
     if (const YAML::Node ui = root["ui"]; ui.IsDefined() && !ui.IsNull()) {

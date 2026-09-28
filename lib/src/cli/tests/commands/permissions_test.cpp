@@ -13,6 +13,7 @@
 #include <string>
 
 #include "agent/tool.h"
+#include "agent/web_search.h"
 #include "agentloop/loop.h"
 #include "commands/helpers.h"
 #include "commands/json_reporter.h"
@@ -220,6 +221,115 @@ TEST_CASE("a pipe and a driverless session reach only the listed websites",
         apogee::agent::dispatch(registry, call("https://docs.python.org/3/"), context);
     CHECK_FALSE(listed.is_error);
     CHECK(fetched == std::vector<std::string>{"https://docs.python.org/3/"});
+}
+
+TEST_CASE("the search instance's host is trusted by configuration; what it finds is not",
+          "[commands][permissions][outbound][search]") {
+    Config config;
+    config.tools.search.url = "http://searx.home.example:8888";
+    const apogee::agent::PermissionChecker check = make_permission_checker(config, nullptr);
+    const auto outbound = [](std::string_view tool, std::string_view host) {
+        return GateRequest{tool, host, "", true};
+    };
+    CHECK(check(outbound("web_search", "searx.home.example")) == Permission::Allow);
+    CHECK(check(outbound("web_search", "other.example")) == Permission::Ask);
+    CHECK(check(outbound("fetch_url", "github.com")) == Permission::Ask);
+    // A section that cannot be used trusts nothing.
+    config.tools.search.provider = "brave";
+    CHECK(make_permission_checker(config, nullptr)(outbound("web_search", "searx.home.example")) ==
+          Permission::Ask);
+}
+
+TEST_CASE("web_search is registered only where tools.search names a usable instance",
+          "[commands][permissions][tools][search]") {
+    CHECK(apogee::commands::make_built_in_tools({}).find("web_search") == nullptr);
+    Config config;
+    CHECK(apogee::commands::make_built_in_tools(
+              apogee::commands::BuiltInToolOptions{.config = &config})
+              .find("web_search") == nullptr);
+    config.tools.search.url = "not a url";
+    CHECK(apogee::commands::make_built_in_tools(
+              apogee::commands::BuiltInToolOptions{.config = &config})
+              .find("web_search") == nullptr);
+    config.tools.search.url = "http://127.0.0.1:8888";
+    config.tools.search.results = 7;
+    const apogee::agent::ToolRegistry registry = apogee::commands::make_built_in_tools(
+        apogee::commands::BuiltInToolOptions{.config = &config});
+    const apogee::agent::Tool* search = registry.find("web_search");
+    REQUIRE(search != nullptr);
+    CHECK(search->outbound);
+    CHECK(search->describe_target("{}") == "127.0.0.1");
+    CHECK(search->description.find("top 7 results") != std::string::npos);
+    // A read-only agent keeps it, as it keeps fetch_url: it writes nothing.
+    CHECK(apogee::commands::make_built_in_tools(
+              apogee::commands::BuiltInToolOptions{
+                  .config = &config, .policy = apogee::harness::AgentToolPolicy::ReadOnly})
+              .find("web_search") != nullptr);
+}
+
+TEST_CASE("a search runs unasked, and the page it found is asked about like any website",
+          "[commands][permissions][outbound][search]") {
+    Config config;
+    config.tools.search.url = "http://127.0.0.1:8888";
+    std::vector<std::string> fetched;
+    const apogee::agent::UrlFetcher web = [&fetched](std::string_view url) {
+        fetched.emplace_back(url);
+        if (url.starts_with("http://127.0.0.1:8888/")) {
+            return apogee::agent::FetchResult{
+                200,
+                R"({"results":[{"title":"b6000","url":"https://github.com/ggml-org/llama.cpp/releases/tag/b6000","content":"notes"}]})",
+                "", ""};
+        }
+        return apogee::agent::FetchResult{200, "<p>release notes</p>", "", ""};
+    };
+    std::string problem;
+    const std::optional<apogee::agent::SearchInstance> instance =
+        apogee::agent::search_instance(config.tools.search, problem);
+    REQUIRE(instance.has_value());
+    apogee::agent::ToolRegistry registry;
+    registry.add(apogee::agent::make_web_search_tool(
+        apogee::agent::make_searxng_provider(instance->base, web), instance->base.host, 5));
+    registry.add(apogee::agent::make_fetch_url_tool(web));
+
+    std::vector<std::string> asked;
+    apogee::agent::DispatchContext context;
+    context.permission = make_permission_checker(config, std::make_shared<SessionApprovals>());
+    context.confirm = [&asked](const GateRequest& request) {
+        asked.emplace_back(request.target);
+        return true;
+    };
+
+    const apogee::agent::ToolOutcome found = apogee::agent::dispatch(
+        registry, apogee::harness::ToolCall{"s", "web_search", R"({"query":"b6000"})"}, context);
+    REQUIRE_FALSE(found.is_error);
+    CHECK(asked.empty());  // the configured instance: never asked
+    CHECK(found.content.find("https://github.com/ggml-org/llama.cpp/releases/tag/b6000") !=
+          std::string::npos);
+
+    const apogee::agent::ToolOutcome opened = apogee::agent::dispatch(
+        registry,
+        apogee::harness::ToolCall{
+            "f", "fetch_url",
+            R"({"url":"https://github.com/ggml-org/llama.cpp/releases/tag/b6000"})"},
+        context);
+    CHECK_FALSE(opened.is_error);
+    CHECK(asked == std::vector<std::string>{"github.com"});  // the page: asked, by its host
+    CHECK(fetched.size() == 2);
+
+    // With nobody to answer, the search still runs and the page is refused.
+    context.confirm = nullptr;
+    CHECK_FALSE(apogee::agent::dispatch(
+                    registry, apogee::harness::ToolCall{"s2", "web_search", R"({"query":"b6000"})"},
+                    context)
+                    .is_error);
+    CHECK(apogee::agent::dispatch(
+              registry,
+              apogee::harness::ToolCall{
+                  "f2", "fetch_url",
+                  R"({"url":"https://github.com/ggml-org/llama.cpp/releases/tag/b6000"})"},
+              context)
+              .is_error);
+    CHECK(fetched.size() == 3);
 }
 
 TEST_CASE("the real fetcher asks for one hop and a bounded body",

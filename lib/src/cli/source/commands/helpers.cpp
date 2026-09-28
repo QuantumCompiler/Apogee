@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "agent/fetch_url.h"
+#include "agent/web_search.h"
 #include "agentloop/graph_context.h"
 #include "backends/http_client.h"
 #include "commands/embed.h"
@@ -229,8 +230,23 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
         return registry;
     }
 
-    registry.add(agent::make_fetch_url_tool(make_http_fetcher(
-        std::make_shared<backends::HttpClient>(std::make_unique<backends::CurlTransport>()))));
+    const auto client =
+        std::make_shared<backends::HttpClient>(std::make_unique<backends::CurlTransport>());
+    registry.add(agent::make_fetch_url_tool(make_http_fetcher(client)));
+
+    // Web search only where the config names an instance (25e): a model is
+    // never offered a tool that can only fail. A section that cannot be used
+    // registers nothing, and `check` says why.
+    if (options.config != nullptr) {
+        std::string problem;
+        if (const std::optional<agent::SearchInstance> search =
+                agent::search_instance(options.config->tools.search, problem);
+            search.has_value()) {
+            registry.add(agent::make_web_search_tool(
+                agent::make_searxng_provider(search->base, make_http_fetcher(client)),
+                search->base.host, search->results));
+        }
+    }
 
     tools::ToolsetOptions toolsets;
     toolsets.harness = options.harness;

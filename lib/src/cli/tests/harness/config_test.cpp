@@ -433,6 +433,26 @@ TEST_CASE("permissions: and tools: parse, and a bad level fails at load",
     }
     CHECK(shipped.tools.fs_root.empty());
     CHECK(shipped.tools.disabled.empty());
+    CHECK_FALSE(shipped.tools.search.configured());  // commented out: search is off
+}
+
+TEST_CASE("tools.search: read as written, results bounded, off when absent", "[config][search]") {
+    const apogee::testing::EnvGuard guard{"APOGEE_SEARCH_TEST_URL", "http://127.0.0.1:8888"};
+    const Config config = load_text(
+        "tools:\n  search:\n    provider: searxng\n    url: ${APOGEE_SEARCH_TEST_URL}\n"
+        "    results: 8\n");
+    CHECK(config.tools.search.configured());
+    CHECK(config.tools.search.provider == "searxng");
+    CHECK(config.tools.search.url == "http://127.0.0.1:8888");
+    CHECK(config.tools.search.results == 8);
+    CHECK(load_text("tools:\n  search:\n    url: http://h:1\n").tools.search.results == 5);
+    CHECK_FALSE(load_text("tools:\n  allowed_hosts: []\n").tools.search.configured());
+    // An unknown provider loads (check names it); a bad count or shape does not.
+    CHECK(load_text("tools:\n  search:\n    provider: brave\n").tools.search.provider == "brave");
+    CHECK_THROWS_AS(load_text("tools:\n  search:\n    url: x\n    results: 0\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("tools:\n  search:\n    url: x\n    results: 21\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("tools:\n  search:\n    url: x\n    results: many\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("tools:\n  search: http://h:1\n"), ConfigError);
 }
 
 TEST_CASE("mcp_servers: parses, expands ~ and ${ENV}, validates enabled, refuses collisions",

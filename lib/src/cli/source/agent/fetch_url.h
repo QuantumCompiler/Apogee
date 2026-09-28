@@ -10,13 +10,14 @@
 
 /// `fetch_url` — read the text of a web page.
 ///
-/// The durable half of Ommi's web tooling. Its *search* half is deliberately
-/// not ported (user decision 2026-08-26): search meant scraping DuckDuckGo's
-/// HTML results page with regexes, which breaks silently whenever the markup
-/// changes and returns nothing rather than erroring. Web search comes from the
-/// providers' own server-side tools instead — Anthropic's `web_search` is
-/// already wired. Fetching a URL the model was *given* carries none of that
-/// fragility: there is no result page to parse.
+/// The durable half of Ommi's web tooling. Its *search* half -- scraping
+/// DuckDuckGo's HTML results page with regexes, which breaks silently whenever
+/// the markup changes and returns nothing rather than erroring -- is not
+/// ported (user decision 2026-08-26). Search comes from the providers' own
+/// server-side tools, and since 25e from `web_search` over the user's own
+/// SearXNG, a JSON API rather than a page (`agent/web_search.h`). Fetching a
+/// URL the model was *given* carries none of that fragility: there is no
+/// result page to parse.
 namespace apogee::agent {
 
 inline constexpr std::string_view kFetchUrlToolName = "fetch_url";

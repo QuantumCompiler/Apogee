@@ -1,0 +1,236 @@
+{
+ "query": "llama.cpp release",
+ "results": [
+  {
+   "template": "default.html",
+   "title": "Releases · ggml-org/llama.cpp - GitHub",
+   "content": "github-actions released this · 28 Sep 16:46 · b11235 · 6c7a87f · This commit was created on GitHub.com and signed with GitHub’s verified signature. GPG key ID: B5690EEEBB952194 · Verified · Learn about vigilant mode. common : fix HF cache paths on Windows (#29475) Supersedes #29158 · Signed-off-by: Adrien Gallouët angt@huggingface.co · Website: https://llama.app · Attestations: https://github.com/ggml-org/llama.cpp/attestations/50839831 ·",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=tbn%3AANd9GcRF7jpqMMuPdU2mFwmlWMk2iPphR7gH2vttMRdunybeONNQTogrul5UFFkB",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "google cse",
+    "brave"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    1,
+    1
+   ],
+   "score": 4.0,
+   "category": "general",
+   "url": "https://github.com/ggml-org/llama.cpp/releases",
+   "engine": "google cse",
+   "parsed_url": [
+    "https",
+    "github.com",
+    "/ggml-org/llama.cpp/releases",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "template": "default.html",
+   "title": "llama.cpp release history - Freedom.Tech",
+   "content": "Llama.cpp 0.4.1 adds Maple/Hy/Spark2.5 model support, fixes MoE/normalization bugs, refactors JSON schema handling, and updates ggml to v0.24.0",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=tbn%3AANd9GcRNY5eFpBjY7iQvrOh54_PiNrTPiboURQ3twlkdfPSyhKhvyujq6oA7rS8",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "google cse",
+    "brave"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    3,
+    4
+   ],
+   "score": 1.1666666666666665,
+   "category": "general",
+   "url": "https://freedom.tech/project/llama-cpp/",
+   "engine": "google cse",
+   "parsed_url": [
+    "https",
+    "freedom.tech",
+    "/project/llama-cpp/",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "template": "default.html",
+   "title": "llama.cpp Changelog - Change8",
+   "content": "This release addresses compiler warnings related to the L2_NORM batch array initialization on GCC 12 aarch64 Release builds. It ensures the array is properly initialized to prevent potential uninitialized use errors.",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "https://imgs.search.brave.com/Ptgxr7hNu2d4ukeP1dRrFwZx0EVvTrbF0ySYTX-CnKk/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly93d3cu/Y2hhbmdlOC5kZXYv/cGFja2FnZS9sbGFt/YS1jcHAvb3Blbmdy/YXBoLWltYWdlPzRh/OTg5YzBkM2YxZTQw/Yzk",
+   "publishedDate": "2026-09-09T17:29:28",
+   "pubdate": "2026-09-09 17:29:28",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "duckduckgo",
+    "brave"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    17,
+    8
+   ],
+   "score": 0.36764705882352944,
+   "category": "general",
+   "url": "https://www.change8.dev/package/llama-cpp",
+   "engine": "brave",
+   "parsed_url": [
+    "https",
+    "www.change8.dev",
+    "/package/llama-cpp",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "template": "default.html",
+   "title": "llama.cpp - Liquid Docs",
+   "content": "Use the tables below to determine which llama.cpp binary is best for your environment and download the relevant binary (version b7075), or browse all releases and find the latest version here.Windows",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=tbn%3AANd9GcQAu89sVx0bzDaPUlVdEBDi8TYL8WZXIpn0gpq4ggZYkG2faD59esTZVrY",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "google cse",
+    "brave"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    9,
+    16
+   ],
+   "score": 0.3472222222222222,
+   "category": "general",
+   "url": "https://docs.liquid.ai/deployment/on-device/llama-cpp",
+   "engine": "google cse",
+   "parsed_url": [
+    "https",
+    "docs.liquid.ai",
+    "/deployment/on-device/llama-cpp",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "template": "default.html",
+   "title": "GitHub - ggml-org/llama.cpp: LLM inference in C/C++ · GitHub",
+   "content": "Release process · Contributors can open PRs · Collaborators will be invited based on contributions · Maintainers can push to branches in the llama.cpp repo and merge PRs into the master branch · Any help with managing issues, PRs and projects is very appreciated!",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "https://imgs.search.brave.com/dnABgxXEtSf7EqzipjJ16rEaEXDvGL71ehK6oqcFPQU/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly9yZXBv/c2l0b3J5LWltYWdl/cy5naXRodWJ1c2Vy/Y29udGVudC5jb20v/NjEyMzU0Nzg0Lzhi/OWViMGVjLTY1MTct/NDRhOS04YTNhLWZj/Y2RkYzY3OGU1Nw",
+   "publishedDate": "2026-09-25T00:53:25",
+   "pubdate": "2026-09-25 00:53:25",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "brave"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    3
+   ],
+   "score": 0.3333333333333333,
+   "category": "general",
+   "url": "https://github.com/ggml-org/llama.cpp",
+   "engine": "brave",
+   "parsed_url": [
+    "https",
+    "github.com",
+    "/ggml-org/llama.cpp",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "template": "default.html",
+   "title": "Local AI Engine (llama.cpp)",
+   "content": "Jan v0.8.0 switched llama.cpp from launching a separate server for each model to a single router process (llama-server --models-preset <router.preset.ini> --models-max <N> --no-webui) that loads and unloads models on demand via the upstream ...",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=tbn%3AANd9GcRHjm1r4BzY9vLVLj4lRRMyI7_q8KUGi87y1mEu1DqDQyPe19WVthbGu7Ud",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "google cse",
+    "brave"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    11,
+    14
+   ],
+   "score": 0.3246753246753247,
+   "category": "general",
+   "url": "https://www.jan.ai/docs/desktop/local-engine/llama-cpp",
+   "engine": "google cse",
+   "parsed_url": [
+    "https",
+    "www.jan.ai",
+    "/docs/desktop/local-engine/llama-cpp",
+    "",
+    "",
+    ""
+   ]
+  }
+ ],
+ "answers": [],
+ "corrections": [],
+ "infoboxes": [],
+ "suggestions": [],
+ "unresponsive_engines": []
+}

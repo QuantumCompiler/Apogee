@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -95,6 +96,11 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
     // is already in its history.
     std::map<std::string, int> call_counts;
 
+    // Tools that said they cannot work for the rest of this turn
+    // (`ToolOutcome::unavailable`): no longer offered, and a call that still
+    // names one is answered without running it.
+    std::set<std::string, std::less<>> withdrawn;
+
     agent::DispatchContext dispatch_context;
     dispatch_context.permission = options.permission;
     dispatch_context.confirm = options.confirm;
@@ -131,6 +137,9 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
         // answer instead of another tool call.
         if (!final_pass) {
             request.tools = tools;
+            std::erase_if(request.tools, [&withdrawn](const harness::Tool& tool) {
+                return withdrawn.contains(tool.name);
+            });
         }
         // The schema rides every request: a provider whose JSON mode cannot
         // coexist with tools applies it on the tools-less final pass, and one
@@ -268,8 +277,19 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
                     continue;
                 }
 
+                if (withdrawn.contains(call.name)) {
+                    append_result(history, call,
+                                  "Error: " + call.name +
+                                      " is unavailable for the rest of this turn (see its "
+                                      "error above). Answer without it.");
+                    continue;
+                }
+
                 const agent::ToolOutcome outcome =
                     agent::dispatch(*options.tools, call, dispatch_context);
+                if (outcome.unavailable) {
+                    withdrawn.insert(call.name);
+                }
                 append_result(history, call, outcome.content);
             }
         } catch (...) {

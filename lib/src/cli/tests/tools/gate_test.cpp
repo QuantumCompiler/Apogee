@@ -11,6 +11,7 @@
 
 #include "agent/fetch_url.h"
 #include "agent/tool.h"
+#include "agent/web_search.h"
 #include "agentloop/loop.h"
 #include "agentloop/reporter.h"
 #include "backends/mock.h"
@@ -265,7 +266,10 @@ TEST_CASE("every built-in tool's parameters are a JSON Schema a template can rea
     apogee::tools::register_native_toolsets(registry, options);
     registry.add(apogee::agent::make_fetch_url_tool(
         [](std::string_view) { return apogee::agent::FetchResult{}; }));
-    REQUIRE(registry.size() >= 18);
+    registry.add(apogee::agent::make_web_search_tool(
+        [](const apogee::agent::SearchRequest&) { return apogee::agent::SearchResponse{}; },
+        "127.0.0.1", 5));
+    REQUIRE(registry.size() >= 19);
 
     for (const apogee::harness::Tool& tool : registry.definitions()) {
         INFO(tool.name << ": " << tool.parameters_schema);

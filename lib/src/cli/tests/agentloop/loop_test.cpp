@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -744,4 +745,65 @@ TEST_CASE("a provider's notice reaches the reporter; its other status does not",
     // A cache report is progress, not a notice (25c).
     CHECK(reporter.progress ==
           std::vector<std::string>{"prompt 120 tokens: 100 from the cache, 20 read"});
+}
+
+// ---------------------------------------------------------------------------
+// A tool that cannot work this turn (25e)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a tool that says it cannot work is withdrawn for the rest of the turn",
+          "[agentloop][unavailable]") {
+    // A misconfigured search refuses every query, and a small model told so in
+    // words rephrases until the step limit. Withdrawn, it cannot be asked.
+    int runs = 0;
+    Tool broken;
+    broken.name = "search";
+    broken.description = "Searches";
+    broken.run = [&runs](std::string_view) {
+        ++runs;
+        return ToolOutcome{"Error: the instance refused", true, /*unavailable=*/true};
+    };
+    ToolRegistry registry;
+    registry.add(broken);
+    registry.add(echo_tool());
+
+    Fixture f = make_fixture({
+        // The same step names it twice: the second is answered, not run.
+        tool_turn(
+            {ToolCall{"c1", "search", R"({"q":"a"})"}, ToolCall{"c2", "search", R"({"q":"b"})"}}),
+        // A model that calls it anyway, with new words.
+        tool_turn({ToolCall{"c3", "search", R"({"q":"c"})"}, ToolCall{"c4", "echo", "{}"}}),
+        text_turn("answered without it"),
+    });
+    const auto result = apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+    CHECK(result.answer == "answered without it");
+    CHECK(runs == 1);
+
+    const auto& requests = f.provider->requests();
+    REQUIRE(requests.size() == 3);
+    const auto offered = [](const apogee::harness::ChatRequest& request, std::string_view name) {
+        return std::any_of(request.tools.begin(), request.tools.end(),
+                           [name](const apogee::harness::Tool& tool) { return tool.name == name; });
+    };
+    CHECK(offered(requests[0], "search"));
+    CHECK_FALSE(offered(requests[1], "search"));  // withdrawn from the next step on
+    CHECK_FALSE(offered(requests[2], "search"));
+    CHECK(offered(requests[2], "echo"));  // and nothing else with it
+
+    std::vector<std::string> results;
+    for (const ChatMessage& message : f.history) {
+        if (message.role == apogee::harness::Role::Tool) {
+            results.push_back(message.content.plain_text());
+        }
+    }
+    REQUIRE(results.size() == 4);
+    CHECK(results[0] == "Error: the instance refused");
+    CHECK(results[1].find("unavailable for the rest of this turn") != std::string::npos);
+    CHECK(results[2].find("unavailable for the rest of this turn") != std::string::npos);
+    CHECK(results[3].starts_with("echoed:"));
+
+    // The next turn offers it again: the user may have fixed it meanwhile.
+    Fixture next = make_fixture({text_turn("fine")});
+    (void)apogee::agentloop::run(*next.harness, next.history, options_with(registry));
+    CHECK(offered(next.provider->requests().front(), "search"));
 }

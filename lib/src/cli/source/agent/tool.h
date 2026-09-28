@@ -25,6 +25,12 @@ struct ToolOutcome {
     /// is the whole point of a tool loop. Aborting the turn instead would throw
     /// away the conversation over a bad argument.
     bool is_error = false;
+    /// The tool cannot work for the rest of this turn: the service behind it
+    /// is down or misconfigured, and no argument will change that. The loop
+    /// stops offering it, because a small model told so in words still
+    /// rephrases and retries until the turn's step limit (a SearXNG with JSON
+    /// off, Qwen3-VL-8B, 2026-09-28). An error; the next turn offers it again.
+    bool unavailable = false;
 };
 
 /// The permission decision for a gated operation.

@@ -6,7 +6,9 @@
 #include <optional>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
+#include "agent/web_search.h"
 #include "harness/config_edit.h"
 #include "harness/host.h"
 #include "platform/platform.h"
@@ -106,8 +108,19 @@ agent::PermissionChecker make_permission_checker(const harness::Config& config,
     // The levels and hosts are copied: the checker outlives any one config
     // object, and a mid-session edit to the file takes effect on the next
     // session.
+    //
+    // The search instance's host counts as listed: the user named it in
+    // tools.search, which is the consent (25e). The pages a search finds are
+    // ordinary fetches, asked per website.
+    std::vector<std::string> hosts = config.tools.allowed_hosts;
+    std::string unused;
+    if (const std::optional<agent::SearchInstance> search =
+            agent::search_instance(config.tools.search, unused);
+        search.has_value()) {
+        hosts.push_back(search->base.host);
+    }
     return
-        [levels = config.permissions, hosts = config.tools.allowed_hosts,
+        [levels = config.permissions, hosts = std::move(hosts),
          approvals = std::move(approvals)](const agent::GateRequest& request) -> agent::Permission {
             if (request.outbound) {
                 // By host, never by tool: `permissions.fetch_url` is not a key.

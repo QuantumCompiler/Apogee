@@ -548,6 +548,25 @@ struct TrainingConfig {
 };
 
 /// The `tools:` section: where the native toolsets operate.
+/// `tools.search`: the web search `web_search` answers from (25e). Absent,
+/// no search tool is registered -- a model is never offered a tool that can
+/// only fail. Kept as written: an unknown provider or an unusable URL loads,
+/// registers nothing, and `check` names it.
+struct SearchConfig {
+    /// `searxng`, the one provider so far.
+    std::string provider;
+    /// The instance's address, such as `http://127.0.0.1:8888`. `${ENV_VAR}`
+    /// references are expanded.
+    std::string url;
+    /// How many results a search returns, 1 to 20.
+    int results = 5;
+
+    /// Whether the section is present at all.
+    [[nodiscard]] bool configured() const noexcept {
+        return !provider.empty() || !url.empty();
+    }
+};
+
 struct ToolsConfig {
     /// The directory the filesystem tools are sandboxed to. Empty means the
     /// folder Apogee was started in (2026-09-25; it was the home directory).
@@ -563,6 +582,8 @@ struct ToolsConfig {
     /// answer -- a pipe, `serve` -- it is refused. As written; an entry that
     /// is not a bare host matches nothing, and `check` reports it.
     std::vector<std::string> allowed_hosts;
+
+    SearchConfig search;
 
     [[nodiscard]] bool is_disabled(std::string_view toolset) const noexcept;
 };

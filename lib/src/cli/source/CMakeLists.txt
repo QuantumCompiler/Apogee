@@ -288,6 +288,8 @@ add_library(apogee_core STATIC
     agent/tool.cpp
     agent/fetch_url.h
     agent/fetch_url.cpp
+    agent/web_search.h
+    agent/web_search.cpp
 
     agentloop/agentloop.h
     agentloop/reporter.h

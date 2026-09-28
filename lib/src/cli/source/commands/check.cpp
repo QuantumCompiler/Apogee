@@ -15,6 +15,7 @@
 #include <system_error>
 
 #include "agent/fetch_url.h"
+#include "agent/web_search.h"
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
 #include "agentloop/structured.h"
@@ -547,6 +548,25 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
                 "'" + host + "' is not a host name, so it allows nothing",
                 "write the host alone, e.g. docs.python.org, not a URL or a pattern");
         }
+    }
+
+    // Configuration only: `check` never waits on the network, and a failing
+    // instance is reported by the tool when used, with its error (25e).
+    std::string problem;
+    if (const std::optional<agent::SearchInstance> search =
+            agent::search_instance(config.tools.search, problem);
+        search.has_value()) {
+        add(report, Status::Ok, "Tools", "search",
+            search->provider + " at " + search->base.str() + ", " +
+                std::to_string(search->results) + " results -- web_search is on, and " +
+                search->base.host + " is reached without asking");
+    } else if (!problem.empty()) {
+        add(report, Status::Warn, "Tools", "search", problem + ", so there is no web_search",
+            "fix tools.search in the config, or remove it");
+    } else {
+        add(report, Status::Ok, "Tools", "search",
+            "not configured -- no web_search tool. To add one, run SearXNG with JSON on and "
+            "add under tools: search: {provider: searxng, url: http://127.0.0.1:8888}");
     }
 
     const std::span<const std::string_view> toolsets = tools::toolset_names();
