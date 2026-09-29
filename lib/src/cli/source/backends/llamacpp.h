@@ -265,6 +265,9 @@ private:
         std::unique_ptr<ChatRendering> chat;
         /// Why the template path was not taken, when it was not.
         std::string fallback_reason;
+        /// On the fallback, the guessed framing's turn markers: generation
+        /// ends where the model writes one out (see `RenderedPrompt::stops`).
+        std::vector<std::string> stops;
     };
 
     /// Renders `request` the one way every path uses -- the text turn, the
@@ -282,6 +285,9 @@ private:
         /// cannot disagree about what a tool call is.
         std::vector<harness::ToolCall> tool_calls;
         harness::FinishReason finish = harness::FinishReason::Stop;
+        /// The last of `tokens` completed a stop string and was never fed
+        /// back, so the cache does not hold it.
+        bool last_unfed = false;
     };
 
     /// Samples until end-of-generation, the token cap, or the context wall.
@@ -291,11 +297,12 @@ private:
     /// the first time one of them changed.
     ///
     /// `chat` is the rendering's grammar and reader, or null for the fallback
-    /// path's filters.
+    /// path's filters; `stops` is the fallback's framing's turn markers.
     [[nodiscard]] Generation generate(LlamaContext& context, std::int64_t prompt_end,
                                       const harness::ChatRequest& request,
                                       const harness::StreamOptions& options,
-                                      const ChatRendering* chat);
+                                      const ChatRendering* chat,
+                                      const std::vector<std::string>& stops);
 
     /// The turn when the request carries images.
     ///
@@ -320,7 +327,9 @@ private:
                       std::int64_t kept, const LlamaContext& context) const;
 
     /// Says, once per turn, that a request carrying tools is answered without
-    /// them -- the fallback path cannot put them in the prompt.
+    /// them -- the fallback path cannot put them in the prompt. A model file
+    /// with no chat template at all is said instead, once a conversation: it
+    /// is almost always a base model.
     void notice_if_toolless(const harness::ChatRequest& request, const RenderedRequest& rendered,
                             const harness::StreamOptions& options) const;
 
@@ -334,6 +343,8 @@ private:
     Options options_;
     std::unique_ptr<LlamaRuntime> runtime_;
     mutable std::optional<models::GgufInfo> header_;
+    /// Whether the no-template notice has been given this conversation.
+    mutable bool template_noticed_ = false;
     /// `general.architecture` of the loaded model, empty before the first load.
     mutable std::string architecture_;
     mutable const ModelProfile* profile_ = nullptr;

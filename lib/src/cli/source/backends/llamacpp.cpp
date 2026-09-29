@@ -259,6 +259,64 @@ void notice(const harness::StreamOptions& options, std::string text) {
     return id;
 }
 
+/// Ends a reply where it writes one of `stops` -- a guessed framing's turn
+/// markers, which a model that does not know them writes out as text before
+/// going on to invent the rest of the transcript.
+///
+/// Text that could still become a marker is held back until it cannot, so a
+/// marker never reaches the screen in part; what is held when the reply ends
+/// otherwise comes out through `flush`.
+class StopWatch {
+public:
+    explicit StopWatch(const std::vector<std::string>& stops) : stops_{stops} {}
+
+    /// The text now safe to pass on. Sets `stopped` when a marker ended the
+    /// reply; the marker and anything after it are dropped.
+    [[nodiscard]] std::string write(std::string_view piece, bool& stopped) {
+        held_ += piece;
+        if (stops_.empty()) {
+            return std::exchange(held_, {});
+        }
+        std::size_t first = std::string::npos;
+        for (const std::string& stop : stops_) {
+            if (!stop.empty()) {
+                first = std::min(first, held_.find(stop));
+            }
+        }
+        if (first != std::string::npos) {
+            stopped = true;
+            std::string out = held_.substr(0, first);
+            held_.clear();
+            return out;
+        }
+        // The longest tail that is the start of a marker waits.
+        std::size_t keep = 0;
+        for (const std::string& stop : stops_) {
+            if (stop.empty()) {
+                continue;
+            }
+            for (std::size_t length = std::min(stop.size() - 1, held_.size()); length > keep;
+                 --length) {
+                if (held_.compare(held_.size() - length, length, stop, 0, length) == 0) {
+                    keep = length;
+                    break;
+                }
+            }
+        }
+        std::string out = held_.substr(0, held_.size() - keep);
+        held_.erase(0, held_.size() - keep);
+        return out;
+    }
+
+    [[nodiscard]] std::string flush() {
+        return std::exchange(held_, {});
+    }
+
+private:
+    const std::vector<std::string>& stops_;
+    std::string held_;
+};
+
 /// A reply read through the model's own template format as it streams.
 ///
 /// llama-server's method: the whole reply so far is re-read after every
@@ -617,7 +675,9 @@ LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
     }
     // The fallback, as it was before 25b: llama.cpp's fixed template set or
     // the name-matched registry, and the profile's filters on the reply.
-    rendered.text = llama_tokens::render_prompt(*model_, options_.model, messages, true);
+    RenderedPrompt fallback = llama_tokens::render_prompt(*model_, options_.model, messages, true);
+    rendered.text = std::move(fallback.text);
+    rendered.stops = std::move(fallback.stops);
     if (request.transient.skip_reasoning) {
         // After the generation prompt, so the model's first token is already
         // the answer's.
@@ -663,7 +723,7 @@ std::vector<std::int64_t> LlamaCppProvider::checkpoint_marks(
         }
         text = std::move(prefix.prompt);
     } else {
-        text = llama_tokens::render_prompt(*model_, options_.model, before, false);
+        text = llama_tokens::render_prompt(*model_, options_.model, before, false).text;
     }
     const std::vector<std::int32_t> head = model_->tokenize(text, true);
     if (!head.empty() && head.size() < prompt.size() &&
@@ -706,7 +766,26 @@ void LlamaCppProvider::report_cache(const harness::StreamOptions& options,
 void LlamaCppProvider::notice_if_toolless(const harness::ChatRequest& request,
                                           const RenderedRequest& rendered,
                                           const harness::StreamOptions& options) const {
-    if (request.tools.empty() || rendered.chat != nullptr) {
+    if (rendered.chat != nullptr) {
+        return;
+    }
+    if (const models::GgufInfo& info = header(); info.parsed && !info.has_chat_template) {
+        // No template at all is almost always a base model, and that is what
+        // the user needs to hear -- once a conversation, tools or not -- rather
+        // than a note about tools that reads like a bug in Apogee. Its answer
+        // runs in a guessed framing, which it ends at the framing's markers.
+        if (!template_noticed_) {
+            template_noticed_ = true;
+            const std::string file = std::filesystem::path{options_.model}.filename().string();
+            notice(options, (file.empty() ? options_.model : file) +
+                                " ships no chat template, so it is most likely a base "
+                                "(pretrained) model: it continues text rather than answering, "
+                                "and cannot use tools. For chat, use its instruction-tuned "
+                                "release, usually named '-it' or '-Instruct'");
+        }
+        return;
+    }
+    if (request.tools.empty()) {
         return;
     }
     // Unknown is permissive, and nothing is dropped silently: the turn still
@@ -751,7 +830,8 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
                                                         std::int64_t prompt_end,
                                                         const harness::ChatRequest& request,
                                                         const harness::StreamOptions& options,
-                                                        const ChatRendering* chat) {
+                                                        const ChatRendering* chat,
+                                                        const std::vector<std::string>& stops) {
     options.cancellation.throw_if_cancelled();
 
     const std::int64_t limit = generation_limit(request);
@@ -770,6 +850,9 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     if (chat != nullptr) {
         reply.emplace(*chat, options);
     }
+    // On the fallback, the guessed framing's own turn markers end the reply.
+    StopWatch watch{stops};
+    bool stopped = false;
 
     std::string answer;
     std::vector<std::int32_t> generated;
@@ -842,14 +925,18 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
             const std::string piece =
                 preserved ? model_->special_token_text(token) : model_->token_text(token);
             if (reply->write(piece)) {
+                stopped = true;
                 break;  // a stop string: not fed back, the reply is over
             }
         } else {
-            const std::string piece = model_->token_text(token);
-            const std::string visible = pump(think.write(piece));
+            const std::string visible =
+                pump(think.write(watch.write(model_->token_text(token), stopped)));
             answer += visible;
             if (options.on_token && !visible.empty()) {
                 options.on_token(visible);
+            }
+            if (stopped) {
+                break;  // a turn marker: not fed back, the reply is over
             }
         }
 
@@ -879,7 +966,13 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
             }
         }
     } else {
-        std::string tail = markup.write(gate.write(think.flush()));
+        // What the watch still held could have become a marker and did not.
+        std::string tail = pump(think.write(watch.flush()));
+        answer += tail;
+        if (options.on_token && !tail.empty()) {
+            options.on_token(tail);
+        }
+        tail = markup.write(gate.write(think.flush()));
         tail += markup.write(gate.flush());
         tail += markup.flush();
         if (!tail.empty()) {
@@ -902,6 +995,7 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     result.tokens = std::move(generated);
     result.tool_calls = std::move(calls);
     result.finish = finish;
+    result.last_unfed = stopped && !result.tokens.empty();
     if (!result.tool_calls.empty()) {
         // A native call ends the turn on the model's side (`<|call|>` is
         // end-of-generation), so the honest finish reason is the tool call,
@@ -953,7 +1047,7 @@ harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatReques
     }
 
     const Generation generation =
-        generate(context, prompt_end, request, options, rendered.chat.get());
+        generate(context, prompt_end, request, options, rendered.chat.get(), rendered.stops);
 
     // The session's own KV is deliberately untouched: this turn ran on a
     // throwaway context, so `session_tokens_` still describes what the text
@@ -1045,7 +1139,7 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
     // landed, because the alternative was a second copy that would drift the
     // first time a stop condition changed.
     const Generation generation =
-        generate(*context, prompt_end, request, options, rendered.chat.get());
+        generate(*context, prompt_end, request, options, rendered.chat.get(), rendered.stops);
     const std::string& answer = generation.text;
 
     if (!side_request) {
@@ -1061,8 +1155,13 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
         // step was written first and then removed -- it could only ever make
         // the remembered prefix SHORTER than the truth, never protect
         // correctness, and it could not be made to fail a test.
-        session_tokens_.insert(session_tokens_.end(), generation.tokens.begin(),
-                               generation.tokens.end());
+        //
+        // Not a token that completed a stop string: it was never fed back, so
+        // claiming it would have the next turn decode on past a position that
+        // was never filled.
+        const auto fed =
+            generation.tokens.end() - static_cast<std::ptrdiff_t>(generation.last_unfed ? 1 : 0);
+        session_tokens_.insert(session_tokens_.end(), generation.tokens.begin(), fed);
     }
 
     last_use_ = options_.clock();

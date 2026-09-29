@@ -1,26 +1,31 @@
 #include "backends/llamacpp_tokens.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "backends/chat_template.h"
 
 namespace apogee::backends::llama_tokens {
 
-std::string render_prompt(const LlamaModel& model, std::string_view model_name,
-                          const std::vector<harness::ChatMessage>& messages,
-                          bool add_generation_prompt) {
+RenderedPrompt render_prompt(const LlamaModel& model, std::string_view model_name,
+                             const std::vector<harness::ChatMessage>& messages,
+                             bool add_generation_prompt) {
     // The model's own template first -- see LlamaModel::apply_builtin_template.
-    std::string builtin = model.apply_builtin_template(messages, add_generation_prompt);
-    if (!builtin.empty()) {
-        return builtin;
+    if (std::string builtin = model.apply_builtin_template(messages, add_generation_prompt);
+        !builtin.empty()) {
+        RenderedPrompt rendered;
+        rendered.kind = TemplateKind::Builtin;
+        rendered.text = std::move(builtin);
+        return rendered;
     }
-    return render_for_model(model_name, messages, add_generation_prompt).text;
+    return render_for_model(model_name, messages, add_generation_prompt);
 }
 
 std::vector<std::int32_t> tokenize_prompt(const LlamaModel& model, std::string_view model_name,
                                           const std::vector<harness::ChatMessage>& messages,
                                           bool add_generation_prompt) {
-    const std::string prompt = render_prompt(model, model_name, messages, add_generation_prompt);
+    const std::string prompt =
+        render_prompt(model, model_name, messages, add_generation_prompt).text;
     // add_special: the template already writes the model's own turn markers,
     // but BOS is a tokenizer-level concern the template does not cover.
     return model.tokenize(prompt, true);

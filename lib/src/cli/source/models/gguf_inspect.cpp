@@ -382,6 +382,12 @@ GgufInfo inspect_gguf(const std::filesystem::path& path) {
             const std::string key = cursor.string();
             const auto type = static_cast<ValueType>(cursor.number<std::uint32_t>());
 
+            if (key == "tokenizer.chat_template") {
+                // Its presence is the fact; the template itself is not read.
+                info.has_chat_template = true;
+                skip_value(cursor, type);
+                continue;
+            }
             if (is_attention_key(key)) {
                 attention.insert_or_assign(key, read_integers(cursor, type));
                 continue;
@@ -434,6 +440,7 @@ GgufInfo inspect_gguf(const std::filesystem::path& path) {
         info.file_type = kUnknownFileType;
         info.architecture.clear();
         info.name.clear();
+        info.has_chat_template = false;
     }
 
     return info;

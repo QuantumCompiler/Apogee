@@ -242,3 +242,22 @@ TEST_CASE("a header with no architecture key parses and says so", "[models][gguf
     CHECK(info.architecture.empty());
     CHECK(info.tensors == 1);
 }
+
+TEST_CASE("a chat template is noticed without being read", "[models][gguf]") {
+    // Its presence is the fact that matters: a file without one is almost
+    // always a base model. Stepping over it must leave the read in step.
+    Builder with;
+    with.magic().u32(3).u64(1).u64(2);
+    with.string_kv("tokenizer.chat_template", "{% for m in messages %}{{ m.content }}{% endfor %}");
+    with.string_kv("general.architecture", "llama");
+    with.tensor("token_embd.weight");
+    const GgufInfo templated = inspect_bytes(with.bytes(), "templated");
+    REQUIRE(templated.parsed);
+    CHECK(templated.has_chat_template);
+    CHECK(templated.architecture == "llama");
+    CHECK(templated.tensors == 1);
+
+    const GgufInfo bare = inspect_bytes(well_formed(), "bare");
+    REQUIRE(bare.parsed);
+    CHECK_FALSE(bare.has_chat_template);
+}

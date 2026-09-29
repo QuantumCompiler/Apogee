@@ -126,6 +126,9 @@ public:
         // cache whose window before `position` is gone. Every test with a
         // sliding model asserts it on every decode.
         REQUIRE(backends::window_intact(oldest, position, sliding_window));
+        // And never past the cache's end: a position skipped is a token the
+        // model is told it has seen and never did.
+        REQUIRE(position <= resident);
         decodes.push_back({position, static_cast<std::int64_t>(tokens.size())});
         resident = position + static_cast<std::int64_t>(tokens.size());
         if (sliding_window > 0) {

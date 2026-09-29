@@ -181,22 +181,26 @@ RenderedPrompt render_for_model(std::string_view model_name,
     if (rendered.template_name == "llama3") {
         rendered.kind = TemplateKind::Named;
         rendered.text = render_llama3(messages, add_generation_prompt);
+        rendered.stops = {"<|eot_id|>", "<|start_header_id|>"};
         return rendered;
     }
     if (rendered.template_name == "mistral") {
         rendered.kind = TemplateKind::Named;
         rendered.text = render_mistral(messages, add_generation_prompt);
+        rendered.stops = {"</s>", "[INST]"};
         return rendered;
     }
     if (rendered.template_name == "chatml") {
         rendered.kind = TemplateKind::Named;
         rendered.text = render_chatml(messages, add_generation_prompt);
+        rendered.stops = {"<|im_end|>", "<|im_start|>"};
         return rendered;
     }
 
     rendered.kind = TemplateKind::Fallback;
     rendered.template_name.clear();
     rendered.text = render_chatml(messages, add_generation_prompt);
+    rendered.stops = {"<|im_end|>", "<|im_start|>"};
     return rendered;
 }
 

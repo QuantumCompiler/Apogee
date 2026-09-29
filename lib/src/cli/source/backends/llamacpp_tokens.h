@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "backends/chat_template.h"
 #include "backends/llama_runtime.h"
 #include "harness/types.h"
 
@@ -16,10 +17,11 @@ namespace apogee::backends::llama_tokens {
 /// Renders `messages` for `model`, preferring the GGUF's own chat template.
 ///
 /// Falls back to the name-matched registry in `chat_template.h` when the model
-/// ships none. `model_name` is only used for that fallback.
-[[nodiscard]] std::string render_prompt(const LlamaModel& model, std::string_view model_name,
-                                        const std::vector<harness::ChatMessage>& messages,
-                                        bool add_generation_prompt);
+/// ships none, and then carries that framing's turn markers as `stops`.
+/// `model_name` is only used for that fallback.
+[[nodiscard]] RenderedPrompt render_prompt(const LlamaModel& model, std::string_view model_name,
+                                           const std::vector<harness::ChatMessage>& messages,
+                                           bool add_generation_prompt);
 
 /// The token sequence a request becomes.
 [[nodiscard]] std::vector<std::int32_t> tokenize_prompt(

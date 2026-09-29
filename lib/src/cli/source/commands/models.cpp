@@ -488,6 +488,14 @@ std::string render_model_info(const harness::Config& config, std::string_view ba
     out << "tensors:      " << info.tensors << " total, " << info.text_tensors << " text\n";
     out << "size:         " << (info.file_size / (1024LL * 1024)) << " MiB\n";
     if (!info.is_projector()) {
+        // A file without one is almost always a base model, and a chat with
+        // it reads as a broken chat unless it is said where a user looks.
+        out << "template:     "
+            << (info.has_chat_template
+                    ? "the model's own"
+                    : "none -- most likely a base (pretrained) model, which continues text "
+                      "rather than answering; for chat, use its instruction-tuned release")
+            << "\n";
         render_window(out, info, value);
     }
     if (info.is_projector()) {

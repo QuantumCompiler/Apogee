@@ -1844,3 +1844,156 @@ TEST_CASE("a local chat past 90% of its default window is compacted, not run int
     const std::vector<ChatMessage> short_history{ChatMessage::user("alpha beta")};
     CHECK_FALSE(apogee::agentloop::measure_context(harness, short_history, "local").should_warn());
 }
+
+// --- A model file with no chat template ----------------------------------------
+
+namespace {
+
+/// A GGUF header in a scratch file, with or without a chat template.
+[[nodiscard]] std::filesystem::path header_with_template(bool with_template,
+                                                         const std::string& name) {
+    apogee::testing::GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(with_template ? 2 : 1);
+    builder.string_kv("general.architecture", "gemma4");
+    if (with_template) {
+        builder.string_kv("tokenizer.chat_template", "{{ messages }}");
+    }
+    builder.tensor("token_embd.weight");
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / ("apogee-template-" + name + ".gguf");
+    REQUIRE(builder.write_to(path));
+    return path;
+}
+
+/// The notices a run gave.
+struct Notices {
+    std::vector<std::string> lines;
+    apogee::harness::StreamOptions options;
+
+    Notices() {
+        options.on_status = [this](const apogee::harness::StatusEvent& event) {
+            if (event.type == apogee::harness::StatusEvent::Type::Notice) {
+                lines.push_back(event.detail);
+            }
+        };
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a guessed framing's turn marker ends the reply, and never reaches the screen",
+          "[backends][llamacpp][template]") {
+    // A base model given the ChatML fallback writes `<|im_end|>` out as text,
+    // a piece at a time, and then invents the rest of the transcript.
+    auto owned = std::make_unique<FakeLlamaRuntime>();
+    owned->script_text = {"Red", "<|im_", "end|>", "user", "more"};
+    owned->eog_token = -1;
+    FakeLlamaRuntime* runtime = owned.get();
+    LlamaCppProvider::Options options;
+    options.backend_name = "local";
+    options.model = "test-model";
+    options.model_path = "/models/test.gguf";
+    LlamaCppProvider provider{std::move(options), std::move(owned)};
+
+    std::string streamed;
+    apogee::harness::StreamOptions stream;
+    stream.on_token = [&streamed](std::string_view piece) { streamed += piece; };
+    const auto response = provider.stream_chat(turn({ChatMessage::user("colors")}), stream);
+
+    CHECK(response.message.content.plain_text() == "Red");
+    CHECK(streamed == "Red");
+    // Stopped at the marker: "user" and "more" were never sampled.
+    CHECK(response.usage.completion_tokens == 3);
+    CHECK(runtime->model->contexts.front()->sampled == 3);
+}
+
+TEST_CASE("text that only looked like the start of a marker still reaches the screen",
+          "[backends][llamacpp][template]") {
+    auto owned = std::make_unique<FakeLlamaRuntime>();
+    owned->script_text = {"a", "<|im", "possible"};
+    owned->eog_token = -1;
+    LlamaCppProvider::Options options;
+    options.backend_name = "local";
+    options.model = "test-model";
+    options.model_path = "/models/test.gguf";
+    LlamaCppProvider provider{std::move(options), std::move(owned)};
+    const auto response = provider.chat(turn({ChatMessage::user("x")}), {});
+    CHECK(response.message.content.plain_text() == "a<|impossible");
+
+    // And one held when the reply ends is flushed rather than lost.
+    auto ending = std::make_unique<FakeLlamaRuntime>();
+    ending->script_text = {"b", "<|im_"};
+    ending->eog_token = -1;
+    LlamaCppProvider::Options more;
+    more.backend_name = "local";
+    more.model = "test-model";
+    more.model_path = "/models/test.gguf";
+    LlamaCppProvider cut{std::move(more), std::move(ending)};
+    CHECK(cut.chat(turn({ChatMessage::user("x")}), {}).message.content.plain_text() == "b<|im_");
+}
+
+TEST_CASE("a stop string's token is not claimed by the cache, so the next turn has no gap",
+          "[backends][llamacpp][kv]") {
+    // The token that completes a stop string is never fed back. Claiming it
+    // in the conversation's cached tokens let a next prompt that shares it
+    // decode on one position past the cache's end -- the scripted context
+    // refuses any decode past its end.
+    TemplateFixture fixture{{"Hello", "<end>", "never"}};
+    fixture.runtime->stops = {"<end>"};
+    const auto first = fixture.provider->chat(turn({ChatMessage::user("hi")}), {});
+    REQUIRE(first.message.content.plain_text() == "Hello");
+
+    auto session = fixture.runtime->model->contexts.front();
+    session->sampled = 0;
+    const auto second =
+        fixture.provider->chat(turn({ChatMessage::user("hi"), ChatMessage::assistant("Hello <end>"),
+                                     ChatMessage::user("more")}),
+                               {});
+    CHECK(second.usage.prompt_tokens > first.usage.prompt_tokens);
+}
+
+TEST_CASE("a model file with no chat template is said to be a base model, once a conversation",
+          "[backends][llamacpp][template]") {
+    const std::filesystem::path bare = header_with_template(false, "bare");
+    auto owned = std::make_unique<FakeLlamaRuntime>();
+    owned->script_text = {"ok"};
+    LlamaCppProvider::Options options;
+    options.backend_name = "local";
+    options.model = bare.string();
+    options.model_path = bare.string();
+    LlamaCppProvider provider{std::move(options), std::move(owned)};
+
+    Notices first;
+    (void)provider.stream_chat(with_tools({ChatMessage::user("what is the weather")}),
+                               first.options);
+    REQUIRE(first.lines.size() == 1);
+    // Named by its file, not its whole path; what it is, and what to do.
+    CHECK(first.lines.front().starts_with("apogee-template-bare.gguf ships no chat template"));
+    CHECK(first.lines.front().find("base (pretrained) model") != std::string::npos);
+    CHECK(first.lines.front().find("cannot use tools") != std::string::npos);
+    CHECK(first.lines.front().find("'-it' or '-Instruct'") != std::string::npos);
+
+    // Once: a second turn, tools or not, is not told again.
+    Notices second;
+    (void)provider.stream_chat(turn({ChatMessage::user("and tomorrow")}), second.options);
+    CHECK(second.lines.empty());
+
+    // A file with a template is not a base model by this measure; one that
+    // still cannot take tools is told only that.
+    const std::filesystem::path templated = header_with_template(true, "templated");
+    auto again = std::make_unique<FakeLlamaRuntime>();
+    again->script_text = {"ok"};
+    LlamaCppProvider::Options with;
+    with.backend_name = "local";
+    with.model = "templated";
+    with.model_path = templated.string();
+    LlamaCppProvider other{std::move(with), std::move(again)};
+    Notices third;
+    (void)other.stream_chat(with_tools({ChatMessage::user("x")}), third.options);
+    REQUIRE(third.lines.size() == 1);
+    CHECK(third.lines.front().find("is answering without tools") != std::string::npos);
+
+    std::error_code code;
+    std::filesystem::remove(bare, code);
+    std::filesystem::remove(templated, code);
+}

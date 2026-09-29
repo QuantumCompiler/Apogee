@@ -44,6 +44,13 @@ struct RenderedPrompt {
     TemplateKind kind = TemplateKind::Fallback;
     /// The registry entry's name, or empty for builtin/fallback.
     std::string template_name;
+    /// The framing's own turn markers, as text: where generation must end
+    /// when the model writes one out. A model that does not know a framing's
+    /// markers -- a base model, or one given a guessed template -- writes
+    /// them as ordinary text, never ends its turn, and goes on to invent the
+    /// rest of the transcript. Empty for the model's own template, whose end
+    /// is a real end-of-generation token.
+    std::vector<std::string> stops;
 };
 
 /// Renders `messages` in ChatML: `<|im_start|>role\ncontent<|im_end|>`.

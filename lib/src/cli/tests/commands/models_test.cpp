@@ -277,6 +277,9 @@ TEST_CASE("info on a readable model reports the header and its resolved profile"
     CHECK(body.find("architecture: qwen35") != std::string::npos);
     CHECK(body.find("profile:      qwen3") != std::string::npos);
     CHECK(body.find("1 total, 1 text") != std::string::npos);
+    // No template in the header: said, with what that means.
+    CHECK(body.find("template:     none -- most likely a base (pretrained) model") !=
+          std::string::npos);
 }
 
 TEST_CASE("info states the window a local backend gets and what its cache costs",
@@ -345,6 +348,28 @@ TEST_CASE("info says when a model's sliding layers keep only their window",
     const std::string body = render_model_info(config, "gemma");
     CHECK(body.find("cache:        527 MiB at q8_0 (the default), sliding layers at 1536 "
                     "positions\n") != std::string::npos);
+
+    std::error_code code;
+    std::filesystem::remove(path, code);
+}
+
+TEST_CASE("info says when a model ships its own chat template", "[commands][models][info]") {
+    apogee::testing::GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(2);
+    builder.string_kv("general.architecture", "llama");
+    builder.string_kv("tokenizer.chat_template", "{{ messages }}");
+    builder.tensor("token_embd.weight");
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "apogee-models-info-templated.gguf";
+    REQUIRE(builder.write_to(path));
+
+    Config config = sample_config();
+    BackendConfig local;
+    local.type = BackendType::LlamaCpp;
+    local.model_path = path.string();
+    config.backends["instruct"] = local;
+    CHECK(render_model_info(config, "instruct").find("template:     the model's own\n") !=
+          std::string::npos);
 
     std::error_code code;
     std::filesystem::remove(path, code);

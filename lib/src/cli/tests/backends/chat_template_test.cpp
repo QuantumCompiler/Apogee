@@ -124,20 +124,39 @@ TEST_CASE("the model's own template beats our registry", "[backends][template]")
     apogee::testing::FakeLlamaModel model;
     model.builtin_template_prefix = "BUILTIN";
 
-    const std::string out = apogee::backends::llama_tokens::render_prompt(model, "Meta-Llama-3-8B",
-                                                                          conversation(), true);
+    const apogee::backends::RenderedPrompt rendered = apogee::backends::llama_tokens::render_prompt(
+        model, "Meta-Llama-3-8B", conversation(), true);
+    const std::string& out = rendered.text;
 
     CHECK(out.find("BUILTIN") == 0);
     CHECK(out.find("<|start_header_id|>") == std::string::npos);
+    // The model's own template ends its turns with real end-of-generation
+    // tokens; no marker text is watched for.
+    CHECK(rendered.kind == apogee::backends::TemplateKind::Builtin);
+    CHECK(rendered.stops.empty());
 }
 
 TEST_CASE("a model with no template of its own takes the registry", "[backends][template]") {
     apogee::testing::FakeLlamaModel model;  // ships no template
 
-    const std::string out = apogee::backends::llama_tokens::render_prompt(model, "Meta-Llama-3-8B",
-                                                                          conversation(), true);
+    const apogee::backends::RenderedPrompt rendered = apogee::backends::llama_tokens::render_prompt(
+        model, "Meta-Llama-3-8B", conversation(), true);
 
-    CHECK(out.find("<|start_header_id|>") != std::string::npos);
+    CHECK(rendered.text.find("<|start_header_id|>") != std::string::npos);
+    // The registry's framing, and its turn markers to stop at.
+    CHECK(rendered.stops == std::vector<std::string>{"<|eot_id|>", "<|start_header_id|>"});
+}
+
+TEST_CASE("every guessed framing stops at its own turn markers", "[backends][template]") {
+    // A base model, or any model given a guessed framing, writes the markers
+    // out as text and goes on to invent the rest of the transcript.
+    using apogee::backends::render_for_model;
+    CHECK(render_for_model("some-new-model", conversation(), true).stops ==
+          std::vector<std::string>{"<|im_end|>", "<|im_start|>"});
+    CHECK(render_for_model("qwen2.5-7b", conversation(), true).stops ==
+          std::vector<std::string>{"<|im_end|>", "<|im_start|>"});
+    CHECK(render_for_model("Mistral-7B", conversation(), true).stops ==
+          std::vector<std::string>{"</s>", "[INST]"});
 }
 
 TEST_CASE("a common prefix is measured exactly", "[backends][llamacpp][kv]") {

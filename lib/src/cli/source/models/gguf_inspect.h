@@ -146,6 +146,12 @@ struct GgufInfo {
     /// The attention geometry, when `parsed`.
     AttentionHeader attention;
 
+    /// Whether the header carries `tokenizer.chat_template`: the model's own
+    /// statement of how a conversation is framed. A file without one is
+    /// almost always a base (pretrained) model, which continues text rather
+    /// than answering.
+    bool has_chat_template = false;
+
     /// Whether the weights are already quantized.
     ///
     /// Load-bearing for `models quantize`: llama.cpp **refuses to requantize**,
