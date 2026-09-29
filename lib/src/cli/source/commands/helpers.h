@@ -18,6 +18,7 @@
 #include "harness/cancellation.h"
 #include "harness/config.h"
 #include "harness/harness.h"
+#include "harness/roles.h"
 #include "harness/types.h"
 #include "mcp/registry.h"
 #include "tools/toolsets.h"
@@ -114,10 +115,25 @@ struct RagChoice {
 /// type), the judge -- and hands them to `agentloop::retrieve_for_turn`, which
 /// decides once and reports honestly. Lives here so `complete` and `chat`
 /// cannot assemble the facts differently.
+///
+/// `conversation` is the backend the chat is on, where there is one: what
+/// `rerank: on` falls back to when no utility model is set.
 [[nodiscard]] agentloop::RagResult retrieve_for_collection(
     const harness::Harness& harness, const harness::Config& config, std::string_view collection,
     const std::string& question, int limit, std::string_view retriever_flag,
-    std::string_view rerank_flag, const harness::CancellationToken& cancellation);
+    std::string_view rerank_flag, const harness::CancellationToken& cancellation,
+    std::string_view conversation = {});
+
+/// The backend a helper `role` runs on for a conversation on `conversation`
+/// (26b): the role's pointer, else the conversation's own backend -- through
+/// the one resolver.
+[[nodiscard]] std::string helper_backend(const harness::Config& config, harness::ModelRole role,
+                                         std::string_view conversation);
+
+/// The utility backend when the config names one, else empty: for the chore
+/// that happens only when a utility model is set -- summarising a large tool
+/// result -- and is never pushed onto the chat model.
+[[nodiscard]] std::string named_utility(const harness::Config& config);
 
 /// Whether `model` names something the config actually defines.
 ///

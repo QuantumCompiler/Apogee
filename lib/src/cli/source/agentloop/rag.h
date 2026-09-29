@@ -82,6 +82,10 @@ struct RagTurn {
     /// Why it did not resolve, for the note.
     std::string embedder_reason;
 
+    /// The backend the conversation is on: where `rerank: on` falls back when
+    /// no utility model is set (26b). Empty outside a conversation.
+    std::string conversation;
+
     /// For the judge. May be null, in which case reranking is off.
     const harness::Harness* harness = nullptr;
     const harness::Config* config = nullptr;

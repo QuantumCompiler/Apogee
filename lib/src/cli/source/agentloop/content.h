@@ -96,6 +96,10 @@ struct ContextUsage {
 ///
 /// **On any failure the original history is returned unchanged.** A failed
 /// compaction must degrade to a longer prompt, never to a lost conversation.
+///
+/// `model` writes the summary: the utility model when one is set, else the
+/// conversation's own backend (26b). It is asked as a side request, so a
+/// local chat model's cache is not disturbed by it.
 [[nodiscard]] std::vector<harness::ChatMessage> compact_history(
     const harness::Harness& harness, const std::vector<harness::ChatMessage>& history,
     const std::string& model, const harness::CancellationToken& cancellation = {});

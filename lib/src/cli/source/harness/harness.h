@@ -182,6 +182,13 @@ public:
     /// give a better error than we can invent.
     [[nodiscard]] bool accepts_images(std::string_view model) const noexcept;
 
+    /// Whether the backend serving `model` accepts audio (26b).
+    ///
+    /// **False for an unknown or unroutable model** -- the opposite of images,
+    /// because nothing here sends audio to a backend that has not said it can
+    /// read it.
+    [[nodiscard]] bool accepts_audio(std::string_view model) const noexcept;
+
     /// Whether generation on the backend serving `model` is billed per call.
     ///
     /// **True for an unroutable model**: unknown is metered, and a policy

@@ -216,8 +216,16 @@ apogee_run(0 config set-default-extraction claude)
 apogee_run(0 config get models.default_extraction)
 expect_equal("${APOGEE_OUT}" "claude" "models.default_extraction")
 
+# The helper roles (26b): set, and read back.
+foreach(helper vision transcription utility)
+    apogee_run(0 config set-default-${helper} claude)
+    apogee_run(0 config get models.default_${helper})
+    expect_equal("${APOGEE_OUT}" "claude" "models.default_${helper}")
+endforeach()
+
 # A role must name a backend that exists.
 apogee_run(1 config set-default no-such-backend)
+apogee_run(1 config set-default-utility no-such-backend)
 
 # --- auto_rag: injection with no flag, reported, and switchable off --------
 apogee_run(0 config add-backend mock --type mock --model mock-1)

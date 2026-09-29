@@ -382,6 +382,13 @@ GgufInfo inspect_gguf(const std::filesystem::path& path) {
             const std::string key = cursor.string();
             const auto type = static_cast<ValueType>(cursor.number<std::uint32_t>());
 
+            if (type == ValueType::Bool &&
+                (key == "clip.has_vision_encoder" || key == "clip.has_audio_encoder")) {
+                const bool present = cursor.number<std::uint8_t>() != 0;
+                (key == "clip.has_vision_encoder" ? info.projector_vision : info.projector_audio) =
+                    present;
+                continue;
+            }
             if (key == "tokenizer.chat_template") {
                 // Its presence is the fact; the template itself is not read.
                 info.has_chat_template = true;
@@ -441,6 +448,8 @@ GgufInfo inspect_gguf(const std::filesystem::path& path) {
         info.architecture.clear();
         info.name.clear();
         info.has_chat_template = false;
+        info.projector_vision = false;
+        info.projector_audio = false;
     }
 
     return info;

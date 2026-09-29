@@ -34,10 +34,10 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(# Apogee configuration.
 
 # Role pointers. Each names an entry under `backends:` below.
 models:
-  # Role pointers. Each names an entry under `backends:` below, and all three
-  # resolve through one shared chain:
+  # Role pointers. Each names an entry under `backends:` below, and every one
+  # resolves through one shared chain:
   #     -m on the command line  >  a per-feature pin  >  the role pointer here
-  #                             >  models.default
+  #       >  (a helper role) the backend the chat is on  >  models.default
   # `apogee models status` prints which rung answered for each role.
 
   # The backend used when nothing else is specified.
@@ -53,6 +53,21 @@ models:
 
   # Used for structured-extraction work. Unset means models.default.
   # default_extraction: extractor
+
+  # Helper models: smaller ones doing what the chat model cannot, or should
+  # not spend its time on. Each unset role falls back to the backend the chat
+  # is on, so nothing changes until you name one.
+  #   default_vision        describes an image for a chat model that cannot
+  #                         see (a llamacpp entry needs an mmproj_path)
+  #   default_transcription turns audio into text (a llamacpp entry whose
+  #                         projector has an audio encoder)
+  #   default_utility       the chores: chat titles, compaction summaries,
+  #                         rewriting a follow-up into a search query, and
+  #                         summarising a tool result over 8 KiB -- which only
+  #                         happens when this is set
+  # default_vision: vision
+  # default_transcription: listener
+  # default_utility: helper
 
 # Optional search roots that pre-fill path prompts. Each is optional; an empty
 # value simply means "no default". ${ENV_VAR} references are expanded.
@@ -324,7 +339,7 @@ backends:
 #     description: "Meeting notes"
 #     # backend: embedder    # which entry embeds this collection (default: models.default_embedding)
 #     # retriever: auto      # lexical | vector | hybrid | auto -- checked by `apogee check`
-#     # rerank: off          # a backend name, or off
+#     # rerank: off          # a backend name, on (the utility model), or off
 #     # graph:               # the knowledge graph over this collection (apogee graph)
 #     #   enabled: true        # set by the first successful `apogee graph build`
 #     #   extract_backend: local # the backend `graph build` extracts with

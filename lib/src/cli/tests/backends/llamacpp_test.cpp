@@ -6,6 +6,7 @@
 #include <cctype>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -1996,4 +1997,47 @@ TEST_CASE("a model file with no chat template is said to be a base model, once a
     std::error_code code;
     std::filesystem::remove(bare, code);
     std::filesystem::remove(templated, code);
+}
+
+// --- Audio, for the transcription role (26b) -------------------------------
+
+TEST_CASE("a projector with an audio encoder is audio-capable, asked of the harness",
+          "[backends][llamacpp][capability][helpers]") {
+    // From the projector's own header, without a load; and only where this
+    // build can run a local model at all -- as `accepts_images` answers.
+    const auto projector = [](bool vision, bool audio, const std::string& name) {
+        const std::filesystem::path path =
+            std::filesystem::temp_directory_path() / ("apogee-projector-" + name + ".gguf");
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        const std::string bytes = apogee::testing::projector_gguf(vision, audio);
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        return path;
+    };
+    const std::filesystem::path hears = projector(false, true, "hears");
+    const std::filesystem::path sees = projector(true, false, "sees");
+
+    const auto provider_with = [](const std::string& mmproj) {
+        LlamaCppProvider::Options options;
+        options.backend_name = "local";
+        options.model_path = "/models/test.gguf";
+        options.mmproj_path = mmproj;
+        return std::make_shared<LlamaCppProvider>(std::move(options),
+                                                  std::make_unique<FakeLlamaRuntime>());
+    };
+
+    apogee::harness::Harness harness{apogee::harness::Config{}};
+    harness.register_provider("ears", provider_with(hears.string()));
+    harness.register_provider("eyes", provider_with(sees.string()));
+    harness.register_provider("plain", provider_with(""));
+    harness.use_default_router();
+
+    CHECK(harness.accepts_audio("ears") == apogee::backends::llama_available());
+    CHECK_FALSE(harness.accepts_audio("eyes"));
+    CHECK_FALSE(harness.accepts_audio("plain"));
+    // Unknown is no -- nothing is sent audio that has not said it reads it.
+    CHECK_FALSE(harness.accepts_audio("nowhere"));
+
+    std::error_code code;
+    std::filesystem::remove(hears, code);
+    std::filesystem::remove(sees, code);
 }

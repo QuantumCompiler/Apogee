@@ -234,6 +234,25 @@ TEST_CASE("every backend type round-trips through its name", "[config]") {
     CHECK_FALSE(apogee::harness::backend_type_from_string("Anthropic").has_value());
 }
 
+TEST_CASE("the helper role pointers parse, and count in the pointer comparison",
+          "[config][roles]") {
+    const Config config = load_text(
+        "models:\n  default: a\n  default_vision: v\n  default_transcription: t\n"
+        "  default_utility: u\nbackends:\n  a:\n    type: mock\n");
+    CHECK(config.models.default_vision == "v");
+    CHECK(config.models.default_transcription == "t");
+    CHECK(config.models.default_utility == "u");
+
+    // The admin plane's restart_required compares them all.
+    for (auto field : {&apogee::harness::ModelsConfig::default_vision,
+                       &apogee::harness::ModelsConfig::default_transcription,
+                       &apogee::harness::ModelsConfig::default_utility}) {
+        apogee::harness::ModelsConfig changed = config.models;
+        changed.*field = "other";
+        CHECK_FALSE(changed == config.models);
+    }
+}
+
 TEST_CASE("a local backend's cache_type parses, and anything else is refused by name",
           "[config][cache]") {
     using apogee::harness::KvCacheType;

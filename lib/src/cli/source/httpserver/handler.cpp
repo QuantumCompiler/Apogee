@@ -11,6 +11,7 @@
 
 #include "agentloop/content.h"
 #include "agentloop/loop.h"
+#include "agentloop/query_rewrite.h"
 #include "agentloop/rag.h"
 #include "agentloop/retriever.h"
 #include "events/bus.h"
@@ -400,7 +401,12 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
         // just sent into a summary of the conversation so far would summarise
         // away the question being asked. A stateless request owns its own
         // messages and is never compacted -- only warned.
-        history = agentloop::compact_history(*harness_, history, plan.backend, cancellation);
+        // The utility model summarises when one is set, else the session's
+        // own backend (26b).
+        history = agentloop::compact_history(
+            *harness_, history,
+            commands::helper_backend(config, harness::ModelRole::Utility, plan.backend),
+            cancellation);
         ++plan.session->compactions;
     }
 
@@ -415,6 +421,9 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
     loop_options.max_tokens = plan.max_tokens;
     loop_options.stream_answer = plan.stream;
     loop_options.cancellation = cancellation;
+    // A large tool result is summarised by the utility model, when one is
+    // set, before the model reads it (26b).
+    loop_options.summary_model = commands::named_utility(config);
     if (tools_ != nullptr && plan.tool_mode == ToolMode::All && !tools_->empty()) {
         loop_options.tools = tools_;
         loop_options.permission = options_.permission;
@@ -429,9 +438,14 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
                                         harness::StatusEvent::Phase::Start,
                                         options_.rag_collection));
         }
+        // A follow-up is searched as a standalone question (26b); the model
+        // is still asked what the client sent.
+        const agentloop::QueryRewrite rewrite = agentloop::rewrite_query(
+            *harness_, commands::helper_backend(config, harness::ModelRole::Utility, plan.backend),
+            history, last_user_text(plan.incoming), cancellation);
         const agentloop::RagResult rag = commands::retrieve_for_collection(
-            *harness_, config, options_.rag_collection, last_user_text(plan.incoming),
-            options_.rag_limit, plan.retriever, plan.rerank, cancellation);
+            *harness_, config, options_.rag_collection, rewrite.query, options_.rag_limit,
+            plan.retriever, plan.rerank, cancellation, plan.backend);
         if (sse != nullptr) {
             sse->emit_meta(simple_event(harness::StatusEvent::Type::RagSearch,
                                         harness::StatusEvent::Phase::Done,

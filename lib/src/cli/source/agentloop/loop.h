@@ -75,6 +75,12 @@ struct Options {
     /// runs it on its own context, and the session's cache is untouched.
     bool side_request = false;
 
+    /// The utility backend that summarises a tool result over
+    /// `kToolSummaryThreshold` before the model reads it (26b). Empty -- the
+    /// default, and whenever no utility model is set -- leaves results as the
+    /// tool returned them.
+    std::string summary_model;
+
     /// Hard ceiling on model→tool→model cycles.
     ///
     /// A model can loop calling the same tool forever, and without a bound the

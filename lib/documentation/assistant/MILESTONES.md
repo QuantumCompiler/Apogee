@@ -1559,7 +1559,7 @@ Asked for by the user (2026-09-25): the CLI pluggable into **other people's** ha
 
 ## Milestone N — Model operations
 
-**Goal.** Model management, end to end: one shared resolver for the `models:` role pointers, the `apogee models` suite, a real GGUF header reader that `check` uses to tell a working model from a broken one, and — from 2026-09-07 — acquiring, quantizing, and repairing models from Hugging Face and the user's Ollama store without ever leaving a half-downloaded one on disk.
+**Goal.** Model management, end to end: one shared resolver for the `models:` role pointers, the `apogee models` suite, a real GGUF header reader that `check` uses to tell a working model from a broken one, and — from 2026-09-07 — acquiring, quantizing, and repairing models from Hugging Face and the user's Ollama store without ever leaving a half-downloaded one on disk. From 2026-09-28 (26b), helper models beside the chat model: `vision`, `transcription` and `utility` in the same resolver.
 
 ### 2026-09-07 — `model-operations`: one resolver, and a check that stops lying
 
@@ -1762,6 +1762,71 @@ Asked for directly (Taylor): "I want there to be an extra line of white space be
 - [x] **Two blank lines, on a terminal only.** One after the banner, and one after each question before whatever answers it -- the thinking block, or the answer on a model that does not reason. Both go through the status writer, as the existing blank line after each answer does, so they are ordered with the spinner and the thinking view, and the view's repaints (which erase only rows they painted) never reach them. A pipe and machine mode get neither.
 
 **Verification.** `cli.chat_typeahead_and_crash_safety` gains a `spacing` check on a PTY with the mock backend: run against the installed binary from before the change, both of its assertions fail. On the real machine, Taylor's two questions to Qwen3.8-27B Q4_K_M, recorded in a PTY and replayed through a terminal model, give exactly the layout asked for. All 1560 ctest cases pass, run serially.
+
+### 2026-09-28 — `helper-model-roles` (backlog item 26b): a small model for the chores, and a check on what a helper can read
+
+**Why.** A harness that gets the most from small local models uses several: the large one answers, and smaller ones do the chores and read what the large one cannot. Until now every chore went to the chat model. Titling a chat, compacting it, judging a rerank: each took the model that was also answering, and a large tool result was read whole by the slowest reader in the process. Asked for by the user on 2026-09-25, with "a helper is used automatically" as their call.
+
+**What was built**
+
+- [x] **Three roles in the one resolver** (`harness/roles.h`): `Vision`, `Transcription` and `Utility` join `Chat`, `Embedding` and `Extraction`, with pointers `models.default_vision`, `default_transcription` and `default_utility`. A helper has one more rung than the others, after its pointer and before `models.default`: **the conversation's own backend** (`RoleRequest::conversation`, reported as `ResolvedFrom::Conversation`). So an unset helper runs on whatever the chat is on, including a backend chosen with `-m`, and a user who sets nothing sees nothing change. `cli.one_role_resolver` still holds: every surface asks this chain.
+- [x] **One mutation path, and its admin twin.** `config set-default-vision`, `set-default-transcription` and `set-default-utility` (one `bind_set_role` call each, through `set_models_role`), `config get` of all three, and `POST /v1/admin/backends/default-vision`, `-transcription` and `-utility`, byte-identical to the CLI on the same file. `GET /v1/admin/backends` lists all six roles with the rung each resolved on. The template documents the helpers.
+- [x] **The utility model's chores**, each going to the chat's own backend when no utility model is set, and each saying under `--verbose` which model did it:
+  - **Titles** (`BackgroundTitle`, `title_request(session, backend)`).
+  - **Compaction**, automatic and `/compact`, in `chat` and `serve`.
+  - **A follow-up's search query** (`agentloop/query_rewrite`): before a retrieval turn in a conversation with an earlier user turn, the last six messages and the question become one standalone query ("which region does it deploy to?" becomes "Which region does Project Heron deploy to?"). The search changes and the chat model's question does not. It never fails a turn: an error, a blank reply or an answer instead of a query searches with the question as asked.
+  - **`rerank: on`**, a new value meaning the utility model, for the flag, a collection's pin, `check`, the admin routes and `/rerank`, all through one validator (`valid_rerank`).
+  - **A tool result over 8 KiB** (`agentloop/tool_summary`), summarised before a local chat model has to read it, but only by a **named** utility model: asking the chat model to summarise for itself costs the reading it saves. The chat model reads the summary under a header naming the size, the summariser, and how to see part of the rest -- a line range for `read_file`, the offset for `fetch_url`, a narrower call otherwise. A failed summary leaves the result as it was.
+  - **`/capture`'s clerk** in chat, only when a utility model is named; otherwise the model already loaded, as Milestone Y decided.
+- [x] **Side requests stay side requests.** The title, the query rewrite, the summary, the rerank judge and compaction all set `transient.side_request`, so a local helper runs on a context of its own and the chat's cache is never cleared. The judge and compaction were plain requests before.
+- [x] **Audio as a capability** (`harness/provider.h`): `AudioCapable::accepts_audio`, discovered by `Harness::accepts_audio` like the other probes. The local backend answers yes when llama.cpp is linked, an `mmproj_path` is set, and the projector's header declares an audio encoder. The header reader now reads a projector's `clip.has_vision_encoder` and `clip.has_audio_encoder`.
+- [x] **What a helper costs, and whether it can do its job.** `models status` lists six roles; an unset helper reads `(unset -- the chat's own backend)`, and a local backend is followed by `[local: N MiB of weights, M MiB of cache]`, since a helper is a second model resident beside the chat's. `check` warns when `default_vision` points at a local backend with no `mmproj_path` or a projector with no vision encoder, or `default_transcription` at one with no audio encoder or at a cloud backend, each naming why -- judged from the config and the projector's header, without loading anything. `idle_unload_seconds` was already per backend, so a resident helper can be given back on its own.
+
+**On real weights** (Qwen3.8-27B Q4_K_M as the chat, Qwen3-VL-8B Q4_K_M with its projector as the utility, Gemma 4 12B-it with its projector for transcription; greedy; `--verbose` lines):
+
+- **`models status`**: `chat: q27 [local: 16032 MiB of weights, 1088 MiB of cache]`, `utility: q8 [local: 4795 MiB of weights, 2448 MiB of cache]`, and the rest.
+- **`check`**, with `default_vision` at the 27B (no projector configured) and `default_transcription` at the 8B: `q27 -- it has no mmproj_path, so it cannot read an image` and `q8 -- its projector has no audio encoder`, both warnings. Pointed at the 8B and Gemma 4 12B, whose projector declares both encoders, both passed. A pointer at a backend that does not exist is refused by `config` before it is written.
+- **A three-question chat over a notes collection, with a `/compact`**: `titled by q8: Project Heron Overview`, `search query by q8: Which region does Project Heron deploy to?`, `history compacted by q8`, and all three answers right. Searched as asked, that follow-up ranked Project Heron's note last of three.
+- **The 27B's cache**: without retrieval, turns two and three read 57 and 98 tokens from the 27B's cache while the 8B titled the chat in the background -- the same as with no utility model set.
+- **A tool result**: asked for the one error in a 35 KB log, the 27B read the file; `read_file's 35 KB result summarised by q8`; the 27B's next step read **413 new tokens, 3,988 from its cache**, where the file itself is about ten thousand tokens. It then ran a narrower `grep_files` to confirm, and named the line, invoice and cause correctly.
+
+**Found on the way, and fixed.** The first real run titled a chat "Project Heron is a system for managing and scaling distribut…". Shown "In one sentence, what is Project Heron?" under "give this conversation a title", the 8B answered the question -- inventing the answer -- where the 27B had titled it. The prompt now says the questions are shown for their topic and are not to be answered, and the 8B gives "Project Heron Overview" and "What is a Ledger"; the 27B's titles are unchanged.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where an unset helper runs | The conversation's own backend, a rung of its own after the pointer *(default taken)* | "The chat backend" has to mean the one this chat is on; `models.default` would send a `-m` chat's chores to another model. |
+| Query rewriting | Only with an earlier user turn and retrieval on *(default taken)*; on the chat's backend when no utility model is set | A first question already stands alone. A follow-up searched as asked finds the wrong thing, whichever model restates it. |
+| Tool-result summaries | Over 8 KiB, and only by a named utility model *(default taken)* | The chat model summarising for itself would read the whole result anyway. |
+| The rerank judge's default | A new value, `on`: the utility model, else the chat's backend | A backend name still works; `on` says "whatever my helper is" without naming it twice. |
+| The capture clerk | The utility model only when one is named (2026-09-25) | Milestone Y's "the loaded model is the clerk, no second load" stands unless a helper was set on purpose. |
+| What `check` judges from | The config and the projector's header | A doctor that loads a model to find out would cost what a helper is meant to save. |
+| Audio on a cloud backend | Not a transcription backend here | Nothing in Apogee sends a cloud backend audio yet; `check` says so rather than pass a pointer that fails later. |
+
+**Guardrails, each mutation-tested (67 mutants), run in separate git worktrees against the whole unit suite.** 65 were caught there, ten of them only after a test was added for what they exposed. One more is caught by `cli.knowledge_lifecycle`, and one cannot be reached.
+- **The resolver:** the conversation's rung for every role, gone, or above the pointer; transcription not a helper; a helper's pointer unread; a role's key misnamed.
+- **The pointers:** not parsed, not compared, not an editable field; `config get` of one reading another; a verb or an admin route setting the wrong pointer, on its own and through the mux.
+- **The chores:**
+  - the title asked of the chat's backend, or its request ignoring the backend it was given;
+  - `/compact` and automatic compaction on the chat's backend, and compaction not a side request;
+  - the query rewrite on the chat's backend or not used at all, tried on a first question, shown the question twice, shown system prompts, the whole history or unclipped messages, not a side request, reasoning not skipped, no budget, its label or quotes kept, a blank or overlong reply used, a failure failing the turn, and never marked as a rewrite;
+  - the summary always taken, taken far past the threshold, never used, never said, shown the whole output, not a side request, blank accepted, missing its way back, a failure failing the call, and never asked by chat;
+  - `named_utility` taking any rung, and `helper_backend` ignoring the conversation;
+  - `rerank: on` refused, resolving the chat role, ignoring the conversation, or silent when nothing can judge; the judge not a side request.
+- **What is said:**
+  - `check` not checking the helpers, never judging a medium, passing a vision backend with no projector, ignoring the encoder flag, reading audio from the vision flag, or passing cloud audio;
+  - `models status` naming `models.default` for an unset helper, dropping the utility row, or its cost;
+  - the header's flags unread, swapped, or kept after a failed read;
+  - an undeclared audio capability counted as yes.
+- **Caught outside the unit suite:** `/capture`'s clerk never the utility model. `knowledge_e2e.sh` now points the utility model at a mock that only writes prose, and checks that the capture fails. The mutant passes the unit suite and fails that script; this was checked by hand.
+- **Cannot be reached:** the admin listing's "conversation" rung. The listing resolves without a conversation, so an unset helper reports `models.default`, as `http-api.md` says.
+
+**Not verified, and found on the way.**
+- **No audio is transcribed yet.** The role, its pointer, `accepts_audio` and `check` are here; [26e](../backlog/attachments-media.md) is what sends audio, and `Harness::accepts_audio` has no caller until then. The header probe was checked against real projector files: Gemma 4 12B-it's declares both encoders, and Qwen3-VL-8B's and Qwen3.8-27B's declare vision only.
+- **A retrieval turn re-reads a local model's whole prompt**, helper or not. The retrieved block sits at the conversation's start, as 25c's notes say. Every turn of the notes chat above read from 0 on the 27B, the same with no utility model set. That is its own change.
+- **Qwen3.8-27B answered one turn with nothing.** In a plain three-question chat, the third answer was saved empty, with and without a utility model set. It is older than this item and left for its own change.
+- **`--verbose` prints a tool call as `[tool] [tool] read_file`.** The tool's status line carries its own tag and the terminal adds another. It is cosmetic, and older than this item.
 
 ## Milestone O — Local multimodal
 

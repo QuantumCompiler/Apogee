@@ -64,6 +64,9 @@ nlohmann::json role_view(const harness::Config& config, harness::ModelRole role)
         case harness::ResolvedFrom::RolePointer:
             from = "role_pointer";
             break;
+        case harness::ResolvedFrom::Conversation:
+            from = "conversation";
+            break;
         case harness::ResolvedFrom::Default:
             from = "default";
             break;
@@ -169,7 +172,11 @@ HttpResponse admin_list_backends(const AdminConfigContext& context) {
             {"roles",
              {{"default", role_view(*loaded.config, harness::ModelRole::Chat)},
               {"default_embedding", role_view(*loaded.config, harness::ModelRole::Embedding)},
-              {"default_extraction", role_view(*loaded.config, harness::ModelRole::Extraction)}}},
+              {"default_extraction", role_view(*loaded.config, harness::ModelRole::Extraction)},
+              {"default_vision", role_view(*loaded.config, harness::ModelRole::Vision)},
+              {"default_transcription",
+               role_view(*loaded.config, harness::ModelRole::Transcription)},
+              {"default_utility", role_view(*loaded.config, harness::ModelRole::Utility)}}},
             {"restart_required", drifted(context, *loaded.config)}});
 }
 

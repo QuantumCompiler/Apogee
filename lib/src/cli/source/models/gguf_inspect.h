@@ -152,6 +152,11 @@ struct GgufInfo {
     /// than answering.
     bool has_chat_template = false;
 
+    /// A projector's own statement of what it reads: `clip.has_vision_encoder`
+    /// and `clip.has_audio_encoder` (26b). False on a file that is not one.
+    bool projector_vision = false;
+    bool projector_audio = false;
+
     /// Whether the weights are already quantized.
     ///
     /// Load-bearing for `models quantize`: llama.cpp **refuses to requantize**,

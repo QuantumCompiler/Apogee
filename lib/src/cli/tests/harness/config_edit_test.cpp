@@ -1115,3 +1115,26 @@ TEST_CASE("allowed-host edits refuse what is not a host, or not listed", "[confi
                                                 "c.example"),
         ConfigEditError);
 }
+
+TEST_CASE("the helper role pointers are set through the one editor", "[config_edit][roles]") {
+    const std::string base = "models:\n  default: a  # the chat\nbackends:\n  a:\n    type: mock\n";
+    std::string edited = apogee::harness::set_models_role(base, "default_utility", "helper");
+    edited = apogee::harness::set_models_role(edited, "default_vision", "eyes");
+    edited = apogee::harness::set_models_role(edited, "default_transcription", "ears");
+    const auto config = apogee::harness::parse_config(edited, "<test>");
+    CHECK(config.models.default_utility == "helper");
+    CHECK(config.models.default_vision == "eyes");
+    CHECK(config.models.default_transcription == "ears");
+    // The comment on the line next to them is kept.
+    CHECK(edited.find("default: a  # the chat") != std::string::npos);
+
+    try {
+        (void)apogee::harness::set_models_role(base, "default_helper", "x");
+        FAIL("expected a ConfigEditError");
+    } catch (const apogee::harness::ConfigEditError& e) {
+        const std::string message = e.what();
+        CHECK(message.find("default_helper") != std::string::npos);
+        CHECK(message.find("default_vision, default_transcription, default_utility") !=
+              std::string::npos);
+    }
+}

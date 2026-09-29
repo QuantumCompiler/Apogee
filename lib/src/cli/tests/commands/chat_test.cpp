@@ -159,6 +159,9 @@ TEST_CASE("the title prompt asks for a title and nothing else", "[chat][title]")
     const std::string prompt = apogee::commands::title_prompt();
     CHECK(prompt.find("title") != std::string::npos);
     CHECK(prompt.find("only") != std::string::npos);
+    // A small utility model answered the question it was shown, and the
+    // invented answer became the title.
+    CHECK(prompt.find("do not answer them") != std::string::npos);
 }
 
 TEST_CASE("listing rows and info carry what identifies a session", "[chat][history]") {
@@ -305,4 +308,191 @@ TEST_CASE("a title that comes back empty is not asked for again", "[chat][title]
     CHECK(session.title.empty());
     CHECK(replies(session) ==
           std::vector<std::string>{"first answer", "second answer", "third answer"});
+}
+
+// ---------------------------------------------------------------------------
+// The utility model does the chat's chores (26b)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A chat on two scripted models, `chatty` and the utility model `helper`,
+/// each answering from its own script in order -- so which one was asked is
+/// read straight off what the chat ends up with.
+struct HelperChat {
+    apogee::testing::TempDir home{"chat-helper-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    std::filesystem::path config_path = home.path() / "config" / "config.yaml";
+    std::string out;
+    std::string err;
+
+    /// `chatty_extra` is YAML under the chat backend's entry; `extra` goes at
+    /// the top level.
+    HelperChat(const nlohmann::json& chatty_turns, const std::vector<std::string>& helper_replies,
+               const std::string& chatty_extra = {}, const std::string& extra = {}) {
+        std::filesystem::create_directories(config_path.parent_path());
+        nlohmann::json helper_turns = nlohmann::json::array();
+        for (const std::string& reply : helper_replies) {
+            helper_turns.push_back({{"text", reply}});
+        }
+        std::ofstream{config_path, std::ios::binary}
+            << "models:\n  default: chatty\n  default_utility: helper\nbackends:\n"
+            << "  chatty:\n    type: mock\n    model_path: " << script("chatty", chatty_turns)
+            << "\n"
+            << chatty_extra
+            << "  helper:\n    type: mock\n    model_path: " << script("helper", helper_turns)
+            << "\n"
+            << extra;
+    }
+
+    [[nodiscard]] std::string script(const std::string& name, const nlohmann::json& turns) const {
+        const std::filesystem::path path = home.path() / (name + ".json");
+        std::ofstream{path, std::ios::binary} << nlohmann::json{{"turns", turns}}.dump();
+        return path.string();
+    }
+
+    /// Runs `apogee <args>` in process with `input` on stdin.
+    int run(const std::vector<std::string>& args, const std::string& input = {}) {
+        std::ostringstream captured_out;
+        std::ostringstream captured_err;
+        std::istringstream fed{input};
+        std::streambuf* old_out = std::cout.rdbuf(captured_out.rdbuf());
+        std::streambuf* old_err = std::cerr.rdbuf(captured_err.rdbuf());
+        std::streambuf* old_in = std::cin.rdbuf(fed.rdbuf());
+        int code = -1;
+        {
+            apogee::commands::RootCommand root{apogee::commands::default_registry()};
+            const std::string path = config_path.string();
+            std::vector<const char*> argv{"apogee", "--config", path.c_str()};
+            for (const std::string& arg : args) {
+                argv.push_back(arg.c_str());
+            }
+            code = root.run(static_cast<int>(argv.size()), argv.data());
+        }
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+        std::cin.rdbuf(old_in);
+        std::cin.clear();
+        out = captured_out.str();
+        err = captured_err.str();
+        return code;
+    }
+
+    [[nodiscard]] static apogee::logger::Session only_session() {
+        const std::vector<apogee::logger::Session> sessions = apogee::logger::list_sessions();
+        REQUIRE(sessions.size() == 1);
+        return sessions.front();
+    }
+};
+
+[[nodiscard]] nlohmann::json texts(const std::vector<std::string>& replies) {
+    nlohmann::json turns = nlohmann::json::array();
+    for (const std::string& reply : replies) {
+        turns.push_back({{"text", reply}});
+    }
+    return turns;
+}
+
+}  // namespace
+
+TEST_CASE("a utility model titles and compacts the chat, and the chat's answers stay its own",
+          "[chat][title][cli][helpers]") {
+    HelperChat chat{texts({"first answer", "second answer"}),
+                    {"Helper Title", "what was said, in short"}};
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--verbose"}, "first question\nsecond question\n/compact\n") == 0);
+
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(session.title == "Helper Title");
+    CHECK(session.compactions == 1);
+    // The summary is the helper's; the one answer kept is the chat's.
+    bool summarised = false;
+    for (const ChatMessage& message : session.messages) {
+        if (message.role == apogee::harness::Role::System &&
+            message.content.plain_text().find("what was said, in short") != std::string::npos) {
+            summarised = true;
+        }
+    }
+    CHECK(summarised);
+    CHECK(replies(session) == std::vector<std::string>{"second answer"});
+    // Said under --verbose, naming the model that did it.
+    CHECK(chat.err.find("titled by helper: Helper Title") != std::string::npos);
+    CHECK(chat.err.find("history compacted by helper") != std::string::npos);
+}
+
+TEST_CASE("a utility model restates a follow-up for retrieval; the chat is asked it as written",
+          "[chat][rag][cli][helpers]") {
+    HelperChat chat{texts({"Heron is the billing ledger.", "It deploys to Frankfurt."}),
+                    {"Heron Notes", "Project Heron deployment region"}};
+    const std::filesystem::path docs = chat.home.path() / "docs";
+    std::filesystem::create_directories(docs);
+    std::ofstream{docs / "heron.md", std::ios::binary}
+        << "Project Heron is the billing ledger. It deploys to Frankfurt.\n";
+    std::ofstream{docs / "kestrel.md", std::ios::binary}
+        << "Project Kestrel is the push service. It deploys to Sydney.\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"embed", "ingest", "notes", docs.string()}) == 0);
+    REQUIRE(chat.run({"chat", "--verbose", "--rag", "notes"},
+                     "Tell me about Project Heron.\nwhere does it deploy?\n") == 0);
+
+    // The first question stands alone and is searched as asked; the follow-up
+    // is restated by the helper before the search.
+    CHECK(chat.err.find("search query by helper: Project Heron deployment region") !=
+          std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(session.title == "Heron Notes");
+    CHECK(replies(session) ==
+          std::vector<std::string>{"Heron is the billing ledger.", "It deploys to Frankfurt."});
+    // What the chat model was asked is the user's own words.
+    std::vector<std::string> asked;
+    for (const ChatMessage& message : session.messages) {
+        if (message.role == apogee::harness::Role::User) {
+            asked.push_back(message.content.plain_text());
+        }
+    }
+    CHECK(asked ==
+          std::vector<std::string>{"Tell me about Project Heron.", "where does it deploy?"});
+}
+
+TEST_CASE("a utility model summarises a large tool result, and compacts a full context",
+          "[chat][cli][helpers]") {
+    // The chat model reads a 12 KB file, then answers at length; the second
+    // question finds the 300-token window over 90% full.
+    const std::string long_answer(1200, 'a');
+    const nlohmann::json chatty = nlohmann::json::array(
+        {{{"tool_calls", {{{"name", "read_file"}, {"arguments", {{"path", "big.log"}}}}}}},
+         {{"text", long_answer}},
+         {{"text", "second answer"}}});
+    HelperChat chat{chatty,
+                    {"the log, in short", "Log Review", "what was said, in short"},
+                    "    context_size: 300\n",
+                    ""};
+    const std::filesystem::path work = chat.home.path() / "work";
+    std::filesystem::create_directories(work);
+    {
+        std::ofstream log{work / "big.log", std::ios::binary};
+        for (int line = 0; line < 400; ++line) {
+            log << "INFO worker processed a batch\n";
+        }
+    }
+    {
+        std::ofstream{chat.config_path, std::ios::binary | std::ios::app}
+            << "tools:\n  fs_root: " << work.string() << "\n";
+    }
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--verbose", "--tools"}, "what is in big.log?\nand then?\n") == 0);
+    INFO(chat.err);
+    CHECK(chat.err.find("read_file's 12 KB result summarised by helper") != std::string::npos);
+    CHECK(chat.err.find("compacting with helper") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(session.title == "Log Review");
+    CHECK(session.compactions == 1);
+    bool summarised = false;
+    for (const ChatMessage& message : session.messages) {
+        if (message.content.plain_text().find("what was said, in short") != std::string::npos) {
+            summarised = true;
+        }
+    }
+    CHECK(summarised);
+    CHECK(replies(session).back() == "second answer");
 }

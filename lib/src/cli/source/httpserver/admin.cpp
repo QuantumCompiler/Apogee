@@ -136,6 +136,18 @@ HttpResponse AdminHandler::set_default_extraction(const HttpRequest& request) {
     return admin_set_role(config_context(), "default_extraction", request);
 }
 
+HttpResponse AdminHandler::set_default_vision(const HttpRequest& request) {
+    return admin_set_role(config_context(), "default_vision", request);
+}
+
+HttpResponse AdminHandler::set_default_transcription(const HttpRequest& request) {
+    return admin_set_role(config_context(), "default_transcription", request);
+}
+
+HttpResponse AdminHandler::set_default_utility(const HttpRequest& request) {
+    return admin_set_role(config_context(), "default_utility", request);
+}
+
 HttpResponse AdminHandler::format_config(const HttpRequest& /*request*/) {
     return admin_format_config(config_context());
 }

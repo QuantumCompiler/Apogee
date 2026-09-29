@@ -24,9 +24,16 @@
 /// ```
 /// explicit override  (-m, or a request's `model`)
 ///   > per-feature backend  (a collection's `backend:`, a graph's entry)
-///     > the role pointer  (models.default_embedding / default_extraction)
-///       > models.default
+///     > the role pointer  (models.default_embedding, default_vision, ...)
+///       > the conversation's backend  (a helper role only)
+///         > models.default
 /// ```
+///
+/// A helper role -- vision, transcription, utility (26b) -- with no pointer
+/// falls back to the backend the conversation is on rather than to
+/// `models.default`: a chat started with `-m`, or switched with `/model`,
+/// keeps its titles and its compaction on the model it is talking to, exactly
+/// as before the roles existed.
 ///
 /// With the role pointer unset the chain collapses to exactly
 /// `override > models.default`, which is what every caller did before this
@@ -49,7 +56,17 @@ enum class ModelRole : std::uint8_t {
     Embedding,
     /// Structured extraction. Consults `models.default_extraction` first.
     Extraction,
+    /// Describes an image for a chat model that cannot read one (26b).
+    Vision,
+    /// Turns audio into timestamped text (26b).
+    Transcription,
+    /// The chores: titles, compaction, query rewriting, large tool results
+    /// (26b).
+    Utility,
 };
+
+/// Whether `role` is a helper, falling back to the conversation's backend.
+[[nodiscard]] bool is_helper(ModelRole role) noexcept;
 
 /// The `models:` key a role reads, e.g. "default_embedding". `Chat` has none of
 /// its own and answers "default".
@@ -70,6 +87,10 @@ struct RoleRequest {
     /// A backend pinned by the feature being run — a collection's `backend:`,
     /// a named graph's entry. Empty when the feature pins none.
     std::string_view entry_backend;
+
+    /// The backend the conversation is on, where there is one. A helper role
+    /// with no pointer of its own falls back to it; the other roles ignore it.
+    std::string_view conversation;
 };
 
 /// Which rung of the chain produced an answer.
@@ -87,6 +108,8 @@ enum class ResolvedFrom : std::uint8_t {
     EntryBackend,
     /// The role's own `models:` pointer.
     RolePointer,
+    /// The backend the conversation is on (a helper role with no pointer).
+    Conversation,
     /// `models.default`.
     Default,
 };

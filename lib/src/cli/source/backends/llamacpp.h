@@ -48,7 +48,8 @@ class LlamaCppProvider final : public harness::LLMProvider,
                                public harness::InTextToolCalling,
                                public harness::EmbeddingCapable,
                                public harness::StatusReporting,
-                               public harness::ContextWindowReporting {
+                               public harness::ContextWindowReporting,
+                               public harness::AudioCapable {
 public:
     /// Reads the wall clock. Injected so the idle-unload policy is testable
     /// without a test that sleeps.
@@ -140,6 +141,13 @@ public:
     /// display detail into the slowest thing in the session. Counts are exact
     /// from the first turn onward, which is when they start mattering.
     [[nodiscard]] std::int64_t count_prompt_tokens(const harness::ChatRequest& request) override;
+
+    // --- AudioCapable --------------------------------------------------------
+
+    /// Whether this entry's projector has an audio encoder, from the
+    /// projector file's header (`clip.has_audio_encoder`), read once: asked
+    /// before any load, and answered without one.
+    [[nodiscard]] bool accepts_audio() const noexcept override;
 
     // --- ContextWindowReporting ----------------------------------------------
 
@@ -343,6 +351,8 @@ private:
     Options options_;
     std::unique_ptr<LlamaRuntime> runtime_;
     mutable std::optional<models::GgufInfo> header_;
+    /// The projector's header, read once; see `accepts_audio`.
+    mutable std::optional<models::GgufInfo> projector_header_;
     /// Whether the no-template notice has been given this conversation.
     mutable bool template_noticed_ = false;
     /// `general.architecture` of the loaded model, empty before the first load.

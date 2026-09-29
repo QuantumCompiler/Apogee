@@ -506,6 +506,41 @@ TEST_CASE("status names the rung each role resolved through", "[commands][models
     CHECK(status.find("extraction: cloud   (via models.default)") != std::string::npos);
 }
 
+TEST_CASE("status lists the helper roles, and what a local one costs to load",
+          "[commands][models][roles]") {
+    // Unset, a helper runs on the chat's own backend -- not a fact this
+    // command knows, so it says that rather than naming models.default.
+    const std::string unset = render_role_status(sample_config());
+    CHECK(unset.find("vision: (unset -- the chat's own backend)\n") != std::string::npos);
+    CHECK(unset.find("transcription: (unset -- the chat's own backend)\n") != std::string::npos);
+    CHECK(unset.find("utility: (unset -- the chat's own backend)\n") != std::string::npos);
+
+    // Pointed at a local model, the line says what it costs: the weights and
+    // the cache its window allocates, beside the chat model's.
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "apogee-models-status-helper.gguf";
+    {
+        const std::string bytes = apogee::testing::qwen38_like_gguf();
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        REQUIRE(file.good());
+        file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+    Config config = sample_config();
+    BackendConfig helper;
+    helper.type = BackendType::LlamaCpp;
+    helper.model_path = path.string();
+    config.backends["helper"] = helper;
+    config.models.default_utility = "helper";
+    const std::string set = render_role_status(config);
+    CHECK(set.find("utility: helper   [local: 0 MiB of weights, 1088 MiB of cache]\n") !=
+          std::string::npos);
+    // A role pointer, so no "via" note.
+    CHECK(set.find("utility: helper   (via") == std::string::npos);
+
+    std::error_code code;
+    std::filesystem::remove(path, code);
+}
+
 TEST_CASE("status flags a role pointing at a backend that is not configured",
           "[commands][models][roles]") {
     // Resolving and validating are separate: the resolver returns the key it

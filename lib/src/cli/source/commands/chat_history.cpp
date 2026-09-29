@@ -81,11 +81,15 @@ std::string format_session_info(const logger::Session& session) {
 }
 
 std::string title_prompt() {
-    return "Give this conversation a title of at most six words. Reply with the title only "
+    // "Do not answer them": a small utility model (26b), shown "what is X?",
+    // answered it -- and the answer, invented, became the title (found live,
+    // 2026-09-28, Qwen3-VL-8B).
+    return "Name the conversation below with a title of at most six words. Its questions are "
+           "listed only so you can see the topic: do not answer them. Reply with the title only "
            "-- no quotes, no punctuation at the end, no explanation.";
 }
 
-harness::ChatRequest title_request(const logger::Session& session) {
+harness::ChatRequest title_request(const logger::Session& session, std::string_view backend) {
     // What the user asked, not the whole transcript: the questions say what a
     // conversation is about, and the answers are most of its length. The
     // whole transcript made a title cost a full re-read of the conversation.
@@ -108,9 +112,9 @@ harness::ChatRequest title_request(const logger::Session& session) {
     }
 
     harness::ChatRequest request;
-    request.model = session.backend;
+    request.model = backend.empty() ? session.backend : std::string{backend};
     request.messages.push_back(
-        harness::ChatMessage::user(title_prompt() + "\n\nWhat the user asked:\n" + asked));
+        harness::ChatMessage::user(title_prompt() + "\n\nThe conversation's questions:\n" + asked));
     // Six words and room to spare; a model that ignores the instruction is cut
     // short rather than left to write an essay nobody reads.
     constexpr std::int64_t kTitleTokens = 32;

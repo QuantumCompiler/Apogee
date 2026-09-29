@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <system_error>
@@ -86,6 +87,64 @@ void check_version(CheckReport& report, const CheckInputs& inputs) {
         add(report, Status::Ok, "Version", "quarantine", "not quarantined");
     }
 #endif
+}
+
+/// What a helper role reads.
+enum class Medium : std::uint8_t { Image, Audio };
+
+/// Why `backend` cannot read `medium`, or empty when it can -- judged from
+/// the config and the projector's own header, without loading a model.
+[[nodiscard]] std::string medium_gap(const harness::BackendConfig& backend, Medium medium) {
+    if (backend.type != harness::BackendType::LlamaCpp) {
+        // A cloud API reads images; no cloud backend here is sent audio.
+        return medium == Medium::Audio ? "only a local model's audio projector transcribes here"
+                                       : std::string{};
+    }
+    const std::string what = medium == Medium::Audio ? "audio" : "an image";
+    if (backend.mmproj_path.empty()) {
+        return "it has no mmproj_path, so it cannot read " + what;
+    }
+    const models::GgufInfo projector =
+        models::inspect_gguf(std::filesystem::path{harness::expand_env(backend.mmproj_path)});
+    if (!projector.parsed) {
+        return "its projector cannot be read: " + projector.parse_error;
+    }
+    const bool reads =
+        medium == Medium::Audio ? projector.projector_audio : projector.projector_vision;
+    if (!reads) {
+        return std::string{"its projector has no "} +
+               (medium == Medium::Audio ? "audio" : "vision") + " encoder";
+    }
+    return {};
+}
+
+/// Role pointers must name a backend that exists. A dangling one fails at
+/// the point of use with a routing error that does not mention config. A
+/// helper that reads a `medium` (26b) is also warned about when its backend
+/// cannot read it, because the attachment that needs it fails much later,
+/// somewhere else.
+void check_role_pointer(CheckReport& report, const harness::Config& config, std::string_view what,
+                        const std::string& value, std::optional<Medium> medium = std::nullopt) {
+    if (value.empty()) {
+        return;
+    }
+    const harness::BackendConfig* backend = config.find_backend(value);
+    if (backend == nullptr) {
+        add(report, Status::Fail, "Config", std::string{what},
+            "names a backend that is not configured: '" + value + "'",
+            "apogee config set-default <one of your configured backends>");
+        return;
+    }
+    if (medium.has_value()) {
+        if (const std::string gap = medium_gap(*backend, *medium); !gap.empty()) {
+            add(report, Status::Warn, "Config", std::string{what}, value + " -- " + gap,
+                *medium == Medium::Audio
+                    ? "point it at a llamacpp backend whose mmproj_path has an audio encoder"
+                    : "point it at a backend with an mmproj_path, or a cloud one");
+            return;
+        }
+    }
+    add(report, Status::Ok, "Config", std::string{what}, value);
 }
 
 void check_config(CheckReport& report, const CheckInputs& inputs) {
@@ -206,23 +265,14 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         add(report, Status::Ok, "Config", label, std::string{type});
     }
 
-    // Role pointers must name a backend that exists. A dangling one fails at
-    // the point of use with a routing error that does not mention config.
-    const auto role = [&](std::string_view what, const std::string& value) {
-        if (value.empty()) {
-            return;
-        }
-        if (config.find_backend(value) == nullptr) {
-            add(report, Status::Fail, "Config", std::string{what},
-                "names a backend that is not configured: '" + value + "'",
-                "apogee config set-default <one of your configured backends>");
-        } else {
-            add(report, Status::Ok, "Config", std::string{what}, value);
-        }
-    };
-    role("default_backend", config.models.default_backend);
-    role("default_embedding", config.models.default_embedding);
-    role("default_extraction", config.models.default_extraction);
+    check_role_pointer(report, config, "default_backend", config.models.default_backend);
+    check_role_pointer(report, config, "default_embedding", config.models.default_embedding);
+    check_role_pointer(report, config, "default_extraction", config.models.default_extraction);
+    check_role_pointer(report, config, "default_vision", config.models.default_vision,
+                       Medium::Image);
+    check_role_pointer(report, config, "default_transcription", config.models.default_transcription,
+                       Medium::Audio);
+    check_role_pointer(report, config, "default_utility", config.models.default_utility);
 
     // Collections: a typo in `retriever:` must never silently mean auto, and a
     // `rerank:` or `backend:` must name something that exists. The validator
@@ -236,11 +286,10 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                 "set retriever to lexical, vector, hybrid, or auto");
             continue;
         }
-        if (!collection.rerank.empty() && collection.rerank != agentloop::kRerankOff &&
-            config.find_backend(collection.rerank) == nullptr) {
+        if (!agentloop::valid_rerank(collection.rerank, config)) {
             add(report, Status::Fail, "Config", label,
                 "rerank names a backend that is not configured: '" + collection.rerank + "'",
-                "set rerank to a configured backend, or off");
+                "set rerank to a configured backend, on, or off");
             continue;
         }
         if (!collection.backend.empty() && config.find_backend(collection.backend) == nullptr) {

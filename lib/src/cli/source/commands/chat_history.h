@@ -23,7 +23,10 @@ namespace apogee::commands {
 /// The request that titles `session`: a side request carrying the user's
 /// messages (not the answers), a small token cap, and no reasoning first --
 /// cheap enough to run once in the background after the first exchange.
-[[nodiscard]] harness::ChatRequest title_request(const logger::Session& session);
+/// `backend` is the one the title is asked of -- the utility model (26b) --
+/// and the session's own when empty.
+[[nodiscard]] harness::ChatRequest title_request(const logger::Session& session,
+                                                 std::string_view backend = {});
 
 /// Cleans a model-generated title: one line, no quotes, bounded length.
 ///

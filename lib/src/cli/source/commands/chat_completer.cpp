@@ -212,6 +212,8 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
             break;
         case ArgumentValues::RerankTargets:
             choices.push_back({std::string{agentloop::kRerankOff}, "No reranking"});
+            choices.push_back({std::string{agentloop::kRerankOn},
+                               "The utility model judges, else the chat's own"});
             choices.push_back({"auto", "Follow each collection's rerank: pin"});
             choices.insert(choices.end(), sources.backends.begin(), sources.backends.end());
             break;

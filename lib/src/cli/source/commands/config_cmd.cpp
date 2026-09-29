@@ -115,6 +115,15 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     if (key == "models.default_extraction") {
         return render(config.models.default_extraction);
     }
+    if (key == "models.default_vision") {
+        return render(config.models.default_vision);
+    }
+    if (key == "models.default_transcription") {
+        return render(config.models.default_transcription);
+    }
+    if (key == "models.default_utility") {
+        return render(config.models.default_utility);
+    }
     if (key == "paths.gguf_dir") {
         return render(config.paths.gguf_dir);
     }
@@ -498,7 +507,7 @@ void bind_delete_backend(CLI::App& parent, const RootContext& context) {
     });
 }
 
-/// The three `set-default*` commands differ only in which key they write.
+/// The `set-default*` commands differ only in which key they write.
 void bind_set_role(CLI::App& parent, const RootContext& context, const std::string& command_name,
                    const std::string& field, const std::string& description) {
     auto name = std::make_shared<std::string>();
@@ -714,6 +723,9 @@ std::vector<std::string> config_keys(const harness::Config& config) {
                                   "models.default",
                                   "models.default_embedding",
                                   "models.default_extraction",
+                                  "models.default_vision",
+                                  "models.default_transcription",
+                                  "models.default_utility",
                                   "paths.gguf_dir",
                                   "paths.hf_dir",
                                   "paths.mcp_dir",
@@ -784,6 +796,13 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
                   "Set the backend used for embeddings");
     bind_set_role(*cmd, context, "set-default-extraction", "default_extraction",
                   "Set the backend used for structured extraction");
+    bind_set_role(*cmd, context, "set-default-vision", "default_vision",
+                  "Set the backend that describes images for a chat model that cannot see");
+    bind_set_role(*cmd, context, "set-default-transcription", "default_transcription",
+                  "Set the backend that transcribes audio");
+    bind_set_role(*cmd, context, "set-default-utility", "default_utility",
+                  "Set the backend for chores: titles, compaction, search queries, large tool "
+                  "results");
     bind_set_permission(*cmd, context);
     bind_add_allowed_host(*cmd, context);
     bind_delete_allowed_host(*cmd, context);

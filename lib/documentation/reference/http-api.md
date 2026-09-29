@@ -87,9 +87,10 @@ The standard request, plus Apogee's extensions:
 | `apogee_events` | With `stream`, interleave status meta-frames (below). |
 | `session_id` | `"new"` to mint a server-side session, a known id to continue one, absent to stay stateless. See **Sessions**. |
 
-Query parameters: `?retriever=lexical|vector|hybrid|auto` and `?rerank=BACKEND|off`
+Query parameters: `?retriever=lexical|vector|hybrid|auto` and `?rerank=BACKEND|on|off`
 override the server's retrieval settings for one request, through the same
-validator and resolver the CLI flags use.
+validator and resolver the CLI flags use. `on` is the utility model
+(`models.default_utility`), else the backend answering the request.
 
 **The non-streamed response:**
 
@@ -270,7 +271,10 @@ with `-m` or `--all-backends` to serve it).
 Every backend entry as a **view that has no `api_key` field** — `api_key_set`
 says whether one is configured — plus `roles`, each named by the backend that
 *resolves* for it and which rung answered (`default`, `role_pointer`, …), and
-`restart_required`.
+`restart_required`. The roles are `default`, `default_embedding`,
+`default_extraction`, and the helpers `default_vision`,
+`default_transcription` and `default_utility`; with no conversation to fall
+back to here, an unset helper resolves as `models.default` does.
 
 ### `POST /v1/admin/backends`
 
@@ -309,6 +313,22 @@ The twin of `apogee config set-default-embedding`. Same body and rules.
 ### `POST /v1/admin/backends/default-extraction`
 
 The twin of `apogee config set-default-extraction`. Same body and rules.
+
+### `POST /v1/admin/backends/default-vision`
+
+The twin of `apogee config set-default-vision`: the backend that describes an
+image for a chat model with no projector. Same body and rules.
+
+### `POST /v1/admin/backends/default-transcription`
+
+The twin of `apogee config set-default-transcription`: the backend that turns
+audio into text. Same body and rules.
+
+### `POST /v1/admin/backends/default-utility`
+
+The twin of `apogee config set-default-utility`: the backend for chores --
+titles, compaction summaries, search-query rewriting, and summaries of tool
+results over 8 KiB. Same body and rules.
 
 ### `POST /v1/admin/config/format`
 
@@ -493,7 +513,7 @@ and `discipline` (filters; **no default branch over HTTP** -- the CLI's
 `anonymize=true` (attribution and the local `raw_ref` stripped, the
 provenance chain kept -- the shareable shape), and, for a query, `q` (the
 question), `retriever` (`lexical` | `vector` | `hybrid` | `auto`), `rerank`
-(a backend, or `off`), and `limit` (default 20).
+(a backend, `on` for the utility model, or `off`), and `limit` (default 20).
 
 A missing collection is `200` with an empty list -- never an error, and never
 a created file. Without `q`: `{"object": "list", "data": [record…]}`. With

@@ -482,8 +482,10 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                        ? std::string{}
                        : agentloop::retriever_values_message("", value);
         });
-    cmd->add_option("--rerank", flags->rerank,
-                    "Backend that reorders retrieved chunks with one generation call, or off")
+    cmd->add_option(
+           "--rerank", flags->rerank,
+           "Backend that reorders retrieved chunks with one generation call, on (the utility "
+           "model), or off")
         ->type_name(kBackendValue);
     cmd->add_option("--branch", flags->branch,
                     "Branch under review (the head); reviewed without checking it out")
@@ -647,9 +649,9 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
             const RagChoice rag_choice =
                 choose_rag_collection(rag_flag_given, rag_flag, loaded.config.collection);
             if (rag_choice.active()) {
-                const agentloop::RagResult rag =
-                    retrieve_for_collection(harness, config, rag_choice.collection, question,
-                                            flags->rag_limit, flags->retriever, flags->rerank, {});
+                const agentloop::RagResult rag = retrieve_for_collection(
+                    harness, config, rag_choice.collection, question, flags->rag_limit,
+                    flags->retriever, flags->rerank, {}, model);
                 if (!rag.error.empty() && !flags->retriever.empty()) {
                     fail_user(rag.error);
                 }
@@ -706,6 +708,7 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
             options.max_tokens = max_tokens;
             options.stream_answer = true;
             options.tools = registry.empty() ? nullptr : &registry;
+            options.summary_model = named_utility(config);
             if (policy == harness::AgentToolPolicy::All) {
                 options.permission = make_permission_checker(config, nullptr);
             }
@@ -776,6 +779,7 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
         options.temperature = temperature;
         options.max_tokens = max_tokens;
         options.tools = registry.empty() ? nullptr : &registry;
+        options.summary_model = named_utility(config);
         // The gate only for an `all` agent: a read-only registry has nothing
         // to prompt for, which is the whole point of the policy.
         if (policy == harness::AgentToolPolicy::All) {

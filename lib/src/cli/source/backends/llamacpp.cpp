@@ -527,6 +527,20 @@ bool LlamaCppProvider::accepts_images() const noexcept {
     return llama_available() && !options_.mmproj_path.empty();
 }
 
+bool LlamaCppProvider::accepts_audio() const noexcept {
+    if (!llama_available() || options_.mmproj_path.empty()) {
+        return false;
+    }
+    try {
+        if (!projector_header_.has_value()) {
+            projector_header_ = models::inspect_gguf(std::filesystem::path{options_.mmproj_path});
+        }
+        return projector_header_->parsed && projector_header_->projector_audio;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 bool LlamaCppProvider::model_loaded() const noexcept {
     return model_ != nullptr;
 }

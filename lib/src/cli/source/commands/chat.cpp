@@ -12,6 +12,7 @@
 
 #include "agentloop/content.h"
 #include "agentloop/loop.h"
+#include "agentloop/query_rewrite.h"
 #include "agentloop/rag.h"
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
@@ -176,12 +177,16 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         agentloop::measure_context(harness, prospective, session.backend);
 
     if (usage.should_compact()) {
+        // The utility model summarises when one is set, else the chat's own
+        // backend, as before (26b).
+        const std::string compactor =
+            helper_backend(harness.config(), harness::ModelRole::Utility, session.backend);
         notice("context " + std::to_string(static_cast<int>(usage.fraction() * 100)) +
-               "% full -- compacting");
+               "% full -- compacting" + (compactor == session.backend ? "" : " with " + compactor));
         // Compacts the PRIOR history only: folding the message the user just
         // typed into a summary of the conversation so far would summarise away
         // the question being asked.
-        session.messages = agentloop::compact_history(harness, session.messages, session.backend);
+        session.messages = agentloop::compact_history(harness, session.messages, compactor);
         ++session.compactions;
     } else if (usage.should_warn()) {
         notice("context " + std::to_string(static_cast<int>(usage.fraction() * 100)) + "% full" +
@@ -197,6 +202,9 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     loop_options.temperature = session.params.temperature;
     loop_options.max_tokens = session.params.max_tokens;
     loop_options.stream_answer = true;
+    // A large tool result is summarised by the utility model, when one is
+    // set, before the chat model reads it (26b).
+    loop_options.summary_model = named_utility(harness.config());
     if (tools != nullptr) {
         loop_options.tools = tools;
         loop_options.ask = ask;
@@ -233,9 +241,21 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         // resumed session continues as it was last set.
         const harness::Config fallback;
         const harness::Config& config = turn_config.has_value() ? *turn_config : fallback;
-        const agentloop::RagResult retrieved =
-            retrieve_for_collection(harness, config, rag_choice.collection, input, rag.limit,
-                                    session.retriever, session.rerank, {});
+        // A follow-up is searched as a standalone question, restated by the
+        // utility model when one is set, else the chat's own (26b). The chat
+        // model is still asked the question as the user wrote it.
+        const std::string rewriter =
+            helper_backend(harness.config(), harness::ModelRole::Utility, session.backend);
+        const agentloop::QueryRewrite rewrite =
+            agentloop::rewrite_query(harness, rewriter, session.messages, input, {});
+        if (rewrite.rewritten) {
+            reporter.on_progress("search query by " + rewriter + ": " + rewrite.query);
+        } else if (!rewrite.note.empty()) {
+            notice(rewrite.note);
+        }
+        const agentloop::RagResult retrieved = retrieve_for_collection(
+            harness, config, rag_choice.collection, rewrite.query, rag.limit, session.retriever,
+            session.rerank, {}, session.backend);
         if (retrieved.error.empty() && !retrieved.prefix.empty()) {
             loop_options.transient_prefix = retrieved.prefix;
         }
@@ -285,7 +305,10 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
 /// the reasoning skipped) and records it.
 class BackgroundTitle {
 public:
-    explicit BackgroundTitle(const harness::Harness& harness) : harness_{harness} {}
+    /// `progress` hears which model titled the chat, for `--verbose` (26b).
+    BackgroundTitle(const harness::Harness& harness,
+                    std::function<void(std::string_view)> progress = {})
+        : harness_{harness}, progress_{std::move(progress)} {}
 
     BackgroundTitle(const BackgroundTitle&) = delete;
     BackgroundTitle& operator=(const BackgroundTitle&) = delete;
@@ -305,14 +328,18 @@ public:
             return;
         }
         asked_ = true;
-        title_ = std::async(std::launch::async, [this, request = title_request(session)]() {
-            try {
-                return sanitize_title(
-                    harness_.chat(request, cancellation_).message.content.plain_text());
-            } catch (const std::exception&) {
-                return std::string{};  // a failed title is cosmetic; it never costs a turn
-            }
-        });
+        // The utility model titles the chat when one is set, else the chat's
+        // own backend, as before (26b).
+        backend_ = helper_backend(harness_.config(), harness::ModelRole::Utility, session.backend);
+        title_ =
+            std::async(std::launch::async, [this, request = title_request(session, backend_)]() {
+                try {
+                    return sanitize_title(
+                        harness_.chat(request, cancellation_).message.content.plain_text());
+                } catch (const std::exception&) {
+                    return std::string{};  // a failed title is cosmetic; it never costs a turn
+                }
+            });
     }
 
     /// Waits for a title in flight and records it on `session`.
@@ -324,6 +351,9 @@ public:
         if (!title.empty() && session.title.empty()) {
             session.title = title;
             logger::save(session);
+            if (progress_) {
+                progress_("titled by " + backend_ + ": " + title);
+            }
         }
     }
 
@@ -335,6 +365,8 @@ public:
 
 private:
     const harness::Harness& harness_;
+    std::function<void(std::string_view)> progress_;
+    std::string backend_;
     harness::CancellationToken cancellation_ = harness::CancellationToken::create();
     std::future<std::string> title_;
     bool asked_ = false;
@@ -373,8 +405,10 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                            : agentloop::retriever_values_message("", value);
             });
     flags->rerank_option =
-        cmd->add_option("--rerank", flags->rerank,
-                        "Backend that reorders retrieved chunks with one generation call, or off")
+        cmd->add_option(
+               "--rerank", flags->rerank,
+               "Backend that reorders retrieved chunks with one generation call, on (the utility "
+               "model), or off")
             ->type_name(kBackendValue);
     cmd->add_option("--image", flags->images, "Image to attach to the first message (repeatable)")
         ->type_name(kPathValue)
@@ -671,7 +705,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             const agentloop::AskFn driver_ask =
                 flags->tools ? make_driver_ask_fn(machine_reporter, std::cin) : agentloop::AskFn{};
 
-            BackgroundTitle title{harness};
+            BackgroundTitle title{harness, [&machine_reporter](std::string_view line) {
+                                      machine_reporter.on_progress(line);
+                                  }};
             std::string line;
             while (std::getline(std::cin, line)) {
                 const DriverMessage message = parse_driver_line(line);
@@ -750,11 +786,16 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             CaptureInputs inputs;
             inputs.raw = transcript;
             inputs.overrides = std::move(overrides);
-            reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                         " distilling this conversation into a record...");
+            // The clerk is the chat's own model -- loaded already, so no second
+            // load (Milestone Y) -- unless a utility model is named (26b).
+            const std::string utility = named_utility(config);
+            const std::string clerk = utility.empty() ? session.backend : utility;
+            reporter.status().print_line(
+                style.tag(ansi::Role::Apogee) + " distilling this conversation into a record" +
+                (clerk == session.backend ? "" : " with " + clerk) + "...");
             const CaptureResult result =
                 capture_and_store(harness, config, config_path, inputs,
-                                  knowledge::make_structured_clerk(harness, session.backend));
+                                  knowledge::make_structured_clerk(harness, clerk));
             if (!result.ok()) {
                 reporter.status().print_line(style.tag(ansi::Role::Error) +
                                              " capture failed: " + result.error);
@@ -769,7 +810,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         };
 
         // --- the REPL --------------------------------------------------------
-        BackgroundTitle title{harness};
+        BackgroundTitle title{harness,
+                              [&reporter](std::string_view line) { reporter.on_progress(line); }};
         bool running = true;
         while (running) {
             // The editor draws its own prompt; the plain reader ignores it and
@@ -938,8 +980,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                             logger::save(session);
                             reporter.status().print_line(style.tag(ansi::Role::Rag) +
                                                          " rerank follows the collection's pin");
-                        } else if (argument != agentloop::kRerankOff &&
-                                   config.find_backend(argument) == nullptr) {
+                        } else if (!agentloop::valid_rerank(argument, config)) {
                             reporter.status().print_line(style.tag(ansi::Role::Error) +
                                                          " no backend named '" + argument + "'");
                         } else {
@@ -954,14 +995,18 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                         logger::save(session);
                         reporter.status().print_line(style.tag(ansi::Role::Apogee) + " renamed");
                         break;
-                    case ChatVerb::Compact:
+                    case ChatVerb::Compact: {
+                        const std::string compactor = helper_backend(
+                            harness.config(), harness::ModelRole::Utility, session.backend);
                         session.messages =
-                            agentloop::compact_history(harness, session.messages, session.backend);
+                            agentloop::compact_history(harness, session.messages, compactor);
                         ++session.compactions;
                         logger::save(session);
-                        reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                     " history compacted");
+                        reporter.status().print_line(
+                            style.tag(ansi::Role::Apogee) + " history compacted" +
+                            (compactor == session.backend ? "" : " by " + compactor));
                         break;
+                    }
                 }
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop

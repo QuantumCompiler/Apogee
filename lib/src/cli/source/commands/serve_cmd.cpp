@@ -116,7 +116,8 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
                        : agentloop::retriever_values_message("", value);
         });
     cmd->add_option("--rerank", flags->rerank,
-                    "Backend that reorders retrieved chunks, or off (?rerank= overrides)")
+                    "Backend that reorders retrieved chunks, on (the utility model), or off "
+                    "(?rerank= overrides)")
         ->type_name(kBackendValue);
     cmd->add_flag("--tools", flags->tools,
                   "Let the model call tools server-side (fetch_url); clients see only the "
@@ -170,8 +171,7 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user("no backend named '" + flags->model +
                       "' (configured: " + join(config.backend_names()) + ")");
         }
-        if (!flags->rerank.empty() && flags->rerank != agentloop::kRerankOff &&
-            config.find_backend(flags->rerank) == nullptr) {
+        if (!agentloop::valid_rerank(flags->rerank, config)) {
             fail_user("--rerank: no backend named '" + flags->rerank + "'");
         }
 

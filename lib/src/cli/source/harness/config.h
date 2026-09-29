@@ -181,6 +181,12 @@ struct ModelsConfig {
     std::string default_backend;
     std::string default_embedding;
     std::string default_extraction;
+    /// The helper roles (26b): a model that describes images for a chat model
+    /// with no projector, one that transcribes audio, and one that does the
+    /// chores -- titles, compaction, query rewriting, large tool results.
+    std::string default_vision;
+    std::string default_transcription;
+    std::string default_utility;
 };
 
 /// Whether two role-pointer sets are identical. Defined in `config.cpp` -- the

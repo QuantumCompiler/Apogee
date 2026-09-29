@@ -541,7 +541,8 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         });
     query
         ->add_option("--rerank", q->rerank,
-                     "Backend that reorders the matches with one generation call, or off")
+                     "Backend that reorders the matches with one generation call, on (the utility "
+                     "model), or off")
         ->type_name(kBackendValue);
     query->add_option("--db", q->db, "The collection (default: knowledge.db, then 'knowledge')")
         ->type_name(kCollectionValue);
@@ -554,8 +555,7 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         const harness::Config config = load_config_lenient(context, config_path);
         const std::string db = resolve_db(config, q->db);
         const knowledge::Store store = open_existing(db);
-        if (!q->rerank.empty() && q->rerank != agentloop::kRerankOff &&
-            config.find_backend(q->rerank) == nullptr) {
+        if (!agentloop::valid_rerank(q->rerank, config)) {
             fail_user("--rerank: no backend named '" + q->rerank + "'");
         }
 

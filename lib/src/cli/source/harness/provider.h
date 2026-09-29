@@ -176,6 +176,26 @@ public:
     [[nodiscard]] virtual std::int64_t count_prompt_tokens(const ChatRequest& request) = 0;
 };
 
+/// Implemented by a provider that can take audio (26b): a local model whose
+/// projector has an audio encoder, read through mtmd.
+///
+/// Unlike images, a provider that does not declare it is taken to have none:
+/// no cloud backend here is sent audio, so the only way to transcribe is a
+/// model that says it can, and a `transcription` role pointed anywhere else
+/// is a mistake worth naming.
+class AudioCapable {
+public:
+    AudioCapable() = default;
+    virtual ~AudioCapable() = default;
+    AudioCapable(const AudioCapable&) = delete;
+    AudioCapable& operator=(const AudioCapable&) = delete;
+    AudioCapable(AudioCapable&&) = delete;
+    AudioCapable& operator=(AudioCapable&&) = delete;
+
+    /// Whether this provider accepts audio right now.
+    [[nodiscard]] virtual bool accepts_audio() const noexcept = 0;
+};
+
 /// Implemented by a provider that sizes its own conversation window.
 ///
 /// A cloud window is a fact about a model name, which the fallback table in

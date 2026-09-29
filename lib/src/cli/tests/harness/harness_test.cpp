@@ -558,3 +558,15 @@ TEST_CASE("preload_model loads a lazily loading backend and answers no for the r
     CHECK_FALSE(harness.preload_model("mock", {}));
     CHECK_FALSE(harness.preload_model("ghost", {}));
 }
+
+TEST_CASE("audio is asked of the provider, and a provider that does not say is taken to have none",
+          "[harness][capability][helpers]") {
+    // The opposite of images: nothing is sent audio that has not said it can
+    // read it (26b).
+    Harness harness{Config{}};
+    harness.register_provider("cloud", mock("cloud", "some-model"));
+    harness.use_default_router();
+    CHECK_FALSE(harness.accepts_audio("cloud"));
+    CHECK(harness.accepts_images("cloud"));
+    CHECK_FALSE(harness.accepts_audio("ghost"));
+}

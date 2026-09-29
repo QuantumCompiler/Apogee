@@ -174,7 +174,7 @@ TEST_CASE("a command's own values follow it", "[chat][completer]") {
     }
 
     CHECK(texts(suggest_chat_input("/rerank ", project())) ==
-          std::vector<std::string>{"off", "auto", "claude", "local", "mock"});
+          std::vector<std::string>{"off", "on", "auto", "claude", "local", "mock"});
 
     std::vector<std::string> statuses;
     for (const std::string_view status : apogee::knowledge::valid_statuses()) {

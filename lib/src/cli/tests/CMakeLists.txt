@@ -68,6 +68,8 @@ add_executable(apogee_tests
     agentloop/rag_test.cpp
     agentloop/retrieval_test.cpp
     agentloop/rerank_test.cpp
+    agentloop/query_rewrite_test.cpp
+    agentloop/tool_summary_test.cpp
     embedstore/vector_test.cpp
     embedstore/fts_query_test.cpp
     embedstore/chunk_test.cpp

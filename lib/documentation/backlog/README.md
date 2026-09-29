@@ -67,7 +67,7 @@ Four tracks, since **24** (chat input completion) shipped on 2026-09-25 — see 
 - **speed and memory**: a context sized to the machine, a persistent prompt cache, and speculative decoding measured before it is built;
 - **memory across chats**: a per-turn context budget and automatic recall.
 
-The user's calls are recorded in the items: attachments kept with their chat and cached by hash, helper models used automatically, and external converters (`pdftotext`, `ffmpeg`). **26a**, the context window sized to the machine, shipped 2026-09-28 ([MILESTONES.md](../assistant/MILESTONES.md#milestone-j--local-inference) → Milestone J). Shipping it found **26m**, a sliding-window model's cache kept at its window, added the same day at the user's request and shipped the same day too ([MILESTONES.md](../assistant/MILESTONES.md#milestone-j--local-inference) → Milestone J): Gemma 4 31B's cache at 32K went from 14.6 GiB to 2.0.
+The user's calls are recorded in the items: attachments kept with their chat and cached by hash, helper models used automatically, and external converters (`pdftotext`, `ffmpeg`). **26a**, the context window sized to the machine, shipped 2026-09-28 ([MILESTONES.md](../assistant/MILESTONES.md#milestone-j--local-inference) → Milestone J). Shipping it found **26m**, a sliding-window model's cache kept at its window, added the same day at the user's request and shipped the same day too ([MILESTONES.md](../assistant/MILESTONES.md#milestone-j--local-inference) → Milestone J): Gemma 4 31B's cache at 32K went from 14.6 GiB to 2.0. **26b**, the helper-model roles, shipped 2026-09-28 too ([MILESTONES.md](../assistant/MILESTONES.md#milestone-n--model-operations) → Milestone N): `vision`, `transcription` and `utility` in the one resolver, with titles, compaction, follow-up search queries and large tool results moved to the utility model.
 
 **27, machine-mode integrations**, asked for 2026-09-25 for **v0.1.4**: the CLI pluggable into other people's harnesses and applications — the native machine-mode protocol as the floor, a common protocol integrators extend from. **The spike ran the same day** ([MILESTONES.md](../assistant/MILESTONES.md#milestone-m--the-front-end-contract) → Milestone M): a naive external host, knowing only the protocol doc, completed a tool-using, permission-prompted conversation against the shipped binary; a host-run MCP server's tool round-tripped through the loop with zero prompts (host tools already work — the gap is wiring); seven walls were recorded. The recommendation: **grow the JSONL contract additively** — the tolerance rules make it retrofittable in both directions, verified live — with MCP as the host-tools sidecar, never a reframe that breaks `protocol_version: 1` drivers. Split into five: 27a the handshake and stability promise, 27b per-run integration wiring (walls W6/W8 — **its document is still to be written**; the Milestone M record carries its substance), 27c turn ids and cancel, 27d the schema artifact, 27e machine-readable reads. Parked with evidence, the user's call: the push channel.
 
@@ -77,17 +77,16 @@ The user's calls are recorded in the items: attachments kept with their chat and
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| 26b | Helper-model roles — `vision`, `transcription` and `utility` in the one resolver; titles, compaction, query rewriting and big tool results move to the utility model | v0.1.3 | [`helper-model-roles.md`](helper-model-roles.md) | 🟢 |
 | 26c | A per-turn context budget — each source gets a share of the real window; finished turns' tool results sent as stubs | v0.1.3 | [`context-budget.md`](context-budget.md) | 🟢 |
 | 26d | Attachments: documents, code and folders — `/attach`, indexed with the embedding model, inlined when they fit, retrieved per turn with citations, kept with the chat | v0.1.3 | [`attachments-documents.md`](attachments-documents.md) | 🔒 26c |
-| 26e | Attachments: images, audio and video — native when the model can, a helper model when not; videos become searchable timelines | v0.1.3 | [`attachments-media.md`](attachments-media.md) | 🔒 26b, 26d |
+| 26e | Attachments: images, audio and video — native when the model can, a helper model when not; videos become searchable timelines | v0.1.3 | [`attachments-media.md`](attachments-media.md) | 🔒 26d |
 | 26f | Structured output by grammar — JSON Schema constrained token by token on local models | v0.1.3 | [`local-structured-output.md`](local-structured-output.md) | 🟢 |
 | 26g | Tool selection by relevance — the relevant few tools per step, and `find_tools` for the rest | v0.1.3 | [`tool-selection.md`](tool-selection.md) | 🟢 |
 | 26h | Sampling local models are meant to be run with — `-t` reaches the model (it is silently ignored today), GGUF and family defaults | v0.1.3 | [`sampling-profiles.md`](sampling-profiles.md) | 🟢 |
 | 26i | Thinking control — `/think on\|off\|auto`, a thinking budget, mapped to every vendor | v0.1.3 | [`thinking-control.md`](thinking-control.md) | 🔒 26h |
 | 26j | A persistent prompt cache — resumed chats and repeated tool prompts restored from disk | v0.1.3 | [`persistent-prompt-cache.md`](persistent-prompt-cache.md) | 🟢 |
 | 26k | Speculative decoding, measured first — MTP, a draft model or n-grams, built only on a clean ≥1.3× win | v0.1.3 | [`speculative-decoding.md`](speculative-decoding.md) | 🟢 |
-| 26l | Recall across chats — past chats summarised and retrieved per turn; never on `serve` | v0.1.3 | [`recall-across-chats.md`](recall-across-chats.md) | 🔒 26b, 26c |
+| 26l | Recall across chats — past chats summarised and retrieved per turn; never on `serve` | v0.1.3 | [`recall-across-chats.md`](recall-across-chats.md) | 🔒 26c |
 
 ### v0.1.4
 

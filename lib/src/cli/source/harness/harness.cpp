@@ -284,6 +284,16 @@ bool Harness::accepts_images(std::string_view model) const noexcept {
     }
 }
 
+bool Harness::accepts_audio(std::string_view model) const noexcept {
+    try {
+        const auto* audio = dynamic_cast<const AudioCapable*>(&route(model));
+        // Not declaring it means "no" -- see AudioCapable.
+        return audio != nullptr && audio->accepts_audio();
+    } catch (const HarnessError&) {
+        return false;
+    }
+}
+
 ModelBehavior Harness::model_behavior_for(std::string_view model) const {
     try {
         const auto* reporter = dynamic_cast<const ModelBehaviorReporting*>(&route(model));

@@ -140,7 +140,8 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
     // --- the judge, resolved once too ---------------------------------------------
     RerankChoice judge;
     if (turn.config != nullptr && turn.harness != nullptr) {
-        judge = resolve_turn_rerank(turn.rerank_flag, turn.rerank_pin, *turn.config);
+        judge =
+            resolve_turn_rerank(turn.rerank_flag, turn.rerank_pin, *turn.config, turn.conversation);
         if (!judge.note.empty()) {
             result.notes.push_back(judge.note);
         }

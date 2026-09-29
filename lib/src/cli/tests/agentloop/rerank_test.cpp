@@ -102,6 +102,41 @@ TEST_CASE("the rerank backend is the flag, else the pin, else none; off wins; un
     CHECK(missing.note.find("not configured") != std::string::npos);
 }
 
+TEST_CASE("rerank on is the utility model, else the chat's own, through the one resolver",
+          "[agentloop][rerank][resolve][helpers]") {
+    apogee::harness::Config config = config_with({"chatty", "helper"});
+    // No utility model: the conversation's backend judges.
+    CHECK(resolve_turn_rerank("on", "", config, "chatty").backend == "chatty");
+    CHECK(resolve_turn_rerank("", "on", config, "chatty").backend == "chatty");
+    // A utility model judges wherever the chat is.
+    config.models.default_utility = "helper";
+    CHECK(resolve_turn_rerank("on", "", config, "chatty").backend == "helper");
+    // Off still wins, and a named backend is still itself.
+    CHECK(resolve_turn_rerank("off", "on", config, "chatty").backend.empty());
+    CHECK(resolve_turn_rerank("chatty", "", config, "x").backend == "chatty");
+
+    // Nothing to judge with: disabled, and said.
+    const apogee::harness::Config none = config_with({"x"});
+    const RerankChoice nothing = resolve_turn_rerank("on", "", none, "");
+    CHECK(nothing.backend.empty());
+    CHECK(nothing.note.find("no utility model or chat backend") != std::string::npos);
+    // A pointer at nothing is caught like a named backend is.
+    apogee::harness::Config ghost = config_with({"x"});
+    ghost.models.default_utility = "ghost";
+    CHECK(resolve_turn_rerank("on", "", ghost, "x").note.find("'ghost'") != std::string::npos);
+}
+
+TEST_CASE("one validator decides what a rerank setting may be", "[agentloop][rerank][helpers]") {
+    using apogee::agentloop::valid_rerank;
+    const apogee::harness::Config config = config_with({"judge"});
+    CHECK(valid_rerank("", config));
+    CHECK(valid_rerank("off", config));
+    CHECK(valid_rerank("on", config));
+    CHECK(valid_rerank("judge", config));
+    CHECK_FALSE(valid_rerank("ghost", config));
+    CHECK_FALSE(valid_rerank("On", config));
+}
+
 TEST_CASE("the candidate set is widened tenfold and capped", "[agentloop][rerank]") {
     CHECK(rerank_fetch_limit(4, false) == 4);
     CHECK(rerank_fetch_limit(4, true) == 40);
@@ -121,6 +156,9 @@ TEST_CASE("a working judge visibly reorders and is flagged applied", "[agentloop
     CHECK(out.note.empty());
     // The judge saw numbered candidates and the question.
     REQUIRE(judge.provider->requests().size() == 1);
+    // Not a turn of the conversation: a chat judging with its own local
+    // model keeps its cache (26b).
+    CHECK(judge.provider->requests()[0].transient.side_request);
     const std::string prompt = judge.provider->requests()[0].messages.front().content.plain_text();
     CHECK(prompt.find("[1] passage number 1") != std::string::npos);
     CHECK(prompt.find("which passage?") != std::string::npos);

@@ -149,6 +149,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         machine_options.temperature = temperature;
         machine_options.max_tokens = max_tokens;
         machine_options.stream_answer = true;
+        machine_options.summary_model = named_utility(config);
 
         agent::ToolRegistry machine_registry;
         const auto machine_mcp = std::make_shared<mcp::Registry>();
@@ -219,6 +220,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     loop_options.temperature = temperature;
     loop_options.max_tokens = max_tokens;
     loop_options.stream_answer = true;
+    // A large tool result is summarised by the utility model, when one is
+    // set, before the model reads it (26b).
+    loop_options.summary_model = named_utility(config);
 
     // Retrieval, spliced into the OUTGOING request only. `transient_prefix` is
     // the seam the agent loop already test-locks as never reaching persisted
@@ -233,7 +237,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     if (rag_choice.active()) {
         const agentloop::RagResult rag =
             retrieve_for_collection(harness, config, rag_choice.collection, prompt, flags.rag_limit,
-                                    flags.retriever, flags.rerank, {});
+                                    flags.retriever, flags.rerank, {}, model);
         // Explicitly asked for and impossible -- an `--retriever vector` with
         // no vectors -- is the user's request failing, not a fallback.
         if (!rag.error.empty() && !flags.retriever.empty()) {
@@ -335,8 +339,10 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                        ? std::string{}
                        : agentloop::retriever_values_message("", value);
         });
-    cmd->add_option("--rerank", flags->rerank,
-                    "Backend that reorders retrieved chunks with one generation call, or off")
+    cmd->add_option(
+           "--rerank", flags->rerank,
+           "Backend that reorders retrieved chunks with one generation call, on (the utility "
+           "model), or off")
         ->type_name(kBackendValue);
     cmd->add_option("--image", flags->images, "Image file to attach (repeatable)")
         ->type_name(kPathValue)

@@ -77,7 +77,8 @@ TEST_CASE("compaction summarises into an authoritative system message",
     provider_options.turns = {MockTurn{"They discussed cats.", {}, {}, {}}};
 
     Harness harness{Config{}};
-    harness.register_provider("mock", std::make_shared<MockProvider>(std::move(provider_options)));
+    const auto mock = std::make_shared<MockProvider>(std::move(provider_options));
+    harness.register_provider("mock", mock);
     harness.use_default_router();
 
     const std::vector<ChatMessage> history{
@@ -89,6 +90,10 @@ TEST_CASE("compaction summarises into an authoritative system message",
     const auto compacted = compact_history(harness, history, "mock");
 
     CHECK(compacted.size() < history.size());
+    // Not a turn of the conversation: whichever model writes it, a local
+    // chat model's cache is not disturbed by it (26b).
+    REQUIRE(mock->requests().size() == 1);
+    CHECK(mock->requests().front().transient.side_request);
     CHECK(compacted[0].role == Role::System);
     CHECK(compacted[0].content.plain_text() == "be brief");
     CHECK(compacted[1].role == Role::System);

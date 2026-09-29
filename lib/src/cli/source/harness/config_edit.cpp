@@ -735,7 +735,8 @@ std::string delete_embedding(std::string_view content, std::string_view name) {
 }
 
 std::vector<std::string_view> models_role_fields() {
-    return {"default", "default_embedding", "default_extraction"};
+    return {"default",        "default_embedding",     "default_extraction",
+            "default_vision", "default_transcription", "default_utility"};
 }
 
 namespace {
@@ -1005,8 +1006,12 @@ std::string set_models_role(std::string_view content, std::string_view field,
                             std::string_view value) {
     const std::vector<std::string_view> allowed = models_role_fields();
     if (std::find(allowed.begin(), allowed.end(), field) == allowed.end()) {
+        std::string accepted;
+        for (const std::string_view name : allowed) {
+            accepted += (accepted.empty() ? "" : ", ") + std::string{name};
+        }
         throw ConfigEditError("unknown models field '" + std::string{field} +
-                              "' (accepted: default, default_embedding, default_extraction)");
+                              "' (accepted: " + accepted + ")");
     }
     return set_section_scalar(content, "models", field, value);
 }

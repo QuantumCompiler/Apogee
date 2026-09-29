@@ -36,6 +36,10 @@ namespace apogee::agentloop {
 /// `--rerank off`, or `rerank: off` on a collection: disabled for the run.
 inline constexpr std::string_view kRerankOff = "off";
 
+/// A rerank setting that names no backend: the utility model judges, or the
+/// conversation's own backend when none is set (26b).
+inline constexpr std::string_view kRerankOn = "on";
+
 /// Multiplies the limit to size the candidate set the judge sees: 5 injected
 /// chunks are chosen from ~50. Reranking can only improve on what retrieval
 /// returned, so the wider net is the point.
@@ -55,15 +59,22 @@ inline constexpr std::int64_t kRerankMaxTokens = 1024;
 
 /// Which backend judges this turn: the flag, else the collection's pin, else
 /// none. A backend that is not configured disables reranking with a note
-/// rather than guessing another.
+/// rather than guessing another. `on` asks the one resolver for the utility
+/// role, falling back to `conversation` -- the backend the chat is on.
 struct RerankChoice {
     /// Empty means no reranking this turn.
     std::string backend;
     std::string note;
 };
 
+/// Whether `value` is a rerank setting the config can honour: unset, `off`,
+/// `on`, or a configured backend. One test, so a flag, a pin and the admin
+/// plane cannot accept different spellings.
+[[nodiscard]] bool valid_rerank(std::string_view value, const harness::Config& config);
+
 [[nodiscard]] RerankChoice resolve_turn_rerank(std::string_view flag, std::string_view pin,
-                                               const harness::Config& config);
+                                               const harness::Config& config,
+                                               std::string_view conversation = {});
 
 /// How many candidates to retrieve when a judge will run: the widened set,
 /// capped. `limit` unchanged when it will not, so the plain path retrieves

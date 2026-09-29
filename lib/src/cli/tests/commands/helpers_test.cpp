@@ -10,6 +10,7 @@
 
 #include "embedstore/store.h"
 #include "harness/config.h"
+#include "harness/roles.h"
 #include "support/env_guard.h"
 
 using apogee::commands::base64_encode;
@@ -63,6 +64,24 @@ TEST_CASE("a flag beats the backend entry, which beats nothing", "[commands][hel
     // An unknown backend resolves to unset rather than throwing.
     CHECK_FALSE(resolve_temperature(std::nullopt, config, "ghost").has_value());
     CHECK(resolve_system_prompt("", config, "ghost").empty());
+}
+
+TEST_CASE("a helper runs on the conversation's backend, but only a named utility summarises",
+          "[commands][helpers]") {
+    // 26b: an unset helper runs on whatever the chat is on; a chore that only
+    // pays when a different model does it asks for a NAMED utility model.
+    apogee::harness::Config config;
+    config.models.default_backend = "big";
+    CHECK(apogee::commands::helper_backend(config, apogee::harness::ModelRole::Utility, "chat") ==
+          "chat");
+    CHECK(apogee::commands::helper_backend(config, apogee::harness::ModelRole::Utility, "") ==
+          "big");
+    CHECK(apogee::commands::named_utility(config).empty());
+
+    config.models.default_utility = "small";
+    CHECK(apogee::commands::helper_backend(config, apogee::harness::ModelRole::Utility, "chat") ==
+          "small");
+    CHECK(apogee::commands::named_utility(config) == "small");
 }
 
 TEST_CASE("base64 encodes with correct padding", "[commands][helpers]") {

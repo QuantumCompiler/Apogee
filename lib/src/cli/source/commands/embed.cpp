@@ -363,7 +363,8 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
         });
     query
         ->add_option("--rerank", *q_rerank,
-                     "Backend that reorders the hits with one generation call, or off")
+                     "Backend that reorders the hits with one generation call, on (the utility "
+                     "model), or off")
         ->type_name(kBackendValue);
 
     query->callback([&context, q_collection, q_text, q_limit, q_retriever, q_rerank]() {

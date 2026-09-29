@@ -2,7 +2,7 @@
 
 **What / why.** The same `/attach` that takes a document ([document attachments](attachments-documents.md)) takes a picture, a recording or a video. Apogee gives each to whichever configured model can read it:
 - **Natively**, when the chat model can: an image to a model with a vision projector, audio to one with an audio projector, and a short video to a video-capable one such as Qwen3-VL through mtmd.
-- **Through a helper**, when it cannot: the [`vision` or `transcription` role](helper-model-roles.md) turns it into text.
+- **Through a helper**, when it cannot: the [`vision` or `transcription` role](../assistant/MILESTONES.md#milestone-n--model-operations) turns it into text.
 
 That text is indexed with the chat's documents, so every later question can retrieve it. A 12-minute screen recording becomes a timeline of what was on screen and what was said, searchable by moment ("what did they type at 4:30?"), readable by a text-only 8B model.
 
@@ -22,7 +22,7 @@ Today:
     - both merged in time order into text the chat's index holds.
 
 **Core constraint(s).**
-- **Capabilities are asked, never cast.** `accepts_images` exists; `accepts_audio` comes with [helper roles](helper-model-roles.md); `accepts_video` (from `mtmd_helper_support_video`) is added the same way.
+- **Capabilities are asked, never cast.** `accepts_images` exists; `accepts_audio` came with [helper roles](../assistant/MILESTONES.md#milestone-n--model-operations) (26b: true when a local backend's projector declares an audio encoder); `accepts_video` (from `mtmd_helper_support_video`) is added the same way.
 - **A helper is used automatically** (the user's call), and the status line says which model is reading what, and for how long.
 - **A child's stderr is captured, never inherited.** Apogee runs `ffmpeg` itself through `platform::ChildProcess` with a bounded stderr tail, and feeds mtmd frames and samples as bitmaps. mtmd's own video helper spawns `ffmpeg` from llama.cpp code Apogee does not control, so it is used only if a PTY check proves it keeps `ffmpeg`'s output off the terminal.
 - **External converters, optional:** `ffmpeg` on `PATH` (the user's call). Without it, audio and video are refused by name and `check` says what to install. Images need nothing external.
@@ -67,4 +67,4 @@ Today:
 - [ ] An audio note is transcribed and questions about it are answered from the transcript.
 - [ ] On a vision chat model, the second turn after an image does not re-encode the image (visible in `--verbose` timings).
 
-**Scope note.** Item **26e**; build after [26b](helper-model-roles.md) and [26d](attachments-documents.md). Out of scope: live capture (microphone, camera, screen), generating audio or images, and uploads over `serve`.
+**Scope note.** Item **26e**; build after [26d](attachments-documents.md) ([26b](../assistant/MILESTONES.md#milestone-n--model-operations), the helper roles, shipped 2026-09-28). Out of scope: live capture (microphone, camera, screen), generating audio or images, and uploads over `serve`.

@@ -404,8 +404,7 @@ HttpResponse admin_list_knowledge(const AdminConfigContext& context, Handler& pl
     options.top_k = limit;
     options.retriever_flag = retriever;
     options.rerank_flag = request.query_value("rerank");
-    if (!options.rerank_flag.empty() && options.rerank_flag != agentloop::kRerankOff &&
-        loaded.config->find_backend(options.rerank_flag) == nullptr) {
+    if (!agentloop::valid_rerank(options.rerank_flag, *loaded.config)) {
         return error_response(400, "rerank: no backend named '" + options.rerank_flag + "'");
     }
     const knowledge::QueryResult result =

@@ -328,6 +328,74 @@ TEST_CASE("a local backend's row states its window and what its cache costs",
     CHECK(plain->detail.find("cache size not known for this architecture") != std::string::npos);
 }
 
+TEST_CASE("a helper role pointed at a backend that cannot do its job is named",
+          "[commands][check][roles]") {
+    // Found here, not when an attachment needs it and fails somewhere else.
+    Install install;
+    install.seed();
+    install.write("models/model.gguf", apogee::testing::minimal_gguf("llama"));
+    install.write("models/seeing.gguf", apogee::testing::projector_gguf(true, false));
+    install.write("models/hearing.gguf", apogee::testing::projector_gguf(false, true));
+    const std::string model = (install.root / "models" / "model.gguf").string();
+    const std::string seeing = (install.root / "models" / "seeing.gguf").string();
+    const std::string hearing = (install.root / "models" / "hearing.gguf").string();
+
+    const auto run = [&](const std::string& models, const std::string& backends) {
+        CheckInputs inputs = inputs_for(install);
+        install.write("config/config.yaml", "models:\n" + models + "backends:\n" + backends);
+        load_into(inputs);
+        return run_checks(inputs);
+    };
+    const std::string local = "  blind:\n    type: llamacpp\n    model_path: " + model +
+                              "\n  sees:\n    type: llamacpp\n    model_path: " + model +
+                              "\n    mmproj_path: " + seeing +
+                              "\n  hears:\n    type: llamacpp\n    model_path: " + model +
+                              "\n    mmproj_path: " + hearing + "\n  cloud:\n    type: mock\n";
+
+    /// The row a config's check gives `label`: status and detail, copied.
+    const auto verdict = [&](const std::string& models, std::string_view label) {
+        const CheckReport report = run(models, local);
+        const auto* row = row_with(report, label);
+        REQUIRE(row != nullptr);
+        return std::pair{row->status, row->detail};
+    };
+
+    SECTION("vision") {
+        const auto [blind, blind_detail] = verdict("  default_vision: blind\n", "default_vision");
+        CHECK(blind == Status::Warn);
+        CHECK(blind_detail.find("no mmproj_path, so it cannot read an image") != std::string::npos);
+
+        const auto [deaf, deaf_detail] = verdict("  default_vision: hears\n", "default_vision");
+        CHECK(deaf == Status::Warn);
+        CHECK(deaf_detail.find("its projector has no vision encoder") != std::string::npos);
+
+        CHECK(verdict("  default_vision: sees\n", "default_vision").first == Status::Ok);
+        CHECK(verdict("  default_vision: cloud\n", "default_vision").first == Status::Ok);
+    }
+
+    SECTION("transcription") {
+        const auto [seeing_status, seeing_detail] =
+            verdict("  default_transcription: sees\n", "default_transcription");
+        CHECK(seeing_status == Status::Warn);
+        CHECK(seeing_detail.find("its projector has no audio encoder") != std::string::npos);
+
+        const auto [cloud_status, cloud_detail] =
+            verdict("  default_transcription: cloud\n", "default_transcription");
+        CHECK(cloud_status == Status::Warn);
+        CHECK(cloud_detail.find("only a local model's audio projector transcribes") !=
+              std::string::npos);
+
+        CHECK(verdict("  default_transcription: hears\n", "default_transcription").first ==
+              Status::Ok);
+    }
+
+    SECTION("utility, and a pointer at nothing") {
+        CHECK(verdict("  default_utility: cloud\n", "default_utility").first == Status::Ok);
+        CHECK(verdict("  default_utility: ghost\n", "default_utility").first == Status::Fail);
+        CHECK(verdict("  default_vision: ghost\n", "default_vision").first == Status::Fail);
+    }
+}
+
 TEST_CASE("a cloud backend with no key warns and never prints the key",
           "[commands][check][secrets]") {
     // Two claims. First, severity: a missing key is a WARNING, because a

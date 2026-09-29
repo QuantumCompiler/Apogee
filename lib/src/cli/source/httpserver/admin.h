@@ -52,6 +52,9 @@ public:
     [[nodiscard]] HttpResponse set_default(const HttpRequest& request);
     [[nodiscard]] HttpResponse set_default_embedding(const HttpRequest& request);
     [[nodiscard]] HttpResponse set_default_extraction(const HttpRequest& request);
+    [[nodiscard]] HttpResponse set_default_vision(const HttpRequest& request);
+    [[nodiscard]] HttpResponse set_default_transcription(const HttpRequest& request);
+    [[nodiscard]] HttpResponse set_default_utility(const HttpRequest& request);
     [[nodiscard]] HttpResponse format_config(const HttpRequest& request);
 
     [[nodiscard]] HttpResponse list_mcp_servers(const HttpRequest& request);

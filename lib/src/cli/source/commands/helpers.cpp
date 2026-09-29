@@ -72,8 +72,10 @@ std::string resolve_system_prompt(const std::string& flag_value, const harness::
 agentloop::RagResult retrieve_for_collection(
     const harness::Harness& harness, const harness::Config& config, std::string_view collection,
     const std::string& question, int limit, std::string_view retriever_flag,
-    std::string_view rerank_flag, const harness::CancellationToken& cancellation) {
+    std::string_view rerank_flag, const harness::CancellationToken& cancellation,
+    std::string_view conversation) {
     agentloop::RagTurn turn;
+    turn.conversation = std::string{conversation};
     turn.store_path = collection_path(collection);
     turn.question = question;
     turn.limit = limit;
@@ -102,6 +104,18 @@ agentloop::RagResult retrieve_for_collection(
     turn.config = &config;
     turn.cancellation = cancellation;
     return agentloop::retrieve_for_turn(turn);
+}
+
+std::string helper_backend(const harness::Config& config, harness::ModelRole role,
+                           std::string_view conversation) {
+    return harness::resolve_backend_key(
+        config, harness::RoleRequest{.role = role, .conversation = conversation});
+}
+
+std::string named_utility(const harness::Config& config) {
+    const harness::Resolution resolved =
+        harness::resolve_backend(config, harness::RoleRequest{.role = harness::ModelRole::Utility});
+    return resolved.from == harness::ResolvedFrom::RolePointer ? resolved.key : std::string{};
 }
 
 RagChoice choose_rag_collection(bool flag_given, std::string_view flag_value,

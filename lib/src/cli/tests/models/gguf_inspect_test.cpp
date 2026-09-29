@@ -261,3 +261,32 @@ TEST_CASE("a chat template is noticed without being read", "[models][gguf]") {
     REQUIRE(bare.parsed);
     CHECK_FALSE(bare.has_chat_template);
 }
+
+TEST_CASE("a projector's encoder flags are read", "[models][gguf]") {
+    // What `check` and the audio capability answer from, without a load.
+    const GgufInfo both = inspect_bytes(apogee::testing::projector_gguf(true, true), "both");
+    REQUIRE(both.parsed);
+    CHECK(both.projector_vision);
+    CHECK(both.projector_audio);
+    CHECK(both.is_projector());
+
+    const GgufInfo seeing = inspect_bytes(apogee::testing::projector_gguf(true, false), "seeing");
+    CHECK(seeing.projector_vision);
+    CHECK_FALSE(seeing.projector_audio);
+
+    const GgufInfo hearing = inspect_bytes(apogee::testing::projector_gguf(false, true), "hearing");
+    CHECK_FALSE(hearing.projector_vision);
+    CHECK(hearing.projector_audio);
+
+    // A model, not a projector: neither.
+    const GgufInfo model = inspect_bytes(well_formed(), "model");
+    CHECK_FALSE(model.projector_vision);
+    CHECK_FALSE(model.projector_audio);
+
+    // A projector cut off after its flags: a partial read is not a finding.
+    const std::string whole = apogee::testing::projector_gguf(true, true);
+    const GgufInfo cut = inspect_bytes(whole.substr(0, whole.size() - 4), "cut");
+    CHECK_FALSE(cut.parsed);
+    CHECK_FALSE(cut.projector_vision);
+    CHECK_FALSE(cut.projector_audio);
+}

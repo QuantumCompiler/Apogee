@@ -123,6 +123,16 @@ from_id="$(sed -n 's/.*"id": "\(kr-[0-9TZ]*-[0-9a-f]*\)".*/\1/p' "$WORK_DIR/from
 [ -n "$from_id" ] || fail "no id in the --from-chat result"
 grep -q "^User: should we drop the cancel button?" "$APOGEE_HOME/knowledge/raw/$from_id.md" || fail "the archived transcript is not the session's words: $(cat "$APOGEE_HOME/knowledge/raw/$from_id.md")"
 
+# --- chat: a named utility model is /capture's clerk (26b) -------------------
+# The chat is on the clerk that captured above; the utility model only writes
+# prose, so the capture failing is the utility model having been asked.
+cp "$CONFIG" "$WORK_DIR/config.no-utility"
+"$APOGEE_BIN" config set-default-utility prose >/dev/null || fail "set-default-utility"
+printf 'should we drop the cancel button?\n/capture\n/exit\n' | "$APOGEE_BIN" chat -m clerk >"$WORK_DIR/chat2.out" 2>"$WORK_DIR/chat2.err" || fail "chat /capture with a utility model: $(cat "$WORK_DIR/chat2.err")"
+grep -q "distilling this conversation into a record with prose" "$WORK_DIR/chat2.err" || fail "/capture did not name the utility clerk: $(cat "$WORK_DIR/chat2.err")"
+grep -q "capture failed" "$WORK_DIR/chat2.err" || fail "/capture did not ask the utility model: $(cat "$WORK_DIR/chat2.err")"
+cp "$WORK_DIR/config.no-utility" "$CONFIG"
+
 # --- query: shipped by default, every branch on request, the retriever named --
 "$APOGEE_BIN" knowledge query "cancel button testers" </dev/null >"$WORK_DIR/q.txt" 2>"$WORK_DIR/q.err" || fail "query: $(cat "$WORK_DIR/q.err")"
 grep -q 'result(s) for "cancel button testers" in "knowledge" \[lexical\]' "$WORK_DIR/q.txt" || fail "no query header: $(cat "$WORK_DIR/q.txt")"

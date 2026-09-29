@@ -24,6 +24,12 @@ namespace {
             return config.models.default_embedding;
         case ModelRole::Extraction:
             return config.models.default_extraction;
+        case ModelRole::Vision:
+            return config.models.default_vision;
+        case ModelRole::Transcription:
+            return config.models.default_transcription;
+        case ModelRole::Utility:
+            return config.models.default_utility;
         case ModelRole::Chat:
             break;
     }
@@ -41,15 +47,26 @@ std::string_view to_string(ModelRole role) noexcept {
             return "default_embedding";
         case ModelRole::Extraction:
             return "default_extraction";
+        case ModelRole::Vision:
+            return "default_vision";
+        case ModelRole::Transcription:
+            return "default_transcription";
+        case ModelRole::Utility:
+            return "default_utility";
         case ModelRole::Chat:
             break;
     }
     return "default";
 }
 
+bool is_helper(ModelRole role) noexcept {
+    return role == ModelRole::Vision || role == ModelRole::Transcription ||
+           role == ModelRole::Utility;
+}
+
 Resolution resolve_backend(const Config& config, const RoleRequest& request) {
     // The order below IS the contract, and it is table-tested rung by rung in
-    // tests/harness/roles_test.cpp. Reordering these four returns is the whole
+    // tests/harness/roles_test.cpp. Reordering these five returns is the whole
     // bug this file exists to prevent, so it is asserted rather than reviewed.
     if (const std::string_view value = trim(request.override); !value.empty()) {
         return {.key = std::string{value}, .from = ResolvedFrom::Override};
@@ -59,6 +76,10 @@ Resolution resolve_backend(const Config& config, const RoleRequest& request) {
     }
     if (const std::string_view value = trim(pointer_for(config, request.role)); !value.empty()) {
         return {.key = std::string{value}, .from = ResolvedFrom::RolePointer};
+    }
+    if (const std::string_view value = trim(request.conversation);
+        is_helper(request.role) && !value.empty()) {
+        return {.key = std::string{value}, .from = ResolvedFrom::Conversation};
     }
     if (const std::string_view value = trim(config.models.default_backend); !value.empty()) {
         return {.key = std::string{value}, .from = ResolvedFrom::Default};

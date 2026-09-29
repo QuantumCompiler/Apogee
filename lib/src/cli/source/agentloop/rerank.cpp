@@ -6,6 +6,7 @@
 #include <exception>
 
 #include "embedstore/chunk.h"
+#include "harness/roles.h"
 #include "harness/types.h"
 
 namespace apogee::agentloop {
@@ -32,15 +33,33 @@ namespace {
 
 }  // namespace
 
+bool valid_rerank(std::string_view value, const harness::Config& config) {
+    return value.empty() || value == kRerankOff || value == kRerankOn ||
+           config.find_backend(value) != nullptr;
+}
+
 RerankChoice resolve_turn_rerank(std::string_view flag, std::string_view pin,
-                                 const harness::Config& config) {
+                                 const harness::Config& config, std::string_view conversation) {
     RerankChoice out;
     if (flag == kRerankOff) {
         return out;
     }
-    const std::string_view wanted = !flag.empty() ? flag : pin;
+    std::string_view wanted = !flag.empty() ? flag : pin;
     if (wanted.empty() || wanted == kRerankOff) {
         return out;
+    }
+    std::string helper;
+    if (wanted == kRerankOn) {
+        helper = harness::resolve_backend_key(
+            config, harness::RoleRequest{.role = harness::ModelRole::Utility,
+                                         .conversation = conversation});
+        if (helper.empty()) {
+            out.note =
+                "rerank is on, but there is no utility model or chat backend to judge -- "
+                "reranking disabled (set models.default_utility, or name a backend)";
+            return out;
+        }
+        wanted = helper;
     }
     if (config.find_backend(wanted) == nullptr) {
         out.note = "rerank backend '" + std::string{wanted} +
@@ -136,6 +155,9 @@ RerankOutcome rerank(const harness::Harness& harness, std::string_view backend,
         harness::ChatMessage::user(build_rerank_prompt(question, candidates, limit))};
     request.temperature = 0.0;
     request.max_tokens = kRerankMaxTokens;
+    // Not a turn of the conversation: a local judge runs on its own context,
+    // and a chat judging with its own model keeps its cache (26b).
+    request.transient.side_request = true;
 
     std::string reply;
     try {

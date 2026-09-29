@@ -511,12 +511,22 @@ std::string render_role_status(const harness::Config& config) {
     std::ostringstream out;
     for (const auto [role, label] : {std::pair{harness::ModelRole::Chat, "chat"},
                                      std::pair{harness::ModelRole::Embedding, "embedding"},
-                                     std::pair{harness::ModelRole::Extraction, "extraction"}}) {
+                                     std::pair{harness::ModelRole::Extraction, "extraction"},
+                                     std::pair{harness::ModelRole::Vision, "vision"},
+                                     std::pair{harness::ModelRole::Transcription, "transcription"},
+                                     std::pair{harness::ModelRole::Utility, "utility"}}) {
         const harness::Resolution resolved =
             harness::resolve_backend(config, harness::RoleRequest{.role = role});
         const std::string& key = resolved.key;
 
         out << label << ": ";
+        // A helper with no pointer of its own runs on whatever the chat is
+        // on, which is not a fact this command can know: say so rather than
+        // naming models.default as if it were the answer.
+        if (harness::is_helper(role) && resolved.from != harness::ResolvedFrom::RolePointer) {
+            out << "(unset -- the chat's own backend)\n";
+            continue;
+        }
         if (key.empty()) {
             out << "(unset -- no models.default configured)\n";
             continue;
@@ -533,8 +543,23 @@ std::string render_role_status(const harness::Config& config) {
         // Resolving and validating are separate on purpose: the resolver
         // returns a key, and each surface decides what an unconfigured one
         // means. Here it is a note; on a run path it is fatal.
-        if (!config.backends.contains(key)) {
+        const auto entry = config.backends.find(key);
+        if (entry == config.backends.end()) {
             out << "   [not configured]";
+        } else if (entry->second.type == harness::BackendType::LlamaCpp &&
+                   !entry->second.model_path.empty()) {
+            // What loading it costs: a helper is a second model resident
+            // beside the chat's, and that memory should be visible (26b).
+            const models::GgufInfo info = models::inspect_gguf(
+                std::filesystem::path{harness::expand_env(entry->second.model_path)});
+            if (info.parsed) {
+                const models::LocalWindow window = models::local_window(info, entry->second);
+                out << "   [local: " << models::mib(info.file_size) << " of weights";
+                if (window.cache_bytes.has_value()) {
+                    out << ", " << models::mib(*window.cache_bytes) << " of cache";
+                }
+                out << "]";
+            }
         }
         out << "\n";
     }

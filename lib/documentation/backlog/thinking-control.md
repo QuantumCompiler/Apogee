@@ -2,7 +2,7 @@
 
 **What / why.** A user, and the harness, decide when a reasoning model thinks, and for how long. On the reference machine, thinking was 26 of the 57 seconds of one ordinary answer (2026-09-25), and it is the same cost whether the question is arithmetic or small talk. The controls:
 - **`/think on|off|auto`** in `chat`, `--think` on `chat` and `complete`, and a `thinking:` default per backend.
-- **`auto`**: the [utility model](helper-model-roles.md), or a cheap heuristic without one, decides per question whether it needs reasoning.
+- **`auto`**: the [utility model](../assistant/MILESTONES.md#milestone-n--model-operations), or a cheap heuristic without one, decides per question whether it needs reasoning.
 - **A thinking budget**: the most tokens a model may spend reasoning before it must answer. llama.cpp's reasoning-budget sampler (`common/reasoning-budget.h`) forces the end-of-thinking tag when the budget is spent.
 - **The display says what happened**: `✻ Thought for 8s` or `✻ Thought for 20s (budget reached)`.
 

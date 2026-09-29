@@ -29,7 +29,7 @@ What does not fit is trimmed or elided in reverse order. **Tool results from fin
 - `agentloop/loop.cpp`: the request built through the budget; tool results from earlier turns sent as stubs.
 - `agentloop/rag.cpp`, `agentloop/content.h`: RAG asks the budget how much it may inject instead of taking a fixed count; `measure_context` becomes the budget's reading.
 - `agentloop/` compaction: tool results summarised or elided first.
-- Consumers that arrive later: [document attachments](attachments-documents.md) (whether to inline or retrieve), [recall across chats](recall-across-chats.md), and the utility model's tool-output summaries ([helper roles](helper-model-roles.md)).
+- Consumers that arrive later: [document attachments](attachments-documents.md) (whether to inline or retrieve), [recall across chats](recall-across-chats.md), and the utility model's tool-output summaries ([helper roles](../assistant/MILESTONES.md#milestone-n--model-operations)).
 
 **Reference (Ommi).** Ommi measured context and compacted near the limit (CHAT.md), which Apogee ported; it had no per-source budget and kept tool results in history whole.
 

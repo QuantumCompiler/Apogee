@@ -116,6 +116,10 @@ std::vector<harness::ChatMessage> compact_history(const harness::Harness& harnes
     request.model = model;
     request.messages = conversation;
     request.messages.push_back(harness::ChatMessage::user(std::string{kSummaryPrompt}));
+    // Not a turn of the conversation: on the chat's own local model it runs
+    // on a context of its own, and the conversation's cache is untouched
+    // (26b). The history it replaces is re-read on the next turn either way.
+    request.transient.side_request = true;
 
     std::string summary;
     try {

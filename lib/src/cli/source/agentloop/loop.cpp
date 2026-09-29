@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "agentloop/tool_summary.h"
 #include "harness/errors.h"
 
 namespace apogee::agentloop {
@@ -290,7 +291,19 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
                 if (outcome.unavailable) {
                     withdrawn.insert(call.name);
                 }
-                append_result(history, call, outcome.content);
+                std::string content = outcome.content;
+                if (!options.summary_model.empty() && content.size() > kToolSummaryThreshold) {
+                    // The utility model reads it first, so the chat model
+                    // reads a summary instead of the whole of it (26b).
+                    if (std::optional<std::string> summary = summarize_tool_result(
+                            harness, options.summary_model, call, content, options.cancellation)) {
+                        reporter.on_progress(call.name + "'s " +
+                                             std::to_string((content.size() + 1023) / 1024) +
+                                             " KB result summarised by " + options.summary_model);
+                        content = std::move(*summary);
+                    }
+                }
+                append_result(history, call, content);
             }
         } catch (...) {
             // Roll the half-turn back. An aborted ask_user must not leave an

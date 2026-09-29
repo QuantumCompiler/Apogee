@@ -81,6 +81,14 @@ public:
         return *this;
     }
 
+    /// One metadata pair whose value is a bool -- a projector's encoder flags.
+    GgufBuilder& bool_kv(std::string_view key, bool value) {
+        text(key);
+        u32(7);  // Bool
+        bytes_.push_back(value ? '\x01' : '\x00');
+        return *this;
+    }
+
     /// One metadata pair whose value is a float32 -- a key that is not an
     /// integer, which the attention read must step over.
     GgufBuilder& f32_kv(std::string_view key, float value) {
@@ -126,6 +134,18 @@ private:
     builder.magic().u32(3).u64(1).u64(1);
     builder.string_kv("general.architecture", architecture);
     builder.tensor("token_embd.weight");
+    return builder.bytes();
+}
+
+/// A multimodal projector's header (26b): its vision and audio encoder
+/// flags, and one vision tensor.
+[[nodiscard]] inline std::string projector_gguf(bool vision, bool audio) {
+    GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(3);
+    builder.string_kv("general.architecture", "clip");
+    builder.bool_kv("clip.has_vision_encoder", vision);
+    builder.bool_kv("clip.has_audio_encoder", audio);
+    builder.tensor("v.patch_embd.weight");
     return builder.bytes();
 }
 

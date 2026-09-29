@@ -303,6 +303,10 @@ add_library(apogee_core STATIC
     agentloop/retriever.cpp
     agentloop/rerank.h
     agentloop/rerank.cpp
+    agentloop/query_rewrite.h
+    agentloop/query_rewrite.cpp
+    agentloop/tool_summary.h
+    agentloop/tool_summary.cpp
     agentloop/rag.h
     agentloop/rag.cpp
     agentloop/graph_context.h

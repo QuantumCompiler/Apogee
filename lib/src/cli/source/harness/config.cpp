@@ -787,6 +787,12 @@ Config parse_config(std::string_view content, std::string_view origin) {
             scalar(models["default_embedding"], origin, "models.default_embedding");
         config.models.default_extraction =
             scalar(models["default_extraction"], origin, "models.default_extraction");
+        config.models.default_vision =
+            scalar(models["default_vision"], origin, "models.default_vision");
+        config.models.default_transcription =
+            scalar(models["default_transcription"], origin, "models.default_transcription");
+        config.models.default_utility =
+            scalar(models["default_utility"], origin, "models.default_utility");
     }
 
     if (const YAML::Node paths = root["paths"]; paths.IsDefined() && !paths.IsNull()) {
@@ -1211,7 +1217,10 @@ namespace apogee::harness {
 bool operator==(const ModelsConfig& lhs, const ModelsConfig& rhs) noexcept {
     return lhs.default_backend == rhs.default_backend &&
            lhs.default_embedding == rhs.default_embedding &&
-           lhs.default_extraction == rhs.default_extraction;
+           lhs.default_extraction == rhs.default_extraction &&
+           lhs.default_vision == rhs.default_vision &&
+           lhs.default_transcription == rhs.default_transcription &&
+           lhs.default_utility == rhs.default_utility;
 }
 
 }  // namespace apogee::harness

@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <random>
 #include <sstream>
 #include <string>
@@ -12,9 +13,15 @@
 
 #include "commands/registry.h"
 #include "commands/root.h"
+#include "events/bus.h"
 #include "harness/config.h"
 #include "harness/config_edit.h"
+#include "harness/harness.h"
+#include "httpserver/admin.h"
+#include "httpserver/handler.h"
 #include "httpserver/http_types.h"
+#include "httpserver/jobs.h"
+#include "httpserver/mux.h"
 #include "support/env_guard.h"
 
 /// The config slice of the control plane, and THE parity proof: an HTTP edit
@@ -91,6 +98,78 @@ nlohmann::json parsed(const HttpResponse& response) {
 }
 
 }  // namespace
+
+TEST_CASE("the helper role pointers set over HTTP are byte-identical to the CLI's",
+          "[httpserver][admin][parity][helpers]") {
+    const Fixture fixture;
+    fixture.cli({"config", "add-backend", "helper", "--type", "mock"});
+    REQUIRE(admin_create_backend(fixture.context(),
+                                 post(nlohmann::json{{"name", "helper"}, {"type", "mock"}}))
+                .status == 201);
+    for (const auto& [verb, field] :
+         {std::pair{"set-default-vision", "default_vision"},
+          std::pair{"set-default-transcription", "default_transcription"},
+          std::pair{"set-default-utility", "default_utility"}}) {
+        CAPTURE(field);
+        fixture.cli({"config", verb, "helper"});
+        const HttpResponse set =
+            admin_set_role(fixture.context(), field, post(nlohmann::json{{"name", "helper"}}));
+        REQUIRE(set.status == 200);
+        CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+        CHECK(Fixture::bytes(fixture.http_config).find(std::string{"  "} + field + ": helper") !=
+              std::string::npos);
+    }
+    // `config get` reads each one back -- vision moved to a backend of its
+    // own, so no pointer can be read in place of another.
+    fixture.cli({"config", "add-backend", "seer", "--type", "mock"});
+    fixture.cli({"config", "set-default-vision", "seer"});
+    for (const auto& [key, expected] : {std::pair{"models.default_vision", "seer\n"},
+                                        std::pair{"models.default_transcription", "helper\n"},
+                                        std::pair{"models.default_utility", "helper\n"}}) {
+        CAPTURE(key);
+        std::ostringstream out;
+        std::streambuf* old_out = std::cout.rdbuf(out.rdbuf());
+        fixture.cli({"config", "get", key});
+        std::cout.rdbuf(old_out);
+        CHECK(out.str() == expected);
+    }
+    // And the listing names each role and the rung it resolved on.
+    const nlohmann::json listed =
+        parsed(apogee::httpserver::admin_list_backends(fixture.context()));
+    CHECK(listed["roles"]["default_utility"]["backend"] == "helper");
+    CHECK(listed["roles"]["default_utility"]["from"] == "role_pointer");
+    CHECK(listed["roles"]["default_vision"]["from"] == "role_pointer");
+    CHECK(listed["roles"]["default_transcription"]["backend"] == "helper");
+}
+
+TEST_CASE("each helper role route sets its own pointer, through the mux",
+          "[httpserver][admin][mux][helpers]") {
+    const Fixture fixture;
+    REQUIRE(admin_create_backend(fixture.context(),
+                                 post(nlohmann::json{{"name", "helper"}, {"type", "mock"}}))
+                .status == 201);
+    apogee::harness::Harness harness{fixture.startup};
+    harness.use_default_router();
+    apogee::httpserver::Handler handler{harness, apogee::httpserver::HandlerOptions{}, nullptr};
+    apogee::events::Bus bus;
+    apogee::httpserver::JobRegistry jobs{bus};
+    apogee::httpserver::AdminOptions options;
+    options.config_path = fixture.http_config;
+    options.startup = fixture.startup;
+    apogee::httpserver::AdminHandler admin{options, jobs, bus};
+    const apogee::httpserver::Mux mux{handler, admin, "token"};
+    for (const auto& [route, field] : {std::pair{"default-vision", "default_vision"},
+                                       std::pair{"default-transcription", "default_transcription"},
+                                       std::pair{"default-utility", "default_utility"}}) {
+        CAPTURE(route);
+        HttpRequest request = post(nlohmann::json{{"name", "helper"}});
+        request.path = std::string{"/v1/admin/backends/"} + route;
+        request.headers["authorization"] = "Bearer token";
+        REQUIRE(mux.dispatch(request).status == 200);
+        CHECK(Fixture::bytes(fixture.http_config).find(std::string{"  "} + field + ": helper") !=
+              std::string::npos);
+    }
+}
 
 TEST_CASE("a cache type added over HTTP is byte-identical to the CLI's, and a bad one refused",
           "[httpserver][admin][parity][cache]") {
