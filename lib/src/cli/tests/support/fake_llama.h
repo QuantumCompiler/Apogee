@@ -109,12 +109,28 @@ public:
     std::size_t sampled = 0;
     std::int32_t eog_token = -1;
 
+    /// Non-zero plays a sliding-window model (26m): the cache keeps only its
+    /// last `sliding_keep` positions (the window and a batch), so `oldest`
+    /// moves up as it decodes, and a cut that leaves the window short is
+    /// refused as a recurrent model's is.
+    std::int64_t sliding_window = 0;
+    std::int64_t sliding_keep = 0;
+    /// The smallest position still held.
+    std::int64_t oldest = 0;
+
     void decode(const std::vector<std::int32_t>& tokens, std::int64_t position) override {
         if (tokens.empty()) {
             return;
         }
+        // The property this whole item exists for: never decode on from a
+        // cache whose window before `position` is gone. Every test with a
+        // sliding model asserts it on every decode.
+        REQUIRE(backends::window_intact(oldest, position, sliding_window));
         decodes.push_back({position, static_cast<std::int64_t>(tokens.size())});
         resident = position + static_cast<std::int64_t>(tokens.size());
+        if (sliding_window > 0) {
+            oldest = std::max(oldest, resident - sliding_keep);
+        }
         evaluated_ += static_cast<std::int64_t>(tokens.size());
     }
 
@@ -146,9 +162,11 @@ public:
     /// does.
     bool rewindable = true;
 
-    /// A checkpoint: only its position, which is all a word-level cache has.
+    /// A checkpoint: its position, and the oldest position a sliding cache
+    /// still held there -- all a word-level cache has.
     struct Checkpoint {
         std::int64_t position = 0;
+        std::int64_t oldest = 0;
     };
 
     /// Checkpoints held, oldest first, under the runtimes' shared policy
@@ -166,15 +184,22 @@ public:
 
     [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
         trims.push_back(position);
-        if (!rewindable && position < resident) {
-            if (const auto it = backends::checkpoint_for(held, position); it != held.end()) {
+        const bool cuts = position < resident;
+        const bool refused =
+            cuts && (!rewindable || !backends::window_intact(oldest, position, sliding_window));
+        if (refused) {
+            if (const auto it = backends::checkpoint_for(held, position);
+                it != held.end() &&
+                backends::window_intact(it->oldest, it->position, sliding_window)) {
                 const std::int64_t restored = it->position;
                 resident = restored;
+                oldest = it->oldest;
                 backends::forget_checkpoints_after(held, restored);
                 restores.push_back(restored);
                 return restored;
             }
             resident = 0;
+            oldest = 0;
             held.clear();
             return 0;
         }
@@ -184,18 +209,18 @@ public:
     }
 
     [[nodiscard]] bool checkpoint(std::int64_t position) override {
-        if (rewindable || position <= 0) {
+        if (!needs_checkpoints() || position <= 0) {
             return false;
         }
         // Taken where the cache really ends -- anything else is a checkpoint
         // of a state that was never there.
         REQUIRE(position == resident);
-        backends::keep_checkpoint(held, Checkpoint{position});
+        backends::keep_checkpoint(held, Checkpoint{.position = position, .oldest = oldest});
         return true;
     }
 
     [[nodiscard]] bool needs_checkpoints() const noexcept override {
-        return !rewindable;
+        return !rewindable || sliding_window > 0;
     }
 
     [[nodiscard]] std::size_t checkpoint_count() const noexcept override {
@@ -324,6 +349,9 @@ public:
     std::int64_t batch_limit = 1000000;
     std::int64_t context_capacity = 1000000;
     bool rewindable = true;
+    /// Applied to every context: see FakeLlamaContext.
+    std::int64_t sliding_window = 0;
+    std::int64_t sliding_keep = 0;
 
     /// What each new context should sample. Applied at creation.
     std::vector<std::int32_t> script;
@@ -559,6 +587,8 @@ public:
         state->context_capacity = context_capacity > 0 ? context_capacity : context_size;
         state->kept_as = cache_type;
         state->rewindable = rewindable;
+        state->sliding_window = sliding_window;
+        state->sliding_keep = sliding_keep;
         state->grammar_error = grammar_error;
         contexts.push_back(state);
         // The provider owns its contexts and destroys a side request's the
@@ -601,6 +631,9 @@ public:
     std::int64_t batch_limit = 1000000;
     /// False plays a recurrent or hybrid model (see FakeLlamaContext).
     bool rewindable = true;
+    /// Non-zero plays a sliding-window model (see FakeLlamaContext).
+    std::int64_t sliding_window = 0;
+    std::int64_t sliding_keep = 0;
     std::vector<std::int32_t> script;
     std::int32_t eog_token = -1;
     std::string builtin_template_prefix;
@@ -636,6 +669,8 @@ public:
         auto loaded = std::make_unique<FakeLlamaModel>();
         loaded->batch_limit = batch_limit;
         loaded->rewindable = rewindable;
+        loaded->sliding_window = sliding_window;
+        loaded->sliding_keep = sliding_keep;
         loaded->script = script;
         for (const std::string& piece : script_text) {
             loaded->script.push_back(loaded->id_for(piece));

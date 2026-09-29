@@ -324,6 +324,32 @@ TEST_CASE("info states the window a local backend gets and what its cache costs"
                     "architecture\n") != std::string::npos);
 }
 
+TEST_CASE("info says when a model's sliding layers keep only their window",
+          "[commands][models][info][cache]") {
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "apogee-models-info-gemma4.gguf";
+    {
+        const std::string bytes = apogee::testing::gemma4_like_gguf();
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        REQUIRE(out.good());
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+    Config config = sample_config();
+    BackendConfig local;
+    local.type = BackendType::LlamaCpp;
+    local.model_path = path.string();
+    config.backends["gemma"] = local;
+
+    // 272 MiB for the 8 full layers over 32,768 positions, 255 for the 40
+    // sliding ones over 1,536 -- llama.cpp's own sizes (26m).
+    const std::string body = render_model_info(config, "gemma");
+    CHECK(body.find("cache:        527 MiB at q8_0 (the default), sliding layers at 1536 "
+                    "positions\n") != std::string::npos);
+
+    std::error_code code;
+    std::filesystem::remove(path, code);
+}
+
 TEST_CASE("a model on disk is listed even when no backend points at it",
           "[commands][models][listing]") {
     // Found by running it: after a 460 MB pull, `models list` said "no backends

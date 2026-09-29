@@ -130,6 +130,28 @@ void forget_checkpoints_after(std::vector<Checkpoint>& held, std::int64_t positi
     std::erase_if(held, [position](const Checkpoint& old) { return old.position > position; });
 }
 
+/// Whether a sliding-window cache still holds the window a token decoded at
+/// `position` looks back over (26m).
+///
+/// A window-sized cache keeps only its last window and a batch. Cut back to
+/// `position`, it may no longer hold the positions just before that, and
+/// decoding on regardless answers from a context with a hole in it -- fluently,
+/// wrongly, and with no error. `oldest` is the smallest position the cache
+/// still holds (-1 when it holds none); `window` is the model's, 0 for a model
+/// with none. The test is llama-server's (`pos_min_thold`), which errs safe:
+/// intact when the oldest position is 0 or lies before `position` minus the
+/// window.
+[[nodiscard]] inline bool window_intact(std::int64_t oldest, std::int64_t position,
+                                        std::int64_t window) noexcept {
+    if (window <= 0 || position <= 0) {
+        return true;
+    }
+    if (oldest < 0) {
+        return false;
+    }
+    return oldest == 0 || oldest < position - window;
+}
+
 /// One KV cache -- llama.cpp's `llama_context`.
 ///
 /// A context IS the conversation's warm state. Keeping one alive across turns
@@ -175,6 +197,9 @@ public:
     /// Then the newest `checkpoint` at or before `position` is restored and
     /// its position returned; with none, the cache is cleared and 0 returned
     /// -- slower, where decoding on from `position` would be wrong.
+    /// A sliding-window model's cache (Gemma, gpt-oss) keeps only its last
+    /// window, so a cut that leaves the window short (`window_intact`) is
+    /// refused the same way (26m).
     [[nodiscard]] virtual std::int64_t trim_to(std::int64_t position) = 0;
 
     /// Saves the part of the cache `trim_to` cannot rewind, as it stands --
@@ -191,8 +216,8 @@ public:
     }
 
     /// Whether `checkpoint` does anything here -- the memory cannot be
-    /// rewound. A caller skips the work of finding where to take them when
-    /// it would be thrown away.
+    /// rewound, or keeps only a sliding window (26m). A caller skips the work
+    /// of finding where to take them when it would be thrown away.
     [[nodiscard]] virtual bool needs_checkpoints() const noexcept {
         return false;
     }

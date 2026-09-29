@@ -252,14 +252,18 @@ private:
 class RealContext final : public LlamaContext {
 public:
     /// `checkpoints` is whether this context's memory needs them: a
-    /// recurrent or hybrid model's running state cannot be rewound (25c).
+    /// recurrent or hybrid model's running state cannot be rewound (25c), and
+    /// a sliding-window model's cache keeps only its window (26m), whose
+    /// length is `sliding_window` (0 for none).
     RealContext(std::unique_ptr<llama_context, ContextDeleter> context, SamplerPtr sampler,
-                mtmd_context* vision, bool checkpoints, harness::KvCacheType cache_type)
+                mtmd_context* vision, bool checkpoints, harness::KvCacheType cache_type,
+                std::int64_t sliding_window)
         : context_{std::move(context)},
           sampler_{std::move(sampler)},
           checkpoints_needed_{checkpoints},
           vision_{vision},
-          cache_type_{cache_type} {}
+          cache_type_{cache_type},
+          sliding_window_{sliding_window} {}
 
     void decode(const std::vector<std::int32_t>& tokens, std::int64_t position) override {
         if (tokens.empty()) {
@@ -317,16 +321,22 @@ public:
     [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
         // p1 < 0 means "to infinity": drop everything from `position` on.
         llama_memory_t memory = llama_get_memory(context_.get());
-        if (llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(position), -1)) {
+        if (llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(position), -1) &&
+            window_intact(llama_memory_seq_pos_min(memory, 0), position, sliding_window_)) {
             forget_checkpoints_after(checkpoints_, position);
             return position;
         }
         // A running state that cannot be rewound this far (see the
-        // interface): refused, and untouched. The newest checkpoint at or
-        // before `position` holds that state as it was there -- llama-server's
-        // restore (tools/server/server-context.cpp). Once it is back, the
-        // attention half trims to it like any other cache, and the running
-        // state already ends there, so the cut succeeds.
+        // interface): refused, and untouched. Or a sliding window the cut left
+        // short: llama.cpp removes the positions, and the ones before them the
+        // next token looks back over are already gone (26m). Either way the
+        // newest checkpoint at or before `position` holds the state as it was
+        // there -- llama-server's restore (tools/server/server-context.cpp).
+        // Once it is back, the attention half trims to it like any other
+        // cache, and the restored part already ends there, so the cut
+        // succeeds. A sliding checkpoint holds its window and a batch, so its
+        // window is whole; it is checked on the state that came back anyway,
+        // since the alternative to checking is a wrong answer.
         if (const auto it = checkpoint_for(checkpoints_, position); it != checkpoints_.end()) {
             llama_log().forget();
             const std::size_t loaded =
@@ -334,7 +344,8 @@ public:
                                              LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
             // A restore that did not take falls through: start again below.
             if (loaded != 0 &&
-                llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(it->position), -1)) {
+                llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(it->position), -1) &&
+                window_intact(llama_memory_seq_pos_min(memory, 0), it->position, sliding_window_)) {
                 const std::int64_t restored = it->position;
                 forget_checkpoints_after(checkpoints_, restored);
                 return restored;
@@ -505,6 +516,7 @@ private:
     /// Borrowed from the model, which outlives every context made from it.
     mtmd_context* vision_ = nullptr;
     harness::KvCacheType cache_type_ = harness::KvCacheType::F16;
+    std::int64_t sliding_window_ = 0;
 };
 
 /// How a model's generation contexts are made (26a).
@@ -737,14 +749,13 @@ public:
 
         std::string error;
         SamplerPtr sampler = make_sampler(vocab_, SamplingGrammar{}, error);
-        // Checkpoints only where the memory cannot be rewound: a recurrent or
-        // hybrid model. A sliding-window model would qualify too, but
-        // contexts keep a full-size window cache by default (`swa_full`),
-        // which trims like any other.
-        const bool checkpoints =
-            llama_model_is_recurrent(model_.get()) || llama_model_is_hybrid(model_.get());
+        // Checkpoints where the memory cannot be rewound -- a recurrent or
+        // hybrid model -- and where it keeps only a sliding window (26m).
+        const std::int64_t sliding_window = llama_model_n_swa(model_.get());
+        const bool checkpoints = llama_model_is_recurrent(model_.get()) ||
+                                 llama_model_is_hybrid(model_.get()) || sliding_window > 0;
         return std::make_unique<RealContext>(std::move(context), std::move(sampler), vision_.get(),
-                                             checkpoints, cache_type);
+                                             checkpoints, cache_type, sliding_window);
     }
 
     [[nodiscard]] bool supports_vision() const noexcept override {
@@ -891,6 +902,12 @@ private:
         // hardware found this; the scripted runtime cannot model an allocator.
         params.type_k = ggml_type_of(cache_type);
         params.type_v = ggml_type_of(cache_type);
+        // A sliding-window layer keeps its window and a batch, not the whole
+        // conversation (26m): llama-server's default, and on Gemma 4 31B at
+        // 32K the difference between 2.0 GiB of cache and 14.6. Such a cache
+        // cannot be cut back past its window, which `trim_to` checks, with
+        // checkpoints to go back to. A model with no sliding window ignores it.
+        params.swa_full = false;
         // A quantized cache needs flash attention, so it is turned on rather
         // than left to detection -- which, where a device lacked the kernel,
         // would turn it off and fail the context. An f16 cache leaves it to
@@ -1004,15 +1021,13 @@ constexpr std::uint32_t kMinimumFittedWindow = 4096;
         return 0;
     }
     const models::GgufInfo info = models::inspect_gguf(request.path);
-    if (const std::optional<std::int64_t> values =
-            info.parsed ? models::kv_values_per_position(info.architecture, info.attention)
-                        : std::nullopt;
-        values.has_value()) {
+    if (const std::optional<models::CacheShape> shape =
+            info.parsed ? models::cache_shape(info.architecture, info.attention) : std::nullopt;
+        shape.has_value()) {
         const std::int64_t window = models::default_local_window(info.attention.context_length, 0);
         std::int64_t needed =
             info.file_size +
-            models::cache_bytes(*values * models::allocated_positions(window), request.cache_type) +
-            kMargin;
+            models::cache_bytes(models::cache_values(*shape, window), request.cache_type) + kMargin;
         if (!request.mmproj_path.empty()) {
             std::error_code code;
             const std::uintmax_t projector = std::filesystem::file_size(request.mmproj_path, code);

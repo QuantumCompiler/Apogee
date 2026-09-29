@@ -182,7 +182,7 @@ void skip_value(Cursor& cursor, ValueType type) {
 }
 
 /// The attention keys worth materialising, after the architecture's prefix.
-constexpr std::array<std::string_view, 14> kAttentionKeys{
+constexpr std::array<std::string_view, 15> kAttentionKeys{
     "context_length",
     "block_count",
     "embedding_length",
@@ -193,6 +193,7 @@ constexpr std::array<std::string_view, 14> kAttentionKeys{
     "attention.key_length_swa",
     "attention.value_length_swa",
     "attention.sliding_window_pattern",
+    "attention.sliding_window",
     "full_attention_interval",
     "nextn_predict_layers",
     "attention.shared_kv_layers",
@@ -321,6 +322,7 @@ constexpr std::uint64_t kMaxLayerValues = 1U << 16U;
     out.key_length_swa = one("attention.key_length_swa");
     out.value_length_swa = one("attention.value_length_swa");
     out.sliding_window_pattern = values("attention.sliding_window_pattern");
+    out.sliding_window = one("attention.sliding_window");
     out.full_attention_interval = one("full_attention_interval");
     out.nextn_predict_layers = one("nextn_predict_layers");
     out.shared_kv_layers = one("attention.shared_kv_layers");

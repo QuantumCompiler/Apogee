@@ -228,6 +228,9 @@ std::int64_t fit_window(const std::string& path, std::int32_t gpu_layers, std::i
     context.type_k = static_cast<ggml_type>(cache_type);
     context.type_v = static_cast<ggml_type>(cache_type);
     context.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    // Sliding layers at their window, as every generation context keeps them
+    // (26m).
+    context.swa_full = false;
 
     // Writable space the fitter may fill in for a split across devices; the
     // split itself is not used -- the model loads with its own settings.

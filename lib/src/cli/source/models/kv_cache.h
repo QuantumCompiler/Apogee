@@ -39,19 +39,44 @@ inline constexpr harness::KvCacheType kDefaultCacheType = harness::KvCacheType::
 /// The positions llama.cpp allocates for a window: rounded up to 256.
 [[nodiscard]] std::int64_t allocated_positions(std::int64_t window) noexcept;
 
-/// The values the cache keeps per position: over every layer that keeps a
-/// cache of its own, its key-value heads times its key and value widths.
+/// What a context's cache keeps per position, by how long each part is kept.
+struct CacheShape {
+    /// Values per position in the layers that keep every position of the
+    /// context.
+    std::int64_t full = 0;
+    /// Values per position in the sliding layers, which keep only their
+    /// window and a batch (26m).
+    std::int64_t sliding = 0;
+    /// How far back a sliding layer looks; 0 when no layer slides.
+    std::int64_t window = 0;
+};
+
+/// The cache's shape: over every layer that keeps a cache of its own, its
+/// key-value heads times its key and value widths.
 ///
 /// The layers are llama.cpp's: a hybrid model's recurrent layers keep none (a
 /// Qwen3.5 or 3.8 has full attention every `full_attention_interval` layers,
 /// its prediction layers after the main stack excluded), nor does a layer
 /// with no key-value heads, nor one reusing an earlier layer's (Gemma's
-/// `shared_kv_layers`). A sliding-window layer keeps a whole window like any
-/// other -- contexts keep a full-size one -- at its own widths where the
-/// header gives them. Zero for a model with no attention at all; nullopt when
-/// the header does not say enough, or the attention is latent (DeepSeek's).
-[[nodiscard]] std::optional<std::int64_t> kv_values_per_position(std::string_view architecture,
-                                                                 const AttentionHeader& header);
+/// `shared_kv_layers`). A layer slides only in a family llama.cpp runs with a
+/// sliding window -- Gemma 2, 3 and 4 and gpt-oss, by the header's pattern or
+/// llama.cpp's default one for the family -- and there at its own widths
+/// where the header gives them. Any other family's layers are full: many
+/// converters write `sliding_window` for every model whose config has one,
+/// and llama.cpp ignores it for most. Zero for a model with no attention at
+/// all; nullopt when the header does not say enough, or the attention is
+/// latent (DeepSeek's).
+[[nodiscard]] std::optional<CacheShape> cache_shape(std::string_view architecture,
+                                                    const AttentionHeader& header);
+
+/// The positions a sliding layer keeps in a context allocated `positions`:
+/// its window and a batch (llama.cpp's default of 512), padded to 256, and
+/// never more than the context -- llama.cpp's own rule
+/// (`llama-kv-cache-iswa.cpp`).
+[[nodiscard]] std::int64_t sliding_positions(std::int64_t positions, std::int64_t window) noexcept;
+
+/// The values a context of `window` tokens allocates for a cache of `shape`.
+[[nodiscard]] std::int64_t cache_values(const CacheShape& shape, std::int64_t window) noexcept;
 
 /// What `values` cache values take at `type`: 2 bytes each at `f16`, and at
 /// `q8_0` and `q4_0` their blocks of 32 -- 34 and 18 bytes.
@@ -69,6 +94,8 @@ struct LocalWindow {
     harness::KvCacheType cache_type = kDefaultCacheType;
     /// Bytes, for the positions llama.cpp allocates; nullopt when unknown.
     std::optional<std::int64_t> cache_bytes;
+    /// The positions a sliding layer keeps, or 0 when none slides.
+    std::int64_t sliding_positions = 0;
 };
 
 /// The window `backend` gets over the model `info` describes. Free memory can

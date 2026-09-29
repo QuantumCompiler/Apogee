@@ -701,7 +701,59 @@ Every saved transcript held its calls and results as IR, with no `<tool_call>`, 
 **Not verified, and found on the way.**
 - **The lowering itself** has not run on real hardware: this machine has 128 GB, and no model here fails the free check. The fitter was run directly: at the trained window it lowered Gemma 4 31B at F16 (62 GB of weights) to 105,728 positions, which the default then caps at 32K anyway.
 - **The `f16` fallback** has not met a model that needs it: every head width here divides into 32.
-- **Gemma 4's sliding layers are most of its cache**: 13.3 of Gemma 4 31B's 14.6 GiB at 32K, because contexts keep a full-size sliding-window cache (`swa_full`) so they can trim. A window-sized one would be about 0.6 GiB, but it cannot be rewound, so it needs the checkpoints 25c built for hybrid models. That is its own item.
+- **Gemma 4's sliding layers are most of its cache**: 13.3 of Gemma 4 31B's 14.6 GiB at 32K, because contexts keep a full-size sliding-window cache (`swa_full`) so they can trim. A window-sized one would be about 0.6 GiB, but it cannot be rewound, so it needs the checkpoints 25c built for hybrid models. That became 26m, below, shipped the same day.
+
+### 2026-09-28 — `sliding-window-cache` (backlog item 26m): a window-sized cache for sliding-window models
+
+**The cache that was mostly window.** Gemma 4 alternates five sliding-window layers (a 1,024-token window) with one full one; gpt-oss alternates one to one (a 128-token window). A sliding layer only ever looks back its window, but Apogee's contexts kept every sliding layer at the conversation's full length (llama.cpp's `swa_full`), because a full-length cache can be cut back anywhere and a chat's next turn depends on that cut. Found shipping 26a: at the new 32K default that was **13.3 of Gemma 4 31B's 14.6 GiB** of cache. llama-server's own default is the other way round -- a window-sized cache, checkpoints, and a check before any cut is trusted -- and that is what this item ports.
+
+**What was built**
+
+- [x] **A window-sized sliding cache** (`llama_real.cpp`, `create`: `swa_full = false`). A sliding layer keeps its window and a batch -- 1,536 positions on Gemma 4, 768 on gpt-oss -- and llama.cpp's fitter projects the same (`llama_chat::fit_window`). A model with no sliding window is unaffected.
+- [x] **Checkpoints for sliding models** (`make_context`): a context needs them when `llama_model_n_swa` is set, as well as for a recurrent or hybrid model. They are 25c's: the same marks (four tokens short of the prompt's end, and the last user message's start), the same shared policy, the same `PARTIAL_ONLY` save -- which for a sliding cache holds just its sliding part (`llama_kv_cache_iswa::state_write`).
+- [x] **Every cut checked** (`window_intact` in `llama_runtime.h`, shared by both runtimes). After a cut to `p`, the cache must still hold the window before `p`: its oldest position (`llama_memory_seq_pos_min`) is 0 or lies before `p` minus the window -- llama-server's test and margin (`pos_min_thold`). A cut that fails it is refused as a hybrid model's is: the newest checkpoint at or before `p` is restored, else the prompt is read from 0. A restored checkpoint is checked the same way, though one taken from a cache llama.cpp builds always holds its window.
+- [x] **The stated cost follows** (`models/kv_cache.h`). `cache_shape` splits the cache into the layers that keep the whole context and the sliding ones, with the window; `sliding_positions` is llama.cpp's rule (the window and a batch of 512, padded to 256, never past the context); `cache_values` sums them. A layer slides only in a family llama.cpp runs with a sliding window -- Gemma 2, 3 and 4 and gpt-oss -- by the header's pattern or, where the header names none, llama.cpp's for the family (every other layer on gpt-oss and Gemma 2; every sixth full on Gemma 3; Gemma 2's window 4,096 when unstated). `gguf_inspect` reads `attention.sliding_window`. `models info` adds "sliding layers at 1536 positions".
+- [x] **The scripted runtime slides too** (`tests/support/fake_llama.h`): a context with a window drops positions older than what it keeps, refuses a cut that leaves the window short, and **fails any test that decodes with the window broken** -- `window_intact` asserted on every decode.
+- [x] **Tests**: 7 new cases and three extended: the rule itself at its edges, a sliding model's chat whose cut stands and one whose cut is refused and restored, a tool step, a cut with no checkpoint behind it read from 0, the sliding sizes against llama.cpp's own, the families (a Qwen2 header's window ignored, Gemma 2's default window, Gemma 3's default period, a pattern with nothing sliding), the padding, and `models info`.
+
+**Sizes** (llama.cpp's own `llama_kv_cache: size` lines at the pin, a 32,768-position context at `q8_0`; `models info` now states each to the MiB):
+
+| Model | Full-length sliding layers | Window-sized |
+|---|---|---|
+| Gemma 4 31B | 14,960 MiB | 1,998 MiB |
+| Gemma 4 12B | 5,712 MiB | 527 MiB |
+| gpt-oss-20b | 816 MiB | 418 MiB |
+
+**On real weights** (greedy, the new binary against a build of the 26a commit, which keeps full-length sliding layers; `--verbose` lines):
+
+- **Gemma 4 31B** (the Q4_K_M in the store, a base model -- see below): a one-shot completion's peak memory footprint went from **14.96 GiB to 2.29 GiB**, output identical. A four-turn chat: **16.80 GiB to 4.22 GiB**, including seven checkpoints at 1,978 MiB, with byte-identical answers and the same reuse every turn (432, 871, 1,309 tokens from the cache).
+- **gpt-oss-20b, a cut past the window**: a three-turn chat whose first answer lists 300 squares (about 1,500 tokens). Its template drops the reasoning from history, so turn two parts from the cache at position 88, over 1,400 tokens back -- far past the 768 positions the sliding layers still held. **The cut was refused, the checkpoint at 83 restored**, and 1,497 tokens read where the full-length cache read 1,492. All three answers byte-identical to the full-length cache's.
+- **gpt-oss-20b, a six-step tool loop** (read five files one at a time, name the one that mentions blue): byte-identical, each step reading only the call and its result (41, 42, 43, 40, 42 tokens), peak 0.91 GiB against 1.30.
+- **gpt-oss-20b, a four-turn chat**: the same words, but turn one's first answer ended two lines with two spaces (Markdown line breaks) -- a near-tie tipped on a fresh context, before any cut; the reuse (77, 103, 124 tokens) was the same.
+- **Gemma 4 12B, a four-turn chat**: peak 6.63 GiB to 1.82. Its answers parted inside turn one's 800-token repetition, again before any cut ("one per line." against "one per.").
+- **Without the check** (a build with it removed), the long gpt-oss run cut at 88 with the start of its window gone from half the model's layers -- and happened to give the same answers. The harm of a short window is subtle, which is why it is held by a rule and a test that fails any decode across it, not by comparing answers.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| When | Always window-sized for a sliding-window model, no setting *(default taken)* | llama-server's default; the answers matched wherever a cut was involved. |
+| The check | llama-server's `pos_min` test and margin, on every cut and every restore | It errs safe; a restore passing it is the normal case. |
+| How many checkpoints | 25c's 8, no byte cap *(default taken)* | Measured: seven held 1,978 MiB on Gemma 4 31B in a short chat; at most 8 × 637.5 MiB once the window fills, against the 12.6 GiB saved. |
+| Which layers slide in the stated cost | The four families llama.cpp runs sliding; any other family's layers full *(the default, refined)* | Converters write `sliding_window` for every model whose config has one -- Qwen2 and Mistral included -- and llama.cpp ignores it for them; "not known" would have hidden their cost. A sliding family not on the list is over-stated, as it was before. |
+| The scripted runtime | Asserts the window on every decode | The property the item exists for holds in every test that uses a sliding model, not only in the ones written for it. |
+
+**Guardrails, each mutation-tested (19 mutants, all caught), run in a separate git worktree against the whole unit suite.**
+- **The rule:** the window ignored; an emptied cache counted as intact; a cache held from 0 counted as short; llama-server's margin dropped.
+- **The sliding size:** the whole context instead of the window; no batch past the window; not padded; past the context; the values summed at the whole context.
+- **The families:** any family sliding; Gemma 2's window, Gemma 3's period or gpt-oss's pattern not assumed; the header's pattern or window ignored; a window reported with nothing sliding; the header's window not read.
+- **What is said:** `models info` without the sliding line, and the sliding positions never set.
+- **Not mutated, and why:** the real runtime's calls (`swa_full`, the checkpoints for a sliding model, the check after a cut and after a restore) compile only with llama.cpp and have no fake beneath them. They were exercised on real weights instead, above, including a build with the check removed.
+
+**Not verified, and found on the way.**
+- **Byte-identical answers are not guaranteed in general.** Twice, a near-tie tipped before any cut: gpt-oss's first answer on a fresh context, and Gemma 4 12B deep in a repetition loop. Two things differ there: the sliding layers attend over a 768- or 1,536-position cache rather than 32,768, and a prompt is now decoded in two batches, split at the checkpoint mark. Either can move a near-tie. Wherever a cut was refused or stood, the answers matched.
+- **The Gemma 4 GGUFs in this store are base models without a chat template.** Their snapshots carry none (`tokenizer_config.json` has no `chat_template`, and there is no `chat_template.jinja`), so they render through the ChatML fallback and continue text rather than answer. The measurements above used them as they are; a tool loop on Gemma 4 was not possible.
+- **Chunked attention** (Llama 4) also reports a window, so it gets the window-sized cache and checkpoints too; the check errs safe for a chunk as well. No such model is on this machine.
 
 ## Milestone K — The install contract
 

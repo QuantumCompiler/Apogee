@@ -148,4 +148,32 @@ private:
     return builder.bytes();
 }
 
+/// A header with Gemma 4 12B's attention geometry (26m): 48 blocks, five
+/// sliding layers (a 1,024-token window, 8 heads of 256) to one full (1 head
+/// of 512). Its cache is 527 MiB at 32K and q8_0.
+[[nodiscard]] inline std::string gemma4_like_gguf() {
+    std::vector<std::int32_t> heads;
+    std::vector<bool> slides;
+    for (int layer = 0; layer < 48; ++layer) {
+        const bool full = layer % 6 == 5;
+        heads.push_back(full ? 1 : 8);
+        slides.push_back(!full);
+    }
+    GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(11);
+    builder.string_kv("general.architecture", "gemma4");
+    builder.u32_kv("gemma4.context_length", 262144);
+    builder.u32_kv("gemma4.block_count", 48);
+    builder.u32_kv("gemma4.attention.head_count", 16);
+    builder.i32_array_kv("gemma4.attention.head_count_kv", heads);
+    builder.u32_kv("gemma4.attention.key_length", 512);
+    builder.u32_kv("gemma4.attention.value_length", 512);
+    builder.u32_kv("gemma4.attention.key_length_swa", 256);
+    builder.u32_kv("gemma4.attention.value_length_swa", 256);
+    builder.u32_kv("gemma4.attention.sliding_window", 1024);
+    builder.bool_array_kv("gemma4.attention.sliding_window_pattern", slides);
+    builder.tensor("token_embd.weight");
+    return builder.bytes();
+}
+
 }  // namespace apogee::testing

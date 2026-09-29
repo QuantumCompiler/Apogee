@@ -29,15 +29,34 @@ using Builder = apogee::testing::GgufBuilder;
 
 constexpr std::int64_t kMiB = 1024LL * 1024;
 
-/// What `header`'s cache takes at 32,768 positions, in MiB.
+/// What `header`'s cache takes in a context of 32,768 tokens, in bytes.
+[[nodiscard]] std::int64_t bytes_at_32k(std::string_view architecture,
+                                        const AttentionHeader& header, KvCacheType type) {
+    const std::optional<apogee::models::CacheShape> shape =
+        apogee::models::cache_shape(architecture, header);
+    REQUIRE(shape.has_value());
+    return apogee::models::cache_bytes(apogee::models::cache_values(*shape, 32768), type);
+}
+
+/// The same, in whole MiB.
 [[nodiscard]] std::int64_t mib_at_32k(std::string_view architecture, const AttentionHeader& header,
                                       KvCacheType type) {
-    const std::optional<std::int64_t> values =
-        apogee::models::kv_values_per_position(architecture, header);
-    REQUIRE(values.has_value());
-    const std::int64_t bytes = apogee::models::cache_bytes(*values * 32768, type);
+    const std::int64_t bytes = bytes_at_32k(architecture, header, type);
     CHECK(bytes % kMiB == 0);
     return bytes / kMiB;
+}
+
+/// Values per position over every layer, for a model none of whose layers
+/// keep only a window.
+[[nodiscard]] std::optional<std::int64_t> per_position(std::string_view architecture,
+                                                       const AttentionHeader& header) {
+    const std::optional<apogee::models::CacheShape> shape =
+        apogee::models::cache_shape(architecture, header);
+    if (!shape.has_value()) {
+        return std::nullopt;
+    }
+    CHECK(shape->sliding == 0);
+    return shape->full;
 }
 
 /// Qwen3.8-27B: 64 blocks and a prediction layer, full attention every 4th.
@@ -68,8 +87,8 @@ constexpr std::int64_t kMiB = 1024LL * 1024;
     return header;
 }
 
-/// Gemma 4 12B: five sliding layers to one full, each kind at its own widths
-/// and head count.
+/// Gemma 4 12B: five sliding layers, with a 1,024-token window, to one full,
+/// each kind at its own widths and head count.
 [[nodiscard]] AttentionHeader gemma4_12b() {
     AttentionHeader header;
     header.context_length = 262144;
@@ -80,6 +99,7 @@ constexpr std::int64_t kMiB = 1024LL * 1024;
     header.value_length = 512;
     header.key_length_swa = 256;
     header.value_length_swa = 256;
+    header.sliding_window = 1024;
     for (int layer = 0; layer < 48; ++layer) {
         const bool full = layer % 6 == 5;
         header.head_count_kv.push_back(full ? 1 : 8);
@@ -144,8 +164,9 @@ TEST_CASE("the header's attention geometry is read under its architecture", "[mo
 
 TEST_CASE("per-layer arrays are read, and latent attention is noticed", "[models][kv]") {
     Builder builder;
-    builder.magic().u32(3).u64(1).u64(6);
+    builder.magic().u32(3).u64(1).u64(7);
     builder.string_kv("general.architecture", "gemma4");
+    builder.u32_kv("gemma4.attention.sliding_window", 1024);
     builder.u32_kv("gemma4.block_count", 3);
     builder.i32_array_kv("gemma4.attention.head_count_kv", {8, 8, 1});
     builder.bool_array_kv("gemma4.attention.sliding_window_pattern", {true, true, false});
@@ -158,6 +179,7 @@ TEST_CASE("per-layer arrays are read, and latent attention is noticed", "[models
     REQUIRE(info.parsed);
     CHECK(info.attention.head_count_kv == std::vector<std::int64_t>{8, 8, 1});
     CHECK(info.attention.sliding_window_pattern == std::vector<std::int64_t>{1, 1, 0});
+    CHECK(info.attention.sliding_window == 1024);
     CHECK(info.attention.latent_attention);
 }
 
@@ -189,19 +211,23 @@ TEST_CASE("the cache sizes are llama.cpp's own", "[models][kv]") {
     CHECK(mib_at_32k("qwen3vl", qwen3vl_8b(), KvCacheType::Q8_0) == 2448);
     CHECK(mib_at_32k("qwen3vl", qwen3vl_8b(), KvCacheType::F16) == 4608);
 
-    // 8 full layers at 1 x (512 + 512), 40 sliding at 8 x (256 + 256).
-    CHECK(mib_at_32k("gemma4", gemma4_12b(), KvCacheType::Q8_0) == 272 + 5440);
-    CHECK(mib_at_32k("gemma4", gemma4_12b(), KvCacheType::F16) == 512 + 10240);
+    // 8 full layers at 1 x (512 + 512) over 32,768 positions; 40 sliding at
+    // 8 x (256 + 256) over their window and a batch, 1,536 (26m).
+    CHECK(mib_at_32k("gemma4", gemma4_12b(), KvCacheType::Q8_0) == 272 + 255);
+    CHECK(mib_at_32k("gemma4", gemma4_12b(), KvCacheType::F16) == 512 + 480);
 
-    // gpt-oss-20b: every layer, sliding or not, keeps the whole window.
+    // gpt-oss-20b: every other layer slides, over a 128-token window -- 768
+    // positions once the batch is added and padded. Its header names no
+    // pattern; llama.cpp's for the family is every other layer.
     AttentionHeader gpt_oss;
     gpt_oss.block_count = 24;
     gpt_oss.head_count = {64};
     gpt_oss.head_count_kv = {8};
     gpt_oss.key_length = 64;
     gpt_oss.value_length = 64;
-    gpt_oss.sliding_window_pattern = {};
-    CHECK(mib_at_32k("gpt-oss", gpt_oss, KvCacheType::Q8_0) == 816);
+    gpt_oss.sliding_window = 128;
+    CHECK(bytes_at_32k("gpt-oss", gpt_oss, KvCacheType::Q8_0) ==
+          408 * kMiB + 12LL * 8 * 128 * 768 * 34 / 32);
 
     // Llama 3.1 8B.
     AttentionHeader llama;
@@ -219,49 +245,49 @@ TEST_CASE("the cache sizes are llama.cpp's own", "[models][kv]") {
 }
 
 TEST_CASE("which layers keep a cache follows llama.cpp", "[models][kv]") {
-    using apogee::models::kv_values_per_position;
+    using apogee::models::cache_shape;
 
     SECTION("a hybrid's interval defaults to 4, and only that family has one") {
         AttentionHeader header = qwen38_27b();
         header.full_attention_interval = 0;
-        CHECK(kv_values_per_position("qwen35", header) == 16 * 4 * 512);
+        CHECK(per_position("qwen35", header) == 16 * 4 * 512);
         header.full_attention_interval = 2;
-        CHECK(kv_values_per_position("qwen35", header) == 32 * 4 * 512);
+        CHECK(per_position("qwen35", header) == 32 * 4 * 512);
         // Another architecture carrying the key is a plain stack of 65.
-        CHECK(kv_values_per_position("llama", header) == 65 * 4 * 512);
+        CHECK(per_position("llama", header) == 65 * 4 * 512);
     }
 
     SECTION("prediction layers past the main stack keep none on a hybrid") {
         AttentionHeader header = qwen38_27b();
         header.block_count = 8;
         header.nextn_predict_layers = 0;
-        CHECK(kv_values_per_position("qwen35", header) == 2 * 4 * 512);
+        CHECK(per_position("qwen35", header) == 2 * 4 * 512);
         // With the last layer a prediction layer, layer 7 is past the stack.
         header.nextn_predict_layers = 1;
-        CHECK(kv_values_per_position("qwen35", header) == 1 * 4 * 512);
+        CHECK(per_position("qwen35", header) == 1 * 4 * 512);
     }
 
     SECTION("layers reusing an earlier layer's cache keep none") {
         AttentionHeader header = qwen3vl_8b();
         header.shared_kv_layers = 6;
-        CHECK(kv_values_per_position("gemma4", header) == 30 * 8 * 256);
+        CHECK(per_position("gemma4", header) == 30 * 8 * 256);
         header.shared_kv_layers = 100;
-        CHECK(kv_values_per_position("gemma4", header) == 0);
+        CHECK(per_position("gemma4", header) == 0);
     }
 
     SECTION("a layer with no key-value heads keeps none") {
         AttentionHeader header = qwen3vl_8b();
         header.block_count = 4;
         header.head_count_kv = {0, 8, 0, 8};
-        CHECK(kv_values_per_position("jamba", header) == 2 * 8 * 256);
+        CHECK(per_position("jamba", header) == 2 * 8 * 256);
         header.head_count_kv = {0};
-        CHECK(kv_values_per_position("mamba", header) == 0);
+        CHECK(per_position("mamba", header) == 0);
     }
 
     SECTION("an absent key-value head count is the head count") {
         AttentionHeader header = qwen3vl_8b();
         header.head_count_kv.clear();
-        CHECK(kv_values_per_position("llama", header) == 36 * 32 * 256);
+        CHECK(per_position("llama", header) == 36 * 32 * 256);
     }
 
     SECTION("absent widths are the embedding over the heads, each alone") {
@@ -270,14 +296,14 @@ TEST_CASE("which layers keep a cache follows llama.cpp", "[models][kv]") {
         // overrode it would show.
         header.key_length = 0;
         header.value_length = 96;
-        CHECK(kv_values_per_position("llama", header) == 36 * 8 * (4096 / 32 + 96));
+        CHECK(per_position("llama", header) == 36 * 8 * (4096 / 32 + 96));
         header.value_length = 0;
-        CHECK(kv_values_per_position("llama", header) == 36 * 8 * 256);
+        CHECK(per_position("llama", header) == 36 * 8 * 256);
         header.head_count = {0};
-        CHECK_FALSE(kv_values_per_position("llama", header).has_value());
+        CHECK_FALSE(per_position("llama", header).has_value());
         header.head_count = {32};
         header.embedding_length = 0;
-        CHECK_FALSE(kv_values_per_position("llama", header).has_value());
+        CHECK_FALSE(per_position("llama", header).has_value());
     }
 
     SECTION("a sliding pattern given as a period") {
@@ -285,28 +311,74 @@ TEST_CASE("which layers keep a cache follows llama.cpp", "[models][kv]") {
         header.head_count_kv = {8};
         header.sliding_window_pattern = {6};
         // Layers 5, 11, ... are full at 512 + 512; the other 40 slide.
-        CHECK(kv_values_per_position("gemma3", header) == 8 * 8 * 1024 + 40 * 8 * 512);
+        std::optional<apogee::models::CacheShape> shape = cache_shape("gemma3", header);
+        REQUIRE(shape.has_value());
+        CHECK(shape->full == 8 * 8 * 1024);
+        CHECK(shape->sliding == 40 * 8 * 512);
+        CHECK(shape->window == 1024);
         // Only the sliding widths differ: a width left out is the full one.
         header.value_length_swa = 0;
-        CHECK(kv_values_per_position("gemma3", header) == 8 * 8 * 1024 + 40 * 8 * 768);
+        shape = cache_shape("gemma3", header);
+        REQUIRE(shape.has_value());
+        CHECK(shape->sliding == 40 * 8 * 768);
+        // Gemma 3's own pattern, when the header names none: every sixth full.
+        header.sliding_window_pattern.clear();
+        shape = cache_shape("gemma3", header);
+        REQUIRE(shape.has_value());
+        CHECK(shape->full == 8 * 8 * 1024);
+    }
+
+    SECTION("only the families llama.cpp runs with a sliding window slide") {
+        // Converters write `sliding_window` for every model whose config has
+        // one; llama.cpp ignores it for Qwen2, Mistral and the rest, whose
+        // layers keep every position.
+        AttentionHeader header = qwen3vl_8b();
+        header.sliding_window = 4096;
+        std::optional<apogee::models::CacheShape> shape = cache_shape("qwen2", header);
+        REQUIRE(shape.has_value());
+        CHECK(shape->full == 36 * 8 * 256);
+        CHECK(shape->sliding == 0);
+        CHECK(shape->window == 0);
+
+        // Gemma 3 slides only once it has a window.
+        header.sliding_window = 0;
+        shape = cache_shape("gemma3", header);
+        REQUIRE(shape.has_value());
+        CHECK(shape->sliding == 0);
+
+        // Gemma 2's window is 4,096 when the header leaves it out, and every
+        // other layer slides: 18 of 36.
+        shape = cache_shape("gemma2", header);
+        REQUIRE(shape.has_value());
+        CHECK(shape->window == 4096);
+        CHECK(shape->full == 18 * 8 * 256);
+        CHECK(shape->sliding == 18 * 8 * 256);
+
+        // A family whose pattern says no layer slides has no window.
+        AttentionHeader flat = gemma4_12b();
+        flat.sliding_window_pattern.assign(48, 0);
+        shape = cache_shape("gemma4", flat);
+        REQUIRE(shape.has_value());
+        CHECK(shape->sliding == 0);
+        CHECK(shape->window == 0);
     }
 
     SECTION("what the header does not say is unknown, never a guess") {
         AttentionHeader header = gemma4_12b();
         header.sliding_window_pattern.clear();
-        CHECK_FALSE(kv_values_per_position("gemma4", header).has_value());
+        CHECK_FALSE(per_position("gemma4", header).has_value());
 
         header = qwen3vl_8b();
         header.head_count_kv = {8, 8, 8};  // neither one value nor one per layer
-        CHECK_FALSE(kv_values_per_position("llama", header).has_value());
+        CHECK_FALSE(per_position("llama", header).has_value());
 
         header = qwen3vl_8b();
         header.latent_attention = true;
-        CHECK_FALSE(kv_values_per_position("deepseek2", header).has_value());
+        CHECK_FALSE(per_position("deepseek2", header).has_value());
 
         header = qwen3vl_8b();
         header.block_count = 0;
-        CHECK_FALSE(kv_values_per_position("llama", header).has_value());
+        CHECK_FALSE(per_position("llama", header).has_value());
     }
 }
 
@@ -333,6 +405,27 @@ TEST_CASE("positions are allocated in multiples of 256", "[models][kv]") {
     CHECK(allocated_positions(257) == 512);
     CHECK(allocated_positions(1) == 256);
     CHECK(allocated_positions(0) == 0);
+}
+
+TEST_CASE("a sliding layer keeps its window and a batch, padded, never past the context",
+          "[models][kv]") {
+    // llama.cpp's rule (llama-kv-cache-iswa.cpp), checked against its own
+    // sizes: 1,536 positions on Gemma 4, 768 on gpt-oss.
+    using apogee::models::sliding_positions;
+
+    CHECK(sliding_positions(32768, 1024) == 1536);
+    CHECK(sliding_positions(32768, 128) == 768);
+    CHECK(sliding_positions(1024, 1024) == 1024);
+    CHECK(sliding_positions(512, 4096) == 512);
+    CHECK(sliding_positions(32768, 0) == 0);
+
+    apogee::models::CacheShape shape;
+    shape.full = 10;
+    shape.sliding = 3;
+    shape.window = 1024;
+    CHECK(apogee::models::cache_values(shape, 32768) == 10 * 32768 + 3 * 1536);
+    CHECK(apogee::models::cache_values(shape, 5000) == 10 * 5120 + 3 * 1536);
+    CHECK(apogee::models::cache_values(shape, 1000) == 10 * 1024 + 3 * 1024);
 }
 
 TEST_CASE("a backend's window and cache are stated as they will be allocated", "[models][kv]") {
@@ -365,6 +458,19 @@ TEST_CASE("a backend's window and cache are stated as they will be allocated", "
     backend.context_size = 131072;
     CHECK(apogee::models::local_window(info, backend).window == 131072);
 
+    CHECK(set.sliding_positions == 0);
+
     info.attention.latent_attention = true;
     CHECK_FALSE(apogee::models::local_window(info, backend).cache_bytes.has_value());
+
+    // A Gemma 4: its sliding layers keep their window, and say so.
+    GgufInfo gemma;
+    gemma.parsed = true;
+    gemma.architecture = "gemma4";
+    gemma.attention = gemma4_12b();
+    const apogee::models::LocalWindow sliding =
+        apogee::models::local_window(gemma, BackendConfig{});
+    CHECK(sliding.window == 32768);
+    CHECK(sliding.sliding_positions == 1536);
+    CHECK(sliding.cache_bytes == (272 + 255) * kMiB);
 }

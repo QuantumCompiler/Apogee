@@ -117,7 +117,13 @@ void render_window(std::ostream& out, const models::GgufInfo& info,
         out << "none -- no attention layers\n";
     } else {
         out << models::mib(*window.cache_bytes) << " at " << harness::to_string(window.cache_type)
-            << (backend.cache_type.has_value() ? "" : " (the default)") << "\n";
+            << (backend.cache_type.has_value() ? "" : " (the default)");
+        if (window.sliding_positions > 0) {
+            // Why a Gemma's cache is small: most of its layers keep only
+            // their window (26m).
+            out << ", sliding layers at " << window.sliding_positions << " positions";
+        }
+        out << "\n";
     }
 }
 

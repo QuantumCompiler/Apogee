@@ -86,6 +86,10 @@ struct AttentionHeader {
     /// Which layers slide: one flag per layer, or one value -- a period, in
     /// which every layer but the last slides.
     std::vector<std::int64_t> sliding_window_pattern;
+    /// `attention.sliding_window`: how far back a sliding layer looks. Many
+    /// converters write it for every model whose config has one, and
+    /// llama.cpp ignores it for most; `models/kv_cache.h` knows which (26m).
+    std::int64_t sliding_window = 0;
     /// Every this-many layers is full attention and the rest recurrent
     /// (Qwen3.5 and 3.8, Qwen3-Next).
     std::int64_t full_attention_interval = 0;

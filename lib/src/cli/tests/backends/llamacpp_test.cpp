@@ -1390,6 +1390,132 @@ TEST_CASE("each turn reports what the cache kept and the checkpoints it holds",
     CHECK(lines.front().find("checkpoints") == std::string::npos);
 }
 
+// ---------------------------------------------------------------------------
+// A window-sized cache for sliding-window models (26m)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the window rule: intact from 0, or when the oldest kept is before the window",
+          "[backends][llamacpp][sliding]") {
+    using apogee::backends::window_intact;
+
+    // No window, or nothing kept before the cut: nothing can be missing.
+    CHECK(window_intact(500, 600, 0));
+    CHECK(window_intact(-1, 0, 1024));
+    // Everything from 0 is held.
+    CHECK(window_intact(0, 300, 1024));
+    CHECK(window_intact(0, 5000, 1024));
+    // Held from before the window: the positions the next token looks back
+    // over are all there.
+    CHECK(window_intact(3975, 5000, 1024));
+    // llama-server's margin, which errs safe: exactly at the window is short.
+    CHECK_FALSE(window_intact(3976, 5000, 1024));
+    CHECK_FALSE(window_intact(4999, 5000, 1024));
+    // A cache emptied under a cut that was supposed to keep something.
+    CHECK_FALSE(window_intact(-1, 10, 1024));
+    // A cut early in a conversation whose first positions are gone.
+    CHECK_FALSE(window_intact(10, 500, 1024));
+}
+
+TEST_CASE("a sliding model's cut within its window reads only what is new, with no restore",
+          "[backends][llamacpp][sliding]") {
+    TemplateFixture fixture{{"<think>", "pondering", "</think>", "first", " answer"}};
+    fixture.runtime->sliding_window = 2;
+    fixture.runtime->sliding_keep = 1000;  // the conversation fits its window
+    const std::vector<ChatMessage> opening{ChatMessage::system("be brief"),
+                                           ChatMessage::user("one two three four five")};
+    const auto first = fixture.provider->chat(turn(opening), {});
+    auto session = fixture.runtime->model->contexts.front();
+    const std::int64_t first_prompt = first.usage.prompt_tokens;
+    // Taken as a hybrid's are: a sliding cache may need them.
+    CHECK(session->checkpoints() == std::vector<std::int64_t>{4, first_prompt - 4});
+
+    const std::size_t mark = session->decodes.size();
+    session->sampled = 0;
+    std::vector<ChatMessage> next = opening;
+    next.push_back(ChatMessage::assistant(first.message.content));
+    next.push_back(ChatMessage::user("six seven"));
+    const auto second = fixture.provider->chat(turn(next), {});
+
+    // The cut kept its window, so it stood: nothing restored, and turn two
+    // read from where the prompts part, past the checkpoint near the end.
+    CHECK(session->restores.empty());
+    const PromptDecode read = prompt_decode(*session, mark, second.usage.prompt_tokens);
+    CHECK(read.start >= first_prompt - 4);
+    CHECK(read.count == second.usage.prompt_tokens - read.start);
+}
+
+TEST_CASE("a cut past a sliding window restores a checkpoint, never the short window",
+          "[backends][llamacpp][sliding]") {
+    // The case a naive cut gets wrong: the cache holds only its last three
+    // positions, turn two parts from it further back than that, and decoding
+    // on from there would look back over positions that are gone. The fake
+    // fails any decode that does (`window_intact` on every decode).
+    TemplateFixture fixture{{"<think>", "pondering", "</think>", "first", " answer"}};
+    fixture.runtime->sliding_window = 2;
+    fixture.runtime->sliding_keep = 3;
+    const std::vector<ChatMessage> opening{ChatMessage::system("be brief"),
+                                           ChatMessage::user("one two three four five")};
+    const auto first = fixture.provider->chat(turn(opening), {});
+    auto session = fixture.runtime->model->contexts.front();
+    const std::int64_t first_prompt = first.usage.prompt_tokens;
+
+    const std::size_t mark = session->decodes.size();
+    session->sampled = 0;
+    std::vector<ChatMessage> next = opening;
+    next.push_back(ChatMessage::assistant(first.message.content));
+    next.push_back(ChatMessage::user("six seven"));
+    const auto second = fixture.provider->chat(turn(next), {});
+
+    CHECK(session->restores == std::vector<std::int64_t>{first_prompt - 4});
+    const PromptDecode read = prompt_decode(*session, mark, second.usage.prompt_tokens);
+    CHECK(read.start == first_prompt - 4);
+    CHECK(read.count == second.usage.prompt_tokens - (first_prompt - 4));
+}
+
+TEST_CASE("a sliding model's tool step reads only the call and its result",
+          "[backends][llamacpp][sliding]") {
+    TemplateFixture fixture{kReadFileCall};
+    fixture.runtime->sliding_window = 2;
+    fixture.runtime->sliding_keep = 3;
+    const std::vector<ChatMessage> asked{ChatMessage::user("what does notes.txt say, please")};
+    const auto step = fixture.provider->chat(with_tools(asked), {});
+    REQUIRE(step.message.tool_calls.size() == 1);
+    auto session = fixture.runtime->model->contexts.front();
+    const std::int64_t first_prompt = step.usage.prompt_tokens;
+
+    const std::size_t mark = session->decodes.size();
+    session->sampled = 0;
+    ChatMessage call = ChatMessage::assistant("");
+    call.tool_calls = step.message.tool_calls;
+    apogee::harness::ToolResult result;
+    result.tool_call_id = step.message.tool_calls.front().id;
+    result.name = "read_file";
+    result.content = "hi there";
+    std::vector<ChatMessage> next = asked;
+    next.push_back(call);
+    next.push_back(ChatMessage::from_tool_result(result));
+    const auto answer = fixture.provider->chat(with_tools(next), {});
+
+    CHECK(session->restores == std::vector<std::int64_t>{first_prompt - 4});
+    const PromptDecode read = prompt_decode(*session, mark, answer.usage.prompt_tokens);
+    CHECK(read.start == first_prompt - 4);
+}
+
+TEST_CASE("with the window short and no checkpoint before the cut, a sliding model reads from 0",
+          "[backends][llamacpp][sliding]") {
+    TemplateFixture fixture{{"ok"}};
+    fixture.runtime->sliding_window = 2;
+    fixture.runtime->sliding_keep = 3;
+    (void)fixture.provider->chat(turn({ChatMessage::user("alpha beta gamma delta epsilon")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    const std::size_t mark = session->decodes.size();
+    session->sampled = 0;
+    // Parts at the second token, before any checkpoint.
+    const auto second = fixture.provider->chat(turn({ChatMessage::system("new")}), {});
+    CHECK(session->restores.empty());
+    CHECK(prompt_decode(*session, mark, second.usage.prompt_tokens).start == 0);
+}
+
 TEST_CASE("the checkpoint policy: replaced at a position, capped, never restored past",
           "[backends][llamacpp][checkpoint]") {
     struct Held {
