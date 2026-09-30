@@ -62,7 +62,8 @@ struct ContextUsage {
     }
 };
 
-/// Measures `messages` against the window `model` resolves to.
+/// Measures `messages` against the window `model` resolves to -- as the
+/// budget would send them, earlier turns' tool results as stubs (26c).
 ///
 /// Falls back to an estimate when the provider offers no exact count, and says
 /// which it used. **A context warning that fires at the wrong point is worse
@@ -96,6 +97,9 @@ struct ContextUsage {
 ///
 /// **On any failure the original history is returned unchanged.** A failed
 /// compaction must degrade to a longer prompt, never to a lost conversation.
+///
+/// Tool results are shown to the summariser as their stubs (26c): tool
+/// output is condensed before conversation.
 ///
 /// `model` writes the summary: the utility model when one is set, else the
 /// conversation's own backend (26b). It is asked as a side request, so a

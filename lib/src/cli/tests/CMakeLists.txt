@@ -99,6 +99,7 @@ add_executable(apogee_tests
     agentloop/loop_test.cpp
     agentloop/anthropic_loop_test.cpp
     agentloop/content_test.cpp
+    agentloop/budget_test.cpp
     agentloop/question_test.cpp
     httpserver/handler_test.cpp
     httpserver/sse_test.cpp

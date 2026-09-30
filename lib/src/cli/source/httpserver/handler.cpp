@@ -445,7 +445,8 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
             history, last_user_text(plan.incoming), cancellation);
         const agentloop::RagResult rag = commands::retrieve_for_collection(
             *harness_, config, options_.rag_collection, rewrite.query, options_.rag_limit,
-            plan.retriever, plan.rerank, cancellation, plan.backend);
+            plan.retriever, plan.rerank, cancellation, plan.backend,
+            agentloop::turn_budget(*harness_, plan.backend, plan.max_tokens));
         if (sse != nullptr) {
             sse->emit_meta(simple_event(harness::StatusEvent::Type::RagSearch,
                                         harness::StatusEvent::Phase::Done,

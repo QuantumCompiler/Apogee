@@ -243,6 +243,33 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
     for (const embedstore::SearchHit& hit : hits) {
         texts.push_back(hit.chunk.text);
     }
+
+    // --- the budget: the leading chunks that fit the retrieval share ----------
+    if (turn.budget.budget.known()) {
+        const std::int64_t share = turn.budget.budget.share(BudgetSource::Retrieval);
+        const auto render = [&](std::size_t count) {
+            const std::vector<std::string> leading{
+                texts.begin(), texts.begin() + static_cast<std::ptrdiff_t>(count)};
+            return render_rag_context(leading, graph_section);
+        };
+        const std::size_t fit = fitting_prefix(turn.budget, share, texts.size(), render);
+        if (fit < texts.size()) {
+            result.notes.push_back(std::to_string(fit) + " of " + std::to_string(texts.size()) +
+                                   " chunks fit the context budget");
+            texts.resize(fit);
+            hits.resize(fit);
+        }
+        if (fit == 0 && !graph_section.empty() &&
+            !fitting_prefix(turn.budget, share, 1,
+                            [&](std::size_t) { return render_rag_context({}, graph_section); })) {
+            result.notes.push_back("the graph context did not fit the context budget either");
+            graph_section.clear();
+            result.graph_entities = 0;
+        }
+        if (texts.empty() && graph_section.empty()) {
+            return result;
+        }
+    }
     result.chunks = static_cast<std::int64_t>(hits.size());
     result.top_score = hits.empty() ? 0.0 : hits.front().score;
     // The retriever that RAN, which on a hybrid turn is hybrid and its scores

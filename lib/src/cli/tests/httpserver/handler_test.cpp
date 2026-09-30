@@ -826,6 +826,38 @@ TEST_CASE("a session near its window is compacted before the turn, a stateless r
 // Retrieval
 // ---------------------------------------------------------------------------
 
+TEST_CASE("a served turn's retrieval fits the model's window, and says what it left out",
+          "[httpserver][rag][budget]") {
+    HandlerOptions options = served_default();
+    options.rag_collection = "notes";
+    options.rag_source = apogee::commands::RagSource::Flag;
+    const Fixture fixture{{text_turn("mock response")}, options};
+    const std::filesystem::path db = apogee::commands::collection_path("notes");
+    std::filesystem::create_directories(db.parent_path());
+    {
+        apogee::embedstore::Store store{db};
+        store.replace_source("notes.md", {std::string{kSecret}, "an unrelated second chunk"});
+    }
+
+    // `tiny` holds 60 tokens: its retrieval share has no room for an excerpt.
+    nlohmann::json body = chat_body("what does the zarquon protocol require?");
+    body["model"] = "tiny";
+    body["stream"] = true;
+    body["apogee_events"] = true;
+    const Frames parsed_frames = frames(collect(fixture.send(post("/v1/chat/completions", body))));
+    for (const ChatMessage& message : fixture.tiny->requests().back().messages) {
+        CHECK(message.content.plain_text().find(kSecret) == std::string::npos);
+    }
+    bool said = false;
+    for (const nlohmann::json& frame : metas(parsed_frames)) {
+        if (frame["meta"]["type"] == "rag_result") {
+            said = frame["meta"]["detail"].get<std::string>().find(
+                       "chunks fit the context budget") != std::string::npos;
+        }
+    }
+    CHECK(said);
+}
+
 TEST_CASE("retrieval is injected into the request and never into the transcript",
           "[httpserver][rag]") {
     HandlerOptions options = served_default();

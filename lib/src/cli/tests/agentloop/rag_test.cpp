@@ -660,3 +660,74 @@ TEST_CASE("a judge on the turn is reported as applied only when its ranking was 
     REQUIRE_FALSE(raw.notes.empty());
     CHECK(raw.notes.back().find("not a ranking") != std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// The context budget (26c)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("retrieval injects only the chunks that fit its share, and says how many",
+          "[agentloop][rag][budget]") {
+    Scratch scratch;
+    {
+        Store store{scratch.db()};
+        std::vector<std::string> chunks;
+        for (int index = 0; index < 6; ++index) {
+            chunks.push_back("alpha " + std::to_string(index) + " " + std::string(400, 'z'));
+        }
+        store.replace_source("doc", chunks);
+    }
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "alpha");
+    turn.limit = 12;
+
+    SECTION("a small window: two chunks' worth of share") {
+        // One token per byte, and a 20% share of 6,000: two 400-byte chunks
+        // and their framing fit, a third does not.
+        turn.budget.budget.window = 6000;
+        turn.budget.budget.reserve = 0;
+        turn.budget.count = [](const apogee::harness::ChatRequest& request) {
+            std::int64_t tokens = 0;
+            for (const apogee::harness::ChatMessage& message : request.messages) {
+                tokens += static_cast<std::int64_t>(message.content.plain_text().size());
+            }
+            return apogee::agentloop::TokenCount{tokens, false};
+        };
+        const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+        CHECK(result.chunks == 2);
+        REQUIRE(result.prefix.size() == 1);
+        CHECK(result.prefix.front().content.plain_text().size() <= 1200);
+        CHECK(result.notes == std::vector<std::string>{"2 of 6 chunks fit the context budget"});
+    }
+
+    SECTION("an unknown window: the limit is the only cap") {
+        const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+        CHECK(result.chunks == 6);
+        CHECK(result.notes.empty());
+    }
+}
+
+TEST_CASE("a graph section that cannot fit the share even alone is dropped, and said",
+          "[agentloop][rag][graph][budget]") {
+    const Scratch scratch;
+    seed(scratch);
+    seed_graph(scratch);
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon protocol");
+    turn.collection = "notes";
+    turn.graph_enabled = true;
+    // A 100-token share, one token per byte: not the chunk, not the graph.
+    turn.budget.budget.window = 500;
+    turn.budget.budget.reserve = 0;
+    turn.budget.count = [](const apogee::harness::ChatRequest& request) {
+        std::int64_t tokens = 0;
+        for (const apogee::harness::ChatMessage& message : request.messages) {
+            tokens += static_cast<std::int64_t>(message.content.plain_text().size());
+        }
+        return apogee::agentloop::TokenCount{tokens, false};
+    };
+    const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK(result.chunks == 0);
+    CHECK(result.graph_entities == 0);
+    CHECK(result.prefix.empty());
+    CHECK(result.notes ==
+          std::vector<std::string>{"0 of 1 chunks fit the context budget",
+                                   "the graph context did not fit the context budget either"});
+}

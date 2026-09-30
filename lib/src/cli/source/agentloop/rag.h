@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "agentloop/budget.h"
 #include "agentloop/embed_func.h"
 #include "agentloop/retriever.h"
 #include "harness/cancellation.h"
@@ -85,6 +86,11 @@ struct RagTurn {
     /// The backend the conversation is on: where `rerank: on` falls back when
     /// no utility model is set (26b). Empty outside a conversation.
     std::string conversation;
+
+    /// The turn's context budget (26c): the chunks injected are the leading
+    /// ones that fit its retrieval share, and a note says how many did not.
+    /// Unknown by default, which keeps `limit` the only cap.
+    TurnBudget budget;
 
     /// For the judge. May be null, in which case reranking is off.
     const harness::Harness* harness = nullptr;

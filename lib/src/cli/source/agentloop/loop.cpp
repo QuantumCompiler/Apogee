@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "agentloop/budget.h"
 #include "agentloop/tool_summary.h"
 #include "harness/errors.h"
 
@@ -82,13 +83,21 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
     // The environment note rides first, ahead of any retrieval, whenever
     // there are tools (25d). Rendered once per turn: it changes once a day,
     // so a local model's cached prompt survives from turn to turn and step
-    // to step.
-    std::vector<harness::ChatMessage> transient = options.transient_prefix;
+    // to step. Unlike retrieval, the budget never trims it.
+    std::vector<harness::ChatMessage> pinned;
     if (options.tools != nullptr) {
         if (std::string note = options.tools->environment(); !note.empty()) {
-            transient.insert(transient.begin(), harness::ChatMessage::system(std::move(note)));
+            pinned.push_back(harness::ChatMessage::system(std::move(note)));
         }
     }
+
+    // Every request of the turn is assembled against the model's window
+    // (26c): earlier turns' tool results as stubs, and on overflow the
+    // lowest priorities trimmed. Only what is sent changes, never `history`.
+    const TurnBudget budget = turn_budget(harness, options.model, options.max_tokens);
+    const std::size_t turn_start = current_turn_start(history);
+    bool stubs_said = false;
+    std::vector<std::string> trims_said;
 
     // How often each call has run in this turn. The third identical one is
     // answered without running: a small local model re-reads the same file
@@ -127,21 +136,42 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
         request.model = options.model;
         request.temperature = options.temperature;
         request.max_tokens = options.max_tokens;
-        request.messages = splice_transient(history, transient, options.transient_at);
-        if (!transient.empty()) {
-            // The markers a provider with a persistent prompt cache reads to
-            // keep injected context out of its cached prefix.
-            request.transient.start = options.transient_at;
-            request.transient.length = transient.size();
-        }
         // On the final pass the tools are withdrawn, which is what forces an
-        // answer instead of another tool call.
+        // answer instead of another tool call. Set before the messages: the
+        // budget counts the definitions too.
         if (!final_pass) {
             request.tools = tools;
             std::erase_if(request.tools, [&withdrawn](const harness::Tool& tool) {
                 return withdrawn.contains(tool.name);
             });
         }
+        Assembly assembly =
+            assemble_request(budget, request, history, pinned, options.transient_prefix,
+                             options.transient_at, turn_start);
+        request.messages = std::move(assembly.messages);
+        if (assembly.transient_length > 0) {
+            // The markers a provider with a persistent prompt cache reads to
+            // keep injected context out of its cached prefix.
+            request.transient.start = assembly.transient_start;
+            request.transient.length = assembly.transient_length;
+        }
+        if (assembly.stubs > 0 && !stubs_said) {
+            // Every turn after one with tools, so said only under --verbose.
+            reporter.on_progress(
+                "earlier turns' tool results sent as " + std::to_string(assembly.stubs) + " stub" +
+                (assembly.stubs == 1 ? "" : "s") + " (" +
+                std::to_string((assembly.stubbed_bytes + 1023) / 1024) + " KB not re-sent)");
+            stubs_said = true;
+        }
+        if (!assembly.trims.empty() && assembly.trims != trims_said) {
+            // Trimmed to fit: said every time it changes, never silently.
+            std::string line = "context budget: ";
+            for (std::size_t index = 0; index < assembly.trims.size(); ++index) {
+                line += (index == 0 ? "" : "; ") + assembly.trims[index];
+            }
+            reporter.on_notice(line);
+        }
+        trims_said = std::move(assembly.trims);
         // The schema rides every request: a provider whose JSON mode cannot
         // coexist with tools applies it on the tools-less final pass, and one
         // whose mode can applies it throughout.

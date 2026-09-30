@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <optional>
 
+#include "agentloop/budget.h"
 #include "harness/errors.h"
 
 namespace apogee::agentloop {
@@ -44,12 +45,18 @@ ContextUsage measure_context(const harness::Harness& harness,
     ContextUsage usage;
     usage.window = harness.context_window_for_model(model);
 
+    // What would be SENT: earlier turns' tool results as the budget sends
+    // them, as stubs (26c). Measuring the transcript instead would compact a
+    // conversation whose request is nowhere near full.
+    const std::vector<harness::ChatMessage> sent =
+        stub_tool_results(messages, current_turn_start(messages)).messages;
+
     // Ask the provider first: a backend that owns a tokenizer (a local model
     // does) answers exactly, and the 80/90 thresholds are only as good as the
     // number they fire on. `std::nullopt` means "no tokenizer, or not cheaply
     // right now" -- never an error, and never a reason to skip the check.
     harness::ChatRequest probe;
-    probe.messages = messages;
+    probe.messages = sent;
     probe.model = model;
     if (const std::optional<std::int64_t> exact = harness.count_prompt_tokens(model, probe)) {
         usage.used_tokens = *exact;
@@ -60,7 +67,7 @@ ContextUsage measure_context(const harness::Harness& harness,
     // The estimate path. `exact` is carried rather than assumed because a
     // warning that fires at the wrong point is worse than none, and the surface
     // says which number it has.
-    const TokenCount count = estimate_prompt_tokens(messages);
+    const TokenCount count = estimate_prompt_tokens(sent);
     usage.used_tokens = count.tokens;
     usage.exact = !count.estimated;
     return usage;
@@ -114,7 +121,11 @@ std::vector<harness::ChatMessage> compact_history(const harness::Harness& harnes
 
     harness::ChatRequest request;
     request.model = model;
-    request.messages = conversation;
+    // Tool output is condensed before the conversation is (26c): the
+    // summariser reads each result as its stub, since the answers that used
+    // them carry what mattered -- and a whole file would be most of what it
+    // read.
+    request.messages = stub_tool_results(conversation, conversation.size()).messages;
     request.messages.push_back(harness::ChatMessage::user(std::string{kSummaryPrompt}));
     // Not a turn of the conversation: on the chat's own local model it runs
     // on a context of its own, and the conversation's cache is untouched

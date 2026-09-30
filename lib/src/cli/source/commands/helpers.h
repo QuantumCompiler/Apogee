@@ -12,6 +12,7 @@
 
 #include "agent/fetch_url.h"
 #include "agent/tool.h"
+#include "agentloop/budget.h"
 #include "agentloop/rag.h"
 #include "backends/http_client.h"
 #include "commands/status_line.h"
@@ -117,12 +118,13 @@ struct RagChoice {
 /// cannot assemble the facts differently.
 ///
 /// `conversation` is the backend the chat is on, where there is one: what
-/// `rerank: on` falls back to when no utility model is set.
+/// `rerank: on` falls back to when no utility model is set. `budget` is the
+/// turn's context budget (26c): what is injected fits its retrieval share.
 [[nodiscard]] agentloop::RagResult retrieve_for_collection(
     const harness::Harness& harness, const harness::Config& config, std::string_view collection,
     const std::string& question, int limit, std::string_view retriever_flag,
     std::string_view rerank_flag, const harness::CancellationToken& cancellation,
-    std::string_view conversation = {});
+    std::string_view conversation = {}, const agentloop::TurnBudget& budget = {});
 
 /// The backend a helper `role` runs on for a conversation on `conversation`
 /// (26b): the role's pointer, else the conversation's own backend -- through

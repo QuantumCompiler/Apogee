@@ -204,7 +204,7 @@ Both were verified against a build that deliberately calls `listen()`. The symbo
 
 ## Milestone F — The shared agent loop
 
-**Goal.** Extract the model→tool→model loop behind an observer **before** the surfaces multiply, not after. That ordering is Ommi's most load-bearing sequencing lesson: it is what kept its four front-ends consistent, and what made deleting an entire front-end a local change rather than a rewrite. `apogee complete --tools` is the first consumer; chat and serve become thin adapters over the same `run()`.
+**Goal.** Extract the model→tool→model loop behind an observer **before** the surfaces multiply, not after. That ordering is Ommi's most load-bearing sequencing lesson: it is what kept its four front-ends consistent, and what made deleting an entire front-end a local change rather than a rewrite. `apogee complete --tools` is the first consumer; chat and serve become thin adapters over the same `run()`. From 2026-09-28 (26c), every request `run()` sends is assembled against the model's window.
 
 ### 2026-08-26 — `agentloop::run`, the tool registry, and `ask_user`
 
@@ -241,6 +241,74 @@ The layering check was **extended to cover `agentloop/` and `agent/`**, which CL
 **Not done: the live-API half** of the Anthropic acceptance criterion. The fixture-automated half is covered by `agentloop/anthropic_loop_test.cpp`, which drives the real provider through the real loop on recorded SSE. Running it against the live API needs a key and a human — worth doing once before the release closes.
 
 ---
+
+### 2026-09-28 — `context-budget` (backlog item 26c): what is sent, sized to the window
+
+**Why.** Every source that added to a request picked its own size. Retrieval injected `--rag-limit` chunks. The tools capped their own output (64 KiB, 16 KiB, 8 KiB). A tool result stayed in history, whole, for the rest of the chat. The history was measured only to warn at 80% and compact at 90%. On a cloud model that is waste. On a local one it is time -- every token is read at about a hundred a second on a 27B -- and crowding, because a small model's attention degrades as unrelated text piles up. The attachments and recall this track adds would make fixed caps untenable.
+
+**What was built**
+
+- [x] **`agentloop/budget.h/.cpp`**, used by every surface through the one loop.
+  - `ContextBudget` is the model's window and the answer's reserve: the request's `max_tokens`, else the backend's, else 4,096, and never more than half the window.
+  - It divides what is left into shares: attachments 30%, retrieval and recall 20%, tool results 25%, history the rest.
+  - `TurnBudget` adds the counting. It is exact where the provider can count (a loaded local model renders and tokenizes the whole request, tool definitions included). Elsewhere it estimates messages, tool calls and tool definitions at four characters a token, and says it did.
+- [x] **A finished turn's tool results are sent as stubs** (`stub_tool_results`). Each is one line: `[read_file({"path":"big.txt"}) returned 57 KB; not kept after its turn -- call it again if you need it.]`
+  - It keeps the link to its call, so the request stays well formed.
+  - Only what is **sent** changes: the saved transcript keeps every result whole.
+  - A result of 512 bytes or less is kept whole, since a stub would be no smaller. So is every `ask_user` answer, since those are the user's own words.
+  - It needs no window, so it applies to every backend. Said once a turn under `--verbose`: `earlier turns' tool results sent as 1 stub (57 KB not re-sent)`.
+- [x] **Retrieval asks for its share.** `RagTurn::budget`, passed by chat, `complete`, `analyze` and `serve` through `retrieve_for_collection`, injects the leading chunks that fit `share(Retrieval)`. `fitting_prefix` finds how many by bisection, counting exactly where it can. The retrieval line says what was left out: `5 of 12 chunks fit the context budget`. A graph section that cannot fit even alone is dropped, and said.
+- [x] **An overflow is trimmed in reverse priority** (`assemble_request`), only when the whole request would not fit the window after the reserve. Each source goes first down to its share, then below it:
+  1. earlier exchanges, oldest first, to none, each with its calls and their results;
+  2. this turn's tool results, oldest first, to their share, then to the newest alone;
+  3. the injected context, from its end.
+
+  The system prompt, the tools' environment note, the question and the newest result are never trimmed. Every trim is said as a notice, once while it holds: `context budget: 2 earlier exchanges not sent; 1 of this turn's tool results sent as a stub`. That is `[warn]` on the terminal, and a `notice` event in machine mode and on `serve`. A request that still cannot fit is sent, and said to be over.
+- [x] **An unknown window never reads as room.** Nothing is sized or trimmed by it, and the fixed caps stand. `share()` is 0 there, so a caller must ask `known()` rather than read 0 as "nothing fits".
+- [x] **A request whose bytes fit is never counted.** A token covers at least a byte, so this shortcut cannot be mistaken, where an estimate could be, several times over, on text that tokenizes densely. Only a request near its window is rendered and tokenized.
+- [x] **Measured and compacted as sent.** `measure_context` counts the conversation with its stubs, so a chat that read a big file is not compacted for what it no longer sends. Compaction shows the summariser the stubs, so tool output is condensed before conversation.
+
+**On real weights** (greedy, `--verbose` lines, against a build of `ea75dea` -- the installed binary, which predates this item and sends the same requests otherwise):
+
+- **A five-turn chat on Qwen3.8-27B** (Q4_K_M, a 32K window) that reads a 58 KB file on its first turn. The answers were word for word the same on both builds.
+
+  | | before | with the budget |
+  |---|---|---|
+  | turn 1, after the read | 18,833 | 18,833 |
+  | turn 2 | 18,907 | 4,137 |
+  | turn 3 | 18,935 | 4,165 |
+  | turn 4 | 18,961 | 4,191 |
+  | turn 5 | 19,005 | **4,235** |
+
+  Prompt tokens per request. Turn five is 78% smaller, and the window 13% used instead of 58%. Turn two read just 150 new tokens: the stub changes the prompt inside turn one, and 25c's checkpoint at turn one's question covers exactly that.
+- **Time was not a clean measure.** Other work on the machine moved an identical first turn between 186 and 282 seconds. Turns two to five took about 44 seconds on both builds, since this hybrid model's generation barely depends on its context length. The gain here is room and attention, not seconds.
+- **`--rag-limit 12` against a small window.** Qwen3-VL-8B on a 4,096-token window with `max_tokens: 512`, over the backlog's 18 documents (258 chunks). The new build said `5 of 12 chunks fit the context budget` and sent a 607-token prompt; the old one injected all 12 in 1,571. Both answers were right.
+- **A large cloud window** was not called. That behaviour is pinned instead by a test: a short conversation with retrieval on a 200,000-token window is sent exactly as before.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The shares | Attachments 30%, retrieval and recall 20%, tool results 25%, history the rest *(default taken)* | Each a field of `BudgetShares`, not a constant in the loop; tuning them is a one-line change. |
+| Finished turns' tool results | Sent as stubs, on every backend *(defaults taken)* | The answer that used a result carries what mattered, and the model can call the tool again. A cloud window gains the same discipline; it only trims less. |
+| How the shares act | Retrieval capped when it asks; everything else only on overflow, in reverse priority, each to its share and then below | On a window with room nothing changes, so the loop's conformance suite passes untouched. |
+| The reserve | The request's `max_tokens`, else the backend's, else 4,096, at most half the window | 4,096 is the larger of the providers' own defaults; past half the window, the question would have no room. |
+| Kept whole | A result of 512 bytes or less, and every `ask_user` answer | A stub would be no smaller; the answers are the user's own words. |
+| Counting | Exact where the provider counts, else four characters a token; a request whose bytes fit is not counted | Exact where possible, never mistaken: the byte ceiling cannot be exceeded, where an estimate on dense text can be several times off. |
+| Reporting | Stubs under `--verbose`, every trim as a notice once while it holds | Stubs happen every turn after tools, and would be noise; a trim changes what the model sees, and is never silent. |
+
+**Guardrails, each mutation-tested (56 mutants, all caught), run in separate git worktrees against the whole unit suite.** 48 of the first 55 were caught on the first pass. The seven that survived were caught once tests were added for what they exposed, and a 56th, for an oversized graph section, was caught by the test written for it.
+- **The arithmetic:** the reserve not held back, uncapped, or taken from neither the request nor the backend; an unknown window read as room; a share of the window instead of what is left, or another source's share; the estimate missing tool calls or definitions; the exact count never asked, or marked estimated.
+- **The stubs:** the turn's start taken from its first user message; this turn's results, the small ones or `ask_user`'s answers stubbed (the answer recognised by its call only); none sent, or none counted; the call unnamed, its arguments unclipped or clipped inside a character; the size in bytes.
+- **The assembly:** no stubs sent; the byte shortcut taken always; exchanges never dropped, the system prompt dropped with them, or only an exchange's question dropped, leaving its answer; this turn's results never stubbed, or the newest too; the injected context never dropped, or dropped before this turn's results; each trim unsaid, a request over its window said nowhere, or an unknown window trimmed anyway.
+- **Retrieval:** never fitted, fitted but unsaid, the count not cut, another source's share, `fitting_prefix` fitting all, one too many or, on an unknown window, none; a graph section too big even alone kept.
+- **The loop and its surfaces:** the assembly unused, its markers not the request's, the stubs or a trim unsaid, a trim said at every step, the request's own `max_tokens` ignored; `measure_context` measuring the transcript whole; compaction shown whole tool output; the budget not passed on by `retrieve_for_collection`, or not built by chat, `complete` or `serve`.
+
+**Not verified, and found on the way.**
+- **Nothing uses the attachments share yet.** [26d](../backlog/attachments-documents.md) will. The place its overflow trim belongs, between the two passes over this turn's tool results, is marked in `budget.cpp`.
+- **One turn's tool results are not capped by their share** unless the whole request overflows. A single 60 KB read on a 32K window still goes in whole on its own turn, and becomes a stub on the next. Cutting what a model has just asked for, while it fits, was judged worse than the crowding.
+- **A retrieval turn still re-reads a local model's whole prompt.** The injected block opens the request, so it changes every turn. 26c sizes that block and leaves where it goes alone; moving it is its own change.
+- **A cloud model's overflow is judged on the estimate**, four characters a token. On text that tokenizes densely it can be under by several times. A cloud window is large, so trimming there needs the request to be near a window that big.
 
 ## Milestone G — The terminal UX layer
 
@@ -2504,7 +2572,7 @@ Also checked:
 - **Windows.** Its paths (`cmd`, `localtime_s` and `_mkgmtime`, the zone's long name) are built by CI only.
 - **The 5 MB acceptance** is proven by a test that runs a real `awk` through the real shell. No model was asked to run one, since `run_command` asks first.
 - **Two tools stay uncapped.** `search_files` and `list_directory` were outside the item.
-- **A file under 64 KiB can still fill a small window.** Sizing tool results to the real window is [26c](../backlog/context-budget.md)'s work.
+- **A file under 64 KiB can still fill a small window.** Sizing what is sent to the real window became [26c](#milestone-f--the-shared-agent-loop)'s work, shipped 2026-09-28: a finished turn's results are sent as stubs.
 
 ### 2026-09-28 — `web-search-searxng` (backlog item 25e): search through the user's own SearXNG
 

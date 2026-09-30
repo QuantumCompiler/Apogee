@@ -496,3 +496,59 @@ TEST_CASE("a utility model summarises a large tool result, and compacts a full c
     CHECK(summarised);
     CHECK(replies(session).back() == "second answer");
 }
+
+TEST_CASE("the next turn sends an earlier turn's tool result as a stub, and says so",
+          "[chat][cli][budget]") {
+    // 6 KB: under the utility model's summary threshold, so read whole.
+    const nlohmann::json chatty = nlohmann::json::array(
+        {{{"tool_calls", {{{"name", "read_file"}, {"arguments", {{"path", "notes.log"}}}}}}},
+         {{"text", "it is a log"}},
+         {{"text", "second answer"}}});
+    HelperChat chat{chatty, {"Log Notes"}};
+    const std::filesystem::path work = chat.home.path() / "work";
+    std::filesystem::create_directories(work);
+    {
+        std::ofstream log{work / "notes.log", std::ios::binary};
+        for (int line = 0; line < 200; ++line) {
+            log << "INFO worker processed a batch\n";
+        }
+    }
+    {
+        std::ofstream{chat.config_path, std::ios::binary | std::ios::app}
+            << "tools:\n  fs_root: " << work.string() << "\n";
+    }
+    REQUIRE(chat.run({"chat", "--verbose", "--tools"}, "what is in notes.log?\nand then?\n") == 0);
+    INFO(chat.err);
+    CHECK(chat.err.find("earlier turns' tool results sent as 1 stub") != std::string::npos);
+    // The transcript keeps the result whole.
+    const apogee::logger::Session session = HelperChat::only_session();
+    bool whole = false;
+    for (const ChatMessage& message : session.messages) {
+        if (message.role == apogee::harness::Role::Tool &&
+            message.content.plain_text().find("INFO worker processed a batch") !=
+                std::string::npos) {
+            whole = true;
+        }
+    }
+    CHECK(whole);
+    CHECK(replies(session).back() == "second answer");
+}
+
+TEST_CASE("chat and complete fit retrieval to the model's window, and say what they left out",
+          "[chat][rag][cli][budget]") {
+    // A 400-token window: its retrieval share has no room for an excerpt.
+    HelperChat chat{
+        texts({"a chat answer", "a complete answer"}), {"Budget Notes"}, "    context_size: 400\n"};
+    const std::filesystem::path docs = chat.home.path() / "docs";
+    std::filesystem::create_directories(docs);
+    std::ofstream{docs / "heron.md", std::ios::binary}
+        << "Project Heron is the billing ledger. It deploys to Frankfurt.\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"embed", "ingest", "notes", docs.string()}) == 0);
+
+    REQUIRE(chat.run({"chat", "--verbose", "--rag", "notes"}, "Where does Heron deploy?\n") == 0);
+    CHECK(chat.err.find("chunks fit the context budget") != std::string::npos);
+
+    REQUIRE(chat.run({"complete", "--verbose", "--rag", "notes", "Where does Heron deploy?"}) == 0);
+    CHECK(chat.err.find("chunks fit the context budget") != std::string::npos);
+}

@@ -213,3 +213,62 @@ backends:
     CHECK_FALSE(usage.exact);  // no provider counting API is wired yet
     CHECK(usage.should_compact());
 }
+
+// ---------------------------------------------------------------------------
+// The context budget's reading (26c)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A finished turn that read a 40 KB file, and a question after it.
+std::vector<ChatMessage> after_a_big_read() {
+    ChatMessage calling = ChatMessage::assistant("");
+    calling.tool_calls = {apogee::harness::ToolCall{"c1", "read_file", R"({"path":"big.log"})"}};
+    apogee::harness::ToolResult read;
+    read.tool_call_id = "c1";
+    read.name = "read_file";
+    read.content = std::string(40000, 'l');
+    return {ChatMessage::user("what is in big.log?"), calling, ChatMessage::from_tool_result(read),
+            ChatMessage::assistant("forty thousand l's"), ChatMessage::user("and now?")};
+}
+
+}  // namespace
+
+TEST_CASE("a conversation is measured as it is sent: an earlier turn's result as its stub",
+          "[agentloop][context][budget]") {
+    // Measured whole, 40 KB is ~10,000 tokens and would compact a 4,096-token
+    // conversation that sends a few hundred.
+    const Config config = apogee::harness::parse_config(R"(
+backends:
+  small:
+    type: mock
+    context_size: 4096
+)",
+                                                        "<test>");
+    Harness harness{config};
+    harness.register_provider("small", std::make_shared<MockProvider>(MockProvider::Options{}));
+    harness.use_default_router();
+
+    const ContextUsage usage = measure_context(harness, after_a_big_read(), "small");
+    CHECK(usage.used_tokens < 200);
+    CHECK_FALSE(usage.should_warn());
+}
+
+TEST_CASE("compaction reads tool output as stubs: tool output goes before conversation",
+          "[agentloop][compact][budget]") {
+    Harness harness{Config{}};
+    MockProvider::Options options;
+    options.backend_name = "mock";
+    options.turns = {MockTurn{.text = "They read a log."}};
+    const auto mock = std::make_shared<MockProvider>(std::move(options));
+    harness.register_provider("mock", mock);
+    harness.use_default_router();
+
+    const std::vector<ChatMessage> history = after_a_big_read();
+    (void)compact_history(harness, history, "mock");
+
+    REQUIRE(mock->requests().size() == 1);
+    for (const ChatMessage& message : mock->requests().front().messages) {
+        CHECK(message.content.plain_text().size() < 1000);
+    }
+}

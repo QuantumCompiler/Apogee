@@ -255,7 +255,8 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         }
         const agentloop::RagResult retrieved = retrieve_for_collection(
             harness, config, rag_choice.collection, rewrite.query, rag.limit, session.retriever,
-            session.rerank, {}, session.backend);
+            session.rerank, {}, session.backend,
+            agentloop::turn_budget(harness, session.backend, session.params.max_tokens));
         if (retrieved.error.empty() && !retrieved.prefix.empty()) {
             loop_options.transient_prefix = retrieved.prefix;
         }

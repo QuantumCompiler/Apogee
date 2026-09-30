@@ -235,9 +235,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     const RagChoice rag_choice =
         choose_rag_collection(flags.rag_option->count() > 0, flags.rag, config.auto_rag);
     if (rag_choice.active()) {
-        const agentloop::RagResult rag =
-            retrieve_for_collection(harness, config, rag_choice.collection, prompt, flags.rag_limit,
-                                    flags.retriever, flags.rerank, {}, model);
+        const agentloop::RagResult rag = retrieve_for_collection(
+            harness, config, rag_choice.collection, prompt, flags.rag_limit, flags.retriever,
+            flags.rerank, {}, model, agentloop::turn_budget(harness, model, max_tokens));
         // Explicitly asked for and impossible -- an `--retriever vector` with
         // no vectors -- is the user's request failing, not a fallback.
         if (!rag.error.empty() && !flags.retriever.empty()) {

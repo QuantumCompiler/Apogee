@@ -73,9 +73,10 @@ agentloop::RagResult retrieve_for_collection(
     const harness::Harness& harness, const harness::Config& config, std::string_view collection,
     const std::string& question, int limit, std::string_view retriever_flag,
     std::string_view rerank_flag, const harness::CancellationToken& cancellation,
-    std::string_view conversation) {
+    std::string_view conversation, const agentloop::TurnBudget& budget) {
     agentloop::RagTurn turn;
     turn.conversation = std::string{conversation};
+    turn.budget = budget;
     turn.store_path = collection_path(collection);
     turn.question = question;
     turn.limit = limit;

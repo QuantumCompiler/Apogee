@@ -651,7 +651,8 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
             if (rag_choice.active()) {
                 const agentloop::RagResult rag = retrieve_for_collection(
                     harness, config, rag_choice.collection, question, flags->rag_limit,
-                    flags->retriever, flags->rerank, {}, model);
+                    flags->retriever, flags->rerank, {}, model,
+                    agentloop::turn_budget(harness, model, max_tokens));
                 if (!rag.error.empty() && !flags->retriever.empty()) {
                     fail_user(rag.error);
                 }

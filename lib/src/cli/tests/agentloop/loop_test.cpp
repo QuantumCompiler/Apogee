@@ -807,3 +807,180 @@ TEST_CASE("a tool that says it cannot work is withdrawn for the rest of the turn
     (void)apogee::agentloop::run(*next.harness, next.history, options_with(registry));
     CHECK(offered(next.provider->requests().front(), "search"));
 }
+
+// ---------------------------------------------------------------------------
+// The context budget (26c)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("an earlier turn's tool result is sent as a stub, and the transcript keeps it whole",
+          "[agentloop][budget]") {
+    Fixture f = make_fixture({text_turn("the second answer")});
+    ChatMessage calling = ChatMessage::assistant("");
+    calling.tool_calls = {ToolCall{"c1", "read_file", R"({"path":"big.log"})"}};
+    apogee::harness::ToolResult read;
+    read.tool_call_id = "c1";
+    read.name = "read_file";
+    read.content = std::string(4000, 'l');
+    f.history = {ChatMessage::user("what is in big.log?"), calling,
+                 ChatMessage::from_tool_result(read), ChatMessage::assistant("lines of l"),
+                 ChatMessage::user("and now?")};
+    Options options;
+    options.model = "mock";
+    NoticeReporter reporter;
+    (void)apogee::agentloop::run(*f.harness, f.history, options, reporter);
+
+    const auto& sent = f.provider->requests().front().messages;
+    REQUIRE(sent.size() == 5);
+    CHECK(sent[2].content.plain_text() ==
+          R"([read_file({"path":"big.log"}) returned 4 KB; not kept after its turn -- call it )"
+          "again if you need it.]");
+    CHECK(sent[2].tool_call_id == "c1");
+    CHECK(f.history[2].content.plain_text() == std::string(4000, 'l'));
+    CHECK(
+        reporter.progress ==
+        std::vector<std::string>{"earlier turns' tool results sent as 1 stub (4 KB not re-sent)"});
+    CHECK(reporter.notices.empty());
+}
+
+TEST_CASE("a request over its window is trimmed, oldest exchanges first, and says so",
+          "[agentloop][budget]") {
+    const Config config = apogee::harness::parse_config(R"(
+backends:
+  small:
+    type: mock
+    context_size: 1000
+    max_tokens: 100
+)",
+                                                        "<test>");
+    MockProvider::Options mock;
+    mock.backend_name = "small";
+    mock.turns = {text_turn("fits now")};
+    const auto provider = std::make_shared<MockProvider>(std::move(mock));
+    Harness harness{config};
+    harness.register_provider("small", provider);
+    harness.use_default_router();
+
+    // Three earlier exchanges of ~400 estimated tokens each, about 1,200 in
+    // all, against 900 after the reserve: the oldest must go.
+    std::vector<ChatMessage> history{ChatMessage::system("be brief")};
+    for (const char fill : {'1', '2', '3'}) {
+        history.push_back(ChatMessage::user(std::string(800, fill)));
+        history.push_back(ChatMessage::assistant(std::string(800, fill)));
+    }
+    history.push_back(ChatMessage::user("the question"));
+    const std::vector<ChatMessage> saved = history;
+    Options options;
+    options.model = "small";
+    NoticeReporter reporter;
+    (void)apogee::agentloop::run(harness, history, options, reporter);
+
+    const auto& sent = provider->requests().front().messages;
+    REQUIRE(sent.size() == 6);
+    CHECK(sent.front().content.plain_text() == "be brief");
+    CHECK(sent[1].content.plain_text() == std::string(800, '2'));
+    CHECK(sent.back().content.plain_text() == "the question");
+    CHECK(reporter.notices ==
+          std::vector<std::string>{"context budget: 1 earlier exchange not sent"});
+    // What was sent changed; what was said did not.
+    REQUIRE(history.size() == saved.size() + 1);
+    CHECK(history[1].content.plain_text() == std::string(800, '1'));
+}
+
+TEST_CASE("on a large window a short conversation is sent exactly as it was before the budget",
+          "[agentloop][budget]") {
+    const Config config = apogee::harness::parse_config(R"(
+backends:
+  cloud:
+    type: mock
+    context_size: 200000
+)",
+                                                        "<test>");
+    MockProvider::Options mock;
+    mock.backend_name = "cloud";
+    mock.turns = {text_turn("the answer")};
+    const auto provider = std::make_shared<MockProvider>(std::move(mock));
+    Harness harness{config};
+    harness.register_provider("cloud", provider);
+    harness.use_default_router();
+
+    std::vector<ChatMessage> history{ChatMessage::system("be brief"), ChatMessage::user("hello"),
+                                     ChatMessage::assistant("hi"), ChatMessage::user("and?")};
+    const std::vector<ChatMessage> before = history;
+    Options options;
+    options.model = "cloud";
+    options.transient_prefix = {ChatMessage::system("retrieved: four excerpts")};
+    NoticeReporter reporter;
+    (void)apogee::agentloop::run(harness, history, options, reporter);
+
+    const apogee::harness::ChatRequest& sent = provider->requests().front();
+    const std::vector<ChatMessage> expected =
+        apogee::agentloop::splice_transient(before, options.transient_prefix, 0);
+    REQUIRE(sent.messages.size() == expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        CHECK(sent.messages[index].content.plain_text() == expected[index].content.plain_text());
+    }
+    CHECK(sent.transient.start == 0);
+    CHECK(sent.transient.length == 1);
+    CHECK(reporter.notices.empty());
+    CHECK(reporter.progress.empty());
+}
+
+namespace {
+
+/// A mock on a 1,000-token window, and three earlier exchanges of ~400
+/// estimated tokens each before `question`.
+struct Crowded {
+    std::shared_ptr<MockProvider> provider;
+    std::unique_ptr<Harness> harness;
+    std::vector<ChatMessage> history{ChatMessage::system("be brief")};
+
+    Crowded(std::string_view extra, std::vector<MockTurn> turns) {
+        const Config config = apogee::harness::parse_config(
+            "backends:\n  small:\n    type: mock\n    context_size: 1000\n" + std::string{extra},
+            "<test>");
+        MockProvider::Options mock;
+        mock.backend_name = "small";
+        mock.turns = std::move(turns);
+        provider = std::make_shared<MockProvider>(std::move(mock));
+        harness = std::make_unique<Harness>(config);
+        harness->register_provider("small", provider);
+        harness->use_default_router();
+        for (const char fill : {'1', '2', '3'}) {
+            history.push_back(ChatMessage::user(std::string(800, fill)));
+            history.push_back(ChatMessage::assistant(std::string(800, fill)));
+        }
+        history.push_back(ChatMessage::user("the question"));
+    }
+};
+
+}  // namespace
+
+TEST_CASE("the request's own max_tokens is the reserve the budget holds back",
+          "[agentloop][budget]") {
+    // No max_tokens on the backend: the default reserve would leave 500, and
+    // cost two exchanges; the request's 100 leaves 900, and costs one.
+    Crowded crowded{"", {text_turn("fits now")}};
+    Options options;
+    options.model = "small";
+    options.max_tokens = 100;
+    NoticeReporter reporter;
+    (void)apogee::agentloop::run(*crowded.harness, crowded.history, options, reporter);
+    CHECK(reporter.notices ==
+          std::vector<std::string>{"context budget: 1 earlier exchange not sent"});
+}
+
+TEST_CASE("a trim that holds across a turn's steps is said once", "[agentloop][budget]") {
+    // Step one drops the oldest exchange; so does step two, after a small
+    // tool result. Said at every step, the same line would print twice.
+    Crowded crowded{"    max_tokens: 100\n",
+                    {tool_turn({ToolCall{"c1", "echo", "{}"}}), text_turn("done")}};
+    ToolRegistry registry;
+    registry.add(echo_tool());
+    Options options = options_with(registry);
+    options.model = "small";
+    NoticeReporter reporter;
+    (void)apogee::agentloop::run(*crowded.harness, crowded.history, options, reporter);
+    REQUIRE(crowded.provider->requests().size() == 2);
+    CHECK(reporter.notices ==
+          std::vector<std::string>{"context budget: 1 earlier exchange not sent"});
+}

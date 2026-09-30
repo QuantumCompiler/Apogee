@@ -315,6 +315,8 @@ add_library(apogee_core STATIC
     agentloop/loop.cpp
     agentloop/content.h
     agentloop/content.cpp
+    agentloop/budget.h
+    agentloop/budget.cpp
     agentloop/question.h
     agentloop/question.cpp
     agentloop/structured.h
