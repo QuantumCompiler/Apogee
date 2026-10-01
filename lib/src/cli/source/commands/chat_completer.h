@@ -41,6 +41,9 @@ enum class ChatVerb : std::uint8_t {
     Rerank,
     Branch,
     Capture,
+    Attach,
+    Attachments,
+    Detach,
     Exit,
 };
 
@@ -52,6 +55,10 @@ enum class ArgumentValues : std::uint8_t {
     /// `off`, `auto`, and the backends.
     RerankTargets,
     CaptureStatuses,
+    /// Files and folders, as `@` completes them, without the `@` (26d).
+    Paths,
+    /// What is attached to this chat (26d).
+    AttachmentNames,
 };
 
 /// One row of the table.
@@ -102,6 +109,8 @@ struct ChatCompletionSources {
     std::vector<NamedChoice> backends;
     /// What `@` paths are relative to.
     std::filesystem::path working_directory;
+    /// What is attached to the chat, for `/detach` (26d). Empty offers none.
+    std::function<std::vector<std::string>()> attachment_names;
     DirectoryLister list;
 };
 

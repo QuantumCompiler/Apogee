@@ -175,6 +175,9 @@ struct DriverMessage {
         User,
         /// An answer to a pending `ask_user` question.
         Answer,
+        /// A file, folder or glob to attach to the chat (26d); `text` is its
+        /// path.
+        Attach,
         /// A line that parsed but carried no recognised type.
         Unknown,
     };
@@ -192,6 +195,7 @@ struct DriverMessage {
 /// ```jsonl
 /// {"type":"user","text":"what is 2+2?"}
 /// {"type":"answer","text":"yes"}
+/// {"type":"attach","path":"report.pdf"}
 /// ```
 [[nodiscard]] DriverMessage parse_driver_line(std::string_view line);
 

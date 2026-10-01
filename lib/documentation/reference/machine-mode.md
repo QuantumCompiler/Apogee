@@ -83,10 +83,22 @@ One JSON object per line on stdin.
 ```jsonl
 {"type":"user","text":"what is 2+2?"}
 {"type":"answer","text":"Yes"}
+{"type":"attach","path":"report.pdf"}
 ```
 
 An unrecognised line is ignored rather than fatal — the tolerance this protocol
 asks of drivers, honoured in the other direction.
+
+### Attaching files
+
+`attach` attaches a file, a folder or a glob to the chat, as `/attach` does at a
+terminal: `path` is relative to the child's working directory. It is indexed in
+the background and settles before the next `user` message is answered. Each
+outcome arrives as a `notice`: what was attached, and how it will reach the model
+(inlined whole, or its excerpts retrieved each turn); a file skipped, and why. A
+folder over 500 files or 50 MB is refused, since there is no terminal to ask on;
+attach a narrower folder or a glob. A `user` message that mentions `@path` attaches
+that path the same way, and is answered as typed.
 
 Closing stdin ends the session: the child drains its queued output, persists the
 conversation, and exits cleanly.

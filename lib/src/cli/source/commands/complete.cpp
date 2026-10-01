@@ -6,6 +6,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,7 @@
 #include "ansi/ansi.h"
 #include "backends/factory.h"
 #include "commands/ask_prompt.h"
+#include "commands/chat_attachments.h"
 #include "commands/cli_reporter.h"
 #include "commands/embed.h"
 #include "commands/helpers.h"
@@ -41,6 +43,8 @@ struct CompleteFlags {
     std::string system_prompt;
     std::string context;
     std::vector<std::string> images;
+    /// Files, folders and globs to attach (26d).
+    std::vector<std::string> attach;
     double temperature = 0.0;
     std::int64_t max_tokens = 0;
     bool quiet = false;
@@ -110,6 +114,58 @@ std::vector<harness::ContentPart> load_attachments(const CompleteFlags& flags) {
     return attachments;
 }
 
+/// A one-shot's attachments (26d): indexed into a temporary store of its own,
+/// removed at exit -- there is no chat to keep them with -- with the other
+/// chats' indexes still searched first, so nothing already embedded is
+/// embedded again.
+class OneShotAttachments {
+public:
+    OneShotAttachments(const harness::Harness& harness, const std::string& model,
+                       std::optional<std::int64_t> max_tokens, ChatAttachments::Hooks hooks)
+        : folder_{std::filesystem::temp_directory_path() /
+                  ("apogee-attach-" + std::to_string(std::random_device{}()))} {
+        session_.backend = model;
+        session_.params.max_tokens = max_tokens;
+        hooks.save = false;
+        attached_ = std::make_unique<ChatAttachments>(harness, session_, folder_ / "index.db",
+                                                      std::move(hooks));
+    }
+
+    ~OneShotAttachments() {
+        attached_.reset();
+        std::error_code code;
+        std::filesystem::remove_all(folder_, code);
+    }
+
+    OneShotAttachments(const OneShotAttachments&) = delete;
+    OneShotAttachments& operator=(const OneShotAttachments&) = delete;
+    OneShotAttachments(OneShotAttachments&&) = delete;
+    OneShotAttachments& operator=(OneShotAttachments&&) = delete;
+
+    [[nodiscard]] ChatAttachments& attached() noexcept {
+        return *attached_;
+    }
+
+private:
+    std::filesystem::path folder_;
+    logger::Session session_;
+    std::unique_ptr<ChatAttachments> attached_;
+};
+
+/// The prompt's attachments, indexed and settled, and what the one request
+/// sends of them: `user_message` is where the prompt sits among the messages.
+ChatAttachments::Turn attach_for_prompt(OneShotAttachments& attachments, const CompleteFlags& flags,
+                                        const std::string& prompt, std::size_t user_message,
+                                        const agentloop::TurnBudget& budget) {
+    std::error_code code;
+    const std::filesystem::path working_directory = std::filesystem::current_path(code);
+    for (const std::string& spec : flags.attach) {
+        (void)attachments.attached().attach(spec, working_directory);
+    }
+    attachments.attached().settle();
+    return attachments.attached().for_turn(user_message, prompt, budget, flags.rag_limit, {});
+}
+
 /// Runs one prompt against one backend, streaming to stdout.
 /// Returns the finish reason so a caller can note truncation.
 harness::ChatResponse run_one(const harness::Harness& harness, const harness::Config& config,
@@ -150,6 +206,24 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         machine_options.max_tokens = max_tokens;
         machine_options.stream_answer = true;
         machine_options.summary_model = named_utility(config);
+        std::optional<OneShotAttachments> machine_attachments;
+        if (!flags.attach.empty()) {
+            machine_attachments.emplace(
+                harness, model, max_tokens,
+                ChatAttachments::Hooks{
+                    .say = [&reporter](const std::string& line,
+                                       bool /*warning*/) { reporter.on_notice(line); },
+                    .progress = {},
+                    .confirm_large = {},
+                    .save = false});
+            ChatAttachments::Turn turn =
+                attach_for_prompt(*machine_attachments, flags, prompt, request.messages.size() - 1,
+                                  agentloop::turn_budget(harness, model, max_tokens));
+            machine_options.inline_attachments = std::move(turn.inlined);
+            if (turn.retrieved.has_value() && turn.retrieved->error.empty()) {
+                machine_options.transient_prefix = turn.retrieved->prefix;
+            }
+        }
 
         agent::ToolRegistry machine_registry;
         const auto machine_mcp = std::make_shared<mcp::Registry>();
@@ -232,12 +306,51 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     // The collection comes from the flag, else the config's `auto_rag` -- one
     // shared decision, so this surface and chat cannot disagree about which
     // wins. Either way the status line says what was injected and from where.
+    const agentloop::TurnBudget budget = agentloop::turn_budget(harness, model, max_tokens);
+    const ansi::Style& style = reporter_options.style;
+    std::optional<OneShotAttachments> attached;
+    std::int64_t share_used = 0;
+    if (!flags.attach.empty()) {
+        // The same core as chat's: an attachment that fits rides the prompt
+        // whole, and the others' excerpts are retrieved for it (26d).
+        attached.emplace(
+            harness, model, max_tokens,
+            ChatAttachments::Hooks{
+                .say =
+                    [&reporter, &style](const std::string& line, bool warning) {
+                        reporter.status().print_line(
+                            style.tag(warning ? ansi::Role::Warning : ansi::Role::Apogee) + " " +
+                            line);
+                    },
+                .progress =
+                    [&reporter, &style](const std::string& line) {
+                        if (line.empty()) {
+                            reporter.status().clear();
+                        } else {
+                            reporter.status().set(style.tag(ansi::Role::Apogee) + " " + line);
+                        }
+                    },
+                .confirm_large = {},
+                .save = false});
+        ChatAttachments::Turn turn =
+            attach_for_prompt(*attached, flags, prompt, request.messages.size() - 1, budget);
+        loop_options.inline_attachments = std::move(turn.inlined);
+        if (turn.retrieved.has_value()) {
+            if (turn.retrieved->error.empty() && !turn.retrieved->prefix.empty()) {
+                loop_options.transient_prefix = turn.retrieved->prefix;
+                share_used = turn.retrieved->tokens;
+            }
+            reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " +
+                                         describe_attachment_retrieval(*turn.retrieved));
+        }
+    }
+
     const RagChoice rag_choice =
         choose_rag_collection(flags.rag_option->count() > 0, flags.rag, config.auto_rag);
     if (rag_choice.active()) {
-        const agentloop::RagResult rag = retrieve_for_collection(
-            harness, config, rag_choice.collection, prompt, flags.rag_limit, flags.retriever,
-            flags.rerank, {}, model, agentloop::turn_budget(harness, model, max_tokens));
+        const agentloop::RagResult rag =
+            retrieve_for_collection(harness, config, rag_choice.collection, prompt, flags.rag_limit,
+                                    flags.retriever, flags.rerank, {}, model, budget, share_used);
         // Explicitly asked for and impossible -- an `--retriever vector` with
         // no vectors -- is the user's request failing, not a fallback.
         if (!rag.error.empty() && !flags.retriever.empty()) {
@@ -249,7 +362,8 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         // Whenever there is a prefix: the chunks, or the graph context that
         // survived a judge dropping every chunk.
         if (rag.error.empty() && !rag.prefix.empty()) {
-            loop_options.transient_prefix = rag.prefix;
+            loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
+                                                 rag.prefix.begin(), rag.prefix.end());
         }
         reporter.status().print_line(reporter_options.style.tag(role) + " " +
                                      describe_retrieval(rag_choice, rag));
@@ -345,6 +459,11 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
            "model), or off")
         ->type_name(kBackendValue);
     cmd->add_option("--image", flags->images, "Image file to attach (repeatable)")
+        ->type_name(kPathValue)
+        ->allow_extra_args(false);
+    cmd->add_option("--attach", flags->attach,
+                    "A file, folder or glob to attach: inlined when it fits, its excerpts "
+                    "retrieved when not (repeatable)")
         ->type_name(kPathValue)
         ->allow_extra_args(false);
     flags->temperature_option =

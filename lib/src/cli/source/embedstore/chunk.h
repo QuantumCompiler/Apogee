@@ -40,6 +40,31 @@ struct ChunkOptions {
     std::size_t overlap = 64;
 };
 
+/// Where one chunk sits in its text: bytes `[begin, end)`.
+struct TextSpan {
+    std::size_t begin = 0;
+    std::size_t end = 0;
+};
+
+/// The chunks of `text` as spans, exactly the chunks `chunk_text` returns.
+/// What a chunk's line or page range is read from, and what lets a document
+/// be rebuilt exactly from its overlapping chunks (26d).
+[[nodiscard]] std::vector<TextSpan> chunk_spans(std::string_view text,
+                                                const ChunkOptions& options = {});
+
+/// Numbers positions in a text by a separator: the line of an offset by
+/// `'\n'`, the page of one by the form feed `pdftotext` puts between pages.
+class PositionIndex {
+public:
+    PositionIndex(std::string_view text, char separator);
+
+    /// 1-based: the separators before `offset`, plus one.
+    [[nodiscard]] std::size_t number_at(std::size_t offset) const;
+
+private:
+    std::vector<std::size_t> separators_;
+};
+
 /// Splits `text` into chunks.
 ///
 /// Never returns a chunk that splits a codepoint. Whitespace-only input and

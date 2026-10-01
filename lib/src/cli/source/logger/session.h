@@ -25,7 +25,10 @@ namespace apogee::logger {
 /// A file without one is a **legacy** session: it is resumed best-effort with
 /// current defaults and flagged, rather than refused. Refusing would make a
 /// version bump destroy conversations.
-inline constexpr int kCurrentSchemaVersion = 1;
+///
+/// 2 (26d): `attachments`. An absent list means none, so a version 1 file
+/// reads as a chat with nothing attached.
+inline constexpr int kCurrentSchemaVersion = 2;
 
 /// Per-request settings, saved so a resumed session continues as it began.
 struct InferenceParams {
@@ -58,6 +61,34 @@ struct ResumeWarning {
 };
 
 [[nodiscard]] std::string_view to_string(WarningKind kind) noexcept;
+
+/// One file of an attachment (26d).
+struct AttachedFile {
+    /// What the model and the user call it: its path relative to the folder
+    /// the chat was in when it was attached, `/`-separated -- or its absolute
+    /// path, when it lies outside that folder. Citations use it.
+    std::string name;
+    /// Its absolute path when it was attached.
+    std::string path;
+    /// Its content's sha256: the key its chunks are indexed under, and what
+    /// another chat's index is searched for before anything is embedded.
+    std::string sha256;
+    /// How its text was read: `text`, `pdftotext` or `html`.
+    std::string reader;
+    std::uint64_t bytes = 0;
+};
+
+/// A file, folder or glob attached to the chat (26d).
+struct Attachment {
+    /// As the user named it: `report.pdf`, `src`, `docs/*.md`.
+    std::string name;
+    std::vector<AttachedFile> files;
+    /// The message its text rides, whole, when it was inlined; nullopt when
+    /// its excerpts are retrieved instead. The text itself is never saved --
+    /// it is rebuilt from the chat's index -- so the transcript keeps the
+    /// message as typed.
+    std::optional<std::size_t> inline_at;
+};
 
 /// One saved conversation.
 struct Session {
@@ -107,6 +138,9 @@ struct Session {
     /// a resumed session continues as it was last set.
     std::string retriever;
     std::string rerank;
+    /// What is attached to this chat, in the order attached (26d). Its index
+    /// is `attachments/<chat_id>.db`, deleted with the chat.
+    std::vector<Attachment> attachments;
 
     /// The name shown in listings: `custom_name` when set, else `title`, else
     /// the id.

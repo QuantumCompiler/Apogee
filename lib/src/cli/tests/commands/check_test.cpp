@@ -1557,3 +1557,35 @@ TEST_CASE("stored models are checked by the handle the other verbs take",
     CHECK(damaged->status == Status::Warn);
     CHECK(damaged->remedy == "apogee models repair m/safetensors/aaaaaaaaaaaa");
 }
+
+TEST_CASE("the doctor's Attachments section: converters, and the chats' indexes",
+          "[check][attachments]") {
+    const Install install;
+    install.seed();
+    {
+        const CheckReport report = run_checks(inputs_for(install));
+        const auto* pdf = row_with(report, "pdftotext");
+        REQUIRE(pdf != nullptr);
+        CHECK(pdf->section == "Attachments");
+        CHECK(pdf->status == Status::Ok);  // optional either way: never a fault
+        const auto* git = row_with(report, "git");
+        REQUIRE(git != nullptr);
+        CHECK(git->section == "Attachments");
+        const auto* indexes = row_with(report, "chat indexes");
+        REQUIRE(indexes != nullptr);
+        CHECK(indexes->detail == "none yet -- '/attach' in a chat creates its index");
+        // The folder is a layout row, private like the sessions.
+        CHECK(row_with(report, "attachments/") != nullptr);
+        const auto entry = std::ranges::find(apogee::harness::data_directories(), "attachments",
+                                             &apogee::harness::LayoutEntry::relative_path);
+        REQUIRE(entry != apogee::harness::data_directories().end());
+        CHECK(entry->private_mode);
+        CHECK(entry->user_data);
+    }
+    install.write("attachments/chat-1.db", std::string(2048, 'x'));
+    install.write("attachments/chat-1.db-wal", "w");
+    const CheckReport report = run_checks(inputs_for(install));
+    const auto* indexes = row_with(report, "chat indexes");
+    REQUIRE(indexes != nullptr);
+    CHECK(indexes->detail == "1 chat index(es), 1 MB -- each deleted with its chat");
+}

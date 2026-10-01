@@ -130,6 +130,16 @@ struct Stubbed {
 [[nodiscard]] Stubbed stub_tool_results(const std::vector<harness::ChatMessage>& messages,
                                         std::size_t before);
 
+/// An attachment inlined whole (26d): its text rides the user message at
+/// `message` in history, in what is sent only -- never in the transcript.
+struct InlineAttachment {
+    std::size_t message = 0;
+    /// Its name, as a trim reports it.
+    std::string name;
+    /// The block, as it is prepended to the message.
+    std::string text;
+};
+
 /// One request's messages, as the budget sends them.
 struct Assembly {
     std::vector<harness::ChatMessage> messages;
@@ -144,6 +154,9 @@ struct Assembly {
     std::size_t stubbed_bytes = 0;
     /// What overflow cost, one phrase each, for the user.
     std::vector<std::string> trims;
+    /// Inlined attachments this request could not carry: their exchange was
+    /// dropped, or the window was full even without them being anywhere else.
+    std::vector<std::string> inline_dropped;
 };
 
 /// Assembles `history` with `pinned` then `injected` spliced in at `at` --
@@ -151,11 +164,18 @@ struct Assembly {
 /// (retrieval, a review note) -- for a request shaped like `shape` (its model
 /// and tools; its messages are ignored). `turn_start` is where the turn in
 /// progress starts in `history`. See the file comment for the order.
+///
+/// `inlined` attachments are prepended to the user messages they ride. They
+/// are the highest priority the budget trims, so the last: an exchange
+/// dropped takes its attachment with it, and past the injected context an
+/// overflow strips them, oldest first. Each one not sent is named in
+/// `inline_dropped`.
 [[nodiscard]] Assembly assemble_request(const TurnBudget& budget, const harness::ChatRequest& shape,
                                         const std::vector<harness::ChatMessage>& history,
                                         const std::vector<harness::ChatMessage>& pinned,
                                         const std::vector<harness::ChatMessage>& injected,
-                                        std::size_t at, std::size_t turn_start);
+                                        std::size_t at, std::size_t turn_start,
+                                        const std::vector<InlineAttachment>& inlined = {});
 
 /// How many of `items` -- each a leading prefix, `render(k)` the text of the
 /// first k -- fit `share` tokens as one system message, counted by `budget`.

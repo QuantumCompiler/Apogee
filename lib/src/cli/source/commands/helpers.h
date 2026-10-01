@@ -106,6 +106,10 @@ struct RagChoice {
 /// injection is the failure mode**: a user who does not know context was added
 /// cannot tell why an answer went sideways, and that is doubly true when
 /// nothing on the command line asked for it.
+/// The status line for a turn's search of the chat's attachments (26d):
+/// excerpts, top score and the retriever, like a collection's.
+[[nodiscard]] std::string describe_attachment_retrieval(const agentloop::RagResult& result);
+
 [[nodiscard]] std::string describe_retrieval(const RagChoice& choice,
                                              const agentloop::RagResult& result);
 
@@ -119,12 +123,14 @@ struct RagChoice {
 ///
 /// `conversation` is the backend the chat is on, where there is one: what
 /// `rerank: on` falls back to when no utility model is set. `budget` is the
-/// turn's context budget (26c): what is injected fits its retrieval share.
+/// turn's context budget (26c): what is injected fits its retrieval share,
+/// less `share_used` -- what the chat's attachments already took (26d).
 [[nodiscard]] agentloop::RagResult retrieve_for_collection(
     const harness::Harness& harness, const harness::Config& config, std::string_view collection,
     const std::string& question, int limit, std::string_view retriever_flag,
     std::string_view rerank_flag, const harness::CancellationToken& cancellation,
-    std::string_view conversation = {}, const agentloop::TurnBudget& budget = {});
+    std::string_view conversation = {}, const agentloop::TurnBudget& budget = {},
+    std::int64_t share_used = 0);
 
 /// The backend a helper `role` runs on for a conversation on `conversation`
 /// (26b): the role's pointer, else the conversation's own backend -- through

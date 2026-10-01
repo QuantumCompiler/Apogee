@@ -165,6 +165,8 @@ add_library(apogee_core STATIC
     commands/chat.cpp
     commands/chat_completer.h
     commands/chat_completer.cpp
+    commands/chat_attachments.h
+    commands/chat_attachments.cpp
     commands/chat_history.h
     commands/chat_history.cpp
     commands/input_gate.h
@@ -317,6 +319,8 @@ add_library(apogee_core STATIC
     agentloop/content.cpp
     agentloop/budget.h
     agentloop/budget.cpp
+    agentloop/attachments.h
+    agentloop/attachments.cpp
     agentloop/question.h
     agentloop/question.cpp
     agentloop/structured.h

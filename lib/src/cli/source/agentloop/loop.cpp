@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -147,7 +148,12 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
         }
         Assembly assembly =
             assemble_request(budget, request, history, pinned, options.transient_prefix,
-                             options.transient_at, turn_start);
+                             options.transient_at, turn_start, options.inline_attachments);
+        for (const std::string& name : assembly.inline_dropped) {
+            if (std::ranges::find(result.inline_dropped, name) == result.inline_dropped.end()) {
+                result.inline_dropped.push_back(name);
+            }
+        }
         request.messages = std::move(assembly.messages);
         if (assembly.transient_length > 0) {
             // The markers a provider with a persistent prompt cache reads to

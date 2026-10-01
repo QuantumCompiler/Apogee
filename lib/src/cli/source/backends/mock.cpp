@@ -35,15 +35,19 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
         return out;
     }
     std::string last_tool_result;
+    std::string last_user;
     std::string system;
     for (const harness::ChatMessage& message : request.messages) {
         if (message.role == harness::Role::Tool) {
             last_tool_result = message.content.plain_text();
+        } else if (message.role == harness::Role::User) {
+            last_user = message.content.plain_text();
         } else if (message.role == harness::Role::System) {
             system += system.empty() ? "" : "\n\n";
             system += message.content.plain_text();
         }
     }
+    replace_all(out, "{{last_user}}", last_user);
     // The `:json` variants expand to a JSON string literal, quotes included,
     // so a scripted JSON answer can carry a tool result verbatim.
     replace_all(out, "{{last_tool_result:json}}", nlohmann::json(last_tool_result).dump());

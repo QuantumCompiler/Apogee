@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "agent/tool.h"
+#include "agentloop/budget.h"
 #include "agentloop/content.h"
 #include "agentloop/question.h"
 #include "agentloop/reporter.h"
@@ -75,6 +76,11 @@ struct Options {
     /// runs it on its own context, and the session's cache is untouched.
     bool side_request = false;
 
+    /// Attachments inlined whole (26d), each prepended to the user message it
+    /// rides in what is sent -- never in `history`. The budget trims them
+    /// last; `RunResult::inline_dropped` names any it could not send.
+    std::vector<InlineAttachment> inline_attachments;
+
     /// The utility backend that summarises a tool result over
     /// `kToolSummaryThreshold` before the model reads it (26b). Empty -- the
     /// default, and whenever no utility model is set -- leaves results as the
@@ -118,6 +124,10 @@ struct RunResult {
     /// Whether max_iterations was hit and the answer came from the
     /// tools-withdrawn final call.
     bool hit_iteration_limit = false;
+
+    /// Inlined attachments some request of the run could not send (26d): the
+    /// caller retrieves them from then on.
+    std::vector<std::string> inline_dropped;
 };
 
 /// Drives the loop until the model stops asking for tools.

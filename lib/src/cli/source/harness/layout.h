@@ -60,6 +60,9 @@ struct LayoutEntry {
 // same drift this file exists to prevent, one level down.
 
 [[nodiscard]] std::filesystem::path sessions_dir();
+/// `<APOGEE_HOME>/attachments` -- each chat's attachment index,
+/// `<chat id>.db`, deleted with the chat (26d). Private, like the sessions.
+[[nodiscard]] std::filesystem::path attachments_dir();
 [[nodiscard]] std::filesystem::path logs_dir();
 [[nodiscard]] std::filesystem::path models_dir();
 [[nodiscard]] std::filesystem::path embeddings_dir();

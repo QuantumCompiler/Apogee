@@ -5,12 +5,14 @@
 #include <sqlite3.h>
 
 #include <filesystem>
+#include <fstream>
 #include <random>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
 
+#include "agentloop/attachments.h"
 #include "agentloop/embed_func.h"
 #include "agentloop/loop.h"
 #include "agentloop/retriever.h"
@@ -730,4 +732,62 @@ TEST_CASE("a graph section that cannot fit the share even alone is dropped, and 
     CHECK(result.notes ==
           std::vector<std::string>{"0 of 1 chunks fit the context budget",
                                    "the graph context did not fit the context budget either"});
+}
+
+TEST_CASE("a chat's attachments are searched as labelled excerpts, the inlined left out",
+          "[agentloop][rag][attachments]") {
+    Scratch scratch;
+    const auto index_file = [&](const std::string& name, const std::string& text) {
+        const std::filesystem::path path = scratch.dir / name;
+        std::ofstream{path, std::ios::binary} << text;
+        apogee::agentloop::AttachmentIndex index{scratch.db(), {}, std::nullopt};
+        return index
+            .add(apogee::agentloop::FoundFile{.path = path, .name = name, .bytes = text.size()}, {})
+            .file->sha256;
+    };
+    (void)index_file("guide.md", "The zarquon protocol requires seventeen widgets.\n");
+    const std::string inlined = index_file("inline.md", "Zarquon is also mentioned here.\n");
+
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon widgets");
+    turn.attachments = true;
+    turn.exclude_sources = {apogee::agentloop::attachment_source(inlined)};
+    const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+    REQUIRE(result.prefix.size() == 1);
+    const std::string sent = result.prefix.front().content.plain_text();
+    CHECK(sent.find("--- guide.md:1 ---") != std::string::npos);
+    CHECK(sent.find("seventeen widgets") != std::string::npos);
+    CHECK(sent.find("also mentioned") == std::string::npos);
+    CHECK(result.chunks == 1);
+    CHECK(result.retriever == "lexical");
+}
+
+TEST_CASE("a later retrieval in the turn gets what the earlier one left of the share",
+          "[agentloop][rag][budget]") {
+    Scratch scratch;
+    {
+        Store store{scratch.db()};
+        std::vector<std::string> chunks;
+        for (int index = 0; index < 6; ++index) {
+            chunks.push_back("alpha " + std::to_string(index) + " " + std::string(400, 'z'));
+        }
+        store.replace_source("doc", chunks);
+    }
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "alpha");
+    turn.limit = 12;
+    turn.budget.budget.window = 6000;
+    turn.budget.budget.reserve = 0;
+    turn.budget.count = [](const apogee::harness::ChatRequest& request) {
+        std::int64_t tokens = 0;
+        for (const apogee::harness::ChatMessage& message : request.messages) {
+            tokens += static_cast<std::int64_t>(message.content.plain_text().size());
+        }
+        return apogee::agentloop::TokenCount{tokens, false};
+    };
+    // A 1,200 share, 500 of it spent already: one chunk and its framing,
+    // about 620, is left room for; two, about 1,050, are not.
+    turn.share_used = 500;
+    const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
+    CHECK(result.chunks == 1);
+    CHECK(result.tokens > 0);
+    CHECK(result.tokens <= 700);
 }

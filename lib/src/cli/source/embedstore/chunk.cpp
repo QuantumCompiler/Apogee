@@ -42,8 +42,31 @@ std::size_t codepoint_count(std::string_view text) noexcept {
 
 std::vector<std::string> chunk_text(std::string_view text, const ChunkOptions& options) {
     std::vector<std::string> chunks;
+    for (const TextSpan& span : chunk_spans(text, options)) {
+        chunks.emplace_back(text.substr(span.begin, span.end - span.begin));
+    }
+    return chunks;
+}
+
+PositionIndex::PositionIndex(std::string_view text, char separator) {
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        if (text[index] == separator) {
+            separators_.push_back(index);
+        }
+    }
+}
+
+std::size_t PositionIndex::number_at(std::size_t offset) const {
+    return static_cast<std::size_t>(
+               std::lower_bound(separators_.begin(), separators_.end(), offset) -
+               separators_.begin()) +
+           1;
+}
+
+std::vector<TextSpan> chunk_spans(std::string_view text, const ChunkOptions& options) {
+    std::vector<TextSpan> spans;
     if (text.empty()) {
-        return chunks;
+        return spans;
     }
 
     const std::size_t size = std::max<std::size_t>(options.size, 1);
@@ -60,12 +83,12 @@ std::vector<std::string> chunk_text(std::string_view text, const ChunkOptions& o
     for (std::size_t start = 0; start < total; start += stride) {
         const std::size_t end = std::min(start + size, total);
         // Both bounds land on codepoint starts, so no chunk can split one.
-        chunks.emplace_back(text.substr(offsets[start], offsets[end] - offsets[start]));
+        spans.push_back(TextSpan{.begin = offsets[start], .end = offsets[end]});
         if (end == total) {
             break;
         }
     }
-    return chunks;
+    return spans;
 }
 
 }  // namespace apogee::embedstore

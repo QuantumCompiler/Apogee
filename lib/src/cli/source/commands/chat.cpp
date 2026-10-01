@@ -20,6 +20,7 @@
 #include "ansi/ansi.h"
 #include "backends/factory.h"
 #include "commands/ask_prompt.h"
+#include "commands/chat_attachments.h"
 #include "commands/chat_completer.h"
 #include "commands/chat_history.h"
 #include "commands/cli_reporter.h"
@@ -66,6 +67,8 @@ struct ChatFlags {
     std::string model;
     std::string system_prompt;
     std::vector<std::string> images;
+    /// Files, folders and globs attached from the start (26d).
+    std::vector<std::string> attach;
     std::string rag;
     int rag_limit = 4;
     /// Kept so an explicit `--rag ""` can be told from no flag at all.
@@ -160,7 +163,7 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
                    agent::ToolRegistry* tools, const agentloop::AskFn& ask, const ToolGate& gate,
                    agentloop::Reporter& reporter,
                    const std::function<void(const std::string&)>& notice, const RagSettings& rag,
-                   const std::string& review_note) {
+                   const std::string& review_note, ChatAttachments* attached) {
     std::vector<harness::ContentPart> turn_attachments;
     turn_attachments.swap(attachments);  // first message only
 
@@ -188,6 +191,9 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         // the question being asked.
         session.messages = agentloop::compact_history(harness, session.messages, compactor);
         ++session.compactions;
+        if (attached != nullptr) {
+            attached->after_compaction();
+        }
     } else if (usage.should_warn()) {
         notice("context " + std::to_string(static_cast<int>(usage.fraction() * 100)) + "% full" +
                (usage.exact ? "" : " (estimated)"));
@@ -235,15 +241,12 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     } else if (turn_config.has_value()) {
         rag_choice = choose_rag_collection(false, {}, turn_config->auto_rag);
     }
-    if (rag_choice.active()) {
-        // The session's retriever and rerank SETTINGS, read each turn so
-        // /retriever and /rerank take effect on the next question and a
-        // resumed session continues as it was last set.
-        const harness::Config fallback;
-        const harness::Config& config = turn_config.has_value() ? *turn_config : fallback;
-        // A follow-up is searched as a standalone question, restated by the
-        // utility model when one is set, else the chat's own (26b). The chat
-        // model is still asked the question as the user wrote it.
+    // A follow-up is searched as a standalone question, restated by the
+    // utility model when one is set, else the chat's own (26b) -- once, for
+    // the attachments and the collection alike. The chat model is still
+    // asked the question as the user wrote it.
+    std::string query = input;
+    if (rag_choice.active() || (attached != nullptr && attached->retrieves())) {
         const std::string rewriter =
             helper_backend(harness.config(), harness::ModelRole::Utility, session.backend);
         const agentloop::QueryRewrite rewrite =
@@ -253,12 +256,39 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         } else if (!rewrite.note.empty()) {
             notice(rewrite.note);
         }
+        query = rewrite.query;
+    }
+    const agentloop::TurnBudget budget =
+        agentloop::turn_budget(harness, session.backend, session.params.max_tokens);
+
+    // The chat's attachments first (26d): an inlined one rides the message
+    // just sent, and the others' excerpts are retrieved -- ahead of a
+    // collection's, which gets what they leave of the share.
+    std::int64_t share_used = 0;
+    if (attached != nullptr) {
+        ChatAttachments::Turn turn =
+            attached->for_turn(session.messages.size() - 1, query, budget, rag.limit, {});
+        loop_options.inline_attachments = std::move(turn.inlined);
+        if (turn.retrieved.has_value()) {
+            if (turn.retrieved->error.empty() && !turn.retrieved->prefix.empty()) {
+                loop_options.transient_prefix = turn.retrieved->prefix;
+                share_used = turn.retrieved->tokens;
+            }
+            notice(describe_attachment_retrieval(*turn.retrieved));
+        }
+    }
+    if (rag_choice.active()) {
+        // The session's retriever and rerank SETTINGS, read each turn so
+        // /retriever and /rerank take effect on the next question and a
+        // resumed session continues as it was last set.
+        const harness::Config fallback;
+        const harness::Config& config = turn_config.has_value() ? *turn_config : fallback;
         const agentloop::RagResult retrieved = retrieve_for_collection(
-            harness, config, rag_choice.collection, rewrite.query, rag.limit, session.retriever,
-            session.rerank, {}, session.backend,
-            agentloop::turn_budget(harness, session.backend, session.params.max_tokens));
+            harness, config, rag_choice.collection, query, rag.limit, session.retriever,
+            session.rerank, {}, session.backend, budget, share_used);
         if (retrieved.error.empty() && !retrieved.prefix.empty()) {
-            loop_options.transient_prefix = retrieved.prefix;
+            loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
+                                                 retrieved.prefix.begin(), retrieved.prefix.end());
         }
         notice(describe_retrieval(rag_choice, retrieved));
     }
@@ -274,6 +304,9 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         const agentloop::RunResult result =
             agentloop::run(harness, session.messages, loop_options, reporter);
         ++session.turns;
+        if (attached != nullptr) {
+            attached->after_turn(result.inline_dropped);
+        }
         if (result.hit_iteration_limit) {
             notice("tool-call limit reached");
         }
@@ -288,6 +321,35 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     // completed turn on disk, and that is a property of writing here rather
     // than at exit.
     logger::save(session);
+}
+
+/// `text` without the double quotes a path with spaces is typed in.
+std::string unquoted(std::string_view text) {
+    if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+        text = text.substr(1, text.size() - 2);
+    } else if (text.starts_with('"')) {
+        text.remove_prefix(1);  // a folder's quote left open by completion
+    }
+    return std::string{text};
+}
+
+/// Attaches each path `message` mentions with `@` that exists, exactly as
+/// `/attach` would, and leaves the message as typed. A mention naming nothing
+/// stays text -- people type `@` in prose -- and `note` says so (26d).
+void attach_mentions(ChatAttachments& attached, std::string_view message,
+                     const std::filesystem::path& working_directory,
+                     const std::function<void(const std::string&)>& note) {
+    const std::vector<std::string> already = attached.names();
+    for (const std::string& mention : mentioned_paths(message)) {
+        const std::optional<std::string> path = existing_mention(mention, working_directory);
+        if (!path.has_value()) {
+            note("@" + mention + ": no file or folder there -- left as text");
+            continue;
+        }
+        if (std::ranges::find(already, *path) == already.end()) {
+            (void)attached.attach(*path, working_directory);
+        }
+    }
 }
 
 /// The conversation's title, asked for once and off the prompt's path.
@@ -412,6 +474,11 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                "model), or off")
             ->type_name(kBackendValue);
     cmd->add_option("--image", flags->images, "Image to attach to the first message (repeatable)")
+        ->type_name(kPathValue)
+        ->allow_extra_args(false);
+    cmd->add_option("--attach", flags->attach,
+                    "A file, folder or glob to attach to the chat: indexed, inlined when it fits, "
+                    "retrieved each turn when not (repeatable)")
         ->type_name(kPathValue)
         ->allow_extra_args(false);
     flags->temperature_option =
@@ -709,26 +776,58 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             BackgroundTitle title{harness, [&machine_reporter](std::string_view line) {
                                       machine_reporter.on_progress(line);
                                   }};
+            // A driver has no terminal to be asked on, so a folder over the
+            // size guard is refused, as on any pipe (26d).
+            std::error_code cwd_error;
+            const std::filesystem::path working_directory =
+                std::filesystem::current_path(cwd_error);
+            ChatAttachments attached{
+                harness, session, ChatAttachments::index_for(session.chat_id),
+                ChatAttachments::Hooks{
+                    .say = [&machine_reporter](
+                               const std::string& line,
+                               bool /*warning*/) { machine_reporter.on_notice(line); },
+                    .progress =
+                        [&machine_reporter](const std::string& line) {
+                            if (!line.empty()) {
+                                machine_reporter.on_progress(line);
+                            }
+                        },
+                    .confirm_large = {},
+                    .save = true}};
+            for (const std::string& spec : flags->attach) {
+                (void)attached.attach(spec, working_directory);
+            }
             std::string line;
             while (std::getline(std::cin, line)) {
                 const DriverMessage message = parse_driver_line(line);
+                if (message.kind == DriverMessage::Kind::Attach && !message.text.empty()) {
+                    (void)attached.attach(message.text, working_directory);
+                    continue;
+                }
                 if (message.kind != DriverMessage::Kind::User || message.text.empty()) {
                     // Unknown types are ignored rather than fatal: the same
                     // tolerance this protocol asks of its own drivers.
                     continue;
                 }
                 title.settle(session);
+                attach_mentions(attached, message.text, working_directory,
+                                [&machine_reporter](const std::string& note) {
+                                    machine_reporter.on_notice(note);
+                                });
+                attached.settle();
 
                 // The driver reads structured input, so there IS someone to
                 // answer a question -- the loop's "nil AskFn <=> never
                 // advertised" rule is satisfied rather than sidestepped.
-                run_chat_turn(harness, session, message.text, attachments,
-                              flags->tools ? &registry : nullptr, driver_ask,
-                              ToolGate{permission, flags->tools ? make_driver_confirm_fn(
-                                                                      machine_reporter, std::cin,
+                run_chat_turn(
+                    harness, session, message.text, attachments, flags->tools ? &registry : nullptr,
+                    driver_ask,
+                    ToolGate{permission, flags->tools
+                                             ? make_driver_confirm_fn(machine_reporter, std::cin,
                                                                       config_path, approvals)
-                                                                : agent::ConfirmFn{}},
-                              machine_reporter, machine_notice, rag_settings, review_note);
+                                             : agent::ConfirmFn{}},
+                    machine_reporter, machine_notice, rag_settings, review_note, &attached);
                 title.start_if_due(session);
 
                 harness::ChatResponse response;
@@ -745,6 +844,47 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             return;
         }
 
+        // --- attachments (26d) ------------------------------------------------
+        std::error_code cwd_error;
+        const std::filesystem::path working_directory = std::filesystem::current_path(cwd_error);
+        const bool asked_on_terminal = platform::is_terminal(platform::StandardStream::In);
+        ChatAttachments attached{
+            harness, session, ChatAttachments::index_for(session.chat_id),
+            ChatAttachments::Hooks{
+                .say =
+                    [&reporter, &style](const std::string& line, bool warning) {
+                        reporter.status().print_line(
+                            style.tag(warning ? ansi::Role::Warning : ansi::Role::Apogee) + " " +
+                            line);
+                    },
+                .progress =
+                    [&reporter, &style](const std::string& line) {
+                        if (line.empty()) {
+                            reporter.status().clear();
+                        } else {
+                            reporter.status().set(style.tag(ansi::Role::Apogee) + " " + line);
+                        }
+                    },
+                // A pipe cannot be asked, so a folder over the size guard is
+                // refused there.
+                .confirm_large =
+                    asked_on_terminal
+                        ? std::function<bool(const std::string&)>{[&reporter, &style](
+                                                                      const std::string& question) {
+                              reporter.status().print_line(style.tag(ansi::Role::Warning) + " " +
+                                                           question + " [y/N]");
+                              std::string answer;
+                              if (!std::getline(std::cin, answer)) {
+                                  return false;
+                              }
+                              return answer == "y" || answer == "Y" || answer == "yes";
+                          }}
+                        : std::function<bool(const std::string&)>{},
+                .save = true}};
+        for (const std::string& spec : flags->attach) {
+            (void)attached.attach(spec, working_directory);
+        }
+
         // Once, immediately before the first prompt -- never between turns.
         discard_startup_typeahead();
 
@@ -754,12 +894,11 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         EditingLineReader::Options reader_options;
         reader_options.history_path = default_history_path();
         // A folder deleted under the process lists as nothing, never a throw.
-        std::error_code cwd_error;
-        reader_options.suggest =
-            [sources = chat_completion_sources(config, std::filesystem::current_path(cwd_error))](
-                std::string_view before_cursor) {
-                return suggest_chat_input(before_cursor, sources);
-            };
+        ChatCompletionSources completion = chat_completion_sources(config, working_directory);
+        completion.attachment_names = [&attached] { return attached.names(); };
+        reader_options.suggest = [sources = std::move(completion)](std::string_view before_cursor) {
+            return suggest_chat_input(before_cursor, sources);
+        };
         reader_options.live = true;
         reader_options.color = style.color_enabled();
         const std::unique_ptr<LineReader> reader =
@@ -996,12 +1135,45 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                         logger::save(session);
                         reporter.status().print_line(style.tag(ansi::Role::Apogee) + " renamed");
                         break;
+                    case ChatVerb::Attach: {
+                        if (argument.empty()) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Error) +
+                                " /attach takes a file, a folder or a glob");
+                            break;
+                        }
+                        (void)attached.attach(unquoted(argument), working_directory);
+                        break;
+                    }
+                    case ChatVerb::Attachments: {
+                        attached.settle();
+                        const std::vector<std::string> lines = attached.describe();
+                        if (lines.empty()) {
+                            reporter.status().print_line(style.tag(ansi::Role::Apogee) +
+                                                         " nothing attached -- /attach <path>");
+                        }
+                        for (const std::string& row : lines) {
+                            reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + row);
+                        }
+                        break;
+                    }
+                    case ChatVerb::Detach: {
+                        attached.settle();
+                        const std::string name = unquoted(argument);
+                        reporter.status().print_line(
+                            attached.detach(name)
+                                ? style.tag(ansi::Role::Apogee) + " detached " + name
+                                : style.tag(ansi::Role::Error) + " nothing attached as '" + name +
+                                      "' -- /attachments lists them");
+                        break;
+                    }
                     case ChatVerb::Compact: {
                         const std::string compactor = helper_backend(
                             harness.config(), harness::ModelRole::Utility, session.backend);
                         session.messages =
                             agentloop::compact_history(harness, session.messages, compactor);
                         ++session.compactions;
+                        attached.after_compaction();
                         logger::save(session);
                         reporter.status().print_line(
                             style.tag(ansi::Role::Apogee) + " history compacted" +
@@ -1016,6 +1188,13 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             }
 
             // --- the turn ------------------------------------------------------
+            // What the message mentions with `@` is attached as `/attach`
+            // would, and what is still indexing settles first (26d).
+            attach_mentions(attached, input, working_directory,
+                            [&reporter, &style](const std::string& note) {
+                                reporter.status().print_line(style.dim(note));
+                            });
+            attached.settle();
             if (decorate) {
                 // One blank line between the question and whatever answers it
                 // -- the thinking block, or the answer itself -- as there is
@@ -1039,7 +1218,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 [&reporter, &style](const std::string& message) {
                     reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
-                rag_settings, review_note);
+                rag_settings, review_note, &attached);
             title.start_if_due(session);
             typeahead.reset();
             if (decorate) {

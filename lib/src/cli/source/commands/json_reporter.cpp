@@ -224,6 +224,11 @@ DriverMessage parse_driver_line(std::string_view line) {
         message.kind = DriverMessage::Kind::User;
     } else if (type == "answer") {
         message.kind = DriverMessage::Kind::Answer;
+    } else if (type == "attach") {
+        // A file, folder or glob to attach, as `/attach` takes one (26d).
+        message.kind = DriverMessage::Kind::Attach;
+        message.text = root.value("path", std::string{});
+        return message;
     } else {
         return message;
     }

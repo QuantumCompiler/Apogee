@@ -25,6 +25,7 @@
 #include "commands/embed.h"
 #include "commands/helpers.h"
 #include "commands/models_pull.h"
+#include "embedstore/ingest.h"
 #include "harness/assets.h"
 #include "harness/host.h"
 #include "harness/layout.h"
@@ -861,6 +862,37 @@ void check_knowledge(CheckReport& report, const CheckInputs& inputs) {
         "private (0700), " + std::to_string(files) + " conversation(s)");
 }
 
+/// The `Attachments` section (26d): the converters an attachment is read
+/// with, which are optional and found on PATH, and the chats' indexes. The
+/// indexes' folder is a layout row, so its mode is the filesystem check's.
+void check_attachments(CheckReport& report, const CheckInputs& inputs) {
+    add(report, Status::Ok, "Attachments", "pdftotext",
+        embedstore::pdftotext_available()
+            ? "found -- attached PDFs are read"
+            : "not installed -- an attached PDF is skipped with that reason (install poppler)");
+    add(report, Status::Ok, "Attachments", "git",
+        platform::find_on_path("git").empty()
+            ? "not installed -- an attached folder is walked without its .gitignore"
+            : "found -- an attached folder inside a repository leaves out what git ignores");
+    std::error_code code;
+    const std::filesystem::path folder = inputs.home / "attachments";
+    std::size_t indexes = 0;
+    std::uintmax_t bytes = 0;
+    if (std::filesystem::is_directory(folder, code)) {
+        for (const auto& entry : std::filesystem::directory_iterator(folder, code)) {
+            if (entry.is_regular_file(code)) {
+                bytes += entry.file_size(code);
+                indexes += entry.path().extension() == ".db" ? 1 : 0;
+            }
+        }
+    }
+    add(report, Status::Ok, "Attachments", "chat indexes",
+        indexes == 0 ? "none yet -- '/attach' in a chat creates its index"
+                     : std::to_string(indexes) + " chat index(es), " +
+                           std::to_string((bytes + (1024 * 1024) - 1) / (1024 * 1024)) +
+                           " MB -- each deleted with its chat");
+}
+
 /// The `Graph` section: every collection whose `graph:` block says anything
 /// -- `extract_backend` must name a configured backend, and an enabled graph
 /// should exist on disk. Hops and the entity cap are validated at load.
@@ -1285,6 +1317,7 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_mcp(report, inputs);
     check_agents(report, inputs);
     check_knowledge(report, inputs);
+    check_attachments(report, inputs);
     check_graphs(report, inputs);
     check_training(report, inputs);
     check_filesystem(report, inputs);

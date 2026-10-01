@@ -104,6 +104,17 @@ constexpr std::int64_t kFramingTokens = 8;
            (kFramingTokens * static_cast<std::int64_t>(request.messages.size() + 1));
 }
 
+/// `content` with `prefix` in front of it: a text part ahead of an image.
+[[nodiscard]] harness::MessageContent with_prefix(const harness::MessageContent& content,
+                                                  std::string_view prefix) {
+    if (content.parts().empty()) {
+        return harness::MessageContent{std::string{prefix} + "\n" + content.plain_text()};
+    }
+    std::vector<harness::ContentPart> parts{harness::ContentPart::from_text(std::string{prefix})};
+    parts.insert(parts.end(), content.parts().begin(), content.parts().end());
+    return harness::MessageContent::from_parts(std::move(parts));
+}
+
 /// "N thing(s)", for a trim's phrase.
 [[nodiscard]] std::string counted(int count, std::string_view one, std::string_view many) {
     return std::to_string(count) + " " + std::string{count == 1 ? one : many};
@@ -117,7 +128,7 @@ public:
               const std::vector<harness::ChatMessage>& history,
               const std::vector<harness::ChatMessage>& pinned,
               const std::vector<harness::ChatMessage>& injected, std::size_t at,
-              std::size_t turn_start)
+              std::size_t turn_start, const std::vector<InlineAttachment>& inlined)
         : budget_{budget},
           request_{std::move(shape)},
           pinned_{pinned},
@@ -129,6 +140,18 @@ public:
         sent_ = std::move(stubbed.messages);
         turn_ = std::min(turn_start, sent_.size());
         position_ = std::min(at, sent_.size());
+        for (const InlineAttachment& attachment : inlined) {
+            if (attachment.message >= sent_.size() ||
+                sent_[attachment.message].role != harness::Role::User) {
+                out_.inline_dropped.push_back(attachment.name);
+                continue;  // its message is gone: compacted, or never sent
+            }
+            harness::ChatMessage& message = sent_[attachment.message];
+            anchors_.push_back(Anchor{.position = attachment.message,
+                                      .name = attachment.name,
+                                      .original = message.content});
+            message.content = with_prefix(message.content, attachment.text);
+        }
     }
 
     [[nodiscard]] Assembly assemble() {
@@ -143,6 +166,7 @@ public:
         drop_exchanges();
         stub_this_turn();
         drop_injected();
+        strip_inlined();
         if (over()) {
             out_.trims.push_back("still " + std::to_string(out_.tokens.tokens - available_) +
                                  " tokens over the window after the reserve -- sent as it is");
@@ -201,6 +225,19 @@ private:
             if (position_ > first) {
                 position_ -= std::min(position_ - first, removed);
             }
+            // An attachment inlined on a dropped message goes with it.
+            std::erase_if(anchors_, [&](const Anchor& anchor) {
+                if (anchor.position >= first && anchor.position < next) {
+                    out_.inline_dropped.push_back(anchor.name);
+                    return true;
+                }
+                return false;
+            });
+            for (Anchor& anchor : anchors_) {
+                if (anchor.position >= next) {
+                    anchor.position -= removed;
+                }
+            }
             ++dropped;
             rebuild();
         }
@@ -256,8 +293,9 @@ private:
             stub_next();
         }
         // ...and below it only when every source lower in priority is at its
-        // own share. Retrieval already is -- it asks for its share -- and the
-        // attachments (26d) will be trimmed to theirs here, between the two.
+        // own share. Retrieval already is -- it asks for its share -- and so
+        // are the inlined attachments: one is inlined only while it fits
+        // theirs (26d).
         while (over() && next + 1 < results.size()) {
             stub_next();
         }
@@ -284,6 +322,30 @@ private:
         }
     }
 
+    /// The inlined attachments still riding their messages: the lowest
+    /// priority to trim, and so the last.
+    void strip_inlined() {
+        int stripped = 0;
+        while (over() && !anchors_.empty()) {
+            const Anchor anchor = anchors_.front();
+            anchors_.erase(anchors_.begin());
+            sent_[anchor.position].content = anchor.original;
+            out_.inline_dropped.push_back(anchor.name);
+            ++stripped;
+            rebuild();
+        }
+        if (stripped > 0) {
+            out_.trims.push_back(counted(stripped, "inlined attachment", "inlined attachments") +
+                                 " not sent");
+        }
+    }
+
+    struct Anchor {
+        std::size_t position = 0;
+        std::string name;
+        harness::MessageContent original;
+    };
+
     const TurnBudget& budget_;
     harness::ChatRequest request_;
     const std::vector<harness::ChatMessage>& pinned_;
@@ -292,6 +354,7 @@ private:
     std::vector<harness::ChatMessage> sent_;
     std::size_t turn_ = 0;
     std::size_t position_ = 0;
+    std::vector<Anchor> anchors_;
     Assembly out_;
 };
 
@@ -413,8 +476,8 @@ Assembly assemble_request(const TurnBudget& budget, const harness::ChatRequest& 
                           const std::vector<harness::ChatMessage>& history,
                           const std::vector<harness::ChatMessage>& pinned,
                           const std::vector<harness::ChatMessage>& injected, std::size_t at,
-                          std::size_t turn_start) {
-    Assembler assembler{budget, shape, history, pinned, injected, at, turn_start};
+                          std::size_t turn_start, const std::vector<InlineAttachment>& inlined) {
+    Assembler assembler{budget, shape, history, pinned, injected, at, turn_start, inlined};
     return assembler.assemble();
 }
 

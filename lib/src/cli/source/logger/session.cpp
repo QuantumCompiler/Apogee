@@ -131,6 +131,25 @@ std::string serialize(const Session& session) {
     if (!session.provider_session_id.empty()) {
         out["provider_session_id"] = session.provider_session_id;
     }
+    if (!session.attachments.empty()) {
+        nlohmann::json attachments = nlohmann::json::array();
+        for (const Attachment& attachment : session.attachments) {
+            nlohmann::json files = nlohmann::json::array();
+            for (const AttachedFile& file : attachment.files) {
+                files.push_back({{"name", file.name},
+                                 {"path", file.path},
+                                 {"sha256", file.sha256},
+                                 {"reader", file.reader},
+                                 {"bytes", file.bytes}});
+            }
+            nlohmann::json entry{{"name", attachment.name}, {"files", std::move(files)}};
+            if (attachment.inline_at.has_value()) {
+                entry["inline_at"] = *attachment.inline_at;
+            }
+            attachments.push_back(std::move(entry));
+        }
+        out["attachments"] = std::move(attachments);
+    }
 
     nlohmann::json params = nlohmann::json::object();
     if (session.params.temperature.has_value()) {
@@ -204,6 +223,33 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
                 loaded.warnings.push_back(
                     ResumeWarning{WarningKind::FieldDropped, "messages",
                                   "a message could not be read and was skipped"});
+            }
+        }
+    }
+
+    if (const auto attachments = parsed.find("attachments");
+        attachments != parsed.end() && attachments->is_array()) {
+        for (const auto& entry : *attachments) {
+            try {
+                Attachment attachment;
+                attachment.name = entry.at("name").get<std::string>();
+                for (const auto& file : entry.at("files")) {
+                    attachment.files.push_back(
+                        AttachedFile{.name = file.at("name").get<std::string>(),
+                                     .path = file.value("path", std::string{}),
+                                     .sha256 = file.at("sha256").get<std::string>(),
+                                     .reader = file.value("reader", std::string{}),
+                                     .bytes = file.value("bytes", std::uint64_t{0})});
+                }
+                if (const auto at = entry.find("inline_at");
+                    at != entry.end() && at->is_number_unsigned()) {
+                    attachment.inline_at = at->get<std::size_t>();
+                }
+                session.attachments.push_back(std::move(attachment));
+            } catch (const std::exception&) {
+                loaded.warnings.push_back(
+                    ResumeWarning{WarningKind::FieldDropped, "attachments",
+                                  "an attachment could not be read and was skipped"});
             }
         }
     }

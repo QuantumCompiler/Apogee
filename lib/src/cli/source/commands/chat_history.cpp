@@ -7,6 +7,7 @@
 #include <memory>
 #include <sstream>
 
+#include "commands/chat_attachments.h"
 #include "harness/errors.h"
 
 namespace apogee::commands {
@@ -221,6 +222,9 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
             if (ec) {
                 fail("could not delete: " + ec.message());
             }
+            // Its attachments' index goes with it (26d): an attachment's text is
+            // as private as the chat it belonged to.
+            ChatAttachments::remove_index(session.chat_id);
             std::cout << "deleted " << session.chat_id << "\n";
         } catch (const CLI::RuntimeError&) {
             throw;

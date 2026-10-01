@@ -146,3 +146,30 @@ TEST_CASE("invalid bytes are chunked leniently rather than rejected",
     CHECK_NOTHROW((void)chunk_text(broken, {.size = 5, .overlap = 1}));
     CHECK_FALSE(chunk_text(broken, {.size = 5, .overlap = 1}).empty());
 }
+
+TEST_CASE("chunk spans are exactly the chunks, and positions number by separator",
+          "[embedstore][chunk]") {
+    std::string text;
+    for (int line = 1; line <= 40; ++line) {
+        text += "line " + std::to_string(line) + " é with some words\n";
+    }
+    const std::vector<std::string> chunks = chunk_text(text, {.size = 100, .overlap = 20});
+    const std::vector<apogee::embedstore::TextSpan> spans =
+        apogee::embedstore::chunk_spans(text, {.size = 100, .overlap = 20});
+    REQUIRE(spans.size() == chunks.size());
+    for (std::size_t index = 0; index < spans.size(); ++index) {
+        CHECK(text.substr(spans[index].begin, spans[index].end - spans[index].begin) ==
+              chunks[index]);
+    }
+    CHECK(spans.front().begin == 0);
+    CHECK(spans.back().end == text.size());
+
+    const apogee::embedstore::PositionIndex lines{"a\nb\nc", '\n'};
+    CHECK(lines.number_at(0) == 1);
+    CHECK(lines.number_at(1) == 1);  // the newline ends line one
+    CHECK(lines.number_at(2) == 2);
+    CHECK(lines.number_at(4) == 3);
+    const apogee::embedstore::PositionIndex pages{"one\ftwo\f", '\f'};
+    CHECK(pages.number_at(0) == 1);
+    CHECK(pages.number_at(4) == 2);
+}

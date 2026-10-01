@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,10 @@ struct RagResult {
     /// Entities the knowledge-graph expansion injected beside the chunks;
     /// 0 when the collection has no enabled graph or nothing was related.
     int graph_entities = 0;
+
+    /// What `prefix` costs, by the turn's count: the share a later retrieval
+    /// in the same turn no longer has (26d).
+    std::int64_t tokens = 0;
 };
 
 /// Everything one turn's retrieval needs, gathered by the surface.
@@ -91,6 +96,15 @@ struct RagTurn {
     /// ones that fit its retrieval share, and a note says how many did not.
     /// Unknown by default, which keeps `limit` the only cap.
     TurnBudget budget;
+    /// Tokens of the retrieval share already spent this turn -- the chat's
+    /// attachments, ahead of `auto_rag` (26d).
+    std::int64_t share_used = 0;
+
+    /// A chat's attachment index (26d): each excerpt labelled from its
+    /// chunk's metadata (`report.pdf p. 41`), adjacent chunks of one file
+    /// merged, and `exclude_sources` -- attachments inlined whole -- left out.
+    bool attachments = false;
+    std::set<std::string> exclude_sources;
 
     /// For the judge. May be null, in which case reranking is off.
     const harness::Harness* harness = nullptr;

@@ -14,14 +14,17 @@
 #include <vector>
 
 #include "backends/mock.h"
+#include "commands/chat_attachments.h"
 #include "commands/chat_history.h"
 #include "commands/registry.h"
 #include "commands/root.h"
 #include "harness/config.h"
+#include "harness/layout.h"
 #include "logger/operational.h"
 #include "logger/session.h"
 #include "support/env_guard.h"
 
+using apogee::commands::ChatAttachments;
 using apogee::commands::format_session_info;
 using apogee::commands::format_session_row;
 using apogee::commands::parse_slash;
@@ -551,4 +554,166 @@ TEST_CASE("chat and complete fit retrieval to the model's window, and say what t
 
     REQUIRE(chat.run({"complete", "--verbose", "--rag", "notes", "Where does Heron deploy?"}) == 0);
     CHECK(chat.err.find("chunks fit the context budget") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Attachments (26d)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a small file attached is inlined; the transcript keeps the message as typed",
+          "[chat][cli][attachments]") {
+    HelperChat chat{texts({"it is 7731", "yes"}), {"Code Notes"}, "    context_size: 8000\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.md";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    const std::string mention = "summarize @" + notes.string() + " please";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--verbose"},
+                     "/attach " + notes.string() + "\nwhat is the code?\n" + mention + "\n") == 0);
+    CHECK(chat.err.find("attached " + notes.generic_string() + ": 1 file, 1 chunk") !=
+          std::string::npos);
+    CHECK(chat.err.find("-- inlined whole") != std::string::npos);
+
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.attachments.size() == 1);
+    CHECK(session.attachments[0].name == notes.generic_string());
+    // It rides the first question; the mention names what is already attached.
+    CHECK(session.attachments[0].inline_at == std::optional<std::size_t>{0});
+    std::vector<std::string> asked;
+    for (const ChatMessage& message : session.messages) {
+        if (message.role == apogee::harness::Role::User) {
+            asked.push_back(message.content.plain_text());
+        }
+    }
+    CHECK(asked == std::vector<std::string>{"what is the code?", mention});
+    CHECK(std::filesystem::exists(ChatAttachments::index_for(session.chat_id)));
+
+    // Deleting the chat deletes its index.
+    REQUIRE(chat.run({"chats", "delete", session.chat_id}) == 0);
+    CHECK_FALSE(std::filesystem::exists(ChatAttachments::index_for(session.chat_id)));
+}
+
+TEST_CASE("an @ mention attaches exactly as /attach would; one naming nothing stays text",
+          "[chat][cli][attachments]") {
+    HelperChat chat{texts({"a summary"}), {"Report"}, "    context_size: 8000\n"};
+    const std::filesystem::path report = chat.home.path() / "report.md";
+    std::ofstream{report, std::ios::binary} << "# Report\nSales rose.\n";
+    const std::string message = "summarize @" + report.string() + " and @nowhere.txt";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat"}, message + "\n") == 0);
+    CHECK(chat.err.find("@nowhere.txt: no file or folder there -- left as text") !=
+          std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.attachments.size() == 1);
+    CHECK(session.attachments[0].name == report.generic_string());
+    CHECK(session.attachments[0].inline_at == std::optional<std::size_t>{0});
+    REQUIRE_FALSE(session.messages.empty());
+    CHECK(session.messages.front().content.plain_text() == message);
+}
+
+TEST_CASE("complete --attach answers over a temporary index", "[chat][cli][attachments]") {
+    HelperChat chat{texts({"a one-shot answer"}), {}, "    context_size: 8000\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.md";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"complete", "--attach", notes.string(), "what is the code?"}) == 0);
+    CHECK(chat.out.find("a one-shot answer") != std::string::npos);
+    CHECK(chat.err.find("-- inlined whole") != std::string::npos);
+    // Nothing kept: no chat index was made.
+    std::error_code code;
+    const std::filesystem::path chats = apogee::harness::attachments_dir();
+    CHECK((!std::filesystem::exists(chats, code) || std::filesystem::is_empty(chats, code)));
+}
+
+TEST_CASE("a driver attaches with an attach line and hears how it went",
+          "[chat][cli][attachments][machine]") {
+    HelperChat chat{texts({"driven answer"}), {"Driven"}, "    context_size: 8000\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.md";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    const std::string input = R"({"type":"attach","path":")" + notes.generic_string() + "\"}\n" +
+                              R"({"type":"user","text":"what is the code?"})" + "\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--input-format", "stream-json", "--output-format", "stream-json"},
+                     input) == 0);
+    CHECK(chat.out.find(R"("type":"notice")") != std::string::npos);
+    CHECK(chat.out.find("-- inlined whole") != std::string::npos);
+    CHECK(chat.out.find("driven answer") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(session.attachments.size() == 1);
+}
+
+TEST_CASE("complete --attach sends an inlined file on the prompt", "[chat][cli][attachments]") {
+    HelperChat chat{texts({"{{last_user}}"}), {}, "    context_size: 8000\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.md";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"complete", "--attach", notes.string(), "what is the code?"}) == 0);
+    CHECK(chat.out.find("--- attached file: " + notes.generic_string() + " ---") !=
+          std::string::npos);
+    CHECK(chat.out.find("The launch code is 7731.") != std::string::npos);
+    CHECK(chat.out.find("what is the code?") != std::string::npos);
+}
+
+TEST_CASE("an inlined attachment whose exchange the budget dropped is retrieved from then on",
+          "[chat][cli][attachments]") {
+    // A 4,000-token window holds 2,000 after the reserve; the second question
+    // alone is 1,600, so the first exchange -- and the file it carried -- go.
+    HelperChat chat{texts({"one", "two"}), {"Dropped"}, "    context_size: 4000\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.md";
+    std::ofstream{notes, std::ios::binary} << std::string(1600, 'n') << "\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat"}, "/attach " + notes.string() + "\nfirst\n" + std::string(6400, 'q') +
+                                   "\n") == 0);
+    CHECK(chat.err.find("-- inlined whole") != std::string::npos);
+    CHECK(chat.err.find("no longer fits the conversation whole") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.attachments.size() == 1);
+    CHECK_FALSE(session.attachments[0].inline_at.has_value());
+}
+
+TEST_CASE("compaction moves an inlined attachment to retrieval", "[chat][cli][attachments]") {
+    // A 2,000-token window: the second question takes it past 90%.
+    HelperChat chat{
+        texts({"one", "two"}), {"Compacted", "what was said"}, "    context_size: 2000\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.md";
+    std::ofstream{notes, std::ios::binary} << std::string(600, 'n') << "\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat"}, "/attach " + notes.string() + "\nfirst\n" + std::string(7200, 'q') +
+                                   "\n") == 0);
+    CHECK(chat.err.find("-- inlined whole") != std::string::npos);
+    CHECK(chat.err.find("compaction folded the messages the attachments rode") !=
+          std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.attachments.size() == 1);
+    CHECK_FALSE(session.attachments[0].inline_at.has_value());
+}
+
+TEST_CASE("a collection gets what the attachments leave of the retrieval share",
+          "[chat][cli][attachments][rag]") {
+    // A 7,000-token window: 3,500 after the reserve, 700 of it retrieval's.
+    // The attachment's four excerpts take about 600; a collection's chunk
+    // needs about 180, and so none fits beside them.
+    HelperChat chat{texts({"answered"}), {"Shared"}, "    context_size: 7000\n"};
+    std::string manual;
+    for (int chunk = 0; chunk < 12; ++chunk) {
+        std::string piece(448, 'x');
+        for (std::size_t at = 63; at < piece.size(); at += 64) {
+            piece[at] = ' ';  // words, not one long token
+        }
+        if (chunk % 3 == 0) {
+            piece.replace(200, 9, " zarquon ");  // a word in this chunk alone
+        }
+        manual += piece;
+    }
+    const std::filesystem::path file = chat.home.path() / "manual.txt";
+    std::ofstream{file, std::ios::binary} << manual;
+    const std::filesystem::path docs = chat.home.path() / "docs";
+    std::filesystem::create_directories(docs);
+    for (const char* name : {"a.md", "b.md"}) {
+        std::ofstream{docs / name, std::ios::binary} << "zarquon " << std::string(480, 'w') << "\n";
+    }
+    INFO(chat.err);
+    REQUIRE(chat.run({"embed", "ingest", "notes", docs.string()}) == 0);
+    REQUIRE(chat.run({"chat", "--rag", "notes"}, "/attach " + file.string() + "\nzarquon?\n") == 0);
+    CHECK(chat.err.find("excerpts from the attachments") != std::string::npos);
+    CHECK(chat.err.find("0 of 2 chunks fit the context budget") != std::string::npos);
 }

@@ -90,6 +90,7 @@ add_executable(apogee_tests
     commands/lifecycle_test.cpp
     commands/machine_mode_test.cpp
     commands/line_reader_test.cpp
+    commands/chat_attachments_test.cpp
     commands/chat_completer_test.cpp
     logger/session_test.cpp
     agent/tool_test.cpp
@@ -100,6 +101,7 @@ add_executable(apogee_tests
     agentloop/anthropic_loop_test.cpp
     agentloop/content_test.cpp
     agentloop/budget_test.cpp
+    agentloop/attachments_test.cpp
     agentloop/question_test.cpp
     httpserver/handler_test.cpp
     httpserver/sse_test.cpp

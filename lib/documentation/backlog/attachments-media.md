@@ -1,6 +1,6 @@
 # Automatic attachments: images, audio and video
 
-**What / why.** The same `/attach` that takes a document ([document attachments](attachments-documents.md)) takes a picture, a recording or a video. Apogee gives each to whichever configured model can read it:
+**What / why.** The same `/attach` that takes a document ([document attachments](../assistant/MILESTONES.md#milestone-h--apogee-chat)) takes a picture, a recording or a video. Apogee gives each to whichever configured model can read it:
 - **Natively**, when the chat model can: an image to a model with a vision projector, audio to one with an audio projector, and a short video to a video-capable one such as Qwen3-VL through mtmd.
 - **Through a helper**, when it cannot: the [`vision` or `transcription` role](../assistant/MILESTONES.md#milestone-n--model-operations) turns it into text.
 
@@ -26,7 +26,7 @@ Today:
 - **A helper is used automatically** (the user's call), and the status line says which model is reading what, and for how long.
 - **A child's stderr is captured, never inherited.** Apogee runs `ffmpeg` itself through `platform::ChildProcess` with a bounded stderr tail, and feeds mtmd frames and samples as bitmaps. mtmd's own video helper spawns `ffmpeg` from llama.cpp code Apogee does not control, so it is used only if a PTY check proves it keeps `ffmpeg`'s output off the terminal.
 - **External converters, optional:** `ffmpeg` on `PATH` (the user's call). Without it, audio and video are refused by name and `check` says what to install. Images need nothing external.
-- **Transient and private as in [document attachments](attachments-documents.md):** descriptions, transcripts and timelines live in the chat's private index, and the session records the attachment by reference.
+- **Transient and private as in [document attachments](../assistant/MILESTONES.md#milestone-h--apogee-chat):** descriptions, transcripts and timelines live in the chat's private index, and the session records the attachment by reference.
 
 **Seam + files.**
 - `agentloop/attachments.*` (from 26d): the media branch that picks native versus helper, and the timeline builder.
@@ -67,4 +67,4 @@ Today:
 - [ ] An audio note is transcribed and questions about it are answered from the transcript.
 - [ ] On a vision chat model, the second turn after an image does not re-encode the image (visible in `--verbose` timings).
 
-**Scope note.** Item **26e**; build after [26d](attachments-documents.md) ([26b](../assistant/MILESTONES.md#milestone-n--model-operations), the helper roles, shipped 2026-09-28). Out of scope: live capture (microphone, camera, screen), generating audio or images, and uploads over `serve`.
+**Scope note.** Item **26e**; gated on nothing now: [26b](../assistant/MILESTONES.md#milestone-n--model-operations), the helper roles, shipped 2026-09-28, and [26d](../assistant/MILESTONES.md#milestone-h--apogee-chat), document attachments, 2026-09-29. Its machinery is 26d's: `agentloop/attachments` reads and indexes (`read_attachment_text` refuses images, audio and video by name today -- that refusal is what this item replaces), `commands/chat_attachments` attaches, settles and inlines, and each chat's private index is `attachments/<chat id>.db`. Out of scope: live capture (microphone, camera, screen), generating audio or images, and uploads over `serve`.

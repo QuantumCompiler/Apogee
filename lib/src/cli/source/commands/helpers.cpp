@@ -73,10 +73,11 @@ agentloop::RagResult retrieve_for_collection(
     const harness::Harness& harness, const harness::Config& config, std::string_view collection,
     const std::string& question, int limit, std::string_view retriever_flag,
     std::string_view rerank_flag, const harness::CancellationToken& cancellation,
-    std::string_view conversation, const agentloop::TurnBudget& budget) {
+    std::string_view conversation, const agentloop::TurnBudget& budget, std::int64_t share_used) {
     agentloop::RagTurn turn;
     turn.conversation = std::string{conversation};
     turn.budget = budget;
+    turn.share_used = share_used;
     turn.store_path = collection_path(collection);
     turn.question = question;
     turn.limit = limit;
@@ -133,6 +134,22 @@ RagChoice choose_rag_collection(bool flag_given, std::string_view flag_value,
         choice.source = RagSource::Config;
     }
     return choice;
+}
+
+std::string describe_attachment_retrieval(const agentloop::RagResult& result) {
+    std::string notes;
+    for (const std::string& note : result.notes) {
+        notes += " -- " + note;
+    }
+    if (!result.error.empty()) {
+        return "attachments not searched -- " + result.error + notes;
+    }
+    if (result.chunks == 0) {
+        return "nothing in the attachments matched [" + result.retriever + "]" + notes;
+    }
+    return std::to_string(result.chunks) + (result.chunks == 1 ? " excerpt" : " excerpts") +
+           " from the attachments, top " + std::to_string(result.top_score).substr(0, 5) + " [" +
+           result.retriever + (result.reranked ? ", reranked" : "") + "]" + notes;
 }
 
 std::string describe_retrieval(const RagChoice& choice, const agentloop::RagResult& result) {

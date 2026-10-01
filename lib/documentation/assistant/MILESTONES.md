@@ -305,7 +305,7 @@ The layering check was **extended to cover `agentloop/` and `agent/`**, which CL
 - **The loop and its surfaces:** the assembly unused, its markers not the request's, the stubs or a trim unsaid, a trim said at every step, the request's own `max_tokens` ignored; `measure_context` measuring the transcript whole; compaction shown whole tool output; the budget not passed on by `retrieve_for_collection`, or not built by chat, `complete` or `serve`.
 
 **Not verified, and found on the way.**
-- **Nothing uses the attachments share yet.** [26d](../backlog/attachments-documents.md) will. The place its overflow trim belongs, between the two passes over this turn's tool results, is marked in `budget.cpp`.
+- **Nothing used the attachments share yet.** [26d](#milestone-h--apogee-chat) did, the next day. An attachment is inlined only while it fits the share, so trimming to it takes nothing; past the injected context, an inlined attachment is stripped last.
 - **One turn's tool results are not capped by their share** unless the whole request overflows. A single 60 KB read on a 32K window still goes in whole on its own turn, and becomes a stub on the next. Cutting what a model has just asked for, while it fits, was judged worse than the crowding.
 - **A retrieval turn still re-reads a local model's whole prompt.** The injected block opens the request, so it changes every turn. 26c sizes that block and leaves where it goes alone; moving it is its own change.
 - **A cloud model's overflow is judged on the estimate**, four characters a token. On text that tokenizes densely it can be under by several times. A cloud window is large, so trimming there needs the request to be near a window that big.
@@ -457,7 +457,7 @@ Verified against a build forced to always use the plain reader: the check failed
 
 ### 2026-09-25 — Chat input completion (backlog item 24)
 
-Asked for directly (Taylor, 2026-09-25): Claude Code's `/` command list and `@` file mentions, in `apogee chat`. Specced and pulled to the top of v0.1.2 the same day, and built that day after the user's one call: until the attachments item ([26d](../backlog/attachments-documents.md)) lands, a sent `@file` mention stays plain text, with no stopgap that pastes the file's contents.
+Asked for directly (Taylor, 2026-09-25): Claude Code's `/` command list and `@` file mentions, in `apogee chat`. Specced and pulled to the top of v0.1.2 the same day, and built that day after the user's one call: until the attachments item ([26d](#milestone-h--apogee-chat), shipped 2026-09-29) lands, a sent `@file` mention stays plain text, with no stopgap that pastes the file's contents.
 
 **What was built**
 
@@ -493,6 +493,82 @@ Asked for directly (Taylor, 2026-09-25): Claude Code's `/` command list and `@` 
   - a burst over visible rows leaves none behind, and `/exit` sent in one burst keeps no suggestion on its line;
   - a piped chat writes no escape sequence and no prompt, and its `/help` lists `/retriever`, described.
   - **Mutation-checked:** without the clear below the line, the burst check fails; without the finishing flag, the `/exit` check fails; with rows allowed to reach the full width, the edge check and 910 unit assertions fail.
+
+### 2026-09-29 — `attachments-documents` (backlog item 26d): documents, code and folders, attached to a chat
+
+**Why.** Until now a chat could take an image on its first message and nothing else. A small local model with a 32K window cannot read a 300-page PDF or a repository by having it pasted in. It can when the document is indexed and the parts that bear on each question are handed to it, cited by page or line. Ommi's `chat --file` pasted one file's text into the first message, whole, with no index and no size handling; this replaces that design rather than porting it. Asked for by the user on 2026-09-25, with three calls of theirs: attachments kept with their chat and cached by file hash, helper models used automatically, and external converters on `PATH`.
+
+**What was built**
+
+- [x] **Attaching.**
+  - `chat --attach <path>` (repeatable), and mid-chat `/attach <path|folder|glob>`, `/attachments` and `/detach <name>`, in chat's command table, so `/help`, completion and dispatch have them.
+  - `/attach` completes paths as `@` does, and `/detach` completes what is attached.
+  - `complete --attach`, and a machine-mode `{"type":"attach","path":…}` line whose outcome arrives as `notice` events.
+  - A sent message's `@path` or `@"path with spaces"` attaches that path exactly as `/attach` would, the message kept as typed. A mention naming nothing stays text, with a dim note.
+- [x] **Reading** (`agentloop/attachments`, one core for every surface).
+  - Text and code are read as they are, a binary one refused. A PDF goes through `pdftotext` with its page breaks kept, and HTML through `fetch_url`'s reader, its links resolved against the file's own `file://` address.
+  - Word, Excel and PowerPoint files are refused by name, and so are images, audio and video, each with its reason.
+  - A folder is walked recursively, hidden entries left out and, inside a git repository, what git ignores (`git ls-files`).
+  - A glob matches `*` and `?` within a name and `**` across folders.
+  - Over 500 files or 50 MB asks on a terminal and is refused on a pipe.
+- [x] **Indexed, always, into the chat's own store**, `attachments/<chat id>.db`, under a new private layout row, and deleted with the chat by `chats delete`.
+  - A file's chunks are stored under its content, `sha256:<hex>`, each with its name, byte offsets, and line or page range in its metadata. `chunk_spans` gives the chunker's spans, and `PositionIndex` numbers them.
+  - Embedded by the embedding model **only when one is named** and not billed per call; otherwise searched by its words, and said so. The chat model is never drafted in through the role's fallback.
+  - Indexing runs on a worker thread while the user types, and settles before the next turn, as the title does. A turn that needs it waits with its progress on the status line, and Ctrl-C keeps what is ready.
+- [x] **The hash cache.** Before anything is read or embedded, the other chats' indexes are searched for the same content under the same embedding model (or lexical beside lexical). A match is copied, vectors and all, and cited by this chat's name for it.
+- [x] **Inlined when it fits.** An attachment whose text fits the budget's attachment share (26c), beside the ones already inlined, rides the user message it was attached with, whole. That is in what is **sent** only.
+  - The transcript keeps the message as typed, and the session records the attachment by reference: path, sha256, reader, size, and the message it rides. That is the session's schema version 2.
+  - The text is rebuilt exactly from the chunks' byte offsets.
+  - The budget trims an inlined attachment last, or with the exchange it rode. Either way it is named, and retrieved from then on. So is every one when compaction folds the messages they rode.
+- [x] **Retrieved every turn** from the chat's index, through the one retriever resolver, with inlined attachments left out.
+  - Excerpts are labelled `ledger.pdf p. 187` or `budget.cpp:477–487`, adjacent chunks of one file merged without their overlap, and the model asked to cite the label.
+  - A question naming code -- `fitting_prefix`, `parseConfig`, `Store::search`, `run()` -- is searched by its words for those names alone. Any other is searched by words and meaning together (a `hybrid` pin) when the index has vectors. `/retriever` overrides both.
+  - The attachments go first; an `auto_rag` or `--rag` collection gets what they leave of the retrieval share (`share_used`), each reported on its own line.
+  - The follow-up is restated once, by 26b's rewrite, for both.
+- [x] **`check`** has an Attachments section: whether `pdftotext` and `git` are found (optional, so never a fault), and how many chat indexes there are and their size. The folder's mode is the filesystem check's, as a layout row.
+
+**On real weights** (Qwen3.8-27B Q4_K_M at its 32K default, greedy; embeddinggemma-300M as the embedding model; `--verbose` lines):
+
+- **A 300-page PDF** (generated, with real cross-references, one detail on page 187), attached with `/attach`. It was read and 612 chunks embedded in 5 seconds. Asked how many crates were in the Tromso warehouse, the 27B answered "4,812 crates of cloudberry jam (ledger.pdf p. 187)" from a 750-token prompt.
+- **`summarize @ledger.pdf` in a second chat** attached it as `/attach` would, and copied it from the first chat's index in 0.7 seconds instead of embedding it again. The summary cited merged ranges (`pp. 82–83`).
+- **Resumed**, the first chat attached and embedded nothing. It restated "which page mentions the cloudberry jam?" as a standalone query and answered "Page 187." `chats delete` removed its chat's index.
+- **A 6 KB source file** was inlined whole. Both questions about it were answered right with no retrieval, the second reading 54 new tokens with 1,633 from the cache.
+- **A folder of 30 source files** inside the repository: asked where `fitting_prefix` is defined, the 27B named `budget.cpp` from line 483, the definition, and `budget.h:181–187`, the declaration. Re-attached after two of its files changed, it copied 28 and read and embedded just those two.
+
+**Found on the way, and settled.**
+- **Meaning missed a name.** The folder question first went to vector search, which did not find the definition: an embedding captures meaning, and an exact name carries little. Hybrid search, tried next, dropped it too. Its rank fusion rewards a chunk middling in both lists over one strong in only one, and the definition was first by its name and nowhere by meaning. Searching the name alone, by its words, put the declaration first and the definition fourth. Hence the code-name rule above.
+- **One run answered nothing.** The 27B spent its default 2,048-token budget reasoning and returned an empty answer. With `-n 8192` it answered. That is the older empty-answer problem, flagged separately during 26b, not this item's.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| `complete --attach` | A temporary store of its own, removed at exit, the hash cache still searched *(default taken)* | A one-shot has no chat to keep it with. |
+| A large folder | Over 500 files or 50 MB asks on a terminal, refused on a pipe *(default taken)* | Attaching a home directory by accident. |
+| `.gitignore` | Honoured inside a repository, through `git ls-files` *(default taken)* | The same `git` the git toolset uses. |
+| Office files | Refused by name *(default taken)* | Each needs a converter decision of its own. |
+| Retrieval | Up to the budget's retrieval share, labelled, adjacent chunks merged *(default taken)* | Contiguous text reads better than fragments. |
+| How it is keyed | By content, `sha256:<hex>`, with name and range per chunk | The hash cache is one lookup per other chat, and a file attached twice is indexed once. |
+| How an inlined one reaches the model | On the message it was attached with, in what is sent only; saved by reference, rebuilt from the index | The message stays as typed, and the text is never saved twice. |
+| The embedder | Only the one named, never a billed one | The chat model standing in through the fallback would embed hundreds of chunks with a 27B; and nothing is vectorised through a metered embedder on Apogee's initiative. |
+| Retrieval's order | The attachments first, then `auto_rag` with what they leave | The user's own documents come first. |
+| A local HTML file's links | Resolved against its own `file://` address | The reader resolves against a web address only. |
+| A question naming code | Searched by its words for those names; anything else, words and meaning together | Found on real weights, above. |
+
+**Guardrails, each mutation-tested (68 mutants, all caught), run in three git worktrees against the whole unit suite.** 59 were caught on the first pass. The nine that survived were caught once tests were added for what they exposed: a `?` that matched a folder separator; cancellation ignored while embedding; the retrieval share not handed on to `auto_rag`; `complete --attach` inlining nothing; inlined attachments searched as well; the cost of those already inlined ignored; a dropped exchange or a compaction left unsaid; and a code name searched along with the rest of its question.
+- **Finding and reading:** hidden entries kept, or kept from git's list; git's list never used; names cited absolute; `*` across folders, `**` needing a folder, `?` matching `/`; the size guard at its limit rather than past it; Office files or images read; a local HTML file's links left as they were; a PDF read as text.
+- **Chunks and excerpts:** a span a byte short; line or page numbers counting the separator, or from zero; page breaks kept in the stored text; the last line past the end; excerpts never merged, their overlap repeated, unlabelled, or not best first.
+- **The index and the hash cache:** content already held indexed again; a copy cited by the other chat's name; a copy across embedding models, or from a vector index into a lexical one; an embedding failure unsaid; another model's vectors mixed in; cancellation ignored.
+- **Inlining and the budget:** an attachment exactly at the share refused; the inlined text never sent, never stripped, kept when its exchange is dropped, or its missing message unsaid; the loop not passing it on, or not collecting what was dropped; the cost of those already inlined ignored; a dropped or compacted one kept inline, or not said.
+- **Retrieval:** inlined attachments searched too; the share not passed on to a collection, or not split; excerpts unlabelled; code names not recognised (snake case, camel case, calls), searched by meaning, or with the rest of the question; no hybrid pin when the index has vectors.
+- **The embedder:** the chat model drafted in through the role's fallback; a billed embedder used.
+- **The surfaces:** a large folder attached without asking; an attachment never anchored to its message, or never inlined; content another attachment still holds removed by `/detach`; an email address read as a mention, or a mention's trailing punctuation kept; a mention already attached, attached again; machine mode's `attach` line unknown; the session's `inline_at` not saved or not read; the index not removed with its chat; the layout row not private; `check` counting an index's side files as indexes.
+
+**Not verified.**
+- **Office files have no item.** Word, Excel and PowerPoint are refused by name, and nothing in the backlog converts them yet. Images, audio and video are [26e](../backlog/attachments-media.md)'s.
+- **A PDF without `pdftotext`.** It is skipped with its reason, and the test for that runs only where `pdftotext` is missing. This machine has it, so that test skipped.
+- **macOS only.** `git ls-files`, `pdftotext` and the private folder were not tried on the Linux or Windows builds.
+- **A billed embedder** is refused by the provider's own flag. That was tested on a mock; no hosted embedder was tried.
 
 ## Milestone I — The full cloud set
 

@@ -436,3 +436,10 @@ TEST_CASE("an outbound permission prompt names the host, flags it, and carries t
     CHECK_FALSE(write_event.contains("outbound"));
     CHECK_FALSE(write_event.contains("detail"));
 }
+
+TEST_CASE("a driver attaches a file with an attach line", "[machine][attachments]") {
+    const DriverMessage attach =
+        apogee::commands::parse_driver_line(R"({"type":"attach","path":"docs/report.pdf"})");
+    CHECK(attach.kind == DriverMessage::Kind::Attach);
+    CHECK(attach.text == "docs/report.pdf");
+}

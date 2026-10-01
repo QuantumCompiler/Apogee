@@ -38,6 +38,12 @@ constexpr std::array kCommands{
     ChatCommandSpec{"capture", ChatVerb::Capture, "[status|link]",
                     "Save this conversation as a knowledge record",
                     ArgumentValues::CaptureStatuses},
+    ChatCommandSpec{"attach", ChatVerb::Attach, "<path>",
+                    "Attach a file, folder or glob: inlined when it fits, retrieved when not",
+                    ArgumentValues::Paths},
+    ChatCommandSpec{"attachments", ChatVerb::Attachments, "", "List what is attached"},
+    ChatCommandSpec{"detach", ChatVerb::Detach, "<name>", "Detach an attachment",
+                    ArgumentValues::AttachmentNames},
     ChatCommandSpec{"exit", ChatVerb::Exit, "", "Save and leave"},
     ChatCommandSpec{"quit", ChatVerb::Exit, "", "Save and leave"},
 };
@@ -222,6 +228,15 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
                 choices.push_back({std::string{status}, {}});
             }
             break;
+        case ArgumentValues::Paths:
+            break;  // completed as paths, below
+        case ArgumentValues::AttachmentNames:
+            if (sources.attachment_names) {
+                for (std::string& name : sources.attachment_names()) {
+                    choices.push_back({std::move(name), {}});
+                }
+            }
+            break;
     }
     return choices;
 }
@@ -369,6 +384,19 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
         ++from;
     }
     const std::string_view typed = before_cursor.substr(from);
+    if (spec->values == ArgumentValues::Paths) {
+        // The `@` completer's own logic, on the argument as if `@` led it.
+        const std::string as_mention = "@" + std::string{typed};
+        Suggestions paths = complete_path(as_mention, 0, sources);
+        for (Suggestion& candidate : paths.candidates) {
+            candidate.text.erase(0, 1);
+            if (!candidate.label.empty()) {
+                candidate.label.erase(0, 1);
+            }
+        }
+        paths.from = from;
+        return paths;
+    }
     if (typed.find_first_of(" \t") != std::string_view::npos) {
         return out;
     }

@@ -984,3 +984,21 @@ TEST_CASE("a trim that holds across a turn's steps is said once", "[agentloop][b
     CHECK(reporter.notices ==
           std::vector<std::string>{"context budget: 1 earlier exchange not sent"});
 }
+
+TEST_CASE("the loop sends an inlined attachment on its message, and names one it could not",
+          "[agentloop][budget][attachments]") {
+    Fixture f = make_fixture({text_turn("the code is 7731")});
+    f.history = {ChatMessage::user("what is the code?")};
+    Options options;
+    options.model = "mock";
+    options.inline_attachments = {
+        {.message = 0, .name = "notes.md", .text = "--- attached file: notes.md ---\n7731\n"},
+        {.message = 5, .name = "gone.md", .text = "never sent"}};
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options);
+    const auto& sent = f.provider->requests().front().messages;
+    REQUIRE(sent.size() == 1);
+    CHECK(sent[0].content.plain_text().starts_with("--- attached file: notes.md ---\n7731\n"));
+    CHECK(sent[0].content.plain_text().ends_with("what is the code?"));
+    CHECK(f.history[0].content.plain_text() == "what is the code?");
+    CHECK(result.inline_dropped == std::vector<std::string>{"gone.md"});
+}

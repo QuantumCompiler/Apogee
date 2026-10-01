@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <string>
+#include <vector>
 
 #include "harness/config_edit.h"
 #include "harness/types.h"
@@ -350,4 +351,55 @@ TEST_CASE("transcript_text renders the participants' turns and nothing else",
     CHECK(text.find("TOOL OUTPUT") == std::string::npos);
     CHECK(apogee::logger::transcript_text({}).empty());
     CHECK(apogee::logger::transcript_text({ChatMessage::system("only")}).empty());
+}
+
+TEST_CASE("attachments round-trip by reference, and an older file has none",
+          "[chat][session][attachments]") {
+    Session session;
+    session.chat_id = "c";
+    session.backend = "mock";
+    session.attachments = {apogee::logger::Attachment{.name = "src",
+                                                      .files = {{.name = "src/a.cpp",
+                                                                 .path = "/work/src/a.cpp",
+                                                                 .sha256 = "ab12",
+                                                                 .reader = "text",
+                                                                 .bytes = 42}},
+                                                      .inline_at = 3},
+                           apogee::logger::Attachment{.name = "report.pdf",
+                                                      .files = {{.name = "report.pdf",
+                                                                 .path = "/work/report.pdf",
+                                                                 .sha256 = "cd34",
+                                                                 .reader = "pdftotext",
+                                                                 .bytes = 9000}},
+                                                      .inline_at = {}}};
+    const Session back = deserialize(apogee::logger::serialize(session), {}).session;
+    REQUIRE(back.attachments.size() == 2);
+    CHECK(back.attachments[0].name == "src");
+    CHECK(back.attachments[0].inline_at == std::optional<std::size_t>{3});
+    CHECK(back.attachments[0].files[0].sha256 == "ab12");
+    CHECK(back.attachments[0].files[0].bytes == 42);
+    CHECK(back.attachments[1].files[0].reader == "pdftotext");
+    CHECK_FALSE(back.attachments[1].inline_at.has_value());
+    // By reference: an attachment is these fields, and never its text.
+    const nlohmann::json written = nlohmann::json::parse(apogee::logger::serialize(session));
+    std::vector<std::string> keys;
+    for (const auto& [key, value] : written["attachments"][0].items()) {
+        keys.push_back(key);
+    }
+    CHECK(keys == std::vector<std::string>{"files", "inline_at", "name"});
+    keys.clear();
+    for (const auto& [key, value] : written["attachments"][0]["files"][0].items()) {
+        keys.push_back(key);
+    }
+    CHECK(keys == std::vector<std::string>{"bytes", "name", "path", "reader", "sha256"});
+
+    const Session older =
+        deserialize(R"({"schema_version": 1, "chat_id": "c", "backend": "mock"})", {}).session;
+    CHECK(older.attachments.empty());
+
+    const auto bad =
+        deserialize(R"({"schema_version": 2, "chat_id": "c", "attachments": [{"name": 7}]})", {});
+    CHECK(bad.session.attachments.empty());
+    REQUIRE_FALSE(bad.warnings.empty());
+    CHECK(bad.warnings.front().kind == WarningKind::FieldDropped);
 }

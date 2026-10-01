@@ -32,7 +32,9 @@ struct MockTurn {
     /// Two placeholders are expanded against the request the turn answers,
     /// so a script can prove what reached the model without a real one:
     /// `{{last_tool_result}}` is the content of the most recent tool result
-    /// in the request, `{{system}}` the concatenated system messages; the
+    /// in the request, `{{last_user}}` the last user message as it was sent
+    /// (an inlined attachment and all), `{{system}}` the concatenated system
+    /// messages; the
     /// `{{last_tool_result:json}}` / `{{system:json}}` forms expand to a
     /// JSON string literal, quotes included, for use inside a JSON answer.
     std::string text;

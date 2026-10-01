@@ -5,11 +5,53 @@
 #include <stdexcept>
 #include <system_error>
 
+#include "agentloop/attachments.h"
 #include "agentloop/graph_context.h"
 #include "agentloop/rerank.h"
 #include "embedstore/store.h"
 
 namespace apogee::agentloop {
+namespace {
+
+/// What `prefix` costs by `budget`'s count.
+[[nodiscard]] std::int64_t prefix_tokens(const TurnBudget& budget,
+                                         const std::vector<harness::ChatMessage>& prefix) {
+    if (prefix.empty()) {
+        return 0;
+    }
+    harness::ChatRequest request;
+    request.messages = prefix;
+    return budget.tokens(request).tokens;
+}
+
+/// A chat's attachment hits as labelled excerpts, fitted to `share` (26d).
+[[nodiscard]] RagResult package_attachments(const RagTurn& turn,
+                                            const std::vector<embedstore::SearchHit>& hits,
+                                            std::int64_t share, RagResult result) {
+    std::vector<AttachmentExcerpt> excerpts = attachment_excerpts(hits);
+    if (turn.budget.budget.known()) {
+        const auto render = [&](std::size_t count) {
+            return render_attachment_excerpts(
+                {excerpts.begin(), excerpts.begin() + static_cast<std::ptrdiff_t>(count)});
+        };
+        const std::size_t fit = fitting_prefix(turn.budget, share, excerpts.size(), render);
+        if (fit < excerpts.size()) {
+            result.notes.push_back(std::to_string(fit) + " of " + std::to_string(excerpts.size()) +
+                                   " excerpts fit the context budget");
+            excerpts.resize(fit);
+        }
+    }
+    if (excerpts.empty()) {
+        return result;
+    }
+    result.chunks = static_cast<std::int64_t>(excerpts.size());
+    result.top_score = excerpts.front().score;
+    result.prefix.push_back(harness::ChatMessage::system(render_attachment_excerpts(excerpts)));
+    result.tokens = prefix_tokens(turn.budget, result.prefix);
+    return result;
+}
+
+}  // namespace
 
 std::string render_rag_context(const std::vector<std::string>& chunks) {
     if (chunks.empty()) {
@@ -146,7 +188,12 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
             result.notes.push_back(judge.note);
         }
     }
-    const int fetch = rerank_fetch_limit(turn.limit, !judge.backend.empty());
+    // Inlined attachments are left out after the search, so it reaches past
+    // them: they would otherwise take the places of excerpts that are not
+    // already in front of the model.
+    const int fetch =
+        rerank_fetch_limit(turn.limit, !judge.backend.empty()) +
+        (turn.exclude_sources.empty() ? 0 : static_cast<int>(turn.exclude_sources.size()) * 8);
 
     // --- run exactly what was decided ---------------------------------------------
     std::vector<embedstore::SearchHit> hits;
@@ -180,6 +227,10 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
             return result;
         }
     }
+
+    std::erase_if(hits, [&](const embedstore::SearchHit& hit) {
+        return turn.exclude_sources.contains(hit.chunk.source);
+    });
 
     // --- the graph, seeded BEFORE the judge -----------------------------------
     //
@@ -238,6 +289,11 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
     if (hits.empty() && graph_section.empty()) {
         return result;
     }
+    const std::int64_t share = std::max<std::int64_t>(
+        turn.budget.budget.share(BudgetSource::Retrieval) - turn.share_used, 0);
+    if (turn.attachments) {
+        return package_attachments(turn, hits, share, std::move(result));
+    }
     std::vector<std::string> texts;
     texts.reserve(hits.size());
     for (const embedstore::SearchHit& hit : hits) {
@@ -246,7 +302,6 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
 
     // --- the budget: the leading chunks that fit the retrieval share ----------
     if (turn.budget.budget.known()) {
-        const std::int64_t share = turn.budget.budget.share(BudgetSource::Retrieval);
         const auto render = [&](std::size_t count) {
             const std::vector<std::string> leading{
                 texts.begin(), texts.begin() + static_cast<std::ptrdiff_t>(count)};
@@ -277,6 +332,7 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
     // The graph section rides after the chunk list, in the same transient
     // message, so it augments them and never crowds them out.
     result.prefix.push_back(harness::ChatMessage::system(render_rag_context(texts, graph_section)));
+    result.tokens = prefix_tokens(turn.budget, result.prefix);
     return result;
 }
 

@@ -372,3 +372,67 @@ TEST_CASE("an ask_user answer is kept whole even when its call is no longer ther
     CHECK(stubbed.stubs == 0);
     CHECK(stubbed.messages[1].content.plain_text() == std::string(2000, 'a'));
 }
+
+TEST_CASE("an inlined attachment rides its message in what is sent, never in history",
+          "[agentloop][budget][attachments]") {
+    const std::vector<ChatMessage> history{ChatMessage::system("be brief"),
+                                           ChatMessage::user("what is in it?")};
+    const std::vector<apogee::agentloop::InlineAttachment> inlined{
+        {.message = 1, .name = "notes.md", .text = "--- attached file: notes.md ---\nhi\n"}};
+    const Assembly assembly =
+        assemble_request(scripted(100000), ChatRequest{}, history, {}, {}, 0, 1, inlined);
+    REQUIRE(assembly.messages.size() == 2);
+    CHECK(assembly.messages[1].content.plain_text() ==
+          "--- attached file: notes.md ---\nhi\n\nwhat is in it?");
+    CHECK(history[1].content.plain_text() == "what is in it?");
+    CHECK(assembly.inline_dropped.empty());
+
+    // A message that is not the user's -- compacted away -- carries nothing.
+    const Assembly gone = assemble_request(scripted(100000), ChatRequest{}, history, {}, {}, 0, 1,
+                                           {{.message = 0, .name = "a.md", .text = "x"}});
+    CHECK(gone.inline_dropped == std::vector<std::string>{"a.md"});
+}
+
+TEST_CASE("an inlined attachment is trimmed last, and with the exchange it rode",
+          "[agentloop][budget][attachments]") {
+    // An old exchange carries a big attachment; the turn in progress a small one.
+    const std::vector<ChatMessage> history{ChatMessage::user("old question"),
+                                           ChatMessage::assistant(std::string(100, 'o')),
+                                           ChatMessage::user("new question")};
+    const std::vector<apogee::agentloop::InlineAttachment> inlined{
+        {.message = 0, .name = "old.md", .text = std::string(2000, 'A')},
+        {.message = 2, .name = "new.md", .text = std::string(1000, 'B')}};
+    const std::vector<ChatMessage> injected{ChatMessage::system(std::string(500, 'R'))};
+
+    SECTION("the old exchange goes, and its attachment with it") {
+        const Assembly assembly =
+            assemble_request(scripted(2000), ChatRequest{}, history, {}, injected, 0, 2, inlined);
+        CHECK(assembly.inline_dropped == std::vector<std::string>{"old.md"});
+        CHECK(has(assembly.messages, 'R', 500));  // retrieval before the last resort
+    }
+
+    SECTION("past the injected context, the attachment itself") {
+        const Assembly assembly =
+            assemble_request(scripted(600), ChatRequest{}, history, {}, injected, 0, 2, inlined);
+        CHECK(assembly.inline_dropped == std::vector<std::string>{"old.md", "new.md"});
+        REQUIRE(assembly.trims.size() >= 3);
+        CHECK(assembly.trims[1] == "the retrieved context not sent");
+        CHECK(assembly.trims[2] == "1 inlined attachment not sent");
+        CHECK(assembly.messages.back().content.plain_text() == "new question");
+    }
+}
+
+TEST_CASE("an inlined attachment goes ahead of an image, as a text part",
+          "[agentloop][budget][attachments]") {
+    const std::vector<ChatMessage> history{
+        ChatMessage::user(apogee::harness::MessageContent::from_parts(
+            {apogee::harness::ContentPart::from_text("look"),
+             apogee::harness::ContentPart::from_image_url("data:image/png;base64,AAAA")}))};
+    const Assembly assembly = assemble_request(scripted(100000), ChatRequest{}, history, {}, {}, 0,
+                                               0, {{.message = 0, .name = "a.md", .text = "A"}});
+    const auto& parts = assembly.messages[0].content.parts();
+    REQUIRE(parts.size() == 3);
+    CHECK(parts[0].text == "A");
+    CHECK(parts[1].text == "look");
+    CHECK(parts[2].kind == apogee::harness::ContentPart::Kind::ImageUrl);
+}
