@@ -267,3 +267,24 @@ TEST_CASE("unreported usage is omitted rather than serialized as zeros", "[harne
     CHECK(encoded.at("usage").at("total_tokens") == 15);
     CHECK(encoded.get<ChatResponse>().usage.total_tokens() == 15);
 }
+
+TEST_CASE("audio parts and a clip's frames round-trip in their JSON shapes", "[harness][ir]") {
+    ContentPart frame = ContentPart::from_image_url("data:image/jpeg;base64,AAAA");
+    frame.video_frame = true;
+    const MessageContent content = MessageContent::from_parts(
+        {ContentPart::from_audio("UklGRg==", "wav"), frame, ContentPart::from_text("hi")});
+    const nlohmann::json json = content;
+    // OpenAI's input_audio shape; a frame is an image part that says so.
+    CHECK(json[0] == nlohmann::json{{"type", "input_audio"},
+                                    {"input_audio", {{"data", "UklGRg=="}, {"format", "wav"}}}});
+    CHECK(json[1]["type"] == "image_url");
+    CHECK(json[1]["video_frame"] == true);
+    CHECK(json[1]["image_url"]["url"] == "data:image/jpeg;base64,AAAA");
+    CHECK(json[2] == nlohmann::json{{"type", "text"}, {"text", "hi"}});
+    CHECK(json.get<MessageContent>() == content);
+    // A plain image is not a frame, and says nothing about it.
+    const nlohmann::json image = ContentPart::from_image_url("data:image/png;base64,AA");
+    CHECK_FALSE(image.contains("video_frame"));
+    CHECK(content.is_rich());
+    CHECK(content.plain_text() == "hi");
+}

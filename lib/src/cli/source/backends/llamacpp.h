@@ -49,7 +49,8 @@ class LlamaCppProvider final : public harness::LLMProvider,
                                public harness::EmbeddingCapable,
                                public harness::StatusReporting,
                                public harness::ContextWindowReporting,
-                               public harness::AudioCapable {
+                               public harness::AudioCapable,
+                               public harness::VideoCapable {
 public:
     /// Reads the wall clock. Injected so the idle-unload policy is testable
     /// without a test that sleeps.
@@ -148,6 +149,18 @@ public:
     /// projector file's header (`clip.has_audio_encoder`), read once: asked
     /// before any load, and answered without one.
     [[nodiscard]] bool accepts_audio() const noexcept override;
+
+    /// The projector's rate once the model is loaded; 0 before (26e).
+    [[nodiscard]] int audio_sample_rate() const noexcept override;
+
+    // --- VideoCapable --------------------------------------------------------
+
+    /// Whether this entry's projector has a vision encoder, from its header
+    /// (26e). A clip reaches the model as its frames, which Apogee's own
+    /// ffmpeg runner extracts, so any vision projector reads one; mtmd's
+    /// `mtmd_helper_support_video` says only whether mtmd's own ffmpeg
+    /// decoding was built, which Apogee does not use.
+    [[nodiscard]] bool accepts_video() const noexcept override;
 
     // --- ContextWindowReporting ----------------------------------------------
 
@@ -312,15 +325,21 @@ private:
                                       const ChatRendering* chat,
                                       const std::vector<std::string>& stops);
 
-    /// The turn when the request carries images.
+    /// The turn when the request carries images or audio.
     ///
     /// A separate path because a multimodal prompt is not a token vector: mtmd
     /// produces interleaved text and embedding chunks, so there is nothing to
     /// prefix-match and the KV cache is rebuilt from scratch. That cost is real
-    /// and is paid only on turns that actually carry a picture.
+    /// and is paid only on turns that actually carry a picture -- which, for
+    /// an attachment, is the turn it is attached on: afterwards its text
+    /// stands in for it (26e).
     [[nodiscard]] harness::ChatResponse run_multimodal(const harness::ChatRequest& request,
-                                                       const harness::StreamOptions& options,
-                                                       const std::vector<std::string>& images);
+                                                       const harness::StreamOptions& options);
+
+    /// The `--verbose` line for a multimodal prompt: what it encoded, how
+    /// many positions it took, and how long it was read for (26e).
+    void report_media(const harness::StreamOptions& options, const std::vector<MediaInput>& media,
+                      std::int64_t positions, double seconds, const LlamaContext& context) const;
 
     /// Where the session's context takes checkpoints for `request`'s prompt
     /// (25c): a few tokens short of its end, and where its last user message

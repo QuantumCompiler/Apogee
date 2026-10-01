@@ -12,10 +12,13 @@
 #include <string_view>
 #include <vector>
 
+#include "agentloop/media.h"
 #include "backends/mock.h"
 #include "harness/config.h"
 #include "harness/harness.h"
+#include "platform/child_process.h"
 #include "support/env_guard.h"
+#include "support/media_fakes.h"
 
 using apogee::commands::ChatAttachments;
 using apogee::commands::existing_mention;
@@ -427,4 +430,258 @@ TEST_CASE("a question naming code finds it by the name, past the question's othe
           std::string::npos);
     CHECK(turn.retrieved->prefix.front().content.plain_text().find("fitting_prefix(int share)") !=
           std::string::npos);
+}
+
+// --- Images, audio and video (26e) ----------------------------------------
+
+namespace {
+
+/// A chat on `chat`, a MediaProvider, beside `eyes`, another, with the roles
+/// `roles` sets -- and a folder of media files to attach.
+struct MediaChat {
+    apogee::testing::TempDir home{"chat-media-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    std::filesystem::path work = home.path() / "work";
+    std::shared_ptr<apogee::testing::MediaProvider> chat =
+        std::make_shared<apogee::testing::MediaProvider>();
+    std::shared_ptr<apogee::testing::MediaProvider> eyes =
+        std::make_shared<apogee::testing::MediaProvider>();
+    std::unique_ptr<apogee::harness::Harness> harness;
+    apogee::logger::Session session;
+    std::vector<std::string> said;
+    std::function<bool(const std::string&)> confirm;
+
+    explicit MediaChat(const std::string& roles = "") {
+        std::filesystem::create_directories(work);
+        const apogee::harness::Config config = apogee::harness::parse_config(
+            "models:\n  default: chat\n" + roles +
+                "backends:\n  chat:\n    type: mock\n    context_size: 8000\n  eyes:\n    type: "
+                "mock\n",
+            "<test>");
+        harness = std::make_unique<apogee::harness::Harness>(config);
+        harness->register_provider("chat", chat);
+        harness->register_provider("eyes", eyes);
+        harness->use_default_router();
+        session.chat_id = "chat-media";
+        session.backend = "chat";
+    }
+
+    [[nodiscard]] ChatAttachments::Hooks hooks() {
+        return ChatAttachments::Hooks{
+            .say = [this](const std::string& line, bool) { said.push_back(line); },
+            .progress = {},
+            .confirm_large = confirm,
+            .save = false};
+    }
+
+    void write(const std::string& name, const std::string& bytes = "PNGBYTES") const {
+        std::ofstream{work / name, std::ios::binary} << bytes;
+    }
+
+    [[nodiscard]] bool heard(std::string_view needle) const {
+        return std::ranges::any_of(
+            said, [&](const std::string& line) { return line.find(needle) != std::string::npos; });
+    }
+
+    [[nodiscard]] apogee::agentloop::TurnBudget budget() const {
+        return apogee::agentloop::turn_budget(*harness, "chat", std::nullopt);
+    }
+};
+
+}  // namespace
+
+TEST_CASE("an image is read as it is with the next message, then its description stands in",
+          "[commands][attachments][media]") {
+    MediaChat fixture;
+    fixture.chat->sees = true;
+    fixture.chat->reply = [](const apogee::harness::ChatRequest&) {
+        return std::string{"A red screen that says STOP."};
+    };
+    fixture.write("stop.png");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-media"), fixture.hooks()};
+    REQUIRE(attached.attach("stop.png", fixture.work));
+    attached.settle();
+    CHECK(fixture.heard("attached stop.png: 1 file, 1 chunk, described by chat, "));
+    CHECK(fixture.heard(" -- read as it is with your next message, then inlined whole"));
+    REQUIRE(attached.describe().size() == 1);
+    CHECK(attached.describe().front().find("described by chat, read as it is with your next "
+                                           "message, then inlined with your next message") !=
+          std::string::npos);
+
+    // The turn it is attached on: the picture, and not its description too.
+    const ChatAttachments::Turn first =
+        attached.for_turn(0, "what is it?", fixture.budget(), 4, {});
+    REQUIRE(first.inlined.size() == 1);
+    CHECK(first.inlined.front().name == "stop.png (as it is)");
+    CHECK(first.inlined.front().text.empty());
+    REQUIRE(first.inlined.front().parts.size() == 1);
+    CHECK(first.inlined.front().parts.front().image_url ==
+          "data:image/png;base64," + apogee::agentloop::base64_encode("PNGBYTES"));
+    CHECK_FALSE(first.retrieved.has_value());
+
+    // Every turn after: the description, on the message it was attached with.
+    const ChatAttachments::Turn second =
+        attached.for_turn(2, "and the colour?", fixture.budget(), 4, {});
+    REQUIRE(second.inlined.size() == 1);
+    CHECK(second.inlined.front().message == 0);
+    CHECK(second.inlined.front().parts.empty());
+    CHECK(second.inlined.front().text.find("A red screen that says STOP.") != std::string::npos);
+}
+
+TEST_CASE("attaching an image again looks at it again, without describing it again",
+          "[commands][attachments][media]") {
+    MediaChat fixture;
+    fixture.chat->sees = true;
+    fixture.write("stop.png");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-media"), fixture.hooks()};
+    REQUIRE(attached.attach("stop.png", fixture.work));
+    attached.settle();
+    (void)attached.for_turn(0, "what is it?", fixture.budget(), 4, {});
+    CHECK(fixture.chat->requests().size() == 1);
+
+    REQUIRE(attached.attach("stop.png", fixture.work));
+    attached.settle();
+    CHECK(fixture.chat->requests().size() == 1);
+    const ChatAttachments::Turn again =
+        attached.for_turn(2, "look closer", fixture.budget(), 4, {});
+    const auto as_it_is = std::ranges::find(again.inlined, std::string{"stop.png (as it is)"},
+                                            &apogee::agentloop::InlineAttachment::name);
+    REQUIRE(as_it_is != again.inlined.end());
+    CHECK(as_it_is->message == 2);
+    CHECK_FALSE(as_it_is->parts.empty());
+}
+
+TEST_CASE("a chat model that cannot see has its images described by the vision role",
+          "[commands][attachments][media]") {
+    MediaChat fixture{"  default_vision: eyes\n"};
+    fixture.eyes->sees = true;
+    fixture.eyes->reply = [](const apogee::harness::ChatRequest&) {
+        return std::string{"An invoice for 1,284.50 EUR."};
+    };
+    fixture.write("invoice.png");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-media"), fixture.hooks()};
+    REQUIRE(attached.attach("invoice.png", fixture.work));
+    attached.settle();
+    CHECK(fixture.heard("attached invoice.png: 1 file, 1 chunk, described by eyes, "));
+    CHECK_FALSE(fixture.heard("read as it is"));
+    CHECK(fixture.chat->requests().empty());
+    const ChatAttachments::Turn turn = attached.for_turn(0, "how much?", fixture.budget(), 4, {});
+    REQUIRE(turn.inlined.size() == 1);
+    CHECK(turn.inlined.front().parts.empty());
+    CHECK(turn.inlined.front().text.find("1,284.50 EUR") != std::string::npos);
+}
+
+TEST_CASE("media nothing here can read is refused, naming the role that would",
+          "[commands][attachments][media]") {
+    MediaChat fixture;
+    fixture.write("note.m4a", "audio");
+    fixture.write("stop.png");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-media"), fixture.hooks()};
+    CHECK_FALSE(attached.attach("note.m4a", fixture.work));
+    CHECK(
+        fixture.heard("note.m4a: backend 'chat' cannot hear audio, and no transcription model "
+                      "is set -- set one with 'apogee config set-default-transcription"));
+    CHECK_FALSE(attached.attach("stop.png", fixture.work));
+    CHECK(fixture.heard("set-default-vision"));
+    attached.settle();
+    CHECK(fixture.session.attachments.empty());
+}
+
+TEST_CASE("many descriptions by a model billed per call are asked about first",
+          "[commands][attachments][media]") {
+    MediaChat fixture;
+    fixture.chat->sees = true;
+    fixture.chat->metered = true;
+    std::filesystem::create_directories(fixture.work / "shots");
+    for (int index = 0; index < 13; ++index) {
+        fixture.write("shots/s" + std::to_string(index) + ".png", "s" + std::to_string(index));
+    }
+    {
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-media"), fixture.hooks()};
+        CHECK_FALSE(attached.attach("shots", fixture.work));
+        CHECK(
+            fixture.heard("shots not attached: it needs about 13 image and frame descriptions "
+                          "by chat, which is billed per call"));
+        CHECK(fixture.chat->requests().empty());
+    }
+    std::string asked;
+    fixture.confirm = [&asked](const std::string& question) {
+        asked = question;
+        return true;
+    };
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-media"), fixture.hooks()};
+    CHECK(attached.attach("shots", fixture.work));
+    attached.settle();
+    CHECK(asked.find("about 13 image and frame descriptions by chat") != std::string::npos);
+    CHECK(fixture.chat->requests().size() == 13);
+
+    // Twelve or fewer are not asked about: with no one to ask, they attach.
+    fixture.confirm = {};
+    std::filesystem::create_directories(fixture.work / "few");
+    for (int index = 0; index < 12; ++index) {
+        fixture.write("few/f" + std::to_string(index) + ".png", "f" + std::to_string(index));
+    }
+    ChatAttachments unasked{*fixture.harness, fixture.session,
+                            ChatAttachments::index_for("chat-media"), fixture.hooks()};
+    CHECK(unasked.attach("few", fixture.work));
+}
+
+TEST_CASE("media the budget could not send as it is is said, and its text stands in",
+          "[commands][attachments][media]") {
+    MediaChat fixture;
+    fixture.chat->sees = true;
+    fixture.write("stop.png");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-media"), fixture.hooks()};
+    REQUIRE(attached.attach("stop.png", fixture.work));
+    attached.settle();
+    (void)attached.for_turn(0, "what is it?", fixture.budget(), 4, {});
+    attached.after_turn({"stop.png (as it is)"});
+    CHECK(
+        fixture.heard("stop.png did not fit this request as it is, so the model did not see it "
+                      "-- its text stands in from now on"));
+    // The description is untouched: still inlined.
+    REQUIRE(fixture.session.attachments.size() == 1);
+    CHECK(fixture.session.attachments.front().inline_at.has_value());
+}
+
+TEST_CASE("a recording over a minute is read through its text, not as it is",
+          "[commands][attachments][media]") {
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
+    const apogee::testing::FakeFfmpeg ffmpeg{"audio", "90"};
+    MediaChat fixture;
+    fixture.chat->hears = true;
+    fixture.chat->reply = [](const apogee::harness::ChatRequest&) {
+        return std::string{"some words"};
+    };
+    fixture.write("talk.m4a", "audio");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-media"), fixture.hooks()};
+    REQUIRE(attached.attach("talk.m4a", fixture.work));
+    attached.settle();
+    CHECK(
+        fixture.heard("talk.m4a runs 1:30, over a minute, so the chat model reads its "
+                      "transcript rather than the recording itself"));
+    CHECK_FALSE(fixture.heard("read as it is"));
+    const ChatAttachments::Turn turn =
+        attached.for_turn(0, "what was said?", fixture.budget(), 4, {});
+    for (const apogee::agentloop::InlineAttachment& inlined : turn.inlined) {
+        CHECK(inlined.parts.empty());
+    }
+
+    // Under a minute, it is heard as it is.
+    const apogee::testing::FakeFfmpeg short_one{"audio", "40"};
+    fixture.write("short.m4a", "short audio");
+    REQUIRE(attached.attach("short.m4a", fixture.work));
+    attached.settle();
+    CHECK(fixture.heard("attached short.m4a: 1 file, 1 chunk, transcribed by chat"));
+    CHECK(fixture.heard(" -- read as it is with your next message, then"));
 }

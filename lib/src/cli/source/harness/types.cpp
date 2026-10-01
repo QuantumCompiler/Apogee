@@ -129,6 +129,14 @@ ContentPart ContentPart::from_image_url(std::string url, std::string detail) {
     return part;
 }
 
+ContentPart ContentPart::from_audio(std::string base64, std::string format) {
+    ContentPart part;
+    part.kind = Kind::InputAudio;
+    part.audio_data = std::move(base64);
+    part.audio_format = std::move(format);
+    return part;
+}
+
 MessageContent::MessageContent(std::string text) : text_{std::move(text)} {}
 
 MessageContent::MessageContent(const char* text) : text_{text == nullptr ? "" : text} {}
@@ -221,7 +229,8 @@ std::vector<ChatMessage> ChatRequest::durable_messages() const {
 
 bool operator==(const ContentPart& lhs, const ContentPart& rhs) {
     return lhs.kind == rhs.kind && lhs.text == rhs.text && lhs.image_url == rhs.image_url &&
-           lhs.detail == rhs.detail;
+           lhs.detail == rhs.detail && lhs.video_frame == rhs.video_frame &&
+           lhs.audio_data == rhs.audio_data && lhs.audio_format == rhs.audio_format;
 }
 
 bool operator==(const ToolCall& lhs, const ToolCall& rhs) {
@@ -242,11 +251,20 @@ void to_json(nlohmann::json& out, const ContentPart& value) {
         out = nlohmann::json{{"type", "text"}, {"text", value.text}};
         return;
     }
+    if (value.kind == ContentPart::Kind::InputAudio) {
+        out = nlohmann::json{
+            {"type", "input_audio"},
+            {"input_audio", {{"data", value.audio_data}, {"format", value.audio_format}}}};
+        return;
+    }
     nlohmann::json image{{"url", value.image_url}};
     if (!value.detail.empty()) {
         image["detail"] = value.detail;
     }
     out = nlohmann::json{{"type", "image_url"}, {"image_url", std::move(image)}};
+    if (value.video_frame) {
+        out["video_frame"] = true;
+    }
 }
 
 void from_json(const nlohmann::json& in, ContentPart& value) {
@@ -262,6 +280,18 @@ void from_json(const nlohmann::json& in, ContentPart& value) {
         }
         value.image_url = optional_string(*image, "url");
         value.detail = optional_string(*image, "detail");
+        const auto frame = in.find("video_frame");
+        value.video_frame = frame != in.end() && frame->is_boolean() && frame->get<bool>();
+        return;
+    }
+    if (type == "input_audio") {
+        value.kind = ContentPart::Kind::InputAudio;
+        const auto audio = in.find("input_audio");
+        if (audio == in.end() || !audio->is_object()) {
+            throw InvalidRequestError("input_audio part is missing its input_audio object");
+        }
+        value.audio_data = optional_string(*audio, "data");
+        value.audio_format = optional_string(*audio, "format");
         return;
     }
     // Anything else is treated as text. Unknown part types degrade to their

@@ -159,16 +159,11 @@ struct RagSettings {
 };
 
 void run_chat_turn(const harness::Harness& harness, logger::Session& session,
-                   const std::string& input, std::vector<harness::ContentPart>& attachments,
-                   agent::ToolRegistry* tools, const agentloop::AskFn& ask, const ToolGate& gate,
-                   agentloop::Reporter& reporter,
+                   const std::string& input, agent::ToolRegistry* tools,
+                   const agentloop::AskFn& ask, const ToolGate& gate, agentloop::Reporter& reporter,
                    const std::function<void(const std::string&)>& notice, const RagSettings& rag,
                    const std::string& review_note, ChatAttachments* attached) {
-    std::vector<harness::ContentPart> turn_attachments;
-    turn_attachments.swap(attachments);  // first message only
-
-    const std::vector<harness::ChatMessage> incoming =
-        build_messages({}, {}, input, turn_attachments);
+    const std::vector<harness::ChatMessage> incoming = build_messages({}, {}, input, {});
 
     // Context is measured against what is ABOUT TO BE SENT -- the saved history
     // plus this turn -- not the history alone. Measuring before appending means
@@ -473,7 +468,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                "Backend that reorders retrieved chunks with one generation call, on (the utility "
                "model), or off")
             ->type_name(kBackendValue);
-    cmd->add_option("--image", flags->images, "Image to attach to the first message (repeatable)")
+    cmd->add_option("--image", flags->images,
+                    "An image to attach, as /attach does: seen as it is with the first message by "
+                    "a model that can, described for one that cannot (repeatable)")
         ->type_name(kPathValue)
         ->allow_extra_args(false);
     cmd->add_option("--attach", flags->attach,
@@ -685,16 +682,6 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         const auto approvals = std::make_shared<SessionApprovals>();
         const agent::PermissionChecker permission = make_permission_checker(config, approvals);
 
-        // --- attachments, for the first message only -------------------------
-        std::vector<harness::ContentPart> attachments;
-        for (const std::string& image : flags->images) {
-            try {
-                attachments.push_back(load_image_part(std::filesystem::path{image}));
-            } catch (const std::exception& e) {
-                fail_user(e.what());
-            }
-        }
-
         if (decorate) {
             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + model +
                                          "  ·  chat " + session.chat_id +
@@ -734,24 +721,6 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                       " cannot be combined with --output-format " +
                       std::string{to_string(flags->output_format)} +
                       "; a driven chat session speaks the protocol in both directions");
-        }
-
-        // THE guard this surface was missing. `complete` had it inline from the
-        // day --image landed; chat never got a copy, so `apogee chat --image`
-        // loaded the file and handed it to a provider that had just answered
-        // that it cannot read images. Both surfaces now call one helper, and a
-        // fifth surface fails the cross-surface test by existing.
-        //
-        // Placed after the format resolution so the refusal can take the shape
-        // the surface requires: prose on a terminal, an `error` event when
-        // stdout carries only JSONL.
-        if (const std::string refusal = attachment_refusal(harness, model, attachments);
-            !refusal.empty()) {
-            if (input_format == InputFormat::StreamJson) {
-                JsonReporter{std::cout}.emit_error(refusal);
-                throw CLI::RuntimeError(1);
-            }
-            fail_user(refusal);
         }
 
         const RagSettings rag_settings{.flag_given = flags->rag_option->count() > 0,
@@ -795,6 +764,12 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                         },
                     .confirm_large = {},
                     .save = true}};
+            // `--image` is an attachment like any other (26e): read as it is
+            // with the first message by a model that can, described for one
+            // that cannot.
+            for (const std::string& spec : flags->images) {
+                (void)attached.attach(spec, working_directory);
+            }
             for (const std::string& spec : flags->attach) {
                 (void)attached.attach(spec, working_directory);
             }
@@ -821,8 +796,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 // answer a question -- the loop's "nil AskFn <=> never
                 // advertised" rule is satisfied rather than sidestepped.
                 run_chat_turn(
-                    harness, session, message.text, attachments, flags->tools ? &registry : nullptr,
-                    driver_ask,
+                    harness, session, message.text, flags->tools ? &registry : nullptr, driver_ask,
                     ToolGate{permission, flags->tools
                                              ? make_driver_confirm_fn(machine_reporter, std::cin,
                                                                       config_path, approvals)
@@ -881,6 +855,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                           }}
                         : std::function<bool(const std::string&)>{},
                 .save = true}};
+        for (const std::string& spec : flags->images) {
+            (void)attached.attach(spec, working_directory);
+        }
         for (const std::string& spec : flags->attach) {
             (void)attached.attach(spec, working_directory);
         }
@@ -913,6 +890,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         // how its DOCUMENTS are searched and says nothing about how a record
         // should be indexed, so only the collection's pin and auto apply.
         const auto capture_session = [&](knowledge::Overrides overrides) {
+            // The clerk is a model call: one at a time (26e).
+            attached.settle();
             const std::string transcript = logger::transcript_text(session.messages);
             if (transcript.empty()) {
                 reporter.status().print_line(
@@ -1168,6 +1147,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                         break;
                     }
                     case ChatVerb::Compact: {
+                        // A model call: what is reading an attachment
+                        // settles first (26e).
+                        attached.settle();
                         const std::string compactor = helper_backend(
                             harness.config(), harness::ModelRole::Utility, session.backend);
                         session.messages =
@@ -1209,7 +1191,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 typeahead.emplace();
             }
             run_chat_turn(
-                harness, session, input, attachments, flags->tools ? &registry : nullptr,
+                harness, session, input, flags->tools ? &registry : nullptr,
                 flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
                 ToolGate{permission, flags->tools ? terminal_confirm_fn(reporter.status(), style,
                                                                         config_path, approvals)

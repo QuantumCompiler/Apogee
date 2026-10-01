@@ -268,35 +268,40 @@ inline constexpr std::size_t kFetchMaxBodyBytes = std::size_t{5} * 1024 * 1024;
 /// extension is not a format the cloud vendors accept.
 [[nodiscard]] std::string image_media_type(const std::filesystem::path& path);
 
-/// Why a backend cannot take the attachments it was given, or empty when it
-/// can.
+/// Why nothing configured can read `medium` for a conversation on `model`, or
+/// empty when something can: the chat model natively, or the helper role that
+/// reads it into text -- `vision` for an image or a video's frames,
+/// `transcription` for audio (26e).
 ///
-/// **One helper, called by every surface that accepts `--image`.** It exists
+/// **One helper, reached by every surface that takes media.** It exists
 /// because the check was originally written inline in `complete.cpp` and simply
 /// never written in `chat.cpp`, so `apogee chat --image` handed pictures to a
 /// provider that had just said it could not read them. A capability check
 /// present on one surface and absent on another is precisely what "parity is
 /// the product" forbids, and the fix that lasts is one function rather than a
-/// second copy.
+/// second copy. Since 26e every surface's `--image`, `--attach` and `@path`
+/// reach it through `ChatAttachments`.
 ///
 /// It returns a message rather than printing or throwing, so each surface can
-/// deliver it in its own idiom: prose on a terminal, an `error` event in
-/// machine mode where stdout carries only JSONL.
+/// deliver it in its own idiom: prose on a terminal, a notice in machine mode
+/// where stdout carries only JSONL.
 ///
-/// The probe goes through `Harness::accepts_images()`, never a `dynamic_cast`
-/// — so this stays correct the day a local backend gains vision without this
-/// file learning that llamacpp exists.
+/// The probes go through `Harness::can_read()`, never a `dynamic_cast` -- so
+/// this stays correct the day a backend gains a medium without this file
+/// learning that it exists.
 [[nodiscard]] std::string attachment_refusal(const harness::Harness& harness,
-                                             const std::string& model,
-                                             const std::vector<harness::ContentPart>& attachments);
+                                             const std::string& model, harness::Medium medium);
 
-/// The message `attachment_refusal` gives, for `model`.
+/// The message `attachment_refusal` gives, for `model` and `medium`: what
+/// cannot read it, and the helper role that would -- naming `helper`, the
+/// model that role is set to, when it is set and cannot either.
 ///
 /// Exposed separately so its content can be asserted directly. It has to be:
 /// in a build without llama.cpp no provider ever answers "no", so a test that
 /// waits for a real refusal to inspect its wording never runs its own
-/// assertions — which is exactly what the first version of that test did.
-[[nodiscard]] std::string image_refusal_message(const std::string& model);
+/// assertions -- which is exactly what the first version of that test did.
+[[nodiscard]] std::string media_refusal_message(const std::string& model, harness::Medium medium,
+                                                std::string_view helper = {});
 
 /// Builds the message list for a one-shot turn.
 ///

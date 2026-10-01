@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "agentloop/media.h"
 #include "embedstore/ingest.h"
 #include "embedstore/store.h"
 #include "platform/child_process.h"
@@ -241,9 +242,9 @@ TEST_CASE("text is read as it is; binary, Office and media files are refused by 
     CHECK(read_attachment_text(scratch.write("deck.pptx", "PK")).reason ==
           "a PowerPoint deck: Office formats are not read yet");
     CHECK(read_attachment_text(scratch.write("photo.JPG", "x")).reason ==
-          "an image: attach one to a message with --image");
+          "an image, which a model reads rather than as text");
     CHECK(read_attachment_text(scratch.write("talk.mp3", "x")).reason ==
-          "audio or video: not read yet");
+          "audio, which a model reads rather than as text");
 }
 
 TEST_CASE("HTML is read as its main content, links resolved against the file",
@@ -514,4 +515,121 @@ TEST_CASE("code names are found in a question; file names and prose are not",
     CHECK(code_names_in("In ledger.pdf, how many crates are there?").empty());
     CHECK(code_names_in("What is the capital of France?").empty());
     CHECK(code_names_in("_leading and trailing_ underscores").empty());
+}
+
+namespace {
+
+/// A timeline long enough to chunk: a screen and a line said every five
+/// seconds for ten minutes.
+[[nodiscard]] std::string long_timeline() {
+    std::string text = "(A video, 10:00 long: what was on screen, and what was said.)\n";
+    for (int at = 0; at < 600; at += 5) {
+        const std::string stamp =
+            std::to_string(at / 60) + ":" + (at % 60 < 10 ? "0" : "") + std::to_string(at % 60);
+        text += "[" + stamp + "] screen: a slide numbered " + std::to_string(at) +
+                " with a chart of the quarter's figures on it\n";
+    }
+    return text;
+}
+
+}  // namespace
+
+TEST_CASE("a medium is read by the media reader the index is given, into indexed text",
+          "[agentloop][attachments][media]") {
+    const Scratch scratch;
+    (void)scratch.write("talk.mp4", "not really a video");
+    int asked = 0;
+    AttachmentIndex index{scratch.dir.path() / "chat.db",
+                          {},
+                          std::nullopt,
+                          [&asked](const FoundFile& file, apogee::harness::Medium medium,
+                                   const apogee::harness::CancellationToken&) {
+                              ++asked;
+                              CHECK(file.name == "talk.mp4");
+                              CHECK(medium == apogee::harness::Medium::Video);
+                              return apogee::agentloop::AttachmentText{
+                                  .text = long_timeline(),
+                                  .reader = "timeline: eyes",
+                                  .reason = {},
+                                  .notes = {"talk.mp4: its sound was not "
+                                            "transcribed"}};
+                          }};
+    const AttachmentIndex::Added added = index.add(scratch.found("talk.mp4"), {});
+    REQUIRE(added.file.has_value());
+    CHECK(asked == 1);
+    CHECK(added.file->reader == "timeline: eyes");
+    CHECK(added.note == "talk.mp4: its sound was not transcribed");
+    REQUIRE(added.chunks > 2);
+
+    // Each chunk is dated by the stamps its lines open with, and cited by them.
+    const Store store{scratch.dir.path() / "chat.db"};
+    const std::vector<apogee::embedstore::Chunk> chunks =
+        store.chunks_by_source(attachment_source(added.file->sha256));
+    const nlohmann::json first = nlohmann::json::parse(chunks.front().metadata);
+    REQUIRE(first.contains("times"));
+    CHECK(first["times"][0].get<double>() == 0.0);
+    const nlohmann::json last = nlohmann::json::parse(chunks.back().metadata);
+    CHECK(last["times"][1].get<double>() == 595.0);
+    CHECK_FALSE(first.contains("lines"));
+    const std::vector<apogee::agentloop::AttachmentExcerpt> excerpts =
+        attachment_excerpts({SearchHit{.chunk = chunks[1], .score = 0.5}});
+    REQUIRE(excerpts.size() == 1);
+    const nlohmann::json second = nlohmann::json::parse(chunks[1].metadata);
+    CHECK(excerpts.front().label ==
+          "talk.mp4 " + apogee::agentloop::clock_time(second["times"][0].get<double>()) + "–" +
+              apogee::agentloop::clock_time(second["times"][1].get<double>()));
+
+    // The same file attached again is not read again.
+    (void)index.add(scratch.found("talk.mp4"), {});
+    CHECK(asked == 1);
+}
+
+TEST_CASE("a medium's reader failing skips it with its reason", "[agentloop][attachments][media]") {
+    const Scratch scratch;
+    (void)scratch.write("note.m4a", "audio");
+    AttachmentIndex index{
+        scratch.dir.path() / "chat.db",
+        {},
+        std::nullopt,
+        [](const FoundFile&, apogee::harness::Medium, const apogee::harness::CancellationToken&) {
+            return apogee::agentloop::AttachmentText{
+                .text = {}, .reader = {}, .reason = "no model here hears audio"};
+        }};
+    const AttachmentIndex::Added added = index.add(scratch.found("note.m4a"), {});
+    CHECK_FALSE(added.file.has_value());
+    CHECK(added.skip == "note.m4a: no model here hears audio");
+
+    // With no reader at all, a medium is refused by what it is.
+    AttachmentIndex plain{scratch.dir.path() / "plain.db", {}, std::nullopt};
+    CHECK(plain.add(scratch.found("note.m4a"), {}).skip ==
+          "note.m4a: audio, which a model reads rather than as text");
+}
+
+TEST_CASE("the chunks covering a moment are found by their times", "[agentloop][attachments]") {
+    const Scratch scratch;
+    (void)scratch.write("talk.mp4", "video");
+    (void)scratch.write("notes.md", "the quarter's figures on a chart\n");
+    AttachmentIndex index{
+        scratch.dir.path() / "chat.db",
+        {},
+        std::nullopt,
+        [](const FoundFile&, apogee::harness::Medium, const apogee::harness::CancellationToken&) {
+            return apogee::agentloop::AttachmentText{.text = long_timeline(),
+                                                     .reader = "timeline: eyes"};
+        }};
+    const AttachmentIndex::Added talk = index.add(scratch.found("talk.mp4"), {});
+    (void)index.add(scratch.found("notes.md"), {});
+    const Store store{scratch.dir.path() / "chat.db"};
+
+    const std::vector<SearchHit> at = apogee::agentloop::hits_at(store, {270.0}, {}, 2.0);
+    REQUIRE_FALSE(at.empty());
+    for (const SearchHit& hit : at) {
+        CHECK(hit.score == 2.0);
+        CHECK(hit.chunk.text.find("[4:30] screen") != std::string::npos);
+    }
+    CHECK(apogee::agentloop::hits_at(store, {}, {}, 1.0).empty());
+    CHECK(apogee::agentloop::hits_at(store, {270.0}, {attachment_source(talk.file->sha256)}, 1.0)
+              .empty());
+    // Past the end, nothing.
+    CHECK(apogee::agentloop::hits_at(store, {3600.0}, {}, 1.0).empty());
 }

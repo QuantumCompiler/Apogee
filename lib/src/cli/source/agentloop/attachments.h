@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -12,6 +13,7 @@
 #include "agentloop/embed_func.h"
 #include "embedstore/store.h"
 #include "harness/cancellation.h"
+#include "harness/harness.h"
 #include "logger/session.h"
 
 /// Attachments: documents, code and folders attached to a conversation (26d).
@@ -77,10 +79,13 @@ struct FoundFiles {
 /// One file's text, as it is attached.
 struct AttachmentText {
     std::string text;
-    /// `text`, `pdftotext` or `html`.
+    /// `text`, `pdftotext` or `html`; for a medium (26e), `vision: <model>`,
+    /// `transcription: <model>` or `timeline: <models>`.
     std::string reader;
     /// Why the file was not read, when it was not.
     std::string reason;
+    /// Worth saying though it was read: a video's sound left untranscribed.
+    std::vector<std::string> notes;
 
     [[nodiscard]] bool ok() const noexcept {
         return reason.empty();
@@ -90,7 +95,7 @@ struct AttachmentText {
 /// Reads `path`: text and code as they are (a binary one refused), a PDF
 /// through `pdftotext` with its page breaks kept, HTML through the reader
 /// `fetch_url` uses. Word, Excel and PowerPoint files are refused by name, and
-/// so are images, audio and video, which are not read here.
+/// so are images, audio and video, which a model reads instead (26e).
 [[nodiscard]] AttachmentText read_attachment_text(const std::filesystem::path& path);
 
 /// The key a file's chunks are stored under.
@@ -106,8 +111,9 @@ struct AttachmentExcerpt {
 };
 
 /// `hits` from a chat's index as excerpts: each labelled from its chunk's
-/// metadata, and adjacent chunks of one file merged into one excerpt with
-/// their overlap removed. Best first.
+/// metadata -- a page, a line range, or a recording's times (`talk.mp4
+/// 4:30–5:00`) -- and adjacent chunks of one file merged into one excerpt
+/// with their overlap removed. Best first.
 [[nodiscard]] std::vector<AttachmentExcerpt> attachment_excerpts(
     const std::vector<embedstore::SearchHit>& hits);
 
@@ -125,17 +131,34 @@ struct AttachmentExcerpt {
 /// definition asked for ranks low by meaning and first by its name.
 [[nodiscard]] std::vector<std::string> code_names_in(std::string_view question);
 
+/// The chunks of `store` whose recording times cover one of `moments`
+/// (seconds), as hits scored `score` -- so a question that names a moment
+/// ("what did they type at 4:30?") is handed that moment of a timeline or a
+/// transcript, whatever its words match (26e). Sources in `exclude` are left
+/// out.
+[[nodiscard]] std::vector<embedstore::SearchHit> hits_at(const embedstore::Store& store,
+                                                         const std::vector<double>& moments,
+                                                         const std::set<std::string>& exclude,
+                                                         double score);
+
 /// The block an inlined file rides its message as.
 [[nodiscard]] std::string render_inline_attachment(std::string_view name, std::string_view text);
+
+/// Reads an image, audio or a video into its text form (26e) -- a closure
+/// over the models that describe and transcribe, as the embedder is one over
+/// the model that embeds.
+using MediaReader = std::function<AttachmentText(const FoundFile& file, harness::Medium medium,
+                                                 const harness::CancellationToken& cancellation)>;
 
 /// A chat's attachment index.
 class AttachmentIndex {
 public:
     /// `store_path` is this index; `others` the folder of the other chats'
     /// indexes, searched by content before anything is embedded (empty for
-    /// none). With no `embedder`, the index is lexical-only.
+    /// none). With no `embedder`, the index is lexical-only; with no `media`
+    /// reader, images, audio and video are refused.
     AttachmentIndex(std::filesystem::path store_path, std::filesystem::path others,
-                    std::optional<Embedder> embedder);
+                    std::optional<Embedder> embedder, MediaReader media = {});
 
     /// What adding one file did.
     struct Added {
@@ -193,6 +216,7 @@ private:
     std::filesystem::path store_path_;
     std::filesystem::path others_;
     std::optional<Embedder> embedder_;
+    MediaReader media_;
 };
 
 /// How many tokens `text` costs inlined as `name`, by `budget`'s count.

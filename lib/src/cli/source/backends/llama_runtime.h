@@ -87,6 +87,16 @@ struct ChatRendering {
     std::unique_ptr<ReplyReader> reader;
 };
 
+/// One picture or sound a multimodal prompt carries, in prompt order (26e).
+struct MediaInput {
+    /// The file's own encoded bytes -- an image (PNG, JPEG, ...) or WAV
+    /// audio -- decoded by mtmd rather than by us.
+    std::string bytes;
+    /// One frame of a video clip: consecutive ones may be merged by a model
+    /// that reads video (Qwen-VL's temporal merge).
+    bool frame = false;
+};
+
 /// The most checkpoints one context keeps; the oldest goes first (25c,
 /// default taken). A chat needs the one before its latest answer; llama-server
 /// keeps 32 because a server shares a context across many slots.
@@ -251,7 +261,7 @@ public:
         return harness::KvCacheType::F16;
     }
 
-    /// Decodes an interleaved text-and-image prompt, extending the KV cache
+    /// Decodes an interleaved text-and-media prompt, extending the KV cache
     /// from `position`. Returns the new position, or -1 with `error` filled.
     ///
     /// **Separate from `decode` because a multimodal prompt is not a token
@@ -262,16 +272,17 @@ public:
     /// `llama_context` — and exposing it is what makes every later caller free
     /// to bypass this seam.
     ///
-    /// `images` are raw encoded bytes (PNG, JPEG, …), decoded by mtmd rather
-    /// than by us. `text` carries one marker per image, in order.
+    /// `media` are raw encoded bytes -- images (PNG, JPEG, …) and WAV audio
+    /// (26e) -- decoded by mtmd rather than by us. `text` carries one marker
+    /// per item, in order.
     ///
     /// The default refuses: a runtime without vision must say so rather than
     /// silently ignore the pictures it was handed.
-    [[nodiscard]] virtual std::int64_t decode_multimodal(const std::vector<std::string>& images,
+    [[nodiscard]] virtual std::int64_t decode_multimodal(const std::vector<MediaInput>& media,
                                                          std::string_view text,
                                                          std::int64_t position,
                                                          std::string& error) {
-        (void)images;
+        (void)media;
         (void)text;
         (void)position;
         error = "this context has no multimodal projector loaded";
@@ -379,8 +390,18 @@ public:
         return false;
     }
 
-    /// The literal a prompt uses to stand for an image, e.g. `<__media__>`.
-    /// Empty when this model has no projector.
+    /// Whether the projector loaded alongside this model hears audio (26e).
+    [[nodiscard]] virtual bool supports_audio() const noexcept {
+        return false;
+    }
+
+    /// The rate the projector hears audio at, in Hz; 0 without audio.
+    [[nodiscard]] virtual int audio_sample_rate() const noexcept {
+        return 0;
+    }
+
+    /// The literal a prompt uses to stand for an image or a sound, e.g.
+    /// `<__media__>`. Empty when this model has no projector.
     [[nodiscard]] virtual std::string image_marker() const {
         return {};
     }

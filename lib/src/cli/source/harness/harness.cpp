@@ -294,6 +294,49 @@ bool Harness::accepts_audio(std::string_view model) const noexcept {
     }
 }
 
+std::string_view to_string(Medium medium) noexcept {
+    switch (medium) {
+        case Medium::Image:
+            return "an image";
+        case Medium::Audio:
+            return "audio";
+        case Medium::Video:
+            return "a video";
+    }
+    return "media";
+}
+
+bool Harness::accepts_video(std::string_view model) const noexcept {
+    try {
+        const auto* video = dynamic_cast<const VideoCapable*>(&route(model));
+        // Not declaring it means "no" -- see VideoCapable.
+        return video != nullptr && video->accepts_video();
+    } catch (const HarnessError&) {
+        return false;
+    }
+}
+
+bool Harness::can_read(std::string_view model, Medium medium) const noexcept {
+    switch (medium) {
+        case Medium::Image:
+            return accepts_images(model);
+        case Medium::Audio:
+            return accepts_audio(model);
+        case Medium::Video:
+            return accepts_video(model);
+    }
+    return false;
+}
+
+int Harness::audio_sample_rate(std::string_view model) const noexcept {
+    try {
+        const auto* audio = dynamic_cast<const AudioCapable*>(&route(model));
+        return audio != nullptr && audio->accepts_audio() ? audio->audio_sample_rate() : 0;
+    } catch (const HarnessError&) {
+        return 0;
+    }
+}
+
 ModelBehavior Harness::model_behavior_for(std::string_view model) const {
     try {
         const auto* reporter = dynamic_cast<const ModelBehaviorReporting*>(&route(model));

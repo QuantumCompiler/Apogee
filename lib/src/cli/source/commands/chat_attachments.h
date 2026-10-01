@@ -23,7 +23,10 @@
 
 /// A conversation's attachments at work (26d): the chat's index, what is
 /// attached, the indexing that runs while the user types, and each turn's
-/// share of them -- inlined whole, or retrieved.
+/// share of them -- inlined whole, or retrieved. Images, audio and video
+/// (26e) are read into text by the models that can -- described,
+/// transcribed, a video made a timeline -- and seen or heard natively, on the
+/// turn they are attached, by a chat model that can.
 ///
 /// `chat` (at a terminal and in machine mode) and `complete` drive this one
 /// class, over the one core in `agentloop/attachments`, so a file is found,
@@ -33,7 +36,9 @@
 /// files for a worker thread and returns; `settle()` -- called before every
 /// turn, as the chat title is -- waits for it, saying how far it has got, and
 /// on Ctrl-C keeps what is ready. One model call at a time: the embedding
-/// model is only ever running while the user is typing.
+/// model, and a helper describing or transcribing, only ever run while the
+/// user is typing -- and anything else that reaches a model settles this
+/// first.
 namespace apogee::commands {
 
 class ChatAttachments {
@@ -44,7 +49,9 @@ public:
         /// How far indexing has got while a turn waits; empty clears it.
         std::function<void(const std::string& line)> progress;
         /// Asked before attaching over `kLargeAttachmentFiles` files or
-        /// `kLargeAttachmentBytes`; null refuses, as a pipe must.
+        /// `kLargeAttachmentBytes`, or before more than
+        /// `kMeteredDescriptionsAsked` descriptions by a model billed per
+        /// call; null refuses, as a pipe must.
         std::function<bool(const std::string& question)> confirm_large;
         /// Whether a settled attach is saved to the session file: a chat's
         /// is, `complete`'s temporary one is not.
@@ -64,10 +71,16 @@ public:
     ChatAttachments(ChatAttachments&&) = delete;
     ChatAttachments& operator=(ChatAttachments&&) = delete;
 
+    /// More descriptions than this by a model billed per call -- a folder of
+    /// images, a video's frames -- ask first (26e): nothing is spent at scale
+    /// on Apogee's initiative.
+    static constexpr std::size_t kMeteredDescriptionsAsked = 12;
+
     /// A saved chat's index: `attachments/<chat id>.db`.
     [[nodiscard]] static std::filesystem::path index_for(std::string_view chat_id);
 
-    /// Removes a chat's index, with its SQLite side files.
+    /// Removes a chat's index, with its SQLite side files and any media
+    /// scratch a crash left.
     static void remove_index(std::string_view chat_id);
 
     /// Queues what `spec` names -- a file, a folder, a glob -- for indexing
@@ -100,14 +113,18 @@ public:
     [[nodiscard]] bool retrieves() const;
 
     /// The turn whose user message sits at `user_message` in history: an
-    /// attachment settled since the last turn rides it when inlined, and the
-    /// ones not inlined are searched for `query`, `limit` at most.
+    /// attachment settled since the last turn rides it when inlined -- an
+    /// image, a sound or a short clip as it is when the chat model can read
+    /// it, its text from the next turn on -- and the ones not inlined are
+    /// searched for `query`, `limit` at most, with any moment it names
+    /// (`4:30`) looked up in a recording's timeline.
     [[nodiscard]] Turn for_turn(std::size_t user_message, const std::string& query,
                                 const agentloop::TurnBudget& budget, int limit,
                                 const harness::CancellationToken& cancellation);
 
     /// After the run: an inlined attachment the budget could not send is
-    /// retrieved from then on, and said.
+    /// retrieved from then on, and said; so is media it could not send as it
+    /// is.
     void after_turn(const std::vector<std::string>& inline_dropped);
 
     /// After compaction: the messages the inlined attachments rode are gone,
@@ -118,14 +135,34 @@ private:
     struct Queued {
         std::string name;
         std::vector<agentloop::FoundFile> files;
+        /// The chat model when it was attached: who reads its media natively.
+        std::string chat;
     };
 
     struct Indexed {
         std::string name;
         std::vector<agentloop::AttachmentIndex::Added> added;
+        /// Its media as the chat model reads them natively, for the next
+        /// message (26e); empty when it cannot.
+        std::vector<harness::ContentPart> native;
     };
 
     void start_worker();
+    /// Media `files` no model can read, said and left out; a run of billed
+    /// descriptions asked about. False when nothing is left.
+    [[nodiscard]] bool readable(std::string_view spec, std::vector<agentloop::FoundFile>& files,
+                                const std::string& chat);
+    /// One file's media read into text by the models that can (26e).
+    [[nodiscard]] agentloop::AttachmentText read_media(const agentloop::FoundFile& file,
+                                                       harness::Medium medium,
+                                                       const std::string& chat,
+                                                       const harness::CancellationToken& token);
+    /// The media of `file` as the chat model reads it natively, or empty.
+    [[nodiscard]] std::vector<harness::ContentPart> native_media(
+        const agentloop::FoundFile& file, const std::string& chat,
+        const harness::CancellationToken& token, std::vector<std::string>& notes);
+    /// A private folder for one file's frames and conversions.
+    [[nodiscard]] std::filesystem::path scratch() const;
     void record(Indexed indexed, const agentloop::TurnBudget& budget);
     [[nodiscard]] std::string inline_text(const logger::Attachment& attachment);
     [[nodiscard]] std::int64_t inline_tokens_in_use(const agentloop::TurnBudget& budget);
@@ -147,6 +184,8 @@ private:
 
     /// Settled and inlined, waiting for the next user message to ride.
     std::set<std::string> pending_inline_;
+    /// Media to be seen or heard as it is with the next user message (26e).
+    std::map<std::string, std::vector<harness::ContentPart>> pending_native_;
     /// Rebuilt inline blocks and their token counts, by attachment name.
     std::map<std::string, std::string> inline_texts_;
     std::map<std::string, std::int64_t> inline_costs_;

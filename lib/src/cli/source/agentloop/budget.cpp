@@ -90,7 +90,7 @@ constexpr std::int64_t kFramingTokens = 8;
 /// message's framing at most `kFramingTokens`. Under the budget by this, a
 /// request fits whatever the tokenizer -- no exact count needed.
 [[nodiscard]] std::int64_t token_ceiling(const harness::ChatRequest& request) {
-    std::size_t bytes = 0;
+    std::size_t bytes = static_cast<std::size_t>(media_tokens(request));
     for (const harness::ChatMessage& message : request.messages) {
         bytes += message.content.plain_text().size();
         for (const harness::ToolCall& call : message.tool_calls) {
@@ -104,14 +104,23 @@ constexpr std::int64_t kFramingTokens = 8;
            (kFramingTokens * static_cast<std::int64_t>(request.messages.size() + 1));
 }
 
-/// `content` with `prefix` in front of it: a text part ahead of an image.
+/// `content` with an attachment in front of it: its native `parts` first --
+/// the picture before the words about it -- then its `prefix` text.
 [[nodiscard]] harness::MessageContent with_prefix(const harness::MessageContent& content,
-                                                  std::string_view prefix) {
-    if (content.parts().empty()) {
+                                                  std::string_view prefix,
+                                                  const std::vector<harness::ContentPart>& media) {
+    if (content.parts().empty() && media.empty()) {
         return harness::MessageContent{std::string{prefix} + "\n" + content.plain_text()};
     }
-    std::vector<harness::ContentPart> parts{harness::ContentPart::from_text(std::string{prefix})};
-    parts.insert(parts.end(), content.parts().begin(), content.parts().end());
+    std::vector<harness::ContentPart> parts{media};
+    if (!prefix.empty()) {
+        parts.push_back(harness::ContentPart::from_text(std::string{prefix}));
+    }
+    if (content.parts().empty()) {
+        parts.push_back(harness::ContentPart::from_text(content.plain_text()));
+    } else {
+        parts.insert(parts.end(), content.parts().begin(), content.parts().end());
+    }
     return harness::MessageContent::from_parts(std::move(parts));
 }
 
@@ -150,7 +159,7 @@ public:
             anchors_.push_back(Anchor{.position = attachment.message,
                                       .name = attachment.name,
                                       .original = message.content});
-            message.content = with_prefix(message.content, attachment.text);
+            message.content = with_prefix(message.content, attachment.text, attachment.parts);
         }
     }
 
@@ -418,7 +427,28 @@ TokenCount estimate_request_tokens(const harness::ChatRequest& request) {
     for (const harness::Tool& tool : request.tools) {
         characters += tool.name.size() + tool.description.size() + tool.parameters_schema.size();
     }
-    return TokenCount{.tokens = estimate_characters(characters), .estimated = true};
+    return TokenCount{.tokens = estimate_characters(characters) + media_tokens(request),
+                      .estimated = true};
+}
+
+std::int64_t media_tokens(const harness::ChatRequest& request) {
+    constexpr std::int64_t kImageTokens = 1024;
+    constexpr std::int64_t kFrameTokens = 256;
+    // 16-bit mono at 16 kHz is 32,000 bytes a second; at 25 tokens a second
+    // that is a token per 1,280 bytes -- generous for a higher rate.
+    constexpr std::int64_t kAudioBytesPerToken = 1280;
+    std::int64_t tokens = 0;
+    for (const harness::ChatMessage& message : request.messages) {
+        for (const harness::ContentPart& part : message.content.parts()) {
+            if (part.kind == harness::ContentPart::Kind::ImageUrl) {
+                tokens += part.video_frame ? kFrameTokens : kImageTokens;
+            } else if (part.kind == harness::ContentPart::Kind::InputAudio) {
+                const auto bytes = static_cast<std::int64_t>(part.audio_data.size() / 4 * 3);
+                tokens += (bytes + kAudioBytesPerToken - 1) / kAudioBytesPerToken;
+            }
+        }
+    }
+    return tokens;
 }
 
 TokenCounter token_counter(const harness::Harness& harness, const std::string& model) {
@@ -426,7 +456,9 @@ TokenCounter token_counter(const harness::Harness& harness, const std::string& m
         harness::ChatRequest probe = request;
         probe.model = model;
         if (const std::optional<std::int64_t> exact = harness.count_prompt_tokens(model, probe)) {
-            return TokenCount{.tokens = *exact, .estimated = false};
+            // A tokenizer counts the words; the pictures and sounds are an
+            // encoder's, so they keep their allowance (26e).
+            return TokenCount{.tokens = *exact + media_tokens(request), .estimated = false};
         }
         return estimate_request_tokens(request);
     };

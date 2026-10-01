@@ -1,13 +1,17 @@
 #include "commands/chat_attachments.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdio>
 #include <exception>
+#include <iterator>
 #include <system_error>
 #include <utility>
 
+#include "agentloop/media.h"
 #include "agentloop/retriever.h"
+#include "commands/helpers.h"
 #include "commands/interrupt.h"
 #include "harness/layout.h"
 #include "harness/roles.h"
@@ -31,6 +35,34 @@ namespace {
 
 [[nodiscard]] std::string files_of(std::size_t count) {
     return std::to_string(count) + (count == 1 ? " file" : " files");
+}
+
+/// What a trim names media sent as it is by, so a dropped one is told apart
+/// from the same attachment's text.
+constexpr std::string_view kAsItIs = " (as it is)";
+
+/// How the files of one attachment were read, when a model read them:
+/// "described by X", "transcribed by X", "a timeline". Empty for text.
+[[nodiscard]] std::string reading_of(const std::vector<logger::AttachedFile>& files) {
+    std::vector<std::string> phrases;
+    for (const logger::AttachedFile& file : files) {
+        std::string phrase;
+        if (file.reader.starts_with("vision: ")) {
+            phrase = "described by " + file.reader.substr(8);
+        } else if (file.reader.starts_with("transcription: ")) {
+            phrase = "transcribed by " + file.reader.substr(15);
+        } else if (file.reader.starts_with("timeline: ")) {
+            phrase = "made a timeline by " + file.reader.substr(10);
+        }
+        if (!phrase.empty() && std::ranges::find(phrases, phrase) == phrases.end()) {
+            phrases.push_back(std::move(phrase));
+        }
+    }
+    std::string out;
+    for (const std::string& phrase : phrases) {
+        out += (out.empty() ? "" : ", ") + phrase;
+    }
+    return out;
 }
 
 /// The folder a chat index lives in, private like the sessions.
@@ -88,6 +120,117 @@ void ChatAttachments::remove_index(std::string_view chat_id) {
     for (const std::string_view suffix : {"", "-wal", "-shm", "-journal"}) {
         std::filesystem::remove(index.string() + std::string{suffix}, code);
     }
+    std::filesystem::remove_all(harness::attachments_dir() / (std::string{chat_id} + ".media"),
+                                code);
+}
+
+std::filesystem::path ChatAttachments::scratch() const {
+    // Beside the index, in the private attachments folder, and removed once
+    // each file is read: a video's frames are the user's as much as it is.
+    return store_path_.parent_path() / (store_path_.stem().string() + ".media");
+}
+
+bool ChatAttachments::readable(std::string_view spec, std::vector<agentloop::FoundFile>& files,
+                               const std::string& chat) {
+    std::size_t billed = 0;
+    std::string biller;
+    std::erase_if(files, [&](const agentloop::FoundFile& file) {
+        const std::optional<harness::Medium> medium = agentloop::medium_of(file.path);
+        if (!medium.has_value()) {
+            return false;
+        }
+        if (const std::string refusal = attachment_refusal(harness_, chat, *medium);
+            !refusal.empty()) {
+            hooks_.say(file.name + ": " + refusal, true);
+            return true;
+        }
+        const agentloop::MediaReaders readers = agentloop::media_readers(harness_, chat, *medium);
+        if (*medium != harness::Medium::Audio && !readers.describer.empty() &&
+            harness_.generation_is_metered(readers.describer)) {
+            biller = readers.describer;
+            if (*medium == harness::Medium::Image) {
+                ++billed;
+            } else {
+                const double seconds = agentloop::media_duration(file.path, cancellation_);
+                billed += std::min(agentloop::kMaxTimelineFrames,
+                                   static_cast<std::size_t>(seconds / agentloop::kFrameEvery) + 1);
+            }
+        }
+        return false;
+    });
+    if (files.empty()) {
+        return false;
+    }
+    if (billed > kMeteredDescriptionsAsked) {
+        const std::string what = "about " + std::to_string(billed) +
+                                 " image and frame descriptions by " + biller +
+                                 ", which is billed per call";
+        if (!hooks_.confirm_large ||
+            !hooks_.confirm_large(std::string{spec} + " needs " + what + " -- go ahead?")) {
+            hooks_.say(std::string{spec} + " not attached: it needs " + what +
+                           " -- set a local vision model with 'apogee config set-default-vision'",
+                       true);
+            return false;
+        }
+    }
+    return true;
+}
+
+agentloop::AttachmentText ChatAttachments::read_media(const agentloop::FoundFile& file,
+                                                      harness::Medium medium,
+                                                      const std::string& chat,
+                                                      const harness::CancellationToken& token) {
+    agentloop::MediaJob job;
+    job.harness = &harness_;
+    job.readers = agentloop::media_readers(harness_, chat, medium);
+    job.scratch = scratch();
+    job.cancellation = token;
+    // Which model is reading what, and for how long (26e).
+    const auto began = std::chrono::steady_clock::now();
+    job.status = [this, began](const std::string& line) {
+        const double elapsed =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+        const std::scoped_lock lock{mutex_};
+        status_ = line + " (" + agentloop::clock_time(elapsed) + ")";
+    };
+    agentloop::MediaText read = agentloop::read_media(file.path, medium, job);
+    return agentloop::AttachmentText{.text = std::move(read.text),
+                                     .reader = std::move(read.reader),
+                                     .reason = std::move(read.reason),
+                                     .notes = std::move(read.notes)};
+}
+
+std::vector<harness::ContentPart> ChatAttachments::native_media(
+    const agentloop::FoundFile& file, const std::string& chat,
+    const harness::CancellationToken& token, std::vector<std::string>& notes) {
+    const std::optional<harness::Medium> medium = agentloop::medium_of(file.path);
+    if (!medium.has_value() || chat.empty() || !harness_.can_read(chat, *medium)) {
+        return {};
+    }
+    if (*medium != harness::Medium::Image) {
+        const double seconds = agentloop::media_duration(file.path, token);
+        if (seconds > agentloop::kNativeSeconds) {
+            notes.push_back(file.name + " runs " + agentloop::clock_time(seconds) +
+                            ", over a minute, so the chat model reads its " +
+                            (*medium == harness::Medium::Video ? "timeline" : "transcript") +
+                            " rather than the " +
+                            (*medium == harness::Medium::Video ? "clip" : "recording") + " itself");
+            return {};
+        }
+    }
+    {
+        const std::scoped_lock lock{mutex_};
+        status_ = "preparing " + file.name + " for " + chat + " to read as it is";
+    }
+    std::string error;
+    const bool with_sound = *medium == harness::Medium::Video && harness_.accepts_audio(chat);
+    std::vector<harness::ContentPart> parts = agentloop::native_parts(
+        file.path, *medium, harness_.audio_sample_rate(chat), with_sound, scratch(), token, error);
+    if (parts.empty() && !error.empty() && !token.stop_requested()) {
+        notes.push_back(file.name + ": the chat model reads its text only -- it could not be " +
+                        "prepared to read as it is (" + error + ")");
+    }
+    return parts;
 }
 
 bool ChatAttachments::attach(std::string_view spec,
@@ -99,6 +242,14 @@ bool ChatAttachments::attach(std::string_view spec,
     }
     for (const std::string& skip : found.skips) {
         hooks_.say(skip, true);
+    }
+    const std::string chat = session_.backend;
+    if (!readable(spec, found.files, chat)) {
+        return false;
+    }
+    found.bytes = 0;
+    for (const agentloop::FoundFile& file : found.files) {
+        found.bytes += file.bytes;
     }
     if (found.large()) {
         const std::string what = files_of(found.files.size()) + " (" + size_of(found.bytes) +
@@ -116,7 +267,8 @@ bool ChatAttachments::attach(std::string_view spec,
                                 files_of(found.files.size()) + ", " + size_of(found.bytes) + ")";
     {
         const std::scoped_lock lock{mutex_};
-        queue_.push_back(Queued{.name = std::string{spec}, .files = std::move(found.files)});
+        queue_.push_back(
+            Queued{.name = std::string{spec}, .files = std::move(found.files), .chat = chat});
     }
     hooks_.say(summary, false);
     start_worker();
@@ -132,7 +284,6 @@ void ChatAttachments::start_worker() {
     }
     ensure_private(store_path_.parent_path());
     worker_ = std::async(std::launch::async, [this, token = cancellation_] {
-        agentloop::AttachmentIndex index{store_path_, harness::attachments_dir(), embedder_};
         for (;;) {
             Queued item;
             {
@@ -144,7 +295,14 @@ void ChatAttachments::start_worker() {
                 item = std::move(queue_.front());
                 queue_.pop_front();
             }
-            Indexed indexed{.name = item.name, .added = {}};
+            const std::string chat = item.chat;
+            agentloop::AttachmentIndex index{
+                store_path_, harness::attachments_dir(), embedder_,
+                [this, &chat](const agentloop::FoundFile& file, harness::Medium medium,
+                              const harness::CancellationToken& cancellation) {
+                    return read_media(file, medium, chat, cancellation);
+                }};
+            Indexed indexed{.name = item.name, .added = {}, .native = {}};
             for (std::size_t at = 0; at < item.files.size(); ++at) {
                 const agentloop::FoundFile& file = item.files[at];
                 if (token.stop_requested()) {
@@ -169,6 +327,18 @@ void ChatAttachments::start_worker() {
                         }));
                 } catch (const std::exception& e) {
                     indexed.added.push_back({.skip = file.name + ": " + e.what()});
+                }
+                // What the chat model reads as it is, beside what it was read
+                // into: attaching an image again looks at it again (26e).
+                agentloop::AttachmentIndex::Added& added = indexed.added.back();
+                if (added.file.has_value() && !token.stop_requested()) {
+                    std::vector<std::string> notes;
+                    std::vector<harness::ContentPart> parts =
+                        native_media(file, chat, token, notes);
+                    std::ranges::move(parts, std::back_inserter(indexed.native));
+                    for (const std::string& note : notes) {
+                        added.note += (added.note.empty() ? "" : "\n") + note;
+                    }
                 }
             }
             const std::scoped_lock lock{mutex_};
@@ -268,9 +438,17 @@ void ChatAttachments::record(Indexed indexed, const agentloop::TurnBudget& budge
         pending_inline_.insert(attachment.name);
         inline_costs_[attachment.name] = tokens;
     }
+    const bool native = !indexed.native.empty();
+    pending_native_.erase(attachment.name);
+    if (native) {
+        pending_native_[attachment.name] = std::move(indexed.native);
+    }
 
     std::string line = "attached " + attachment.name + ": " + files_of(attachment.files.size()) +
                        ", " + std::to_string(chunks) + (chunks == 1 ? " chunk" : " chunks");
+    if (const std::string reading = reading_of(attachment.files); !reading.empty()) {
+        line += ", " + reading;
+    }
     if (copied > 0) {
         line += copied == attachment.files.size()
                     ? ", from another chat's index"
@@ -280,7 +458,8 @@ void ChatAttachments::record(Indexed indexed, const agentloop::TurnBudget& budge
         line += ", searched by its words" +
                 (lexical_reason_.empty() ? std::string{} : ": " + lexical_reason_);
     }
-    line += inlined ? " -- inlined whole" : " -- its excerpts are retrieved each turn";
+    line += native ? " -- read as it is with your next message, then " : " -- ";
+    line += inlined ? "inlined whole" : "its excerpts are retrieved each turn";
     hooks_.say(line, false);
 }
 
@@ -337,6 +516,7 @@ bool ChatAttachments::detach(std::string_view name) {
     }
     const std::string key{name};
     pending_inline_.erase(key);
+    pending_native_.erase(key);
     inline_texts_.erase(key);
     inline_costs_.erase(key);
     save();
@@ -356,8 +536,12 @@ std::vector<std::string> ChatAttachments::describe() const {
         } else if (pending_inline_.contains(attachment.name)) {
             state = "inlined with your next message";
         }
+        if (pending_native_.contains(attachment.name)) {
+            state = "read as it is with your next message, then " + state;
+        }
+        const std::string reading = reading_of(attachment.files);
         lines.push_back(attachment.name + " -- " + files_of(attachment.files.size()) + ", " +
-                        size_of(bytes) + ", " + state);
+                        size_of(bytes) + (reading.empty() ? "" : ", " + reading) + ", " + state);
     }
     return lines;
 }
@@ -390,17 +574,35 @@ ChatAttachments::Turn ChatAttachments::for_turn(std::size_t user_message, const 
     pending_inline_.clear();
 
     std::set<std::string> inline_sources;
+    const auto in_front = [&](const logger::Attachment& attachment) {
+        for (const logger::AttachedFile& file : attachment.files) {
+            inline_sources.insert(agentloop::attachment_source(file.sha256));
+        }
+    };
     for (const logger::Attachment& attachment : session_.attachments) {
-        if (!attachment.inline_at.has_value()) {
+        // Read as it is on this message (26e); from the next, its text
+        // stands in -- a vision chat stops re-reading every image every turn.
+        bool as_it_is = false;
+        if (const auto native = pending_native_.find(attachment.name);
+            native != pending_native_.end()) {
+            turn.inlined.push_back(
+                agentloop::InlineAttachment{.message = user_message,
+                                            .name = attachment.name + std::string{kAsItIs},
+                                            .text = {},
+                                            .parts = std::move(native->second)});
+            in_front(attachment);
+            as_it_is = true;
+        }
+        if (!attachment.inline_at.has_value() ||
+            (as_it_is && *attachment.inline_at == user_message)) {
             continue;
         }
         turn.inlined.push_back(agentloop::InlineAttachment{.message = *attachment.inline_at,
                                                            .name = attachment.name,
                                                            .text = inline_text(attachment)});
-        for (const logger::AttachedFile& file : attachment.files) {
-            inline_sources.insert(agentloop::attachment_source(file.sha256));
-        }
+        in_front(attachment);
     }
+    pending_native_.clear();
     if (retrieves()) {
         agentloop::RagTurn rag;
         rag.store_path = store_path_;
@@ -434,6 +636,7 @@ ChatAttachments::Turn ChatAttachments::for_turn(std::size_t user_message, const 
         rag.budget = budget;
         rag.attachments = true;
         rag.exclude_sources = std::move(inline_sources);
+        rag.moments = agentloop::moments_in(query);
         turn.retrieved = agentloop::retrieve_for_turn(rag);
     }
     if (anchored) {
@@ -445,6 +648,13 @@ ChatAttachments::Turn ChatAttachments::for_turn(std::size_t user_message, const 
 void ChatAttachments::after_turn(const std::vector<std::string>& inline_dropped) {
     bool changed = false;
     for (const std::string& name : inline_dropped) {
+        if (name.ends_with(kAsItIs)) {
+            hooks_.say(name.substr(0, name.size() - kAsItIs.size()) +
+                           " did not fit this request as it is, so the model did not see it -- "
+                           "its text stands in from now on",
+                       true);
+            continue;
+        }
         const auto it = std::ranges::find(session_.attachments, name, &logger::Attachment::name);
         if (it == session_.attachments.end() || !it->inline_at.has_value()) {
             continue;

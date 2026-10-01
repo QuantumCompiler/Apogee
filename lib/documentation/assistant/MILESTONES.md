@@ -565,10 +565,130 @@ Asked for directly (Taylor, 2026-09-25): Claude Code's `/` command list and `@` 
 - **The surfaces:** a large folder attached without asking; an attachment never anchored to its message, or never inlined; content another attachment still holds removed by `/detach`; an email address read as a mention, or a mention's trailing punctuation kept; a mention already attached, attached again; machine mode's `attach` line unknown; the session's `inline_at` not saved or not read; the index not removed with its chat; the layout row not private; `check` counting an index's side files as indexes.
 
 **Not verified.**
-- **Office files have no item.** Word, Excel and PowerPoint are refused by name, and nothing in the backlog converts them yet. Images, audio and video are [26e](../backlog/attachments-media.md)'s.
+- **Office files have no item.** Word, Excel and PowerPoint are refused by name, and nothing in the backlog converts them yet. Images, audio and video were [26e](#milestone-h--apogee-chat)'s, shipped the next day.
 - **A PDF without `pdftotext`.** It is skipped with its reason, and the test for that runs only where `pdftotext` is missing. This machine has it, so that test skipped.
 - **macOS only.** `git ls-files`, `pdftotext` and the private folder were not tried on the Linux or Windows builds.
 - **A billed embedder** is refused by the provider's own flag. That was tested on a mock; no hosted embedder was tried.
+
+### 2026-09-30 — `attachments-media` (backlog item 26e): images, audio and video, attached to a chat
+
+**Why.** 26d let a chat hold documents. A picture could still reach a model only through `--image` on a chat's first message, and only a vision model could read it. Audio had no way in at all. Video was refused, although the pinned llama.cpp decodes it. Yet the common case on a laptop is a small text-only model, beside a helper that can see or hear and could turn either into text it reads. Asked for by the user on 2026-09-25, with two calls of theirs: helper models used automatically, and `ffmpeg` on `PATH`.
+
+**What was built**
+
+- [x] **The same `/attach`.** `--attach`, `/attach`, `@path`, `complete --attach` and a machine-mode `attach` line take an image, a recording or a video, and so does `--image` on `chat` and `complete`.
+  - Anything nothing configured can read is refused by the one guard, `attachment_refusal`. Its message names the role to set, or that role's own model when it is set and cannot read the medium either.
+  - `complete --image` still fails a one-shot whose picture is missing, is not an image, or that nothing can read.
+- [x] **As it is, once.** A chat model that can read the medium is sent it with the next message, ahead of the text, in what is sent only:
+  - an image, on a vision model;
+  - a sound up to a minute, on a model whose projector hears;
+  - a clip up to a minute, as its frames (one a second, at 640 pixels, with the time every five frames), on a local model with a vision projector, plus its sound for one that hears.
+- [x] **As text, from then on.** Every medium is also read into text and indexed with the chat's documents, inlined when it fits and retrieved when not. That text stands in for the pixels and samples on every later turn, so a vision chat stops re-encoding its images every turn.
+  - An image is described by the `vision` role: what it shows, then its text copied as written.
+  - Audio is transcribed by the `transcription` role in 30-second windows, each line stamped `[m:ss–m:ss]`.
+  - A video becomes a **timeline**: a frame every five seconds and at each scene change, at most 240, each one described, merged in time order with what was said. A frame identical to one already described keeps its line but is not described again.
+  - With no helper set, the chat model reads its own media when it can *(default taken)*. A helper is used automatically, and the status line names the model reading each file and how long it has been at it.
+- [x] **Found by moment.** A transcript's or timeline's chunks carry the times their lines cover, and are cited by them (`standup.mp4 6:30–7:05`). When a question names a moment (`at 4:30`), the chunks covering it are looked up by time and go first, whatever the search found.
+- [x] **ffmpeg, run by Apogee.** `platform/ffmpeg` runs `ffprobe` and `ffmpeg` as Apogee's own children, with a deadline, an output cap and Ctrl-C.
+  - Their stderr is a pipe Apogee drains, never the terminal.
+  - Frames go to a private folder beside the chat's index, removed after each file.
+  - mtmd's own video helper is not used: it spawns ffmpeg from code whose output Apogee does not control.
+  - Without ffmpeg, audio and video are refused by name.
+- [x] **The local backend reads it.** A multimodal request carries images, WAV audio and frames to mtmd (`MediaInput`).
+  - Each marker sits where its part sat in its message. They had all been stacked at the top of the prompt.
+  - Frames are marked mergeable, for Qwen-VL's temporal merge.
+  - Audio on a projector without an audio encoder is refused.
+  - `accepts_video` answers from the projector header, `audio_sample_rate` once the model is loaded, and `--verbose` says what a turn encoded and how long it took.
+- [x] **Capabilities, asked.** `Harness::can_read(model, medium)` answers over `accepts_images`, `accepts_audio` and the new `VideoCapable`. The IR gains an `InputAudio` part (OpenAI's `input_audio` shape) and a `video_frame` flag on image parts.
+- [x] **The budget sizes it.** An image is allowed 1,024 tokens, a frame 256, a second of audio 25. The allowance is added to the estimate, the byte ceiling and the exact count, all of which see only words.
+- [x] **`check`** says whether `ffmpeg` is installed, and which models read images, audio and video for the default chat.
+
+**On real weights** (Q4_K_M weights; `--verbose` lines; Qwen3-VL-8B as the `vision` role, and Gemma 4 12B, whose projector has an audio encoder, as the `transcription` role):
+
+- **A text-only Llama 3.1 8B**, given an invoice image with `complete --image`: Qwen3-VL-8B described it, and the 8B named the customer, the total and the due date. Ten seconds in all.
+- **A vision chat on Qwen3-VL-8B** with `--image`: the first turn read the image as it is; the second read 159 tokens of text, its description included, with no image encoded.
+- **A 16-second voice note** (recorded with `say`), attached to the 8B, was transcribed by Gemma 4 12B word for word. Asked when the delivery now was and what had to be paid first, the 8B answered both. Attached to a chat on Gemma 4 12B itself, it was heard as it is: 439 positions with 1 sound encoded, in 1.2 s.
+- **A 25-second clip of four slides** on Qwen3-VL-8B was read as its frames (25 frames, 405 positions, 8.8 s), and the steps and their times came back right. The next turn read its timeline.
+- **A 10-minute screen recording with narration**: nine screens, the deadline spoken at 6:30 over a calendar. Attached to a chat on Qwen3.8-27B, its timeline was built in the background into 131 chunks: 121 frames described by Qwen3-VL-8B (about 9 s each) and 20 windows transcribed by Gemma 4 12B (about 4 s each). That took 23 minutes, two answers included.
+  - Asked what was on screen when they mentioned the deadline, the 27B answered "At 6:30, the screen showed a November calendar view", with the Friday 14 November proposal due at 17:00.
+  - Asked what was typed into the terminal, it quoted the command and its output, at 5:30–5:55.
+  - **Re-run with identical frames reused**, only 20 of the 121 frames needed describing: nine screens, plus the frames where the encoder's output differed. The frames took 2 minutes instead of 18, the whole run 5.5 minutes, and the answer was the same, now also listing the dry-dock inspection the day before.
+
+**Found on the way, and settled.**
+- **Gemma 4 answers nothing about audio with its thinking off.** Transcription with the reasoning skipped, as every helper chore runs, came back empty, and the note was indexed as "nothing was said". With its reasoning on, the model transcribed it word for word. A media request now asks again with the reasoning on when a reply comes back empty, and keeps it on for the rest of that file.
+- **That empty transcript was copied to the next chat** by the hash cache, as if it were true. A recording none of whose windows could be transcribed is now refused, not indexed as silence.
+- **Frame descriptions lost their colours.** With "This is one frame of a video, at 0:10" on its own line after the prompt, Qwen3-VL-8B copied only the text, and a question about a slide's colour was answered wrong. With that line opening the prompt instead, it described the screen.
+- **"No vision model is set" was said when one was.** The configured vision model's Q4 entry has no `mmproj_path`. The refusal now names the role's model when it is set and cannot read the medium either.
+- **A `.jpg` slipped past the refusal.** Read on its own as a file name, `.jpg` is a hidden file with no extension. The test that pinned the refusal found it.
+- **The image path stacked every marker at the top of the prompt**, before the whole rendered conversation. A clip's frames with their times between them, or a sound on the third message, need each marker where its part sits, which is llama-server's way.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| A clip read natively | Up to 60 s; longer, its timeline *(default taken)* | A minute of frames at mtmd's default rate is already thousands of tokens for an 8B model. |
+| A timeline's frames | One every 5 s and at each scene change, at most 240, thinned evenly *(default taken)* | Enough for a screen recording; the cap bounds the helper's time. At most 960 are extracted before thinning. |
+| An image attached again | Read again as it is, by a chat model that can see *(default taken)* | The way back to the pixels when the description missed something. A model that cannot see reads the same description, stored once. |
+| No helper set | The chat model reads its own media when it can *(default taken)* | One model's view is better than none, and it is already loaded. |
+| Audio read natively | Up to a minute too, as video | The same bound, for the same reason. |
+| A native clip | 1 frame a second at 640 px, the time every five frames, its sound for a model that hears | 60 frames of Qwen3-VL fit a 32K window; mtmd's own default is 4 a second. |
+| `accepts_video` | From the projector header (a vision encoder), not `mtmd_helper_support_video` | A clip reaches mtmd as frames Apogee's own runner extracted. The helper's flag says only whether mtmd's own ffmpeg decoding was built, which Apogee does not use. |
+| Audio's sample rate | The model's own once it is loaded; 16 kHz before, which mtmd converts | The rate is fixed per projector inside mtmd and known only after a load. |
+| When media goes as it is | Once, with the message it was attached with; its text from then on | The point of the item: a vision chat stops re-encoding its images every turn. |
+| `--image` | An attachment, on `chat` and `complete` alike | Otherwise `--attach` would be described for a text-only model while `--image` was refused, which is a parity bug. |
+| Many billed descriptions | More than 12 ask on a terminal, refused on a pipe | The spend rule's spirit: nothing is spent at scale on Apogee's initiative. One image is one call. |
+| A frame identical to one described | Keeps its line, is not described again | A slide left up costs one description, and a moment there is still found. |
+| A moment a question names | Looked up by the chunks' times, first | Searching "4:30" by its digits finds every line with a 4 or a 30. |
+
+**Guardrails, each mutation-tested (77 mutants, all caught), run in three git worktrees against the whole unit suite.** 74 were caught on the first pass. The three that survived were caught once their tests were fixed:
+- A native clip left uncapped: the test found the sound's `-t 60` rather than the frames'.
+- Twelve billed descriptions asked about: the test changed its hooks after they had been copied.
+- `check` never falling back to the chat model: only a role set to a model that cannot read reaches that fallback.
+
+What the mutants covered:
+- **The ffmpeg runner:**
+  - a span's start not added back to its frames' times, or a span read from the start;
+  - the output cap, the stop or the deadline ignored, and a failure left unsaid;
+  - `-fps_mode` not asked for, and a progress line's `pts_time` taken for a frame's;
+  - a WAV's rate field wrong, or an odd byte kept;
+  - an audio stream missed, and audio decoded at a fixed rate.
+- **Who reads what:**
+  - the role's model passed over, no fallback to the chat model, nothing read natively, and a video's sound or frames never read;
+  - in the harness: video assumed of a provider that declares nothing, video read as images, and a rate asked of a model that cannot hear.
+- **Reading media:**
+  - no retry with the reasoning on, or a retry that still skips it;
+  - transcription at a fixed rate, and a recording never transcribed indexed as silence;
+  - what was said sorted after the screen at the same moment;
+  - 240 frames not thinned, an identical frame described again, frames sparser, or no scene changes;
+  - the frame's context put after the prompt;
+  - hours dropped from a clock, a time read inside a longer number, and a span dated from its first byte rather than its line;
+  - the scratch folder kept.
+- **What is read as it is:**
+  - a clip's frames unmarked, without their times, without its sound, or uncapped;
+  - never built, or built for a recording over a minute;
+  - sent every turn, the text sent beside the image on its first turn, or not kept for the next message;
+  - a dropped one left unsaid.
+- **The index and retrieval:**
+  - chunks without times, labels without them, every chunk taken for a moment, and an excluded one kept;
+  - media read as text, a reader's notes dropped, and `.jpg` read as a file name;
+  - moments ignored, and a moment's score shown in place of the search's.
+- **The budget:** media left out of the estimate, a frame sized as an image, audio counted as free, and native parts dropped.
+- **The local backend:** frames set apart, the frame flag lost, audio unread, audio sent to a projector that cannot hear, a remote image decoded, the media left unreported, and a rate claimed before the load.
+- **The surfaces:**
+  - the refusal skipped, helpers ignored by it, and the role's model unnamed;
+  - billed descriptions not asked about, or asked about at twelve;
+  - `check` saying any chat model reads clips, ffmpeg always found, and no fallback to the chat model;
+  - `complete --image` unchecked, and `chat --image` ignored;
+  - the IR's frame flag unread or unwritten, and audio parsed as text.
+
+The two lines in `llama_real.cpp` (WAV decoding and mergeable frames) and the header-based `accepts_video` are not in the count: the worktrees build without llama.cpp, where neither can run. They were verified on real weights above.
+
+**Not verified.**
+- **macOS only.** On Windows, child processes are not supported yet, so audio and video fail there with the reason. Linux was not tried.
+- **Cloud helpers.** Only local models described and transcribed. A cloud vision role should work, since cloud models read images, but none was tried. No cloud backend is sent audio, and none is sent a clip as frames.
+- **A real screen recording.** The recording above was generated: static slides and a synthetic voice. A real one has a moving cursor and changing content, so fewer of its frames are identical and fewer descriptions are saved.
+- **HEIC and TIFF** are converted to JPEG through ffmpeg, but no real file of either was tried.
+- **Uploads over `serve`** are out of scope. A served request's `input_audio` part now parses as audio, though, and a local backend that hears would read it.
 
 ## Milestone I — The full cloud set
 
@@ -1967,7 +2087,7 @@ Asked for directly (Taylor): "I want there to be an extra line of white space be
 - **Cannot be reached:** the admin listing's "conversation" rung. The listing resolves without a conversation, so an unset helper reports `models.default`, as `http-api.md` says.
 
 **Not verified, and found on the way.**
-- **No audio is transcribed yet.** The role, its pointer, `accepts_audio` and `check` are here; [26e](../backlog/attachments-media.md) is what sends audio, and `Harness::accepts_audio` has no caller until then. The header probe was checked against real projector files: Gemma 4 12B-it's declares both encoders, and Qwen3-VL-8B's and Qwen3.8-27B's declare vision only.
+- **No audio is transcribed yet.** The role, its pointer, `accepts_audio` and `check` are here; [26e](#milestone-h--apogee-chat), shipped 2026-09-30, is what sends audio, and `Harness::accepts_audio` had no caller until then. The header probe was checked against real projector files: Gemma 4 12B-it's declares both encoders, and Qwen3-VL-8B's and Qwen3.8-27B's declare vision only.
 - **A retrieval turn re-reads a local model's whole prompt**, helper or not. The retrieved block sits at the conversation's start, as 25c's notes say. Every turn of the notes chat above read from 0 on the 27B, the same with no utility model set. That is its own change.
 - **Qwen3.8-27B answered one turn with nothing.** In a plain three-question chat, the third answer was saved empty, with and without a utility model set. It is older than this item and left for its own change.
 - **`--verbose` prints a tool call as `[tool] [tool] read_file`.** The tool's status line carries its own tag and the terminal adds another. It is cosmetic, and older than this item.

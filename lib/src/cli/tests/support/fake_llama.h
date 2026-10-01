@@ -144,6 +144,40 @@ public:
         return script[sampled++];
     }
 
+    /// Whether this context decodes media (its model has a projector); the
+    /// base refuses otherwise.
+    bool multimodal = false;
+    /// Every multimodal decode: the media, and the text with its markers, in
+    /// order (26e).
+    std::vector<std::vector<backends::MediaInput>> media_decodes;
+    std::vector<std::string> media_texts;
+    /// Positions one item of media takes.
+    static constexpr std::int64_t kMediaPositions = 16;
+
+    [[nodiscard]] std::int64_t decode_multimodal(const std::vector<backends::MediaInput>& media,
+                                                 std::string_view text, std::int64_t position,
+                                                 std::string& error) override {
+        if (!multimodal) {
+            return LlamaContext::decode_multimodal(media, text, position, error);
+        }
+        media_decodes.push_back(media);
+        media_texts.emplace_back(text);
+        // A word a position, as `tokenize` counts, and each item its own.
+        std::int64_t words = 0;
+        bool in_word = false;
+        for (const char c : text) {
+            const bool space = c == ' ' || c == '\n' || c == '\t';
+            words += !space && !in_word ? 1 : 0;
+            in_word = !space;
+        }
+        const std::int64_t count =
+            words + kMediaPositions * static_cast<std::int64_t>(media.size());
+        decodes.push_back({position, count});
+        resident = position + count;
+        evaluated_ += count;
+        return resident;
+    }
+
     /// Every grammar set, in order -- including the empty ones that clear it.
     std::vector<backends::SamplingGrammar> grammars;
     /// When set, a non-empty grammar is refused with this.
@@ -293,6 +327,12 @@ public:
 
     [[nodiscard]] std::int32_t sample() override {
         return state_->sample();
+    }
+
+    [[nodiscard]] std::int64_t decode_multimodal(const std::vector<backends::MediaInput>& media,
+                                                 std::string_view text, std::int64_t position,
+                                                 std::string& error) override {
+        return state_->decode_multimodal(media, text, position, error);
     }
 
     [[nodiscard]] bool set_grammar(const backends::SamplingGrammar& grammar,
@@ -529,16 +569,30 @@ public:
     }
 
     /// Whether the model claims a projector that does images. Its contexts
-    /// still refuse to decode one, so an image turn fails after its context
-    /// is made -- enough to see what window that context got.
+    /// still refuse to decode one unless `decodes_media`, so an image turn
+    /// fails after its context is made -- enough to see what window that
+    /// context got.
     bool vision = false;
+    /// Whether the projector hears audio, and at what rate (26e).
+    bool audio = false;
+    int sample_rate = 0;
+    /// Whether contexts decode media rather than refusing it.
+    bool decodes_media = false;
 
     [[nodiscard]] bool supports_vision() const noexcept override {
         return vision;
     }
 
+    [[nodiscard]] bool supports_audio() const noexcept override {
+        return audio;
+    }
+
+    [[nodiscard]] int audio_sample_rate() const noexcept override {
+        return audio ? sample_rate : 0;
+    }
+
     [[nodiscard]] std::string image_marker() const override {
-        return vision ? "<image>" : std::string{};
+        return vision || audio ? "<image>" : std::string{};
     }
 
     /// Width of the vectors the fake produces. Settable so a test can stage a
@@ -593,6 +647,7 @@ public:
         state->sliding_window = sliding_window;
         state->sliding_keep = sliding_keep;
         state->grammar_error = grammar_error;
+        state->multimodal = decodes_media;
         contexts.push_back(state);
         // The provider owns its contexts and destroys a side request's the
         // moment the call returns -- so the model keeps them ALIVE and hands
@@ -691,6 +746,9 @@ public:
         loaded->fitted = request.fit_window ? fitted : 0;
         loaded->cache_type = request.cache_type;
         loaded->vision = vision;
+        loaded->audio = audio;
+        loaded->sample_rate = sample_rate;
+        loaded->decodes_media = decodes_media;
         model = loaded.get();
         return loaded;
     }
@@ -700,6 +758,9 @@ public:
     std::int64_t trained_length = 4096;
     std::int64_t fitted = 0;
     bool vision = false;
+    bool audio = false;
+    int sample_rate = 0;
+    bool decodes_media = false;
 
     std::string last_path;
 

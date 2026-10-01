@@ -286,6 +286,24 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
         hits.resize(static_cast<std::size_t>(turn.limit));
     }
 
+    if (turn.attachments && !turn.moments.empty()) {
+        // A moment the question names is looked up by its time, not searched
+        // for by its digits, and goes first: just above the best the search
+        // found, so the score shown stays the search's.
+        double top = 0.0;
+        for (const embedstore::SearchHit& hit : hits) {
+            top = std::max(top, hit.score);
+        }
+        const std::vector<embedstore::SearchHit> at =
+            hits_at(*store, turn.moments, turn.exclude_sources, top + 1e-6);
+        std::erase_if(hits, [&](const embedstore::SearchHit& hit) {
+            return std::ranges::any_of(at, [&](const embedstore::SearchHit& pinned) {
+                return pinned.chunk.id == hit.chunk.id;
+            });
+        });
+        hits.insert(hits.begin(), at.begin(), at.end());
+    }
+
     if (hits.empty() && graph_section.empty()) {
         return result;
     }

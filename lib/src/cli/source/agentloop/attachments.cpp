@@ -14,6 +14,7 @@
 
 #include "agent/fetch_url.h"
 #include "agent/readable.h"
+#include "agentloop/media.h"
 #include "embedstore/chunk.h"
 #include "embedstore/ingest.h"
 #include "harness/errors.h"
@@ -229,17 +230,13 @@ constexpr std::string_view kLocalHost = "file.invalid";
     if (const auto it = kRefused.find(extension); it != kRefused.end()) {
         return it->second + ": Office formats are not read yet";
     }
-    for (const std::string_view image :
-         {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic"}) {
-        if (extension == image) {
-            return "an image: attach one to a message with --image";
-        }
-    }
-    for (const std::string_view media : {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".mp4",
-                                         ".mov", ".mkv", ".webm", ".avi"}) {
-        if (extension == media) {
-            return "audio or video: not read yet";
-        }
+    // A name to read the extension from: ".jpg" alone is a hidden file with
+    // none.
+    if (const std::optional<harness::Medium> medium =
+            medium_of(std::filesystem::path{"file" + extension});
+        medium.has_value()) {
+        return std::string{harness::to_string(*medium)} +
+               ", which a model reads rather than as text";
     }
     return {};
 }
@@ -297,6 +294,11 @@ constexpr std::string_view kLocalHost = "file.invalid";
 /// The label for chunks `first` to `last` of one file.
 [[nodiscard]] std::string label_of(const nlohmann::json& first, const nlohmann::json& last) {
     const std::string file = first.value("file", std::string{"an attachment"});
+    if (first.contains("times") && last.contains("times")) {
+        const double from = first["times"][0].get<double>();
+        const double to = last["times"][1].get<double>();
+        return file + " " + clock_time(from) + (to > from ? "–" + clock_time(to) : "");
+    }
     if (first.contains("pages") && last.contains("pages")) {
         const std::int64_t from = first["pages"][0].get<std::int64_t>();
         const std::int64_t to = last["pages"][1].get<std::int64_t>();
@@ -347,6 +349,11 @@ struct ChunkedFile {
             std::ranges::replace(text, '\f', '\n');
         } else if (read.reader == "text") {
             meta["lines"] = {lines.number_at(span.begin), lines.number_at(last)};
+        } else if (const std::optional<TimeSpan> times = time_span(read.text, span.begin, span.end);
+                   times.has_value()) {
+            // A transcript or a timeline: dated by the stamps its lines open
+            // with, so it is cited, and found, by its moment (26e).
+            meta["times"] = {times->start, times->end};
         }
         out.texts.push_back(std::move(text));
         out.metadata.push_back(meta.dump());
@@ -543,16 +550,41 @@ std::vector<std::string> code_names_in(std::string_view question) {
     return out;
 }
 
+std::vector<embedstore::SearchHit> hits_at(const embedstore::Store& store,
+                                           const std::vector<double>& moments,
+                                           const std::set<std::string>& exclude, double score) {
+    std::vector<embedstore::SearchHit> out;
+    if (moments.empty()) {
+        return out;
+    }
+    for (const embedstore::Chunk& chunk : store.chunks_with_metadata()) {
+        if (exclude.contains(chunk.source)) {
+            continue;
+        }
+        const nlohmann::json meta = metadata_of(chunk);
+        if (!meta.contains("times")) {
+            continue;
+        }
+        const double from = meta["times"][0].get<double>();
+        const double to = meta["times"][1].get<double>();
+        if (std::ranges::any_of(moments, [&](double at) { return at >= from && at <= to; })) {
+            out.push_back(embedstore::SearchHit{.chunk = chunk, .score = score});
+        }
+    }
+    return out;
+}
+
 std::string render_inline_attachment(std::string_view name, std::string_view text) {
     return "--- attached file: " + std::string{name} + " ---\n" + std::string{text} +
            (text.ends_with('\n') ? "" : "\n") + "--- end of " + std::string{name} + " ---\n";
 }
 
 AttachmentIndex::AttachmentIndex(std::filesystem::path store_path, std::filesystem::path others,
-                                 std::optional<Embedder> embedder)
+                                 std::optional<Embedder> embedder, MediaReader media)
     : store_path_{std::move(store_path)},
       others_{std::move(others)},
-      embedder_{std::move(embedder)} {}
+      embedder_{std::move(embedder)},
+      media_{std::move(media)} {}
 
 std::string AttachmentIndex::model() const {
     return embedder_.has_value() ? embedder_->model : std::string{};
@@ -717,7 +749,24 @@ AttachmentIndex::Added AttachmentIndex::add(const FoundFile& file,
         return copied;
     }
 
-    const AttachmentText read = read_attachment_text(file.path);
+    // An image, audio or a video is read by a model into its text form --
+    // a description, a transcript, a timeline (26e); everything else as text.
+    const std::optional<harness::Medium> medium = medium_of(file.path);
+    AttachmentText read;
+    try {
+        read = medium.has_value() && media_ ? media_(file, *medium, cancellation)
+                                            : read_attachment_text(file.path);
+    } catch (const harness::CancelledError&) {
+        out.skip = file.name + ": cancelled";
+        return out;
+    }
+    for (const std::string& note : read.notes) {
+        out.note += (out.note.empty() ? "" : "\n") + note;
+    }
+    if (cancellation.stop_requested()) {
+        out.skip = file.name + ": cancelled";
+        return out;
+    }
     if (!read.ok()) {
         out.skip = file.name + ": " + read.reason;
         return out;

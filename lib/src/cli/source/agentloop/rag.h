@@ -105,6 +105,10 @@ struct RagTurn {
     /// merged, and `exclude_sources` -- attachments inlined whole -- left out.
     bool attachments = false;
     std::set<std::string> exclude_sources;
+    /// Moments the question names, in seconds: an attachment index's chunks
+    /// covering one -- a timeline's, a transcript's -- are handed over first,
+    /// whatever the search found (26e).
+    std::vector<double> moments;
 
     /// For the judge. May be null, in which case reranking is off.
     const harness::Harness* harness = nullptr;

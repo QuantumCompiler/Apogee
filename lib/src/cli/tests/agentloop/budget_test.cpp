@@ -436,3 +436,51 @@ TEST_CASE("an inlined attachment goes ahead of an image, as a text part",
     CHECK(parts[1].text == "look");
     CHECK(parts[2].kind == apogee::harness::ContentPart::Kind::ImageUrl);
 }
+
+TEST_CASE("pictures and sounds are sized by allowance, not by their bytes",
+          "[agentloop][budget][media]") {
+    using apogee::harness::ContentPart;
+    ChatRequest request;
+    ContentPart frame = ContentPart::from_image_url("data:image/jpeg;base64,AAAA");
+    frame.video_frame = true;
+    // A second of 16 kHz audio: 32,000 bytes, as base64.
+    const ContentPart sound = ContentPart::from_audio(std::string(42664, 'A'), "wav");
+    request.messages.push_back(ChatMessage::user(apogee::harness::MessageContent::from_parts(
+        {ContentPart::from_image_url("data:image/png;base64," + std::string(400000, 'A')), frame,
+         sound, ContentPart::from_text("hi")})));
+    CHECK(apogee::agentloop::media_tokens(request) == 1024 + 256 + 25);
+    // In the estimate, beside the words -- never the base64's length.
+    const TokenCount estimate = apogee::agentloop::estimate_request_tokens(request);
+    CHECK(estimate.tokens >= 1024 + 256 + 25);
+    CHECK(estimate.tokens < 2000);
+    CHECK(apogee::agentloop::media_tokens(ChatRequest{}) == 0);
+}
+
+TEST_CASE("media read as it is rides ahead of the text and the message, in what is sent",
+          "[agentloop][budget][media]") {
+    using apogee::harness::ContentPart;
+    const std::vector<ChatMessage> history{ChatMessage::user("what is in it?")};
+    const Assembly assembly =
+        assemble_request(scripted(100000), ChatRequest{}, history, {}, {}, 0, 0,
+                         {{.message = 0,
+                           .name = "shot.png (as it is)",
+                           .text = {},
+                           .parts = {ContentPart::from_image_url("data:image/png;base64,AAAA")}}});
+    const auto& parts = assembly.messages[0].content.parts();
+    REQUIRE(parts.size() == 2);
+    CHECK(parts[0].kind == ContentPart::Kind::ImageUrl);
+    CHECK(parts[1].text == "what is in it?");
+    // History itself is untouched.
+    CHECK_FALSE(history[0].content.is_rich());
+
+    // Trimmed last, and then sent without it, said by its name.
+    const std::vector<ChatMessage> long_history{ChatMessage::user(std::string(4000, 'x'))};
+    const Assembly over =
+        assemble_request(scripted(1200), ChatRequest{}, long_history, {}, {}, 0, 0,
+                         {{.message = 0,
+                           .name = "shot.png (as it is)",
+                           .text = {},
+                           .parts = {ContentPart::from_image_url("data:image/png;base64,AAAA")}}});
+    CHECK(over.inline_dropped == std::vector<std::string>{"shot.png (as it is)"});
+    CHECK_FALSE(over.messages.back().content.is_rich());
+}

@@ -15,6 +15,7 @@ add_executable(apogee_tests
     packages_test.cpp
     platform/platform_test.cpp
     platform/child_process_test.cpp
+    platform/ffmpeg_test.cpp
     commands/registry_test.cpp
     commands/root_test.cpp
     harness/config_test.cpp
@@ -102,6 +103,7 @@ add_executable(apogee_tests
     agentloop/content_test.cpp
     agentloop/budget_test.cpp
     agentloop/attachments_test.cpp
+    agentloop/media_test.cpp
     agentloop/question_test.cpp
     httpserver/handler_test.cpp
     httpserver/sse_test.cpp
@@ -557,6 +559,15 @@ if(UNIX)
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.mcp_server_stderr_stays_off_the_terminal PROPERTIES TIMEOUT 120)
+
+        # ffmpeg under a PTY (26e): audio and video are decoded by a child
+        # whose banner, mapping and progress never reach the terminal.
+        add_test(NAME cli.ffmpeg_stays_off_the_terminal
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/pty_ffmpeg_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.ffmpeg_stays_off_the_terminal PROPERTIES TIMEOUT 120)
 
         add_test(NAME cli.chat_typeahead_and_crash_safety
             COMMAND "${Python3_EXECUTABLE}"

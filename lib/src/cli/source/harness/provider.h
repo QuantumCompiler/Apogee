@@ -194,6 +194,34 @@ public:
 
     /// Whether this provider accepts audio right now.
     [[nodiscard]] virtual bool accepts_audio() const noexcept = 0;
+
+    /// The rate its model hears audio at, in Hz, or 0 while it cannot say --
+    /// a local model's is its projector's, known once that is loaded (26e).
+    /// Audio is decoded to this rate before it is sent; at 0 it is decoded
+    /// to 16 kHz, which the backend converts to its own.
+    [[nodiscard]] virtual int audio_sample_rate() const noexcept {
+        return 0;
+    }
+};
+
+/// Implemented by a provider that reads a video clip as its frames (26e): a
+/// local model with a vision projector, in a build whose mtmd has video, whose
+/// consecutive frames it may merge.
+///
+/// A provider that does not declare it is taken to have none, as with audio:
+/// no cloud backend here is sent frames as a clip, and a clip on a model that
+/// cannot take one becomes a timeline of described frames instead.
+class VideoCapable {
+public:
+    VideoCapable() = default;
+    virtual ~VideoCapable() = default;
+    VideoCapable(const VideoCapable&) = delete;
+    VideoCapable& operator=(const VideoCapable&) = delete;
+    VideoCapable(VideoCapable&&) = delete;
+    VideoCapable& operator=(VideoCapable&&) = delete;
+
+    /// Whether this provider accepts a clip's frames right now.
+    [[nodiscard]] virtual bool accepts_video() const noexcept = 0;
 };
 
 /// Implemented by a provider that sizes its own conversation window.

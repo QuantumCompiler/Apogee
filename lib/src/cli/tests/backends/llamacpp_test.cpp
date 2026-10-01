@@ -2041,3 +2041,169 @@ TEST_CASE("a projector with an audio encoder is audio-capable, asked of the harn
     std::filesystem::remove(hears, code);
     std::filesystem::remove(sees, code);
 }
+
+// --- Images, audio and video (26e) ----------------------------------------
+
+namespace {
+
+/// A provider on a model whose projector sees, and maybe hears, and whose
+/// contexts decode media rather than refusing it.
+struct MediaFixture {
+    FakeLlamaRuntime* runtime = nullptr;
+    std::unique_ptr<LlamaCppProvider> provider;
+
+    explicit MediaFixture(bool audio = false, bool vision = true) {
+        auto owned = std::make_unique<FakeLlamaRuntime>();
+        owned->eog_token = -1;
+        owned->vision = vision;
+        owned->audio = audio;
+        owned->sample_rate = 16000;
+        owned->decodes_media = true;
+        runtime = owned.get();
+        LlamaCppProvider::Options options;
+        options.backend_name = "local";
+        options.model = "test-model";
+        options.model_path = "/models/test.gguf";
+        provider = std::make_unique<LlamaCppProvider>(std::move(options), std::move(owned));
+    }
+};
+
+[[nodiscard]] apogee::harness::ContentPart frame_part() {
+    apogee::harness::ContentPart part =
+        apogee::harness::ContentPart::from_image_url("data:image/jpeg;base64,RlJBTUU=");
+    part.video_frame = true;
+    return part;
+}
+
+}  // namespace
+
+TEST_CASE("each picture and sound is marked where it sits in its message",
+          "[backends][llamacpp][media]") {
+    MediaFixture fixture{true};
+    ChatMessage clip = ChatMessage::user("");
+    clip.content = apogee::harness::MessageContent::from_parts(
+        {apogee::harness::ContentPart::from_text("[0:00]"), frame_part(), frame_part(),
+         apogee::harness::ContentPart::from_text("[0:05]"), frame_part(),
+         apogee::harness::ContentPart::from_audio("UklGRgAA", "wav"),
+         apogee::harness::ContentPart::from_text("what happens?")});
+    const ChatRequest request = turn({ChatMessage::system("be brief"), ChatMessage::user("earlier"),
+                                      ChatMessage::assistant("noted"), clip});
+    (void)fixture.provider->chat(request, {});
+
+    const auto& model = *fixture.runtime->model;
+    REQUIRE(model.contexts.size() == 1);
+    const auto& context = *model.contexts.back();
+    REQUIRE(context.media_decodes.size() == 1);
+    const std::vector<apogee::backends::MediaInput>& media = context.media_decodes.front();
+    REQUIRE(media.size() == 4);
+    CHECK(media[0].frame);
+    CHECK(media[0].bytes == "FRAME");
+    CHECK(media[2].frame);
+    CHECK_FALSE(media[3].frame);
+    CHECK(media[3].bytes.starts_with("RIFF"));
+
+    // In the message that carried them, after the earlier turns -- not
+    // stacked at the top of the prompt -- frames against each other, their
+    // times between them.
+    const std::string& text = context.media_texts.front();
+    CHECK(text.find("earlier") < text.find("<image>"));
+    CHECK(text.find("[0:00]<image><image>[0:05]<image><image>\nwhat happens?") !=
+          std::string::npos);
+}
+
+TEST_CASE("a turn with media says what it encoded under --verbose", "[backends][llamacpp][media]") {
+    MediaFixture fixture{true};
+    ChatMessage asked = ChatMessage::user("");
+    asked.content = apogee::harness::MessageContent::from_parts(
+        {apogee::harness::ContentPart::from_image_url("data:image/png;base64,UE5H"), frame_part(),
+         apogee::harness::ContentPart::from_audio("UklGRgAA", "wav"),
+         apogee::harness::ContentPart::from_text("and this?")});
+    std::vector<std::string> said;
+    apogee::harness::StreamOptions options;
+    options.on_status = [&said](const apogee::harness::StatusEvent& event) {
+        if (event.type == apogee::harness::StatusEvent::Type::PromptCache) {
+            said.push_back(event.detail);
+        }
+    };
+    (void)fixture.provider->stream_chat(turn({asked}), options);
+    REQUIRE(said.size() == 1);
+    CHECK(said.front().starts_with("prompt "));
+    CHECK(said.front().find("with 1 image, 1 frame, 1 sound encoded: read whole on a fresh "
+                            "context in ") != std::string::npos);
+}
+
+TEST_CASE("audio a projector cannot hear is refused, not ignored", "[backends][llamacpp][media]") {
+    MediaFixture fixture{false};
+    ChatMessage heard = ChatMessage::user("");
+    heard.content = apogee::harness::MessageContent::from_parts(
+        {apogee::harness::ContentPart::from_audio("UklGRgAA", "wav"),
+         apogee::harness::ContentPart::from_text("what was said?")});
+    try {
+        (void)fixture.provider->chat(turn({heard}), {});
+        FAIL("an audio turn on a projector without audio ran");
+    } catch (const apogee::harness::ProviderError& e) {
+        CHECK(std::string{e.what()}.find("no audio encoder") != std::string::npos);
+    }
+}
+
+TEST_CASE("a remote image is never fetched: the turn stays on the text path",
+          "[backends][llamacpp][media]") {
+    MediaFixture fixture;
+    ChatMessage asked = ChatMessage::user("");
+    asked.content = apogee::harness::MessageContent::from_parts(
+        {apogee::harness::ContentPart::from_image_url("https://example.com/a.png"),
+         apogee::harness::ContentPart::from_text("what is it?")});
+    (void)fixture.provider->chat(turn({asked}), {});
+    REQUIRE_FALSE(fixture.runtime->model->contexts.empty());
+    CHECK(fixture.runtime->model->contexts.back()->media_decodes.empty());
+}
+
+TEST_CASE("the projector's rate is the model's own, once it is loaded",
+          "[backends][llamacpp][media]") {
+    MediaFixture fixture{true};
+    fixture.runtime->sample_rate = 24000;
+    // Before a load nothing can say.
+    CHECK(fixture.provider->audio_sample_rate() == 0);
+    (void)fixture.provider->chat(turn({ChatMessage::user("hello")}), {});
+    CHECK(fixture.provider->audio_sample_rate() == 24000);
+}
+
+TEST_CASE("a projector that sees reads a clip as its frames, asked of the harness",
+          "[backends][llamacpp][capability][media]") {
+    const auto projector = [](bool vision, bool audio, const std::string& name) {
+        const std::filesystem::path path =
+            std::filesystem::temp_directory_path() / ("apogee-projector-video-" + name + ".gguf");
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        const std::string bytes = apogee::testing::projector_gguf(vision, audio);
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        return path;
+    };
+    const std::filesystem::path sees = projector(true, false, "sees");
+    const std::filesystem::path hears = projector(false, true, "hears");
+    const auto provider_with = [](const std::string& mmproj) {
+        LlamaCppProvider::Options options;
+        options.backend_name = "local";
+        options.model_path = "/models/test.gguf";
+        options.mmproj_path = mmproj;
+        return std::make_shared<LlamaCppProvider>(std::move(options),
+                                                  std::make_unique<FakeLlamaRuntime>());
+    };
+    apogee::harness::Harness harness{apogee::harness::Config{}};
+    harness.register_provider("eyes", provider_with(sees.string()));
+    harness.register_provider("ears", provider_with(hears.string()));
+    harness.register_provider("plain", provider_with(""));
+    harness.use_default_router();
+
+    CHECK(harness.accepts_video("eyes") == apogee::backends::llama_available());
+    CHECK(harness.can_read("eyes", apogee::harness::Medium::Video) ==
+          apogee::backends::llama_available());
+    CHECK_FALSE(harness.accepts_video("ears"));
+    CHECK_FALSE(harness.accepts_video("plain"));
+    CHECK_FALSE(harness.accepts_video("nowhere"));
+    CHECK(harness.can_read("ears", apogee::harness::Medium::Audio) ==
+          apogee::backends::llama_available());
+
+    std::error_code code;
+    std::filesystem::remove(sees, code);
+    std::filesystem::remove(hears, code);
+}

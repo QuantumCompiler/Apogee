@@ -761,6 +761,55 @@ TEST_CASE("a chat's attachments are searched as labelled excerpts, the inlined l
     CHECK(result.retriever == "lexical");
 }
 
+TEST_CASE("a moment the question names is looked up in a recording's timeline, first",
+          "[agentloop][rag][attachments]") {
+    Scratch scratch;
+    std::string timeline = "(A video, 10:00 long.)\n";
+    for (int at = 0; at < 600; at += 5) {
+        timeline += "[" + std::to_string(at / 60) + ":" + (at % 60 < 10 ? "0" : "") +
+                    std::to_string(at % 60) + "] screen: slide " + std::to_string(at) +
+                    " showing a chart of the quarter's figures\n";
+    }
+    {
+        std::ofstream{scratch.dir / "talk.mp4"} << "video";
+        std::ofstream{scratch.dir / "guide.md"} << "The zarquon protocol requires widgets.\n";
+        apogee::agentloop::AttachmentIndex index{
+            scratch.db(),
+            {},
+            std::nullopt,
+            [&timeline](const apogee::agentloop::FoundFile&, apogee::harness::Medium,
+                        const apogee::harness::CancellationToken&) {
+                return apogee::agentloop::AttachmentText{.text = timeline,
+                                                         .reader = "timeline: eyes"};
+            }};
+        for (const std::string name : {"talk.mp4", "guide.md"}) {
+            (void)index.add(
+                apogee::agentloop::FoundFile{.path = scratch.dir / name, .name = name, .bytes = 5},
+                {});
+        }
+    }
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon at 4:30");
+    turn.attachments = true;
+    turn.limit = 1;
+
+    const RagResult searched = apogee::agentloop::retrieve_for_turn(turn);
+    REQUIRE(searched.prefix.size() == 1);
+    CHECK(searched.prefix.front().content.plain_text().find("talk.mp4") == std::string::npos);
+
+    turn.moments = {270.0};
+    const RagResult looked_up = apogee::agentloop::retrieve_for_turn(turn);
+    REQUIRE(looked_up.prefix.size() == 1);
+    const std::string sent = looked_up.prefix.front().content.plain_text();
+    // The moment first, then what the search found; the score shown is the
+    // search's.
+    const std::size_t moment = sent.find("--- talk.mp4 ");
+    REQUIRE(moment != std::string::npos);
+    CHECK(sent.find("[4:30] screen: slide 270") != std::string::npos);
+    CHECK(moment < sent.find("--- guide.md"));
+    CHECK(looked_up.top_score < 1.0);
+    CHECK(looked_up.retriever == "lexical");
+}
+
 TEST_CASE("a later retrieval in the turn gets what the earlier one left of the share",
           "[agentloop][rag][budget]") {
     Scratch scratch;

@@ -172,24 +172,8 @@ void decode_in_batches(LlamaContext& context, const std::vector<std::int32_t>& t
 /// offset (`checkpoint_offsets`, tools/server/server-context.cpp).
 constexpr std::int64_t kCheckpointTail = 4;
 
-/// Decodes the base64 payload of a `data:` URI. Empty for anything else.
-///
-/// The IR carries images as data URIs because that is what the cloud vendors
-/// take; mtmd wants the raw bytes, so this is where the two meet. A remote
-/// `https://` image is NOT fetched here -- a local backend silently reaching
-/// out to the network to answer a prompt is a surprise nobody asked for, and
-/// the caller reports it as unsupported instead.
-[[nodiscard]] std::string decode_data_uri(std::string_view url) {
-    constexpr std::string_view marker_text = ";base64,";
-    if (!url.starts_with("data:")) {
-        return {};
-    }
-    const std::size_t marker = url.find(marker_text);
-    if (marker == std::string_view::npos) {
-        return {};
-    }
-    const std::string_view encoded = url.substr(marker + marker_text.size());
-
+/// Decodes base64, skipping whitespace; stops at padding.
+[[nodiscard]] std::string decode_base64(std::string_view encoded) {
     static constexpr std::string_view alphabet =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
@@ -215,21 +199,86 @@ constexpr std::int64_t kCheckpointTail = 4;
     return out;
 }
 
-/// Every image in `messages`, as raw encoded bytes.
-[[nodiscard]] std::vector<std::string> collect_images(
-    const std::vector<harness::ChatMessage>& messages) {
-    std::vector<std::string> images;
-    for (const harness::ChatMessage& message : messages) {
+/// Decodes the base64 payload of a `data:` URI. Empty for anything else.
+///
+/// The IR carries images as data URIs because that is what the cloud vendors
+/// take; mtmd wants the raw bytes, so this is where the two meet. A remote
+/// `https://` image is NOT fetched here -- a local backend silently reaching
+/// out to the network to answer a prompt is a surprise nobody asked for, and
+/// the caller reports it as unsupported instead.
+[[nodiscard]] std::string decode_data_uri(std::string_view url) {
+    constexpr std::string_view marker_text = ";base64,";
+    if (!url.starts_with("data:")) {
+        return {};
+    }
+    const std::size_t marker = url.find(marker_text);
+    if (marker == std::string_view::npos) {
+        return {};
+    }
+    return decode_base64(url.substr(marker + marker_text.size()));
+}
+
+/// A request's pictures and sounds, in prompt order, and the request with
+/// each one replaced by the projector's marker where it sits in its message.
+struct MediaPrompt {
+    harness::ChatRequest request;
+    std::vector<MediaInput> media;
+    bool images = false;
+    bool audio = false;
+};
+
+/// Whether `request` carries a picture or a sound this backend can read: an
+/// image as a `data:` URI, or audio. A remote image is never fetched (see
+/// `decode_data_uri`), so it leaves a turn on the text path.
+[[nodiscard]] bool carries_media(const harness::ChatRequest& request) {
+    return std::ranges::any_of(request.messages, [](const harness::ChatMessage& message) {
+        return std::ranges::any_of(message.content.parts(), [](const harness::ContentPart& part) {
+            return (part.kind == harness::ContentPart::Kind::ImageUrl &&
+                    part.image_url.starts_with("data:")) ||
+                   (part.kind == harness::ContentPart::Kind::InputAudio &&
+                    !part.audio_data.empty());
+        });
+    });
+}
+
+/// `request` with its media taken out as `MediaInput`s, each leaving its
+/// marker in place (26e). The template then renders every marker inside the
+/// message that carried it -- llama-server's way -- so a clip's frames keep
+/// their timestamps between them and a sound attached to the third message is
+/// heard there, not at the top of the prompt.
+[[nodiscard]] MediaPrompt with_markers(const harness::ChatRequest& request,
+                                       const std::string& marker) {
+    MediaPrompt out;
+    out.request = request;
+    for (harness::ChatMessage& message : out.request.messages) {
+        if (!message.content.is_rich()) {
+            continue;
+        }
+        std::vector<harness::ContentPart> parts;
         for (const harness::ContentPart& part : message.content.parts()) {
-            if (part.kind != harness::ContentPart::Kind::ImageUrl) {
+            std::string bytes;
+            if (part.kind == harness::ContentPart::Kind::ImageUrl) {
+                bytes = decode_data_uri(part.image_url);
+                out.images = out.images || !bytes.empty();
+            } else if (part.kind == harness::ContentPart::Kind::InputAudio) {
+                bytes = decode_base64(part.audio_data);
+                out.audio = out.audio || !bytes.empty();
+            } else {
+                parts.push_back(part);
                 continue;
             }
-            if (std::string bytes = decode_data_uri(part.image_url); !bytes.empty()) {
-                images.push_back(std::move(bytes));
+            if (bytes.empty()) {
+                continue;
             }
+            out.media.push_back(MediaInput{.bytes = std::move(bytes), .frame = part.video_frame});
+            // A frame sits against its neighbours, so a video model can
+            // merge them; anything else stands on its own line.
+            parts.push_back(
+                harness::ContentPart::from_text(part.video_frame ? marker : marker + "\n"));
         }
+        message.content = harness::MessageContent::from_parts(std::move(parts));
     }
-    return images;
+    return out;
 }
 
 /// Sends `text` as a notice, when anyone is listening.
@@ -541,6 +590,24 @@ bool LlamaCppProvider::accepts_audio() const noexcept {
     }
 }
 
+int LlamaCppProvider::audio_sample_rate() const noexcept {
+    return model_ != nullptr ? model_->audio_sample_rate() : 0;
+}
+
+bool LlamaCppProvider::accepts_video() const noexcept {
+    if (!llama_available() || options_.mmproj_path.empty()) {
+        return false;
+    }
+    try {
+        if (!projector_header_.has_value()) {
+            projector_header_ = models::inspect_gguf(std::filesystem::path{options_.mmproj_path});
+        }
+        return projector_header_->parsed && projector_header_->projector_vision;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 bool LlamaCppProvider::model_loaded() const noexcept {
     return model_ != nullptr;
 }
@@ -774,6 +841,45 @@ void LlamaCppProvider::report_cache(const harness::StreamOptions& options,
     // memory behind the numbers above.
     event.detail += " · window " + std::to_string(context.capacity()) + ", " +
                     std::string{harness::to_string(context.cache_type())} + " cache";
+    options.on_status(event);
+}
+
+void LlamaCppProvider::report_media(const harness::StreamOptions& options,
+                                    const std::vector<MediaInput>& media, std::int64_t positions,
+                                    double seconds, const LlamaContext& context) const {
+    if (!options.on_status) {
+        return;
+    }
+    // The pictures and sounds a turn encoded, and what it cost: the line that
+    // shows a later turn reading their text instead (26e).
+    std::size_t frames = 0;
+    std::size_t sounds = 0;
+    for (const MediaInput& item : media) {
+        frames += item.frame ? 1 : 0;
+        sounds += item.bytes.starts_with("RIFF") ? 1 : 0;
+    }
+    const std::size_t images = media.size() - frames - sounds;
+    std::string what;
+    const auto add = [&what](std::size_t count, std::string_view one, std::string_view many) {
+        if (count > 0) {
+            what += (what.empty() ? "" : ", ") + std::to_string(count) + " " +
+                    std::string{count == 1 ? one : many};
+        }
+    };
+    add(images, "image", "images");
+    add(frames, "frame", "frames");
+    add(sounds, "sound", "sounds");
+    char took[32];
+    std::snprintf(took, sizeof took, "%.1f", seconds);
+    harness::StatusEvent event;
+    event.type = harness::StatusEvent::Type::PromptCache;
+    event.phase = harness::StatusEvent::Phase::Done;
+    event.name = options_.model;
+    event.tokens = positions;
+    event.detail = "prompt " + std::to_string(positions) + " positions with " + what +
+                   " encoded: read whole on a fresh context in " + took + " s · window " +
+                   std::to_string(context.capacity()) + ", " +
+                   std::string{harness::to_string(context.cache_type())} + " cache";
     options.on_status(event);
 }
 
@@ -1020,9 +1126,9 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
 }
 
 harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatRequest& request,
-                                                       const harness::StreamOptions& options,
-                                                       const std::vector<std::string>& images) {
-    if (!model_->supports_vision()) {
+                                                       const harness::StreamOptions& options) {
+    const MediaPrompt media = with_markers(request, model_->image_marker());
+    if (media.images && !model_->supports_vision()) {
         // Reached when a model loaded but its projector does not do images --
         // an audio-only mmproj, say. The capability probe answered from config,
         // which cannot know that; this is where the truth arrives.
@@ -1031,22 +1137,21 @@ harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatReques
             "this model has no usable image support. Check that mmproj_path points at the "
             "projector matching this model");
     }
-
-    // The prompt is rendered as text with one marker per image, which is the
-    // contract mtmd's tokenizer expects. Markers go at the FRONT of the user's
-    // text: every vision model in this family was trained with the picture
-    // before the question about it.
-    const std::string marker = model_->image_marker();
-    std::string prompt;
-    for (std::size_t i = 0; i < images.size(); ++i) {
-        prompt += marker;
-        prompt += "\n";
+    if (media.audio && !model_->supports_audio()) {
+        throw harness::ProviderError(options_.backend_name,
+                                     "this model's projector has no audio encoder, so it cannot "
+                                     "hear the audio it was sent");
     }
-    // Through the same renderer as a text turn, tools included: a model asked
-    // about a picture can act on it (the Milestone O rule, 25b default).
-    const RenderedRequest rendered = render_request(request);
-    notice_if_toolless(request, rendered, options);
-    prompt += rendered.text;
+
+    // The prompt is rendered as text with one marker per item where each sat
+    // in its message -- the contract mtmd's tokenizer expects -- through the
+    // same renderer as a text turn, tools included: a model asked about a
+    // picture can act on it (the Milestone O rule, 25b default). An attached
+    // file's parts come first in its message, so the picture is still read
+    // before the question about it.
+    const RenderedRequest rendered = render_request(media.request);
+    notice_if_toolless(media.request, rendered, options);
+    const std::string& prompt = rendered.text;
 
     // A fresh context every time. There is no prefix to reuse -- an image
     // occupies embedding positions that no token comparison can match -- so
@@ -1055,10 +1160,14 @@ harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatReques
     LlamaContext& context = *scratch;
 
     std::string error;
-    const std::int64_t prompt_end = context.decode_multimodal(images, prompt, 0, error);
+    const auto began = std::chrono::steady_clock::now();
+    const std::int64_t prompt_end = context.decode_multimodal(media.media, prompt, 0, error);
     if (prompt_end < 0) {
         throw harness::ProviderError(options_.backend_name, error);
     }
+    report_media(options, media.media, prompt_end,
+                 std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count(),
+                 context);
 
     const Generation generation =
         generate(context, prompt_end, request, options, rendered.chat.get(), rendered.stops);
@@ -1093,9 +1202,8 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
     // path below decodes from scratch and skips the KV reuse the text path
     // depends on. Paying that on a turn with a picture in it is the honest
     // trade; pretending an image is a token sequence is not.
-    const std::vector<std::string> images = collect_images(request.messages);
-    if (!images.empty()) {
-        return run_multimodal(request, options, images);
+    if (carries_media(request)) {
+        return run_multimodal(request, options);
     }
 
     const RenderedRequest rendered = render_request(request);

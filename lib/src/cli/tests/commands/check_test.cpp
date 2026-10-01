@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
 
 #include "embedstore/store.h"
@@ -1588,4 +1589,78 @@ TEST_CASE("the doctor's Attachments section: converters, and the chats' indexes"
     const auto* indexes = row_with(report, "chat indexes");
     REQUIRE(indexes != nullptr);
     CHECK(indexes->detail == "1 chat index(es), 1 MB -- each deleted with its chat");
+}
+
+TEST_CASE("the doctor says which models read images, audio and video, and whether ffmpeg is there",
+          "[check][attachments][media]") {
+    const Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    inputs.config_missing = false;
+    inputs.config = apogee::harness::parse_config(
+        "models:\n  default: local\n  default_vision: cloud\n"
+        "backends:\n  local:\n    type: llamacpp\n    model_path: /models/m.gguf\n"
+        "  cloud:\n    type: anthropic\n    model: claude-x\n",
+        "<test>");
+    const apogee::testing::TempDir empty{"check-path-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard path{"PATH", empty.path().string()};
+    const CheckReport report = run_checks(inputs);
+
+    const auto* ffmpeg = row_with(report, "ffmpeg");
+    REQUIRE(ffmpeg != nullptr);
+    CHECK(ffmpeg->section == "Attachments");
+    CHECK(ffmpeg->status == Status::Ok);  // optional: never a fault
+    CHECK(ffmpeg->detail.find("not installed -- attached audio and video are refused") !=
+          std::string::npos);
+
+    // The local chat model has no projector: the cloud vision role describes.
+    const auto* images = row_with(report, "images");
+    REQUIRE(images != nullptr);
+    CHECK(images->detail == "described by cloud");
+    const auto* audio = row_with(report, "audio");
+    REQUIRE(audio != nullptr);
+    CHECK(
+        audio->detail.starts_with("nothing here hears it -- set a transcription model with "
+                                  "'apogee config set-default-transcription'"));
+    CHECK(audio->detail.ends_with(" -- but ffmpeg is not installed"));
+    const auto* video = row_with(report, "video");
+    REQUIRE(video != nullptr);
+    CHECK(video->detail.starts_with("a timeline of its frames by cloud, its sound untranscribed"));
+}
+
+TEST_CASE("a chat model that sees reads images as they are, and describes its own",
+          "[check][attachments][media]") {
+    // A cloud one sees images, but is sent a clip's timeline, never its
+    // frames: only a local model with a vision projector reads a clip.
+    const Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    inputs.config_missing = false;
+    inputs.config = apogee::harness::parse_config(
+        "models:\n  default: cloud\nbackends:\n  cloud:\n    type: anthropic\n    model: c\n",
+        "<test>");
+    const CheckReport report = run_checks(inputs);
+    const auto* images = row_with(report, "images");
+    REQUIRE(images != nullptr);
+    CHECK(images->detail == "cloud sees them as they are; described by cloud");
+    const auto* video = row_with(report, "video");
+    REQUIRE(video != nullptr);
+    CHECK(video->detail.starts_with("a timeline of its frames by cloud"));
+}
+
+TEST_CASE("a vision role that cannot see gives way to a chat model that can",
+          "[check][attachments][media]") {
+    const Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    inputs.config_missing = false;
+    inputs.config = apogee::harness::parse_config(
+        "models:\n  default: cloud\n  default_vision: local\n"
+        "backends:\n  cloud:\n    type: anthropic\n    model: c\n"
+        "  local:\n    type: llamacpp\n    model_path: /models/m.gguf\n",
+        "<test>");
+    const CheckReport report = run_checks(inputs);
+    const auto* images = row_with(report, "images");
+    REQUIRE(images != nullptr);
+    CHECK(images->detail == "cloud sees them as they are; described by cloud");
 }

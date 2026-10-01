@@ -138,7 +138,18 @@ struct InlineAttachment {
     std::string name;
     /// The block, as it is prepended to the message.
     std::string text;
+    /// What the chat model reads natively -- the picture, the sound, a clip's
+    /// frames -- on the turn the attachment is attached (26e), ahead of the
+    /// text. Empty on every later turn, when the text stands in for it.
+    std::vector<harness::ContentPart> parts;
 };
+
+/// What a request's pictures and sounds take of the window, by allowance:
+/// an image 1,024 tokens, a clip's frame 256, a second of audio 25 (26e). A
+/// model's own encoder decides the real figure, which nothing here can ask
+/// before it runs; the allowance keeps a turn carrying a clip from being
+/// sized as if it carried only its words.
+[[nodiscard]] std::int64_t media_tokens(const harness::ChatRequest& request);
 
 /// One request's messages, as the budget sends them.
 struct Assembly {

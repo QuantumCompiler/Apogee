@@ -87,6 +87,12 @@ private:
     std::vector<std::string> known_names_;
 };
 
+/// What a model may be asked to read besides text (26e).
+enum class Medium : std::uint8_t { Image, Audio, Video };
+
+/// "an image", "audio", "a video".
+[[nodiscard]] std::string_view to_string(Medium medium) noexcept;
+
 /// Owns the providers and routes requests to them.
 class Harness {
 public:
@@ -188,6 +194,18 @@ public:
     /// because nothing here sends audio to a backend that has not said it can
     /// read it.
     [[nodiscard]] bool accepts_audio(std::string_view model) const noexcept;
+
+    /// Whether the backend serving `model` reads a video clip as its frames
+    /// (26e). False for an unknown or unroutable model, as with audio.
+    [[nodiscard]] bool accepts_video(std::string_view model) const noexcept;
+
+    /// Whether the backend serving `model` reads `medium` natively: one typed
+    /// question for the three (26e).
+    [[nodiscard]] bool can_read(std::string_view model, Medium medium) const noexcept;
+
+    /// The rate the backend serving `model` hears audio at, or 0 while it
+    /// cannot say (see `AudioCapable::audio_sample_rate`).
+    [[nodiscard]] int audio_sample_rate(std::string_view model) const noexcept;
 
     /// Whether generation on the backend serving `model` is billed per call.
     ///

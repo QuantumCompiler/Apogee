@@ -610,6 +610,79 @@ TEST_CASE("an @ mention attaches exactly as /attach would; one naming nothing st
     CHECK(session.messages.front().content.plain_text() == message);
 }
 
+namespace {
+
+/// `chat`'s config with the helper model as the vision role too.
+void with_vision_helper(const HelperChat& chat) {
+    std::ifstream in{chat.config_path};
+    std::string text{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    const std::string utility = "  default_utility: helper\n";
+    text.replace(text.find(utility), utility.size(), utility + "  default_vision: helper\n");
+    std::ofstream{chat.config_path, std::ios::binary} << text;
+}
+
+}  // namespace
+
+TEST_CASE("chat --image attaches the picture: seen with the first message, described after",
+          "[chat][cli][attachments][media]") {
+    HelperChat chat{texts({"{{last_user}}", "second"}),
+                    {"A red screen that says STOP.", "Pic"},
+                    "    context_size: 8000\n"};
+    with_vision_helper(chat);
+    const std::filesystem::path picture = chat.home.path() / "stop.png";
+    std::ofstream{picture, std::ios::binary} << "PNGBYTES";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--image", picture.string()}, "what is it?\nand now?\n") == 0);
+    CHECK(chat.err.find("attached " + picture.generic_string() +
+                        ": 1 file, 1 chunk, described by helper") != std::string::npos);
+    CHECK(chat.err.find("-- read as it is with your next message, then inlined whole") !=
+          std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.attachments.size() == 1);
+    REQUIRE(session.attachments[0].files.size() == 1);
+    CHECK(session.attachments[0].files[0].reader == "vision: helper");
+    // The transcript keeps the messages as typed: no picture saved in it.
+    for (const ChatMessage& message : session.messages) {
+        CHECK_FALSE(message.content.is_rich());
+    }
+}
+
+TEST_CASE("a driver attaches a picture with an attach line, and hears it described",
+          "[chat][cli][attachments][media][machine]") {
+    HelperChat chat{
+        texts({"driven answer"}), {"A chart of sales.", "Driven"}, "    context_size: 8000\n"};
+    with_vision_helper(chat);
+    const std::filesystem::path picture = chat.home.path() / "chart.png";
+    std::ofstream{picture, std::ios::binary} << "PNGBYTES";
+    const std::string input = R"({"type":"attach","path":")" + picture.generic_string() + "\"}\n" +
+                              R"({"type":"user","text":"what is it?"})" + "\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--input-format", "stream-json", "--output-format", "stream-json"},
+                     input) == 0);
+    CHECK(chat.out.find("described by helper") != std::string::npos);
+    CHECK(chat.out.find("driven answer") != std::string::npos);
+}
+
+TEST_CASE("complete --image a model cannot see is described for it; a file that is no image fails",
+          "[chat][cli][attachments][media]") {
+    HelperChat chat{
+        texts({"{{last_user}}"}), {"An invoice for 1,284.50 EUR."}, "    context_size: 8000\n"};
+    with_vision_helper(chat);
+    const std::filesystem::path picture = chat.home.path() / "invoice.png";
+    std::ofstream{picture, std::ios::binary} << "PNGBYTES";
+    INFO(chat.err);
+    REQUIRE(chat.run({"complete", "--image", picture.string(), "how much?"}) == 0);
+    CHECK(chat.err.find("described by helper") != std::string::npos);
+    CHECK(chat.out.find("how much?") != std::string::npos);
+    // Not an image, or not there: refused before anything runs.
+    const std::filesystem::path notes = chat.home.path() / "notes.txt";
+    std::ofstream{notes} << "text";
+    CHECK(chat.run({"complete", "--image", notes.string(), "x"}) != 0);
+    CHECK(chat.err.find("unsupported image type") != std::string::npos);
+    CHECK(chat.run({"complete", "--image", (chat.home.path() / "gone.png").string(), "x"}) != 0);
+    CHECK(chat.err.find("cannot open file") != std::string::npos);
+}
+
 TEST_CASE("complete --attach answers over a temporary index", "[chat][cli][attachments]") {
     HelperChat chat{texts({"a one-shot answer"}), {}, "    context_size: 8000\n"};
     const std::filesystem::path notes = chat.home.path() / "notes.md";

@@ -38,15 +38,24 @@ enum class Role : std::uint8_t { System, User, Assistant, Tool };
 /// Mirrors the OpenAI content-part schema, which llama-server and several
 /// vendors already accept, so the common case needs no translation at all.
 struct ContentPart {
-    enum class Kind : std::uint8_t { Text, ImageUrl };
+    enum class Kind : std::uint8_t { Text, ImageUrl, InputAudio };
 
     Kind kind = Kind::Text;
     std::string text;       ///< set when kind == Text
     std::string image_url;  ///< https://… or a data: URI; set when kind == ImageUrl
     std::string detail;     ///< optional "low" | "high" | "auto" for images
+    /// An image that is one frame of a video clip, in order with the frames
+    /// beside it: a model that reads video may merge consecutive ones (26e).
+    bool video_frame = false;
+    /// Base64 audio, and its container (`wav`); set when kind == InputAudio.
+    /// OpenAI's `input_audio` shape. Only a backend that declares
+    /// `AudioCapable` is ever sent one.
+    std::string audio_data;
+    std::string audio_format;
 
     [[nodiscard]] static ContentPart from_text(std::string value);
     [[nodiscard]] static ContentPart from_image_url(std::string url, std::string detail = {});
+    [[nodiscard]] static ContentPart from_audio(std::string base64, std::string format);
 };
 
 /// A message's content: either plain text or a sequence of typed parts.

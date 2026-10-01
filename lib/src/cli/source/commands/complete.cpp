@@ -12,6 +12,7 @@
 
 #include "agent/tool.h"
 #include "agentloop/loop.h"
+#include "agentloop/media.h"
 #include "agentloop/rag.h"
 #include "agentloop/reporter.h"
 #include "agentloop/retriever.h"
@@ -101,17 +102,21 @@ std::string resolve_prompt(const CompleteFlags& flags) {
     return piped;
 }
 
-std::vector<harness::ContentPart> load_attachments(const CompleteFlags& flags) {
-    std::vector<harness::ContentPart> attachments;
-    attachments.reserve(flags.images.size());
+/// Fails unless each `--image` is an image file that exists: a one-shot whose
+/// picture is missing has nothing to answer about.
+void check_images(const CompleteFlags& flags) {
     for (const std::string& image : flags.images) {
-        try {
-            attachments.push_back(load_image_part(std::filesystem::path{image}));
-        } catch (const std::exception& e) {
-            fail_user(e.what());
+        const std::filesystem::path path{image};
+        std::error_code code;
+        if (!std::filesystem::is_regular_file(path, code)) {
+            fail_user(image + ": cannot open file");
+        }
+        if (agentloop::medium_of(path) != harness::Medium::Image) {
+            fail_user(image +
+                      ": unsupported image type (accepted: png, jpg, jpeg, gif, webp, bmp, tif, "
+                      "tiff, heic)");
         }
     }
-    return attachments;
 }
 
 /// A one-shot's attachments (26d): indexed into a temporary store of its own,
@@ -159,6 +164,14 @@ ChatAttachments::Turn attach_for_prompt(OneShotAttachments& attachments, const C
                                         const agentloop::TurnBudget& budget) {
     std::error_code code;
     const std::filesystem::path working_directory = std::filesystem::current_path(code);
+    // `--image` is an attachment like any other since 26e -- described for a
+    // model that cannot see it -- but a one-shot whose picture nothing can
+    // read fails rather than answer without it.
+    for (const std::string& image : flags.images) {
+        if (!attachments.attached().attach(image, working_directory)) {
+            fail_user(image + " was not attached, so there is nothing to ask about");
+        }
+    }
     for (const std::string& spec : flags.attach) {
         (void)attachments.attached().attach(spec, working_directory);
     }
@@ -170,18 +183,12 @@ ChatAttachments::Turn attach_for_prompt(OneShotAttachments& attachments, const C
 /// Returns the finish reason so a caller can note truncation.
 harness::ChatResponse run_one(const harness::Harness& harness, const harness::Config& config,
                               const std::filesystem::path& config_path, const CompleteFlags& flags,
-                              const std::string& model, const std::string& prompt,
-                              const std::vector<harness::ContentPart>& attachments, bool decorate) {
-    // The shared guard, not a private copy: the copy is what `chat` never got.
-    if (const std::string refusal = attachment_refusal(harness, model, attachments);
-        !refusal.empty()) {
-        fail_user(refusal);
-    }
-
+                              const std::string& model, const std::string& prompt, bool decorate) {
     harness::ChatRequest request;
     request.model = model;
     request.messages = build_messages(resolve_system_prompt(flags.system_prompt, config, model),
-                                      flags.context, prompt, attachments);
+                                      flags.context, prompt, {});
+    const bool attaching = !flags.attach.empty() || !flags.images.empty();
 
     const std::optional<double> temperature =
         flags.temperature_option->count() > 0 ? std::optional<double>{flags.temperature}
@@ -207,7 +214,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         machine_options.stream_answer = true;
         machine_options.summary_model = named_utility(config);
         std::optional<OneShotAttachments> machine_attachments;
-        if (!flags.attach.empty()) {
+        if (attaching) {
             machine_attachments.emplace(
                 harness, model, max_tokens,
                 ChatAttachments::Hooks{
@@ -310,7 +317,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     const ansi::Style& style = reporter_options.style;
     std::optional<OneShotAttachments> attached;
     std::int64_t share_used = 0;
-    if (!flags.attach.empty()) {
+    if (attaching) {
         // The same core as chat's: an attachment that fits rides the prompt
         // whole, and the others' excerpts are retrieved for it (26d).
         attached.emplace(
@@ -458,7 +465,9 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
            "Backend that reorders retrieved chunks with one generation call, on (the utility "
            "model), or off")
         ->type_name(kBackendValue);
-    cmd->add_option("--image", flags->images, "Image file to attach (repeatable)")
+    cmd->add_option("--image", flags->images,
+                    "An image to attach: seen as it is by a model that can, described for one "
+                    "that cannot (repeatable)")
         ->type_name(kPathValue)
         ->allow_extra_args(false);
     cmd->add_option("--attach", flags->attach,
@@ -525,7 +534,7 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
         }
 
         const std::string prompt = resolve_prompt(*flags);
-        const std::vector<harness::ContentPart> attachments = load_attachments(*flags);
+        check_images(*flags);
 
         if (!flags->all_backends) {
             if (!flags->model.empty() && !names_a_configured_backend(config, flags->model)) {
@@ -550,8 +559,7 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
             }
 
             const std::string model = harness::resolve_chat_backend(config, flags->model);
-            (void)run_one(harness, config, config_path, *flags, model, prompt, attachments,
-                          decorate);
+            (void)run_one(harness, config, config_path, *flags, model, prompt, decorate);
             return;
         }
 
@@ -567,8 +575,7 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
             }
             std::cout << "=== " << status.name << " ===\n";
             try {
-                (void)run_one(harness, config, config_path, *flags, status.name, prompt,
-                              attachments, decorate);
+                (void)run_one(harness, config, config_path, *flags, status.name, prompt, decorate);
                 any_succeeded = true;
             } catch (const CLI::RuntimeError&) {
                 // One backend failing must not abandon the rest -- comparing

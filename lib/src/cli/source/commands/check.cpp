@@ -30,6 +30,7 @@
 #include "harness/host.h"
 #include "harness/layout.h"
 #include "harness/paths.h"
+#include "harness/roles.h"
 #include "httpserver/admin_auth.h"
 #include "knowledge/store.h"
 #include "models/gguf_inspect.h"
@@ -37,6 +38,7 @@
 #include "models/snapshot.h"
 #include "models/store.h"
 #include "platform/child_process.h"
+#include "platform/ffmpeg.h"
 #include "platform/platform.h"
 #include "scaffold/agent.h"
 #include "secrets/resolve.h"
@@ -865,7 +867,87 @@ void check_knowledge(CheckReport& report, const CheckInputs& inputs) {
 /// The `Attachments` section (26d): the converters an attachment is read
 /// with, which are optional and found on PATH, and the chats' indexes. The
 /// indexes' folder is a layout row, so its mode is the filesystem check's.
+/// Whether the backend `key` reads `medium`, from the config alone.
+[[nodiscard]] bool reads(const harness::Config& config, const std::string& key, Medium medium) {
+    const harness::BackendConfig* backend = key.empty() ? nullptr : config.find_backend(key);
+    return backend != nullptr && medium_gap(*backend, medium).empty();
+}
+
+/// The model a helper role reads `medium` with for a chat on `chat`: the
+/// role's own when it can, else the chat's when it can -- the rule the
+/// attachments follow (26e).
+[[nodiscard]] std::string helper_reading(const harness::Config& config, const std::string& chat,
+                                         harness::ModelRole role, Medium medium) {
+    const std::string key = harness::resolve_backend_key(
+        config, harness::RoleRequest{.role = role, .conversation = chat});
+    if (reads(config, key, medium)) {
+        return key;
+    }
+    return reads(config, chat, medium) ? chat : std::string{};
+}
+
+/// Which models read images, audio and video for the default chat (26e):
+/// as they are, and into text.
+void check_media_readers(CheckReport& report, const CheckInputs& inputs, bool decoder) {
+    if (inputs.config_missing || !inputs.config_error.empty()) {
+        return;
+    }
+    const harness::Config& config = inputs.config;
+    const std::string chat = harness::resolve_chat_backend(config, "");
+    const std::string describer =
+        helper_reading(config, chat, harness::ModelRole::Vision, Medium::Image);
+    const std::string transcriber =
+        helper_reading(config, chat, harness::ModelRole::Transcription, Medium::Audio);
+    const bool sees = reads(config, chat, Medium::Image);
+    const bool hears = reads(config, chat, Medium::Audio);
+    // A clip goes as its frames only to a local model with a vision
+    // projector; a cloud one is sent its timeline.
+    const harness::BackendConfig* chat_backend = chat.empty() ? nullptr : config.find_backend(chat);
+    const bool clips =
+        sees && chat_backend != nullptr && chat_backend->type == harness::BackendType::LlamaCpp;
+    const std::string no_ffmpeg = decoder ? "" : " -- but ffmpeg is not installed";
+
+    std::string images = describer.empty()
+                             ? "nothing here reads them -- set a vision model with 'apogee config "
+                               "set-default-vision'"
+                             : "described by " + describer;
+    if (sees) {
+        images = chat + " sees them as they are; " + images;
+    }
+    add(report, Status::Ok, "Attachments", "images", images);
+
+    std::string audio = transcriber.empty()
+                            ? "nothing here hears it -- set a transcription model with 'apogee "
+                              "config set-default-transcription'"
+                            : "transcribed by " + transcriber;
+    if (hears) {
+        audio = chat + " hears up to a minute as it is; " + audio;
+    }
+    add(report, Status::Ok, "Attachments", "audio", audio + no_ffmpeg);
+
+    std::string video;
+    if (describer.empty() && transcriber.empty()) {
+        video = "nothing here reads its frames or hears its sound";
+    } else {
+        video = "a timeline of its frames" + (describer.empty() ? "" : " by " + describer) +
+                (transcriber.empty() ? ", its sound untranscribed"
+                                     : " and its sound by " + transcriber);
+    }
+    if (clips) {
+        video = chat + " reads up to a minute as its frames; " + video;
+    }
+    add(report, Status::Ok, "Attachments", "video", video + no_ffmpeg);
+}
+
 void check_attachments(CheckReport& report, const CheckInputs& inputs) {
+    // Optional, as pdftotext is: without it, audio and video are refused by
+    // name and the rest attaches as before (26e).
+    const bool decoder = !platform::ffmpeg_path().empty() && !platform::ffprobe_path().empty();
+    add(report, Status::Ok, "Attachments", "ffmpeg",
+        decoder ? "found -- attached audio and video are decoded"
+                : "not installed -- attached audio and video are refused (install ffmpeg, "
+                  "with its ffprobe)");
+    check_media_readers(report, inputs, decoder);
     add(report, Status::Ok, "Attachments", "pdftotext",
         embedstore::pdftotext_available()
             ? "found -- attached PDFs are read"

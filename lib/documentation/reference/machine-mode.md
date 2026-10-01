@@ -100,6 +100,17 @@ folder over 500 files or 50 MB is refused, since there is no terminal to ask on;
 attach a narrower folder or a glob. A `user` message that mentions `@path` attaches
 that path the same way, and is answered as typed.
 
+An image, a recording or a video is attached the same way. A chat model that can
+read it is sent it as it is with the next `user` message; from the turn after, it
+reaches the model as text: an image's description, a recording's transcript, or
+a video's timeline of what was on screen and what was said, by the time. The
+`vision` and `transcription` helper roles write that text, or the chat model when
+no helper is set and it can. Audio and video need `ffmpeg` on the child's `PATH`.
+Something nothing configured can read is refused in a `notice` that names the
+role to set. More than twelve descriptions by a model billed per call are refused
+too, since there is no terminal to ask on. A `notice` also reports what could not
+be read, such as a video's sound with no model to hear it.
+
 Closing stdin ends the session: the child drains its queued output, persists the
 conversation, and exits cleanly.
 

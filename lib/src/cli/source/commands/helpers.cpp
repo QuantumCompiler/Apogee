@@ -13,29 +13,20 @@
 #include "agent/fetch_url.h"
 #include "agent/web_search.h"
 #include "agentloop/graph_context.h"
+#include "agentloop/media.h"
 #include "backends/http_client.h"
 #include "commands/embed.h"
 #include "harness/harness.h"
+#include "harness/roles.h"
 #include "platform/platform.h"
 #include "version/version.h"
 
 namespace apogee::commands {
 namespace {
 
-constexpr std::string_view kBase64Alphabet =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
 const harness::BackendConfig* entry_for(const harness::Config& config,
                                         std::string_view backend_name) {
     return config.find_backend(backend_name);
-}
-
-std::string lowercase_extension(const std::filesystem::path& path) {
-    std::string extension = path.extension().string();
-    for (char& c : extension) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return extension;
 }
 
 }  // namespace
@@ -372,58 +363,11 @@ bool stdin_is_piped() {
 }
 
 std::string base64_encode(std::string_view bytes) {
-    std::string out;
-    out.reserve(((bytes.size() + 2) / 3) * 4);
-
-    std::size_t i = 0;
-    for (; i + 2 < bytes.size(); i += 3) {
-        const auto a = static_cast<unsigned char>(bytes[i]);
-        const auto b = static_cast<unsigned char>(bytes[i + 1]);
-        const auto c = static_cast<unsigned char>(bytes[i + 2]);
-        const std::uint32_t triple = (static_cast<std::uint32_t>(a) << 16U) |
-                                     (static_cast<std::uint32_t>(b) << 8U) |
-                                     static_cast<std::uint32_t>(c);
-        out.push_back(kBase64Alphabet[(triple >> 18U) & 0x3FU]);
-        out.push_back(kBase64Alphabet[(triple >> 12U) & 0x3FU]);
-        out.push_back(kBase64Alphabet[(triple >> 6U) & 0x3FU]);
-        out.push_back(kBase64Alphabet[triple & 0x3FU]);
-    }
-
-    if (i < bytes.size()) {
-        const auto a = static_cast<unsigned char>(bytes[i]);
-        std::uint32_t triple = static_cast<std::uint32_t>(a) << 16U;
-        const bool has_second = i + 1 < bytes.size();
-        if (has_second) {
-            triple |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[i + 1])) << 8U;
-        }
-        out.push_back(kBase64Alphabet[(triple >> 18U) & 0x3FU]);
-        out.push_back(kBase64Alphabet[(triple >> 12U) & 0x3FU]);
-        out.push_back(has_second ? kBase64Alphabet[(triple >> 6U) & 0x3FU] : '=');
-        out.push_back('=');
-    }
-    return out;
+    return agentloop::base64_encode(bytes);
 }
 
 std::string image_media_type(const std::filesystem::path& path) {
-    // The set the cloud vendors actually accept. An unrecognised extension is
-    // reported rather than guessed: the wire format needs an explicit media
-    // type, and sending the wrong one fails with a far less clear message.
-    static const std::array<std::pair<std::string_view, std::string_view>, 6> kTypes{{
-        {".png", "image/png"},
-        {".jpg", "image/jpeg"},
-        {".jpeg", "image/jpeg"},
-        {".gif", "image/gif"},
-        {".webp", "image/webp"},
-        {".bmp", "image/bmp"},
-    }};
-
-    const std::string extension = lowercase_extension(path);
-    for (const auto& [candidate, media_type] : kTypes) {
-        if (extension == candidate) {
-            return std::string{media_type};
-        }
-    }
-    return {};
+    return agentloop::image_media_type(path);
 }
 
 harness::ContentPart load_image_part(const std::filesystem::path& path) {
@@ -452,24 +396,52 @@ harness::ContentPart load_image_part(const std::filesystem::path& path) {
 }
 
 std::string attachment_refusal(const harness::Harness& harness, const std::string& model,
-                               const std::vector<harness::ContentPart>& attachments) {
-    if (attachments.empty()) {
+                               harness::Medium medium) {
+    const agentloop::MediaReaders readers = agentloop::media_readers(harness, model, medium);
+    if (readers.native || !readers.describer.empty() || !readers.transcriber.empty()) {
         return {};
     }
-    if (harness.accepts_images(model)) {
-        return {};
-    }
-    return image_refusal_message(model);
+    // The role that would read it, when it is set: then it is that model
+    // that cannot either, and saying "no vision model is set" would be wrong.
+    const harness::Resolution helper = harness::resolve_backend(
+        harness.config(), harness::RoleRequest{.role = medium == harness::Medium::Audio
+                                                           ? harness::ModelRole::Transcription
+                                                           : harness::ModelRole::Vision,
+                                               .conversation = model});
+    return media_refusal_message(
+        model, medium,
+        helper.from == harness::ResolvedFrom::RolePointer ? helper.key : std::string{});
 }
 
-std::string image_refusal_message(const std::string& model) {
-    // Names the backend and BOTH ways forward. A message that only says
-    // "cannot accept images" leaves a user guessing between three different
-    // problems: the wrong backend, a missing mmproj_path, or a build without
-    // llama.cpp.
-    return "backend '" + model +
-           "' cannot accept images. Local (llamacpp) vision needs an mmproj_path on the backend "
-           "and a build with -DAPOGEE_ENABLE_LLAMA=ON; a cloud backend accepts --image today";
+std::string media_refusal_message(const std::string& model, harness::Medium medium,
+                                  std::string_view helper) {
+    // Names what cannot read it and the role that would. A message that only
+    // says "cannot accept images" leaves a user guessing between the wrong
+    // backend, a missing mmproj_path, and a build without llama.cpp.
+    const std::string local =
+        " -- a local model reads one with an mmproj_path on its backend, in a build with "
+        "-DAPOGEE_ENABLE_LLAMA=ON";
+    const auto role = [&](std::string_view noun, std::string_view command) {
+        if (!helper.empty()) {
+            return "and neither can the " + std::string{noun} + " model, '" + std::string{helper} +
+                   "' -- point 'apogee config " + std::string{command} + "' at one that can";
+        }
+        return "and no " + std::string{noun} + " model is set -- set one with 'apogee config " +
+               std::string{command} + " <backend>'";
+    };
+    switch (medium) {
+        case harness::Medium::Image:
+            return "backend '" + model + "' cannot read images, " +
+                   role("vision", "set-default-vision") + local;
+        case harness::Medium::Audio:
+            return "backend '" + model + "' cannot hear audio, " +
+                   role("transcription", "set-default-transcription") +
+                   ", a local model whose mmproj has an audio encoder";
+        case harness::Medium::Video:
+            return "backend '" + model + "' cannot read a video's frames or hear its sound, " +
+                   role("vision", "set-default-vision") + local;
+    }
+    return {};
 }
 
 std::vector<harness::ChatMessage> build_messages(

@@ -29,6 +29,8 @@ add_library(apogee_core STATIC
     version/version.cpp
     platform/child_process.h
     platform/child_process.cpp
+    platform/ffmpeg.h
+    platform/ffmpeg.cpp
     platform/platform.h
     platform/platform.cpp
     commands/command.h
@@ -321,6 +323,8 @@ add_library(apogee_core STATIC
     agentloop/budget.cpp
     agentloop/attachments.h
     agentloop/attachments.cpp
+    agentloop/media.h
+    agentloop/media.cpp
     agentloop/question.h
     agentloop/question.cpp
     agentloop/structured.h

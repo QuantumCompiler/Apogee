@@ -412,41 +412,50 @@ public:
     }
 
 private:
-    std::int64_t decode_multimodal(const std::vector<std::string>& images, std::string_view text,
+    std::int64_t decode_multimodal(const std::vector<MediaInput>& media, std::string_view text,
                                    std::int64_t position, std::string& error) override {
         if (vision_ == nullptr) {
             error = "this backend has no mmproj_path configured, so it cannot read images";
             return -1;
         }
 
-        // mtmd decodes the image bytes itself -- PNG, JPEG, and the rest --
-        // which is why the seam carries raw bytes rather than pixels. Doing our
-        // own decoding would mean a second image library and a second set of
+        // mtmd decodes the bytes itself -- PNG, JPEG and the rest, and WAV
+        // audio at the projector's own rate (26e) -- which is why the seam
+        // carries raw bytes rather than pixels or samples. Doing our own
+        // decoding would mean a second image library and a second set of
         // format bugs.
         std::vector<BitmapPtr> owned;
         std::vector<const mtmd_bitmap*> borrowed;
-        owned.reserve(images.size());
-        borrowed.reserve(images.size());
-        for (const std::string& bytes : images) {
+        owned.reserve(media.size());
+        borrowed.reserve(media.size());
+        llama_log().forget();
+        for (const MediaInput& item : media) {
             // Since b11151 the helper also decodes video, handing back a
-            // video context beside the bitmap. An attachment here is an
-            // image; a video context is freed and the input refused.
+            // video context beside the bitmap -- by spawning ffmpeg from code
+            // whose output Apogee does not own. A clip arrives here as its
+            // frames, extracted by Apogee's own runner (26e); a video context
+            // is freed and the input refused.
             const mtmd_helper_bitmap_wrapper decoded = mtmd_helper_bitmap_init_from_buf(
-                vision_, reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size(),
+                vision_, reinterpret_cast<const unsigned char*>(item.bytes.data()),
+                item.bytes.size(),
                 /*placeholder=*/false, mtmd_helper_init_opt_default());
             BitmapPtr bitmap{decoded.bitmap};
             if (decoded.video_ctx != nullptr) {
                 mtmd_helper_video_free(decoded.video_ctx);
                 error =
-                    "an attachment decoded as video, which this backend does not take -- "
-                    "attach an image";
+                    "an attachment decoded as video, which this backend takes only as its "
+                    "frames -- attach it with /attach";
                 return -1;
             }
             if (bitmap == nullptr) {
-                error =
-                    "an attached image could not be decoded -- it may be a format this "
-                    "projector does not handle, or the file may be damaged";
+                error = with_llama_reason(
+                    "an attached image or sound could not be decoded -- it may be a format this "
+                    "projector does not handle, or the file may be damaged");
                 return -1;
+            }
+            if (item.frame) {
+                // Consecutive frames of a clip: a video model merges them.
+                mtmd_bitmap_set_mergeable(bitmap.get(), true);
             }
             borrowed.push_back(bitmap.get());
             owned.push_back(std::move(bitmap));
@@ -764,6 +773,18 @@ public:
         // "an mmproj was configured" is how a surface accepts a picture it
         // cannot use.
         return vision_ != nullptr && mtmd_support_vision(vision_.get());
+    }
+
+    [[nodiscard]] bool supports_audio() const noexcept override {
+        return vision_ != nullptr && mtmd_support_audio(vision_.get());
+    }
+
+    [[nodiscard]] int audio_sample_rate() const noexcept override {
+        if (vision_ == nullptr) {
+            return 0;
+        }
+        const int rate = mtmd_get_audio_sample_rate(vision_.get());
+        return rate > 0 ? rate : 0;
     }
 
     [[nodiscard]] std::string image_marker() const override {
