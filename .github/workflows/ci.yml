@@ -1,5 +1,20 @@
 # Apogee CI -- the CLI PIPELINE.
 #
+# WHEN YOU CHANGE THIS FILE -- a job added, removed or renamed, a matrix row
+# changed, a stage reordered -- other things move with it. The full list is
+# DEVELOPER.md -> Changing the pipeline; the ones that fail loudly if missed:
+#
+#   - the required checks. Once the pull request's run passes, and BEFORE it
+#     merges: lib/scripts/required-checks.py --pr <N>, then --apply (it
+#     changes the repository's settings). Until then the "Stable: CI must
+#     pass" ruleset waits for the old job names, and nothing can merge;
+#   - lib/scripts/pr-ci.sh rehearses this file's pull-request jobs, in this
+#     order, through the same scripts: mirror the change there;
+#   - the matrix here and the one in release.yml are the same list on purpose;
+#   - lib/scripts/release-from-pr.sh finds the platforms a run built by its
+#     `build <target>` jobs and `apogee-<target>` artifacts: keep both names;
+#   - a required matrix job never gets a job-level `if:` (see `changes`).
+#
 # Everything here builds, tests, packages and releases ONE deliverable: the
 # `apogee` command-line executable. It is the "CLI pipeline" (user decision,
 # 2026-09-25), named so because it will not stay the only one: the GUI
@@ -21,17 +36,20 @@
 #
 # Gating policy (user decision, 2026-09-19, superseding 2026-08-24's
 # "macos-arm64 only"): EVERY job that runs on a pull request is required for
-# it -- the version check, the clone, all five unit-test runs and all five
-# builds -- each of which reports success without building when the CLI is
-# unchanged. (`what changed` is not listed: the matrix jobs need it, and a
-# matrix job skipped because it failed never reports its required name, so
-# its failure blocks the pull request anyway.) There is no
-# `continue-on-error` in this file and there must not be one; a platform that
-# cannot pass is a platform to fix, not to mark informational. GitHub enforces the requirement through the branch protection
-# rule on `stable`, which lists these checks by their job names
-# (`version bump`, `clone llama.cpp`, `unit tests <name>`, `build <name>`) --
-# a renamed job has to be renamed there too. `tag and release` is NOT one of
-# them: it only ever runs after the merge.
+# it -- `what changed`, the version check, the clone, all five unit-test runs
+# and all five builds -- each of which reports success without building when
+# the CLI is unchanged. There is no `continue-on-error` in this file and there
+# must not be one; a platform that cannot pass is a platform to fix, not to
+# mark informational. GitHub enforces the requirement through a repository
+# ruleset on `stable`, "Stable: CI must pass", which has no bypass list -- an
+# admin may merge without an approval, never past a red pipeline (user
+# decision, 2026-10-03). Its check names are not typed by anyone:
+# lib/scripts/required-checks.py reads them from a pull request's passing run
+# (every job that ran and passed, matrix rows expanded) and, with --apply,
+# sets them. When a job here is renamed, added or removed, run it against the
+# pull request that changes it, after that run passes and before the merge --
+# until then the ruleset still waits for the old names. `tag and release` is
+# never among them: it only ever runs after the merge.
 #
 # Job policy (user decisions, 2026-09-19, 2026-09-20, 2026-09-22 and
 # 2026-09-25): CI is the llama.cpp clone, the source suite per platform, then

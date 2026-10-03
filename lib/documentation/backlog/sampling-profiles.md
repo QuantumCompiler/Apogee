@@ -11,7 +11,7 @@ Proposed order of precedence:
 
 **Core constraint(s).**
 - **Deterministic when asked.** Temperature 0 means greedy, byte-for-byte reproducible, which the tests and the hybrid [checkpoints](../assistant/MILESTONES.md#milestone-j--local-inference)' equivalence check rely on. A seed is settable.
-- **One sampler chain.** The grammar (25b's lazy tool grammar, [26f](local-structured-output.md)'s schema grammar) and the [reasoning budget](thinking-control.md) share the chain these settings build; `common_sampler` (`common/sampling.h`) is the upstream implementation and is linked with 25b.
+- **One sampler chain.** The grammar (25b's lazy tool grammar, [26f](../assistant/MILESTONES.md#milestone-x--agents-as-data)'s schema grammar) and the [reasoning budget](thinking-control.md) share the chain these settings build; `common_sampler` (`common/sampling.h`) is the upstream implementation and is linked with 25b. The schema grammar is advanced past the reply's opening (`SamplingGrammar::prefill`, `make_sampler` in `llama_real.cpp`) before the first sample; a chain these settings rebuild must keep that step, or the grammar demands the assistant header again (found by 26f).
 - **Profiles are evidence.** A family default carries its source (the model card) in the profile's evidence line, as profiles already do, and `models info` shows the settings in force and where each came from.
 - **Parity.** `temperature` means the same on every backend; the new knobs (`top_p`, `top_k`, `min_p`, `repeat_penalty`, `presence_penalty`) are ignored by a cloud backend that lacks them, and `models info` says so.
 

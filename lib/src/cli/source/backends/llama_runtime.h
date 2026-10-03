@@ -45,6 +45,12 @@ struct SamplingGrammar {
     bool lazy = false;
     std::vector<std::string> trigger_patterns;
     std::vector<std::int32_t> trigger_tokens;
+    /// Text the prompt already ends with that the grammar's rules start at:
+    /// the template's opening of the reply (`<|im_start|>assistant\n`, and a
+    /// thinking model's `<think>`). A grammar over the whole reply is
+    /// advanced past it before the first sample, as llama-server does; a
+    /// lazy one never is, and empty advances nothing (26f).
+    std::string prefill;
 };
 
 /// A reply, read back through the model's own template format.
@@ -72,10 +78,28 @@ public:
                                     std::string& error) const = 0;
 };
 
+/// What one `render_chat` renders besides the messages and the tools.
+struct ChatRenderOptions {
+    /// The template's own switch. Off asks a thinking model to answer
+    /// without reasoning first, where its template has that switch.
+    bool enable_thinking = true;
+    /// Off renders the messages alone -- a prefix of the full prompt, whose
+    /// length is where its next message starts.
+    bool add_generation_prompt = true;
+    /// A JSON Schema, as text, the whole answer must follow (26f). Empty
+    /// for none.
+    std::string response_schema;
+};
+
 /// A request rendered through the model's own chat template, tools and all.
 struct ChatRendering {
     std::string prompt;
+    /// The tool-call grammar (lazy), or the one holding the answer to the
+    /// request's schema (not lazy) -- see `holds_schema`.
     SamplingGrammar grammar;
+    /// The grammar holds the whole answer to the request's JSON Schema,
+    /// after any reasoning (26f).
+    bool holds_schema = false;
     /// Special tokens the reader must see as text (`<tool_call>` on Qwen). A
     /// special token is otherwise rendered as nothing, and the call it opens
     /// would reach the reader as bare JSON.
@@ -345,22 +369,25 @@ public:
     /// Renders `messages` and `tools` through the model's own chat template,
     /// with llama.cpp's chat layer (`common/chat.h`, the one llama-server
     /// runs): the prompt, the grammar a tool call must follow, and a reader
-    /// for the reply. `enable_thinking` is the template's own switch.
+    /// for the reply.
     ///
     /// False with `error` when it cannot -- the GGUF ships no template, or
     /// its template cannot render this request. The caller then renders
     /// through `apply_builtin_template` and the registry, as before, and says
     /// so when the request carried tools. The default cannot.
-    /// `add_generation_prompt` off renders the messages alone -- a prefix of
-    /// the full prompt, whose length is where its next message starts.
+    ///
+    /// With a `response_schema` (26f), true means the grammar holds the
+    /// whole answer to it, after any reasoning, and `holds_schema` is set;
+    /// false with `error` when it cannot -- the template's format has no
+    /// place for a schema, the converter cannot express this one, or the
+    /// grammar does not compile -- and the caller renders again without it.
     [[nodiscard]] virtual bool render_chat(const std::vector<harness::ChatMessage>& messages,
                                            const std::vector<harness::Tool>& tools,
-                                           bool enable_thinking, bool add_generation_prompt,
-                                           ChatRendering& out, std::string& error) const {
+                                           const ChatRenderOptions& options, ChatRendering& out,
+                                           std::string& error) const {
         (void)messages;
         (void)tools;
-        (void)enable_thinking;
-        (void)add_generation_prompt;
+        (void)options;
         (void)out;
         error = "this runtime has no chat-template layer";
         return false;

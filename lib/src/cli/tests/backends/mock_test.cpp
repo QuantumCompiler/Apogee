@@ -266,6 +266,10 @@ TEST_CASE("placeholders expand against the request: the last tool result and the
     REQUIRE_FALSE(parsed.is_discarded());
     CHECK(parsed.at("s") == "line \"quoted\"\nsecond");
     CHECK(apogee::backends::expand_mock_text("plain", request) == "plain");
+    // The request's schema, exactly as it rode (26f).
+    request.transient.response_schema = R"({"b": 1, "a": 2})";
+    CHECK(apogee::backends::expand_mock_text("{{response_schema:json}}", request) ==
+          R"("{\"b\": 1, \"a\": 2}")");
 
     // And through the provider, streamed and not.
     apogee::backends::MockProvider::Options options;

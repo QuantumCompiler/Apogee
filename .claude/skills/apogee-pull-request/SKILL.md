@@ -28,6 +28,7 @@ Plus `git status` — warn if uncommitted work would be missing from the MR. The
 - **New dated entries** in item documents' Decisions made → the decisions this branch settled (including exercised `[default:]` calls).
 - [`ROADMAP.md`](../../../lib/documentation/assistant/ROADMAP.md) checkbox/section changes → release-level framing.
 - New/changed files under `lib/src/`, `lib/scripts/`, `.claude/skills/` → the implementation surface.
+- Changes under `.github/workflows/` that add, remove or rename a job or change a matrix → the merge needs the required checks re-applied first ([DEVELOPER.md → Changing the pipeline](../../../lib/documentation/assistant/DEVELOPER.md#changing-the-pipeline)); it goes under **Before merging**.
 
 ## 2. Write the description
 
@@ -52,6 +53,9 @@ Structure (omit empty sections; keep it readable — a reviewer who knows nothin
 
 ## Review notes
 <Where reviewer attention pays: risky seams, invariants touched, deliberate divergences.>
+
+## Before merging
+<Steps the merge depends on that CI does not do. When the pipeline's jobs changed: once this PR's run passes, `lib/scripts/required-checks.py --pr <this PR> --apply`, or the required checks still name the old jobs and the PR cannot merge.>
 
 ## Open questions
 <Any [user] open calls surfaced or deliberately deferred by this branch.>

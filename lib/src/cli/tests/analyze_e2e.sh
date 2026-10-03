@@ -55,6 +55,10 @@ JSON
 cat > "$WORK_DIR/prose.json" <<'JSON'
 {"turns": [{"text": "I cannot produce JSON."}, {"text": "STILL-PROSE"}]}
 JSON
+# Echoes the schema the request carried, inside a conforming answer.
+cat > "$WORK_DIR/echo.json" <<'JSON'
+{"turns": [{"text": "{\"summary\": \"s\", \"findings\": [], \"verdict\": \"no_security_concerns\", \"verdict_rationale\": {{response_schema:json}}, \"human_summary\": \"h\"}"}]}
+JSON
 
 "$APOGEE_BIN" config init >/dev/null || fail "config init"
 "$APOGEE_BIN" check --fix >/dev/null 2>&1 || fail "check --fix"
@@ -63,6 +67,7 @@ JSON
 "$APOGEE_BIN" config add-backend review --type mock --model-path "$WORK_DIR/review.json" >/dev/null || fail "add-backend review"
 "$APOGEE_BIN" config add-backend retry --type mock --model-path "$WORK_DIR/retry.json" >/dev/null || fail "add-backend retry"
 "$APOGEE_BIN" config add-backend prose --type mock --model-path "$WORK_DIR/prose.json" >/dev/null || fail "add-backend prose"
+"$APOGEE_BIN" config add-backend echo --type mock --model-path "$WORK_DIR/echo.json" >/dev/null || fail "add-backend echo"
 "$APOGEE_BIN" config add-backend vendor --type claude-cli >/dev/null || fail "add-backend vendor"
 "$APOGEE_BIN" config set-default review >/dev/null || fail "set-default"
 
@@ -112,6 +117,19 @@ grep -q '"conforms": false' "$WORK_DIR/retry.out" && fail "a conforming retry wa
 grep -q '"conforms": false' "$WORK_DIR/prose.out" || fail "two misses were not flagged: $(cat "$WORK_DIR/prose.out")"
 grep -q "STILL-PROSE" "$WORK_DIR/prose.out" || fail "the raw answer was dropped"
 grep -q "conforms: false" "$WORK_DIR/prose.err" || fail "the warning did not reach stderr"
+
+# --- the schema rides the request as its file wrote it (26f) -----------------
+# A local model's grammar writes the properties in the order the text lists
+# them; a re-serialised schema would list them alphabetically.
+"$APOGEE_BIN" analyze --agent security-review -m echo --json "x" </dev/null >"$WORK_DIR/echo.out" 2>"$WORK_DIR/echo.err" || fail "analyze echo: $(cat "$WORK_DIR/echo.err")"
+python3 - "$WORK_DIR/echo.out" "$APOGEE_HOME/schemas/security-review-output.json" <<'PY' || fail "the schema did not ride the request as written: $(cat "$WORK_DIR/echo.out")"
+import json, sys
+sent = json.load(open(sys.argv[1]))
+if "json" in sent:
+    sent = sent["json"]
+sent = sent["verdict_rationale"]
+sys.exit(0 if sent.strip() == open(sys.argv[2]).read().strip() else 1)
+PY
 
 # --- a vendor-CLI backend is refused by type, before anything is spawned -----
 if "$APOGEE_BIN" analyze --agent security-review -m vendor "x" </dev/null >/dev/null 2>"$WORK_DIR/vendor.err"; then

@@ -43,6 +43,7 @@ Open calls are tagged:
 - Mark the item's index row **in progress** in the backlog README so parallel sessions see it's taken.
 - One item at a time. Honor the item's Core constraints and the repo-wide rules (CLAUDE.md → Invariants and Code Style).
 - Tests per the item's Guardrails; verify with `lib/scripts/cicd.sh --test` before calling anything done.
+- If the item changes the pipeline — a CI job added, removed or renamed, a matrix row, a new workflow, or what the CLI is built from — follow [DEVELOPER.md → Changing the pipeline](../../../lib/documentation/assistant/DEVELOPER.md#changing-the-pipeline). Its required-checks step comes after the pull request's run passes and before the merge, and `--apply` changes repository settings: tell the user it is needed, and run it only when they say so.
 
 ## 6. Ship — the Documentation and Status flow
 

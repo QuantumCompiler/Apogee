@@ -303,8 +303,8 @@ void normalize(ExtractResult& result) {
 }
 
 ExtractFn make_structured_extractor(const harness::Harness& harness, std::string model) {
-    return [&harness, model = std::move(model), schema = extract_schema()](
-               std::string_view chunk_text, const harness::CancellationToken& cancellation) {
+    return [&harness, model = std::move(model)](std::string_view chunk_text,
+                                                const harness::CancellationToken& cancellation) {
         ExtractOutcome outcome;
         std::vector<harness::ChatMessage> history{
             harness::ChatMessage::system(extract_system_prompt()),
@@ -321,7 +321,8 @@ ExtractFn make_structured_extractor(const harness::Harness& harness, std::string
         agentloop::NullReporter reporter;
         try {
             const agentloop::StructuredResult result =
-                agentloop::run_structured(harness, history, options, reporter, schema);
+                agentloop::run_structured(harness, history, options, reporter,
+                                          extract_schema_text());
             outcome.attempts = result.attempts;
             if (!result.conforms || !result.json.has_value()) {
                 outcome.error = "the extractor did not return entities and relations";

@@ -277,7 +277,9 @@ TEST_CASE(
     CHECK(*first.max_tokens == apogee::knowledge::kClerkMaxTokens);
     CHECK(first.tools.empty());
     CHECK(first.transient.side_request);
-    CHECK(first.transient.response_schema == apogee::knowledge::capture_schema().dump());
+    // As written, so a grammar keeps the schema's own order -- intent first
+    // (26f).
+    CHECK(first.transient.response_schema == apogee::knowledge::capture_schema_text());
     REQUIRE(first.messages.size() == 2);
     CHECK(first.messages[0].role == apogee::harness::Role::System);
     CHECK(first.messages[0].content.plain_text() == apogee::knowledge::capture_system_prompt());

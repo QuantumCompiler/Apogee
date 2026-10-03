@@ -21,8 +21,11 @@
 #include <mtmd.h>
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -185,16 +188,69 @@ using BitmapPtr = std::unique_ptr<mtmd_bitmap, BitmapDeleter>;
 using ChunksPtr = std::unique_ptr<mtmd_input_chunks, ChunksDeleter>;
 using SamplerPtr = std::unique_ptr<llama_sampler, SamplerDeleter>;
 
+/// `text` as tokens, special tokens parsed as themselves; empty on failure.
+std::vector<std::int32_t> tokenize_text(const llama_vocab* vocab, std::string_view text,
+                                        bool add_special) {
+    if (text.empty()) {
+        return {};
+    }
+    // Negative return = "the buffer was this many short". Ask once with a
+    // zero-length buffer to learn the count, then fill exactly.
+    const std::int32_t needed = -llama_tokenize(
+        vocab, text.data(), static_cast<std::int32_t>(text.size()), nullptr, 0, add_special, true);
+    if (needed <= 0) {
+        return {};
+    }
+
+    std::vector<std::int32_t> tokens(static_cast<std::size_t>(needed));
+    const std::int32_t written =
+        llama_tokenize(vocab, text.data(), static_cast<std::int32_t>(text.size()), tokens.data(),
+                       needed, add_special, true);
+    if (written < 0) {
+        return {};
+    }
+    tokens.resize(static_cast<std::size_t>(written));
+    return tokens;
+}
+
+/// Advances a grammar over the whole reply past `prefill`, the reply's
+/// opening the prompt already holds -- llama-server's own step
+/// (`common/sampling.cpp`): the rules a template's format builds start at
+/// its assistant header, and the model never writes that. False with
+/// `error` when the grammar refuses it.
+bool prefill_grammar(const llama_vocab* vocab, llama_sampler& grammar, std::string_view prefill,
+                     std::string& error) {
+    const std::vector<std::int32_t> tokens = tokenize_text(vocab, prefill, false);
+    for (std::size_t index = 0; index < tokens.size(); ++index) {
+        std::array<char, 256> piece{};
+        const std::int32_t length = llama_token_to_piece(
+            vocab, tokens[index], piece.data(), static_cast<std::int32_t>(piece.size()), 0, true);
+        // Some tokenizers put a space before a leading special token; the
+        // prompt holds no such space, so neither may the grammar.
+        if (index == 0 && length > 0 && std::isspace(static_cast<unsigned char>(piece[0])) != 0 &&
+            std::isspace(static_cast<unsigned char>(prefill.front())) == 0) {
+            continue;
+        }
+        try {
+            llama_sampler_accept(&grammar, tokens[index]);
+        } catch (const std::exception& e) {
+            error = std::string{"the grammar does not accept the reply's opening: "} + e.what();
+            return false;
+        }
+    }
+    return true;
+}
+
 /// The sampler chain for one generation: the grammar when there is one, then
 /// greedy selection. Greedy: deterministic, and per-family sampling belongs to
 /// its own item (sampling-profiles). Null with `error` when the grammar does
-/// not compile.
+/// not compile, or does not accept the opening it is advanced past.
 SamplerPtr make_sampler(const llama_vocab* vocab, const SamplingGrammar& grammar,
                         std::string& error) {
     SamplerPtr chain{llama_sampler_chain_init(llama_sampler_chain_default_params())};
     if (!grammar.gbnf.empty()) {
         llama_log().forget();
-        llama_sampler* constrained = nullptr;
+        SamplerPtr constrained;
         if (grammar.lazy) {
             std::vector<const char*> patterns;
             patterns.reserve(grammar.trigger_patterns.size());
@@ -203,18 +259,24 @@ SamplerPtr make_sampler(const llama_vocab* vocab, const SamplingGrammar& grammar
             }
             std::vector<llama_token> tokens{grammar.trigger_tokens.begin(),
                                             grammar.trigger_tokens.end()};
-            constrained = llama_sampler_init_grammar_lazy_patterns(
+            constrained.reset(llama_sampler_init_grammar_lazy_patterns(
                 vocab, grammar.gbnf.c_str(), "root", patterns.data(), patterns.size(),
-                tokens.data(), tokens.size());
+                tokens.data(), tokens.size()));
         } else {
-            constrained = llama_sampler_init_grammar(vocab, grammar.gbnf.c_str(), "root");
+            constrained.reset(llama_sampler_init_grammar(vocab, grammar.gbnf.c_str(), "root"));
         }
         if (constrained == nullptr) {
-            error = with_llama_reason("llama.cpp: the tool-call grammar did not compile");
+            error =
+                with_llama_reason(grammar.lazy ? "llama.cpp: the tool-call grammar did not compile"
+                                               : "llama.cpp: the schema's grammar did not compile");
+            return nullptr;
+        }
+        if (!grammar.lazy && !grammar.prefill.empty() &&
+            !prefill_grammar(vocab, *constrained, grammar.prefill, error)) {
             return nullptr;
         }
         // The chain owns what is added to it.
-        llama_sampler_chain_add(chain.get(), constrained);
+        llama_sampler_chain_add(chain.get(), constrained.release());
     }
     llama_sampler_chain_add(chain.get(), llama_sampler_init_greedy());
     return chain;
@@ -561,27 +623,7 @@ public:
 
     [[nodiscard]] std::vector<std::int32_t> tokenize(std::string_view text,
                                                      bool add_special) const override {
-        if (text.empty()) {
-            return {};
-        }
-        // Negative return = "the buffer was this many short". Ask once with a
-        // zero-length buffer to learn the count, then fill exactly.
-        const std::int32_t needed =
-            -llama_tokenize(vocab_, text.data(), static_cast<std::int32_t>(text.size()), nullptr, 0,
-                            add_special, true);
-        if (needed <= 0) {
-            return {};
-        }
-
-        std::vector<std::int32_t> tokens(static_cast<std::size_t>(needed));
-        const std::int32_t written =
-            llama_tokenize(vocab_, text.data(), static_cast<std::int32_t>(text.size()),
-                           tokens.data(), needed, add_special, true);
-        if (written < 0) {
-            return {};
-        }
-        tokens.resize(static_cast<std::size_t>(written));
-        return tokens;
+        return tokenize_text(vocab_, text, add_special);
     }
 
     [[nodiscard]] std::string token_text(std::int32_t token) const override {
@@ -621,8 +663,8 @@ public:
     }
 
     [[nodiscard]] bool render_chat(const std::vector<harness::ChatMessage>& messages,
-                                   const std::vector<harness::Tool>& tools, bool enable_thinking,
-                                   bool add_generation_prompt, ChatRendering& out,
+                                   const std::vector<harness::Tool>& tools,
+                                   const ChatRenderOptions& options, ChatRendering& out,
                                    std::string& error) const override {
         if (!templates_loaded_) {
             // Once per load: parsing a Jinja template is not free, and its
@@ -636,8 +678,9 @@ public:
         }
 
         llama_chat::Inputs inputs;
-        inputs.enable_thinking = enable_thinking;
-        inputs.add_generation_prompt = add_generation_prompt;
+        inputs.enable_thinking = options.enable_thinking;
+        inputs.add_generation_prompt = options.add_generation_prompt;
+        inputs.json_schema = options.response_schema;
         inputs.messages.reserve(messages.size());
         for (const harness::ChatMessage& message : messages) {
             llama_chat::Message converted;
@@ -668,6 +711,24 @@ public:
         out.stops = std::move(rendered.stops);
         out.format = std::move(rendered.format);
         out.reader = std::make_unique<RealReplyReader>(std::move(rendered.parser));
+        if (options.response_schema.empty()) {
+            return true;
+        }
+        // A format with no place for a schema renders without one -- a
+        // tool-call grammar or none -- and saying so is the caller's cue to
+        // state the schema in the prompt instead.
+        if (out.grammar.gbnf.empty() || out.grammar.lazy) {
+            error = "its chat format (" + out.format + ") has no grammar for a schema";
+            return false;
+        }
+        out.grammar.prefill = std::move(rendered.generation_prompt);
+        // Compiled once here, where the caller can still fall back: a
+        // grammar that fails at the first sample would leave the prompt
+        // without the schema and the answer unheld.
+        if (make_sampler(vocab_, out.grammar, error) == nullptr) {
+            return false;
+        }
+        out.holds_schema = true;
         return true;
     }
 

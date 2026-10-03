@@ -664,7 +664,8 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
             TurnOutput turn;
             if (loaded.structured()) {
                 const agentloop::StructuredResult result =
-                    agentloop::run_structured(harness, history, options, reporter, *loaded.schema);
+                    agentloop::run_structured(harness, history, options, reporter,
+                                              std::string_view{loaded.schema_texts.front()});
                 turn.answer = result.answer;
                 turn.json = result.json;
                 turn.structured = true;

@@ -1202,6 +1202,41 @@ Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the
 
 **Not verified.** None of it has run on a runner. The copying build jobs on the Windows runners (`curl` and `7z` in Git Bash) are exercised first by the first pull request that leaves the CLI alone. `make pr-ci` was not run end to end, because this branch changes the CLI, so a rehearsal would be a full build.
 
+### 2026-10-03 — Required checks, read from the pipeline
+
+**Goal.** The user asked for merges into `stable` to need the pipeline green, whatever the approvals, and for a script that keeps the required checks current as the pipeline changes. The repository's one ruleset, "Stable", had a required-status-checks rule listing **no** checks. Its 1-approval rule cannot be met on one's own pull request, so every merge went through the admin bypass, and the bypass is all-or-nothing per ruleset: it covered the checks as well.
+
+**What was built**
+
+- [x] **`lib/scripts/required-checks.py`.** It reads the required checks from GitHub's own record of a pull request's CI. That is every job that ran and passed in its runs, across every workflow, with each matrix row expanded, named and pinned to the app exactly as GitHub reports the check. So nobody types them, and a renamed job, a new platform or a GUI workflow follows from one passing run.
+  - The pull request is the newest open one into the default branch, else the last merged; `--pr N` picks one.
+  - Its head's newest run of each workflow must have passed, and must not be still running.
+  - A merged pull request's `closed` run is created at or after the merge, so it is ignored. `tag and release` is skipped on an open pull request, so it is never required.
+- [x] **The "Stable: CI must pass" ruleset**, created or updated by `--apply`. It requires those checks with **no bypass list**, and the branch up to date with `stable`. An update replaces only the check list and keeps the ruleset's other settings. Without `--apply` the script prints the difference and changes nothing. The "Stable" ruleset keeps its review rules and admin bypass.
+- [x] **The documented list now includes `what changed`.** It runs and passes on every pull request, and the rule "every job that ran and passed" no longer carves it out.
+- [x] **Every place a pipeline change is made or reviewed says what moves with it** (the user's call: a change to the pipeline must not leave the required checks behind).
+  - [DEVELOPER.md → Changing the pipeline](DEVELOPER.md#changing-the-pipeline) has the full list: the required checks re-applied before the merge, `pr-ci.sh` mirrored, the two matrices kept as one list, the job and artifact names `release-from-pr.sh` reads, no job-level `if:` on a required matrix job, `changed.sh` for new CLI inputs, and when `required-checks.py` itself must change.
+  - The short version is at the top of `ci.yml`.
+  - A checklist item is in CLAUDE.md → Implementing a Feature.
+  - The `apogee-backlog-item`, `apogee-document-update` and `apogee-pull-request` skills each carry it. The docs pass runs the dry run; the PR description gains a **Before merging** section.
+  - The script's header lists its own assumptions.
+  - `--apply` is always the user's to run: it changes repository settings.
+
+**Verified.**
+- Against the real repository, read-only: the script picks PR #3, takes its passing run (36196338575), and derives 13 checks. `tag and release` is left out both ways: skipped in that run, and run only in the post-merge run, which the script ignores.
+- Against a stand-in `gh`, 26 checks pass:
+  - create and update, with the ruleset's other settings kept;
+  - already up to date;
+  - the bypass and enforcement warnings;
+  - a failed run and a running pipeline refused;
+  - an open pull request preferred;
+  - two workflows combined;
+  - a pull request into another branch refused.
+
+  Removing the post-merge filter or the "passed" filter fails them.
+
+**Not done.** The ruleset has not been created. Running `--apply` changes the repository's settings, and that is the user's to run.
+
 ### 2026-09-01 — Layout, doctor, installers, completions, release pipeline
 
 **What was built**
@@ -2979,7 +3014,7 @@ Also checked:
 |---|---|---|
 | Vendor-CLI backends under `analyze` | **Refused by type, with the reason** *(user decision)* | Those CLIs run their own tools outside Apogee's gate, so a `read-only` policy cannot hold there and the loop sees no tool call; allowing them under `tools: none` would be the forwarding this item retires. Same shape as `serve`. |
 | Schema validation | `pboettch/json-schema-validator`, fetched and pinned *(default taken)* | It sits on nlohmann/json, already the project's JSON library; a hand-rolled validator would be a second draft-07. |
-| Local models | Prompt-level JSON, not a grammar *(default taken)* | The pinned llama.cpp subtree carries no schema-to-grammar converter; the validator and the retry cover it, and a grammar mode is a later upgrade behind the same request field. |
+| Local models | Prompt-level JSON, not a grammar *(default taken)* | The pinned llama.cpp subtree carries no schema-to-grammar converter; the validator and the retry cover it, and a grammar mode is a later upgrade behind the same request field. *Superseded 2026-10-03 by 26f, below: a grammar wherever the model's template can hold the schema, and the prompt only where it cannot.* |
 | Anthropic | The structured-outputs field where the model id says so, else one forced tool *(default taken)* | The forced-tool pattern is universal on the Messages API; the version parse reads both `claude-<family>-<major>-<minor>` and the older `claude-<major>-<minor>-<family>`, and an id it cannot read lands on the universal path rather than on a 400. |
 | Saved filenames | `<base>-YYYYMMDD-HHMMSS.<ext>` *(default taken)* | Ommi's format put a colon in every filename; Windows is a target. |
 | `analyses/` | A layout row *(default taken)* | Declared, seeded and doctor-checked like every other; Ommi's lazy `reviews/` was the one directory outside its parity check. |
@@ -2997,6 +3032,76 @@ Also checked:
 **The two survivors, and what each taught.** Removing the fold's presence check survived because the existing tool-call test asserted the calls and not the words: without the check an ordinary turn kept its calls and lost its text. The test now pins a turn with prose *and* a real call. Disabling the "prompt file already exists" refusal survived because the duplicate test collided on the config entry too, which refuses on its own; the check exists for a file with no entry — a seeded or edited bundled prompt — and the test now proves `agents create security-review` will not clobber one without `--force`. A mutant that survives is usually a property the test never stated.
 
 **A lesson recorded.** The first version of `fold_structured_output` moved every tool call out of the response *before* checking whether a structured call was present, so an ordinary turn — a real `search` call — came back with empty names and ids. The existing "tool calls arrive as structured IR tool calls" test caught it on the first full run, and the fix is a presence check before anything moves. A function that touches its input before deciding whether it applies is a function that breaks the callers it was never for.
+
+### 2026-10-03 — `local-structured-output` (backlog item 26f): a grammar holds a local model's answer to its schema
+
+**Why.** Structured output has worked on every provider since the section above. A local model, though, could only be *told* the schema: the pinned llama.cpp had no converter Apogee could reach. So the schema went into the prompt, and the validator and its one retry did the rest. Small models miss that way, and a miss can survive the retry. On the corpus below, Llama 3.2 3B, the extraction role in the user's own config, gave three of twenty capture records a `discipline` of `infrastructure`. That is not one of the five values the schema allows. When corrected, it gave the same answer again, so all three captures failed. In graph extraction, 8 of its 24 calls failed even after their retry. Since then, 25b had linked llama.cpp's `common` chat layer, which turns a schema into a grammar for the model's own format.
+
+**What was built**
+
+- [x] **The model's own template holds the schema.** A request with a `response_schema` and no tools is first rendered through llama.cpp's chat layer with the schema: `json_schema`, which is llama-server's `response_format`. The grammar this produces applies from the first token (it is not lazy). It allows the format's reasoning block first, then holds the whole answer to the schema token by token: every field, type, `enum` and `pattern`.
+- [x] **Advanced past the reply's opening.** The grammar for a format starts at its assistant header, which the prompt already contains. So the grammar is fed the generation prompt before the first sample (`SamplingGrammar::prefill`), as llama-server does. Without this, the grammar made the model write the header a second time, and the reply no longer matched its own format.
+- [x] **Compiled while the prompt can still change.** The grammar is compiled and advanced past the opening while the prompt is being rendered, so one that fails is caught while the schema can still be stated instead.
+- [x] **Stated once.** While a grammar holds the answer, the backend adds nothing to the prompt. Every structured caller already ends its system prompt with an OUTPUT FORMAT block of its own (`schema_instruction`). That block is the caller's prompt and is left alone: it is the one place the fields' meanings reach the model.
+- [x] **The fallback, said once.** Some cases fall back to stating the schema in the prompt, as before:
+  - the model has no template;
+  - its format has no place for a schema (Kimi, Functionary, GigaChat, Ling, Muse);
+  - the converter cannot express the schema, such as an unresolved `$ref` or an invalid `pattern`;
+  - the grammar does not compile.
+
+  Each reason is said once: as a notice where the surface shows notices, and as a line in the operational log, since the clerks and the extractor show none.
+- [x] **Tools first.** A grammar over the whole answer leaves no room for a tool call. So a turn with tools keeps its tool-call grammar and states the schema, the same rule Gemini follows in the section above. The clerks, the extractor and `refine` have no tools, so they are held from their first request. An `analyze` agent with tools is held only on the loop's final pass, which has no tools.
+- [x] **A thinking model still thinks.** The template's thinking switch is left as the request set it, and the reasoning reaches the thinking sink as on any turn.
+- [x] **The author's order.** `run_structured` gained an overload that takes the schema's own text and sends it on the request as written. The clerk, the extractor and `analyze` use it. A grammar writes the properties in the order the text lists them, but Apogee's JSON type sorts keys alphabetically when parsed. Without the overload, the clerk would have written its `decision` before the `intent` its schema puts first.
+- [x] **The mock echoes it.** In a scripted mock's answer, `{{response_schema:json}}` becomes the schema the request carried. That is how `cli.analyze_lifecycle` checks that `analyze` sends the schema file as written.
+
+**On real weights** (Q4_K_M weights). The test was the production clerk and extractor, run through a probe that counts attempts, over a corpus of twenty short meeting transcripts that each end in a decision, ingested as one collection of twenty chunks. "Before" is the last commit's build:
+
+| Model | Capture, valid on the first try | Graph extraction |
+|---|---|---|
+| Llama 3.2 3B, before | 17/20; the other 3 failed even after their retry | 24 calls: 11 retried, 8 failed |
+| Llama 3.2 3B, **after** | **20/20** | **20 calls, none retried, none failed** |
+| Qwen3-VL-8B, before | 20/20 | 20 calls, none retried |
+| Qwen3-VL-8B, **after** | **20/20** | **20 calls, none retried** |
+
+- The three records that failed before (Jenkins to Actions, cron to Airflow, DKIM) were valid on the first try: the grammar admits only the five disciplines.
+- **The grammar alone writes the schema.** The schema was given to the model nowhere but the grammar: two invented field names, one with a `^[A-Z]{3}-[0-9]{4}$` pattern. Qwen3-VL-8B, Gemma 4 12B, gpt-oss-20b and Llama 3.1 8B each answered with exactly those fields, in that form.
+- **A thinking model still thinks.** Gemma 4 12B and gpt-oss-20b reasoned first (667 and 525 bytes, to the thinking sink) and then wrote the JSON. Qwen3.8-27B did too, asked a word problem under a schema: it reasoned, then answered 205 minutes on the first try.
+- **Timings are not comparable.** The runs shared the GPU in different combinations before and after.
+
+**Found on the way, and settled.**
+- **The prefill.** llama-server feeds a format's grammar the reply's opening before it samples. A grammar applied without that step demanded the header again: `<|im_start|>assistant` on Qwen, `<|start_header_id|>assistant<|end_header_id|>` on Llama. Found by reading `common/sampling.cpp`, then confirmed on real weights with the step removed.
+- **Alphabetical keys.** Apogee's JSON type sorts object keys, so a schema re-serialized before it reached the grammar would have reordered every answer. Fixed for the local path with the text overload. The cloud wires re-parse the schema the same way and still send it sorted; that is left as it is, though OpenAI's structured outputs also write keys in schema order.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| When the grammar applies | Whenever a local request has a `response_schema` and no tools *(default taken)* | There is no reason to leave a local structured request unconstrained. The tools exception is the loop's rule for every provider whose JSON mode cannot share a turn with tools. |
+| A schema no grammar can hold | Falls back to the prompt statement with one note per reason, never an error *(default taken)* | The validator still guards the answer. |
+| The prompt statement | Dropped while a grammar holds the answer; a caller's own OUTPUT FORMAT block untouched | The spec's "stated once": the grammar is the second statement. A caller's block is its prompt, and it carries what the fields mean. With the schema stated nowhere, Llama 3.1 8B filled in two invented fields that were right in form and wrong in substance. |
+| Where the schema's text comes from | The author's own text, through a `run_structured` overload | A grammar fixes the order the properties are written in, and the author chose that order. |
+| When the grammar is checked | While the prompt is being rendered: compiled and advanced past the opening | A grammar that failed only at the first sample would leave the answer held by nothing: the prompt was already sent without the schema. |
+| Prefill | The template's generation prompt, and only for a grammar that is not lazy | llama-server's rule: a lazy tool-call grammar starts at its trigger, not at the header. |
+| Qwen3.8-27B in the acceptance runs | **Left out** *(user decision, 2026-10-03)* | It thinks before every answer, and a twenty-item run took hours. It is left out of real-weights tests until thinking control (26i) can set its level. It had passed 8 of 8 captures on the first try when stopped. The acceptance models are Qwen3-VL-8B, plus Llama 3.2 3B, the user's own extraction model. |
+
+**Guardrails, each mutation-tested (17 mutants, all caught on the first pass; 16 against the whole unit suite in a git worktree, one by `cli.analyze_lifecycle` on the real binary).** What they covered:
+- **The grammar:** dropped altogether; held on a turn with tools; the thinking switch turned off under a schema.
+- **Stated once:** the schema stated beside a grammar; the "already stated" guard removed; the fallback left unstated; the checkpoint prefix rendered with the statement, which loses the last-user checkpoint.
+- **The note:** said on every call, never said, without its reason, or without the model's name.
+- **The author's order:**
+  - the text overload re-serializing the schema, or validating against nothing;
+  - the clerk, the extractor or `analyze` sending the parsed object;
+  - the mock not echoing the schema.
+
+The prefill, which lives only in the llama build, was checked on real weights instead: removing it put the assistant header into every reply.
+
+**Not verified.**
+- Linux and Windows.
+- The families whose formats have no place for a schema were not run on real weights. Their fallback is tested over the scripted runtime.
+- DeepSeek's template renders the schema into the prompt itself, so a caller's OUTPUT FORMAT block states it a second time there. No DeepSeek model was run.
+- An `analyze` agent with tools is held only on its final pass, and most answer before it.
+- Qwen3.8-27B over the corpus (see the decision above).
 
 ## Milestone Y — The knowledge layer
 

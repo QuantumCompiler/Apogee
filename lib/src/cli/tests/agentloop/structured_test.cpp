@@ -150,6 +150,31 @@ TEST_CASE("a conforming answer takes one attempt and the schema rode the request
     CHECK(history.size() == 2);  // user, assistant
 }
 
+TEST_CASE("a schema's own text rides the request as written, its order kept",
+          "[agentloop][structured]") {
+    // 26f: a local model's grammar writes the properties in the order the
+    // text lists them. Parsed, the object's order is alphabetical -- here it
+    // would put "findings" first -- so the text the author wrote is what the
+    // provider gets, and the answer is still validated against it.
+    constexpr std::string_view kOrdered =
+        R"({"type":"object","properties":{"summary":{"type":"string"},)"
+        R"("findings":{"type":"array"},"human_summary":{"type":"string"}},)"
+        R"("required":["summary","findings","human_summary"]})";
+    Rig rig{{std::string{kBad}, std::string{kGood}}};
+    std::vector<apogee::harness::ChatMessage> history{apogee::harness::ChatMessage::user("review")};
+    apogee::agentloop::Options options;
+    options.model = "mock";
+    apogee::agentloop::NullReporter reporter;
+    const auto result = run_structured(rig.harness, history, options, reporter, kOrdered);
+    REQUIRE(rig.mock->requests().size() == 2);
+    for (const auto& request : rig.mock->requests()) {
+        CHECK(request.transient.response_schema == kOrdered);
+    }
+    // Validated against it: the first answer lacks human_summary.
+    CHECK(result.attempts == 2);
+    CHECK(result.conforms);
+}
+
 TEST_CASE("a non-conforming first answer earns one correction and the second is validated",
           "[agentloop][structured][retry]") {
     Rig rig{{std::string{kBad}, std::string{kGood}}};

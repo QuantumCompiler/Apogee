@@ -12,7 +12,8 @@ struct llama_model;
 ///
 /// It renders a model's embedded Jinja template with the tool list, builds a
 /// parser for that template's tool-call format, and returns a lazy grammar
-/// that constrains a call once the model starts one. Every family's trained
+/// that constrains a call once the model starts one -- or, given a JSON
+/// Schema, a grammar holding the whole answer to it (26f). Every family's trained
 /// format, maintained upstream with the pin -- where Ommi injected a prose
 /// protocol that a model trained on tool tokens ignores (25b).
 ///
@@ -58,6 +59,10 @@ struct Inputs {
     /// Off renders the messages alone, without the assistant's opening:
     /// a prefix of the full prompt (25c measures where a message starts).
     bool add_generation_prompt = true;
+    /// A JSON Schema, as text, the whole reply must follow (26f): the
+    /// rendering's grammar then holds the answer to it after any reasoning
+    /// -- llama-server's `response_format`. Empty for none.
+    std::string json_schema;
 };
 
 /// A reply, read back through the template's format.
@@ -106,6 +111,11 @@ struct Rendered {
     std::vector<std::int32_t> preserved_tokens;
     /// Extra strings that end generation.
     std::vector<std::string> stops;
+    /// The assistant's opening, which the prompt already ends with
+    /// (`<|im_start|>assistant\n`, a thinking model's `<think>`). A grammar
+    /// over the whole reply starts there, so it is advanced past it before
+    /// the first sample.
+    std::string generation_prompt;
     bool supports_thinking = false;
     /// The format's name, for a diagnostic.
     std::string format;

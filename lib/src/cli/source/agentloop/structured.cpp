@@ -153,12 +153,12 @@ std::string correction_message(const std::vector<std::string>& errors) {
     return out;
 }
 
-StructuredResult run_structured(const harness::Harness& harness,
-                                std::vector<harness::ChatMessage>& history, const Options& options,
-                                Reporter& reporter, const nlohmann::json& schema) {
-    Options bound = options;
-    bound.response_schema = schema.dump();
+namespace {
 
+/// The run itself, `bound` already carrying the schema's text.
+StructuredResult run_bound(const harness::Harness& harness,
+                           std::vector<harness::ChatMessage>& history, const Options& bound,
+                           Reporter& reporter, const nlohmann::json& schema) {
     StructuredResult result;
     const auto attempt = [&]() {
         result.run = run(harness, history, bound, reporter);
@@ -185,6 +185,24 @@ StructuredResult run_structured(const harness::Harness& harness,
     history.push_back(harness::ChatMessage::user(correction_message(result.errors)));
     attempt();
     return result;
+}
+
+}  // namespace
+
+StructuredResult run_structured(const harness::Harness& harness,
+                                std::vector<harness::ChatMessage>& history, const Options& options,
+                                Reporter& reporter, const nlohmann::json& schema) {
+    Options bound = options;
+    bound.response_schema = schema.dump();
+    return run_bound(harness, history, bound, reporter, schema);
+}
+
+StructuredResult run_structured(const harness::Harness& harness,
+                                std::vector<harness::ChatMessage>& history, const Options& options,
+                                Reporter& reporter, std::string_view schema_text) {
+    Options bound = options;
+    bound.response_schema = std::string{schema_text};
+    return run_bound(harness, history, bound, reporter, nlohmann::json::parse(schema_text));
 }
 
 }  // namespace apogee::agentloop

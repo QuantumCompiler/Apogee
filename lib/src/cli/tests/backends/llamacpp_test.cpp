@@ -827,10 +827,10 @@ TEST_CASE("preload loads the model before any request, and only once",
 
 TEST_CASE("a response schema is stated once in the prompt, and never twice",
           "[backends][llamacpp][structured]") {
-    // A local model has no JSON mode here: the schema rides the system block
-    // as text. The fake tokenises words, and usage.prompt_tokens is exact, so
-    // "the instruction was added" and "it was not added twice" are both
-    // token arithmetic.
+    // A model with no template to hold it in a grammar (the plain fixture
+    // ships none) gets the schema in the system block as text. The fake
+    // tokenises words, and usage.prompt_tokens is exact, so "the instruction
+    // was added" and "it was not added twice" are both token arithmetic.
     Fixture plain;
     const auto without = plain.provider->chat(turn({ChatMessage::user("alpha beta gamma")}), {});
 
@@ -1065,6 +1065,148 @@ TEST_CASE("the grammar rides a request with tools and is cleared on one without"
     session->sampled = 0;
     (void)fixture.provider->chat(turn({ChatMessage::user("plain")}), {});
     CHECK(session->grammars.back().gbnf.empty());
+}
+
+namespace {
+
+constexpr const char* kAnswerSchema =
+    R"({"type":"object","properties":{"a":{"type":"string"}},"required":["a"]})";
+
+ChatRequest structured(std::vector<ChatMessage> messages) {
+    ChatRequest request = turn(std::move(messages));
+    request.transient.response_schema = kAnswerSchema;
+    return request;
+}
+
+}  // namespace
+
+TEST_CASE("a schema is held by a grammar, and the prompt does not state it",
+          "[backends][llamacpp][structured]") {
+    // 26f: the model's own template takes the schema and its grammar holds
+    // the whole answer to it, so the prompt carries no statement of it --
+    // the grammar is the one place it is stated.
+    TemplateFixture fixture{{R"({"a":"x"})"}};
+    Captured seen;
+    const auto response = fixture.provider->stream_chat(
+        structured({ChatMessage::user("alpha beta gamma")}), seen.options);
+
+    const auto& rendered = fixture.runtime->model->chat_renders.back();
+    CHECK(rendered.response_schema == kAnswerSchema);
+    const std::string& prompt = fixture.runtime->model->tokenized.back();
+    CHECK(prompt.find("OUTPUT FORMAT") == std::string::npos);
+    CHECK(prompt.find("properties") == std::string::npos);
+
+    const auto& grammars = fixture.runtime->model->contexts.front()->grammars;
+    REQUIRE_FALSE(grammars.empty());
+    CHECK(grammars.back().gbnf == std::string{"root ::= fake-answer "} + kAnswerSchema);
+    CHECK_FALSE(grammars.back().lazy);
+    // Advanced past the reply's opening, which the prompt already holds.
+    CHECK(grammars.back().prefill == " assistant:");
+    CHECK(prompt.ends_with(grammars.back().prefill));
+
+    CHECK(response.message.content.plain_text() == R"({"a":"x"})");
+    CHECK(seen.notices.empty());
+}
+
+TEST_CASE("a clerk's schema is held on its own context too", "[backends][llamacpp][structured]") {
+    // Every structured caller runs as a side request: the grammar rides the
+    // throwaway context, not the session's.
+    TemplateFixture fixture{{R"({"a":"x"})"}};
+    ChatRequest request = structured(
+        {ChatMessage::system("You are a clerk."), ChatMessage::user("alpha beta gamma")});
+    request.transient.side_request = true;
+    (void)fixture.provider->chat(request, {});
+    const auto& grammars = fixture.runtime->model->contexts.back()->grammars;
+    REQUIRE_FALSE(grammars.empty());
+    CHECK_FALSE(grammars.back().gbnf.empty());
+    CHECK_FALSE(grammars.back().lazy);
+}
+
+TEST_CASE("a thinking model still thinks before its structured answer",
+          "[backends][llamacpp][structured]") {
+    // The grammar admits the reasoning ahead of the answer, so the template's
+    // thinking switch stays on and the reasoning reaches its own sink.
+    TemplateFixture fixture{{"<think>", "pondering", "</think>", R"({"a":"x"})"}};
+    Captured seen;
+    const auto response =
+        fixture.provider->stream_chat(structured({ChatMessage::user("think first")}), seen.options);
+    CHECK(fixture.runtime->model->chat_renders.back().enable_thinking);
+    CHECK(seen.thinking == "pondering");
+    CHECK(response.message.content.plain_text() == R"({"a":"x"})");
+}
+
+TEST_CASE("a turn with tools keeps its tool grammar, and states the schema",
+          "[backends][llamacpp][structured]") {
+    // A grammar over the whole answer leaves no room for a call, so the loop's
+    // rule for every provider holds here too: the schema is held on the
+    // tools-less pass, and a turn that may still call a tool states it.
+    TemplateFixture fixture{kReadFileCall};
+    ChatRequest request = with_tools({ChatMessage::user("read it")});
+    request.transient.response_schema = kAnswerSchema;
+    const auto response = fixture.provider->chat(request, {});
+
+    for (const auto& render : fixture.runtime->model->chat_renders) {
+        CHECK(render.response_schema.empty());
+    }
+    CHECK(fixture.runtime->model->tokenized.back().find("OUTPUT FORMAT") != std::string::npos);
+    const auto& grammars = fixture.runtime->model->contexts.front()->grammars;
+    REQUIRE_FALSE(grammars.empty());
+    CHECK(grammars.back().gbnf == "root ::= fake-call");
+    CHECK(grammars.back().lazy);
+    CHECK(response.message.tool_calls.size() == 1);
+}
+
+TEST_CASE("a schema no grammar can hold is stated in the prompt, and said once",
+          "[backends][llamacpp][structured]") {
+    // A format with no place for a schema, or one the converter cannot
+    // express: the answer is held by the prompt and the validator, as before
+    // 26f, and the user is told once rather than every call.
+    TemplateFixture fixture{{R"({"a":"x"})"}};
+    fixture.runtime->schema_error = "Unresolved $ref #/definitions/missing";
+    Captured seen;
+    const auto first = fixture.provider->stream_chat(
+        structured({ChatMessage::user("alpha beta gamma")}), seen.options);
+    CHECK(fixture.runtime->model->tokenized.back().find("OUTPUT FORMAT") != std::string::npos);
+    const auto& grammars = fixture.runtime->model->contexts.front()->grammars;
+    REQUIRE_FALSE(grammars.empty());
+    CHECK(grammars.back().gbnf.empty());
+    CHECK(first.message.content.plain_text() == R"({"a":"x"})");
+    REQUIRE(seen.notices.size() == 1);
+    CHECK(seen.notices.front().find("Unresolved $ref") != std::string::npos);
+    CHECK(seen.notices.front().find("qwen3-vl-8b") != std::string::npos);
+
+    fixture.runtime->model->contexts.front()->sampled = 0;
+    (void)fixture.provider->stream_chat(structured({ChatMessage::user("again")}), seen.options);
+    CHECK(seen.notices.size() == 1);
+}
+
+TEST_CASE("a schema's grammar that does not compile falls back before the prompt is sent",
+          "[backends][llamacpp][structured]") {
+    // Compiled as the prompt is rendered, while the schema can still be
+    // stated: one that failed only at the first sample would leave the
+    // answer held by nothing.
+    TemplateFixture fixture{{R"({"a":"x"})"}};
+    fixture.runtime->grammar_error = "parse error at line 3";
+    Captured seen;
+    (void)fixture.provider->stream_chat(structured({ChatMessage::user("alpha beta gamma")}),
+                                        seen.options);
+    CHECK(fixture.runtime->model->tokenized.back().find("OUTPUT FORMAT") != std::string::npos);
+    CHECK(fixture.runtime->model->contexts.front()->grammars.back().gbnf.empty());
+    REQUIRE(seen.notices.size() == 1);
+    CHECK(seen.notices.front().find("parse error at line 3") != std::string::npos);
+}
+
+TEST_CASE("a held schema's prompt keeps its last-user checkpoint",
+          "[backends][llamacpp][structured][checkpoint]") {
+    // The conversation before the last user message is rendered with the same
+    // inputs as the full prompt -- no statement of the schema in either -- or
+    // its length is no position in the prompt and the checkpoint is lost.
+    TemplateFixture fixture{{R"({"a":"x"})"}};
+    fixture.runtime->rewindable = false;
+    const auto response = fixture.provider->chat(
+        structured({ChatMessage::system("be brief"), ChatMessage::user("one two three four")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    CHECK(session->checkpoints() == std::vector<std::int64_t>{4, response.usage.prompt_tokens - 4});
 }
 
 TEST_CASE("thinking reaches only the thinking sink", "[backends][llamacpp][tools]") {

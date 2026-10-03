@@ -239,7 +239,7 @@ ClerkFn make_structured_clerk(const harness::Harness& harness, std::string model
         options.side_request = true;
         agentloop::NullReporter reporter;
         const agentloop::StructuredResult result =
-            agentloop::run_structured(harness, history, options, reporter, capture_schema());
+            agentloop::run_structured(harness, history, options, reporter, capture_schema_text());
         ClerkOutcome outcome;
         outcome.json = result.json;
         outcome.conforms = result.conforms;

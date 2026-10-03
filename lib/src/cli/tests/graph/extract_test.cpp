@@ -181,6 +181,8 @@ TEST_CASE(
     CHECK(outcome.result->relations.size() == 1);
     REQUIRE(seen.size() == 1);
     CHECK(seen.front().transient.side_request);
+    // As written (26f): a grammar keeps the schema's own order.
+    CHECK(seen.front().transient.response_schema == apogee::graph::extract_schema_text());
     CHECK(nlohmann::json::parse(seen.front().transient.response_schema) ==
           apogee::graph::extract_schema());
     CHECK(seen.front().temperature == apogee::graph::kExtractTemperature);

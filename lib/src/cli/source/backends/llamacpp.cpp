@@ -16,16 +16,20 @@
 #include "backends/native_tool_calls.h"
 #include "events/bus.h"
 #include "harness/errors.h"
+#include "logger/operational.h"
 #include "models/gguf_inspect.h"
 
 namespace apogee::backends {
 namespace {
 
-/// The prompt-level form of structured output: a local model has no JSON
-/// mode here (the pinned subtree carries no schema-to-grammar converter),
-/// so the schema is stated in the system block and the caller validates.
-/// Skipped when a system message already carries the schema text -- the
-/// agent runner states it once itself -- so the model never reads it twice.
+/// The prompt-level form of structured output, now the fallback (26f): a
+/// grammar holds a local answer to its schema wherever the model's template
+/// can take one, and only where it cannot -- no template, a format with no
+/// place for a schema, a schema the converter cannot express, a turn with
+/// tools -- is the schema stated in the system block, the caller validating
+/// either way. Skipped when a system message already carries the schema
+/// text -- every structured caller states it once itself -- so the model
+/// never reads it twice.
 std::vector<harness::ChatMessage> messages_with_schema(const harness::ChatRequest& request) {
     const std::string& schema = request.transient.response_schema;
     if (schema.empty()) {
@@ -58,8 +62,9 @@ std::vector<harness::ChatMessage> messages_with_schema(const harness::ChatReques
 }
 
 /// The messages a local prompt is rendered from: the schema instruction
-/// where one is asked for, and the system messages that open the
-/// conversation joined into one, a blank line apart.
+/// where one is asked for and `state_schema` -- false when a grammar holds
+/// the answer, so the schema is not stated twice -- and the system messages
+/// that open the conversation joined into one, a blank line apart.
 ///
 /// A template may take one system message, and only first: Qwen3.5 and
 /// 3.8's raise "System message must be at the beginning" on a second, and
@@ -67,8 +72,10 @@ std::vector<harness::ChatMessage> messages_with_schema(const harness::ChatReques
 /// tools with it. A second is the ordinary case: the environment note
 /// (25d), a retrieval block or a review note ahead of a chat's own system
 /// prompt. The Anthropic and Google wires join theirs the same way.
-std::vector<harness::ChatMessage> prompt_messages(const harness::ChatRequest& request) {
-    std::vector<harness::ChatMessage> messages = messages_with_schema(request);
+std::vector<harness::ChatMessage> prompt_messages(const harness::ChatRequest& request,
+                                                  bool state_schema) {
+    std::vector<harness::ChatMessage> messages =
+        state_schema ? messages_with_schema(request) : request.messages;
     std::size_t leading = 0;
     while (leading < messages.size() && messages[leading].role == harness::Role::System) {
         ++leading;
@@ -743,13 +750,31 @@ std::int64_t LlamaCppProvider::count_prompt_tokens(const harness::ChatRequest& r
 LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
     const harness::ChatRequest& request) const {
     RenderedRequest rendered;
-    const std::vector<harness::ChatMessage> messages = prompt_messages(request);
+    ChatRenderOptions render;
     // The template's own switch, where it has one; a family without one
-    // ignores it (Qwen's closed think block is exactly this switch).
-    const bool enable_thinking = !request.transient.skip_reasoning;
+    // ignores it (Qwen's closed think block is exactly this switch). Kept
+    // under a schema too: the grammar admits the reasoning before the
+    // answer, so a thinking model still thinks (26f).
+    render.enable_thinking = !request.transient.skip_reasoning;
+
+    // A schema is held by a grammar on the tools-less pass, the loop's rule
+    // for every provider whose JSON mode cannot share a turn with tools: a
+    // grammar over the whole answer leaves no room for a call (26f).
+    if (!request.transient.response_schema.empty() && request.tools.empty()) {
+        ChatRenderOptions held = render;
+        held.response_schema = request.transient.response_schema;
+        auto chat = std::make_unique<ChatRendering>();
+        if (model_->render_chat(prompt_messages(request, false), request.tools, held, *chat,
+                                rendered.schema_fallback)) {
+            rendered.text = chat->prompt;
+            rendered.chat = std::move(chat);
+            return rendered;
+        }
+    }
+
+    const std::vector<harness::ChatMessage> messages = prompt_messages(request, true);
     auto chat = std::make_unique<ChatRendering>();
-    if (model_->render_chat(messages, request.tools, enable_thinking, true, *chat,
-                            rendered.fallback_reason)) {
+    if (model_->render_chat(messages, request.tools, render, *chat, rendered.fallback_reason)) {
         rendered.text = chat->prompt;
         rendered.chat = std::move(chat);
         return rendered;
@@ -781,7 +806,8 @@ std::vector<std::int64_t> LlamaCppProvider::checkpoint_marks(
     // it, alone, and keeping its length only if it really is a token prefix
     // of the prompt -- a template that renders earlier messages differently
     // once they are not last gives no usable boundary, and none is taken.
-    const std::vector<harness::ChatMessage> messages = prompt_messages(request);
+    const bool held = rendered.chat != nullptr && rendered.chat->holds_schema;
+    const std::vector<harness::ChatMessage> messages = prompt_messages(request, !held);
     std::size_t last_user = messages.size();
     for (std::size_t i = messages.size(); i-- > 0;) {
         if (messages[i].role == harness::Role::User) {
@@ -796,10 +822,17 @@ std::vector<std::int64_t> LlamaCppProvider::checkpoint_marks(
         messages.begin(), messages.begin() + static_cast<std::ptrdiff_t>(last_user)};
     std::string text;
     if (rendered.chat != nullptr) {
+        // The same inputs as the full prompt, schema included, so the two
+        // agree on every token before the last user message.
+        ChatRenderOptions render;
+        render.enable_thinking = !request.transient.skip_reasoning;
+        render.add_generation_prompt = false;
+        if (held) {
+            render.response_schema = request.transient.response_schema;
+        }
         ChatRendering prefix;
         std::string ignored;
-        if (!model_->render_chat(before, request.tools, !request.transient.skip_reasoning, false,
-                                 prefix, ignored)) {
+        if (!model_->render_chat(before, request.tools, render, prefix, ignored)) {
             return marks;
         }
         text = std::move(prefix.prompt);
@@ -916,6 +949,19 @@ void LlamaCppProvider::notice_if_toolless(const harness::ChatRequest& request,
                                                  : rendered.fallback_reason));
 }
 
+void LlamaCppProvider::notice_schema_fallback(const RenderedRequest& rendered,
+                                              const harness::StreamOptions& options) const {
+    if (rendered.schema_fallback.empty() || schema_noticed_.contains(rendered.schema_fallback)) {
+        return;
+    }
+    schema_noticed_.insert(rendered.schema_fallback);
+    const std::string text = "no grammar holds " + options_.model + "'s answer to its schema (" +
+                             rendered.schema_fallback +
+                             "), so the schema is stated in the prompt and the answer checked";
+    notice(options, text);
+    logger::log(logger::Level::Warn, "llamacpp", text);
+}
+
 harness::ChatResponse LlamaCppProvider::chat(const harness::ChatRequest& request,
                                              const harness::CancellationToken& cancellation) {
     harness::StreamOptions options;
@@ -962,9 +1008,15 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     if (std::string error;
         !context.set_grammar(chat != nullptr ? chat->grammar : SamplingGrammar{}, error)) {
         // The reader still parses a call without it; unconstrained is the
-        // permissive reading, and the user is told.
+        // permissive reading, and the user is told. A schema's grammar was
+        // compiled when the prompt was rendered, so this is the rare case of
+        // one that compiled there and not here -- its answer is validated.
         (void)context.set_grammar(SamplingGrammar{}, error);
-        notice(options, "tool calls on " + options_.model + " run without their grammar: " + error);
+        const bool held = chat != nullptr && chat->holds_schema;
+        notice(options,
+               (held ? "the answer on " + options_.model + " runs without its schema's grammar: "
+                     : "tool calls on " + options_.model + " run without their grammar: ") +
+                   error);
     }
     std::optional<TemplateReply> reply;
     if (chat != nullptr) {
@@ -1151,6 +1203,7 @@ harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatReques
     // before the question about it.
     const RenderedRequest rendered = render_request(media.request);
     notice_if_toolless(media.request, rendered, options);
+    notice_schema_fallback(rendered, options);
     const std::string& prompt = rendered.text;
 
     // A fresh context every time. There is no prefix to reuse -- an image
@@ -1208,6 +1261,7 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
 
     const RenderedRequest rendered = render_request(request);
     notice_if_toolless(request, rendered, options);
+    notice_schema_fallback(rendered, options);
     // add_special: see llama_tokens::tokenize_prompt.
     const std::vector<std::int32_t> prompt = model_->tokenize(rendered.text, true);
 

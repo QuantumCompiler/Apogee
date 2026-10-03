@@ -12,8 +12,9 @@
 /// Structured output: a schema-bound run, validated client-side, always.
 ///
 /// A provider's native JSON mode -- OpenAI's `text.format`, Gemini's
-/// `responseSchema`, Anthropic's structured outputs or one forced tool --
-/// reduces the retry rate; it never replaces the check (decided 2026-09-13).
+/// `responseSchema`, Anthropic's structured outputs or one forced tool, and a
+/// local model's grammar (26f) -- reduces the retry rate; it never replaces
+/// the check (decided 2026-09-13).
 /// The answer the loop returns is validated against the schema here, on
 /// every backend alike, and a non-conforming one gets exactly one corrective
 /// turn carrying the validator's message. A second miss is delivered RAW and
@@ -73,5 +74,18 @@ struct StructuredResult {
                                               std::vector<harness::ChatMessage>& history,
                                               const Options& options, Reporter& reporter,
                                               const nlohmann::json& schema);
+
+/// The same, with the schema as its author wrote it (26f): the text rides
+/// the request as written, and the answer is validated against it parsed.
+/// A provider that holds the answer to a schema token by token -- a local
+/// model's grammar -- writes the properties in the order the text lists
+/// them, and a parsed object's order is alphabetical: the clerk would write
+/// its decision before the intent its schema puts first. `schema_text` is a
+/// JSON object its caller has already checked -- a compiled-in clerk's, or
+/// the file `analyze` validated.
+[[nodiscard]] StructuredResult run_structured(const harness::Harness& harness,
+                                              std::vector<harness::ChatMessage>& history,
+                                              const Options& options, Reporter& reporter,
+                                              std::string_view schema_text);
 
 }  // namespace apogee::agentloop

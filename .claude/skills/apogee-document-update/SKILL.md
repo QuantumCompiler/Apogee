@@ -31,6 +31,7 @@ Work through the system in this order (read [`CLAUDE.md`](../../../lib/documenta
 6. **[SPEC.md](../../../lib/documentation/assistant/SPEC.md)** — only if scope, non-goals, principles, or surfaces actually changed; revisions carry a date, per house style.
 7. **Root `README.md`** — if one exists and the branch changed how the project builds or installs, it says so. (There is deliberately **no** repo-root `CLAUDE.md` pointer — `lib/documentation/assistant/CLAUDE.md` is the entry point.)
 8. **Skills** (`.claude/skills/*/SKILL.md`) — any paths or process steps they reference that this branch moved or renamed.
+9. **The pipeline** — if the diff touches `.github/` or `lib/scripts/`, walk [DEVELOPER.md → Changing the pipeline](../../../lib/documentation/assistant/DEVELOPER.md#changing-the-pipeline) against it: `pr-ci.sh` mirrors any changed pull-request job, the `ci.yml` and `release.yml` matrices are still one list, `changed.sh` covers anything new the CLI build reads, and `required-checks.py`'s stated assumptions still hold. If a CI job's name, matrix or set changed, the required checks must be re-applied before the merge. Run `lib/scripts/required-checks.py --pr <N>` (the dry run; it reads, never writes) if the pull request exists, and carry its output into the report.
 
 ## 3. Mechanical validation
 
@@ -43,4 +44,4 @@ After the edits, verify the whole system (script it — don't eyeball):
 
 ## 4. Report
 
-Summarize for the MR description: which docs changed and why, which backlog items were completed/started/re-gated, any decisions recorded, and — explicitly — anything found that needs the **user** (an unanswered `[user]` call the branch stepped around, a SPEC-shape change made without a recorded decision). Remind that `lib/scripts/cicd.sh --test` should be green before the MR is opened — this skill covers the docs half of "done", not the build half.
+Summarize for the MR description: which docs changed and why, which backlog items were completed/started/re-gated, any decisions recorded, and — explicitly — anything found that needs the **user** (an unanswered `[user]` call the branch stepped around, a SPEC-shape change made without a recorded decision, and — when the branch changed the pipeline's jobs — that `lib/scripts/required-checks.py --pr <N> --apply` must run after the pull request's CI passes and before it merges, which only they should run). Remind that `lib/scripts/cicd.sh --test` should be green before the MR is opened — this skill covers the docs half of "done", not the build half.

@@ -421,8 +421,13 @@ public:
     std::set<std::string> special_words;
     /// The stop strings a rendering carries.
     std::vector<std::string> stops;
-    /// A grammar rendering fails to compile with this, on every context.
+    /// A grammar rendering fails to compile with this, on every context --
+    /// and a schema's, compiled as it is rendered, at `render_chat`.
     std::string grammar_error;
+    /// When set, `render_chat` cannot hold a schema, with this reason: a
+    /// format with no place for one, or a schema the converter cannot
+    /// express (26f).
+    std::string schema_error;
 
     /// What each `render_chat` call was given, in order.
     struct ChatRender {
@@ -430,6 +435,7 @@ public:
         std::vector<harness::Tool> tools;
         bool enable_thinking = true;
         bool add_generation_prompt = true;
+        std::string response_schema;
     };
 
     mutable std::vector<ChatRender> chat_renders;
@@ -477,18 +483,31 @@ public:
 
     /// The word-level stand-in for the model's own template: every role, call
     /// and result on the prompt as words, the tools named, and the thinking
-    /// switch visible -- so a test can read what the model was shown.
+    /// switch visible -- so a test can read what the model was shown. A
+    /// schema is held the way a real format holds it: a grammar that is not
+    /// lazy, advanced past the reply's opening, and nothing in the prompt.
     [[nodiscard]] bool render_chat(const std::vector<harness::ChatMessage>& messages,
-                                   const std::vector<harness::Tool>& tools, bool enable_thinking,
-                                   bool add_generation_prompt, backends::ChatRendering& out,
+                                   const std::vector<harness::Tool>& tools,
+                                   const backends::ChatRenderOptions& options,
+                                   backends::ChatRendering& out,
                                    std::string& error) const override {
-        chat_renders.push_back({messages, tools, enable_thinking, add_generation_prompt});
+        chat_renders.push_back({messages, tools, options.enable_thinking,
+                                options.add_generation_prompt, options.response_schema});
         if (!chat_template) {
             error = "the model ships no chat template";
             return false;
         }
         if (!chat_template_error.empty()) {
             error = chat_template_error;
+            return false;
+        }
+        const bool schema = !options.response_schema.empty();
+        if (schema && !schema_error.empty()) {
+            error = schema_error;
+            return false;
+        }
+        if (schema && !grammar_error.empty()) {
+            error = grammar_error;
             return false;
         }
         for (std::size_t i = 1; system_first_only && i < messages.size(); ++i) {
@@ -519,10 +538,18 @@ public:
                 prompt += " answers:" + message.tool_call_id;
             }
         }
-        if (add_generation_prompt) {
-            prompt += enable_thinking ? " assistant:" : " assistant(no-think):";
+        std::string opening;
+        if (options.add_generation_prompt) {
+            opening = options.enable_thinking ? " assistant:" : " assistant(no-think):";
+            prompt += opening;
         } else if (unstable_prefix) {
             prompt += " [partial]";
+        }
+        if (schema) {
+            out.grammar = backends::SamplingGrammar{};
+            out.grammar.gbnf = "root ::= fake-answer " + options.response_schema;
+            out.grammar.prefill = opening;
+            out.holds_schema = true;
         }
         out.prompt = std::move(prompt);
         out.preserved_tokens = {id_for("<tool_call>"), id_for("</tool_call>")};
@@ -703,6 +730,7 @@ public:
     std::set<std::string> special_words;
     std::vector<std::string> stops;
     std::string grammar_error;
+    std::string schema_error;
 
     /// Generation scripted as the exact PIECES a model emits, rather than as
     /// token ids.
@@ -742,6 +770,7 @@ public:
         loaded->special_words = special_words;
         loaded->stops = stops;
         loaded->grammar_error = grammar_error;
+        loaded->schema_error = schema_error;
         loaded->trained_length = trained_length;
         loaded->fitted = request.fit_window ? fitted : 0;
         loaded->cache_type = request.cache_type;

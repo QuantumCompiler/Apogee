@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -286,6 +287,10 @@ private:
         std::unique_ptr<ChatRendering> chat;
         /// Why the template path was not taken, when it was not.
         std::string fallback_reason;
+        /// Why a grammar does not hold the answer to the request's schema,
+        /// when one was asked for and the schema is stated in the prompt
+        /// instead (26f).
+        std::string schema_fallback;
         /// On the fallback, the guessed framing's turn markers: generation
         /// ends where the model writes one out (see `RenderedPrompt::stops`).
         std::vector<std::string> stops;
@@ -360,6 +365,13 @@ private:
     void notice_if_toolless(const harness::ChatRequest& request, const RenderedRequest& rendered,
                             const harness::StreamOptions& options) const;
 
+    /// Says, once per reason, that a structured request's answer is held to
+    /// its schema by the prompt alone (26f) -- on screen where the surface
+    /// shows notices, and in the operational log, since a clerk or an
+    /// extractor shows none. Never an error: the answer is still validated.
+    void notice_schema_fallback(const RenderedRequest& rendered,
+                                const harness::StreamOptions& options) const;
+
     /// The resolved profile, and the architecture it was resolved from.
     ///
     /// Cached at load rather than recomputed: it is asked once per turn by the
@@ -374,6 +386,8 @@ private:
     mutable std::optional<models::GgufInfo> projector_header_;
     /// Whether the no-template notice has been given this conversation.
     mutable bool template_noticed_ = false;
+    /// The schema-fallback reasons already said (26f).
+    mutable std::set<std::string, std::less<>> schema_noticed_;
     /// `general.architecture` of the loaded model, empty before the first load.
     mutable std::string architecture_;
     mutable const ModelProfile* profile_ = nullptr;

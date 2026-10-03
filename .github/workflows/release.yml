@@ -1,5 +1,10 @@
 # Apogee releases -- the MANUAL path.
 #
+# When you change this file, keep its matrix the same list as ci.yml's, and
+# read DEVELOPER.md -> Changing the pipeline. Its jobs are not required checks
+# (it never runs on a pull request), so lib/scripts/required-checks.py does
+# not need re-running for a change here alone.
+#
 # Distribution host and pipeline shape are a user decision (2026-09-01): GitHub
 # Releases, built by GitHub Actions. `install.sh` and `install.ps1` fetch the
 # archive for the host from there.

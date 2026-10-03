@@ -115,6 +115,9 @@ bool Templates::render(const Inputs& inputs, Rendered& out, std::string& error) 
     request.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
     // One call per step: easier to gate and to show (25b, default taken).
     request.parallel_tool_calls = false;
+    // Parsed by `common` itself; a schema it cannot read or express throws,
+    // and the caller falls back to stating it in the prompt (26f).
+    request.json_schema = inputs.json_schema;
 
     request.messages.reserve(inputs.messages.size());
     for (const Message& message : inputs.messages) {
@@ -149,6 +152,7 @@ bool Templates::render(const Inputs& inputs, Rendered& out, std::string& error) 
     out.grammar_lazy = params.grammar_lazy;
     out.supports_thinking = params.supports_thinking;
     out.stops = params.additional_stops;
+    out.generation_prompt = params.generation_prompt;
     out.format = common_chat_format_name(params.format);
 
     out.preserved_tokens.clear();

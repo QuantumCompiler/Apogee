@@ -52,6 +52,10 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
     // so a scripted JSON answer can carry a tool result verbatim.
     replace_all(out, "{{last_tool_result:json}}", nlohmann::json(last_tool_result).dump());
     replace_all(out, "{{system:json}}", nlohmann::json(system).dump());
+    // The schema the request carried, as it carried it -- so a check on the
+    // real binary can see a caller kept its author's order (26f).
+    replace_all(out, "{{response_schema:json}}",
+                nlohmann::json(request.transient.response_schema).dump());
     replace_all(out, "{{last_tool_result}}", last_tool_result);
     replace_all(out, "{{system}}", system);
     return out;
