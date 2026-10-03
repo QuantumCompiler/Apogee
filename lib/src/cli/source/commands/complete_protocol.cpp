@@ -27,6 +27,7 @@ namespace {
     const std::size_t colon = type.find(':');
     const std::string base = type.substr(0, colon);
     value.type = base;
+    value.list = base == kCollectionListValue || option.get_delimiter() == ',';
     if (base == kBackendValue) {
         value.kind = ValueKind::Backend;
     } else if (base == kPathValue) {
@@ -57,22 +58,39 @@ namespace {
     return value;
 }
 
-/// The names `value` offers for `current`: a list's words after the last
-/// comma, carrying what precedes it and skipping what is already there.
-[[nodiscard]] Completion offer_names(const ValueSpec& value, const CompletionSources& sources,
-                                     const CompletionContext& context, std::string_view current) {
-    Completion completion;
-    const bool list = value.source == kCollectionListValue;
+/// The `items` that complete `current`. For a list, the word after the last
+/// comma: what precedes it is carried, and what it already holds is skipped.
+[[nodiscard]] std::vector<std::string> offer_items(const std::vector<std::string>& items,
+                                                   const ValueSpec& value,
+                                                   std::string_view current) {
     std::string head;
     std::string_view word = current;
-    if (const std::size_t comma = current.rfind(','); list && comma != std::string_view::npos) {
+    if (const std::size_t comma = current.rfind(',');
+        value.list && comma != std::string_view::npos) {
         head = std::string{current.substr(0, comma + 1)};
         word = current.substr(comma + 1);
     }
+    std::vector<std::string> offered;
+    for (const std::string& item : filter_prefix(items, word)) {
+        if (value.list && (',' + head).find(',' + item + ',') != std::string::npos) {
+            continue;  // already in the list
+        }
+        offered.push_back(head + item);
+    }
+    return offered;
+}
+
+/// The names `value` offers for `current`.
+[[nodiscard]] Completion offer_names(const ValueSpec& value, const CompletionSources& sources,
+                                     const CompletionContext& context, std::string_view current) {
+    Completion completion;
+    const std::string_view kind = value.source == kCollectionListValue
+                                      ? std::string_view{kCollectionValue}
+                                      : std::string_view{value.source};
     NameList found;
     if (sources) {
         try {
-            found = sources(list ? std::string_view{kCollectionValue} : value.source, context);
+            found = sources(kind, context);
         } catch (const std::exception&) {
             found = {};  // silent, as every completion failure is
         }
@@ -80,12 +98,7 @@ namespace {
     std::ranges::sort(found.names);
     const auto [duplicates, end] = std::ranges::unique(found.names);
     found.names.erase(duplicates, end);
-    for (const std::string& name : filter_prefix(found.names, word)) {
-        if (list && (',' + head).find(',' + name + ',') != std::string::npos) {
-            continue;  // already in the list
-        }
-        completion.candidates.push_back(head + name);
-    }
+    completion.candidates = offer_items(found.names, value, current);
     if (!completion.candidates.empty()) {
         return completion;
     }
@@ -117,7 +130,7 @@ namespace {
             break;
         }
         case ValueKind::Choice:
-            completion.candidates = filter_prefix(value.choices, current);
+            completion.candidates = offer_items(value.choices, value, current);
             break;
         case ValueKind::Path:
             completion.files = true;
@@ -159,8 +172,11 @@ namespace {
         }
         for (const std::string& spelling : spellings) {
             spec.flags.push_back(spelling);
-            // A flag has no value to take; an option has at least one.
-            if (option->get_type_size_max() > 0) {
+            // A flag has no value to take; an option has at least one. Asked
+            // the way the parser asks: CLI11 gives every option a type size
+            // of one, flags included, and a flag none of its items -- read the
+            // size and `--safetensors <TAB>` was taken for its value.
+            if (option->get_items_expected_max() > 0) {
                 spec.values.emplace(spelling, value_of(*option, spelling));
             }
         }

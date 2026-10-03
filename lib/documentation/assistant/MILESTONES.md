@@ -1349,7 +1349,7 @@ Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the
   - [DEVELOPER.md → Changing the pipeline](DEVELOPER.md#changing-the-pipeline) has the full list: the required checks re-applied before the merge, `pr-ci.sh` mirrored, the two matrices kept as one list, the job and artifact names `release-from-pr.sh` reads, no job-level `if:` on a required matrix job, `changed.sh` for new CLI inputs, and when `required-checks.py` itself must change.
   - The short version is at the top of `ci.yml`.
   - A checklist item is in CLAUDE.md → Implementing a Feature.
-  - The `apogee-backlog-execute-item` (then `apogee-backlog-item`), `apogee-maintenance-documents` (then `apogee-document-update`) and `apogee-pull-request` skills each carry it. The docs pass runs the dry run; the PR description gains a **Before merging** section.
+  - The `apogee-backlog-execute-item` (then `apogee-backlog-item`), `apogee-maintenance-documents` (then `apogee-document-update`) and `apogee-maintenance-pull-request` (then `apogee-pull-request`) skills each carry it. The docs pass runs the dry run; the PR description gains a **Before merging** section.
   - The script's header lists its own assumptions.
   - `--apply` is always the user's to run: it changes repository settings.
 
@@ -2325,6 +2325,9 @@ Every other header read goes through the same function, so each is faster the sa
   - warnings and errors are kept and attached to a failure as `llama.cpp said: …`;
   - the callback in place before (the backend's own, when a model is loaded) is put back afterwards.
   - On a small hand-built model, the build from before printed 14 lines of llama.cpp's own. This one prints none, and on a failure says llama.cpp's reason in one line beneath its own.
+- [x] **The new flags complete after another flag** (`commands/complete_protocol.cpp`; the user's report, 2026-10-03). `models pull <repo> --safetensors --<TAB>` showed `--safetensors`' own description, and `--register` never appeared.
+  - The cause predates this item: since flag completion shipped, the protocol took every boolean flag for one that takes a value, so the word after any of them (`chat --raw`, `models delete --yes`) was read as that flag's value. It read CLI11's type size, which is one for every option, flags included; the parser reads the items an option expects, which is none for a flag. Completion now asks the parser's question.
+  - A fixed set the parser splits at commas completes its last word, as a collection list already did: `--register-with Q4_K_M,<TAB>` offers the other levels, not the one already listed.
 
 **Not run, by the user's call.** The guardrail's live check, one full-weight pull chained to a registered quant and chatted with, was not run: the user runs it (2026-10-03). Nothing in this item's tests downloads, converts or quantizes a real model.
 - The converter is the existing test's shell script.
@@ -2348,6 +2351,7 @@ Every other header read goes through the same function, so each is faster the sa
 - **The chain:** registration not idempotent; another model's name, a name differing in case, or a missing config not refused up front; the names not checked first; the projector or the quantizations not registered; an existing quantization not recognised; levels kept as typed, or F16 kept as a level; `--type` allowed beside `--register`; a base model unmarked; a chained verb printing its own hints or its warnings inline; the resume command without its levels.
 - **The quantize log** (on a llama build): the log not routed or not put back, the reason dropped, the tensor count unsaid, the warnings not kept.
 - Not mutation-tested: the `--register needs --safetensors` refusal. Its mutant turns the test's command into a real pull, which reaches the network.
+- **The completion fix** (4 more mutants, all caught): a flag read as taking a value, a set split at commas not completed as a list, the parser's delimiter not read, a level already listed offered again.
 
 **Tests.**
 - `model_chain_test`: the orchestration as a table over stand-in stages.
@@ -2359,6 +2363,7 @@ Every other header read goes through the same function, so each is faster the sa
   - a base model's note said once;
   - on a llama build, the whole chain through the command line with the real quantizer.
 - `quantize_test`, on a llama build: a real quantization writes nothing of llama.cpp's to the terminal (captured at the file descriptor) and counts its one tensor; a refusal carries llama.cpp's reason; the backend still hears llama.cpp afterwards.
+- `lifecycle_test`, for the completion fix: the reported line and its siblings (`--safetensors --`, `chat --raw --`, `uninstall -y --`, a positional after a flag); every spelling in the real tree held to the parser's own count of what it takes; `--register-with`'s comma list, and a single-word set that is not one.
 
 ## Milestone O — Local multimodal
 

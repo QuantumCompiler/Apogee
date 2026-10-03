@@ -1,5 +1,5 @@
 ---
-name: apogee-pull-request
+name: apogee-maintenance-pull-request
 description: Draft the merge-request description for the current branch — what shipped, which backlog items it closed, decisions made, docs updated, how it was verified. Use when the user is opening an MR/PR or asks to "write the PR description", "describe this branch", "draft the merge request".
 ---
 

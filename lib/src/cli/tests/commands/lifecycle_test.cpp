@@ -637,6 +637,73 @@ TEST_CASE("a fixed set of values completes from the parser's own validator",
     CHECK(complete_full({"models", "convert"}, "./", fake_sources()).files);
 }
 
+TEST_CASE("a flag that takes no value leaves the next word to the line",
+          "[commands][completion][flags]") {
+    // The report: `models pull <repo> --safetensors --<TAB>` showed
+    // --safetensors' own description, and --register never appeared. Every
+    // boolean flag was read as taking the word after it.
+    const std::vector<std::string> after =
+        complete_line({"models", "pull", "org/repo", "--safetensors"}, "--");
+    CHECK(contains(after, "--register"));
+    CHECK(contains(after, "--register-with"));
+    CHECK(complete_line({"models", "convert", "snap", "--register"}, "--register-") ==
+          std::vector<std::string>{"--register-with"});
+    CHECK(contains(complete_line({"chat", "--raw"}, "--"), "--model"));
+    CHECK(contains(complete_line({"uninstall", "-y"}, "--"), "--keep-data"));
+    // A positional after a flag is still that positional.
+    CHECK(complete_full({"models", "pull", "--safetensors"}).hint.starts_with("ref "));
+}
+
+namespace {
+
+[[nodiscard]] std::vector<std::string> spellings_of(const CLI::Option& option) {
+    std::vector<std::string> spellings;
+    for (const std::string& name : option.get_snames()) {
+        spellings.push_back("-" + name);
+    }
+    for (const std::string& name : option.get_lnames()) {
+        spellings.push_back("--" + name);
+    }
+    return spellings;
+}
+
+/// Holds `spec` to the parser it was read from, at every depth: a spelling
+/// takes the next word exactly when CLI11 expects a value after it.
+void check_values_against(const CLI::App& app, const apogee::commands::CommandSpec& spec,
+                          const std::string& path, std::size_t& flags) {
+    for (const CLI::Option* option : app.get_options()) {
+        if (!option->nonpositional()) {
+            continue;
+        }
+        const bool takes_value = option->get_expected_max() > 0;
+        flags += takes_value ? 0 : 1;
+        for (const std::string& spelling : spellings_of(*option)) {
+            INFO("apogee" << path << " " << spelling);
+            CHECK(spec.values.contains(spelling) == takes_value);
+        }
+    }
+    for (const CLI::App* sub : app.get_subcommands({})) {
+        if (sub->get_group().empty()) {
+            continue;
+        }
+        const auto child = std::ranges::find(spec.subcommands, sub->get_name(),
+                                             &apogee::commands::CommandSpec::name);
+        REQUIRE(child != spec.subcommands.end());
+        check_values_against(*sub, *child, path + " " + sub->get_name(), flags);
+    }
+}
+
+}  // namespace
+
+TEST_CASE("a spelling takes the next word exactly when the parser expects one",
+          "[commands][completion][flags]") {
+    const apogee::commands::RootCommand root{apogee::commands::default_registry()};
+    std::size_t flags = 0;
+    check_values_against(root.app(), apogee::commands::specs_from_app(root.app()), "", flags);
+    // Every --help, every --yes: a walk that found none checked nothing.
+    CHECK(flags > 100);
+}
+
 TEST_CASE("free text says what it wants instead of offering file names",
           "[commands][completion][values]") {
     // The report: `config add-backend --model na<TAB>` did nothing, and a bare
@@ -764,6 +831,22 @@ TEST_CASE("a comma list completes its last word and skips what it holds",
     CHECK(
         complete_full({"config", "add-graph", "g", "--collections"}, "docs,notes,m", fake_sources())
             .candidates == std::vector<std::string>{"docs,notes,meetings"});
+}
+
+TEST_CASE("a fixed set the parser splits at commas completes its last word",
+          "[commands][completion][values]") {
+    // `--register-with Q4_K_M,<TAB>`: the parser splits the word, so the
+    // levels after the comma complete, and one already listed is not offered.
+    const std::vector<std::string> pull = {"models", "pull", "org/repo", "--safetensors",
+                                           "--register-with"};
+    CHECK(contains(complete_line(pull), "Q4_K_M"));
+    CHECK(complete_line(pull, "Q4_K_M,Q") ==
+          std::vector<std::string>{"Q4_K_M,Q2_K", "Q4_K_M,Q3_K_M", "Q4_K_M,Q5_K_M", "Q4_K_M,Q6_K",
+                                   "Q4_K_M,Q8_0"});
+    CHECK(complete_line({"models", "convert", "snap", "--register-with"}, "Q8_0,Q4") ==
+          std::vector<std::string>{"Q8_0,Q4_K_M"});
+    // A set that takes one word is not a list.
+    CHECK(complete_line({"models", "convert", "snap", "--type"}, "f16,").empty());
 }
 
 TEST_CASE("a list that depends on the line reads the line", "[commands][completion][names]") {

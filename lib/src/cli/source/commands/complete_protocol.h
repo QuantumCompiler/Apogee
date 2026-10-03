@@ -66,6 +66,10 @@ struct ValueSpec {
     std::vector<std::string> choices;
     /// Which names, for `ValueKind::Names`: the declared type name.
     std::string source;
+    /// A comma-separated list -- declared `kCollectionListValue`, or split by
+    /// the parser (`->delimiter(',')`): only the word after the last comma is
+    /// completed, and what the list already holds is not offered again.
+    bool list = false;
     /// The declared type name as written -- `TEXT`, `INT`, `COLLECTION` --
     /// so a test can tell free text from a number.
     std::string type;

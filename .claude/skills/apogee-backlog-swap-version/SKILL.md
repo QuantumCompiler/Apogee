@@ -1,5 +1,5 @@
 ---
-name: apogee-backlog-version-swap
+name: apogee-backlog-swap-version
 description: Slide Apogee's queued releases by one version — insert a new version target ahead of the queue (bumping later versions, their directories, track prefixes and every reference up), or remove a vacated version (sliding everything back down). Use when the user says "this goes as v0.1.X, bump the rest", "renumber the queue", or "collapse that version".
 ---
 
@@ -54,4 +54,4 @@ If an Edit fails because a parallel session touched the file, re-read the live r
 
 ## 6. Report
 
-Tell the user: the version mapping (old → new, per release), the prefix mapping (old track → new), how many files the scripted pass touched, every hand edit (especially rewritten narratives and the recorded renumber note), what changed in MILESTONES/SPEC and why it was only that, and the validation results. If the swap was the insert direction and the new table's documents don't exist yet, say so — authoring them is its own step, per the backlog README's document format, not this skill's job.
+Tell the user: the version mapping (old → new, per release), the prefix mapping (old track → new), how many files the scripted pass touched, every hand edit (especially rewritten narratives and the recorded renumber note), what changed in MILESTONES/SPEC and why it was only that, and the validation results. If the swap was the insert direction and the new table's documents don't exist yet, say so — authoring them is `/apogee-backlog-create-item`'s job, not this skill's.

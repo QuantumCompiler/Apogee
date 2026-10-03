@@ -1,6 +1,6 @@
 ---
-name: apogee-spike
-description: Run an evidence-gathering spike for Apogee — answer a "can we / how should we" question by probing the real binary or codebase in a sandbox, then report the walls hit and a proposed backlog-item split. Use when the user asks for a spike ("do a spike into X", "spike this", "investigate whether we could…").
+name: apogee-spike-investigate
+description: Run an evidence-gathering spike for Apogee — answer a "can we / how should we" question by probing the real binary or codebase in a sandbox, then report the findings only, including the backlog documents that would need to be created (never creating them). Use when the user asks for a spike ("do a spike into X", "spike this", "investigate whether we could…").
 ---
 
 # Run an Apogee Spike
@@ -9,9 +9,9 @@ A spike answers a design question with **evidence, not opinion**. Its deliverabl
 
 ## 1. What a spike is — and is not
 
-- A spike **produces findings**: walls, measurements, a proposed item split, and the questions only the user can answer.
-- A spike **does not build** anything shippable, does not create backlog documents, and does not edit SPEC/ROADMAP/README. Those happen only if the user asks afterwards.
-- **"Execute the spike" / "execute the plan" means create the backlog documents** — one per item in the split, each authored to the backlog README's document format and quality bar and placed in its index table — it never means implementing. Building happens later via `/apogee-backlog-execute-item`.
+- A spike **produces a report, and only a report**: walls, measurements, the documents that would need to be created, and the questions only the user can answer.
+- A spike **does not build** anything shippable, does not create backlog documents, and does not edit SPEC/ROADMAP/README — even when the split is obvious. Those happen only if the user asks afterwards.
+- **"Execute the spike" / "execute the plan" means create the backlog documents** (via `/apogee-backlog-create-item`, one per item in the split, placed in the index table the user named) — it never means implementing. Building happens later via `/apogee-backlog-execute-item`.
 - Findings live **in the report, not the repo**. Do not save a spike write-up file unless the user explicitly asks for one; "internalize it in your context" is the default.
 
 ## 2. Ground first
@@ -46,7 +46,7 @@ Deliver everything in the final chat message:
 1. **The question**, as asked.
 2. **Method** — what was probed and how (one short paragraph; name the sandbox).
 3. **Walls** — numbered, each with its evidence and the capability that removes it; plus the already-works list.
-4. **Proposed item split** — walls grouped into right-sized backlog items (one focused session each), with suggested gates between them and the target table (release / Architecture / Maintenance). Note which walls one root-cause fix collapses.
+4. **The documents that would need to be created** — the walls grouped into right-sized backlog items (one focused session each), presented as the concrete document list: a working title per item, its target table (release / Architecture / Maintenance), its gate, and which walls it closes. Note which walls one root-cause fix collapses. This list is the handoff: when the user says "execute", each entry becomes one document with nothing left to decide but the open calls.
 5. **Questions for the user** — only the genuinely user-owned calls, phrased in plain architecture language (no ML jargon); everything agent-decidable gets a stated default instead. If the user asks to be interviewed, use AskUserQuestion; otherwise list the questions and stop.
 
 Then **wait**. Do not create documents, items, or code until the user says what to execute.

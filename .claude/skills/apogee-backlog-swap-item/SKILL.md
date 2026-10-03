@@ -1,5 +1,5 @@
 ---
-name: apogee-backlog-item-swap
+name: apogee-backlog-swap-item
 description: Move an Apogee backlog item between index tables — a release table to a standing queue (Maintenance/Architecture), a standing queue back into a release, or release to release — re-identifying it for its destination, closing the number gap it leaves, git-mv'ing its document, and sweeping every reference. Use when the user says "move M4 into v0.1.3", "make 26n a maintenance item", "pull that item into this release".
 ---
 
