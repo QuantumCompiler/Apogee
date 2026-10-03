@@ -29,7 +29,7 @@ Kebab-case filename in `lib/documentation/backlog/`, following the format in the
 - **Reference (Ommi)** — from step 2.
 - **Decisions made** — dated entries for anything settled while specing (including why it sits where it sits in the queue).
 - **Open calls** — every call tagged: `[user]` only for genuinely user-owned decisions (they block the build), `[default: …]` with a stated recommendation for agent-decidable picks. Don't reopen decisions other items own — mark those `(consumed decision)`.
-- **Guardrail(s)** — what's tested so the change can't regress silently.
+- **Guardrail(s)** — what's tested so the change can't regress silently. A check on real weights names the capability and the measure, not the models: it runs on [the model families](../../../lib/documentation/assistant/DEVELOPER.md#on-real-weights-the-model-families) (Meta, Qwen, Google, OpenAI, each on its Q4_K_M build when installed, one family at a time; the excluded models are listed there).
 - **Acceptance criteria** — observable, checkable outcomes; no vibes.
 - **Scope note** — earmarked / gated on `<item>` / unscheduled, honoring the gate convention (name a real item; no cycles).
 

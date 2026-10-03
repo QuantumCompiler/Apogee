@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -52,6 +53,51 @@ void append_result(std::vector<harness::ChatMessage>& history, const harness::To
     history.push_back(harness::ChatMessage::from_tool_result(result));
 }
 
+/// The question a turn's tools are ranked for: the surface's restatement
+/// when it has one, else the last user message as written.
+std::string selection_query(const Options& options,
+                            const std::vector<harness::ChatMessage>& history) {
+    if (!options.selection_query.empty()) {
+        return options.selection_query;
+    }
+    for (auto message = history.rbegin(); message != history.rend(); ++message) {
+        if (message->role == harness::Role::User) {
+            return message->content.plain_text();
+        }
+    }
+    return {};
+}
+
+/// The tools one step offers (26g): with selection off, all of `tools`;
+/// with it on, the offered ones in the registry's order, then `find_tools`
+/// naming the rest, then `ask_user` -- which is offered whenever someone can
+/// answer it.
+std::vector<harness::Tool> step_tools(const std::vector<harness::Tool>& tools,
+                                      const ToolSelection* selection, bool active) {
+    if (selection == nullptr || !active) {
+        return tools;
+    }
+    std::vector<harness::Tool> out;
+    std::vector<std::string> hidden;
+    std::optional<harness::Tool> question;
+    for (const harness::Tool& tool : tools) {
+        if (tool.name == kQuestionToolName) {
+            question = tool;
+        } else if (selection->offered(tool.name)) {
+            out.push_back(tool);
+        } else {
+            hidden.push_back(tool.name);
+        }
+    }
+    if (selection->offered(kFindToolsName)) {
+        out.push_back(find_tools_tool(hidden));
+    }
+    if (question.has_value()) {
+        out.push_back(std::move(*question));
+    }
+    return out;
+}
+
 /// A call's identity for the repeated-call guard: the tool and its
 /// arguments as JSON, so `{"a":1, "b":2}` and `{"b":2,"a":1}` are one call.
 std::string call_key(const harness::ToolCall& call) {
@@ -80,6 +126,20 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
     result.tokens.estimated = false;
 
     const std::vector<harness::Tool> tools = advertised_tools(options);
+
+    // The turn's tools, chosen once (26g): a step offers the same set, so a
+    // model that caches its prompt reads only what is new, until a step
+    // needs more.
+    ToolSelection* const selection = options.tools != nullptr ? options.tool_selection : nullptr;
+    bool selecting = false;
+    if (selection != nullptr) {
+        const ToolOffer offer =
+            selection->begin_turn(selection_query(options, history), options.cancellation);
+        selecting = offer.active;
+        if (selecting) {
+            reporter.on_progress(describe_offer(offer, options.tools->size()));
+        }
+    }
 
     // The environment note rides first, ahead of any retrieval, whenever
     // there are tools (25d). Rendered once per turn: it changes once a day,
@@ -141,7 +201,7 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
         // answer instead of another tool call. Set before the messages: the
         // budget counts the definitions too.
         if (!final_pass) {
-            request.tools = tools;
+            request.tools = step_tools(tools, selection, selecting);
             std::erase_if(request.tools, [&withdrawn](const harness::Tool& tool) {
                 return withdrawn.contains(tool.name);
             });
@@ -293,6 +353,33 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
                     }
                     append_result(history, call, encoded);
                     continue;
+                }
+
+                if (selecting && call.name == kFindToolsName) {
+                    // Answered here, like ask_user: it searches the registry
+                    // rather than acting, and what it finds is offered from
+                    // the next step (26g, default taken).
+                    std::vector<std::string> added;
+                    const std::string query = find_tools_query(call.arguments);
+                    const std::string found = selection->find(query, options.cancellation, added);
+                    if (!added.empty()) {
+                        std::string line = "find_tools \"" + query + "\" offered";
+                        for (std::size_t index = 0; index < added.size(); ++index) {
+                            line += (index == 0 ? " " : ", ") + added[index];
+                        }
+                        reporter.on_progress(line);
+                    }
+                    append_result(history, call, found);
+                    continue;
+                }
+
+                if (selecting && options.tools != nullptr &&
+                    options.tools->find(call.name) != nullptr && selection->offer(call.name)) {
+                    // Named without being offered -- a model remembers tools
+                    // from earlier turns. It is dispatched and gated as any
+                    // call is, and offered from the next step.
+                    reporter.on_progress(
+                        call.name + " called without being offered: offered from the next step");
                 }
 
                 if (options.tools == nullptr) {

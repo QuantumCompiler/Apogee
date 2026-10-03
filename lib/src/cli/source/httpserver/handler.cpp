@@ -424,8 +424,15 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
     // A large tool result is summarised by the utility model, when one is
     // set, before the model reads it (26b).
     loop_options.summary_model = commands::named_utility(config);
+    // A selection of the request's own (26g): a served request carries its
+    // whole conversation, so there is no last turn here to keep tools from.
+    std::optional<agentloop::ToolSelection> selection;
     if (tools_ != nullptr && plan.tool_mode == ToolMode::All && !tools_->empty()) {
         loop_options.tools = tools_;
+        if (options_.tool_ranker != nullptr) {
+            selection.emplace(options_.tool_ranker, tools_->size());
+            loop_options.tool_selection = &*selection;
+        }
         loop_options.permission = options_.permission;
         // No AskFn, ever: nobody is attached to a served request, so the
         // loop's rule leaves ask_user out of the request entirely. And no
@@ -443,6 +450,7 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
         const agentloop::QueryRewrite rewrite = agentloop::rewrite_query(
             *harness_, commands::helper_backend(config, harness::ModelRole::Utility, plan.backend),
             history, last_user_text(plan.incoming), cancellation);
+        loop_options.selection_query = rewrite.query;
         const agentloop::RagResult rag = commands::retrieve_for_collection(
             *harness_, config, options_.rag_collection, rewrite.query, options_.rag_limit,
             plan.retriever, plan.rerank, cancellation, plan.backend,

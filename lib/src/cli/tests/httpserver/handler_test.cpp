@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -510,6 +511,43 @@ TEST_CASE("tool_mode selects the tools a request may use", "[httpserver][tools]"
     CHECK(refused.status == 400);
     CHECK(parsed(refused)["error"]["message"].get<std::string>().find("tool_mode") !=
           std::string::npos);
+}
+
+TEST_CASE("a served request with many tools offers the ones its question needs",
+          "[httpserver][tools][tool_selection]") {
+    // 26g: past the threshold, each request runs a selection of its own over
+    // the server's one ranker.
+    const auto numbered = [](int index) {
+        Tool tool;
+        tool.name = "tool_" + std::to_string(index);
+        tool.description = "does thing number " + std::to_string(index);
+        tool.run = [](std::string_view) { return ToolOutcome{"ok", false}; };
+        return tool;
+    };
+    ToolRegistry all;
+    all.add(echo_tool());
+    for (int index = 0; index < 17; ++index) {
+        all.add(numbered(index));
+    }
+    HandlerOptions options = served_default();
+    options.tool_ranker = std::make_shared<const apogee::agentloop::ToolRanker>(
+        all.definitions(), all.definition_hashes(), std::nullopt);
+    Fixture fixture{{text_turn("mock response")}, std::move(options), true};
+    for (int index = 0; index < 17; ++index) {
+        fixture.registry.add(numbered(index));
+    }
+
+    CHECK(
+        fixture.send(post("/v1/chat/completions", chat_body("echoes its arguments back"))).status ==
+        200);
+    REQUIRE_FALSE(fixture.provider->requests().empty());
+    const auto& tools = fixture.provider->requests().back().tools;
+    CHECK(tools.size() < all.size());
+    const auto offers = [&tools](std::string_view name) {
+        return std::ranges::any_of(tools, [name](const auto& tool) { return tool.name == name; });
+    };
+    CHECK(offers("echo"));
+    CHECK(offers("find_tools"));
 }
 
 TEST_CASE("client-side tools are refused rather than silently ignored", "[httpserver][tools]") {

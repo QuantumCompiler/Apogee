@@ -204,7 +204,7 @@ Both were verified against a build that deliberately calls `listen()`. The symbo
 
 ## Milestone F — The shared agent loop
 
-**Goal.** Extract the model→tool→model loop behind an observer **before** the surfaces multiply, not after. That ordering is Ommi's most load-bearing sequencing lesson: it is what kept its four front-ends consistent, and what made deleting an entire front-end a local change rather than a rewrite. `apogee complete --tools` is the first consumer; chat and serve become thin adapters over the same `run()`. From 2026-09-28 (26c), every request `run()` sends is assembled against the model's window.
+**Goal.** Extract the model→tool→model loop behind an observer **before** the surfaces multiply, not after. That ordering is Ommi's most load-bearing sequencing lesson: it is what kept its four front-ends consistent, and what made deleting an entire front-end a local change rather than a rewrite. `apogee complete --tools` is the first consumer; chat and serve become thin adapters over the same `run()`. From 2026-09-28 (26c), every request `run()` sends is assembled against the model's window. From 2026-10-03 (26g), past 16 registered tools a turn offers the tools its question needs, not every one.
 
 ### 2026-08-26 — `agentloop::run`, the tool registry, and `ask_user`
 
@@ -309,6 +309,68 @@ The layering check was **extended to cover `agentloop/` and `agent/`**, which CL
 - **One turn's tool results are not capped by their share** unless the whole request overflows. A single 60 KB read on a 32K window still goes in whole on its own turn, and becomes a stub on the next. Cutting what a model has just asked for, while it fits, was judged worse than the crowding.
 - **A retrieval turn still re-reads a local model's whole prompt.** The injected block opens the request, so it changes every turn. 26c sizes that block and leaves where it goes alone; moving it is its own change.
 - **A cloud model's overflow is judged on the estimate**, four characters a token. On text that tokenizes densely it can be under by several times. A cloud window is large, so trimming there needs the request to be near a window that big.
+
+---
+
+### 2026-10-03 — `tool-selection` (backlog item 26g): the tools a question needs, and a server's tools together
+
+**Why.** Every request with tools listed every tool registered. The native toolsets alone are about twenty, and each MCP server adds its own: with two servers of a dozen tools each, a local model's prompt was 3,200 to 6,700 tokens before the conversation started, depending on how its template writes tools, and most of it the definitions. That costs reading time on a cold prompt and room in the window on every one. A small model also chooses from the whole menu, and connecting another server made every request bigger. Ommi had no answer for this beyond advising a stronger backend for tool-heavy work.
+
+**What was built**
+
+- [x] **`agentloop/tool_selection.h/.cpp`**, used by every surface through the one loop.
+  - **Selection starts above 16 registered tools.** At or below that, every tool is offered and the request is byte for byte what it was.
+  - **A turn offers** the core (`read_file`, `list_directory`, `run_command`, those the registry has), the eight tools its question ranks highest, and `find_tools`.
+  - **An MCP tool comes with the rest of its server**, whether it was ranked, found or named (the user's call). Native tools are ranked one by one.
+  - **The ranking is by meaning** when the `embedding` role resolves to a model that costs nothing to call: each tool's split name and description is embedded once, and the vectors are cached in `cache/tool-vectors.json` under the model and a hash of the definition (`agent::definition_hash`), so a changed definition is embedded again and the file is safe to delete. A metered embedder is never called for this (the spend rule); with none, or one that fails, **BM25** over the same words ranks instead, and stays the ranking for that conversation rather than retrying the embedder every turn.
+  - **A question is ranked whole and by each of its clauses** (`ranking_queries`), each tool taking its best score. "APG-42's fix needs Sam's eyes: add Sam to Tuesday's design review" blended into one vector ranked only the tracker; ranked by its clauses it finds the calendar too.
+  - **`find_tools`** searches what was not offered and returns up to five definitions, name, description and arguments, which are offered from the next step. Its own description names the tools not shown yet (up to 100), as Claude Code lists its deferred tools.
+- [x] **The loop** (`agentloop/loop.cpp`) ranks once per turn and keeps the offered set for the turn's steps, in the registry's order. **A new turn keeps the last turn's set** while it already offers the new question's top three, because a different tool list is a different prompt prefix and a model with a prompt cache reads the whole conversation again. `find_tools` is answered in the loop. A registered tool called without being offered is dispatched and gated exactly as before, and offered from the next step. The final pass still withdraws every tool.
+- [x] **Every surface.** Chat, `complete`, `analyze` and `serve` build the selection after the agent's tool policy has filtered the registry, so selection only narrows what the policy allows. A follow-up in chat is ranked by the utility model's standalone restatement: the retrieval rewrite when there is one, else its own (`tools ranked for, by <utility>: ...`). `serve` shares one ranker across requests and gives each request its own selection.
+- [x] **Said.** `--verbose` prints once `[tools] 45 registered: each turn offers the ones its question needs, ranked by meaning, by <backend>`, and per turn `tools: 21 of 45 offered, and find_tools, ranked by meaning -- for this question: list_notes, read_note, ...`, with `(the last turn's tools kept)` when kept, a line for each `find_tools` call, and one for a tool called without being offered. Machine mode's events are unchanged.
+
+**On real weights** (the model families, DEVELOPER.md → On real weights; greedy). Each family ran its Q4_K_M build, except gpt-oss, whose only installed build is F16. The four families ran side by side, each loading its model again for each of its four runs, so the times are not comparisons. That was before the user's rule later the same day: one family at a time, its model loaded once. The registry held the 21 native tools and two MCP servers written for this, an issue tracker and a calendar of 12 tools each: 45 tools. The calendar refuses an event id that does not exist, as a real one would. Ranked by Embedding-Gemma-300M.
+
+- **The battery**, eight tasks, each its own conversation: read a file, write one, count lines with the shell, find a file in a folder, read a link and fetch it, arithmetic, open a ticket, and add someone to a meeting found through the calendar. A task passes when its tools were called and worked, or, for the arithmetic, when the answer is right.
+
+  | Family (model) | Every tool | Selected | Prompt per step, every tool → selected |
+  |---|---|---|---|
+  | OpenAI (gpt-oss-20b, F16) | 8/8 | 8/8 | 3,253 → 1,597 |
+  | Google (Gemma 4 12B, Q4_K_M) | 8/8 | 8/8 | 4,698 → 2,257 |
+  | Qwen (Qwen3-VL-8B, Q4_K_M) | 8/8 | 8/8 | 5,306 → 2,549 |
+  | Meta (Llama 3.1 8B, Q4_K_M) | 6/8 | 6/8 | 6,660 → 3,199 |
+
+  The first acceptance criterion holds on every family: the battery passes as it did with every tool, at about half the prompt. Llama 3.1 8B failed the same two tasks both ways: it fetched an address it made up instead of reading the file, and linked tickets instead of using the calendar. A turn offered 8 to 30 of the 45.
+- **A four-turn chat** (read a file; count lines; read the budget file; open a ticket). Every tool: 4/4 on every family. Selected: 4/4 on gpt-oss, Gemma and Qwen; Llama 3.1 8B 2/4, answering two turns by describing the call it had made ("This is the response from the `run_command` function...") rather than giving its result.
+- **What a prompt cache changes.** With every tool, the tools are the same prefix on every request, and a local model's cache reads them once: after the first turn, a step read 20 to 100 new tokens. A selection that changes reads its prompt again, about 1,500 to 4,000 tokens. Over the four-turn chat the selected runs read more new tokens in all: gpt-oss 5,473 against 3,635, Qwen 7,271 against 5,598, Gemma 7,237 against 5,186, Llama 9,051 against 6,896. Keeping the set saved one read in each chat (the ticket turn, after the budget turn had offered both servers). What selection buys is a prompt half the size on every step, and a cold start half as long (a new chat, a `complete`, a request a server has not seen); not fewer tokens read in one long chat.
+- **`find_tools`, the second criterion, met on gpt-oss-20b only.** It was measured before servers were offered whole, when "add Sam to Tuesday's design review" was offered the tracker and not the calendar's `list_events`. gpt-oss searched in all three runs of it (`find_tools "list calendar events"`) and was offered `list_events`. It finished twice: once after two searches and no refused call, once after six refused invites and one search. The third time it searched after five, then broke off with a malformed call. Qwen3-VL-8B, Gemma 4 12B and Llama 3.1 8B never called `find_tools` in any run, with or without the hidden tools named in its description: they used the wrong tool, or invented the event id and were refused, some until the loop's bound. With servers whole, no task in the battery or the chat needed a search, and none was made.
+- **The third criterion** (12 tools: byte-identical requests) is a test, not a run.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Threshold and size | Above 16 registered tools; the top 8 plus the core *(default taken)* | The native toolsets are about twenty, so a chat with tools selects even before any server is connected. Eight covered every battery task's tools on every family. |
+| The core | `read_file`, `list_directory`, `run_command`, `find_tools` *(default taken)* | The tools almost every task begins with; ranked out, a model cannot even look around. |
+| `find_tools` | Returns definitions, offered from the next step *(default taken)* | A tool dispatched unseen would be called with arguments the model guessed. |
+| MCP servers | **Offered whole** — the user's call | A server's tools need each other: an invite needs the event id `list_events` finds. On a local model a tool not offered cannot be called at all, because its name is outside the grammar, and small models do not search. In the last run with single tools the cross-server task failed on every family; whole, it passed on three of four, as with every tool. |
+| Families | One Meta, Qwen, Google and OpenAI model each, optional, never DeepSeek; Qwen3.8-27B excluded until 26i; later the same day, each on its Q4_K_M build when one is installed, one family at a time with its model loaded once — the user's calls | Replaces the document's two acceptance models; recorded in DEVELOPER.md → On real weights for every later item. |
+| The ranking | Embedding role when free, else BM25; best of the question and its clauses | The spend rule; one vector for a two-part question goes to the stronger part. |
+| Kept sets | A turn keeps the last set while it offers the new top three | A changed tool list re-reads the whole prompt on a cached model. |
+| Unoffered calls | Dispatched and gated, then offered | Models remember tools from earlier turns; failing the call would punish that. |
+
+**Guardrails, each mutation-tested (37 mutants, all caught), run in separate git worktrees against the whole unit suite.** 34 were caught on the first pass. The three that survived were caught once tests were added for what they exposed. Vectors remade on every ranking went unseen because the remake read them back from the cache: a second ranking now must not read the cache, and an embedder that failed must not be asked again. The restated question ignored, by the loop or by chat, went unseen because the tests checked a tool the server rule offered anyway, and a progress line printed before the restatement was used: the tests now check what the turn was ranked for.
+- **The selection:** the threshold off by one, the core dropped or offered without being registered, the top count, the set never or always kept, a server split or its prefix wrong, a question's clauses or its best clause ignored.
+- **`find_tools`:** returning tools already offered, or ones sharing no word of the query; offering nothing it found; more than five; the hidden names uncapped.
+- **The vectors:** remade on every ranking, the cache key without the model, the cache never written; the definition hash without the description, or without separators between fields; the cache file not merged with another writer's, its version ignored, or kept outside `cache/`.
+- **The loop and its surfaces:** the selection unused, `find_tools` not offered, the hidden tools unnamed, `ask_user` dropped, a named tool not offered next, `find_tools` not answered, the restated question ignored, the offer unsaid; a metered embedder called; the surface's threshold off by one; selection not passed by chat, `complete` or `serve`, or the chat's restatement unused.
+
+**Not verified, and found on the way.**
+- **A selection reads more in a long local chat than offering everything** (above). The prompt is half the size on every step; the re-reads are the price, and the keep rule only limits them. A persistent prompt cache (26j) would make every tool's prefix cheaper still across processes; whether selection should then stay on for a local model with few servers is worth measuring there.
+- **A question that needs no tool still pulls in servers.** For "What is 17 * 23?" the top eight are whatever ranks least badly, MCP tools among them, so both servers came with them: 28 of 45 offered. A floor on the score before a server is pulled in whole would stop that.
+- **Embedding-Gemma is used without its task prefixes** (`task: search result | query:` and `title: none | text:`), as retrieval uses it too. "The budget file in the docs folder" ranked the tracker's sprint tools above `read_file`. The prefixes belong in the embedding clients, for retrieval and here alike.
+- **Small models do not search.** `find_tools` helps a model that reasons about what it lacks (gpt-oss); for the others, offering a server whole is what works.
+- **A cloud model** was not run. Its requests go through the same loop and the same tests; a cloud prompt cache is keyed on the prompt's start too, so the same trade-off should hold there.
 
 ## Milestone G — The terminal UX layer
 

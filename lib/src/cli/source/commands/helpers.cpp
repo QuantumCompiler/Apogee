@@ -12,10 +12,12 @@
 
 #include "agent/fetch_url.h"
 #include "agent/web_search.h"
+#include "agentloop/embed_func.h"
 #include "agentloop/graph_context.h"
 #include "agentloop/media.h"
 #include "backends/http_client.h"
 #include "commands/embed.h"
+#include "commands/tool_vectors.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
 #include "platform/platform.h"
@@ -322,6 +324,45 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
     // The policy last, over everything registered -- native, fetch_url and
     // MCP alike -- so what the loop advertises IS the policy.
     return apply_tool_policy(registry, options.policy);
+}
+
+std::shared_ptr<const agentloop::ToolRanker> make_tool_ranker(
+    const harness::Harness& harness, const harness::Config& config,
+    const agent::ToolRegistry& registry, const std::filesystem::path& cache_file,
+    std::string& ranked_by) {
+    std::optional<agentloop::ToolEmbedding> embedding;
+    std::string reason;
+    const std::optional<agentloop::Embedder> embedder =
+        agentloop::resolve_embedder(harness, config, {}, reason);
+    if (!embedder.has_value()) {
+        ranked_by = "words (no embedding model" + (reason.empty() ? "" : ": " + reason) + ")";
+    } else if (embedder->metered) {
+        // One call a turn, on Apogee's initiative: never on a billed one.
+        ranked_by = "words (" + embedder->backend + " bills each call)";
+    } else {
+        auto cache = std::make_shared<ToolVectorCache>(cache_file);
+        embedding = agentloop::ToolEmbedding{
+            .embed = embedder->embed,
+            .model = embedder->backend + "/" + embedder->model,
+            .load = [cache](const std::string& key) { return cache->load(key); },
+            .store = [cache](const agentloop::ToolVectors& made) { cache->store(made); }};
+        ranked_by = "meaning, by " + embedder->backend;
+    }
+    return std::make_shared<const agentloop::ToolRanker>(
+        registry.definitions(), registry.definition_hashes(), std::move(embedding));
+}
+
+std::unique_ptr<agentloop::ToolSelection> make_tool_selection(
+    const harness::Harness& harness, const harness::Config& config,
+    const agent::ToolRegistry& registry, const std::filesystem::path& config_path,
+    std::string& ranked_by) {
+    if (registry.size() <= agentloop::kToolSelectionThreshold) {
+        // Offered whole: no ranker, no embedder resolved, nothing loaded.
+        return nullptr;
+    }
+    return std::make_unique<agentloop::ToolSelection>(
+        make_tool_ranker(harness, config, registry, tool_vector_cache_path(config_path), ranked_by),
+        registry.size());
 }
 
 std::function<void(std::string_view)> mcp_status_line(StatusLine& status) {

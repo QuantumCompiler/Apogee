@@ -160,7 +160,8 @@ struct RagSettings {
 
 void run_chat_turn(const harness::Harness& harness, logger::Session& session,
                    const std::string& input, agent::ToolRegistry* tools,
-                   const agentloop::AskFn& ask, const ToolGate& gate, agentloop::Reporter& reporter,
+                   agentloop::ToolSelection* selection, const agentloop::AskFn& ask,
+                   const ToolGate& gate, agentloop::Reporter& reporter,
                    const std::function<void(const std::string&)>& notice, const RagSettings& rag,
                    const std::string& review_note, ChatAttachments* attached) {
     const std::vector<harness::ChatMessage> incoming = build_messages({}, {}, input, {});
@@ -208,6 +209,9 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     loop_options.summary_model = named_utility(harness.config());
     if (tools != nullptr) {
         loop_options.tools = tools;
+        // The tools each step offers, when there are many (26g): one
+        // selection for the conversation, so a turn can keep the last one's.
+        loop_options.tool_selection = selection;
         loop_options.ask = ask;
         loop_options.permission = gate.permission;
         loop_options.confirm = gate.confirm;
@@ -252,6 +256,20 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
             notice(rewrite.note);
         }
         query = rewrite.query;
+        loop_options.selection_query = query;
+    } else if (selection != nullptr && selection->active()) {
+        // The tools are ranked for a follow-up restated to stand alone --
+        // by the utility model only when one is set: a request to the chat
+        // model itself every turn would cost more than the ranking saves.
+        if (const std::string utility = named_utility(harness.config());
+            !utility.empty() && agentloop::has_earlier_turn(session.messages)) {
+            const agentloop::QueryRewrite rewrite =
+                agentloop::rewrite_query(harness, utility, session.messages, input, {});
+            if (rewrite.rewritten) {
+                reporter.on_progress("tools ranked for, by " + utility + ": " + rewrite.query);
+                loop_options.selection_query = rewrite.query;
+            }
+        }
     }
     const agentloop::TurnBudget budget =
         agentloop::turn_budget(harness, session.backend, session.params.max_tokens);
@@ -677,6 +695,19 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                         }}
                                       : mcp::StderrTail::Sink{}});
         }
+        // Past a dozen and a half tools, each turn offers the ones its
+        // question needs (26g); one selection for the whole conversation.
+        std::unique_ptr<agentloop::ToolSelection> selection;
+        if (flags->tools) {
+            std::string ranked_by;
+            selection = make_tool_selection(harness, config, registry, config_path, ranked_by);
+            if (selection != nullptr && flags->verbose) {
+                reporter.status().print_line("[tools] " + std::to_string(registry.size()) +
+                                             " registered: each turn offers the ones its question "
+                                             "needs, ranked by " +
+                                             ranked_by);
+            }
+        }
         // The gate: config levels, then what the user answers for this
         // session. The prompt half is chosen per surface below.
         const auto approvals = std::make_shared<SessionApprovals>();
@@ -796,7 +827,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 // answer a question -- the loop's "nil AskFn <=> never
                 // advertised" rule is satisfied rather than sidestepped.
                 run_chat_turn(
-                    harness, session, message.text, flags->tools ? &registry : nullptr, driver_ask,
+                    harness, session, message.text, flags->tools ? &registry : nullptr,
+                    selection.get(), driver_ask,
                     ToolGate{permission, flags->tools
                                              ? make_driver_confirm_fn(machine_reporter, std::cin,
                                                                       config_path, approvals)
@@ -1191,7 +1223,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 typeahead.emplace();
             }
             run_chat_turn(
-                harness, session, input, flags->tools ? &registry : nullptr,
+                harness, session, input, flags->tools ? &registry : nullptr, selection.get(),
                 flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
                 ToolGate{permission, flags->tools ? terminal_confirm_fn(reporter.status(), style,
                                                                         config_path, approvals)

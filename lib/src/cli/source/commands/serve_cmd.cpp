@@ -17,6 +17,7 @@
 #include "backends/factory.h"
 #include "commands/helpers.h"
 #include "commands/permissions.h"
+#include "commands/tool_vectors.h"
 #include "events/bus.h"
 #include "harness/config.h"
 #include "harness/errors.h"
@@ -254,6 +255,17 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
             // Nobody is attached to a served request: the config's levels
             // decide, and ask is deny.
             options.permission = make_permission_checker(config, nullptr);
+            // Past a dozen and a half tools, each request offers the ones its
+            // question needs (26g), ranked once for the server's life.
+            if (registry.size() > agentloop::kToolSelectionThreshold) {
+                std::string ranked_by;
+                options.tool_ranker = make_tool_ranker(
+                    harness, config, registry, tool_vector_cache_path(config_path), ranked_by);
+                std::cerr << "[tools] " << registry.size()
+                          << " registered: each request offers the ones its question needs, "
+                             "ranked by "
+                          << ranked_by << "\n";
+            }
         }
 
         httpserver::Handler handler{harness, options, flags->tools ? &registry : nullptr};

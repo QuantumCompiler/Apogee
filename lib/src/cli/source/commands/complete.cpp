@@ -233,6 +233,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         }
 
         agent::ToolRegistry machine_registry;
+        std::unique_ptr<agentloop::ToolSelection> machine_selection;
         const auto machine_mcp = std::make_shared<mcp::Registry>();
         if (flags.tools) {
             // stdout is the protocol: connection notes go to stderr.
@@ -242,6 +243,11 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                 .mcp = machine_mcp,
                 .mcp_status = [](std::string_view line) { std::cerr << line << "\n"; }});
             machine_options.tools = &machine_registry;
+            // Past a dozen and a half tools, the ones the question needs (26g).
+            std::string ranked_by;
+            machine_selection =
+                make_tool_selection(harness, config, machine_registry, config_path, ranked_by);
+            machine_options.tool_selection = machine_selection.get();
             // The config's levels only: a one-shot driver cannot be asked, so
             // ask resolves to deny, exactly as on a pipe.
             machine_options.permission = make_permission_checker(config, nullptr);
@@ -377,6 +383,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     }
 
     agent::ToolRegistry registry;
+    std::unique_ptr<agentloop::ToolSelection> selection;
     const auto mcp_registry = std::make_shared<mcp::Registry>();
     if (flags.tools) {
         registry = make_built_in_tools(BuiltInToolOptions{
@@ -389,6 +396,16 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             }}
                                             : mcp::StderrTail::Sink{}});
         loop_options.tools = &registry;
+        // Past a dozen and a half tools, the ones the question needs (26g).
+        std::string ranked_by;
+        selection = make_tool_selection(harness, config, registry, config_path, ranked_by);
+        if (selection != nullptr && flags.verbose) {
+            reporter.status().print_line("[tools] " + std::to_string(registry.size()) +
+                                         " registered: the turn offers the ones its question "
+                                         "needs, ranked by " +
+                                         ranked_by);
+        }
+        loop_options.tool_selection = selection.get();
         // Advertised only when there is a terminal to answer on. A null AskFn
         // means the tool never appears in the request at all -- and a null
         // ConfirmFn, on a pipe, means a destructive tool's `ask` is a deny.

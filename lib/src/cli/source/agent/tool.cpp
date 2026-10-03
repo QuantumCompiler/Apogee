@@ -3,6 +3,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include "models/sha256.h"
+
 namespace apogee::agent {
 
 void ToolRegistry::add(Tool tool) {
@@ -57,8 +59,27 @@ std::vector<harness::Tool> ToolRegistry::definitions() const {
     return out;
 }
 
+std::map<std::string, std::string, std::less<>> ToolRegistry::definition_hashes() const {
+    std::map<std::string, std::string, std::less<>> out;
+    for (const harness::Tool& definition : definitions()) {
+        out.emplace(definition.name, definition_hash(definition));
+    }
+    return out;
+}
+
 bool gated(const Tool& tool) noexcept {
     return tool.writes || tool.outbound;
+}
+
+std::string definition_hash(const harness::Tool& definition) {
+    // NUL-separated: no field can carry one, so two definitions that differ
+    // only in where one field ends cannot hash alike.
+    std::string bytes = definition.name;
+    bytes += '\0';
+    bytes += definition.description;
+    bytes += '\0';
+    bytes += definition.parameters_schema;
+    return models::sha256_hex(bytes);
 }
 
 bool permitted_target(const Tool& tool, std::string_view target, std::string_view detail,

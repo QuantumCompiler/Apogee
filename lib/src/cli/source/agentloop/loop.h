@@ -11,6 +11,7 @@
 #include "agentloop/content.h"
 #include "agentloop/question.h"
 #include "agentloop/reporter.h"
+#include "agentloop/tool_selection.h"
 #include "harness/harness.h"
 #include "harness/types.h"
 
@@ -41,6 +42,19 @@ struct Options {
 
     /// Tools the model may call. Empty means a plain single-turn completion.
     const agent::ToolRegistry* tools = nullptr;
+
+    /// Picks the tools each step offers when the registry is large (26g):
+    /// the core, the question's top-ranked tools, and `find_tools` for the
+    /// rest. Null -- or one over a registry at or below
+    /// `kToolSelectionThreshold` -- offers every tool, as before. The caller
+    /// owns it, and a chat keeps one for its whole conversation, so a turn
+    /// can keep the last turn's tools and the prompt's start with them.
+    ToolSelection* tool_selection = nullptr;
+
+    /// What the selection ranks tools for: the question restated to stand
+    /// on its own, where the surface has that (26b). Empty means the last
+    /// user message as written.
+    std::string selection_query;
 
     /// Prompts the user. **Null means `ask_user` is never advertised** — not
     /// advertised-and-refused, absent from the request entirely. A model told
@@ -148,7 +162,8 @@ struct RunResult {
                             std::vector<harness::ChatMessage>& history, const Options& options);
 
 /// The tool definitions for a request under `options`: the registry's tools,
-/// plus `ask_user` when an AskFn is present.
+/// plus `ask_user` when an AskFn is present. With a tool selection on, each
+/// step offers the part of these it has chosen (26g); this is the whole.
 ///
 /// Exposed for testing the advertisement rule directly — it is a contract, not
 /// an implementation detail.

@@ -19,7 +19,7 @@ Apogee is a from-scratch re-implementation of **Ommi** (the sibling project at `
 3. **In-process llama.cpp** — C++ can link llama.cpp directly instead of Ommi's per-turn subprocess spawns, keeping the same zero-listening-socket guarantee without process churn. *(Confirmed 2026-08-31, and with no spawn-isolation mode: the accepted cost is that a fatal error inside llama.cpp takes the process down, bounded to one in-flight turn because a chat session is saved after every completed turn. Shipped — see [MILESTONES.md](MILESTONES.md) → Milestone J.)*
 4. **Open local models** *(decided 2026-08-24)* — no forbidden or curated local models: any model the user supplies runs. Ommi's sha256-pinned approved-model allowlist and its refusal semantics are deliberately not ported. Models, datasets, and tensors download directly from Hugging Face or pull through Ollama.
 
-Parts that are Python in Ommi (training drivers, MCP servers) may stay Python in Apogee — "primarily C++" governs the harness, not every satellite script.
+Parts that are Python in Ommi (training drivers, MCP servers) may stay Python in Apogee — "primarily C++" governs the harness, not every satellite script. *Revised 2026-10-03 (the user's call, opening the MLX track):* the skeleton's "no runtime interpreter dependency on core inference paths" rule is amended — **llama.cpp remains the zero-dependency default local runtime on every platform; the binary still ships and runs alone** — and an **explicitly opt-in, interpreter-backed backend type** is permitted beside that default (the `mlx` type: a persistent Python child over pipes, in the environment Apogee owns, never the system Python), refusing loudly at construction when its runtime is absent. No inference path requires an interpreter unless the user configures one.
 
 ## Core surfaces
 
@@ -35,7 +35,7 @@ A **GUI ships as a sibling application** *(committed direction 2026-08-24; plann
 
 ## Scope (in)
 
-- **Backends:** cloud — Anthropic, OpenAI, Google, and Ollama, each via its official CLI (subscription plan; a persistent child with token-level streaming where that CLI supports it, per-turn spawning where it does not; the harness never reads a CLI's credentials or session files, and never causes a vendor's server to start) and, where offered, its direct HTTPS API (API billing plan), selected per backend entry; local — llama.cpp linked in-process.
+- **Backends:** cloud — Anthropic, OpenAI, Google, and Ollama, each via its official CLI (subscription plan; a persistent child with token-level streaming where that CLI supports it, per-turn spawning where it does not; the harness never reads a CLI's credentials or session files, and never causes a vendor's server to start) and, where offered, its direct HTTPS API (API billing plan), selected per backend entry; local — llama.cpp linked in-process, and *(added 2026-10-03, opt-in)* MLX on Apple silicon through a persistent Python child over pipes.
 - **Open local models:** no forbidden or curated models — any user-supplied model runs; verification protects integrity (digests, loadability), never gates choice; unknown models are handled permissively through behavior profiles.
 - **Model & data sources:** direct Hugging Face downloads (models, GGUFs, SafeTensors, datasets) and pulls through the user's Ollama store.
 - **Agentic tool loop:** one shared model→tool→model loop behind all surfaces; MCP client and agent management in a later ring.

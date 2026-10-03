@@ -17,7 +17,7 @@
 - `httpserver/`: read twins only where the existing graph admin surface already has the pattern; nothing mutating.
 - Tests: `tests/graph/navigate_test.cpp` (path/neighborhood over a fixture graph, table-tested: no path, self, caps, ambiguity); `tests/tools/` for the toolset's bounds; an `mcp_e2e`-style check that an external MCP client reaches `graph_path`.
 
-**Reference (Ommi).** No analog — Ommi's graph layer (the shape Milestone Y ported) had build and expansion, not user-facing traversal. External prior art: Graphify's `query` / `path` / `explain` verbs and its MCP tool set, adopted in Apogee idiom; divergence: no "strict mode" forcing models through the graph — the toolset is offered, selection stays the model's (and [26g](tool-selection.md)'s, when it lands).
+**Reference (Ommi).** No analog — Ommi's graph layer (the shape Milestone Y ported) had build and expansion, not user-facing traversal. External prior art: Graphify's `query` / `path` / `explain` verbs and its MCP tool set, adopted in Apogee idiom; divergence: no "strict mode" forcing models through the graph — the toolset is offered, selection stays the model's (and [26g](../assistant/MILESTONES.md#milestone-f--the-shared-agent-loop)'s, shipped 2026-10-03).
 
 **Decisions made** (dated):
 - 2026-09-30 — Split from the v0.1.6 code-graph work: navigation is useful over the *existing* prose graphs on its own, so it does not gate on [29a](code-graph-extraction.md) — it only gets better when code nodes arrive.

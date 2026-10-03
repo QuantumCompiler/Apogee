@@ -122,6 +122,8 @@ add_library(apogee_core STATIC
     commands/complete.cpp
     commands/helpers.h
     commands/helpers.cpp
+    commands/tool_vectors.h
+    commands/tool_vectors.cpp
     commands/ask_prompt.h
     commands/ask_prompt.cpp
     commands/terminal.h
@@ -309,6 +311,8 @@ add_library(apogee_core STATIC
     agentloop/rerank.cpp
     agentloop/query_rewrite.h
     agentloop/query_rewrite.cpp
+    agentloop/tool_selection.h
+    agentloop/tool_selection.cpp
     agentloop/tool_summary.h
     agentloop/tool_summary.cpp
     agentloop/rag.h

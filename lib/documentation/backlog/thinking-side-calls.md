@@ -7,7 +7,7 @@
 - **CLI rendering only; the wire is untouched.** This is `CliReporter`'s presentation choice. Machine mode maps the same narration onto the **existing** `tool_status` event (whose documented meaning is already "described in `text` for display") — no new event types, `cli.machine_schema_conformance` stays green, and protocol growth remains the 27 track's business. The SSE adapter maps to its existing meta-frame the same way.
 - **One painter.** Entries enter the thinking block through `ThinkingView`'s own write path — no second rolling-window implementation, no competing erase arithmetic. The never-the-last-column and width-per-repaint rules apply because the view already enforces them.
 - **The seam stays shared and the layers stay blind:** `agentloop/` (and the chat command's clerk path) emit a side-call event through the Reporter; what each adapter renders is its own business. `agentloop/` learns nothing about views — the event carries role, description, and (when truly known) elapsed and tokens; **no timing lies**: counts and durations render only when the layer reports them.
-- **In-turn only — the division of labor with [26n](cli-busy-line.md):** the thinking block narrates work *inside a turn that owns the terminal*; slow commands outside a turn are the busy line's job; genuinely background work (the async chat title, attachment indexing between turns) stays off both the block and the transcript, keeping the status line it has today.
+- **In-turn only — the division of labor with [M1](cli-busy-line.md):** the thinking block narrates work *inside a turn that owns the terminal*; slow commands outside a turn are the busy line's job; genuinely background work (the async chat title, attachment indexing between turns) stays off both the block and the transcript, keeping the status line it has today.
 - **Quiet means quiet:** whatever suppresses the thinking display today (`--quiet`, pipes — where none of this ever rendered) suppresses the narration identically; nothing new leaks to a non-TTY.
 
 **Seam + files.**
@@ -20,7 +20,7 @@
 **Reference (Ommi).** No analog — Ommi surfaced none of its side work; the typed thinking display is Apogee's own (Milestones D and G), and the helper-role side-request architecture it narrates is 26b's. This item is those two shipped pieces meeting.
 
 **Decisions made** (dated):
-- 2026-09-30 — Asked for by the user: the other model calls (embedder, extractor, and the rest) folded into the thinking block; **end of v0.1.3**, lettered **26p** per the release-prefix rule.
+- 2026-09-30 — Asked for by the user: the other model calls (embedder, extractor, and the rest) folded into the thinking block; **end of v0.1.3**, lettered **26n** per the release-prefix rule.
 - 2026-09-30 — One new Reporter event mapped per adapter, rather than reusing `on_tool_status` at the source: the CLI needs to tell side calls from tool runs to place them in the block, while machine mode deliberately collapses both into its existing display-prose event — the distinction exists exactly where it is needed and nowhere else.
 
 **Open calls:**
@@ -41,4 +41,4 @@
 - [ ] The saved transcript, the `result` text, piped output and machine mode carry none of it; `cli.machine_schema_conformance` passes unmodified.
 - [ ] `/capture` in chat narrates the clerk in the block instead of a bare status print.
 
-**Scope note.** Item **26p**, earmarked for **v0.1.3** (the end — the user's call); gated on nothing pending. Interplay, not gates: [26i](thinking-control.md) shares the block (its off-switch meets the all-narration default above); [26n](cli-busy-line.md) owns the outside-a-turn case. Out of scope: narrating background work that never owns the terminal (titles, between-turn indexing); any machine-mode or SSE vocabulary change; cost/billing accounting beyond what a call already reports.
+**Scope note.** Item **26n**, earmarked for **v0.1.3** (the end — the user's call); gated on nothing pending. Interplay, not gates: [26i](thinking-control.md) shares the block (its off-switch meets the all-narration default above); [M1](cli-busy-line.md) owns the outside-a-turn case. Out of scope: narrating background work that never owns the terminal (titles, between-turn indexing); any machine-mode or SSE vocabulary change; cost/billing accounting beyond what a call already reports.

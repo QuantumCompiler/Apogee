@@ -14,6 +14,7 @@
 #include "agent/tool.h"
 #include "agentloop/budget.h"
 #include "agentloop/rag.h"
+#include "agentloop/tool_selection.h"
 #include "backends/http_client.h"
 #include "commands/status_line.h"
 #include "harness/cancellation.h"
@@ -235,6 +236,24 @@ inline constexpr std::size_t kFetchMaxBodyBytes = std::size_t{5} * 1024 * 1024;
 /// `fetch_url` plus the native toolsets, honouring `tools.disabled`. The one
 /// place that decides which tools a `--tools` run has.
 [[nodiscard]] agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options);
+
+/// What a surface ranks its tools with (26g): the embedding role's vectors
+/// when it resolves to an embedder that costs nothing to call, cached in
+/// `cache_file`, and words otherwise. The spend rule: ranking is one embed
+/// call per turn, and Apogee never pays for a call on its own initiative.
+/// `ranked_by` says which, and why, for `--verbose`.
+[[nodiscard]] std::shared_ptr<const agentloop::ToolRanker> make_tool_ranker(
+    const harness::Harness& harness, const harness::Config& config,
+    const agent::ToolRegistry& registry, const std::filesystem::path& cache_file,
+    std::string& ranked_by);
+
+/// The selection a conversation over `registry` offers its tools through
+/// (26g): null when the registry is small enough to offer whole, so nothing
+/// changes for it. A chat keeps it for every turn.
+[[nodiscard]] std::unique_ptr<agentloop::ToolSelection> make_tool_selection(
+    const harness::Harness& harness, const harness::Config& config,
+    const agent::ToolRegistry& registry, const std::filesystem::path& config_path,
+    std::string& ranked_by);
 
 /// `registry` filtered by `policy`: `ReadOnly` drops every tool that
 /// declares `writes`, `None` drops everything, `All` keeps it whole. The

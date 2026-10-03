@@ -114,6 +114,11 @@ struct Tool {
 /// off the machine.
 [[nodiscard]] bool gated(const Tool& tool) noexcept;
 
+/// The SHA-256 of a definition's name, description and argument schema:
+/// what a model is shown of a tool, so a change to any of them is a new
+/// definition (26g).
+[[nodiscard]] std::string definition_hash(const harness::Tool& definition);
+
 /// The set of tools available to a run.
 class ToolRegistry {
 public:
@@ -134,6 +139,11 @@ public:
 
     /// The registry rendered as IR tool definitions, for the outgoing request.
     [[nodiscard]] std::vector<harness::Tool> definitions() const;
+
+    /// Each tool's `definition_hash`, by name: what a vector made from its
+    /// definition is cached under, so a changed definition is embedded
+    /// again (26g).
+    [[nodiscard]] std::map<std::string, std::string, std::less<>> definition_hashes() const;
 
     /// The note the loop hands a model beside these tools, each turn: where
     /// they act and what day it is (25d). Rendered when asked, so a

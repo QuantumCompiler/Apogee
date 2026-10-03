@@ -40,4 +40,4 @@
 - [ ] `apogee check` and `apogee graph build` speak through the same component; `--quiet` silences all of it.
 - [ ] A command finishing under 150 ms never flickers a frame.
 
-**Scope note.** Item **26n**, earmarked for **v0.1.3** (the tail — the user's call; lettered into track 26 per the release-prefix rule, 2026-09-30); gated on nothing pending. Out of scope: making the sweeps themselves faster (caching GGUF header reads is the real latency fix for `models list` and worth its own item if wanted); multi-line progress displays; progress *events* in machine mode (the 27/28 tracks own that protocol's growth).
+**Scope note.** **Maintenance item M1** (created 2026-09-30 at the v0.1.3 tail as a track-26 item; moved into the Maintenance table at its creation, 2026-10-03 — the user's call); release-agnostic, claimable any time, gated on nothing pending. Out of scope: making the sweeps themselves faster (caching GGUF header reads is the real latency fix for `models list` and worth its own item if wanted); multi-line progress displays; progress *events* in machine mode (the 27/28 tracks own that protocol's growth).

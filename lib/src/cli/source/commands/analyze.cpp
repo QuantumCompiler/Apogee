@@ -710,6 +710,11 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
             options.max_tokens = max_tokens;
             options.stream_answer = true;
             options.tools = registry.empty() ? nullptr : &registry;
+            // Past a dozen and a half tools, the ones the question needs (26g).
+            std::string ranked_by;
+            const std::unique_ptr<agentloop::ToolSelection> selection =
+                make_tool_selection(harness, config, registry, config_path, ranked_by);
+            options.tool_selection = selection.get();
             options.summary_model = named_utility(config);
             if (policy == harness::AgentToolPolicy::All) {
                 options.permission = make_permission_checker(config, nullptr);
@@ -781,6 +786,12 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
         options.temperature = temperature;
         options.max_tokens = max_tokens;
         options.tools = registry.empty() ? nullptr : &registry;
+        // Past a dozen and a half tools, the ones each question needs (26g);
+        // one selection for an interactive session's every turn.
+        std::string ranked_by;
+        const std::unique_ptr<agentloop::ToolSelection> selection =
+            make_tool_selection(harness, config, registry, config_path, ranked_by);
+        options.tool_selection = selection.get();
         options.summary_model = named_utility(config);
         // The gate only for an `all` agent: a read-only registry has nothing
         // to prompt for, which is the whole point of the policy.

@@ -70,6 +70,7 @@ add_executable(apogee_tests
     agentloop/retrieval_test.cpp
     agentloop/rerank_test.cpp
     agentloop/query_rewrite_test.cpp
+    agentloop/tool_selection_test.cpp
     agentloop/tool_summary_test.cpp
     embedstore/vector_test.cpp
     embedstore/fts_query_test.cpp
@@ -77,6 +78,7 @@ add_executable(apogee_tests
     embedstore/ingest_test.cpp
     agentloop/conformance_test.cpp
     commands/helpers_test.cpp
+    commands/tool_vectors_test.cpp
     commands/thinking_view_test.cpp
     commands/status_line_test.cpp
     commands/download_progress_test.cpp

@@ -21,7 +21,7 @@
 **Reference (Ommi).** No analog — Ommi's tools ran ungated, and the gate itself is Apogee's divergence (Milestone V). External prior art: the claude CLI's launch-time permission flags, named by the user as the reference. In-house precedents consumed: the `permissions:` schema and prompt ladder (Milestone V), `SessionApprovals`, and item 24's command table with per-verb argument completion.
 
 **Decisions made** (dated):
-- 2026-09-30 — Asked for by the user: permissions preset at launch like the claude CLI, and adjustable mid-chat by slash command with today's completability; **end of v0.1.3**, lettered **26q** per the release-prefix rule.
+- 2026-09-30 — Asked for by the user: permissions preset at launch like the claude CLI, and adjustable mid-chat by slash command with today's completability; **end of v0.1.3**, lettered **26o** per the release-prefix rule.
 - 2026-09-30 — **The equivalence principle** (a preset = the `session` answer given early) over a new grant vocabulary: it reuses the shipped structure, inherits the ladder's config-first safety, and sidesteps the grant-ceiling question entirely — which stays where it belongs, on [28b](task-autonomy-policy.md)'s **[user]** calls for *unattended* tasks. This item is the attended sibling: a human typed the grant.
 - 2026-09-30 — Single-argument verbs, so completion needs nothing the table doesn't have. The user's chained-command wish (`/permissions set <tool> <level>`, two completable positions) is recorded as the extension path: the table would grow per-position completers — deferred, not refused.
 
@@ -46,4 +46,4 @@
 - [ ] `--allow-host example.org` pre-answers `fetch_url`'s per-website ask for that host and no other.
 - [ ] A config-level `deny` is not loosened by any flag or verb, asserted in the equivalence table.
 
-**Scope note.** Item **26q**, earmarked for **v0.1.3** (the end — the user's call); gated on nothing pending. Interplay, not gates: [28b](task-autonomy-policy.md) owns the *unattended* grant ceiling for tasks and its **[user]** calls stand apart; the 27 track's per-run wiring item inherits these flags' precedent for hosts/front-ends. Out of scope: chained two-position slash completion (recorded as the table's extension path); persistent grants (that is `always` and `config set-permission`, unchanged); pattern or wildcard grants (`--allow 'mcp__*'` waits for a demonstrated need).
+**Scope note.** Item **26o**, earmarked for **v0.1.3** (the end — the user's call); gated on nothing pending. Interplay, not gates: [28b](task-autonomy-policy.md) owns the *unattended* grant ceiling for tasks and its **[user]** calls stand apart; the 27 track's per-run wiring item inherits these flags' precedent for hosts/front-ends. Out of scope: chained two-position slash completion (recorded as the table's extension path); persistent grants (that is `always` and `config set-permission`, unchanged); pattern or wildcard grants (`--allow 'mcp__*'` waits for a demonstrated need).

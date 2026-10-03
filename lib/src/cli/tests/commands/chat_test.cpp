@@ -500,6 +500,45 @@ TEST_CASE("a utility model summarises a large tool result, and compacts a full c
     CHECK(replies(session).back() == "second answer");
 }
 
+TEST_CASE("a chat with many tools offers each turn the ones its question needs",
+          "[chat][cli][tool_selection]") {
+    // 26g: the native toolsets are past the threshold, so the chat holds a
+    // selection, and --verbose says what each turn offered.
+    const nlohmann::json chatty = nlohmann::json::array({{{"text", "it is a log"}}});
+    HelperChat chat{chatty, {"Log Notes"}};
+    REQUIRE(chat.run({"chat", "--verbose", "--tools"}, "what is in big.log?\n") == 0);
+    INFO(chat.err);
+    CHECK(chat.err.find("registered: each turn offers the ones its question needs, ranked by") !=
+          std::string::npos);
+    CHECK(chat.err.find("offered, and find_tools, ranked by") != std::string::npos);
+}
+
+TEST_CASE("a follow-up's tools are ranked for it restated by the utility model",
+          "[chat][cli][tool_selection]") {
+    // No retrieval runs, so the restatement is asked for the tools alone --
+    // and only of a utility model the config names.
+    const nlohmann::json chatty =
+        nlohmann::json::array({{{"text", "first"}}, {{"text", "second"}}});
+    HelperChat chat{chatty, {"Notes Chat", "show the commit history"}};
+    REQUIRE(chat.run({"chat", "--verbose", "--tools"}, "what is in notes.txt?\nand then?\n") == 0);
+    INFO(chat.err);
+    CHECK(chat.err.find("tools ranked for, by helper: show the commit history") !=
+          std::string::npos);
+    // And the turn's tools are ranked for that restatement.
+    CHECK(chat.err.find("for this question: git_") != std::string::npos);
+}
+
+TEST_CASE("complete with many tools offers the ones its question needs",
+          "[chat][cli][tool_selection]") {
+    const nlohmann::json chatty = nlohmann::json::array({{{"text", "done"}}});
+    HelperChat chat{chatty, {}};
+    REQUIRE(chat.run({"complete", "--verbose", "--tools", "show the commit history"}) == 0);
+    INFO(chat.err);
+    CHECK(chat.err.find("registered: the turn offers the ones its question needs") !=
+          std::string::npos);
+    CHECK(chat.err.find("offered, and find_tools, ranked by") != std::string::npos);
+}
+
 TEST_CASE("the next turn sends an earlier turn's tool result as a stub, and says so",
           "[chat][cli][budget]") {
     // 6 KB: under the utility model's summary threshold, so read whole.

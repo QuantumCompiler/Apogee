@@ -11,6 +11,7 @@
 
 #include "agent/tool.h"
 #include "agentloop/reporter.h"
+#include "agentloop/tool_selection.h"
 #include "commands/helpers.h"
 #include "harness/cancellation.h"
 #include "harness/config.h"
@@ -90,6 +91,11 @@ struct HandlerOptions {
     /// served request, so `ask` resolves to deny; `allow` in the config is
     /// the only way a destructive tool runs here.
     agent::PermissionChecker permission;
+
+    /// Ranks the tools when there are many (26g): each request offers the
+    /// ones its question needs, through a selection of its own. Null offers
+    /// every tool.
+    std::shared_ptr<const agentloop::ToolRanker> tool_ranker;
 };
 
 class Handler {
