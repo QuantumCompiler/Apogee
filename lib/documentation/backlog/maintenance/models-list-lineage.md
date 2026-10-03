@@ -7,7 +7,7 @@
 - **Hiding is a view, never a state change:** a consumed snapshot stays in the store, stays trainable, stays deletable, and still appears under `--all` and in `models info <snapshot>`; `check` and the store rules treat it exactly as today. Deleting all of a snapshot's derived GGUFs makes it reappear in the default listing — the display follows the store, live.
 - **Honest when the chain breaks:** a derived GGUF whose source snapshot was deleted says `source snapshot no longer on disk` rather than hiding the lineage or inventing presence; a quant whose F16 parent is gone still names it.
 - **One layout authority** (consumed decision — the model store): all lineage resolution asks `models/store.h`'s declarations; no display-side path arithmetic.
-- **The listing stays the sweep it is:** lineage reads sidecars the sweep already visits — and under [M2](gguf-header-cache.md), whatever that cache covers; this item must not add a second pass over the store.
+- **The listing stays the sweep it is:** lineage reads sidecars the sweep already visits; this item must not add a second pass over the store ([M2](../../assistant/MILESTONES.md#milestone-n--model-operations), shipped 2026-10-03, made the sweep fast by fixing the header reader rather than caching it).
 
 **Seam + files.**
 - `models/sidecar.h/.cpp`: the integrity-side lineage fields — `derived_from` (a store-relative path: `…/safetensors/<hash>` or `…/gguf/<hash>`) and the operation that made it (`convert`, `quantize`, training promotion already knows its origin); absent fields mean pre-item artifacts, read as unknown.
@@ -16,7 +16,7 @@
 - `commands/models.cpp`: the default listing folds consumed snapshots; `--all` restores them; derived rows' SOURCE cell reads `converted` (instead of `local`); `models info` prints the chain with the inferred/recorded tag and the upstream ref.
 - Tests: `tests/models/` — sidecar round-trip with the new fields; `consumed()` table (recorded, inferred, no-gguf, deleted-gguf-reappears); listing goldens before/after convert, with `--all`, with a broken chain; the single-pass property asserted via the sweep's read counts.
 
-**Reference (Ommi).** No analog — Ommi had neither open acquisition nor a conversion ladder, so nothing ever had lineage. In-house precedents consumed: the sidecar's claimed-versus-verified split (its header war story), the store's one-declaration rule, and [M2](gguf-header-cache.md)'s sweep-cost discipline.
+**Reference (Ommi).** No analog — Ommi had neither open acquisition nor a conversion ladder, so nothing ever had lineage. In-house precedents consumed: the sidecar's claimed-versus-verified split (its header war story), the store's one-declaration rule, and [M2](../../assistant/MILESTONES.md#milestone-n--model-operations)'s sweep-cost discipline.
 
 **Decisions made** (dated):
 - 2026-10-03 — Asked for by the user from the live listing, placed in **Maintenance** at their direction; the display rule is theirs verbatim (consumed snapshots out of the default view, unconverted ones stay, derived backends say their source).
@@ -41,4 +41,4 @@
 - [ ] Pre-existing GGUFs show the same facts tagged *(inferred)*.
 - [ ] Deleting a snapshot's derived GGUFs returns it to the default listing; deleting the snapshot leaves its GGUFs listing with the honest broken-chain note.
 
-**Scope note.** **Maintenance item M5**; gated on nothing pending. Interplay, not gates: [M2](gguf-header-cache.md) (sweep cost), [M3](pull-register-chain.md) (the chain stamps the same records). Out of scope: backfilling old sidecars; lineage for Ollama-pulled or hand-copied GGUFs (unknown stays unknown); surfacing lineage in machine-readable output (rides [27e](../v0.1.4/machine-readable-reads.md)'s documents when that lands).
+**Scope note.** **Maintenance item M5**; gated on nothing pending. Interplay, not gates: [M2](../../assistant/MILESTONES.md#milestone-n--model-operations) (sweep cost, shipped), [M3](pull-register-chain.md) (the chain stamps the same records). Out of scope: backfilling old sidecars; lineage for Ollama-pulled or hand-copied GGUFs (unknown stays unknown); surfacing lineage in machine-readable output (rides [27e](../v0.1.4/machine-readable-reads.md)'s documents when that lands).

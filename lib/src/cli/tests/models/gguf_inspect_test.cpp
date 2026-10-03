@@ -6,7 +6,10 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <istream>
+#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "support/gguf_builder.h"
@@ -289,4 +292,114 @@ TEST_CASE("a projector's encoder flags are read", "[models][gguf]") {
     CHECK_FALSE(cut.parsed);
     CHECK_FALSE(cut.projector_vision);
     CHECK_FALSE(cut.projector_audio);
+}
+
+// ---- what a read costs (M2) -------------------------------------------------
+
+namespace {
+
+/// An in-memory file that counts the seeks made on it.
+class CountingBuffer final : public std::stringbuf {
+public:
+    explicit CountingBuffer(const std::string& bytes) : std::stringbuf{bytes, std::ios::in} {}
+
+    [[nodiscard]] int seeks() const noexcept {
+        return seeks_;
+    }
+
+protected:
+    pos_type seekoff(off_type offset, std::ios_base::seekdir direction,
+                     std::ios_base::openmode which) override {
+        ++seeks_;
+        return std::stringbuf::seekoff(offset, direction, which);
+    }
+
+    pos_type seekpos(pos_type position, std::ios_base::openmode which) override {
+        ++seeks_;
+        return std::stringbuf::seekpos(position, which);
+    }
+
+private:
+    int seeks_ = 0;
+};
+
+/// A header shaped like a real model's: a vocabulary of `tokens` strings, its
+/// scores (400 KB of f32), the architecture after both, and one tensor.
+[[nodiscard]] std::string vocabulary_model(std::size_t tokens) {
+    std::vector<std::string> vocabulary;
+    vocabulary.reserve(tokens);
+    for (std::size_t index = 0; index < tokens; ++index) {
+        vocabulary.push_back("token" + std::to_string(index));
+    }
+    Builder builder;
+    builder.magic().u32(3).u64(1).u64(3);
+    builder.string_array_kv("tokenizer.ggml.tokens", vocabulary);
+    builder.f32_array_kv("tokenizer.ggml.scores", 100000);
+    builder.string_kv("general.architecture", "qwen3");
+    builder.tensor("token_embd.weight");
+    return builder.bytes();
+}
+
+}  // namespace
+
+TEST_CASE("a vocabulary is stepped over through the buffer, not a seek per string",
+          "[models][gguf][cost]") {
+    // `models list` took 14 seconds on a 31-model store because every
+    // vocabulary string was skipped with a seek, which throws the buffer away:
+    // a system call per token. Small skips now read through the buffer; one
+    // large enough to be worth it -- the scores array -- is still one seek.
+    const std::string bytes = vocabulary_model(50000);
+    CountingBuffer buffer{bytes};
+    std::istream in{&buffer};
+
+    const GgufInfo info = inspect_gguf(in, bytes.size());
+
+    REQUIRE(info.parsed);
+    CHECK(info.architecture == "qwen3");  // read past both arrays, in step
+    CHECK(info.tensors == 1);
+    CHECK(std::cmp_equal(info.file_size, bytes.size()));
+    CHECK(buffer.seeks() == 1);
+}
+
+TEST_CASE("the stream and the file read the same header", "[models][gguf][cost]") {
+    for (const std::string& bytes : {well_formed(), vocabulary_model(1000)}) {
+        CountingBuffer buffer{bytes};
+        std::istream in{&buffer};
+        const GgufInfo streamed = inspect_gguf(in, bytes.size());
+        const GgufInfo filed = inspect_bytes(bytes, "stream-vs-file");
+        REQUIRE(streamed.parsed);
+        REQUIRE(filed.parsed);
+        CHECK(streamed.architecture == filed.architecture);
+        CHECK(streamed.name == filed.name);
+        CHECK(streamed.tensors == filed.tensors);
+        CHECK(streamed.text_tensors == filed.text_tensors);
+        CHECK(streamed.file_size == filed.file_size);
+    }
+}
+
+TEST_CASE("a stream shorter than it claims fails inside a skip, as a reason",
+          "[models][gguf][cost]") {
+    // The bounds check trusts the size it is given; a file cut short after its
+    // size was taken ends the skip early, and that is a parse error with a
+    // reason, never a header read past the bytes there were.
+    const std::string whole = vocabulary_model(2000);
+    // 2,000 tokens are some 34 KB of strings: 20,000 bytes ends among them.
+    const std::string cut = whole.substr(0, 20000);
+    CountingBuffer buffer{cut};
+    std::istream in{&buffer};
+
+    const GgufInfo info = inspect_gguf(in, whole.size());
+
+    CHECK_FALSE(info.parsed);
+    CHECK(info.parse_error == "could not read the file");
+    CHECK(info.architecture.empty());
+    CHECK(info.tensors == 0);
+
+    // Cut inside the very last field, a tensor's data offset: nothing is read
+    // after it, so only the skip's own check can tell.
+    CountingBuffer tail{whole.substr(0, whole.size() - 4)};
+    std::istream tail_in{&tail};
+    const GgufInfo short_tail = inspect_gguf(tail_in, whole.size());
+    CHECK_FALSE(short_tail.parsed);
+    CHECK(short_tail.parse_error == "could not read the file");
 }

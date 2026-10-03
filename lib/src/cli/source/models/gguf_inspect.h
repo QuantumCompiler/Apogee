@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <istream>
 #include <string>
 #include <vector>
 
@@ -193,5 +194,11 @@ struct GgufInfo {
 /// file, wrong magic, a length that runs past the end — comes back as
 /// `parsed == false` with a reason a user can act on.
 [[nodiscard]] GgufInfo inspect_gguf(const std::filesystem::path& path);
+
+/// Reads a header from `in`, a stream of `size` bytes positioned at its start:
+/// what the path overload does once the file is open, with the same
+/// guarantees. Exposed so a test can hand it a stream that counts what a read
+/// costs -- the regression this reader once had was cost, not correctness.
+[[nodiscard]] GgufInfo inspect_gguf(std::istream& in, std::uint64_t size);
 
 }  // namespace apogee::models

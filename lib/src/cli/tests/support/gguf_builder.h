@@ -69,6 +69,30 @@ public:
         return *this;
     }
 
+    /// One metadata pair whose value is an array of strings -- the shape of a
+    /// tokenizer's vocabulary.
+    GgufBuilder& string_array_kv(std::string_view key, const std::vector<std::string>& values) {
+        text(key);
+        u32(9);  // Array
+        u32(8);  // of String
+        u64(values.size());
+        for (const std::string& value : values) {
+            text(value);
+        }
+        return *this;
+    }
+
+    /// One metadata pair whose value is `count` f32 zeros -- the shape of a
+    /// tokenizer's scores.
+    GgufBuilder& f32_array_kv(std::string_view key, std::size_t count) {
+        text(key);
+        u32(9);  // Array
+        u32(6);  // of Float32
+        u64(count);
+        bytes_.append(count * sizeof(float), '\0');
+        return *this;
+    }
+
     /// One metadata pair whose value is an array of bools -- a per-layer flag.
     GgufBuilder& bool_array_kv(std::string_view key, const std::vector<bool>& flags) {
         text(key);

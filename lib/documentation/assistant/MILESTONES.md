@@ -524,7 +524,7 @@ Asked for directly (Taylor, 2026-09-23, with a Qwen3.5 transcript): "the formatt
 - `graph_e2e.sh`: on a pipe, the build keeps a line per chunk and writes no escape byte, and `--quiet` keeps only the summary.
 
 **Not verified, and found on the way.**
-- **Why `models list` is slow.** Sampling it showed nearly all the time inside `inspect_gguf`'s `skip_value`. Each string of a tokenizer's vocabulary is skipped with its own `seekg`, which discards the stream's buffer, so a 150,000-token vocabulary costs some 300,000 system calls per file: about 10 of the 15 seconds were system time. That is the read itself, outside this item. Reading the vocabulary in buffered blocks could make the header cache (M2) unnecessary, and is worth trying first.
+- **Why `models list` is slow.** Sampling it showed nearly all the time inside `inspect_gguf`'s `skip_value`. Each string of a tokenizer's vocabulary is skipped with its own `seekg`, which discards the stream's buffer, so a 150,000-token vocabulary costs some 300,000 system calls per file: about 10 of the 15 seconds were system time. That is the read itself, outside this item. Reading the vocabulary in buffered blocks could make the header cache (M2) unnecessary, and is worth trying first. It did: M2 shipped that fix instead of the cache, the same day ([Milestone N](#milestone-n--model-operations)).
 - **A failed chunk printed above the line** is covered by the code path, not a test: no fixture makes a chunk fail on a terminal.
 - **Windows** builds the stream-aware width but runs no PTY check, the recorded per-item skip.
 
@@ -2257,6 +2257,47 @@ Asked for directly (Taylor): "I want there to be an extra line of white space be
 - **A retrieval turn re-reads a local model's whole prompt**, helper or not. The retrieved block sits at the conversation's start, as 25c's notes say. Every turn of the notes chat above read from 0 on the 27B, the same with no utility model set. That is its own change.
 - **Qwen3.8-27B answered one turn with nothing.** In a plain three-question chat, the third answer was saved empty, with and without a utility model set. It is older than this item and left for its own change.
 - **`--verbose` prints a tool call as `[tool] [tool] read_file`.** The tool's status line carries its own tag and the terminal adds another. It is cosmetic, and older than this item.
+
+### 2026-10-03 — `gguf-header-cache` (maintenance item M2): the header reader stops seeking, and no cache is needed
+
+**Why.** `apogee models list` took 14 seconds on this machine's store of 31 models, and `check`, which reads most of them twice, about 30. M2 was specced as a cache of what the headers say: a file under `cache/`, keyed by each model file's path, size and modification time, so that a second listing would read no headers at all. Shipping M1 the same day, a sample of `models list` showed that the time was not in the number of headers but in how each was read.
+- Nearly all of it was inside `inspect_gguf`, stepping over the tokenizer's vocabulary, and two-thirds of it was system time.
+- Each of a vocabulary's strings (150,000 or more in a current model) was skipped with its own `seekg`. A seek throws the stream's buffer away, so the next read went back to the operating system: some 300,000 system calls per file.
+
+**What was built**
+
+- [x] **Small skips read through the buffer** (`models/gguf_inspect.cpp`). A skip of up to 64 KiB (`kBufferedSkip`) is `ignore`d; only a larger one, such as an array of scores hundreds of kilobytes long, seeks. A skip that comes up short (a file cut after its size was taken) is a parse error with its reason, like every other short read.
+- [x] **`inspect_gguf(std::istream&, size)`**, the core the path overload now calls once the file is open. A test can hand it a stream that counts what a read costs. This reader's regression was in cost, not correctness, and only a count can hold that.
+- [x] **The test builder** (`tests/support/gguf_builder.h`) makes vocabularies and score arrays.
+
+**Measured** (this machine's store, read only, comparing the build from before the change with this one, output compared byte for byte):
+
+| Command | Before | After | Output |
+|---|---|---|---|
+| `models list` | 13.95 s | 0.34 s | identical |
+| `models status` | 0.86 s | 0.03 s | identical |
+| `check` | 27.6 s | 0.68 s | identical |
+
+Every other header read goes through the same function, so each is faster the same way with the same answer: the llamacpp backend's profile and window, `convert`, `quantize`, acquisition's verify and training's promotion.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| No cache | The reader fix only — **the user's call**, on the numbers above | A cache would save about another third of a second. It would cost a file under `cache/`, a window in which a listing could be stale, and guardrails of its own (the test keeping it off the loading paths). With the read this cheap, nothing is stored and no listing can be out of date. The document's four open calls were all about the cache, and lapsed with it. |
+| The threshold | 64 KiB | Every vocabulary string and every small value stays in the buffer. An array of scores, hundreds of kilobytes, is one seek rather than a read of bytes nothing looks at. |
+
+**Guardrails, each mutation-tested (5 mutants, all caught)**, against the whole unit suite. The mutants: every skip a seek, no skip a seek, a short skip unchecked, the size not passed to the stream overload, and the file size not recorded.
+- `gguf_inspect_test` reads through a stream that counts its seeks:
+  - a 50,000-string vocabulary is stepped over with no seeks, and its scores with one;
+  - the architecture after both is read in step;
+  - the stream and the file overloads read alike;
+  - a stream shorter than it claims fails inside a skip, the last field included.
+
+**Not verified, and found on the way.**
+- **Every measurement ran with the files in the operating system's cache**, read moments before. A first read after a restart also pays for the disk, for the same header bytes as before.
+- **Windows** uses the same standard library calls, but was not measured there.
+- **M1's busy line now shows only briefly.** A 31-model `models list` finishes in a third of a second, so its line appears for a frame or two after the 150 ms gate.
 
 ## Milestone O — Local multimodal
 

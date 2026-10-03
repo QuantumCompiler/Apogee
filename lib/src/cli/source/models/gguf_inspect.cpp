@@ -7,6 +7,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace apogee::models {
@@ -66,6 +67,15 @@ enum class ValueType : std::uint32_t {
 constexpr std::uint64_t kMaxStringBytes = 1U << 24U;  // 16 MiB
 constexpr std::uint64_t kMaxCount = 1U << 24U;        // tensors, kv pairs, array elements
 
+/// The largest skip taken by reading through the stream's buffer; anything
+/// larger is a seek. A seek throws the buffer away, so the vocabulary's
+/// strings, stepped over one seek each, cost a system call apiece: some
+/// 300,000 for a 150,000-token model, and nearly all of `models list`'s 14
+/// seconds on a 31-model store. Through the buffer they cost a few hundred
+/// reads in all (M2, which this replaced a header cache with). An array of
+/// scores, hundreds of kilobytes, is still cheaper as one seek.
+constexpr std::uint64_t kBufferedSkip = std::uint64_t{64} * 1024U;
+
 /// Signals a header that cannot be read. Caught in `inspect_gguf`; never
 /// escapes this file.
 class GgufError final : public std::runtime_error {
@@ -79,7 +89,7 @@ public:
 /// one place, rather than being a different bug at each of the six call sites.
 class Cursor {
 public:
-    Cursor(std::ifstream& in, std::uint64_t size) : in_{&in}, size_{size} {}
+    Cursor(std::istream& in, std::uint64_t size) : in_{&in}, size_{size} {}
 
     void read(char* out, std::uint64_t count) {
         if (count > size_ || offset_ > size_ - count) {
@@ -94,14 +104,22 @@ public:
 
     /// Advances without materialising the bytes -- used for values whose
     /// content is not needed, notably the token vocabulary, which is megabytes
-    /// of strings in every real model.
+    /// of strings in every real model. A small skip reads through the buffer,
+    /// a large one seeks: see `kBufferedSkip`.
     void skip(std::uint64_t count) {
         if (count > size_ || offset_ > size_ - count) {
             throw GgufError("header runs past the end of the file (truncated or corrupt)");
         }
-        in_->seekg(static_cast<std::streamoff>(count), std::ios::cur);
-        if (!in_->good()) {
-            throw GgufError("could not seek within the file");
+        if (count <= kBufferedSkip) {
+            in_->ignore(static_cast<std::streamsize>(count));
+            if (std::cmp_not_equal(in_->gcount(), count) || !in_->good()) {
+                throw GgufError("could not read the file");
+            }
+        } else {
+            in_->seekg(static_cast<std::streamoff>(count), std::ios::cur);
+            if (!in_->good()) {
+                throw GgufError("could not seek within the file");
+            }
         }
         offset_ += count;
     }
@@ -132,7 +150,7 @@ public:
     }
 
 private:
-    std::ifstream* in_;
+    std::istream* in_;
     std::uint64_t size_;
     std::uint64_t offset_ = 0;
 };
@@ -344,21 +362,27 @@ constexpr std::uint64_t kMaxLayerValues = 1U << 16U;
 }  // namespace
 
 GgufInfo inspect_gguf(const std::filesystem::path& path) {
-    GgufInfo info;
-
     std::error_code code;
     const std::uintmax_t size = std::filesystem::file_size(path, code);
     if (code) {
+        GgufInfo info;
         info.parse_error = "cannot read '" + path.string() + "': " + code.message();
         return info;
     }
-    info.file_size = static_cast<std::int64_t>(size);
 
     std::ifstream in(path, std::ios::binary);
     if (!in) {
+        GgufInfo info;
+        info.file_size = static_cast<std::int64_t>(size);
         info.parse_error = "cannot open '" + path.string() + "'";
         return info;
     }
+    return inspect_gguf(in, size);
+}
+
+GgufInfo inspect_gguf(std::istream& in, std::uint64_t size) {
+    GgufInfo info;
+    info.file_size = static_cast<std::int64_t>(size);
 
     try {
         Cursor cursor{in, size};
