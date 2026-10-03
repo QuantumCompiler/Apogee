@@ -1,6 +1,6 @@
 # Recall across chats
 
-**What / why.** A new conversation knows what earlier ones established, without being told. Each finished chat is summarised by the [utility model](../assistant/MILESTONES.md#milestone-n--model-operations): what was asked, what was decided, the facts and preferences stated, the files involved. The summary is indexed with the embedding model, in the background, when the chat ends or the next time Apogee starts. Every turn then retrieves the few past summaries, and the [knowledge records](../assistant/MILESTONES.md#milestone-y--the-knowledge-layer), that bear on the question, and injects them within the [context budget](../assistant/MILESTONES.md#milestone-f--the-shared-agent-loop), reported on the status line (`[memory] 2 past chats, 1 decision`).
+**What / why.** A new conversation knows what earlier ones established, without being told. Each finished chat is summarised by the [utility model](../../assistant/MILESTONES.md#milestone-n--model-operations): what was asked, what was decided, the facts and preferences stated, the files involved. The summary is indexed with the embedding model, in the background, when the chat ends or the next time Apogee starts. Every turn then retrieves the few past summaries, and the [knowledge records](../../assistant/MILESTONES.md#milestone-y--the-knowledge-layer), that bear on the question, and injects them within the [context budget](../../assistant/MILESTONES.md#milestone-f--the-shared-agent-loop), reported on the status line (`[memory] 2 past chats, 1 decision`).
 
 A small model has no memory beyond its window. This gives it the user's history the way `auto_rag` gives it a document collection, automatically. The knowledge layer already stores decisions deliberately captured; recall covers everything else a user would otherwise repeat.
 
@@ -19,13 +19,13 @@ A small model has no memory beyond its window. This gives it the user's history 
 - `harness/config.*` and the template: `memory.recall`.
 - `harness/layout.h`: the private row for the chats index.
 - `commands/check.cpp`: the index's size and mode.
-- Machine mode: a `memory` meta event beside the existing retrieval one, in [machine-mode.md](../reference/machine-mode.md).
+- Machine mode: a `memory` meta event beside the existing retrieval one, in [machine-mode.md](../../reference/machine-mode.md).
 
 **Reference (Ommi).** None: Ommi kept sessions and captured knowledge records (which Apogee ported as Milestone Y), but never recalled past conversations automatically.
 
 **Decisions made:**
 - 2026-09-25 — Asked for by the user ("Memory across chats").
-- 2026-09-25 — After [26b](../assistant/MILESTONES.md#milestone-n--model-operations) (the summariser) and [26c](../assistant/MILESTONES.md#milestone-f--the-shared-agent-loop) (the share it injects within).
+- 2026-09-25 — After [26b](../../assistant/MILESTONES.md#milestone-n--model-operations) (the summariser) and [26c](../../assistant/MILESTONES.md#milestone-f--the-shared-agent-loop) (the share it injects within).
 
 **Open calls:**
 - [default: on in `chat`, off in `complete` and in agents] A one-shot or an agent's run should be reproducible from its inputs; a conversation benefits from memory.
@@ -47,4 +47,4 @@ A small model has no memory beyond its window. This gives it the user's history 
 - [ ] `/recall off` stops it for the session; `apogee chats delete` of the earlier chat stops it for good.
 - [ ] `apogee serve` answers the same question without the recalled fact.
 
-**Scope note.** Item **26l**; gated on nothing now: [26b](../assistant/MILESTONES.md#milestone-n--model-operations), the summariser's role, shipped 2026-09-28 (`commands::helper_backend(config, ModelRole::Utility, conversation)`), and so did [26c](../assistant/MILESTONES.md#milestone-f--the-shared-agent-loop), the budget whose retrieval share recall injects within (`TurnBudget::budget.share(BudgetSource::Retrieval)`, as `agentloop/rag.cpp` fits its chunks with `fitting_prefix`). Out of scope: editing or pinning memories by hand (the knowledge layer is the deliberate path), and recall across machines.
+**Scope note.** Item **26l**; gated on nothing now: [26b](../../assistant/MILESTONES.md#milestone-n--model-operations), the summariser's role, shipped 2026-09-28 (`commands::helper_backend(config, ModelRole::Utility, conversation)`), and so did [26c](../../assistant/MILESTONES.md#milestone-f--the-shared-agent-loop), the budget whose retrieval share recall injects within (`TurnBudget::budget.share(BudgetSource::Retrieval)`, as `agentloop/rag.cpp` fits its chunks with `fitting_prefix`). Out of scope: editing or pinning memories by hand (the knowledge layer is the deliberate path), and recall across machines.

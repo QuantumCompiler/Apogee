@@ -127,6 +127,11 @@ enum class StandardStream : std::uint8_t { In, Out, Err };
 /// assume a conservative default rather than skip wrapping.
 [[nodiscard]] std::optional<int> terminal_width() noexcept;
 
+/// The width of the terminal `stream` is attached to. A line painted on
+/// stderr is measured on stderr: under `apogee models list | grep x` stdout
+/// is the pipe and stderr the terminal the busy line repaints on (M1).
+[[nodiscard]] std::optional<int> terminal_width(StandardStream stream) noexcept;
+
 /// The terminal's height in rows, or nullopt when it cannot be determined.
 ///
 /// The answer view needs it to keep its open area on screen: an erase cannot

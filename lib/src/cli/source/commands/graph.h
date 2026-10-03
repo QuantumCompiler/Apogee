@@ -58,6 +58,9 @@ struct GraphBuildRequest {
     bool dry_run = false;
     bool force = false;
     int limit = 0;
+    /// No progress at all: no busy line on a terminal, no per-chunk line on
+    /// a pipe (M1). The results and every failure still print.
+    bool quiet = false;
 };
 
 void run_graph_build(const RootContext& context, const GraphBuildRequest& request);

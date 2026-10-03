@@ -41,4 +41,4 @@
 - [ ] Pre-existing GGUFs show the same facts tagged *(inferred)*.
 - [ ] Deleting a snapshot's derived GGUFs returns it to the default listing; deleting the snapshot leaves its GGUFs listing with the honest broken-chain note.
 
-**Scope note.** **Maintenance item M5**; gated on nothing pending. Interplay, not gates: [M2](gguf-header-cache.md) (sweep cost), [M3](pull-register-chain.md) (the chain stamps the same records). Out of scope: backfilling old sidecars; lineage for Ollama-pulled or hand-copied GGUFs (unknown stays unknown); surfacing lineage in machine-readable output (rides [27e](machine-readable-reads.md)'s documents when that lands).
+**Scope note.** **Maintenance item M5**; gated on nothing pending. Interplay, not gates: [M2](gguf-header-cache.md) (sweep cost), [M3](pull-register-chain.md) (the chain stamps the same records). Out of scope: backfilling old sidecars; lineage for Ollama-pulled or hand-copied GGUFs (unknown stays unknown); surfacing lineage in machine-readable output (rides [27e](../v0.1.4/machine-readable-reads.md)'s documents when that lands).

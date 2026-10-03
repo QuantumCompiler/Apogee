@@ -16,6 +16,7 @@
 #include "agentloop/retriever.h"
 #include "backends/factory.h"
 #include "commands/graph.h"
+#include "commands/status_line.h"
 #include "embedstore/ingest.h"
 #include "embedstore/store.h"
 #include "harness/config.h"
@@ -166,12 +167,15 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
         });
 
     auto in_graph = std::make_shared<bool>(false);
+    auto in_quiet = std::make_shared<bool>(false);
     ingest->add_flag("--graph", *in_graph,
                      "After a successful ingest, build the knowledge graph covering this "
                      "collection (a named graph listing it, else its own)");
 
+    ingest->add_flag("-q,--quiet", *in_quiet,
+                     "No progress line while it reads and embeds (nor in --graph's build)");
     ingest->callback([&context, in_collection, in_path, in_size, in_overlap, in_retriever, in_graph,
-                      size_option, overlap_option]() {
+                      in_quiet, size_option, overlap_option]() {
         require_plain_name(*in_collection);
 
         const std::filesystem::path target{*in_path};
@@ -241,8 +245,20 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
 
         embedstore::IngestReport report;
         try {
-            report =
-                embedstore::ingest_path(collection_path(*in_collection), target, chunking, embed);
+            // Each file is read, chunked and -- with an embedder -- embedded
+            // in turn: said on one line, numbered against the walk (M1).
+            BusyLine busy{
+                std::cerr,
+                decision.retriever == agentloop::Retriever::Vector ? "embedding" : "reading",
+                busy_options(*in_quiet)};
+            const std::string verb =
+                decision.retriever == agentloop::Retriever::Vector ? "embedding " : "reading ";
+            report = embedstore::ingest_path(
+                collection_path(*in_collection), target, chunking, embed,
+                [&busy, &verb](std::size_t done, std::size_t total,
+                               const std::filesystem::path& file) {
+                    busy.report(verb + file.filename().string(), done, total);
+                });
             embedstore::Store store{collection_path(*in_collection)};
             const embedstore::Store::Stats stats = store.stats();
             if (decision.retriever == agentloop::Retriever::Vector && stats.dimension > 0) {
@@ -325,6 +341,7 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
         if (*in_graph) {
             GraphBuildRequest request;
             request.name = *in_collection;
+            request.quiet = *in_quiet;
             try {
                 const harness::Config fresh = harness::load_config(config_path);
                 if (const std::optional<agentloop::CoveringGraph> covering =

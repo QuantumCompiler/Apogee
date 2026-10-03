@@ -21,7 +21,7 @@ Apogee is a re-implementation of Ommi (`~/Data/Development/Projects/Ommi`). Befo
 
 ## 3. Write the document
 
-Kebab-case filename in `lib/documentation/backlog/`, following the format in the backlog README exactly. Quality bar per section:
+Kebab-case filename in **the target table's subdirectory** of `lib/documentation/backlog/` (the tree mirrors the index tables: `architecture/`, `maintenance/`, `v0.1.<x>/` — create the directory with a table's first item), following the format in the backlog README exactly. Links out of the backlog climb two levels (`../../assistant/…`); same-table doc links are bare filenames, cross-table ones `../<table-dir>/<file>`. Quality bar per section:
 
 - **What / why** — what it delivers and why it's worth building, concrete enough to build from. If it's too big for one focused session, mark it **split first** and list the sub-documents the grooming must produce.
 - **Core constraint(s)** — pull in the repo invariants it touches (never-listens, parity/backfill rules, secrets hygiene, code style) plus its own; a constraint the item doesn't state is a constraint the builder won't honor.

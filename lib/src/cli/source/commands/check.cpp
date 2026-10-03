@@ -67,6 +67,14 @@ void add(CheckReport& report, Status status, std::string section, std::string na
         {status, std::move(section), std::move(name), std::move(detail), std::move(remedy)});
 }
 
+/// Says what the doctor is doing now, when someone is listening (M1).
+void say(const CheckInputs& inputs, const std::string& label, std::size_t done = 0,
+         std::size_t total = 0) {
+    if (inputs.progress) {
+        inputs.progress(label, done, total);
+    }
+}
+
 void check_version(CheckReport& report, const CheckInputs& inputs) {
     add(report, Status::Ok, "Version", "apogee", std::string{version::semantic()});
 
@@ -174,6 +182,14 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
 
     const secrets::CredentialStore store{secrets::credentials_path(inputs.config_path)};
     const secrets::EnvSnapshot env = secrets::EnvSnapshot::capture(inputs.env);
+    // The local backends' headers are the slow part: counted, so the line
+    // can say how far through them it is.
+    const auto local =
+        static_cast<std::size_t>(std::ranges::count_if(config.backends, [](const auto& entry) {
+            return entry.second.type == harness::BackendType::LlamaCpp &&
+                   !entry.second.model_path.empty();
+        }));
+    std::size_t read = 0;
     for (const auto& [name, backend] : config.backends) {
         const std::string label = "backend: " + name;
         const std::string_view type = harness::to_string(backend.type);
@@ -187,6 +203,7 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                 continue;
             }
             const std::filesystem::path model = harness::expand_env(backend.model_path);
+            say(inputs, "checking config: " + model.filename().string(), ++read, local);
             std::error_code code;
             if (!std::filesystem::exists(model, code)) {
                 // A dangling model_path is a real failure -- the backend cannot
@@ -377,9 +394,14 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
     const models::StoreRoots roots = check_roots(inputs);
 
     int found = 0;
-    for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
+    const std::vector<models::StoredGguf> ggufs = models::list_store_ggufs(roots);
+    const std::vector<models::StoredSnapshot> snapshots = models::list_store_snapshots(roots);
+    const std::size_t total = ggufs.size() + snapshots.size();
+    std::size_t read = 0;
+    for (const models::StoredGguf& stored : ggufs) {
         ++found;
         const std::string name = stored.model + "/gguf/" + stored.id;
+        say(inputs, "checking models: " + stored.file.filename().string(), ++read, total);
         // A full header read, not the 4-byte magic check this used to do. The
         // failure that actually happens is a half-finished download, and that
         // file has perfectly valid magic -- so magic alone reported "valid
@@ -394,9 +416,10 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
                                           : info.architecture + ", valid GGUF header");
         }
     }
-    for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
+    for (const models::StoredSnapshot& stored : snapshots) {
         ++found;
         const std::string name = stored.model + "/safetensors/" + stored.id;
+        say(inputs, "checking models: " + name, ++read, total);
         if (models::config_is_download_record(stored.dir)) {
             add(report, Status::Warn, "Models", name,
                 "damaged by an older pull: its config.json is a download record",
@@ -1393,18 +1416,30 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
 
 CheckReport run_checks(const CheckInputs& inputs) {
     CheckReport report;
+    say(inputs, "checking the version");
     check_version(report, inputs);
+    say(inputs, "checking config");
     check_config(report, inputs);
+    say(inputs, "checking tools");
     check_tools(report, inputs);
+    say(inputs, "checking MCP servers");
     check_mcp(report, inputs);
+    say(inputs, "checking agents");
     check_agents(report, inputs);
+    say(inputs, "checking knowledge");
     check_knowledge(report, inputs);
+    say(inputs, "checking attachments");
     check_attachments(report, inputs);
+    say(inputs, "checking graphs");
     check_graphs(report, inputs);
+    say(inputs, "checking training");
     check_training(report, inputs);
+    say(inputs, "checking the data directory");
     check_filesystem(report, inputs);
+    say(inputs, "checking secrets");
     check_secrets(report, inputs);
     check_credential_store(report, inputs);
+    say(inputs, "checking models");
     check_models(report, inputs);
     return report;
 }
@@ -1597,6 +1632,7 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
     struct Flags {
         bool fix = false;
         bool no_color = false;
+        bool quiet = false;
     };
 
     auto flags = std::make_shared<Flags>();
@@ -1606,6 +1642,7 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
                   "Repair what is safely repairable: missing directories and private modes. "
                   "Never touches your config.");
     cmd->add_flag("--no-color", flags->no_color, "Disable coloured output");
+    cmd->add_flag("-q,--quiet", flags->quiet, "No progress line while it checks");
 
     cmd->callback([&context, flags]() {
         CheckInputs inputs;
@@ -1645,7 +1682,15 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
             }
         }
 
-        const CheckReport report = run_checks(inputs);
+        CheckReport report;
+        {
+            // Every model's header is read, so on a full store this takes
+            // seconds: said on one line, gone before the report (M1).
+            BusyLine busy{std::cerr, "checking", busy_options(flags->quiet)};
+            inputs.progress = busy.sink();
+            report = run_checks(inputs);
+            inputs.progress = nullptr;
+        }
         const ansi::Style style =
             ansi::Style::detect(flags->no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
         std::cout << render_report(report, style.color_enabled());

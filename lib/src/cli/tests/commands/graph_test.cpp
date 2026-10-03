@@ -596,3 +596,21 @@ TEST_CASE(
     CHECK(out.find("Graph build complete for \"work\":") != std::string::npos);
     CHECK(std::filesystem::exists(apogee::agentloop::graph_db_path("work")));
 }
+
+TEST_CASE("embed ingest --graph --quiet carries the silence into the build it chains",
+          "[commands][graph][ingest][busy]") {
+    // M1: --quiet means no progress at all -- the ingest's own line, the
+    // chained build's line on a terminal, and its per-chunk lines on a pipe.
+    // What happened is still said.
+    const Fixture fixture;
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"embed", "ingest", "notes", (fixture.home.path() / "docs").string(),
+                         "--graph", "--quiet"},
+                        &out, &err) == 0);
+    INFO(out);
+    INFO(err);
+    CHECK(out.find("Graph build complete for \"notes\":") != std::string::npos);
+    CHECK(err.find("[graph] extracting") == std::string::npos);
+    CHECK(err.find("\033[2K") == std::string::npos);
+}

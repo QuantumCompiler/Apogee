@@ -254,16 +254,44 @@ bool is_terminal(StandardStream stream) noexcept {
 }
 
 std::optional<int> terminal_width() noexcept {
+    return terminal_width(StandardStream::Out);
+}
+
+std::optional<int> terminal_width(StandardStream stream) noexcept {
 #if defined(_WIN32)
+    DWORD handle = STD_OUTPUT_HANDLE;
+    switch (stream) {
+        case StandardStream::In:
+            handle = STD_INPUT_HANDLE;
+            break;
+        case StandardStream::Out:
+            handle = STD_OUTPUT_HANDLE;
+            break;
+        case StandardStream::Err:
+            handle = STD_ERROR_HANDLE;
+            break;
+    }
     CONSOLE_SCREEN_BUFFER_INFO info{};
-    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info) != 0) {
+    if (GetConsoleScreenBufferInfo(GetStdHandle(handle), &info) != 0) {
         const int width = info.srWindow.Right - info.srWindow.Left + 1;
         return width > 0 ? std::optional<int>{width} : std::nullopt;
     }
     return std::nullopt;
 #else
+    int descriptor = STDOUT_FILENO;
+    switch (stream) {
+        case StandardStream::In:
+            descriptor = STDIN_FILENO;
+            break;
+        case StandardStream::Out:
+            descriptor = STDOUT_FILENO;
+            break;
+        case StandardStream::Err:
+            descriptor = STDERR_FILENO;
+            break;
+    }
     ::winsize size{};
-    if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
+    if (::ioctl(descriptor, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
         return static_cast<int>(size.ws_col);
     }
     return std::nullopt;

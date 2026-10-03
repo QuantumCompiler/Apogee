@@ -7,6 +7,7 @@
 
 #include "ansi/ansi.h"
 #include "commands/command.h"
+#include "commands/status_line.h"
 #include "harness/config.h"
 #include "models/gguf_inspect.h"
 #include "secrets/resolve.h"
@@ -92,10 +93,13 @@ struct ModelRow {
 /// `models_dir` empty skips the on-disk half. `config_path` locates the
 /// credential store beside it (empty: no store is consulted), and `env` is
 /// the snapshot the key column reports against (null: the process-wide one).
+/// `progress` hears each header or snapshot as it is read, numbered against
+/// the whole sweep (M1); a test passes none.
 [[nodiscard]] std::vector<ModelRow> build_model_rows(const harness::Config& config,
                                                      const std::filesystem::path& models_dir = {},
                                                      const std::filesystem::path& config_path = {},
-                                                     const secrets::EnvSnapshot* env = nullptr);
+                                                     const secrets::EnvSnapshot* env = nullptr,
+                                                     const BusyProgress& progress = {});
 
 /// Renders rows as an aligned table. Empty input yields a single explanatory
 /// line, never a bare header with nothing under it.
@@ -118,8 +122,8 @@ struct ModelRow {
 /// reason when it did not parse — an unparseable header must never render as
 /// an empty field, which is the reporting bug this whole surface exists to
 /// avoid.
-[[nodiscard]] std::string render_model_info(const harness::Config& config,
-                                            std::string_view backend);
+[[nodiscard]] std::string render_model_info(const harness::Config& config, std::string_view backend,
+                                            const BusyProgress& progress = {});
 
 /// The body of `apogee models status` — which backend each role resolves to,
 /// and whether that backend is actually configured.
@@ -127,7 +131,8 @@ struct ModelRow {
 /// Every line here comes from `harness::resolve_backend_key`, never from a
 /// local reimplementation of the chain. This command is the visible proof that
 /// the resolver answers the same way the run path does.
-[[nodiscard]] std::string render_role_status(const harness::Config& config);
+[[nodiscard]] std::string render_role_status(const harness::Config& config,
+                                             const BusyProgress& progress = {});
 
 class ModelsCommand final : public Command {
 public:

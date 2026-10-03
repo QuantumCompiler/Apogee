@@ -6,6 +6,8 @@
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 #include "embedstore/store.h"
 
@@ -178,4 +180,28 @@ TEST_CASE("a PDF without pdftotext is skipped by name, never fatally",
     // Named either way: "not installed" on a machine without it, "could not
     // read it" on one with it. Both say which file and why.
     CHECK(report.skips.front().find("pdftotext") != std::string::npos);
+}
+
+TEST_CASE("an ingest says each file as its turn comes, against the whole walk",
+          "[embedstore][ingest][busy]") {
+    // M1: the walk is counted before the first file is read, so a busy line
+    // can say how far through it is -- skipped files included, since they
+    // take their turn too.
+    const Tree tree;
+    tree.write("a.md", "alpha");
+    tree.write("b.bin", std::string{"\0\1\2", 3});
+    tree.write("nested/c.txt", "gamma");
+
+    std::vector<std::pair<std::size_t, std::size_t>> counts;
+    std::vector<std::string> names;
+    const IngestReport report =
+        ingest_path(tree.db(), tree.docs(), {}, {},
+                    [&](std::size_t done, std::size_t total, const std::filesystem::path& file) {
+                        counts.emplace_back(done, total);
+                        names.push_back(file.filename().string());
+                    });
+    CHECK(report.files_read == 2);
+    CHECK(report.files_skipped == 1);
+    CHECK(counts == std::vector<std::pair<std::size_t, std::size_t>>{{1, 3}, {2, 3}, {3, 3}});
+    CHECK(names == std::vector<std::string>{"a.md", "b.bin", "c.txt"});
 }

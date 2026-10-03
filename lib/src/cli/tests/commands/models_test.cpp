@@ -9,6 +9,7 @@
 #include <regex>
 #include <string>
 #include <system_error>
+#include <tuple>
 #include <vector>
 
 #include "harness/roles.h"
@@ -687,4 +688,70 @@ TEST_CASE("rows are coloured by what they are, and align the same without colour
 
     // Colour is laid over the text, never counted into a column's width.
     CHECK(std::regex_replace(coloured, std::regex{"\033\\[[0-9;]*m"}, "") == plain);
+}
+
+TEST_CASE("the listing says each read as it goes, numbered against the whole sweep",
+          "[commands][models][listing][busy]") {
+    // M1: `models list` used to read every header in silence. The sweep now
+    // names each read, against a total counted before the first -- and saying
+    // so changes nothing the listing prints.
+    const RealModel stored{"llama"};
+    const RealModel elsewhere{"qwen3"};
+    const std::filesystem::path snapshot =
+        stored.dir / "owner--repo" / "safetensors" / "aaaaaaaaaaaa";
+    std::filesystem::create_directories(snapshot);
+    std::ofstream{snapshot / "config.json"} << R"({"architectures": ["Qwen2ForCausalLM"]})";
+    std::ofstream{snapshot / "model.safetensors"} << "weights";
+
+    Config config = sample_config();  // a cloud backend, a dangling path, an unset one
+    BackendConfig local;
+    local.type = BackendType::LlamaCpp;
+    local.model_path = elsewhere.path.string();
+    config.backends["local"] = local;
+
+    std::vector<std::tuple<std::string, std::size_t, std::size_t>> heard;
+    const std::vector<ModelRow> rows =
+        build_model_rows(config, stored.dir, {}, nullptr,
+                         [&heard](std::string_view label, std::size_t done, std::size_t total) {
+                             heard.emplace_back(label, done, total);
+                         });
+    CHECK(render_model_table(rows) == render_model_table(build_model_rows(config, stored.dir)));
+
+    // The two configured local files (one dangling), the stored GGUF no
+    // backend points at, and the snapshot -- never the cloud backend or the
+    // one with no path.
+    REQUIRE(heard.size() == 4);
+    for (std::size_t at = 0; at < heard.size(); ++at) {
+        CHECK(std::get<1>(heard[at]) == at + 1);
+        CHECK(std::get<2>(heard[at]) == 4);
+    }
+    CHECK(std::get<0>(heard[0]) == "reading model headers: embedder.gguf");
+    CHECK(std::get<0>(heard[1]) == "reading model headers: real.gguf");
+    CHECK(std::get<0>(heard[2]) == "reading model headers: real.gguf");
+    CHECK(std::get<0>(heard[3]) == "reading snapshots: owner--repo");
+}
+
+TEST_CASE("info and status say the header they read", "[commands][models][busy]") {
+    const RealModel model{"llama"};
+    Config config;
+    BackendConfig local;
+    local.type = BackendType::LlamaCpp;
+    local.model_path = model.path.string();
+    config.backends["local"] = local;
+    config.models.default_backend = "local";
+
+    std::vector<std::string> heard;
+    const auto sink = [&heard](std::string_view label, std::size_t, std::size_t total) {
+        // No count: neither knows a total worth claiming.
+        CHECK(total == 0);
+        heard.emplace_back(label);
+    };
+    CHECK(render_model_info(config, "local", sink) == render_model_info(config, "local"));
+    REQUIRE(heard.size() == 1);
+    CHECK(heard.front() == "reading real.gguf");
+
+    heard.clear();
+    CHECK(render_role_status(config, sink) == render_role_status(config));
+    REQUIRE_FALSE(heard.empty());
+    CHECK(heard.front() == "reading local's model header");
 }

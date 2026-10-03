@@ -31,7 +31,7 @@
 - The image round-trip against the fake driver, plus the capability answer flipping with the model directory's markers.
 - The promote table: the MLX branch gated, versioned, retained and rolled back identically to GGUF's — mutation-tested with the rest of the plan.
 - The served-turn no-listen sample over a live MLX child; the type-refusal test asserting vendor CLIs refused and `mlx` served.
-- On real weights: an image question answered natively by an MLX vision build from [the model families](../assistant/DEVELOPER.md#on-real-weights-the-model-families) where one exists, and a `train` run promoted with `--target mlx` then chatted with — both recorded on ship.
+- On real weights: an image question answered natively by an MLX vision build from [the model families](../../assistant/DEVELOPER.md#on-real-weights-the-model-families) where one exists, and a `train` run promoted with `--target mlx` then chatted with — both recorded on ship.
 
 **Acceptance criteria:**
 - [ ] `apogee chat -m <mlx vision entry> --image photo.jpg` answers about the image natively; a non-vision MLX entry routes the image through the 26e helper path instead, with the honest notice.

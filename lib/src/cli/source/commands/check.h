@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "commands/command.h"
+#include "commands/status_line.h"
 #include "harness/config.h"
 
 /// `apogee check` — the install doctor.
@@ -82,6 +83,10 @@ struct CheckInputs {
     /// Environment lookup, injected so a test can present a backend as having
     /// a key without setting one in the process.
     std::function<std::string(std::string_view)> env;
+
+    /// Hears each section as it starts, and each model header as it is read
+    /// -- numbered where a section reads several (M1). Null: nothing is said.
+    BusyProgress progress;
 };
 
 /// Runs every check and returns the report. Pure with respect to the machine

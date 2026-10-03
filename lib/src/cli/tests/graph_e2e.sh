@@ -84,6 +84,10 @@ grep -q "No graph built" "$WORK_DIR/stats0.txt" || fail "--dry-run stored someth
 # --- the build: stamped, enabled through the editor ------------------------
 "$APOGEE_BIN" graph build notes -m extractor </dev/null >"$WORK_DIR/build.txt" 2>"$WORK_DIR/build.err" || fail "build: $(cat "$WORK_DIR/build.err")"
 grep -q "Graph build complete for \"notes\"" "$WORK_DIR/build.txt" || fail "no build summary: $(cat "$WORK_DIR/build.txt")"
+# On a pipe the progress stays a line per chunk a log can read, and nothing
+# a terminal would draw (M1): the busy line is for terminals only.
+grep -q "^\[graph\] extracting atlas.md (file 1/2, chunk 1/2)" "$WORK_DIR/build.err" || fail "a pipe lost the per-chunk progress lines: $(cat "$WORK_DIR/build.err")"
+if grep -q "$(printf '\033')" "$WORK_DIR/build.txt" "$WORK_DIR/build.err"; then fail "a piped build carries escape bytes"; fi
 grep -q "Files extracted:   2 of 2 planned" "$WORK_DIR/build.txt" || fail "not every file extracted: $(cat "$WORK_DIR/build.txt")"
 grep -q "graph.enabled set on 'notes'" "$WORK_DIR/build.txt" || fail "graph.enabled was not set: $(cat "$WORK_DIR/build.txt")"
 grep -q "^      enabled: true" "$CONFIG" || fail "the config does not carry graph.enabled: $(cat "$CONFIG")"
@@ -188,6 +192,11 @@ grep -q "\[Knowledge graph: notes\]" "$WORK_DIR/turn5.out" || fail "the collecti
 grep -q "^Deleted graph \"work\": 4 node(s)" "$WORK_DIR/delw.txt" || fail "graph delete work: $(cat "$WORK_DIR/delw.txt")"
 [ ! -e "$APOGEE_HOME/embeddings/graphs/work.db" ] || fail "graph delete left the database"
 "$APOGEE_BIN" config delete-graph work </dev/null >/dev/null 2>&1 || fail "config delete-graph again"
+
+# --- --quiet: no progress, the results still said (M1) ---------------------
+"$APOGEE_BIN" graph build notes -m extractor --force --quiet </dev/null >"$WORK_DIR/quiet.txt" 2>"$WORK_DIR/quiet.err" || fail "quiet build: $(cat "$WORK_DIR/quiet.err")"
+grep -q "Graph build complete for \"notes\"" "$WORK_DIR/quiet.txt" || fail "a quiet build lost its summary: $(cat "$WORK_DIR/quiet.txt")"
+if grep -q "\[graph\] extracting\|\[graph\] embedding" "$WORK_DIR/quiet.err"; then fail "--quiet still printed progress: $(cat "$WORK_DIR/quiet.err")"; fi
 
 # --- delete clears the graph, keeps the chunks -------------------------------
 "$APOGEE_BIN" graph delete notes </dev/null >"$WORK_DIR/delete.txt" 2>&1 || fail "delete"

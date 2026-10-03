@@ -32,7 +32,7 @@
 - The censorship guard: a templated model's literal `<|end|>` in prose renders exactly.
 - Tools: with no template, the request carries zero tool definitions (asserted at the wire recorder), and the notice prints once.
 - The saved transcript byte-equals the model's output in all cases — the display never leaks into history.
-- On real weights (live, recorded on ship): a base build from [the model families](../assistant/DEVELOPER.md#on-real-weights-the-model-families) where one is installed — the capability is a clean screen (no marker bytes) and tools reported off, for a full multi-turn session.
+- On real weights (live, recorded on ship): a base build from [the model families](../../assistant/DEVELOPER.md#on-real-weights-the-model-families) where one is installed — the capability is a clean screen (no marker bytes) and tools reported off, for a full multi-turn session.
 
 **Acceptance criteria:**
 - [ ] Replaying the motivating session's model: no `<|…` fragments anywhere on screen, `--tools` answered by the startup notice with zero tools advertised, the base tag visible at the banner and status line throughout — and the model still streams its (wrong) answers, ungated.

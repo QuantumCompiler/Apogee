@@ -549,7 +549,8 @@ TEST_CASE("a positional completes by what it declares, once", "[commands][comple
     CHECK(complete_line({"models", "info"}) == std::vector<std::string>{"claude", "local"});
     CHECK(complete_line({"models", "info"}, "lo") == std::vector<std::string>{"local"});
     // Every positional given: only a flag can follow, so flags are offered.
-    CHECK(complete_line({"models", "info", "claude"}) == std::vector<std::string>{"--help", "-h"});
+    CHECK(complete_line({"models", "info", "claude"}) ==
+          std::vector<std::string>{"--help", "--quiet", "-h", "-q"});
     CHECK(complete_line({"train", "rollback"}) == std::vector<std::string>{"claude", "local"});
     // A positional that is a file or free text offers nothing, which hands
     // the word back to the shell's own file completion.

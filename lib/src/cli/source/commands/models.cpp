@@ -132,9 +132,50 @@ void render_window(std::ostream& out, const models::GgufInfo& info,
 std::vector<ModelRow> build_model_rows(const harness::Config& config,
                                        const std::filesystem::path& models_dir,
                                        const std::filesystem::path& config_path,
-                                       const secrets::EnvSnapshot* env) {
+                                       const secrets::EnvSnapshot* env,
+                                       const BusyProgress& progress) {
     std::vector<ModelRow> rows;
     rows.reserve(config.backends.size());
+
+    // What the model store holds -- listed before anything is read, so the
+    // sweep below knows how many reads it has to do and can say so (M1).
+    // Listing is a directory walk; the header reads are what take the time.
+    models::StoreRoots roots = models::StoreRoots::at(models_dir);
+    if (!config.paths.hf_dir.empty()) {
+        roots.safetensors =
+            std::filesystem::path{harness::expand_env_and_home(config.paths.hf_dir)};
+    }
+    std::vector<std::filesystem::path> configured;
+    for (const auto& [key, backend] : config.backends) {
+        if (!backend.model_path.empty()) {
+            configured.push_back(
+                std::filesystem::path{harness::expand_env_and_home(backend.model_path)}
+                    .lexically_normal());
+        }
+    }
+    std::vector<models::StoredGguf> stored_ggufs;
+    std::vector<models::StoredSnapshot> stored_snapshots;
+    if (!models_dir.empty()) {
+        for (models::StoredGguf& stored : models::list_store_ggufs(roots)) {
+            if (std::ranges::find(configured, stored.file.lexically_normal()) == configured.end()) {
+                stored_ggufs.push_back(std::move(stored));
+            }
+            // else its backend's row already says everything
+        }
+        stored_snapshots = models::list_store_snapshots(roots);
+    }
+    std::size_t reads = stored_ggufs.size() + stored_snapshots.size();
+    for (const auto& [key, backend] : config.backends) {
+        if (is_local(backend.type) && !harness::expand_env(backend.model_path).empty()) {
+            ++reads;
+        }
+    }
+    std::size_t read = 0;
+    const auto reading = [&](std::string_view what, const std::string& name) {
+        if (progress) {
+            progress(std::string{what} + name, ++read, reads);
+        }
+    };
     std::optional<secrets::CredentialStore> store;
     if (!config_path.empty()) {
         store.emplace(secrets::credentials_path(config_path));
@@ -200,6 +241,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
 
         const std::filesystem::path path{expanded};
         row.model = path.filename().string();
+        reading("reading model headers: ", row.model);
         row.verified = describe_record(path);
 
         const models::GgufInfo info = models::inspect_gguf(path);
@@ -230,24 +272,9 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     // everything `models pull`, `convert`, `quantize` and `train promote` have
     // made, until the user wires it up. Each by the handle the other verbs
     // take: `<model>/<format>/<id>`.
-    models::StoreRoots roots = models::StoreRoots::at(models_dir);
-    if (!config.paths.hf_dir.empty()) {
-        roots.safetensors =
-            std::filesystem::path{harness::expand_env_and_home(config.paths.hf_dir)};
-    }
-    std::vector<std::filesystem::path> configured;
-    for (const auto& [key, backend] : config.backends) {
-        if (!backend.model_path.empty()) {
-            configured.push_back(
-                std::filesystem::path{harness::expand_env_and_home(backend.model_path)}
-                    .lexically_normal());
-        }
-    }
     if (!models_dir.empty()) {
-        for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
-            if (std::ranges::find(configured, stored.file.lexically_normal()) != configured.end()) {
-                continue;  // its backend's row already says everything
-            }
+        for (const models::StoredGguf& stored : stored_ggufs) {
+            reading("reading model headers: ", stored.file.filename().string());
             ModelRow row;
             // Not a backend: it is a file waiting to be pointed at.
             row.backend = "(not configured)";
@@ -282,7 +309,8 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         // SafeTensors sets -- trainable, not runnable -- listed so a user can
         // see what `convert` and `apogee train` can take, without a backend
         // ever pointing at one.
-        for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
+        for (const models::StoredSnapshot& stored : stored_snapshots) {
+            reading("reading snapshots: ", stored.model);
             ModelRow row;
             row.backend = "(not configured)";
             row.type = "-";
@@ -417,7 +445,8 @@ std::string render_model_jsonl(const std::vector<ModelRow>& rows) {
     return out.str();
 }
 
-std::string render_model_info(const harness::Config& config, std::string_view backend) {
+std::string render_model_info(const harness::Config& config, std::string_view backend,
+                              const BusyProgress& progress) {
     const auto entry = config.backends.find(std::string{backend});
     if (entry == config.backends.end()) {
         return {};
@@ -448,6 +477,9 @@ std::string render_model_info(const harness::Config& config, std::string_view ba
     }
 
     out << "model_path:   " << expanded << "\n";
+    if (progress) {
+        progress("reading " + std::filesystem::path{expanded}.filename().string(), 0, 0);
+    }
     const models::GgufInfo info = models::inspect_gguf(std::filesystem::path{expanded});
     if (!info.parsed) {
         // The reason, always. An unreadable header rendering as blank fields is
@@ -507,7 +539,7 @@ std::string render_model_info(const harness::Config& config, std::string_view ba
     return out.str();
 }
 
-std::string render_role_status(const harness::Config& config) {
+std::string render_role_status(const harness::Config& config, const BusyProgress& progress) {
     std::ostringstream out;
     for (const auto [role, label] : {std::pair{harness::ModelRole::Chat, "chat"},
                                      std::pair{harness::ModelRole::Embedding, "embedding"},
@@ -550,6 +582,11 @@ std::string render_role_status(const harness::Config& config) {
                    !entry->second.model_path.empty()) {
             // What loading it costs: a helper is a second model resident
             // beside the chat's, and that memory should be visible (26b).
+            if (progress) {
+                // No count: which roles read a header is only known as each
+                // resolves, and a total guessed ahead would be a lie.
+                progress("reading " + key + "'s model header", 0, 0);
+            }
             const models::GgufInfo info = models::inspect_gguf(
                 std::filesystem::path{harness::expand_env(entry->second.model_path)});
             if (info.parsed) {
@@ -588,13 +625,24 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
 
     auto format = std::make_shared<std::string>();
     auto no_color = std::make_shared<bool>(false);
+    auto list_quiet = std::make_shared<bool>(false);
     CLI::App* list = cmd->add_subcommand("list", "List configured backends and their models");
     list->add_option("--output-format", *format, "text (default) or stream-json")
         ->check(CLI::IsMember({"text", "stream-json"}));
     list->add_flag("--no-color", *no_color, "Disable coloured output");
-    list->callback([load, format, no_color, &context]() {
-        const std::vector<ModelRow> rows = build_model_rows(
-            load(), harness::models_dir(), harness::resolve_config_path(context.config_path));
+    list->add_flag("-q,--quiet", *list_quiet, "No progress line while the models are read");
+    list->callback([load, format, no_color, list_quiet, &context]() {
+        const harness::Config config = load();
+        std::vector<ModelRow> rows;
+        {
+            // Every stored model's header is read, and on a full store that
+            // takes seconds: said on one line, gone before the table (M1).
+            BusyLine busy{std::cerr, "reading the model store",
+                          busy_options(*list_quiet || *format == "stream-json")};
+            rows = build_model_rows(config, harness::models_dir(),
+                                    harness::resolve_config_path(context.config_path), nullptr,
+                                    busy.sink());
+        }
         if (*format == "stream-json") {
             std::cout << render_model_jsonl(rows);
             return;
@@ -604,21 +652,37 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
     });
 
     auto info_name = std::make_shared<std::string>();
+    auto info_quiet = std::make_shared<bool>(false);
     CLI::App* info = cmd->add_subcommand("info", "Show one backend's model in detail");
     info->add_option("backend", *info_name, "Backend key from the config")
         ->type_name(kBackendValue)
         ->required();
-    info->callback([load, info_name]() {
+    info->add_flag("-q,--quiet", *info_quiet, "No progress line while the model is read");
+    info->callback([load, info_name, info_quiet]() {
         const harness::Config config = load();
-        const std::string body = render_model_info(config, *info_name);
+        std::string body;
+        {
+            BusyLine busy{std::cerr, "reading the model", busy_options(*info_quiet)};
+            body = render_model_info(config, *info_name, busy.sink());
+        }
         if (body.empty()) {
             fail("no backend named '" + *info_name + "'");
         }
         std::cout << body;
     });
 
+    auto status_quiet = std::make_shared<bool>(false);
     CLI::App* status = cmd->add_subcommand("status", "Show which backend each role resolves to");
-    status->callback([load]() { std::cout << render_role_status(load()); });
+    status->add_flag("-q,--quiet", *status_quiet, "No progress line while the models are read");
+    status->callback([load, status_quiet]() {
+        const harness::Config config = load();
+        std::string body;
+        {
+            BusyLine busy{std::cerr, "resolving the roles", busy_options(*status_quiet)};
+            body = render_role_status(config, busy.sink());
+        }
+        std::cout << body;
+    });
 
     // The mutating verbs live in their own translation unit, so "what can this
     // command destroy?" has a short answer.

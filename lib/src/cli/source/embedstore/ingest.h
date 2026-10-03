@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -16,6 +17,12 @@ namespace apogee::embedstore {
 /// lexical-only ingest. Throws to report a failure; the walk records it for
 /// that source and stores the chunks lexical-only rather than dropping them.
 using EmbedChunks = std::function<std::vector<std::vector<float>>(const std::vector<std::string>&)>;
+
+/// Hears each file as its turn comes: the 1-based place of `file` among
+/// `total`, the whole walk counted before the first is read. A caller's busy
+/// line says it; a test passes none (M1).
+using IngestProgress =
+    std::function<void(std::size_t done, std::size_t total, const std::filesystem::path& file)>;
 
 struct IngestReport {
     std::int64_t files_read = 0;
@@ -72,6 +79,7 @@ struct IngestReport {
 [[nodiscard]] IngestReport ingest_path(const std::filesystem::path& store_path,
                                        const std::filesystem::path& target,
                                        const ChunkOptions& options = {},
-                                       const EmbedChunks& embed = {});
+                                       const EmbedChunks& embed = {},
+                                       const IngestProgress& progress = {});
 
 }  // namespace apogee::embedstore

@@ -459,6 +459,75 @@ Asked for directly (Taylor, 2026-09-23, with a Qwen3.5 transcript): "the formatt
 - `cli.chat_typeahead_and_crash_safety` gains three PTY checks: `markdown` (no `**` around rendered bold, and `**bold**` with `--raw`), `typeahead-hidden` (words typed mid-reply absent from the reply, present at the prompt) and `interrupt` (echo off mid-turn, on after SIGINT). A build without the guard fails the second and third, and one whose signal handler does not restore echo fails the third.
 - On the real binary under a 100-column PTY, the Qwen3.8 fixture rendered with its table wrapped in columns.
 
+
+### 2026-10-03 — `cli-busy-line` (maintenance item M1): every slow command speaks on one line
+
+**Why.** `apogee models list` went silent for seconds (the user's report, 2026-09-30). On this machine's store it made 31 reads in about 15 seconds, and `check`, which reads most of them twice, took about 30, with nothing on screen. Chat solved this in the 2026-08-26 entry above: the status line, one repainted line with a spinner, active only on a terminal. But only a conversation ever made one, so an ordinary command had no line to speak on. This item carries the same painter across the application.
+
+**What was built**
+
+- [x] **The general frame** (`spinner_frame`, a second overload beside chat's), for example `✻ reading model headers: gemma-4-31B-it-F16.gguf (6/31 · 7s)`:
+  - the spinner, the label, then `(done/total)` when the sweep knows its total;
+  - the elapsed time from two seconds;
+  - never the last column: the frame is cut to the width less one, the label giving way first, and the count and time never cut.
+- [x] **`StatusLine` grew a busy mode** (`start_busy`), rather than a second painter being written:
+  - its first frame comes only after a delay, so a fast command paints nothing;
+  - the label and count change from any thread (`set_spinner_label`);
+  - stderr's width is asked at every repaint;
+  - `print_above` writes output meant to stay with the line out of its way, and the line repaints below it.
+  - Stopping now wakes a waiting spinner instead of sleeping out its interval, chat's spinner included, so a command that finishes early is never kept waiting.
+- [x] **`BusyLine`**, the scope a command opens around slow work:
+  - constructing it means the line may appear; destroying it (or `finish`) clears it, so what the command prints next starts on a clean row;
+  - `report(label, done, total)` and `set(label)`, and `sink()`, the same as a `BusyProgress` callback for a sweep to report through;
+  - `above(write)` for a line that stays.
+  - `busy_options(quiet)` makes it active only when stderr is a terminal and nothing asked for silence. Otherwise it writes no byte and starts no thread.
+- [x] **`platform::terminal_width(StandardStream)`.** The line paints on stderr, so it is measured on stderr. Under `apogee models list | grep x`, stdout is the pipe and stderr the terminal.
+- [x] **The first consumers**, each reporting through a plain callback from the layer doing the work. `models/` is untouched: the header reads are in `commands/`.
+  - `models list` counts its reads across the whole sweep before the first: configured local files, stored GGUFs no backend points at, and SafeTensors snapshots. `models info` and `models status` name the header they read, without a count, since neither knows a total worth claiming.
+  - `check` says each section as it starts, and counts the headers in Config and in Models.
+  - `graph build` and `graph communities` move their per-chunk and per-community lines onto the busy line on a terminal. On a pipe those lines stay as they were, one per step, a log a script can read. A failed chunk and a dry run's extraction print above the line.
+  - `embed ingest` counts its files: the walk is counted before the first is read (`embedstore::IngestProgress`, an optional parameter with an empty default).
+  - There is no `graph update` yet; it adopts the line when it is written.
+- [x] **`-q, --quiet`** on every one of them: no busy line, and for the graph commands no per-step line on a pipe either. Results, warnings and failures still print. `embed ingest --graph --quiet` carries it into the build it chains. `models list --output-format stream-json` is silent the same way.
+
+**On the real store** (this machine's, read only: 31 stored models and 20 local backends, a 100-column pseudo-terminal, built without llama.cpp, with three mutation builds running beside it, so the times are long):
+- `models list` showed 178 frames over 22 seconds, from `(1/31)` to `(31/31)`, then the table on a clean first row.
+- `check` showed 353 frames over 44 seconds, counting Config's reads to 20 and then Models' to 31.
+- No frame reached the last column (the widest was 78 of 100), and no residue was left.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The frame | Spinner · label · `(done/total)` when known · elapsed from 2 s; the label cut to the live width *(default taken)* | The count and the time are what tell a stalled sweep from a working one, so they are never cut. |
+| The gate | 150 ms before the first frame *(default taken)* | A fast command never flickers. Elapsed still counts from the start of the work. |
+| The consumers | `models list/info/status`, `check`, `graph build` (and `communities`), `embed ingest` *(default taken)* | The known slow spots; a later slow command adopts the same scope as it is touched. |
+| Quiet | `--quiet` silences the busy line, and on a pipe the graph commands' progress lines too *(default taken)* | One verbosity model: what silences the status line silences this. |
+| One painter | `StatusLine` extended, never a second | Decided when the item was specced (2026-09-30): a second transient line is the erase-arithmetic bug class the thinking view closed once. |
+| Pipes | Graph progress kept a line per step; the other consumers print nothing | The line is for terminals; a log needs lines it can read, and the commands that printed none print none. |
+
+**Guardrails, each mutation-tested (38 mutants, all caught)**, run in separate git worktrees against the whole unit suite, the PTY check and the graph end-to-end on the mutated binary. 37 were caught on the first pass, 14 of them only by the binary-level checks. The survivor, a stop that never woke the spinner, went unseen because the test stopped the spinner before its thread had reached its wait; the test now waits for the first frame first.
+- **The frame:** the time from one second, the count dropped, the last column used, the label or a narrow frame not cut, the ellipsis not counted, a count shown with no total.
+- **The line:** no delay, a stop not woken, the width measured once, stderr's width asked of stdout (in `status_line` and in `platform`), the line painting on a pipe or ignoring `--quiet`, output above it not erased first, `finish` leaving the line, a label change never shown.
+- **The consumers:** each sweep's report unsaid or uncounted (configured reads, snapshots, `info`, `status`, Config's and Models' reads, an ingest's files), the sink never passed by `models list` or `check`, JSON output painting, the graph's and the ingest's lines unused, and every `--quiet` ignored, the one `embed ingest --graph` carries included.
+
+**Tests.**
+- `status_line_test`: the frame as goldens, including the shapes with no total and under two seconds; every width from 1 to 80, wide characters included; an inactive line writes nothing; a delay outlasted by the work paints nothing and is not waited out; the line repaints in place and clears; output above it; the width asked at every repaint; a stop that wakes the spinner.
+- `models_test`, `check_test`, `ingest_test`: what each sweep reports, and that reporting changes nothing printed. `graph_test`: `embed ingest --graph --quiet` is quiet in the build it chains.
+- **`cli.busy_line`** (`tests/pty_busy_check.py`), on the real binary. A model's sidecar and an agent's schema are named pipes, so the sweep is held, with no test seam in the product, until the script has seen the line on the terminal; the graph extractor and summariser are the mock, slowed by `delay_ms`; an ingest of 8,000 files is slow by being big. For `models list`, `check`, `graph build`, `graph communities` and `embed ingest` it checks that:
+  - the line repaints naming its phase and count, and no frame reaches the last column;
+  - the final screen holds only the results;
+  - piped, `models list` writes nothing to stderr, and its stdout is byte-identical whether stderr is a terminal or a pipe;
+  - `--quiet` and `stream-json` paint nothing, and a sweep under 150 ms paints nothing.
+
+  Run against the installed build from before this item, it fails on every frame it never painted.
+- `graph_e2e.sh`: on a pipe, the build keeps a line per chunk and writes no escape byte, and `--quiet` keeps only the summary.
+
+**Not verified, and found on the way.**
+- **Why `models list` is slow.** Sampling it showed nearly all the time inside `inspect_gguf`'s `skip_value`. Each string of a tokenizer's vocabulary is skipped with its own `seekg`, which discards the stream's buffer, so a 150,000-token vocabulary costs some 300,000 system calls per file: about 10 of the 15 seconds were system time. That is the read itself, outside this item. Reading the vocabulary in buffered blocks could make the header cache (M2) unnecessary, and is worth trying first.
+- **A failed chunk printed above the line** is covered by the code path, not a test: no fixture makes a chunk fail on a terminal.
+- **Windows** builds the stream-aware width but runs no PTY check, the recorded per-item skip.
+
 ---
 
 ## Milestone H — `apogee chat`
@@ -882,7 +951,7 @@ Every saved transcript held its calls and results as IR, with no `<tool_call>`, 
 | Acceptance models | **8B-class and up** (the user's call) | Qwen3-VL-8B and Qwen3.8-27B. |
 | Profile filters | Replaced by `common`'s parser wherever Jinja renders *(default taken)* | One parser per template, maintained upstream; the filters stay for the fallback. |
 | Streaming | Re-read per token, emit the difference *(default taken)* | llama-server's method; quadratic, and nothing at chat lengths. |
-| Sampling | Greedy, plus the lazy grammar *(default taken)* | Per-family sampling is [26h](../backlog/sampling-profiles.md); the chain it will extend is `make_sampler`. |
+| Sampling | Greedy, plus the lazy grammar *(default taken)* | Per-family sampling is [26h](../backlog/v0.1.3/sampling-profiles.md); the chain it will extend is `make_sampler`. |
 | Tool choice | `auto`, parallel calls off *(default taken)* | One call per step is easier to gate and to show. |
 | Repeated calls | The third identical call is answered unrun *(default taken)* | The spike's 3B read one file three times and ran the shell eight. |
 | Image turns | Carry tools too *(default taken)* | A model asked about a picture can act on it (the Milestone O rule). |
@@ -1096,7 +1165,7 @@ Every saved transcript held its calls and results as IR, with no `<tool_call>`, 
 - [x] **A stop's token is not claimed by the cache** (`Generation::last_unfed`): it still counts as generated, and the conversation's cached tokens stop before it. The scripted context now refuses any decode past its end, so the gap cannot come back quietly.
 - [x] **Tests**: 7 new cases: the marker ending the reply unseen, a near-marker kept and a held one flushed, a stop's token and the next turn's decode, the notice once and in place of the tools line, the template noticed in the header, both `template:` lines, and every guessed framing's stops.
 
-**On real weights** (the new binary, both files as they are): Gemma 4 12B gave the notice once, answered, and stopped at its guessed format's marker after 6 s instead of running to its cap. Llama 3.1 8B gave the notice and still loops to its cap, repeating itself rather than writing any marker; a base model under greedy sampling does that, and taming it belongs to sampling ([26h](../backlog/sampling-profiles.md)). The fix that makes those chats work is the instruct release.
+**On real weights** (the new binary, both files as they are): Gemma 4 12B gave the notice once, answered, and stopped at its guessed format's marker after 6 s instead of running to its cap. Llama 3.1 8B gave the notice and still loops to its cap, repeating itself rather than writing any marker; a base model under greedy sampling does that, and taming it belongs to sampling ([26h](../backlog/v0.1.3/sampling-profiles.md)). The fix that makes those chats work is the instruct release.
 
 **Guardrails, each mutation-tested (13 mutants, all caught), run in a separate git worktree against the whole unit suite:** a marker never ending the reply, nothing held back, held text lost at the end, the reply going on past a marker; the stop's token claimed, or never marked; the notice every turn, never, or beside the tools line; the fallback with no stops; the template unnoticed or its value not stepped over; `models info` inverted.
 
@@ -2979,7 +3048,7 @@ Also checked:
 - **Heat, first.** Measured with `macmon`, the 14-inch M3 Max's GPU reaches 95–97 °C within about 25 s of steady generation, and its clock falls from 1,372 MHz to about 610 MHz after two minutes. Generation fell from 17.5 to 12.3 tokens/s over those two minutes and was still falling. After an hour of builds and model runs, it measured 5.2 tokens/s generating and 73 reading, against 13.6 and 152 when cool.
 - **Ruled out.** CPU load from builds (12 busy cores cost 7%). Graphics from the terminal and this desktop app, which kept the GPU "96% busy" at rest yet cost the model little. Apogee itself: llama.cpp's own benchmark, at the same pin, matches it.
 - **This machine supports High Power mode** (`pmset -g cap`), which runs the fans harder. It is the user's setting to change, not Apogee's.
-- **The rest is tokens.** Qwen3.8's reasoning before every step, and every byte a tool returns. That is what the smaller first page, and [thinking control](../backlog/thinking-control.md), address.
+- **The rest is tokens.** Qwen3.8's reasoning before every step, and every byte a tool returns. That is what the smaller first page, and [thinking control](../backlog/v0.1.3/thinking-control.md), address.
 
 **Guardrails, each mutation-tested (51 mutants, every one run against the whole unit suite).** 48 were caught outright, and 3 once their tests were strengthened. The mutants, by area:
 - **Landmarks:** `<main>` ignored; no dominant article, or any largest article taken.

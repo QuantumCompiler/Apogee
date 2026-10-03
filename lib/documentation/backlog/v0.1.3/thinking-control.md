@@ -2,11 +2,11 @@
 
 **What / why.** A user, and the harness, decide when a reasoning model thinks, and for how long. On the reference machine, thinking was 26 of the 57 seconds of one ordinary answer (2026-09-25), and it is the same cost whether the question is arithmetic or small talk. The controls:
 - **`/think on|off|auto`** in `chat`, `--think` on `chat` and `complete`, and a `thinking:` default per backend.
-- **`auto`**: the [utility model](../assistant/MILESTONES.md#milestone-n--model-operations), or a cheap heuristic without one, decides per question whether it needs reasoning.
+- **`auto`**: the [utility model](../../assistant/MILESTONES.md#milestone-n--model-operations), or a cheap heuristic without one, decides per question whether it needs reasoning.
 - **A thinking budget**: the most tokens a model may spend reasoning before it must answer. llama.cpp's reasoning-budget sampler (`common/reasoning-budget.h`) forces the end-of-thinking tag when the budget is spent.
 - **The display says what happened**: `✻ Thought for 8s` or `✻ Thought for 20s (budget reached)`.
 
-Switching thinking off goes through the template's own `enable_thinking` now that [local tool calling](../assistant/MILESTONES.md#milestone-j--local-inference) renders through Jinja (2026-09-25), generalising the Qwen-only `skip_reasoning` added for titles on 2026-09-25.
+Switching thinking off goes through the template's own `enable_thinking` now that [local tool calling](../../assistant/MILESTONES.md#milestone-j--local-inference) renders through Jinja (2026-09-25), generalising the Qwen-only `skip_reasoning` added for titles on 2026-09-25.
 
 **Core constraint(s).**
 - **Parity across backends.** The same setting maps to each vendor's own control: Anthropic's thinking budget, OpenAI's reasoning effort, Gemini's thinking budget. A backend with no control says so in `models info` rather than pretending.

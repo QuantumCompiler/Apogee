@@ -571,6 +571,16 @@ if(UNIX)
         )
         set_tests_properties(cli.ffmpeg_stays_off_the_terminal PROPERTIES TIMEOUT 120)
 
+        # The busy line (M1): a slow sweep -- held by a named pipe, never a
+        # seam in the product -- speaks on one repainted stderr line that is
+        # gone before the results, and stdout stays the answer on a pipe.
+        add_test(NAME cli.busy_line
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/pty_busy_check.py"
+                $<TARGET_FILE:apogee>
+        )
+        set_tests_properties(cli.busy_line PROPERTIES TIMEOUT 120)
+
         add_test(NAME cli.chat_typeahead_and_crash_safety
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/pty_chat_check.py"

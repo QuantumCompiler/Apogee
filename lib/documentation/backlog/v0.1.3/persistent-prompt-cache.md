@@ -1,6 +1,6 @@
 # A prompt cache that survives the process
 
-**What / why.** A resumed chat, or a new one with the same system prompt and tools, starts without re-reading what was already read. The KV cache lives only as long as the process today, so `chat --resume` on a long conversation reads the whole transcript before its first token: 10,000 tokens is about 100 s on the reference machine's 27B. Every new chat with `--tools` also reads the same system prompt and tool definitions (1–2K tokens once [local tool calling](../assistant/MILESTONES.md#milestone-j--local-inference) renders them), every time. llama.cpp saves and restores a sequence's state to a file (`llama_state_seq_save_file`, `…load_file`), including a hybrid model's recurrent state.
+**What / why.** A resumed chat, or a new one with the same system prompt and tools, starts without re-reading what was already read. The KV cache lives only as long as the process today, so `chat --resume` on a long conversation reads the whole transcript before its first token: 10,000 tokens is about 100 s on the reference machine's 27B. Every new chat with `--tools` also reads the same system prompt and tool definitions (1–2K tokens once [local tool calling](../../assistant/MILESTONES.md#milestone-j--local-inference) renders them), every time. llama.cpp saves and restores a sequence's state to a file (`llama_state_seq_save_file`, `…load_file`), including a hybrid model's recurrent state.
 
 Two caches:
 - **The prefix cache.** Per model, the state after the system prompt and tool definitions, keyed by a hash of those tokens. Computed once, restored into every new chat whose prompt starts the same way.
@@ -9,7 +9,7 @@ Two caches:
 **Core constraint(s).**
 - **A cache that cannot be used is discarded, never trusted.** A key mismatch, a model file changed, a llama.cpp that refuses the state: each means the cache is removed and the prompt is read as today, with one line saying so. Ommi's "self-healing cache" lesson (CHAT.md) came from M-RoPE Qwen models refusing replay, the same family this targets.
 - **Correctness first.** A restore must leave the context exactly as decoding the prefix would; output after a restore equals output without it under greedy sampling.
-- **Bounded, and in `cache/`.** State files go under the `cache/` layout row ("safe to delete"), with a total size cap and least-recently-used eviction. Sizes are large: 64 KiB a token for Qwen3.8 at `f16`, 34 KiB at `q8_0`, the default since [26a](../assistant/MILESTONES.md#milestone-j--local-inference) (`models/kv_cache.h` gives any model's cost per position from its header). `check` reports the total.
+- **Bounded, and in `cache/`.** State files go under the `cache/` layout row ("safe to delete"), with a total size cap and least-recently-used eviction. Sizes are large: 64 KiB a token for Qwen3.8 at `f16`, 34 KiB at `q8_0`, the default since [26a](../../assistant/MILESTONES.md#milestone-j--local-inference) (`models/kv_cache.h` gives any model's cost per position from its header). `check` reports the total.
 - **Private.** A chat's cache holds its conversation, so its files are `0600`, like sessions.
 - **Side requests never read or write the session's cache.**
 
@@ -25,7 +25,7 @@ Two caches:
 
 **Decisions made:**
 - 2026-09-25 — Asked for by the user ("Speed and memory").
-- 2026-09-25 — After [25c](../assistant/MILESTONES.md#milestone-j--local-inference), whose hybrid-state handling a restore must respect, and [26a](../assistant/MILESTONES.md#milestone-j--local-inference), whose cache type sets the file sizes.
+- 2026-09-25 — After [25c](../../assistant/MILESTONES.md#milestone-j--local-inference), whose hybrid-state handling a restore must respect, and [26a](../../assistant/MILESTONES.md#milestone-j--local-inference), whose cache type sets the file sizes.
 
 **Open calls:**
 - [default: the prefix cache on, the chat cache on for chats over 2,000 tokens] Short chats re-read in a second or two and are not worth the disk.

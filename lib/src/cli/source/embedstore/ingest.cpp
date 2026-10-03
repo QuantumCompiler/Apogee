@@ -105,7 +105,7 @@ bool read_as_text(const std::filesystem::path& path, std::string& text, std::str
 
 IngestReport ingest_path(const std::filesystem::path& store_path,
                          const std::filesystem::path& target, const ChunkOptions& options,
-                         const EmbedChunks& embed) {
+                         const EmbedChunks& embed, const IngestProgress& progress) {
     IngestReport report;
     Store store{store_path};
 
@@ -129,7 +129,11 @@ IngestReport ingest_path(const std::filesystem::path& store_path,
         root = target.parent_path();
     }
 
+    std::size_t done = 0;
     for (const std::filesystem::path& file : files) {
+        if (progress) {
+            progress(++done, files.size(), file);
+        }
         std::string text;
         std::string reason;
         if (!read_as_text(file, text, reason)) {

@@ -8,7 +8,7 @@
 - **Warnings propagate once, decisions don't change:** the base-model note (no chat template) and a failed projector appear in the chain's summary exactly as they do standalone — and a base model still registers, with the convert-the-`-it`-release hint beside its backend name.
 - **No network after the pull stage;** the whole chain after it runs offline, and zero model calls anywhere (conversion and quantization are not inference).
 - **Config edits are byte-disciplined:** every `add-backend` through the comment-preserving editor; role pointers untouched; names collision-checked before the chain starts so stage one never runs for a chain that would refuse at stage four.
-- **One status discipline:** stage progress through the standing status/busy machinery ([M1](cli-busy-line.md) when it lands, today's `download_progress` and convert reporting meanwhile), and the quantize log-leak fix means **no third-party library writes raw lines to the terminal** on any `models` path — the captured-stderr rule, applied to an in-process library's logging.
+- **One status discipline:** stage progress through the standing status/busy machinery ([M1](../../assistant/MILESTONES.md#milestone-g--the-terminal-ux-layer)'s busy line, shipped 2026-10-03, for a stage with no progress of its own; `download_progress` and convert's reporting where they have it), and the quantize log-leak fix means **no third-party library writes raw lines to the terminal** on any `models` path — the captured-stderr rule, applied to an in-process library's logging.
 
 **Seam + files.**
 - `commands/models_pull.cpp`: the `--register` / `--register-with <levels>` flags (comma or repeatable), the stage orchestrator (a small plan over closures: pull, convert, quantize×N, register×M — the promote-plan shape in miniature), the resume-command printing, the upfront name-collision check.
@@ -32,7 +32,7 @@
 - The stage table, exhaustively: every stage's failure leaves prior artifacts intact and prints the resuming command; mutation-tested where convention applies.
 - The quantize-silence assertion on a fixture GGUF: zero non-Apogee lines on stdout/stderr at default verbosity.
 - Config byte-goldens: a chain's registrations are exactly the entries `add-backend` would write by hand, pristine comments kept.
-- On real weights (live, recorded on ship): one full-weight pull from [the model families](../assistant/DEVELOPER.md#on-real-weights-the-model-families) chained to a registered quant and chatted with — the capability is pull-to-first-token in one command.
+- On real weights (live, recorded on ship): one full-weight pull from [the model families](../../assistant/DEVELOPER.md#on-real-weights-the-model-families) chained to a registered quant and chatted with — the capability is pull-to-first-token in one command.
 
 **Acceptance criteria:**
 - [ ] `apogee models pull <ref> --safetensors --register` ends with a registered F16 backend and prints each stage as it ran; `--register-with Q4_K_M` adds the quant and its backend — one command, no further typing.

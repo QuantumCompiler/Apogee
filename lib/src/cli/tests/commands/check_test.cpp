@@ -8,6 +8,9 @@
 #include <fstream>
 #include <random>
 #include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #include "embedstore/store.h"
 #include "harness/assets.h"
@@ -1663,4 +1666,53 @@ TEST_CASE("a vision role that cannot see gives way to a chat model that can",
     const auto* images = row_with(report, "images");
     REQUIRE(images != nullptr);
     CHECK(images->detail == "cloud sees them as they are; described by cloud");
+}
+
+TEST_CASE("the doctor says each section, and counts the headers it reads",
+          "[commands][check][busy]") {
+    // M1: on a full store `check` reads every model's header, which takes
+    // seconds; each section is said as it starts, and the reads are counted.
+    // Saying so changes nothing in the report.
+    const Install install;
+    install.seed();
+    install.write("local/good.gguf", apogee::testing::minimal_gguf("llama"));
+    install.write("models/m/gguf/111111111111/stored.gguf", apogee::testing::minimal_gguf("llama"));
+    install.write("models/n/gguf/222222222222/other.gguf", apogee::testing::minimal_gguf("llama"));
+
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml",
+                  "backends:\n  local:\n    type: llamacpp\n    model_path: " +
+                      (install.root / "local" / "good.gguf").string() +
+                      "\n  unset:\n    type: llamacpp\n  cloud:\n    type: anthropic\n");
+    load_into(inputs);
+
+    std::vector<std::tuple<std::string, std::size_t, std::size_t>> heard;
+    inputs.progress = [&heard](std::string_view label, std::size_t done, std::size_t total) {
+        heard.emplace_back(label, done, total);
+    };
+    const CheckReport with = run_checks(inputs);
+    inputs.progress = nullptr;
+    const CheckReport without = run_checks(inputs);
+    CHECK(render_report(with, false) == render_report(without, false));
+
+    const auto at = [&heard](std::string_view label) {
+        return std::ranges::find_if(
+                   heard, [label](const auto& entry) { return std::get<0>(entry) == label; }) -
+               heard.begin();
+    };
+    // In the order the report is built, and a count only where one is known.
+    CHECK(at("checking the version") == 0);
+    CHECK(at("checking config") < at("checking config: good.gguf"));
+    CHECK(at("checking config: good.gguf") < at("checking models"));
+    CHECK(at("checking models") < at("checking models: stored.gguf"));
+    const auto heard_as = [&heard](std::string_view label) {
+        const auto match = std::ranges::find_if(
+            heard, [label](const auto& entry) { return std::get<0>(entry) == label; });
+        REQUIRE(match != heard.end());
+        return std::pair{std::get<1>(*match), std::get<2>(*match)};
+    };
+    CHECK(heard_as("checking config: good.gguf") == std::pair<std::size_t, std::size_t>{1, 1});
+    CHECK(heard_as("checking models: stored.gguf") == std::pair<std::size_t, std::size_t>{1, 2});
+    CHECK(heard_as("checking models: other.gguf") == std::pair<std::size_t, std::size_t>{2, 2});
+    CHECK(heard_as("checking config") == std::pair<std::size_t, std::size_t>{0, 0});
 }

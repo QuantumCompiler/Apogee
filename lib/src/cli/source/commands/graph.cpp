@@ -18,6 +18,7 @@
 #include "commands/embed.h"
 #include "commands/helpers.h"
 #include "commands/knowledge_core.h"
+#include "commands/status_line.h"
 #include "embedstore/store.h"
 #include "graph/build.h"
 #include "graph/communities.h"
@@ -478,6 +479,7 @@ struct BuildFlags {
     bool dry_run = false;
     bool force = false;
     int limit = 0;
+    bool quiet = false;
 };
 
 struct CommunitiesFlags {
@@ -486,6 +488,7 @@ struct CommunitiesFlags {
     bool force = false;
     int min_size = 0;
     bool list = false;
+    bool quiet = false;
 };
 
 struct DedupeFlags {
@@ -494,43 +497,62 @@ struct DedupeFlags {
     bool dry_run = false;
 };
 
-/// The build options every build form shares: the progress line, the
-/// dry-run printer, failures as they happen.
+/// The build options every build form shares: the progress, the dry-run
+/// printer, failures as they happen. `busy` must outlive the build.
+///
+/// On a terminal the progress is the busy line, one line repainted per chunk
+/// (M1); on a pipe it stays a line per chunk a log can read, as before; with
+/// `--quiet`, neither. What stays -- a failed chunk, a dry run's extraction --
+/// is printed above the busy line, never through it.
 [[nodiscard]] graph::BuildOptions build_options(const Generation& generation,
                                                 const std::string& embed_model,
-                                                const GraphBuildRequest& request) {
+                                                const GraphBuildRequest& request, BusyLine& busy) {
     graph::BuildOptions options;
     options.model = generation.kg_model;
     options.embed_model = embed_model;
     options.force = request.force;
     options.limit = request.limit;
     options.dry_run = request.dry_run;
-    options.on_progress = [](const graph::Progress& progress) {
+    options.on_progress = [&busy, quiet = request.quiet](const graph::Progress& progress) {
         if (progress.stage == graph::Progress::Stage::Extract) {
-            std::cerr << "[graph] extracting "
-                      << (progress.collection.empty() ? "" : progress.collection + ": ")
-                      << progress.file << " (file " << progress.file_index << "/"
-                      << progress.file_count << ", chunk " << progress.chunks_done + 1 << "/"
-                      << progress.chunks_total
-                      << (progress.failed > 0 ? ", " + std::to_string(progress.failed) + " failed"
-                                              : "")
-                      << ")\n";
-        } else {
+            const std::string failed =
+                progress.failed > 0 ? ", " + std::to_string(progress.failed) + " failed" : "";
+            const std::string where =
+                (progress.collection.empty() ? "" : progress.collection + ": ") + progress.file;
+            if (busy.active()) {
+                busy.report("extracting " + where + ", file " +
+                                std::to_string(progress.file_index) + " of " +
+                                std::to_string(progress.file_count) + failed,
+                            static_cast<std::size_t>(progress.chunks_done) + 1,
+                            static_cast<std::size_t>(progress.chunks_total));
+            } else if (!quiet) {
+                std::cerr << "[graph] extracting " << where << " (file " << progress.file_index
+                          << "/" << progress.file_count << ", chunk " << progress.chunks_done + 1
+                          << "/" << progress.chunks_total << failed << ")\n";
+            }
+        } else if (busy.active()) {
+            busy.set("embedding " + std::to_string(progress.entities) + " entities");
+        } else if (!quiet) {
             std::cerr << "[graph] embedding " << progress.entities << " entities\n";
         }
     };
     if (request.dry_run) {
-        options.on_extract = print_dry_run_extraction;
+        options.on_extract = [&busy](const embedstore::Chunk& chunk,
+                                     const graph::ExtractResult& result) {
+            busy.above([&] { print_dry_run_extraction(chunk, result); });
+        };
     }
     // Failed chunks print as they happen -- a count alone cannot tell a
     // flaky backend from a model that cannot produce the JSON. A dry run
     // prints the whole error; a real build keeps it to one line.
-    options.on_chunk_failed = [dry_run = request.dry_run](const embedstore::Chunk& chunk,
-                                                          std::string_view error) {
-        std::cout << "\n"
-                  << chunk.source << " [chunk " << chunk.ordinal
-                  << "] FAILED: " << (dry_run ? std::string{error} : preview_text(error, 200))
-                  << "\n";
+    options.on_chunk_failed = [&busy, dry_run = request.dry_run](const embedstore::Chunk& chunk,
+                                                                 std::string_view error) {
+        busy.above([&] {
+            std::cout << "\n"
+                      << chunk.source << " [chunk " << chunk.ordinal
+                      << "] FAILED: " << (dry_run ? std::string{error} : preview_text(error, 200))
+                      << "\n";
+        });
     };
     return options;
 }
@@ -557,12 +579,17 @@ void build_collection(const harness::Config& config, const std::filesystem::path
     std::cout << "Building the knowledge graph for \"" << target.name << "\" with "
               << generation.key << "...\n";
     graph::BuildResult result;
-    try {
-        result = graph::build(
-            store, graph::make_structured_extractor(providers.harness, generation.key),
-            entity_embedder.embed, build_options(generation, entity_embedder.model, request));
-    } catch (const std::exception& e) {
-        fail_backend(std::string{"graph build failed: "} + e.what());
+    {
+        BusyLine busy{std::cerr, "extracting", busy_options(request.quiet)};
+        try {
+            result = graph::build(
+                store, graph::make_structured_extractor(providers.harness, generation.key),
+                entity_embedder.embed,
+                build_options(generation, entity_embedder.model, request, busy));
+        } catch (const std::exception& e) {
+            busy.finish();
+            fail_backend(std::string{"graph build failed: "} + e.what());
+        }
     }
     print_build_summary(target.name, result);
     if (request.dry_run || result.cancelled) {
@@ -637,18 +664,23 @@ void build_named(const harness::Config& config, const std::filesystem::path& con
     const bool built = file_exists(target.db_path);
     embedstore::Store store{request.dry_run && !built ? std::filesystem::path{":memory:"}
                                                       : target.db_path};
-    graph::BuildOptions options = build_options(generation, entity_embedder.model, request);
-    options.graph_name = target.name;
     std::cout << "Building knowledge graph \"" << target.name << "\" over ["
               << join(named.collections) << "] with " << generation.key << "...\n";
     graph::BuildResult result;
-    try {
-        result =
-            graph::build_multi(store, members.members(named),
-                               graph::make_structured_extractor(providers.harness, generation.key),
-                               entity_embedder.embed, options);
-    } catch (const std::exception& e) {
-        fail_backend(std::string{"graph build failed: "} + e.what());
+    {
+        BusyLine busy{std::cerr, "extracting", busy_options(request.quiet)};
+        graph::BuildOptions options =
+            build_options(generation, entity_embedder.model, request, busy);
+        options.graph_name = target.name;
+        try {
+            result = graph::build_multi(
+                store, members.members(named),
+                graph::make_structured_extractor(providers.harness, generation.key),
+                entity_embedder.embed, options);
+        } catch (const std::exception& e) {
+            busy.finish();
+            fail_backend(std::string{"graph build failed: "} + e.what());
+        }
     }
     print_build_summary(target.name, result);
 }
@@ -833,12 +865,14 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
                     "Print every chunk's extraction and a summary; store nothing");
     build->add_flag("--force", b->force, "Re-extract every source, stale or not");
     build->add_option("--limit", b->limit, "Stop after N chunks (0 = no limit)");
+    build->add_flag("-q,--quiet", b->quiet, "No progress: no busy line, no per-chunk lines");
     build->callback([&context, b]() {
         run_graph_build(context, GraphBuildRequest{.name = b->name,
                                                    .model = b->model,
                                                    .dry_run = b->dry_run,
                                                    .force = b->force,
-                                                   .limit = b->limit});
+                                                   .limit = b->limit,
+                                                   .quiet = b->quiet});
     });
 
     // ---- stats ---------------------------------------------------------------
@@ -936,6 +970,8 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
     communities->add_option("--min-size", c->min_size,
                             "The smallest community to summarise (default 3)");
     communities->add_flag("--list", c->list, "List the stored communities; summarise nothing");
+    communities->add_flag("-q,--quiet", c->quiet,
+                          "No progress: no busy line, no per-community lines");
     communities->callback([&context, c]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
@@ -962,18 +998,28 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         options.model = generation.kg_model;
         options.force = c->force;
         options.min_size = c->min_size;
-        options.on_progress = [](int done, int total) {
-            std::cerr << "[graph] summarising community " << done + 1 << "/" << total << "\n";
-        };
         std::cout << "Detecting and summarising communities for \"" << target.name << "\" with "
                   << generation.key << "...\n";
         graph::CommunitiesResult result;
-        try {
-            result = graph::build_communities(
-                store, graph::make_summarizer(providers.harness, generation.key), embedder.embed,
-                options);
-        } catch (const std::exception& e) {
-            fail_backend(std::string{"community build failed: "} + e.what());
+        {
+            BusyLine busy{std::cerr, "detecting communities", busy_options(c->quiet)};
+            options.on_progress = [&busy, quiet = c->quiet](int done, int total) {
+                if (busy.active()) {
+                    busy.report("summarising communities", static_cast<std::size_t>(done) + 1,
+                                static_cast<std::size_t>(total));
+                } else if (!quiet) {
+                    std::cerr << "[graph] summarising community " << done + 1 << "/" << total
+                              << "\n";
+                }
+            };
+            try {
+                result = graph::build_communities(
+                    store, graph::make_summarizer(providers.harness, generation.key),
+                    embedder.embed, options);
+            } catch (const std::exception& e) {
+                busy.finish();
+                fail_backend(std::string{"community build failed: "} + e.what());
+            }
         }
         if (result.cancelled) {
             std::cout << "Community build for \"" << target.name
