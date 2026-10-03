@@ -161,6 +161,31 @@ private:
     return builder.bytes();
 }
 
+/// The smallest GGUF llama.cpp will really quantize (M3): a llama with the
+/// hyperparameters its loader asks for, and one 256x4 F16 tensor of zeros,
+/// laid out at GGUF's 32-byte alignment. About 2 KiB -- a real quantization
+/// in a test, no model downloaded. Without `with_context`, llama.cpp reads
+/// its metadata and then refuses it, for want of `llama.context_length`.
+[[nodiscard]] inline std::string quantizable_gguf(bool with_context = true) {
+    GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(with_context ? 8 : 7);
+    builder.string_kv("general.architecture", "llama");
+    builder.u32_kv("general.file_type", 1);  // F16
+    builder.u32_kv("llama.block_count", 1);
+    if (with_context) {
+        builder.u32_kv("llama.context_length", 128);
+    }
+    builder.u32_kv("llama.embedding_length", 256);
+    builder.u32_kv("llama.feed_forward_length", 512);
+    builder.u32_kv("llama.attention.head_count", 1);
+    builder.f32_kv("llama.attention.layer_norm_rms_epsilon", 1e-5F);
+    builder.text("token_embd.weight").u32(2).u64(256).u64(4).u32(1).u64(0);  // F16, offset 0
+    std::string bytes = builder.bytes();
+    bytes.append((32 - (bytes.size() % 32)) % 32, '\0');
+    bytes.append(std::size_t{256} * 4 * 2, '\0');
+    return bytes;
+}
+
 /// A multimodal projector's header (26b): its vision and audio encoder
 /// flags, and one vision tensor.
 [[nodiscard]] inline std::string projector_gguf(bool vision, bool audio) {

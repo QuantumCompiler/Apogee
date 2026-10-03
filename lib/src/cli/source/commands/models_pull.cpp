@@ -20,8 +20,11 @@
 #include "commands/download_progress.h"
 #include "commands/helpers.h"
 #include "commands/interrupt.h"
+#include "commands/model_chain.h"
 #include "commands/models_migrate.h"
+#include "commands/status_line.h"
 #include "harness/config.h"
+#include "harness/config_edit.h"
 #include "harness/layout.h"
 #include "harness/paths.h"
 #include "models/acquire.h"
@@ -180,16 +183,14 @@ std::string projector_failure(const std::string& error) {
     return error;
 }
 
-/// A snapshot with no chat template is a base model: its GGUF continues text
-/// rather than answering, which reads as a broken chat unless it is said.
-void note_if_base_model(const std::filesystem::path& snapshot) {
-    if (models::snapshot_has_chat_template(snapshot)) {
-        return;
-    }
-    std::cout << "note: this model has no chat template -- it is a base model, which continues "
-                 "text rather than answering.\n"
-                 "      To chat, convert its instruction-tuned release (often named '-it' or "
-                 "'-Instruct'); a base model is what fine-tuning starts from.\n";
+/// What a snapshot with no chat template is said to be: a base model, whose
+/// GGUF continues text rather than answering -- which reads as a broken chat
+/// unless it is said. One wording, standalone and chained (M3).
+[[nodiscard]] std::string base_model_note() {
+    return "note: this model has no chat template -- it is a base model, which continues "
+           "text rather than answering.\n"
+           "      To chat, convert its instruction-tuned release (often named '-it' or "
+           "'-Instruct'); a base model is what fine-tuning starts from.";
 }
 
 /// The one command that puts a stored model to use, its projector included.
@@ -280,6 +281,13 @@ void print_backend_hint(const std::filesystem::path& model_file,
     return separator == std::string::npos ? model : model.substr(separator + 2);
 }
 
+/// What `pull --safetensors` stored, or found already stored.
+struct PulledSnapshot {
+    std::string model;
+    std::string id;
+    std::filesystem::path dir;
+};
+
 /// `models pull <owner>/<repo> --safetensors`: the whole full-weight
 /// repository -- shards, configuration, tokenizer -- through the tree ladder,
 /// each shard checked against the sha256 Hugging Face publishes for it, into
@@ -288,7 +296,8 @@ void print_backend_hint(const std::filesystem::path& model_file,
 ///
 /// The id is known before a byte moves -- Hugging Face publishes every shard's
 /// sha256 -- so weights already here are found, not fetched again.
-void pull_snapshot(const std::string& ref, const models::StoreRoots& roots) {
+PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& roots,
+                             bool chained) {
     if (!looks_like_hf(ref)) {
         fail("--safetensors takes a Hugging Face repository (owner/repo); '" + ref +
              "' is not one");
@@ -337,7 +346,7 @@ void pull_snapshot(const std::string& ref, const models::StoreRoots& roots) {
         if (std::filesystem::is_directory(existing, code)) {
             std::cout << "already here -- these exact weights are at\n  " << existing.string()
                       << "\n";
-            return;
+            return PulledSnapshot{.model = model, .id = known_id, .dir = existing};
         }
     }
     // Without a published digest on every shard the id waits for the bytes.
@@ -395,7 +404,8 @@ void pull_snapshot(const std::string& ref, const models::StoreRoots& roots) {
         if (commit.existed) {
             std::cout << "\nalready here -- these exact weights are at\n  " << commit.dir.string()
                       << "\n";
-            return;
+            return PulledSnapshot{
+                .model = model, .id = commit.dir.filename().string(), .dir = commit.dir};
         }
         final_dir = commit.dir;
     }
@@ -412,10 +422,17 @@ void pull_snapshot(const std::string& ref, const models::StoreRoots& roots) {
     std::cout << "\n"
               << final_dir.string() << "\n"
               << "verified: " << result.files << " file(s), " << human_size(result.bytes) << ", "
-              << digests << " checked against a published sha256\n"
-              << "\nA full-weight snapshot: trainable with 'apogee train', not runnable -- make "
-                 "a GGUF of it with\n  apogee models convert "
-              << parsed->repo_id() << "\n";
+              << digests << " checked against a published sha256\n";
+    if (!chained) {
+        std::cout
+            << "\nA full-weight snapshot: trainable with 'apogee train', not runnable -- make "
+               "a GGUF of it with\n  apogee models convert "
+            << parsed->repo_id()
+            << "\nNext time one command pulls, converts and registers it:\n  apogee models "
+               "pull "
+            << parsed->repo_id() << " --safetensors --register-with Q4_K_M\n";
+    }
+    return PulledSnapshot{.model = model, .id = final_dir.filename().string(), .dir = final_dir};
 }
 
 }  // namespace
@@ -711,6 +728,628 @@ bool repair_snapshot_in_place(const std::filesystem::path& dir) {
     return true;
 }
 
+namespace {
+
+/// What `convert_model` made, or found made.
+struct ConvertedModel {
+    std::string model;
+    std::string id;
+    std::filesystem::path file;
+    std::filesystem::path projector;
+    /// No chat template: a base model, registered all the same.
+    bool base_model = false;
+    /// Each as the standalone verb prints it, prefix and all.
+    std::vector<std::string> warnings;
+};
+
+/// What `quantize_model` made, or found made.
+struct QuantizedModel {
+    std::string model;
+    std::string id;
+    std::filesystem::path file;
+    std::filesystem::path projector;
+    std::vector<std::string> warnings;
+};
+
+/// `models convert`: a GGUF -- and its projector, when the snapshot can see or
+/// hear -- from a SafeTensors set, into the store. Standalone it prints what
+/// it made, its warnings and what to do next; `chained` (M3), the warnings
+/// come back in the result for the chain's summary and nothing is suggested.
+ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view given,
+                             std::string_view from, const std::string& type, bool chained) {
+    const SnapshotChoice source = choose_snapshot(roots, given, from);
+    if (!source.error.empty()) {
+        fail(source.error);
+    }
+    // Every refusal BEFORE anything is announced or any Python is looked
+    // for: the cheap local checks first, then the environment.
+    if (const std::string damaged = models::damaged_snapshot_error(source.path); !damaged.empty()) {
+        fail(damaged + " -- or repair it in place with 'apogee models repair " + source.model +
+             "'");
+    }
+    const training::PythonEnv env{harness::training_venv_dir()};
+    const std::filesystem::path script = training::converter_script();
+    if (const std::string why = training::converter_unavailable(env, script); !why.empty()) {
+        fail(why);
+    }
+
+    ConvertedModel out;
+    out.model = source.model;
+    out.base_model = !models::snapshot_has_chat_template(source.path);
+    const auto finish = [&out, chained]() {
+        if (!chained) {
+            for (const std::string& warning : out.warnings) {
+                std::cout << warning << "\n";
+            }
+        }
+    };
+
+    const models::Encoders encoders = models::snapshot_encoders(source.path);
+    models::Sidecar record;
+    record.ref =
+        source.id.empty() ? source.path.string() : source.model + "/safetensors/" + source.id;
+    record.source = "convert";
+    record.transform = "convert";
+    record.transform_note = "--outtype " + type;
+    record.verification.header_checked = true;
+    record.verification.header_parsed = true;
+    models::Sidecar projector_record = record;
+    projector_record.transform_note = "--mmproj --outtype " + type;
+
+    // Recognised before it runs: the same set at the same precision is the
+    // same bytes, and only a projector it still lacks is worth making.
+    const std::optional<models::StoredGguf> done =
+        find_conversion(roots, source.model, record.ref, type);
+    if (done.has_value() && (!encoders.any() || !done->projector.empty())) {
+        std::cout << "already converted:\n  " << done->file.string() << "\n";
+        if (!done->projector.empty()) {
+            std::cout << "  " << done->projector.string() << "\n";
+        }
+        if (!chained) {
+            std::cout << "(to convert it again, delete it first: apogee models delete "
+                      << done->model << "/gguf/" << done->id << ")\n";
+        }
+        if (out.base_model) {
+            out.warnings.push_back(base_model_note());
+        }
+        out.file = done->file;
+        out.projector = done->projector;
+        out.id = done->id;
+        finish();
+        if (!chained) {
+            print_backend_hint(done->file, done->projector);
+        }
+        return out;
+    }
+    // The encoder's tensors go to the projector, the rest to the model.
+    std::int64_t model_estimate = 0;
+    std::int64_t projector_estimate = 0;
+    if (const std::optional<std::int64_t> all = models::snapshot_elements(source.path)) {
+        const std::int64_t encoder =
+            models::snapshot_elements(source.path, models::is_encoder_tensor).value_or(0);
+        model_estimate = models::estimated_gguf_bytes(*all - encoder, type);
+        projector_estimate = models::estimated_gguf_bytes(encoder, type);
+    }
+    std::string precision = type;
+    for (char& c : precision) {
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+    const std::filesystem::path staging =
+        models::make_incoming_dir(roots, models::kGgufFormat, source.model);
+    const auto cancelled = [&staging]() {
+        (void)models::remove_weights(staging);
+        std::cerr << "apogee models: cancelled -- nothing was written\n";
+        throw CLI::RuntimeError(kCancelled);
+    };
+
+    // ---- the model ------------------------------------------------------
+    std::filesystem::path model_output;
+    models::GgufInfo model_info;
+    if (done.has_value()) {
+        std::cout << "already converted:\n  " << done->file.string() << "\n";
+    } else {
+        model_output = staging / (display_name(source.model) +
+                                  (type == "auto" ? std::string{} : "-" + precision) + ".gguf");
+        std::cout << "converting " << source.path.string() << " to a GGUF ("
+                  << (type == "auto" ? "precision chosen by the converter" : precision)
+                  << (model_estimate > 0 ? ", about " + format_progress_size(model_estimate)
+                                         : std::string{})
+                  << ")\n";
+        const models::ConvertResult result = run_conversion(
+            source.path, model_output, training::script_converter(env.interpreter(), script, type),
+            model_estimate);
+        if (result.cancelled) {
+            cancelled();
+        }
+        if (!result.ok) {
+            (void)models::remove_weights(staging);
+            fail(result.error);
+        }
+        model_info = result.info;
+    }
+
+    // ---- its projector --------------------------------------------------
+    // A separate GGUF beside the model (`mmproj_path`): without it a model
+    // that can see or hear is text-only, and nothing would say so.
+    const std::filesystem::path projector_output =
+        staging /
+        models::projector_path_for(done.has_value() ? done->file : model_output).filename();
+    std::string projector_problem;
+    models::GgufInfo projector_info;
+    if (encoders.any()) {
+        std::cout << (done.has_value() ? "making its projector" : "and its projector")
+                  << ", so it can read " << encoders.reads()
+                  << (projector_estimate > 0
+                          ? " (about " + format_progress_size(projector_estimate) + ")"
+                          : std::string{})
+                  << "\n";
+        const models::ConvertResult made =
+            run_conversion(source.path, projector_output,
+                           training::script_converter(env.interpreter(), script, type,
+                                                      training::ConverterOutput::Projector),
+                           projector_estimate);
+        if (made.cancelled) {
+            cancelled();
+        }
+        if (!made.ok) {
+            projector_problem = projector_failure(made.error);
+        } else if (!made.info.is_projector()) {
+            projector_problem = "the converter's output holds a text model, not a projector";
+        } else {
+            projector_problem = models::write_record(projector_output, projector_record);
+            projector_info = made.info;
+        }
+        if (!projector_problem.empty()) {
+            std::error_code code;
+            std::filesystem::remove(projector_output, code);
+            if (done.has_value()) {
+                (void)models::remove_weights(staging);
+                fail("its projector could not be made -- " + projector_problem);
+            }
+        }
+    }
+
+    // ---- into the store -------------------------------------------------
+    // Its id is the model's own hash, so the directory can only be named
+    // now; a projector for a model already stored joins it there.
+    std::filesystem::path model_file;
+    std::filesystem::path projector;
+    bool existed = false;
+    if (done.has_value()) {
+        const models::Commit commit = models::commit_weights(staging, done->dir);
+        if (!commit.error.empty()) {
+            (void)models::remove_weights(staging);
+            fail(commit.error);
+        }
+        model_file = done->file;
+        projector = done->dir / projector_output.filename();
+    } else {
+        const models::StoredFile stored =
+            commit_with_progress(roots, source.model, staging, model_output, record);
+        model_file = stored.file;
+        projector = stored.projector;
+        existed = stored.existed;
+    }
+
+    std::cout << "\n" << (existed ? "already here -- these exact weights are at\n" : "");
+    if (!done.has_value()) {
+        std::cout << model_file.string() << "\n"
+                  << "verified: GGUF header parsed -- " << model_info.architecture << ", "
+                  << model_info.tensors << " tensors, " << human_size(model_info.file_size) << "\n";
+    }
+    if (!projector.empty()) {
+        std::cout << projector.string() << "\n";
+        if (projector_info.parsed) {
+            std::cout << "verified: projector header parsed -- " << projector_info.tensors
+                      << " tensors, " << human_size(projector_info.file_size) << "\n";
+        }
+    }
+    if (!projector_problem.empty()) {
+        out.warnings.push_back("warning: its projector could not be made -- " + projector_problem +
+                               "\n         the model works for text; it cannot read " +
+                               encoders.reads() + " without one");
+    }
+    if (out.base_model) {
+        out.warnings.push_back(base_model_note());
+    }
+    if (!done.has_value() && models::is_known_unrunnable(model_info.architecture)) {
+        out.warnings.push_back("warning: architecture '" + model_info.architecture +
+                               "' is not known to run in Apogee's llama.cpp.");
+    }
+    out.file = model_file;
+    out.projector = projector;
+    out.id = done.has_value() ? done->id : model_file.parent_path().filename().string();
+    finish();
+    if (!chained) {
+        if (type != "q8_0") {
+            std::cout << "\nMake it smaller:\n  apogee models quantize " << source.model
+                      << " --type Q4_K_M\n";
+        }
+        print_backend_hint(model_file, projector);
+    }
+    return out;
+}
+
+/// The quantization of `ref` at `level` already in the store, found by its
+/// record -- the source it was made from and the level -- so a second run,
+/// a resumed chain's above all, does not spend minutes making it again.
+[[nodiscard]] std::optional<models::StoredGguf> find_quantization(const models::StoreRoots& roots,
+                                                                  std::string_view model,
+                                                                  std::string_view ref,
+                                                                  std::string_view level) {
+    for (const models::StoredGguf& stored : models::list_store_ggufs(roots, model)) {
+        const std::optional<models::Sidecar> record = models::load_sidecar(stored.file);
+        if (record.has_value() && record->source == "quantize" && record->ref == ref &&
+            models::canonical_quant_type(record->transform_note) ==
+                models::canonical_quant_type(level)) {
+            return stored;
+        }
+    }
+    return std::nullopt;
+}
+
+/// `models quantize`: a smaller copy of a GGUF, its projector carried along,
+/// into the store. llama.cpp's own log stays off the terminal; the busy line
+/// counts its tensors instead (M3). Standalone it prints what to do next;
+/// `chained`, warnings come back in the result and nothing is suggested.
+QuantizedModel quantize_model(const models::StoreRoots& roots, std::string_view given,
+                              std::string_view from, const std::string& type,
+                              const Quantizer& quantizer, bool chained) {
+    const GgufChoice input = choose_gguf(roots, given, from);
+    if (!input.error.empty()) {
+        fail(input.error);
+    }
+    // The table's spelling, so `q4_k_m` and `Q4_K_M` are one level, in the
+    // file's name and in its record alike.
+    const std::string level = models::canonical_quant_type(type).value_or(type);
+
+    QuantizedModel out;
+    out.model = input.model;
+    const std::string ref =
+        input.id.empty() ? input.file.string() : input.model + "/gguf/" + input.id;
+    if (const std::optional<models::StoredGguf> made =
+            find_quantization(roots, input.model, ref, level);
+        made.has_value()) {
+        std::cout << "already quantized:\n  " << made->file.string() << "\n";
+        if (!made->projector.empty()) {
+            std::cout << "  " << made->projector.string() << "\n";
+        }
+        out.file = made->file;
+        out.projector = made->projector;
+        out.id = made->id;
+        if (!chained) {
+            print_backend_hint(made->file, made->projector);
+        }
+        return out;
+    }
+
+    const std::filesystem::path staging =
+        models::make_incoming_dir(roots, models::kGgufFormat, input.model);
+    const std::filesystem::path output =
+        staging / (display_name(input.model) + "-" + level + ".gguf");
+    models::QuantizeResult result;
+    {
+        BusyLine busy{std::cerr, "quantizing to " + level, busy_options(false)};
+        result = quantizer(input.file, output, level,
+                           [&busy, &level](std::size_t done, std::size_t total) {
+                               busy.report("quantizing to " + level, done, total);
+                           });
+    }
+    if (!result.ok) {
+        // Reported BEFORE any "this will take a while" note: announcing
+        // work and then refusing to do it reads as a crash rather than as
+        // a refusal.
+        (void)models::remove_weights(staging);
+        fail(result.error);
+    }
+
+    // The projector is the same for every quantization of a model, so it
+    // comes along -- a hard link, no second copy -- and the smaller model
+    // still reads images. (Declared on 2026-09-23 and never called: the
+    // first Q4_K_M made with it stored no projector.) Committed with the
+    // model; into an identical model's directory that lacks one, adopted.
+    std::string projector_problem;
+    if (!input.projector.empty()) {
+        projector_problem = models::share_projector(input.projector, staging);
+    }
+
+    models::Sidecar record;
+    record.ref = ref;
+    record.source = "quantize";
+    record.transform = "quantize";
+    record.transform_note = level;
+    record.verification.header_checked = true;
+    record.verification.header_parsed = models::inspect_gguf(output).parsed;
+    const models::StoredFile stored =
+        commit_with_progress(roots, input.model, staging, output, record);
+    std::cout << "\n"
+              << (stored.existed ? "already here -- these exact weights are at\n" : "")
+              << stored.file.string() << "\n"
+              << human_size(result.input_bytes) << " -> " << human_size(result.output_bytes)
+              << "\n";
+    if (!stored.projector.empty()) {
+        std::cout << stored.projector.string()
+                  << (stored.projector_added ? "  (its projector, added now)\n" : "\n");
+    }
+    if (!projector_problem.empty()) {
+        out.warnings.push_back("warning: its projector did not come along -- " + projector_problem +
+                               "\n         point mmproj_path at " + input.projector.string());
+    }
+    out.file = stored.file;
+    out.projector = stored.projector;
+    out.id = stored.file.parent_path().filename().string();
+    if (!chained) {
+        for (const std::string& warning : out.warnings) {
+            std::cout << warning << "\n";
+        }
+        print_backend_hint(stored.file, stored.projector);
+    }
+    return out;
+}
+
+/// A path a config field names, comparable with one the store gives; empty
+/// for an empty field.
+[[nodiscard]] std::filesystem::path configured_path(const std::string& field) {
+    return field.empty()
+               ? std::filesystem::path{}
+               : std::filesystem::path{harness::expand_env_and_home(field)}.lexically_normal();
+}
+
+/// The backend a chain registers for `model` at `level`: `Qwen3-8B-Q4_K_M`.
+[[nodiscard]] std::string backend_name(const std::string& model, std::string_view level) {
+    return display_name(model) + "-" + std::string{level};
+}
+
+/// Refuses, before the first stage, a chain whose registrations would refuse
+/// at its last: no config to register into, or a name already taken by a
+/// backend that is not this model's. One a previous run of this chain made
+/// -- pointing inside this model's directory -- is not in the way.
+void check_registrations(const models::StoreRoots& roots, const std::filesystem::path& config_path,
+                         const std::string& model, const std::vector<std::string>& names) {
+    std::error_code code;
+    if (!std::filesystem::exists(config_path, code)) {
+        fail("there is no config to register into at " + config_path.string() +
+             " -- run 'apogee config init' first");
+    }
+    harness::Config config;
+    try {
+        config = harness::load_config(config_path);
+    } catch (const std::exception& e) {
+        fail(e.what());
+    }
+    std::vector<std::string> existing;
+    existing.reserve(config.backends.size());
+    for (const auto& [name, backend] : config.backends) {
+        existing.push_back(name);
+    }
+    const std::filesystem::path home =
+        models::model_dir(roots, models::kGgufFormat, model).lexically_normal();
+    for (const std::string& name : names) {
+        if (const std::optional<std::string> clash = harness::fold_collision(existing, name);
+            clash.has_value()) {
+            fail("backend '" + name + "' would collide with '" + *clash +
+                 "': names that differ only in case are one backend");
+        }
+        const auto found = config.backends.find(name);
+        if (found == config.backends.end()) {
+            continue;
+        }
+        const std::filesystem::path path = configured_path(found->second.model_path);
+        const std::filesystem::path relative = path.lexically_relative(home);
+        if (path.empty() || relative.empty() || *relative.begin() == "..") {
+            fail("backend '" + name + "' already exists" +
+                 (path.empty() ? std::string{} : " and points at " + path.string()) +
+                 " -- remove it with 'apogee config delete-backend " + name +
+                 "' first, or register this one by hand under another name");
+        }
+    }
+}
+
+/// One backend the chain registers.
+struct Registration {
+    std::string name;
+    std::filesystem::path file;
+    std::filesystem::path projector;
+};
+
+/// Adds each as a `llamacpp` backend through the one config editor -- the
+/// very edit `config add-backend <name> --type llamacpp --model-path <file>
+/// [--mmproj-path <projector>]` makes, byte for byte. An entry already
+/// naming the same files is left as it is: a resumed chain registers what is
+/// missing and nothing twice.
+void register_backends(const std::filesystem::path& config_path,
+                       const std::vector<Registration>& wanted, bool base_model, ChainLog& log) {
+    for (const Registration& entry : wanted) {
+        harness::Config config;
+        try {
+            config = harness::load_config(config_path);
+        } catch (const std::exception& e) {
+            fail(e.what());
+        }
+        if (const auto found = config.backends.find(entry.name); found != config.backends.end()) {
+            const bool same =
+                found->second.type == harness::BackendType::LlamaCpp &&
+                configured_path(found->second.model_path) == entry.file.lexically_normal() &&
+                configured_path(found->second.mmproj_path) == entry.projector.lexically_normal();
+            if (!same) {
+                fail("backend '" + entry.name +
+                     "' already exists and points elsewhere -- remove it "
+                     "with 'apogee config delete-backend " +
+                     entry.name + "', then resume");
+            }
+            std::cout << "already registered: " << entry.name << "\n";
+        } else {
+            harness::BackendConfig backend;
+            backend.type = harness::BackendType::LlamaCpp;
+            backend.model_path = entry.file.string();
+            backend.mmproj_path = entry.projector.string();
+            try {
+                harness::edit_config_file(
+                    config_path, [&entry, &backend](std::string_view content) {
+                        return harness::append_backend(content, entry.name, backend, false);
+                    });
+            } catch (const std::exception& e) {
+                fail(e.what());
+            }
+            std::cout << "registered " << entry.name << "\n";
+        }
+        log.ready.push_back(entry.name +
+                            (base_model ? "  (a base model: it continues text rather than "
+                                          "answering -- to chat, convert its instruction-tuned "
+                                          "release)"
+                                        : std::string{}));
+    }
+    if (!wanted.empty()) {
+        log.next = "chat with one:  apogee chat -m " + wanted.back().name;
+    }
+}
+
+}  // namespace
+
+std::vector<std::string> register_levels(const std::vector<std::string>& given) {
+    std::vector<std::string> levels;
+    for (const std::string& name : given) {
+        const std::optional<std::string> level = models::canonical_quant_type(name);
+        if (!level.has_value()) {
+            std::string accepted;
+            for (const std::string& known : models::quant_type_names()) {
+                accepted += (accepted.empty() ? "" : ", ") + known;
+            }
+            fail("unknown quantization level '" + name +
+                 "' for --register-with. Accepted: " + accepted);
+        }
+        // The F16 is always made and registered; naming it again is a no-op.
+        if (*level != "F16" && std::ranges::find(levels, *level) == levels.end()) {
+            levels.push_back(*level);
+        }
+    }
+    return levels;
+}
+
+namespace {
+
+/// The levels `--register-with` names, refused up front when this build has
+/// no llama.cpp to make them with -- before a pull or a conversion that would
+/// be wasted on a chain that could not finish.
+[[nodiscard]] std::vector<std::string> buildable_levels(const std::vector<std::string>& given) {
+    std::vector<std::string> levels = register_levels(given);
+    if (!levels.empty() && !models::quantize_supported()) {
+        fail(
+            "this build cannot quantize: llama.cpp was not compiled in. Rebuild with "
+            "-DAPOGEE_ENABLE_LLAMA=ON, or drop --register-with to register the F16 alone");
+    }
+    return levels;
+}
+
+}  // namespace
+
+Quantizer default_quantizer() {
+    return [](const std::filesystem::path& input, const std::filesystem::path& output,
+              std::string_view level, const models::QuantizeProgress& progress) {
+        return models::quantize(input, output, level, progress);
+    };
+}
+
+void run_register_chain(const RegisterChainRequest& request, const ChainTools& tools) {
+    const models::StoreRoots& roots = request.roots;
+    const std::vector<std::string>& levels = request.levels;
+
+    // The model -- and so every backend's name -- is known before anything
+    // runs, so a chain that would refuse at its end refuses now.
+    std::string model;
+    std::string snapshot = request.snapshot;
+    std::string snapshot_from = request.snapshot_from;
+    const bool pulls = !request.pull_ref.empty();
+    if (pulls) {
+        const std::optional<models::HfRef> parsed = models::parse_hf_ref(request.pull_ref);
+        if (!looks_like_hf(request.pull_ref) || !parsed.has_value() || !parsed->file.empty()) {
+            fail("--safetensors takes a Hugging Face repository (owner/repo); '" +
+                 request.pull_ref + "' is not one");
+        }
+        model = models::repo_directory_name(*parsed);
+    } else {
+        const SnapshotChoice source = choose_snapshot(roots, snapshot, snapshot_from);
+        if (!source.error.empty()) {
+            fail(source.error);
+        }
+        model = source.model;
+        if (!source.id.empty()) {
+            snapshot = source.model + "/safetensors/" + source.id;
+            snapshot_from.clear();
+        }
+    }
+    std::vector<std::string> names{backend_name(model, "F16")};
+    for (const std::string& level : levels) {
+        names.push_back(backend_name(model, level));
+    }
+    check_registrations(roots, request.config_path, model, names);
+
+    std::string joined;
+    for (const std::string& level : levels) {
+        joined += (joined.empty() ? "" : ",") + level;
+    }
+    const std::string with = levels.empty() ? " --register" : " --register-with " + joined;
+    const auto convert_resume = [&with](const std::string& from) {
+        return "apogee models convert " + from + with;
+    };
+
+    ChainLog log;
+    log.resume = pulls ? "apogee models pull " + request.pull_ref + " --safetensors" + with
+                       : convert_resume(snapshot);
+
+    ConvertedModel f16;
+    std::vector<QuantizedModel> quants;
+    std::vector<ChainStage> stages;
+    if (pulls) {
+        stages.push_back({"pull " + request.pull_ref + "'s full weights", [&](ChainLog& chain) {
+                              const PulledSnapshot pulled =
+                                  pull_snapshot(request.pull_ref, roots, /*chained=*/true);
+                              snapshot = pulled.model + "/safetensors/" + pulled.id;
+                              // Everything after the pull runs offline: resuming
+                              // need not reach Hugging Face again.
+                              chain.resume = convert_resume(snapshot);
+                          }});
+    }
+    stages.push_back({"convert to F16", [&](ChainLog& chain) {
+                          f16 = convert_model(roots, snapshot, snapshot_from, "f16",
+                                              /*chained=*/true);
+                          for (const std::string& warning : f16.warnings) {
+                              chain.note(warning);
+                          }
+                      }});
+    for (const std::string& level : levels) {
+        stages.push_back({"quantize to " + level, [&, level](ChainLog& chain) {
+                              QuantizedModel made =
+                                  quantize_model(roots, f16.model + "/gguf/" + f16.id, {}, level,
+                                                 tools.quantize, /*chained=*/true);
+                              for (const std::string& warning : made.warnings) {
+                                  chain.note(warning);
+                              }
+                              quants.push_back(std::move(made));
+                          }});
+    }
+    stages.push_back({names.size() == 1 ? "register " + names.front()
+                                        : "register " + std::to_string(names.size()) + " backends",
+                      [&](ChainLog& chain) {
+                          std::vector<Registration> wanted{{.name = names.front(),
+                                                            .file = f16.file,
+                                                            .projector = f16.projector}};
+                          for (std::size_t index = 0; index < quants.size(); ++index) {
+                              wanted.push_back({.name = names[index + 1],
+                                                .file = quants[index].file,
+                                                .projector = quants[index].projector});
+                          }
+                          register_backends(request.config_path, wanted, f16.base_model, chain);
+                      }});
+
+    std::cout << (pulls ? "pulling " + request.pull_ref + ", then " : std::string{})
+              << "converting it to F16"
+              << (levels.empty() ? std::string{} : ", quantizing it to " + joined)
+              << " and registering "
+              << (names.size() == 1 ? "it" : std::to_string(names.size()) + " backends") << "\n\n";
+    (void)run_chain(stages, std::move(log), std::cout);
+}
+
 void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,
                           const RootContext& context) {
     // ---- pull ---------------------------------------------------------------
@@ -726,12 +1365,39 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     pull->add_flag("--safetensors", *pull_safetensors,
                    "Download a Hugging Face repository's full-weight SafeTensors snapshot "
                    "(trainable, not runnable) instead of a GGUF");
+    auto pull_register = std::make_shared<bool>(false);
+    auto pull_register_with = std::make_shared<std::vector<std::string>>();
+    pull->add_flag("--register", *pull_register,
+                   "With --safetensors: then convert it to F16 and register that as a backend");
+    const CLI::Option* pull_register_option =
+        pull->add_option("--register-with", *pull_register_with,
+                         "With --safetensors: --register, and quantize to each of these levels "
+                         "too, each its own backend (comma-separated)")
+            ->delimiter(',')
+            ->type_name(words_value(models::quant_type_names()));
 
-    pull->callback([pull_ref, pull_yes, pull_safetensors, models_dir, &context]() {
+    pull->callback([pull_ref, pull_yes, pull_safetensors, pull_register, pull_register_with,
+                    pull_register_option, models_dir, &context]() {
         const std::string& ref = *pull_ref;
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
+        if (*pull_register || pull_register_option->count() > 0) {
+            if (!*pull_safetensors) {
+                fail(
+                    "--register needs --safetensors: the chain converts a full-weight pull. A "
+                    "GGUF pull is runnable as it lands -- it prints the backend to add");
+            }
+            run_register_chain(RegisterChainRequest{
+                .roots = roots,
+                .config_path = harness::resolve_config_path(context.config_path),
+                .pull_ref = ref,
+                .snapshot = {},
+                .snapshot_from = {},
+                .levels = buildable_levels(*pull_register_with),
+            });
+            return;
+        }
         if (*pull_safetensors) {
-            pull_snapshot(ref, roots);
+            (void)pull_snapshot(ref, roots, /*chained=*/false);
             return;
         }
 
@@ -969,58 +1635,8 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 "  apogee models quantize --types    (to see the choices)");
         }
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
-        const GgufChoice input = choose_gguf(roots, *quant_in, *quant_from);
-        if (!input.error.empty()) {
-            fail(input.error);
-        }
-
-        const std::filesystem::path staging =
-            models::make_incoming_dir(roots, models::kGgufFormat, input.model);
-        const std::filesystem::path output =
-            staging / (display_name(input.model) + "-" + *quant_type + ".gguf");
-        const models::QuantizeResult result = models::quantize(input.file, output, *quant_type);
-        std::error_code code;
-        if (!result.ok) {
-            // Reported BEFORE any "this will take a while" note: announcing
-            // work and then refusing to do it reads as a crash rather than as
-            // a refusal.
-            (void)models::remove_weights(staging);
-            fail(result.error);
-        }
-
-        // The projector is the same for every quantization of a model, so it
-        // comes along -- a hard link, no second copy -- and the smaller model
-        // still reads images. (Declared on 2026-09-23 and never called: the
-        // first Q4_K_M made with it stored no projector.) Committed with the
-        // model; into an identical model's directory that lacks one, adopted.
-        std::string projector_problem;
-        if (!input.projector.empty()) {
-            projector_problem = models::share_projector(input.projector, staging);
-        }
-
-        models::Sidecar record;
-        record.ref = input.id.empty() ? input.file.string() : input.model + "/gguf/" + input.id;
-        record.source = "quantize";
-        record.transform = "quantize";
-        record.transform_note = *quant_type;
-        record.verification.header_checked = true;
-        record.verification.header_parsed = models::inspect_gguf(output).parsed;
-        const models::StoredFile stored =
-            commit_with_progress(roots, input.model, staging, output, record);
-        std::cout << "\n"
-                  << (stored.existed ? "already here -- these exact weights are at\n" : "")
-                  << stored.file.string() << "\n"
-                  << human_size(result.input_bytes) << " -> " << human_size(result.output_bytes)
-                  << "\n";
-        if (!stored.projector.empty()) {
-            std::cout << stored.projector.string()
-                      << (stored.projector_added ? "  (its projector, added now)\n" : "\n");
-        }
-        if (!projector_problem.empty()) {
-            std::cout << "warning: its projector did not come along -- " << projector_problem
-                      << "\n         point mmproj_path at " << input.projector.string() << "\n";
-        }
-        print_backend_hint(stored.file, stored.projector);
+        (void)quantize_model(roots, *quant_in, *quant_from, *quant_type, default_quantizer(),
+                             /*chained=*/false);
     });
 
     // ---- convert ------------------------------------------------------------
@@ -1040,195 +1656,38 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         ->check(CLI::IsMember(training::converter_out_types()));
     convert->add_option("--from", *convert_from, "Which of the model's SafeTensors sets, by id")
         ->type_name(kSnapshotIdValue);
+    auto convert_register = std::make_shared<bool>(false);
+    auto convert_register_with = std::make_shared<std::vector<std::string>>();
+    convert->add_flag("--register", *convert_register,
+                      "Register the F16 as a backend once it is made");
+    const CLI::Option* register_with_option =
+        convert
+            ->add_option("--register-with", *convert_register_with,
+                         "--register, and quantize to each of these levels too, each its own "
+                         "backend (comma-separated)")
+            ->delimiter(',')
+            ->type_name(words_value(models::quant_type_names()));
 
-    convert->callback([convert_in, convert_type, convert_from, models_dir, &context]() {
+    convert->callback([convert_in, convert_type, convert_from, convert_register,
+                       convert_register_with, register_with_option, models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
-        const SnapshotChoice source = choose_snapshot(roots, *convert_in, *convert_from);
-        if (!source.error.empty()) {
-            fail(source.error);
-        }
-        // Every refusal BEFORE anything is announced or any Python is looked
-        // for: the cheap local checks first, then the environment.
-        if (const std::string damaged = models::damaged_snapshot_error(source.path);
-            !damaged.empty()) {
-            fail(damaged + " -- or repair it in place with 'apogee models repair " + source.model +
-                 "'");
-        }
-        const training::PythonEnv env{harness::training_venv_dir()};
-        const std::filesystem::path script = training::converter_script();
-        if (const std::string why = training::converter_unavailable(env, script); !why.empty()) {
-            fail(why);
-        }
-
-        const models::Encoders encoders = models::snapshot_encoders(source.path);
-        models::Sidecar record;
-        record.ref =
-            source.id.empty() ? source.path.string() : source.model + "/safetensors/" + source.id;
-        record.source = "convert";
-        record.transform = "convert";
-        record.transform_note = "--outtype " + *convert_type;
-        record.verification.header_checked = true;
-        record.verification.header_parsed = true;
-        models::Sidecar projector_record = record;
-        projector_record.transform_note = "--mmproj --outtype " + *convert_type;
-
-        // Recognised before it runs: the same set at the same precision is the
-        // same bytes, and only a projector it still lacks is worth making.
-        const std::optional<models::StoredGguf> done =
-            find_conversion(roots, source.model, record.ref, *convert_type);
-        if (done.has_value() && (!encoders.any() || !done->projector.empty())) {
-            std::cout << "already converted:\n  " << done->file.string() << "\n";
-            if (!done->projector.empty()) {
-                std::cout << "  " << done->projector.string() << "\n";
+        if (*convert_register || register_with_option->count() > 0) {
+            if (*convert_type != "f16") {
+                fail(
+                    "--register makes the F16 -- the source every quantization starts from; "
+                    "drop --type");
             }
-            std::cout << "(to convert it again, delete it first: apogee models delete "
-                      << done->model << "/gguf/" << done->id << ")\n";
-            note_if_base_model(source.path);
-            print_backend_hint(done->file, done->projector);
+            run_register_chain(RegisterChainRequest{
+                .roots = roots,
+                .config_path = harness::resolve_config_path(context.config_path),
+                .pull_ref = {},
+                .snapshot = *convert_in,
+                .snapshot_from = *convert_from,
+                .levels = buildable_levels(*convert_register_with),
+            });
             return;
         }
-
-        // The encoder's tensors go to the projector, the rest to the model.
-        std::int64_t model_estimate = 0;
-        std::int64_t projector_estimate = 0;
-        if (const std::optional<std::int64_t> all = models::snapshot_elements(source.path)) {
-            const std::int64_t encoder =
-                models::snapshot_elements(source.path, models::is_encoder_tensor).value_or(0);
-            model_estimate = models::estimated_gguf_bytes(*all - encoder, *convert_type);
-            projector_estimate = models::estimated_gguf_bytes(encoder, *convert_type);
-        }
-        std::string precision = *convert_type;
-        for (char& c : precision) {
-            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        }
-        const std::filesystem::path staging =
-            models::make_incoming_dir(roots, models::kGgufFormat, source.model);
-        const auto cancelled = [&staging]() {
-            (void)models::remove_weights(staging);
-            std::cerr << "apogee models: cancelled -- nothing was written\n";
-            throw CLI::RuntimeError(kCancelled);
-        };
-
-        // ---- the model ------------------------------------------------------
-        std::filesystem::path model_output;
-        models::GgufInfo model_info;
-        if (done.has_value()) {
-            std::cout << "already converted:\n  " << done->file.string() << "\n";
-        } else {
-            model_output =
-                staging / (display_name(source.model) +
-                           (*convert_type == "auto" ? std::string{} : "-" + precision) + ".gguf");
-            std::cout << "converting " << source.path.string() << " to a GGUF ("
-                      << (*convert_type == "auto" ? "precision chosen by the converter" : precision)
-                      << (model_estimate > 0 ? ", about " + format_progress_size(model_estimate)
-                                             : std::string{})
-                      << ")\n";
-            const models::ConvertResult result =
-                run_conversion(source.path, model_output,
-                               training::script_converter(env.interpreter(), script, *convert_type),
-                               model_estimate);
-            if (result.cancelled) {
-                cancelled();
-            }
-            if (!result.ok) {
-                (void)models::remove_weights(staging);
-                fail(result.error);
-            }
-            model_info = result.info;
-        }
-
-        // ---- its projector --------------------------------------------------
-        // A separate GGUF beside the model (`mmproj_path`): without it a model
-        // that can see or hear is text-only, and nothing would say so.
-        const std::filesystem::path projector_output =
-            staging /
-            models::projector_path_for(done.has_value() ? done->file : model_output).filename();
-        std::string projector_problem;
-        models::GgufInfo projector_info;
-        if (encoders.any()) {
-            std::cout << (done.has_value() ? "making its projector" : "and its projector")
-                      << ", so it can read " << encoders.reads()
-                      << (projector_estimate > 0
-                              ? " (about " + format_progress_size(projector_estimate) + ")"
-                              : std::string{})
-                      << "\n";
-            const models::ConvertResult made =
-                run_conversion(source.path, projector_output,
-                               training::script_converter(env.interpreter(), script, *convert_type,
-                                                          training::ConverterOutput::Projector),
-                               projector_estimate);
-            if (made.cancelled) {
-                cancelled();
-            }
-            if (!made.ok) {
-                projector_problem = projector_failure(made.error);
-            } else if (!made.info.is_projector()) {
-                projector_problem = "the converter's output holds a text model, not a projector";
-            } else {
-                projector_problem = models::write_record(projector_output, projector_record);
-                projector_info = made.info;
-            }
-            if (!projector_problem.empty()) {
-                std::error_code code;
-                std::filesystem::remove(projector_output, code);
-                if (done.has_value()) {
-                    (void)models::remove_weights(staging);
-                    fail("its projector could not be made -- " + projector_problem);
-                }
-            }
-        }
-
-        // ---- into the store -------------------------------------------------
-        // Its id is the model's own hash, so the directory can only be named
-        // now; a projector for a model already stored joins it there.
-        std::filesystem::path model_file;
-        std::filesystem::path projector;
-        bool existed = false;
-        if (done.has_value()) {
-            const models::Commit commit = models::commit_weights(staging, done->dir);
-            if (!commit.error.empty()) {
-                (void)models::remove_weights(staging);
-                fail(commit.error);
-            }
-            model_file = done->file;
-            projector = done->dir / projector_output.filename();
-        } else {
-            const models::StoredFile stored =
-                commit_with_progress(roots, source.model, staging, model_output, record);
-            model_file = stored.file;
-            projector = stored.projector;
-            existed = stored.existed;
-        }
-
-        std::cout << "\n" << (existed ? "already here -- these exact weights are at\n" : "");
-        if (!done.has_value()) {
-            std::cout << model_file.string() << "\n"
-                      << "verified: GGUF header parsed -- " << model_info.architecture << ", "
-                      << model_info.tensors << " tensors, " << human_size(model_info.file_size)
-                      << "\n";
-        }
-        if (!projector.empty()) {
-            std::cout << projector.string() << "\n";
-            if (projector_info.parsed) {
-                std::cout << "verified: projector header parsed -- " << projector_info.tensors
-                          << " tensors, " << human_size(projector_info.file_size) << "\n";
-            }
-        }
-        if (!projector_problem.empty()) {
-            std::cout << "warning: its projector could not be made -- " << projector_problem
-                      << "\n         the model works for text; it cannot read " << encoders.reads()
-                      << " without one\n";
-        }
-        note_if_base_model(source.path);
-        if (!done.has_value() && models::is_known_unrunnable(model_info.architecture)) {
-            std::cout << "warning: architecture '" << model_info.architecture
-                      << "' is not known to run in Apogee's llama.cpp.\n";
-        }
-        if (*convert_type != "q8_0") {
-            std::cout << "\nMake it smaller:\n  apogee models quantize " << source.model
-                      << " --type Q4_K_M\n";
-        }
-        print_backend_hint(model_file, projector);
+        (void)convert_model(roots, *convert_in, *convert_from, *convert_type, /*chained=*/false);
     });
 
     // ---- repair -------------------------------------------------------------

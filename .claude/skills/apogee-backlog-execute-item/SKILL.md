@@ -1,5 +1,5 @@
 ---
-name: apogee-backlog-item
+name: apogee-backlog-execute-item
 description: Take the next recommended Apogee backlog item (or a named one) and work it per the repo's docs-first process. Use when the user says "take the next backlog item", "continue", "work the queue", "next item", or names a specific backlog document to implement.
 ---
 

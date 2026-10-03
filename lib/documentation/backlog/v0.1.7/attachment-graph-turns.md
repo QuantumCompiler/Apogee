@@ -1,13 +1,13 @@
 # Graph-aware attachment turns
 
-**What / why.** A graph built at attach time ([29d](attachment-code-graph.md)) is worthless if turns can't reach it — and today they can't, three ways, all measured in the 2026-10-03 spike: the attachments retrieval path returns before the graph section is packaged (`agentloop/rag.cpp`, the early `package_attachments` return), the one graph-resolution decision is keyed on *config collections* (`graph_context::resolve_turn_graph`) which the chat's attachment store is not, and no surface ever sets `graph_enabled` on an attachments turn. This item closes all three and adds the delivery that actually matters: **the model walks the graph itself.** Concretely: **(a)** an attachment turn whose store holds a graph runs the existing retrieval-time expansion — seeded from the excerpt hits, rendered after the excerpts, under the same budget rules collection turns already obey; **(b)** [29b](graph-navigation.md)'s read-only `graph` toolset is registered in a chat whose attachments carry a graph, **scoped to that store**, so a structural question becomes `graph_explain` / `graph_path` calls instead of invented paths; **(c)** the attachments line gains the graph-entity count collection turns already report. The stress-test transcript — a model attached this repository inventing `lib/src/core/` and cycling — is this item's motivating case and its real-weights check, inverted.
+**What / why.** A graph built at attach time ([30d](attachment-code-graph.md)) is worthless if turns can't reach it — and today they can't, three ways, all measured in the 2026-10-03 spike: the attachments retrieval path returns before the graph section is packaged (`agentloop/rag.cpp`, the early `package_attachments` return), the one graph-resolution decision is keyed on *config collections* (`graph_context::resolve_turn_graph`) which the chat's attachment store is not, and no surface ever sets `graph_enabled` on an attachments turn. This item closes all three and adds the delivery that actually matters: **the model walks the graph itself.** Concretely: **(a)** an attachment turn whose store holds a graph runs the existing retrieval-time expansion — seeded from the excerpt hits, rendered after the excerpts, under the same budget rules collection turns already obey; **(b)** [30b](graph-navigation.md)'s read-only `graph` toolset is registered in a chat whose attachments carry a graph, **scoped to that store**, so a structural question becomes `graph_explain` / `graph_path` calls instead of invented paths; **(c)** the attachments line gains the graph-entity count collection turns already report. The stress-test transcript — a model attached this repository inventing `lib/src/core/` and cycling — is this item's motivating case and its real-weights check, inverted.
 
 **Core constraint(s).**
 - **Passive injection stays bounded; the tools do the walking.** Expansion keeps the existing seeding (top-k before the judge), hop and entity budgets; the correction for the stress test is the toolset, not a bigger transient prefix.
-- **Read-only, everywhere** — 29b's rule carries: the scoped toolset never writes, registers ungated, and a future write verb is a different item.
-- **One traversal core** (29b's): the scoped tools are 29b's implementations handed the attachment store's path — no attachment-flavored fork of the walk.
+- **Read-only, everywhere** — 30b's rule carries: the scoped toolset never writes, registers ungated, and a future write verb is a different item.
+- **One traversal core** (30b's): the scoped tools are 30b's implementations handed the attachment store's path — no attachment-flavored fork of the walk.
 - **Transient stays transient:** the graph section rides the same per-turn transient prefix as excerpts, never persisted history (the load-bearing property `agentloop/rag.h` documents).
-- **The model-free guarantee holds through use:** entity matching and traversal over an attachment graph work with no embedder (29b's lexical path), so a lexical-only chat walks its graph too.
+- **The model-free guarantee holds through use:** entity matching and traversal over an attachment graph work with no embedder (30b's lexical path), so a lexical-only chat walks its graph too.
 - **Scoping is explicit, not config:** the attachment store is resolved from the chat's own state, never by teaching `resolve_turn_graph` to find it in `graphs:` config — a chat's attachments are not a named graph, and collection precedence rules must not grow a special case.
 - Code style carries: `.h`/`.cpp` pairs, smart pointers only.
 
@@ -15,9 +15,9 @@
 - `agentloop/rag.cpp` — the attachments branch learns the graph section: build it (the existing labelled-section builder, store = the attachment database) before `package_attachments`, render it after the excerpts under the same fitting rules the collection path uses.
 - `agentloop/rag.h` — `RagTurn`'s existing graph fields documented as serving attachment turns too; `commands/helpers.cpp` sets them for an attachment turn when the store holds `kg_*` rows.
 - `commands/chat.cpp` / `commands/chat_attachments.cpp/.h` — the chat registers the scoped `graph` toolset when its attachment store holds a graph (and drops it when the last graphed attachment is detached); `ChatAttachments` exposes the store's graph state.
-- `tools/` — 29b's toolset constructed over an injected store path (it already is, for named graphs); registration plumbing only.
-- Tests: `tests/agentloop/` for the attachment-turn expansion (budget, seeding, lexical-only); `tests/commands/` for toolset registration/deregistration; golden: the same question over the same fixture graph yields identical payloads via CLI verb and scoped tool (29b's one-core assertion extended).
-- Consumes: [29d](attachment-code-graph.md) (the graph exists), [29b](graph-navigation.md) (verbs, toolset, caps, addressing), [29a](code-graph-extraction.md) (what the graph contains); 26g (shipped) governs how the added tools rank in selection — no special pleading.
+- `tools/` — 30b's toolset constructed over an injected store path (it already is, for named graphs); registration plumbing only.
+- Tests: `tests/agentloop/` for the attachment-turn expansion (budget, seeding, lexical-only); `tests/commands/` for toolset registration/deregistration; golden: the same question over the same fixture graph yields identical payloads via CLI verb and scoped tool (30b's one-core assertion extended).
+- Consumes: [30d](attachment-code-graph.md) (the graph exists), [30b](graph-navigation.md) (verbs, toolset, caps, addressing), [30a](code-graph-extraction.md) (what the graph contains); 26g (shipped) governs how the added tools rank in selection — no special pleading.
 
 **Reference (Ommi).** The expansion half has the Ommi analog already ported (Milestone Y's retrieval-time expansion; Ommi's `knowledge query --graph`, `lib/cli/documentation/internal/KNOWLEDGE.md` — collection-scoped there too). The toolset-over-attachments half has **no analog**: Ommi models were never handed graph tools.
 
@@ -32,7 +32,7 @@
 **Guardrail(s).**
 - The attachment-turn expansion tables: seeded from excerpt hits, budget enforcement, lexical-only traversal, empty-graph turns identical to today's.
 - Registration lifecycle: toolset present after a graphed attach, absent after detach, never present on a chat with chunk-only attachments.
-- 29b's one-core golden extended to the scoped instance.
+- 30b's one-core golden extended to the scoped instance.
 - On real weights, the capability and the measure (the stress test inverted): with this repository attached in a sandboxed chat, the model families answer a structural question ("where is retrieval implemented?") with at least one graph-tool call and **every cited path existing** under the attachment root.
 
 **Acceptance criteria:**
@@ -41,4 +41,4 @@
 - [ ] `graph_explain` through the scoped toolset equals the CLI verb's payload over the same store, golden-compared.
 - [ ] A lexical-only chat (no embedder) walks its attachment graph through the tools.
 
-**Scope note.** Item **29e**, earmarked for **v0.1.6**; **gated on [29a](code-graph-extraction.md), [29b](graph-navigation.md), [29d](attachment-code-graph.md)**. Out of scope: write tools; growing the transient graph budget (the fix is tools, not more injection); the flags/config surface ([29f](attachment-options.md)); forcing the model through the graph (29b's recorded divergence from Graphify stands).
+**Scope note.** Item **30e**, earmarked for **v0.1.7**; **gated on [30a](code-graph-extraction.md), [30b](graph-navigation.md), [30d](attachment-code-graph.md)**. Out of scope: write tools; growing the transient graph budget (the fix is tools, not more injection); the flags/config surface ([30f](attachment-options.md)); forcing the model through the graph (30b's recorded divergence from Graphify stands).

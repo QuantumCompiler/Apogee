@@ -11,7 +11,7 @@ A spike answers a design question with **evidence, not opinion**. Its deliverabl
 
 - A spike **produces findings**: walls, measurements, a proposed item split, and the questions only the user can answer.
 - A spike **does not build** anything shippable, does not create backlog documents, and does not edit SPEC/ROADMAP/README. Those happen only if the user asks afterwards.
-- **"Execute the spike" / "execute the plan" means create the backlog documents** (via `/apogee-create-backlog-item`, one per item in the split, placed in the right index table) — it never means implementing. Building happens later via `/apogee-backlog-item`.
+- **"Execute the spike" / "execute the plan" means create the backlog documents** — one per item in the split, each authored to the backlog README's document format and quality bar and placed in its index table — it never means implementing. Building happens later via `/apogee-backlog-execute-item`.
 - Findings live **in the report, not the repo**. Do not save a spike write-up file unless the user explicitly asks for one; "internalize it in your context" is the default.
 
 ## 2. Ground first

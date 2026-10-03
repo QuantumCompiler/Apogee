@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <mutex>
+#include <optional>
+#include <string>
 #include <system_error>
+#include <utility>
 
 #include "models/gguf_inspect.h"
 
@@ -69,7 +73,118 @@ static_assert(static_cast<int>(LLAMA_FTYPE_MOSTLY_F16) == 1,
     return out;
 }
 
+#if defined(APOGEE_ENABLE_LLAMA)
+/// The tensor count in one of llama.cpp's per-tensor quantize lines --
+/// `[  12/ 291] blk.0.attn_q.weight - [...]` -- or nothing for any other
+/// line. Lenient by design: a line it does not recognise only means no count
+/// is said for it.
+[[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> tensor_count(
+    std::string_view line) {
+    if (!line.starts_with('[')) {
+        return std::nullopt;
+    }
+    const std::size_t slash = line.find('/');
+    const std::size_t close = line.find(']');
+    if (slash == std::string_view::npos || close == std::string_view::npos || slash > close) {
+        return std::nullopt;
+    }
+    const auto number = [](std::string_view digits) -> std::optional<std::size_t> {
+        while (!digits.empty() && digits.front() == ' ') {
+            digits.remove_prefix(1);
+        }
+        if (digits.empty() || !std::ranges::all_of(digits, [](char c) {
+                return std::isdigit(static_cast<unsigned char>(c)) != 0;
+            })) {
+            return std::nullopt;
+        }
+        return static_cast<std::size_t>(std::stoull(std::string{digits}));
+    };
+    const std::optional<std::size_t> done = number(line.substr(1, slash - 1));
+    const std::optional<std::size_t> total = number(line.substr(slash + 1, close - slash - 1));
+    if (!done.has_value() || !total.has_value()) {
+        return std::nullopt;
+    }
+    return std::pair{*done, *total};
+}
+
+/// llama.cpp's log while one quantize runs, never printed (M3). `models
+/// quantize` used to put its metadata dump and a line per tensor on the
+/// terminal, where every other `models` verb reports in its own words.
+/// Warnings and errors are kept, for a failure's message; the per-tensor
+/// lines are the progress; the rest goes. The callback in place before --
+/// llama.cpp's own, or the backend's -- is put back when this goes.
+class QuantizeLog {
+public:
+    explicit QuantizeLog(const QuantizeProgress& progress) : progress_{progress} {
+        llama_log_get(&previous_, &previous_data_);
+        llama_log_set(&QuantizeLog::receive, this);
+    }
+
+    ~QuantizeLog() {
+        llama_log_set(previous_, previous_data_);
+    }
+
+    QuantizeLog(const QuantizeLog&) = delete;
+    QuantizeLog& operator=(const QuantizeLog&) = delete;
+    QuantizeLog(QuantizeLog&&) = delete;
+    QuantizeLog& operator=(QuantizeLog&&) = delete;
+
+    /// What llama.cpp warned about or failed with, trimmed.
+    [[nodiscard]] std::string said() {
+        const std::scoped_lock lock{mutex_};
+        std::string out = kept_;
+        while (!out.empty() && (out.back() == '\n' || out.back() == ' ')) {
+            out.pop_back();
+        }
+        return out;
+    }
+
+private:
+    static void receive(ggml_log_level level, const char* text, void* self) {
+        if (text != nullptr && self != nullptr) {
+            static_cast<QuantizeLog*>(self)->add(level, text);
+        }
+    }
+
+    void add(ggml_log_level level, std::string_view text) {
+        if (level == GGML_LOG_LEVEL_INFO && progress_) {
+            if (const auto count = tensor_count(text); count.has_value()) {
+                progress_(count->first, count->second);
+            }
+        }
+        const std::scoped_lock lock{mutex_};
+        // A continuation belongs to whatever it continues.
+        if (level != GGML_LOG_LEVEL_CONT) {
+            keeping_ = level >= GGML_LOG_LEVEL_WARN;
+        }
+        if (!keeping_) {
+            return;
+        }
+        kept_ += text;
+        if (kept_.size() > kKept) {
+            kept_.erase(0, kept_.size() - kKept);
+        }
+    }
+
+    static constexpr std::size_t kKept = 2048;
+    const QuantizeProgress& progress_;
+    ggml_log_callback previous_ = nullptr;
+    void* previous_data_ = nullptr;
+    std::mutex mutex_;
+    std::string kept_;
+    bool keeping_ = false;
+};
+#endif
+
 }  // namespace
+
+std::optional<std::string> canonical_quant_type(std::string_view name) {
+    const Entry* entry = find_type(name);
+    if (entry == nullptr) {
+        return std::nullopt;
+    }
+    return std::string{entry->name};
+}
 
 std::vector<std::string> quant_type_names() {
     std::vector<std::string> names;
@@ -97,7 +212,7 @@ bool quantize_supported() noexcept {
 }
 
 QuantizeResult quantize(const std::filesystem::path& input, const std::filesystem::path& output,
-                        std::string_view type) {
+                        std::string_view type, const QuantizeProgress& progress) {
     QuantizeResult result;
 
     const Entry* entry = find_type(type);
@@ -144,11 +259,15 @@ QuantizeResult quantize(const std::filesystem::path& input, const std::filesyste
     llama_model_quantize_params params = llama_model_quantize_default_params();
     params.ftype = static_cast<llama_ftype>(entry->type);
 
+    QuantizeLog log{progress};
     if (llama_model_quantize(input.string().c_str(), output.string().c_str(), &params) != 0) {
-        // llama.cpp has already logged the specifics; this says which file and
-        // what was being attempted, which its own message does not.
+        // Which file and what was being attempted, then llama.cpp's own
+        // specifics -- kept from its log rather than printed by it.
         result.error =
             "llama.cpp could not quantize " + input.string() + " to " + std::string{entry->name};
+        if (const std::string said = log.said(); !said.empty()) {
+            result.error += "\nllama.cpp said: " + said;
+        }
         std::filesystem::remove(output, code);
         return result;
     }
@@ -161,6 +280,7 @@ QuantizeResult quantize(const std::filesystem::path& input, const std::filesyste
     // "Apogee cannot do this"; this reads as "this build cannot, and here is
     // the flag" -- which is the difference the refusal test pins.
     (void)entry;
+    (void)progress;
     result.error =
         "this build cannot quantize: llama.cpp was not compiled in. Rebuild with "
         "-DAPOGEE_ENABLE_LLAMA=ON";

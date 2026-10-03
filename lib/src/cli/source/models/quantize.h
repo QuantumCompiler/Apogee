@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
+#include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -44,6 +47,15 @@ struct QuantType {
 /// Their spellings alone, for completion.
 [[nodiscard]] std::vector<std::string> quant_type_names();
 
+/// `name` as the table spells it -- `q4_k_m` is `Q4_K_M` -- or nothing when
+/// it names no accepted type. What a backend made from a quantization is
+/// named after, so one level is never registered twice under two spellings.
+[[nodiscard]] std::optional<std::string> canonical_quant_type(std::string_view name);
+
+/// How far a quantization is: the tensor it is on, of how many. Read from
+/// llama.cpp's own per-tensor log lines, so it is said only when they are.
+using QuantizeProgress = std::function<void(std::size_t done, std::size_t total)>;
+
 /// What a quantization run produced.
 struct QuantizeResult {
     bool ok = false;
@@ -66,7 +78,14 @@ struct QuantizeResult {
 /// `output` must not already exist — the same rule acquisition follows, and for
 /// the same reason: a quantize that silently replaced a model someone was using
 /// would be the most expensive kind of convenience.
+///
+/// **llama.cpp's log never reaches the terminal** (M3). For the run its log
+/// callback is Apogee's: the metadata dump and the per-tensor lines are
+/// dropped -- the latter told to `progress` -- and its warnings and errors
+/// are kept for a failure's message. The callback in place before is put
+/// back after.
 [[nodiscard]] QuantizeResult quantize(const std::filesystem::path& input,
-                                      const std::filesystem::path& output, std::string_view type);
+                                      const std::filesystem::path& output, std::string_view type,
+                                      const QuantizeProgress& progress = {});
 
 }  // namespace apogee::models

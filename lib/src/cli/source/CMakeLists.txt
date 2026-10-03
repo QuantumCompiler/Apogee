@@ -95,6 +95,8 @@ add_library(apogee_core STATIC
     models/store.cpp
     models/migrate.h
     models/migrate.cpp
+    commands/model_chain.h
+    commands/model_chain.cpp
     commands/models_pull.h
     commands/models_pull.cpp
     commands/models_migrate.h

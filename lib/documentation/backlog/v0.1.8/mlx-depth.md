@@ -13,13 +13,13 @@
 - `assets/mlx/mlx_generate.py`: the vision extension (image parts in the request protocol, `mlx-vlm` loading when the model carries it); the stub-module suite grows the image cases.
 - `backends/mlx_local.cpp`: image-capability answer from the model directory's own markers; the capability probe stays a harness question.
 - `httpserver/`: nothing structural — a conformance case proving an `mlx` entry serves `/v1/chat/completions` streamed, and the type-refusal test updated to assert it is *not* refused.
-- `training/promote` plan + `commands/train.cpp`: the MLX registration target (`--target mlx`), fused-SafeTensors path through [30b](mlx-model-operations.md)'s store row, the version ledger unchanged.
+- `training/promote` plan + `commands/train.cpp`: the MLX registration target (`--target mlx`), fused-SafeTensors path through [31b](mlx-model-operations.md)'s store row, the version ledger unchanged.
 - Tests: fake-driver image round-trip; promote-plan table gains the MLX branch (closure-tested like the GGUF one); the served-stream conformance case; `check` rows.
 
 **Reference (Ommi).** No analog for any of the three: Ommi had no second runtime, no vision on local models, and its training promoted into its one format. The in-house precedents consumed: local multimodal (Milestone O), the serve plane's refusal semantics (Milestone T), and the promote plan (Milestone Z).
 
 **Decisions made** (dated):
-- 2026-10-03 — Split from the MLX track as its closer: each piece needs 30a's child protocol and 30b's store row to exist first.
+- 2026-10-03 — Split from the MLX track as its closer: each piece needs 31a's child protocol and 31b's store row to exist first.
 - 2026-10-03 — **Serve may route MLX** (the policy half of this item, decided at spec time): the serve exclusion list is about credentials, and extending it to a local runtime would misstate the rule it encodes. The conformance test makes the decision structural.
 
 **Open calls:**
@@ -39,4 +39,4 @@
 - [ ] `apogee train promote --target mlx` registers the tuned model as a runnable `mlx` entry through the one config editor, versioned in the ledger, with rollback intact — and no GGUF conversion ran.
 - [ ] `check` reports the vision dependency honestly on installs with and without it.
 
-**Scope note.** Item **30c**, earmarked for **v0.1.7**; build after [30a](mlx-backend-core.md) and [30b](mlx-model-operations.md). Out of scope: MLX embeddings; audio/video native paths; distillation changes beyond the promote target; any second serve plane.
+**Scope note.** Item **31c**, earmarked for **v0.1.8**; build after [31a](mlx-backend-core.md) and [31b](mlx-model-operations.md). Out of scope: MLX embeddings; audio/video native paths; distillation changes beyond the promote target; any second serve plane.

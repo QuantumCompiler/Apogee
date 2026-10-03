@@ -26,7 +26,7 @@
 - [default: the flag is `models list --all`; the folded state prints one tail line — `N snapshot(s) consumed by conversions — --all shows them` — so the fold is visible, not silent] Discoverability of the fold.
 - [default: SOURCE reads `converted` for GGUFs with recorded or inferred lineage, `local` otherwise; the full chain lives in `models info`, not new columns] Column treatment — taste, veto freely.
 - [default: a snapshot consumed *and also registered as a backend itself* (possible once the MLX track lands) is not folded — folding applies only to unregistered, consumed snapshots] Interaction with future direct-snapshot backends.
-- [default: [M3](pull-register-chain.md)'s chain stamps the same lineage through the same functions — nothing extra; noted so the two items compose] M3 interplay.
+- [default: [M3](../../assistant/MILESTONES.md#milestone-n--model-operations)'s chain (shipped 2026-10-03) stamps the same lineage through the same functions — nothing extra; noted so the two items compose] M3 interplay.
 
 **Guardrail(s).**
 - The `consumed()` table, exhaustively, including both-snapshots-one-converted (only the recorded one folds; the other stays).
@@ -41,4 +41,4 @@
 - [ ] Pre-existing GGUFs show the same facts tagged *(inferred)*.
 - [ ] Deleting a snapshot's derived GGUFs returns it to the default listing; deleting the snapshot leaves its GGUFs listing with the honest broken-chain note.
 
-**Scope note.** **Maintenance item M5**; gated on nothing pending. Interplay, not gates: [M2](../../assistant/MILESTONES.md#milestone-n--model-operations) (sweep cost, shipped), [M3](pull-register-chain.md) (the chain stamps the same records). Out of scope: backfilling old sidecars; lineage for Ollama-pulled or hand-copied GGUFs (unknown stays unknown); surfacing lineage in machine-readable output (rides [27e](../v0.1.4/machine-readable-reads.md)'s documents when that lands).
+**Scope note.** **Maintenance item M4** (M5 until 2026-10-03, when base-model sessions moved to the v0.1.3 tail); gated on nothing pending. Interplay, not gates: [M2](../../assistant/MILESTONES.md#milestone-n--model-operations) (sweep cost, shipped), [M3](../../assistant/MILESTONES.md#milestone-n--model-operations) (the chain stamps the same records, shipped). Out of scope: backfilling old sidecars; lineage for Ollama-pulled or hand-copied GGUFs (unknown stays unknown); surfacing lineage in machine-readable output (rides [28e](../v0.1.5/machine-readable-reads.md)'s documents when that lands).

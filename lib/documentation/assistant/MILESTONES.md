@@ -1349,7 +1349,7 @@ Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the
   - [DEVELOPER.md → Changing the pipeline](DEVELOPER.md#changing-the-pipeline) has the full list: the required checks re-applied before the merge, `pr-ci.sh` mirrored, the two matrices kept as one list, the job and artifact names `release-from-pr.sh` reads, no job-level `if:` on a required matrix job, `changed.sh` for new CLI inputs, and when `required-checks.py` itself must change.
   - The short version is at the top of `ci.yml`.
   - A checklist item is in CLAUDE.md → Implementing a Feature.
-  - The `apogee-backlog-item`, `apogee-document-update` and `apogee-pull-request` skills each carry it. The docs pass runs the dry run; the PR description gains a **Before merging** section.
+  - The `apogee-backlog-execute-item` (then `apogee-backlog-item`), `apogee-maintenance-documents` (then `apogee-document-update`) and `apogee-pull-request` skills each carry it. The docs pass runs the dry run; the PR description gains a **Before merging** section.
   - The script's header lists its own assumptions.
   - `--apply` is always the user's to run: it changes repository settings.
 
@@ -1961,7 +1961,7 @@ The general lesson is the one this repo already applies elsewhere and had not ap
 
 **What this deliberately does not do.** No push channel (a driving GUI performs its own mutations by shelling out to `apogee config …`, so it already knows when to re-read); no socket, ever (`lsof`, sampled continuously while the child lives); no protocol representation of slash commands, which are terminal-REPL affordances a driver replaces with its own UI.
 
-### 2026-09-25 — The integration spike: a naive host embeds the binary (backlog item 27, for v0.1.4)
+### 2026-09-25 — The integration spike: a naive host embeds the binary (backlog item 28, for v0.1.5)
 
 Asked for by the user (2026-09-25): the CLI pluggable into **other people's** harnesses and applications, with the native machine mode as the floor and a common protocol integrators extend from. The spike's instrument is [`tests/naive_host_driver.py`](../../src/cli/tests/naive_host_driver.py) — a third-party-style host, kept as evidence and re-runnable (`naive_host_driver.py <binary> <work-dir>`), that knows **only what machine-mode.md says**: it may not learn from Apogee's source, and where the documented contract leaves it blind it records a wall instead of peeking. It ran against the installed `v0.1.2` binary (the shipped contract an integrator meets today) in a throwaway `APOGEE_HOME`, with a scripted `mock` backend as the model actor.
 
@@ -1983,7 +1983,7 @@ Asked for by the user (2026-09-25): the CLI pluggable into **other people's** ha
 
 **The recommendation: grow the JSONL contract; do not reframe it.** JSON-RPC/LSP framing would break every `protocol_version: 1` driver to buy request/response multiplexing the walls do not demand — turns serialize by design, and the one axis that wants a peer protocol (host tools) is **already answered by MCP as a sidecar**, proven above, wanting only per-run wiring. The decisive finding is that the existing tolerance rules make the contract **retrofittable in both directions**: an unknown inbound line is ignored (verified live), so a new host can send a `hello` to an old binary harmlessly, and rule 1 means an old host survives every additive event. The gaps close as additions: a handshake and a written stability promise (W1), a schema artifact pinned like the prose doc (W2), turn ids and an inbound cancel (W3, W4), per-run wiring for host MCP servers and the file-tool root (W6, W8 — W8's *default* also changes under item 25a's launch-folder rule, which shipped later the same day, [Milestone V](#milestone-v--the-native-toolsets); the spike's evidence is the v0.1.2 binary, and the per-run declaration remains the integration half), and `--output-format json` on the read commands a host UI needs (W7).
 
-**Split (2026-09-25), all five specced into the v0.1.4 table:** 27a the handshake and the stability promise → 27b per-run integration wiring → 27c turn ids and cancel → 27d the schema artifact → 27e machine-readable reads. **Parked with evidence, the user's call:** a push channel (v1's "events arrive in response to turns, never unprompted" held comfortably for an embedding host — the case for push is config/model change notification for long-lived embeds, and 27a's capability field is where it would negotiate if ever wanted). A SPEC revision naming third-party embedding as a product surface is proposed alongside the split rather than made unilaterally.
+**Split (2026-09-25), all five specced into the v0.1.5 table:** 28a the handshake and the stability promise → 28b per-run integration wiring → 28c turn ids and cancel → 28d the schema artifact → 28e machine-readable reads. **Parked with evidence, the user's call:** a push channel (v1's "events arrive in response to turns, never unprompted" held comfortably for an embedding host — the case for push is config/model change notification for long-lived embeds, and 28a's capability field is where it would negotiate if ever wanted). A SPEC revision naming third-party embedding as a product surface is proposed alongside the split rather than made unilaterally.
 
 ---
 
@@ -2299,6 +2299,67 @@ Every other header read goes through the same function, so each is faster the sa
 - **Windows** uses the same standard library calls, but was not measured there.
 - **M1's busy line now shows only briefly.** A 31-model `models list` finishes in a third of a second, so its line appears for a frame or two after the 150 ms gate.
 
+### 2026-10-03 — `pull-register-chain` (maintenance item M3): one command from a pull to a runnable backend, and a quantize that stops talking over itself
+
+**Why.** Getting a full-weight model from Hugging Face to a chattable backend took four commands, each typed after watching the last finish (the user's transcript, 2026-10-03): `models pull … --safetensors`, `models convert`, `models quantize --type Q4_K_M`, then `config add-backend`. Every stage was already a shipped core. The same transcript showed `models quantize` printing llama.cpp's own metadata dump straight onto the terminal, where every other `models` verb reports in its own words: 14 lines for a one-tensor model, hundreds for a real one.
+
+**What was built**
+
+- [x] **`--register` and `--register-with <levels>`**, on `models pull <ref> --safetensors` and on `models convert <model>`.
+  - The chain pulls (when it starts from a pull), converts to F16 with its projector, quantizes to each listed level, and registers a backend for every artifact: `<model>-F16` and `<model>-<level>`.
+  - Levels are comma-separated and spelled any way the quantize table accepts; `q4_k_m` is `Q4_K_M`, and F16 is always made.
+  - `--register` without `--safetensors` is refused, naming why: a GGUF pull is runnable as it lands.
+- [x] **The verbs became functions the chain calls** (`commands/models_pull.cpp`): `pull_snapshot`, `convert_model` and `quantize_model`.
+  - Standalone, each prints exactly what it printed before.
+  - Chained, each hands its warnings (a base model, a projector that could not be made, an unrunnable architecture) to the chain, which says them once in its summary. Each verb's own "add a backend" and "make it smaller" hints give way to the chain's.
+  - Every stage keeps its guarantees because it is the same code: the staging directory, the hash-named store home, the projector carried to every quantization, Ctrl-C cleaning up.
+- [x] **The orchestration** (`commands/model_chain.h/.cpp`): stages in order under `[i/n]` lines.
+  - A stage that fails has said why; the chain then says where it stopped and the one command that resumes it, and passes the failure on with the stage's own exit code (a cancel stays a cancel).
+  - Once the pull is done, the chain says at once that from here on `apogee models convert <model>/safetensors/<id> --register-with …` resumes it. That command runs offline, and a run killed outright has already shown it.
+- [x] **Resuming makes nothing twice.** `convert` already found an existing conversion by its record; `quantize` now finds an existing quantization the same way (the source it was made from, and the level). Standalone `models quantize` benefits too: a level already made is reported, not made again.
+- [x] **Registration is the hand-typed edit.** Each backend goes through `harness::append_backend` in the one config editor, the edit `config add-backend <name> --type llamacpp --model-path … [--mmproj-path …]` makes. A name an earlier run of the same chain registered for the same files is left as it is.
+  - Before the first stage, the chain refuses what would refuse at its last: no config to register into, a name another model's backend holds, or a name differing only in case.
+- [x] **llama.cpp's log stays off the terminal** (`models/quantize.cpp`). For the run, its log callback is Apogee's `QuantizeLog`:
+  - the metadata dump is dropped;
+  - the per-tensor lines become a tensor count on M1's busy line;
+  - warnings and errors are kept and attached to a failure as `llama.cpp said: …`;
+  - the callback in place before (the backend's own, when a model is loaded) is put back afterwards.
+  - On a small hand-built model, the build from before printed 14 lines of llama.cpp's own. This one prints none, and on a failure says llama.cpp's reason in one line beneath its own.
+
+**Not run, by the user's call.** The guardrail's live check, one full-weight pull chained to a registered quant and chatted with, was not run: the user runs it (2026-10-03). Nothing in this item's tests downloads, converts or quantizes a real model.
+- The converter is the existing test's shell script.
+- The chain's quantizer is a stand-in that writes small GGUFs.
+- llama.cpp's real quantizer runs, on a llama build, only on a 2 KiB model built in the test (`quantizable_gguf`).
+- The pull stage itself, which needs the network, is exercised only through the orchestrator's tests.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| What registers | Every artifact: `<model>-F16` and `<model>-<level>` *(default taken)* | The user picks at chat time and deletes what they do not want. |
+| The F16 | Always made and kept *(default taken)* | It is the quantization source and the training input; retention is the user's, through `models delete`. |
+| Flag composition | `--register` without `--safetensors` refused *(default taken)* | The chain is for full-weight pulls; a GGUF pull is runnable as it lands. |
+| Discoverability | A plain `pull --safetensors` now suggests `--register-with Q4_K_M` *(default taken)* | The next pull can be one command. |
+| The resume command | `models convert <model>/safetensors/<id> --register…`, said as soon as the pull is done | Offline, and it skips what is done; `convert` gained the same flags for this. |
+| No real pull | Built and verified without downloading or converting a real model — **the user's call** | The live check is the user's; the tests need none of it. |
+
+**Guardrails, each mutation-tested (24 mutants, all caught on the first pass)**, against the whole unit suite; the quantize log's five on a llama build.
+- **The orchestration:** a failure unsaid or swallowed; the offline resume unsaid; a warning said twice.
+- **The chain:** registration not idempotent; another model's name, a name differing in case, or a missing config not refused up front; the names not checked first; the projector or the quantizations not registered; an existing quantization not recognised; levels kept as typed, or F16 kept as a level; `--type` allowed beside `--register`; a base model unmarked; a chained verb printing its own hints or its warnings inline; the resume command without its levels.
+- **The quantize log** (on a llama build): the log not routed or not put back, the reason dropped, the tensor count unsaid, the warnings not kept.
+- Not mutation-tested: the `--register needs --safetensors` refusal. Its mutant turns the test's command into a real pull, which reaches the network.
+
+**Tests.**
+- `model_chain_test`: the orchestration as a table over stand-in stages.
+- `models_convert_test`, all in process:
+  - the chain with a stand-in quantizer, each config byte-identical to `config add-backend` typed by hand;
+  - a stop at a quantize, resumed by the printed command, making nothing twice;
+  - a stop at the conversion, resumed by running the printed command itself;
+  - the up-front refusals;
+  - a base model's note said once;
+  - on a llama build, the whole chain through the command line with the real quantizer.
+- `quantize_test`, on a llama build: a real quantization writes nothing of llama.cpp's to the terminal (captured at the file descriptor) and counts its one tensor; a refusal carries llama.cpp's reason; the backend still hears llama.cpp afterwards.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.
@@ -2391,7 +2452,7 @@ The lesson is the cheap one: **a plan inherited from the reference implementatio
 | Family | Embedded chat template | Observed |
 |---|---|---|
 | `gemma3` (1b-it Q8_0) | **yes** | Clean. Answered "Paris". Nothing to strip. |
-| `qwen3` (3.6-27b Q4_K_M) | **yes** | **Emitted `<think>\n\n</think>\n\n4` — all of it reaching the user.** |
+| `qwen3` (3.6-28b Q4_K_M) | **yes** | **Emitted `<think>\n\n</think>\n\n4` — all of it reaching the user.** |
 | `llama3` (3.2-3b, local files) | **no** | Degenerate on every prompt. |
 
 This item was written from Ommi's Gemma 4, which shipped **no** chat template and had to be reverse-engineered — that was the case the bespoke-override slot existed for. **Gemma 3 ships a good template and needs no help at all.** The family that needed help was Llama, and its files here carry a content hash where a name should be and degenerate like base models, so nothing about it could be verified.

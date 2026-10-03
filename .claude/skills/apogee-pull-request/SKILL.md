@@ -9,7 +9,7 @@ Drafts the MR description for the current branch against `stable` (the repo's ma
 
 ## 0. Precondition
 
-The docs should already be reconciled — if `apogee-document-update` hasn't been run on this branch, run it first. Describing stale docs produces a stale description.
+The docs should already be reconciled — if `apogee-maintenance-documents` hasn't been run on this branch, run it first. Describing stale docs produces a stale description.
 
 ## 1. Gather the evidence
 

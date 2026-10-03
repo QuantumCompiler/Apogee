@@ -1,12 +1,14 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "commands/command.h"
+#include "models/quantize.h"
 #include "models/sidecar.h"
 #include "models/store.h"
 
@@ -135,6 +137,48 @@ struct GgufChoice {
 /// Takes no `Config`: nothing here reads one. A Hugging Face token comes from
 /// the environment at the point of use (`HF_TOKEN`), and the models directory
 /// is passed explicitly so a test can point it at a temporary tree.
+/// What makes a quantization: `models::quantize`, or a test's stand-in.
+using Quantizer = std::function<models::QuantizeResult(
+    const std::filesystem::path& input, const std::filesystem::path& output, std::string_view level,
+    const models::QuantizeProgress& progress)>;
+
+[[nodiscard]] Quantizer default_quantizer();
+
+/// The levels `--register-with` names, in the table's spelling and each once;
+/// F16 dropped, since it is always made and registered. Fails on an unknown
+/// level, naming the accepted ones -- before anything runs.
+[[nodiscard]] std::vector<std::string> register_levels(const std::vector<std::string>& given);
+
+/// One command from SafeTensors to runnable backends (M3).
+struct RegisterChainRequest {
+    models::StoreRoots roots;
+    /// The config the backends are registered in.
+    std::filesystem::path config_path;
+    /// Set: the chain begins by pulling this Hugging Face repository's full
+    /// weights (`models pull <ref> --safetensors --register...`).
+    std::string pull_ref;
+    /// Without a pull: the SafeTensors set to start from, as `convert` takes
+    /// it (`models convert <model> --register...`) -- the resume command.
+    std::string snapshot;
+    std::string snapshot_from;
+    /// The quantization levels, each its own backend beside the F16's.
+    std::vector<std::string> levels;
+};
+
+/// What the chain makes things with, so a test can stand in for llama.cpp.
+struct ChainTools {
+    Quantizer quantize = default_quantizer();
+};
+
+/// Pull (when asked), convert to F16 with its projector, quantize to each
+/// level, and register a backend for every one of them -- `<model>-F16`,
+/// `<model>-<level>` -- each stage the standalone verb's own core. Refuses
+/// before the first stage what would refuse at the last (no config, a name
+/// taken by another model). A failure says where it stopped and the command
+/// that resumes it; every earlier stage's output stays in the store, and the
+/// resumed chain finds it rather than making it again.
+void run_register_chain(const RegisterChainRequest& request, const ChainTools& tools = {});
+
 void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,
                           const RootContext& context);
 

@@ -1,6 +1,6 @@
 # Task autonomy policy: questions and permissions with nobody present
 
-**What / why.** [28a](task-runner-core.md) ships safe and therefore narrow: an unattended task fails cleanly when the model asks a question, and every `ask`-level destructive tool denies. That makes whole classes of useful tasks impossible on purpose — a task that must write files, run a build, or make a judgment call needs the user's authority granted **before** the run, since nobody is present during it. This item is that grant, made explicit and auditable: a **per-task question policy** (`--on-question fail` — the 28a default — or `--on-question answer:"<declared answer>"`), and **per-task permission grants** (`--allow <tool>`, repeatable) that widen the gate for this task only. The hazard this item exists to avoid is the rubber stamp: an orchestrator that auto-answers "yes" to every prompt re-creates exactly the hole the permission gate closes. Policy is therefore *declared up front, scoped to the task, and recorded per use* — never answered live by the machine on the user's behalf.
+**What / why.** [29a](task-runner-core.md) ships safe and therefore narrow: an unattended task fails cleanly when the model asks a question, and every `ask`-level destructive tool denies. That makes whole classes of useful tasks impossible on purpose — a task that must write files, run a build, or make a judgment call needs the user's authority granted **before** the run, since nobody is present during it. This item is that grant, made explicit and auditable: a **per-task question policy** (`--on-question fail` — the 29a default — or `--on-question answer:"<declared answer>"`), and **per-task permission grants** (`--allow <tool>`, repeatable) that widen the gate for this task only. The hazard this item exists to avoid is the rubber stamp: an orchestrator that auto-answers "yes" to every prompt re-creates exactly the hole the permission gate closes. Policy is therefore *declared up front, scoped to the task, and recorded per use* — never answered live by the machine on the user's behalf.
 
 **Core constraint(s).**
 - **The gate's semantics do not change.** A denial is still a tool result the model reads; a grant merely resolves `ask` to `allow` for the named tool, inside this task's lifetime. No new answer kind, no bypass path, and `ask`-resolves-to-deny remains the unattended default everywhere else.
@@ -19,7 +19,7 @@
 **Reference (Ommi).** No analog (Ommi's tools ran ungated; Apogee's gate — Milestone V — deliberately diverged, and its "a surface with nobody to ask denies" rule is the floor this item builds on). In-house precedents: the `permissions:` schema and `[y]es/[n]o/[a]lways/[s]ession` ladder (Milestone V), and the per-agent tool policy filter (Milestone X).
 
 **Decisions made** (dated):
-- 2026-09-25 — Split from the v0.1.5 task work: 28a stays deny-by-default with fail-on-question so autonomy widening is a deliberate, reviewable step — this document — never an accident of the runner shipping.
+- 2026-09-25 — Split from the v0.1.6 task work: 29a stays deny-by-default with fail-on-question so autonomy widening is a deliberate, reviewable step — this document — never an accident of the runner shipping.
 - 2026-09-25 — Grants scoped to the task, composed to be no wider than config × agent policy, recorded per use (the design that survived the spike's rubber-stamp concern).
 
 **Open calls:**
@@ -39,4 +39,4 @@
 - [ ] `--on-question answer:"blue"` lets a question-asking task finish unattended, the answer and the question both recorded; without it, the task fails naming the question.
 - [ ] A grant wider than the config's `permissions:` or the named agent's policy is refused at `task run`, naming the rule.
 
-**Scope note.** Item **28b**, earmarked for **v0.1.5**; build after [28a](task-runner-core.md). Out of scope: any blanket grant; policy for interactive chat (the existing ladder owns it); org-level or shared policy files.
+**Scope note.** Item **29b**, earmarked for **v0.1.6**; build after [29a](task-runner-core.md). Out of scope: any blanket grant; policy for interactive chat (the existing ladder owns it); org-level or shared policy files.

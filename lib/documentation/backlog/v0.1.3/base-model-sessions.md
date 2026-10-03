@@ -19,6 +19,7 @@
 
 **Decisions made** (dated):
 - 2026-10-03 — Asked for by the user from the live transcript ("very poor performance"), placed in **Maintenance** at their direction.
+- 2026-10-03 — Moved back into the **v0.1.3** tail as **26r** (the user's call, later the same day), re-numbering Maintenance's remaining M5/M6 to **M4**/**M5**.
 - 2026-10-03 — **Framing, not gating:** a refusal or a confirm-to-continue would contradict the recorded open-models principle; the fixes are clean output, honest tool advertisement, and a visible state.
 
 **Open calls:**
@@ -40,4 +41,4 @@
 - [ ] The saved session for both cases is byte-identical to the models' raw output.
 - [ ] `models info` and the conversation warning agree on the one wording, including the confidently-wrong sentence.
 
-**Scope note.** **Maintenance item M4**; gated on nothing pending. Out of scope: any refusal or confirmation gate (contradicts the open-models principle); guessing a *better* chat template (the existing guess stands); the attachments relevance floor the same transcript brushed (excerpts injected at `top 0.032` — a retrieval-quality question for the attachments machinery, its own item if the user wants it); machine-mode changes.
+**Scope note.** Item **26r**, earmarked for **v0.1.3** (the release's end, after 26q); gated on nothing pending. Out of scope: any refusal or confirmation gate (contradicts the open-models principle); guessing a *better* chat template (the existing guess stands); the attachments relevance floor the same transcript brushed (excerpts injected at `top 0.032` — a retrieval-quality question for the attachments machinery, its own item if the user wants it); machine-mode changes.

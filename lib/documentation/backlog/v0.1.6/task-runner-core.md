@@ -5,7 +5,7 @@
 **Core constraint(s).**
 - **An outer loop; the agent loop is untouched.** The per-turn bound (`max_iterations = 12`, the final-pass flag) and the half-turn rollback discipline stand exactly as they are; the runner decides *whether to open another turn*, never how a turn runs. One source of truth per concern.
 - **Bounded by construction.** A round budget is not optional and has no off switch — an unbounded autonomous loop must be unrepresentable, not discouraged. The stop set: done, budget exhausted, the breaker (no progress), an unrecoverable error, or an explicit halt.
-- **Deny-by-default survives autonomy.** An unattended run has nobody to ask, so `ask`-level destructive tools deny and the denial is a tool result the model reads — the existing rule, byte-for-byte. *Widening it is [28b](task-autonomy-policy.md)'s business and must never happen as a side effect here.* Likewise a model question with nobody present fails the task cleanly in this item; answering policies are 28b.
+- **Deny-by-default survives autonomy.** An unattended run has nobody to ask, so `ask`-level destructive tools deny and the denial is a tool result the model reads — the existing rule, byte-for-byte. *Widening it is [29b](task-autonomy-policy.md)'s business and must never happen as a side effect here.* Likewise a model question with nobody present fails the task cleanly in this item; answering policies are 29b.
 - **A task rides an ordinary chat session** — persisted per turn, compacted when long, resumable — and the ledger references the session, never copies the transcript. `chats delete` on a task's session is refused while its task is live.
 - **The ledger is rewritten on every transition** (the pipeline-manifest pattern, Milestone Z), lives under a `tasks/` layout row declared in `harness/layout.h` in the same commit (the parity rule), and one task runs at a time under a `cycle`-style PID lock.
 - **Never a daemon, never a socket.** A task is a user- or scheduler-invoked process that exits when it stops — the training cycle's rule, adopted whole.
@@ -19,8 +19,8 @@
 **Reference (Ommi).** No analog for a goal-driven task runner. The nearest shapes are in-house and Ommi-derived: the **training cycle** (Milestone Z) — scheduler-invoked autonomous work under a PID lock, a circuit breaker, `halt`/`resume` replacing hand-edited state — and the **pipeline** — staged work, the manifest rewritten on every transition, resume from the first unpassed stage. Precedents to reuse, not ports.
 
 **Decisions made** (dated):
-- 2026-09-25 — Asked for by the user, targeted **v0.1.5**: the user states the goal; the application composes and drives every turn after it.
-- 2026-09-25 — In-binary, with a ledger (the spike's two findings above); the CLI is the contract, and [28c](task-surfaces.md) carries it to the other surfaces.
+- 2026-09-25 — Asked for by the user, targeted **v0.1.6**: the user states the goal; the application composes and drives every turn after it.
+- 2026-09-25 — In-binary, with a ledger (the spike's two findings above); the CLI is the contract, and [29c](task-surfaces.md) carries it to the other surfaces.
 - 2026-09-25 — **Plan-first as an ordinary turn**, not a mode: the plan is the first application-composed turn's answer, recorded in the ledger and quoted into later turns — so the whole task is readable in its session transcript afterwards.
 
 **Open calls:**
@@ -43,4 +43,4 @@
 - [ ] A destructive tool call inside an unattended task denies and the task records it; nothing prompts.
 - [ ] A second `task run` while one is live is refused by the lock, naming the running task.
 
-**Scope note.** Item **28a**, earmarked for **v0.1.5**; gated on nothing pending. Out of scope: per-task permission grants and question policies ([28b](task-autonomy-policy.md)); machine-mode events, JSON reads and admin views ([28c](task-surfaces.md)); schedules and queues (a task is invoked, like the cycle — a queue waits for demand); sub-tasks spawning tasks.
+**Scope note.** Item **29a**, earmarked for **v0.1.6**; gated on nothing pending. Out of scope: per-task permission grants and question policies ([29b](task-autonomy-policy.md)); machine-mode events, JSON reads and admin views ([29c](task-surfaces.md)); schedules and queues (a task is invoked, like the cycle — a queue waits for demand); sub-tasks spawning tasks.

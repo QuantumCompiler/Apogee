@@ -1,5 +1,5 @@
 ---
-name: apogee-document-update
+name: apogee-maintenance-documents
 description: Pre-MR documentation reconciliation — audit every doc in the repo against what the current branch actually changed, fix drift, and report what still needs the user. Run before opening a merge request ("update the docs", "docs pass before the MR", "reconcile documentation", "about to open an MR/PR").
 ---
 
