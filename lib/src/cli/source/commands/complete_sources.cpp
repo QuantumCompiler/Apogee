@@ -227,6 +227,18 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
     } else if (kind == kGgufValue) {
         list.names = stored_models(store_roots(config), true, false);
         list.paths = true;
+    } else if (kind == kBackendOrWeightsValue) {
+        list.names = config.backend_names();
+        const models::StoreRoots roots = store_roots(config);
+        for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
+            list.names.push_back(
+                models::weights_handle(stored.model, models::kGgufFormat, stored.id));
+        }
+        for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
+            list.names.push_back(
+                models::weights_handle(stored.model, models::kSafetensorsFormat, stored.id));
+        }
+        list.none = "no backends configured and the model store is empty";
     } else if (kind == kSnapshotIdValue) {
         list = weight_ids(context, false);
     } else if (kind == kGgufIdValue) {

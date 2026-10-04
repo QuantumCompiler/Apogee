@@ -22,6 +22,7 @@
 **Decisions made** (dated):
 - 2026-10-03 — Found by the attachment-representation spike: no floor at the injection site (a 0.000-score excerpt injected), RRF's 0.033 ceiling misread as percent by user and assistant alike, lexical saturating at 0.950 for an irrelevant question. A Maintenance item because it is release-agnostic polish on a shipped pipeline.
 - 2026-10-03 — Floors are per-retriever by measurement, not preference: the probe shows a shared threshold cannot exist (0.000 must floor, 0.023 RRF must not, 0.950 lexical proves nothing).
+- 2026-10-03 — Moved into the **v0.1.3** tail as **26s** (the user's call, later the same day), leaving Maintenance's lineage item (M4) as the standing queue's one row.
 
 **Open calls:**
 - [default: strength displayed as a word band — `strong / fair / weak match` — computed per retriever (RRF: score ÷ its ceiling for the lists fused; cosine: fixed bands; lexical: question-term coverage), with the raw score and retriever tag kept in parentheses] The display shape.
@@ -40,4 +41,4 @@
 - [ ] An on-topic lexical turn injects as today; an off-topic one with saturated scores floors on term coverage and says so.
 - [ ] The raw score and retriever remain visible (parenthesized on the human line, fields on machine surfaces).
 
-**Scope note.** Item **M5** (M6 until 2026-10-03's re-number), Maintenance — claimable at any time by name; gated on nothing. Out of scope: reranking changes (the judge's rules are 26b's, untouched); embedding-quality work; the structural map card ([26q](../v0.1.3/attachment-map-card.md)) and graph wiring ([30d](../v0.1.7/attachment-code-graph.md), [30e](../v0.1.7/attachment-graph-turns.md)), which fix the *other* failure the stress test showed.
+**Scope note.** Item **26s**, earmarked for **v0.1.3** (the release's end, after 26r; Maintenance's M5 — and before that M6 — until 2026-10-03's moves); gated on nothing pending. Out of scope: reranking changes (the judge's rules are 26b's, untouched); embedding-quality work; the structural map card ([26q](attachment-map-card.md)) and graph wiring ([30d](../v0.1.7/attachment-code-graph.md), [30e](../v0.1.7/attachment-graph-turns.md)), which fix the *other* failure the stress test showed.

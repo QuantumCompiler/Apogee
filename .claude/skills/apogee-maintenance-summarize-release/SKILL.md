@@ -1,6 +1,6 @@
 ---
-name: apogee-maintenance-release-summary
-description: Draft the GitHub release notes for an Apogee version in the house format of the published releases — title and theme, intro, Highlights, Install, Platforms, Known limitations, Reference — built from the release's evidence (ROADMAP, MILESTONES, the git range). Use when the user runs /apogee-maintenance-release-summary, or asks to "write the release notes", "summarize this release", "draft the release summary for vX.Y.Z".
+name: apogee-maintenance-summarize-release
+description: Draft the GitHub release notes for an Apogee version in the house format of the published releases — title and theme, intro, Highlights, Install, Platforms, Known limitations, Reference — built from the release's evidence (ROADMAP, MILESTONES, the git range). Use when the user runs /apogee-maintenance-summarize-release, or asks to "write the release notes", "summarize this release", "draft the release summary for vX.Y.Z".
 argument-hint: "[vX.Y.Z]"
 ---
 

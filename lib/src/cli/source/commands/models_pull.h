@@ -163,6 +163,10 @@ struct RegisterChainRequest {
     std::string snapshot_from;
     /// The quantization levels, each its own backend beside the F16's.
     std::vector<std::string> levels;
+    /// What every backend's name begins with (`--base-name`); empty: the
+    /// model's own name. `Gemma4-E2B` registers `Gemma4-E2B-F16` and
+    /// `Gemma4-E2B-Q4KM`.
+    std::string base_name;
 };
 
 /// What the chain makes things with, so a test can stand in for llama.cpp.
@@ -171,12 +175,14 @@ struct ChainTools {
 };
 
 /// Pull (when asked), convert to F16 with its projector, quantize to each
-/// level, and register a backend for every one of them -- `<model>-F16`,
-/// `<model>-<level>` -- each stage the standalone verb's own core. Refuses
+/// level, and register a backend for every one of them -- `<base>-F16`,
+/// `<base>-Q4KM`, the level without its underscores the way backends are
+/// named by hand -- each stage the standalone verb's own core. Refuses
 /// before the first stage what would refuse at the last (no config, a name
-/// taken by another model). A failure says where it stopped and the command
-/// that resumes it; every earlier stage's output stays in the store, and the
-/// resumed chain finds it rather than making it again.
+/// taken by another model, a name the config cannot hold). A failure says
+/// where it stopped and the command that resumes it; every earlier stage's
+/// output stays in the store, and the resumed chain finds it rather than
+/// making it again.
 void run_register_chain(const RegisterChainRequest& request, const ChainTools& tools = {});
 
 void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,

@@ -295,19 +295,21 @@ struct FakeQuantizer {
 
 /// Runs the chain on `home`, its narration captured; false when it threw.
 bool chain(const Home& home, const std::string& snapshot, std::vector<std::string> levels,
-           FakeQuantizer& quantizer, std::string* out) {
+           FakeQuantizer& quantizer, std::string* out, std::string base_name = {}) {
     const std::ostringstream captured;
     std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
     std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
     bool ok = true;
     try {
-        apogee::commands::run_register_chain(RegisterChainRequest{.roots = home.roots,
-                                                                  .config_path = home.config_path,
-                                                                  .pull_ref = {},
-                                                                  .snapshot = snapshot,
-                                                                  .snapshot_from = {},
-                                                                  .levels = std::move(levels)},
-                                             ChainTools{.quantize = quantizer.get()});
+        apogee::commands::run_register_chain(
+            RegisterChainRequest{.roots = home.roots,
+                                 .config_path = home.config_path,
+                                 .pull_ref = {},
+                                 .snapshot = snapshot,
+                                 .snapshot_from = {},
+                                 .levels = std::move(levels),
+                                 .base_name = std::move(base_name)},
+            ChainTools{.quantize = quantizer.get()});
     } catch (...) {
         ok = false;
     }
@@ -384,7 +386,7 @@ TEST_CASE("a two-level chain registers three backends, byte for byte the hand-ty
     CHECK(quantizer.asked == std::vector<std::string>{"Q4_K_M", "Q5_K_M"});
     CHECK(out.find("[2/4] quantize to Q4_K_M") != std::string::npos);
     CHECK(out.find("[4/4] register 3 backends") != std::string::npos);
-    CHECK(out.find("chat with one:  apogee chat -m vision-Q5_K_M") != std::string::npos);
+    CHECK(out.find("chat with one:  apogee chat -m vision-Q5KM") != std::string::npos);
 
     const auto f16 = stored_at(home, "org--vision", "vision-F16.gguf");
     const auto q4 = stored_at(home, "org--vision", "vision-Q4_K_M.gguf");
@@ -397,10 +399,48 @@ TEST_CASE("a two-level chain registers three backends, byte for byte the hand-ty
           hand_typed(home, pristine,
                      {{"vision-F16", "--type", "llamacpp", "--model-path", f16.file.string(),
                        "--mmproj-path", f16.projector.string()},
-                      {"vision-Q4_K_M", "--type", "llamacpp", "--model-path", q4.file.string(),
+                      {"vision-Q4KM", "--type", "llamacpp", "--model-path", q4.file.string(),
                        "--mmproj-path", q4.projector.string()},
-                      {"vision-Q5_K_M", "--type", "llamacpp", "--model-path", q5.file.string(),
+                      {"vision-Q5KM", "--type", "llamacpp", "--model-path", q5.file.string(),
                        "--mmproj-path", q5.projector.string()}}));
+}
+
+TEST_CASE("what a chain makes says where it came from, and its snapshot folds out of the list",
+          "[commands][models][convert][register][lineage]") {
+    // M4 over M3: the chain's verbs write the records lineage reads -- nothing
+    // extra -- and the command line shows them.
+    const Home home;
+    home.add_snapshot("org--vision", true);
+    FakeQuantizer quantizer;
+    std::string out;
+    REQUIRE(chain(home, "org--vision", {"Q4_K_M"}, quantizer, &out));
+    const auto f16 = stored_at(home, "org--vision", "vision-F16.gguf");
+    const std::string f16_handle = "org--vision/gguf/" + f16.id;
+
+    REQUIRE(home.run({"models", "info", "vision-Q4KM", "--quiet"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("lineage:      quantized to Q4_K_M from " + f16_handle +
+                   " (recorded)\n"
+                   "              converted from org--vision/safetensors/aaaaaaaaaaaa "
+                   "(recorded)\n") != std::string::npos);
+    REQUIRE(home.run({"models", "info", f16_handle, "--quiet"}, &out) == 0);
+    CHECK(out.find("backends:     vision-F16\n") != std::string::npos);
+    REQUIRE(home.run({"models", "info", "org--vision/safetensors/aaaaaaaaaaaa", "--quiet"}, &out) ==
+            0);
+    CHECK(out.find("made from it: " + f16_handle + " (recorded)\n") != std::string::npos);
+
+    REQUIRE(home.run({"models", "list", "--quiet", "--no-color"}, &out) == 0);
+    CHECK(out.find("org--vision/safetensors/aaaaaaaaaaaa") == std::string::npos);
+    CHECK(out.find("1 snapshot consumed by a conversion is folded -- --all lists it") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "list", "--quiet", "--no-color", "--all"}, &out) == 0);
+    CHECK(out.find("org--vision/safetensors/aaaaaaaaaaaa") != std::string::npos);
+
+    // A whole model is not one thing to show: info names what it holds.
+    CHECK(home.run({"models", "info", "org--vision", "--quiet"}, &out) == 1);
+    CHECK(out.find("'org--vision' is a model -- name one set of its weights:") !=
+          std::string::npos);
+    CHECK(out.find("  " + f16_handle) != std::string::npos);
 }
 
 TEST_CASE("a chain stopped at a quantize resumes with the command it printed, making nothing twice",
@@ -432,7 +472,80 @@ TEST_CASE("a chain stopped at a quantize resumes with the command it printed, ma
     CHECK(working.asked == std::vector<std::string>{"Q5_K_M"});
     CHECK(out.find("already converted") != std::string::npos);
     CHECK(out.find("already quantized") != std::string::npos);
-    CHECK(out.find("registered vision-Q5_K_M") != std::string::npos);
+    CHECK(out.find("registered vision-Q5KM") != std::string::npos);
+}
+
+TEST_CASE("a base name begins every backend's name, and the resume command carries it",
+          "[commands][models][convert][register]") {
+    // The user's own names (2026-10-03): Gemma4-E4B-F16, Gemma4-E4B-Q4KM.
+    const Home home;
+    home.add_snapshot("org--vision", true);
+    FakeQuantizer failing;
+    failing.refuse = "Q5_K_M";
+    std::string out;
+    REQUIRE_FALSE(chain(home, "org--vision", {"Q4_K_M", "Q5_K_M"}, failing, &out, "Vision-7B"));
+    INFO(out);
+    const std::string resume =
+        "apogee models convert org--vision/safetensors/aaaaaaaaaaaa --register-with Q4_K_M,Q5_K_M "
+        "--base-name Vision-7B";
+    CHECK(out.find("resume with:\n  " + resume + "\n") != std::string::npos);
+
+    // Resumed as printed: every name begins with the base.
+    FakeQuantizer working;
+    REQUIRE(chain(home, "org--vision/safetensors/aaaaaaaaaaaa", {"Q4_K_M", "Q5_K_M"}, working, &out,
+                  "Vision-7B"));
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path);
+    CHECK(config.backends.contains("Vision-7B-F16"));
+    CHECK(config.backends.contains("Vision-7B-Q4KM"));
+    CHECK(config.backends.contains("Vision-7B-Q5KM"));
+    CHECK_FALSE(config.backends.contains("vision-F16"));
+    CHECK(out.find("chat with one:  apogee chat -m Vision-7B-Q5KM") != std::string::npos);
+    // The file keeps the table's spelling.
+    CHECK(stored_at(home, "org--vision", "vision-Q4_K_M.gguf").file.filename() ==
+          "vision-Q4_K_M.gguf");
+
+    // Through the command line, where no quantizer is needed.
+    home.add_snapshot("org--text", false);
+    REQUIRE(home.run({"models", "convert", "org--text", "--register", "--base-name", "Text-1B"},
+                     &out) == 0);
+    CHECK(out.find("registered Text-1B-F16") != std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path).backends.contains("Text-1B-F16"));
+}
+
+TEST_CASE(
+    "a base name the config cannot hold, or with nothing to name, is refused before anything "
+    "runs",
+    "[commands][models][convert][register]") {
+    const Home home;
+    home.add_snapshot("org--text", false);
+    const std::string pristine = read_file(home.config_path);
+    std::string out;
+
+    struct Row {
+        std::vector<std::string> args;
+        std::string said;
+    };
+
+    for (const Row& row : {
+             Row{.args = {"models", "convert", "org--text", "--register", "--base-name",
+                          "My Model"},
+                 .said = "cannot contain spaces"},
+             Row{.args = {"models", "convert", "org--text", "--register", "--base-name", "a:b"},
+                 .said = "cannot contain spaces, tabs, colons"},
+             Row{.args = {"models", "convert", "org--text", "--register", "--base-name", ""},
+                 .said = "--base-name cannot be empty"},
+             Row{.args = {"models", "convert", "org--text", "--base-name", "Text"},
+                 .said = "--base-name names the backends --register makes"},
+             // Refused before anything is fetched: no network in this test.
+             Row{.args = {"models", "pull", "org/text", "--safetensors", "--base-name", "Text"},
+                 .said = "--base-name names the backends --register makes"},
+         }) {
+        INFO(row.args.back());
+        CHECK(home.run(row.args, &out) == 1);
+        CHECK(out.find(row.said) != std::string::npos);
+    }
+    CHECK(home.converter_calls().empty());
+    CHECK(read_file(home.config_path) == pristine);
 }
 
 TEST_CASE("a chain stopped at the conversion is resumed by the very command it printed",
@@ -521,10 +634,10 @@ TEST_CASE("a base model is registered, its note said once and beside its name",
     CHECK(out.find(note) != std::string::npos);
     CHECK(out.find(note) == out.rfind(note));
     CHECK(out.find("text-F16  (a base model") != std::string::npos);
-    CHECK(out.find("text-Q4_K_M  (a base model") != std::string::npos);
+    CHECK(out.find("text-Q4KM  (a base model") != std::string::npos);
     const apogee::harness::Config config = apogee::harness::load_config(home.config_path);
     CHECK(config.backends.contains("text-F16"));
-    CHECK(config.backends.contains("text-Q4_K_M"));
+    CHECK(config.backends.contains("text-Q4KM"));
 }
 
 TEST_CASE("the chain's flags are checked before anything is fetched or made",
@@ -576,6 +689,6 @@ TEST_CASE("the whole chain through the command line, llama.cpp quantizing for re
     CHECK(read_file(home.config_path) ==
           hand_typed(home, pristine,
                      {{"text-F16", "--type", "llamacpp", "--model-path", f16.file.string()},
-                      {"text-Q4_K_M", "--type", "llamacpp", "--model-path", q4.file.string()}}));
+                      {"text-Q4KM", "--type", "llamacpp", "--model-path", q4.file.string()}}));
 }
 #endif

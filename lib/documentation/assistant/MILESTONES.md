@@ -1349,7 +1349,7 @@ Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the
   - [DEVELOPER.md → Changing the pipeline](DEVELOPER.md#changing-the-pipeline) has the full list: the required checks re-applied before the merge, `pr-ci.sh` mirrored, the two matrices kept as one list, the job and artifact names `release-from-pr.sh` reads, no job-level `if:` on a required matrix job, `changed.sh` for new CLI inputs, and when `required-checks.py` itself must change.
   - The short version is at the top of `ci.yml`.
   - A checklist item is in CLAUDE.md → Implementing a Feature.
-  - The `apogee-backlog-execute-item` (then `apogee-backlog-item`), `apogee-maintenance-documents` (then `apogee-document-update`) and `apogee-maintenance-pull-request` (then `apogee-pull-request`) skills each carry it. The docs pass runs the dry run; the PR description gains a **Before merging** section.
+  - The `apogee-backlog-execute-item` (then `apogee-backlog-item`), `apogee-maintenance-update-documents` (then `apogee-document-update`) and `apogee-maintenance-summarize-pull-request` (then `apogee-pull-request`) skills each carry it. The docs pass runs the dry run; the PR description gains a **Before merging** section.
   - The script's header lists its own assumptions.
   - `--apply` is always the user's to run: it changes repository settings.
 
@@ -2306,7 +2306,7 @@ Every other header read goes through the same function, so each is faster the sa
 **What was built**
 
 - [x] **`--register` and `--register-with <levels>`**, on `models pull <ref> --safetensors` and on `models convert <model>`.
-  - The chain pulls (when it starts from a pull), converts to F16 with its projector, quantizes to each listed level, and registers a backend for every artifact: `<model>-F16` and `<model>-<level>`.
+  - The chain pulls (when it starts from a pull), converts to F16 with its projector, quantizes to each listed level, and registers a backend for every artifact: `<model>-F16` and `<model>-<level>`, named since 2026-10-03 as the user names them (below).
   - Levels are comma-separated and spelled any way the quantize table accepts; `q4_k_m` is `Q4_K_M`, and F16 is always made.
   - `--register` without `--safetensors` is refused, naming why: a GGUF pull is runnable as it lands.
 - [x] **The verbs became functions the chain calls** (`commands/models_pull.cpp`): `pull_snapshot`, `convert_model` and `quantize_model`.
@@ -2328,6 +2328,11 @@ Every other header read goes through the same function, so each is faster the sa
 - [x] **The new flags complete after another flag** (`commands/complete_protocol.cpp`; the user's report, 2026-10-03). `models pull <repo> --safetensors --<TAB>` showed `--safetensors`' own description, and `--register` never appeared.
   - The cause predates this item: since flag completion shipped, the protocol took every boolean flag for one that takes a value, so the word after any of them (`chat --raw`, `models delete --yes`) was read as that flag's value. It read CLI11's type size, which is one for every option, flags included; the parser reads the items an option expects, which is none for a flag. Completion now asks the parser's question.
   - A fixed set the parser splits at commas completes its last word, as a collection list already did: `--register-with Q4_K_M,<TAB>` offers the other levels, not the one already listed.
+- [x] **Backend names the user's way, and `--base-name`** (`commands/models_pull.cpp`; asked for after the user's first live chain, 2026-10-03). The chain registered `gemma-4-E2B-F16` and `gemma-4-E2B-Q4_K_M` beside the user's own `Gemma4-E4B-F16` and `Gemma4-E4B-Q4KM`.
+  - A backend's level is written without its underscores: `-F16`, `-Q4KM`, `-Q5KM`, `-Q6K`, `-Q80`. The file keeps the table's spelling (`gemma-4-E2B-Q4_K_M.gguf`), and so does the record.
+  - `--base-name <name>`, after the levels on `pull` and on `convert`, is what every name begins with: `--base-name Gemma4-E2B` registers `Gemma4-E2B-F16` and `Gemma4-E2B-Q4KM`. Without it, the model's own name, as before.
+  - The resume command carries it, so a resumed chain registers the names the first run would have.
+  - A name the config cannot hold is refused before anything runs, by the very edit that will add it, run on the config's text and kept nowhere -- one rule, not a copy. `--base-name` without `--register`, or empty, is refused the same way.
 
 **Not run, by the user's call.** The guardrail's live check, one full-weight pull chained to a registered quant and chatted with, was not run: the user runs it (2026-10-03). Nothing in this item's tests downloads, converts or quantizes a real model.
 - The converter is the existing test's shell script.
@@ -2340,6 +2345,7 @@ Every other header read goes through the same function, so each is faster the sa
 | Decision | Choice | Why |
 |---|---|---|
 | What registers | Every artifact: `<model>-F16` and `<model>-<level>` *(default taken)* | The user picks at chat time and deletes what they do not want. |
+| Backend names | `<base>-F16`, `<base>-Q4KM`: the level without underscores, the base `--base-name` or the model's name — **the user's call**, 2026-10-03 | The names the user gives backends by hand; the files keep the table's spelling. |
 | The F16 | Always made and kept *(default taken)* | It is the quantization source and the training input; retention is the user's, through `models delete`. |
 | Flag composition | `--register` without `--safetensors` refused *(default taken)* | The chain is for full-weight pulls; a GGUF pull is runnable as it lands. |
 | Discoverability | A plain `pull --safetensors` now suggests `--register-with Q4_K_M` *(default taken)* | The next pull can be one command. |
@@ -2351,6 +2357,7 @@ Every other header read goes through the same function, so each is faster the sa
 - **The chain:** registration not idempotent; another model's name, a name differing in case, or a missing config not refused up front; the names not checked first; the projector or the quantizations not registered; an existing quantization not recognised; levels kept as typed, or F16 kept as a level; `--type` allowed beside `--register`; a base model unmarked; a chained verb printing its own hints or its warnings inline; the resume command without its levels.
 - **The quantize log** (on a llama build): the log not routed or not put back, the reason dropped, the tensor count unsaid, the warnings not kept.
 - Not mutation-tested: the `--register needs --safetensors` refusal. Its mutant turns the test's command into a real pull, which reaches the network.
+- **The names** (7 more mutants, all caught): the level keeping its underscores; the base name ignored; the resume command without it; a name the config cannot hold not refused up front; `--base-name` taken with nothing to name, or empty; `convert` passing none. `pull`'s passing it on is not mutation-tested, for the reason above: its test would be a real pull.
 - **The completion fix** (4 more mutants, all caught): a flag read as taking a value, a set split at commas not completed as a list, the parser's delimiter not read, a level already listed offered again.
 
 **Tests.**
@@ -2364,6 +2371,93 @@ Every other header read goes through the same function, so each is faster the sa
   - on a llama build, the whole chain through the command line with the real quantizer.
 - `quantize_test`, on a llama build: a real quantization writes nothing of llama.cpp's to the terminal (captured at the file descriptor) and counts its one tensor; a refusal carries llama.cpp's reason; the backend still hears llama.cpp afterwards.
 - `lifecycle_test`, for the completion fix: the reported line and its siblings (`--safetensors --`, `chat --raw --`, `uninstall -y --`, a positional after a flag); every spelling in the real tree held to the parser's own count of what it takes; `--register-with`'s comma list, and a single-word set that is not one.
+
+### 2026-10-03 — `models-list-lineage` (maintenance item M4): every model says where it came from, and a snapshot whose job is done leaves the listing
+
+**Why.** The user's `models list` (2026-10-03) opened with eleven `(not configured)` SafeTensors rows, and most of them had already done their job: each had been converted into the GGUFs registered below it. A consumed input shown as an unconfigured model reads as work to do, and it hides the one snapshot that really is waiting. The user's rule, taken as written: **a snapshot used to make a GGUF no longer shows as an unregistered model; one never converted still does — and what was built from a snapshot says so.**
+
+**What was found first.** The item was specced on the premise that lineage was recorded nowhere, so that `convert` and `quantize` would first have to start writing it. They already did. Since `models convert` first shipped (2026-09-23), the record beside every conversion has said `source: convert` with `ref` naming its snapshot as `<model>/safetensors/<id>`, and every quantization `source: quantize` with `ref` naming its GGUF. Every one of the 22 GGUF records on the user's store carries it. So the "record" half became a **reading** of those two fields, with no new field written: a `derived_from` beside `ref` would have been a second copy of one fact.
+
+**What was built**
+
+- [x] **The lineage core** (`models/lineage.h/.cpp`, new):
+  - `origin_from_record` reads a record: converted, quantized, pulled from Hugging Face or Ollama, a fine-tune, or unknown.
+  - `Lineage` is built from what one sweep of the store holds:
+    - `chain()` walks back from a model, one link per step: quantized from its F16, converted from its snapshot, pulled from its upstream.
+    - `consumed()` names the GGUFs whose chain reaches a snapshot.
+  - Recorded lineage answers first, and inference only where no record does. Every answer built on inference carries `inferred`.
+  - **Inference is narrow.** A GGUF with no record, under a model holding exactly one snapshot, is taken to be its conversion. So is a quantization whose F16 has been deleted, record and all; the F16 is the big file, and once quantized it is the one most often removed. With two snapshots nothing is guessed. Outside the store nothing is inferred at all.
+  - A fine-tune's record names its run, so it never consumes its base snapshot: the base model is no more runnable because a fine-tune of it exists.
+- [x] **One handle parser in the layout's file** (`models/store.h`): `weights_handle` and `parse_weights_handle` read `<model>/<format>/<id>` without asking the disk. A record's `ref` is read through them, never with path arithmetic in the display.
+- [x] **`models list` folds consumed snapshots** (`commands/models.cpp`).
+  - A snapshot the lineage says is consumed is not shown. It is still shown when it needs attention (a damaged one) or a backend points at it.
+  - One dim line under the table counts the fold: `12 snapshots consumed by conversions are folded -- --all lists them`.
+  - `--all` lists everything; nothing about the store changes, so `check`, `train` and `models delete` see what they saw before.
+  - Deleting a snapshot's GGUFs brings it back, because the listing follows the store.
+  - A GGUF whose chain passes through a conversion reads `converted` in SOURCE, backend or not; everything else reads what it read before.
+  - `--output-format stream-json` keeps every row: the fold is the table's, and lineage in machine output is 28e's.
+- [x] **The sweep reads nothing twice** ([M2](#milestone-n--model-operations)'s cost discipline).
+  - Each file's record is read inside its own counted step of the busy line, as before, and the lineage is applied in one pass over the finished rows.
+  - The first version read every record up front. That would have left the busy line on its uncounted label while the records loaded. It would also have hung `cli.busy_line`, which holds the sweep on a named-pipe sidecar until it sees a counted frame. It was caught reading that test, before it ran.
+- [x] **`models info` takes stored weights as well as a backend**: `<model>/<format>/<id>`, or a bare id.
+  - Completion offers both through a new name kind, `BACKEND_OR_WEIGHTS`.
+  - A local model's info prints its chain:
+    ```
+    lineage:      quantized to Q4_K_M from google--gemma-4-E4B/gguf/c52b3d2c5304 (recorded)
+                  converted from google--gemma-4-E4B/safetensors/af4523bb6580 (recorded)
+                  pulled from google/gemma-4-E4B (Hugging Face)
+    ```
+  - A broken link says what is gone: `-- source snapshot no longer on disk`, or `-- no longer on disk` for a quantization's F16.
+  - A snapshot's info says what was made from it, conversion first, and whether the listing folds it.
+  - A whole model name is refused with the handles to pick from.
+
+**On the user's store** (read-only, through a scratch `APOGEE_HOME` holding a copy of the config, with the models directory linked in).
+- `models list` went from 12 `(not configured)` snapshot rows to none, with the one tail line, and its 22 local backends now read `converted`. Every snapshot there had been converted, `google/gemma-4-E2B` among them, through M3's chain earlier the same day.
+- `--all` listed exactly the old table, line for line, apart from the SOURCE column.
+- Everything there is recorded, so nothing was inferred: the inferred path runs only on the tests' fixtures.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where lineage lives | A reading of the record's `source` and `ref`; no `derived_from` field | Convert and quantize have written the parent there since the store's first day; a second field would be a second copy. |
+| When to infer | Only where it names exactly one snapshot: a record-less GGUF, or a quantization whose F16 is gone | With two, either could be the parent, and a guess would fold the wrong one. |
+| A fine-tune | Does not consume its base | The base model stays unrunnable until it is converted. |
+| Discoverability of the fold | `models list --all`, plus one tail line counting what is folded *(default taken)* | The fold is visible, never silent. |
+| SOURCE | `converted` for a GGUF whose chain reaches a conversion, recorded or inferred; unchanged otherwise *(default taken)* | The full chain lives in `models info`, not in new columns. |
+| A snapshot a backend points at | Never folded *(default taken)* | Possible once MLX (31a) runs one directly; a backend's own model is never hidden. |
+| Machine output | `stream-json` keeps every row | A machine reader is not misled by `(not configured)`, and lineage there is 28e's. |
+| `models info` | Takes `<model>/<format>/<id>` or an id as well as a backend | The acceptance needs it: a fresh conversion is not a backend yet, and a folded snapshot must stay reachable. |
+| M3's chain | Stamps the same records through the same functions, nothing extra *(default taken)* | Proven through the command line: chain, then `info` and `list`. |
+
+**Guardrails, each mutation-tested (30 mutants, all caught on the first pass)**, against the whole unit suite. The three on `consumed()` ran again on its final form, after the conversion was ordered first.
+- **The reading:** a conversion, a pull or a fine-tune read as unknown.
+- **Inference:** none at all; not marked as inference; a guess between two snapshots; none across a deleted F16; not carried down a chain; an inference beating a record; the conversion not listed first.
+- **The chain:** a gone F16 or a gone snapshot not marked; a path outside the store not checked; the upstream link dropped; the walk unbounded.
+- **The handle parser:** any id accepted.
+- **The listing:** `converted` never said; a snapshot needing attention or a backend's own folded; nothing folded; `--all` ignored; the fold unsaid.
+- **Info:** inferred said as recorded; a gone snapshot or F16 unsaid; no stored handle taken; no lineage on a backend; the command line passing no store; a record not kept for the lineage.
+- **Completion:** stored handles not offered for `models info`.
+
+**Tests.**
+- `lineage_test`, over a store built in a temp directory:
+  - the record table;
+  - `consumed()` exhaustively: recorded; never converted; inferred; two snapshots with one converted (only the recorded one); two snapshots and no record (nothing guessed); a record beating an inference; a quantization reaching it through its F16; the F16 deleted, with one snapshot or two; a pulled GGUF, a fine-tune and another model's GGUF consuming nothing;
+  - the conversion ordered before its quantizations;
+  - a snapshot that stops being consumed once its GGUF is gone;
+  - the full chain to the upstream; the broken chains; the inferred chains; a parent outside the store, present and gone;
+  - a record naming itself; a store split across `paths.hf_dir`.
+- `store_test`: the handle parser against what is not a handle.
+- `models_test`:
+  - the listing's fold and its tail line, and `--all` as a superset of every line;
+  - `converted` on backends and stored rows, and a pulled GGUF unchanged;
+  - deleting the GGUFs brings the snapshot back; deleting only the F16 keeps it folded, said as inferred; deleting the snapshot names the break;
+  - a damaged snapshot and a backend's own never folded;
+  - the sweep's reads counted exactly as before;
+  - `info` goldens for a backend, a stored GGUF, a consumed snapshot, a waiting one, a bare id, an inferred conversion, an unknown origin and a whole model name.
+- `models_convert_test`: M3's chain run, then `models info` and `models list` through the command line on what it made.
+- `complete_sources_test`: `models info` completes backends and stored handles, and no bare model.
+- No inference was run, by the user's call: nothing in this item loads a model.
 
 ## Milestone O — Local multimodal
 

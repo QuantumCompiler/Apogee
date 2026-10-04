@@ -38,6 +38,8 @@ add_library(apogee_core STATIC
     models/gguf_inspect.cpp
     models/kv_cache.h
     models/kv_cache.cpp
+    models/lineage.h
+    models/lineage.cpp
     models/sha256.h
     models/sha256.cpp
     models/sidecar.h

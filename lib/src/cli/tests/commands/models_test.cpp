@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <random>
 #include <regex>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <tuple>
@@ -15,6 +17,7 @@
 #include "harness/roles.h"
 #include "models/sidecar.h"
 #include "models/snapshot.h"
+#include "models/store.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
@@ -754,4 +757,302 @@ TEST_CASE("info and status say the header they read", "[commands][models][busy]"
     CHECK(render_role_status(config, sink) == render_role_status(config));
     REQUIRE_FALSE(heard.empty());
     CHECK(heard.front() == "reading local's model header");
+}
+
+namespace {
+
+/// The motivating listing (2026-10-03) in small: `org/m` pulled, converted to
+/// an F16 and quantized -- the quantization a backend -- and `org/e2b` pulled
+/// and never converted. Every record as the verbs write them.
+struct LineageStore {
+    apogee::testing::TempDir dir{"models-lineage-" + std::to_string(std::random_device{}())};
+    std::filesystem::path models = dir.path();
+    std::filesystem::path snapshot = models / "org--m" / "safetensors" / "aaaaaaaaaaaa";
+    std::filesystem::path waiting = models / "org--e2b" / "safetensors" / "cccccccccccc";
+    std::filesystem::path f16 = models / "org--m" / "gguf" / "111111111111" / "m-F16.gguf";
+    std::filesystem::path quant = models / "org--m" / "gguf" / "222222222222" / "m-Q4_K_M.gguf";
+    Config config;
+
+    LineageStore() {
+        write_snapshot_dir(snapshot, "org/m");
+        write_snapshot_dir(waiting, "org/e2b");
+        apogee::models::Sidecar converted;
+        converted.source = "convert";
+        converted.transform = "convert";
+        converted.ref = "org--m/safetensors/aaaaaaaaaaaa";
+        converted.transform_note = "--outtype f16";
+        write_gguf(f16, converted);
+        apogee::models::Sidecar quantized;
+        quantized.source = "quantize";
+        quantized.transform = "quantize";
+        quantized.ref = "org--m/gguf/111111111111";
+        quantized.transform_note = "Q4_K_M";
+        write_gguf(quant, quantized);
+
+        BackendConfig backend;
+        backend.type = BackendType::LlamaCpp;
+        backend.model_path = quant.string();
+        config.backends["m-q4"] = backend;
+    }
+
+    static void write_snapshot_dir(const std::filesystem::path& at, const std::string& ref) {
+        std::filesystem::create_directories(at);
+        std::ofstream{at / "config.json"} << R"({"architectures": ["LlamaForCausalLM"]})";
+        std::ofstream{at / "model.safetensors"} << "weights";
+        apogee::models::Snapshot record;
+        record.ref = ref;
+        record.revision = "main";
+        record.source = "huggingface";
+        record.files.push_back({.path = "model.safetensors", .size = 7, .sha256 = "abc"});
+        REQUIRE(apogee::models::write_snapshot(at, record));
+    }
+
+    static void write_gguf(const std::filesystem::path& at,
+                           const std::optional<apogee::models::Sidecar>& record) {
+        std::filesystem::create_directories(at.parent_path());
+        std::ofstream{at, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+        if (record.has_value()) {
+            REQUIRE(apogee::models::write_sidecar(at, *record));
+        }
+    }
+
+    [[nodiscard]] std::vector<ModelRow> rows() const {
+        return build_model_rows(config, models);
+    }
+
+    [[nodiscard]] std::string info(std::string_view name) const {
+        return render_model_info(config, name, {}, models);
+    }
+};
+
+[[nodiscard]] const ModelRow* row_named(const std::vector<ModelRow>& rows, std::string_view model) {
+    const auto match =
+        std::ranges::find_if(rows, [model](const ModelRow& row) { return row.model == model; });
+    return match == rows.end() ? nullptr : &*match;
+}
+
+[[nodiscard]] std::vector<std::string> lines_of(const std::string& text) {
+    std::vector<std::string> out;
+    std::istringstream in{text};
+    for (std::string line; std::getline(in, line);) {
+        out.push_back(line);
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a snapshot a conversion consumed folds out of the listing, and the fold is said",
+          "[commands][models][listing][lineage]") {
+    // The user's rule (2026-10-03): a snapshot used to make a GGUF no longer
+    // shows as an unconfigured model; one never converted still does.
+    const LineageStore store;
+    const std::vector<ModelRow> rows = store.rows();
+    REQUIRE(row_named(rows, "org--m/safetensors/aaaaaaaaaaaa") != nullptr);
+    CHECK(row_named(rows, "org--m/safetensors/aaaaaaaaaaaa")->consumed);
+    REQUIRE(row_named(rows, "org--e2b/safetensors/cccccccccccc") != nullptr);
+    CHECK_FALSE(row_named(rows, "org--e2b/safetensors/cccccccccccc")->consumed);
+
+    const std::string folded = render_model_table(rows);
+    CHECK(folded.find("org--m/safetensors/aaaaaaaaaaaa") == std::string::npos);
+    CHECK(folded.find("org--e2b/safetensors/cccccccccccc") != std::string::npos);
+    CHECK(folded.ends_with("\n1 snapshot consumed by a conversion is folded -- --all lists it\n"));
+
+    // --all: everything, and no tail line -- every line the folded table has
+    // (its tail aside) is in it.
+    const std::string all = render_model_table(rows, {}, true);
+    CHECK(all.find("org--m/safetensors/aaaaaaaaaaaa") != std::string::npos);
+    CHECK(all.find("folded") == std::string::npos);
+    const std::vector<std::string> folded_lines = lines_of(folded);
+    const std::vector<std::string> all_lines = lines_of(all);
+    for (std::size_t at = 0; at + 2 < folded_lines.size(); ++at) {
+        INFO(folded_lines[at]);
+        CHECK(std::ranges::find(all_lines, folded_lines[at]) != all_lines.end());
+    }
+    CHECK(all_lines.size() == folded_lines.size() - 2 + 1);
+
+    // The fold is the table's: a machine reader gets every row.
+    CHECK(render_model_jsonl(rows).find("org--m/safetensors/aaaaaaaaaaaa") != std::string::npos);
+}
+
+TEST_CASE("a GGUF made from a snapshot says converted, backend or not",
+          "[commands][models][listing][lineage]") {
+    const LineageStore store;
+    // A pulled GGUF beside them was not converted, and says what it said.
+    apogee::models::Sidecar pulled;
+    pulled.source = "huggingface";
+    pulled.ref = "org/m-GGUF:m.gguf";
+    LineageStore::write_gguf(store.models / "org--m" / "gguf" / "444444444444" / "p.gguf", pulled);
+
+    const std::vector<ModelRow> rows = store.rows();
+    CHECK(row_for(rows, "m-q4").provenance == "converted");
+    REQUIRE(row_named(rows, "org--m/gguf/111111111111") != nullptr);
+    CHECK(row_named(rows, "org--m/gguf/111111111111")->provenance == "converted");
+    REQUIRE(row_named(rows, "org--m/gguf/444444444444") != nullptr);
+    CHECK(row_named(rows, "org--m/gguf/444444444444")->provenance == "huggingface");
+    CHECK(row_named(rows, "org--e2b/safetensors/cccccccccccc")->provenance == "huggingface");
+}
+
+TEST_CASE("deleting a snapshot's GGUFs returns it to the listing; deleting it leaves theirs",
+          "[commands][models][listing][lineage]") {
+    {
+        const LineageStore store;
+        REQUIRE(apogee::models::remove_weights(store.f16.parent_path()).empty());
+        REQUIRE(apogee::models::remove_weights(store.quant.parent_path()).empty());
+        const std::vector<ModelRow> rows = store.rows();
+        CHECK_FALSE(row_named(rows, "org--m/safetensors/aaaaaaaaaaaa")->consumed);
+        CHECK(render_model_table(rows).find("folded") == std::string::npos);
+    }
+    {
+        // Only the F16 deleted -- for its size, once quantized: the snapshot
+        // stays folded, and the quantization says how that is known.
+        const LineageStore store;
+        REQUIRE(apogee::models::remove_weights(store.f16.parent_path()).empty());
+        const std::vector<ModelRow> rows = store.rows();
+        CHECK(row_named(rows, "org--m/safetensors/aaaaaaaaaaaa")->consumed);
+        CHECK(row_for(rows, "m-q4").provenance == "converted");
+        CHECK(store.info("m-q4").find(
+                  "lineage:      quantized to Q4_K_M from org--m/gguf/111111111111 (recorded) -- "
+                  "no longer on disk\n"
+                  "              converted from org--m/safetensors/aaaaaaaaaaaa (inferred)\n"
+                  "              pulled from org/m (Hugging Face)\n") != std::string::npos);
+    }
+    {
+        const LineageStore store;
+        REQUIRE(apogee::models::remove_weights(store.snapshot).empty());
+        const std::vector<ModelRow> rows = store.rows();
+        CHECK(row_named(rows, "org--m/safetensors/aaaaaaaaaaaa") == nullptr);
+        // Still converted -- the record says so -- and info names the break.
+        CHECK(row_named(rows, "org--m/gguf/111111111111")->provenance == "converted");
+        CHECK(store.info("org--m/gguf/111111111111")
+                  .find("lineage:      converted from org--m/safetensors/aaaaaaaaaaaa (recorded) "
+                        "-- source snapshot no longer on disk\n") != std::string::npos);
+        CHECK(store.info("m-q4").find("              converted from "
+                                      "org--m/safetensors/aaaaaaaaaaaa (recorded) -- source "
+                                      "snapshot no longer on disk\n") != std::string::npos);
+    }
+}
+
+TEST_CASE("a consumed snapshot needing attention is never folded",
+          "[commands][models][listing][lineage]") {
+    const LineageStore store;
+    std::ofstream{store.snapshot / "config.json"}
+        << apogee::models::serialize(apogee::models::Sidecar{});
+    const std::vector<ModelRow> rows = store.rows();
+    const ModelRow* row = row_named(rows, "org--m/safetensors/aaaaaaaaaaaa");
+    REQUIRE(row != nullptr);
+    CHECK(row->attention);
+    CHECK_FALSE(row->consumed);
+}
+
+TEST_CASE("a consumed snapshot a backend points at is never folded",
+          "[commands][models][listing][lineage]") {
+    // Not possible with llama.cpp alone; an MLX backend will run a snapshot
+    // as it is (31a), and a backend's own model is never hidden.
+    LineageStore store;
+    BackendConfig direct;
+    direct.type = BackendType::LlamaCpp;
+    direct.model_path = store.snapshot.string();
+    store.config.backends["m-direct"] = direct;
+    const std::vector<ModelRow> rows = store.rows();
+    const ModelRow* row = row_named(rows, "org--m/safetensors/aaaaaaaaaaaa");
+    REQUIRE(row != nullptr);
+    CHECK_FALSE(row->consumed);
+}
+
+TEST_CASE("the lineage adds no read to the sweep", "[commands][models][listing][lineage][busy]") {
+    // M2 made the sweep fast; this item reads the records it already visits.
+    const LineageStore store;
+    std::vector<std::string> heard;
+    const std::vector<ModelRow> rows =
+        build_model_rows(store.config, store.models, {}, nullptr,
+                         [&heard](std::string_view label, std::size_t, std::size_t total) {
+                             heard.emplace_back(label);
+                             CHECK(total == 4);
+                         });
+    // The backend's file, the one GGUF no backend points at, two snapshots:
+    // one read each.
+    CHECK(heard == std::vector<std::string>{
+                       "reading model headers: m-Q4_K_M.gguf", "reading model headers: m-F16.gguf",
+                       "reading snapshots: org--e2b", "reading snapshots: org--m"});
+}
+
+TEST_CASE("info names a model's chain back to the upstream it was pulled as",
+          "[commands][models][info][lineage]") {
+    const LineageStore store;
+    const std::string quant = store.info("m-q4");
+    CHECK(quant.find("model_path:   " + store.quant.string() +
+                     "\n"
+                     "lineage:      quantized to Q4_K_M from org--m/gguf/111111111111 (recorded)\n"
+                     "              converted from org--m/safetensors/aaaaaaaaaaaa (recorded)\n"
+                     "              pulled from org/m (Hugging Face)\n"
+                     "header:       ok") != std::string::npos);
+
+    // A fresh conversion is no backend yet: info takes its handle.
+    const std::string f16 = store.info("org--m/gguf/111111111111");
+    CHECK(
+        f16.starts_with("weights:      org--m/gguf/111111111111\n"
+                        "backends:     none -- "));
+    CHECK(f16.find("lineage:      converted from org--m/safetensors/aaaaaaaaaaaa (recorded)\n"
+                   "              pulled from org/m (Hugging Face)\n") != std::string::npos);
+    CHECK(f16.find("header:       ok") != std::string::npos);
+    // And a backend's file, by its handle, names the backend.
+    CHECK(store.info("org--m/gguf/222222222222").find("backends:     m-q4\n") != std::string::npos);
+
+    // Without the store, info is what it was.
+    CHECK(render_model_info(store.config, "m-q4").find("lineage:") == std::string::npos);
+}
+
+TEST_CASE("info on a snapshot says what was made of it and whether the listing folds it",
+          "[commands][models][info][lineage]") {
+    const LineageStore store;
+    const std::string consumed = store.info("org--m/safetensors/aaaaaaaaaaaa");
+    CHECK(consumed.starts_with("weights:      org--m/safetensors/aaaaaaaaaaaa\n"));
+    CHECK(consumed.find("lineage:      pulled from org/m (Hugging Face)\n") != std::string::npos);
+    CHECK(consumed.find("made from it: org--m/gguf/111111111111 (recorded)\n"
+                        "              org--m/gguf/222222222222 (recorded)\n") !=
+          std::string::npos);
+    CHECK(consumed.find("listing:      folded -- a conversion consumed it; 'apogee models list "
+                        "--all' shows it\n") != std::string::npos);
+
+    const std::string waiting = store.info("org--e2b/safetensors/cccccccccccc");
+    CHECK(waiting.find("made from it: nothing yet -- 'apogee models convert "
+                       "org--e2b/safetensors/cccccccccccc' makes a GGUF of it\n") !=
+          std::string::npos);
+    CHECK(waiting.find("listing:") == std::string::npos);
+    // A bare id names the same weights.
+    CHECK(store.info("cccccccccccc") == waiting);
+}
+
+TEST_CASE("info says an inference is one, and an unknown origin is unknown",
+          "[commands][models][info][lineage]") {
+    const apogee::testing::TempDir dir{"models-inferred-" + std::to_string(std::random_device{}())};
+    LineageStore::write_snapshot_dir(dir.path() / "org--x" / "safetensors" / "dddddddddddd",
+                                     "org/x");
+    LineageStore::write_gguf(dir.path() / "org--x" / "gguf" / "555555555555" / "x.gguf",
+                             std::nullopt);
+    LineageStore::write_gguf(dir.path() / "org--y" / "gguf" / "666666666666" / "y.gguf",
+                             std::nullopt);
+    const Config config;
+    CHECK(render_model_info(config, "org--x/gguf/555555555555", {}, dir.path())
+              .find("lineage:      converted from org--x/safetensors/dddddddddddd (inferred)\n"
+                    "              pulled from org/x (Hugging Face)\n") != std::string::npos);
+    CHECK(render_model_info(config, "org--x/safetensors/dddddddddddd", {}, dir.path())
+              .find("made from it: org--x/gguf/555555555555 (inferred)\n") != std::string::npos);
+    CHECK(render_model_info(config, "org--y/gguf/666666666666", {}, dir.path())
+              .find("lineage:      unknown -- no record says where it came from\n") !=
+          std::string::npos);
+    // The inferred conversion folds its snapshot all the same, and says converted.
+    const std::vector<ModelRow> rows = build_model_rows(config, dir.path());
+    CHECK(row_named(rows, "org--x/safetensors/dddddddddddd")->consumed);
+    CHECK(row_named(rows, "org--x/gguf/555555555555")->provenance == "converted");
+    CHECK(row_named(rows, "org--y/gguf/666666666666")->provenance == "local");
+}
+
+TEST_CASE("info on a whole model, or nothing stored, yields nothing for the caller to report",
+          "[commands][models][info][lineage]") {
+    const LineageStore store;
+    CHECK(store.info("org--m").empty());
+    CHECK(store.info("org--m/gguf/999999999999").empty());
+    CHECK(store.info("no-such-backend").empty());
 }

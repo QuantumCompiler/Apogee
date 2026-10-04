@@ -71,6 +71,9 @@ inline constexpr const char* kModelValue = "MODEL";
 inline constexpr const char* kSnapshotValue = "SNAPSHOT";
 /// A model with a GGUF, one GGUF of it, or a `.gguf` path.
 inline constexpr const char* kGgufValue = "GGUF";
+/// A configured backend, or one set of stored weights (`<model>/<format>/<id>`)
+/// -- what `models info` shows.
+inline constexpr const char* kBackendOrWeightsValue = "BACKEND_OR_WEIGHTS";
 /// A SafeTensors set's id -- of the model named by the command's first
 /// positional.
 inline constexpr const char* kSnapshotIdValue = "SNAPSHOT_ID";
@@ -93,12 +96,20 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 26> kNameValues{
-    kCollectionValue, kCollectionListValue, kGraphValue,      kNamedGraphValue, kAgentValue,
-    kChatValue,       kServerValue,         kDatasetValue,    kKitValue,        kSuiteValue,
-    kRunValue,        kPipelineRunValue,    kPipelineValue,   kRegimeValue,     kModelValue,
-    kSnapshotValue,   kGgufValue,           kSnapshotIdValue, kGgufIdValue,     kPullRefValue,
-    kRecordValue,     kGitRefValue,         kGitRemoteValue,  kConfigKeyValue,  kToolValue,
+inline constexpr std::array<std::string_view, 27> kNameValues{
+    kCollectionValue, kCollectionListValue,
+    kGraphValue,      kNamedGraphValue,
+    kAgentValue,      kChatValue,
+    kServerValue,     kDatasetValue,
+    kKitValue,        kSuiteValue,
+    kRunValue,        kPipelineRunValue,
+    kPipelineValue,   kRegimeValue,
+    kModelValue,      kSnapshotValue,
+    kGgufValue,       kBackendOrWeightsValue,
+    kSnapshotIdValue, kGgufIdValue,
+    kPullRefValue,    kRecordValue,
+    kGitRefValue,     kGitRemoteValue,
+    kConfigKeyValue,  kToolValue,
     kAllowedHostValue};
 
 /// The type name for free text with a known set of usual words: the parser

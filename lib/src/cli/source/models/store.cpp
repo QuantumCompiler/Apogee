@@ -107,6 +107,27 @@ std::string safe_model_name(std::string_view text) {
     return name.empty() ? std::string{"model"} : name;
 }
 
+std::string weights_handle(std::string_view model, std::string_view format, std::string_view id) {
+    return std::string{model} + "/" + std::string{format} + "/" + std::string{id};
+}
+
+std::optional<WeightsHandle> parse_weights_handle(std::string_view text) {
+    const std::size_t first = text.find('/');
+    const std::size_t second =
+        first == std::string_view::npos ? std::string_view::npos : text.find('/', first + 1);
+    if (second == std::string_view::npos) {
+        return std::nullopt;
+    }
+    WeightsHandle handle{.model = std::string{text.substr(0, first)},
+                         .format = std::string{text.substr(first + 1, second - first - 1)},
+                         .id = std::string{text.substr(second + 1)}};
+    if (handle.model.empty() || handle.model.find('\\') != std::string::npos ||
+        handle.model.starts_with('.') || !is_format(handle.format) || !is_weight_id(handle.id)) {
+        return std::nullopt;
+    }
+    return handle;
+}
+
 bool is_weight_id(std::string_view text) noexcept {
     return text.size() == kWeightIdLength && std::ranges::all_of(text, [](char c) {
                return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');

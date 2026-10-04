@@ -78,6 +78,11 @@ struct ModelRow {
     /// key, a projector configured as a model, a damaged snapshot, the old
     /// layout. `note` says what.
     bool attention = false;
+    /// A SafeTensors set a conversion has consumed -- a stored GGUF records
+    /// (or, failing any record, the store's shape implies) that it was made
+    /// from this -- with no backend on it and nothing needing attention. The
+    /// table folds it unless asked for everything (M4); nothing else changes.
+    bool consumed = false;
 };
 
 /// Builds the listing: every configured backend, plus every model on disk.
@@ -108,22 +113,34 @@ struct ModelRow {
 /// colour: a configured backend in Apogee's cyan, anything needing attention
 /// in the warning yellow, and what no backend points at dimmed. Alignment is
 /// measured on the plain text, so a colourless `style` gives the same table.
+///
+/// A `consumed` snapshot is folded out unless `all`, and one line under the
+/// table counts what was folded, so the fold is never silent (M4).
 [[nodiscard]] std::string render_model_table(const std::vector<ModelRow>& rows,
-                                             const ansi::Style& style = {});
+                                             const ansi::Style& style = {}, bool all = false);
 
 /// Renders the listing as one JSON object per line, for `--output-format
 /// stream-json`. A GUI listing models is the first consumer of machine mode
 /// beyond chat, and the flag already exists.
 [[nodiscard]] std::string render_model_jsonl(const std::vector<ModelRow>& rows);
 
-/// The body of `apogee models info <backend>`.
+/// The body of `apogee models info <name>`: a backend, or -- with
+/// `models_dir` -- one set of weights in the store by its handle or id.
+/// Empty when `name` is neither.
 ///
 /// `info` is where a header read is reported in full, including the failure
 /// reason when it did not parse — an unparseable header must never render as
 /// an empty field, which is the reporting bug this whole surface exists to
 /// avoid.
-[[nodiscard]] std::string render_model_info(const harness::Config& config, std::string_view backend,
-                                            const BusyProgress& progress = {});
+///
+/// With `models_dir`, a local model also says where it came from (M4): the
+/// chain back through its records -- quantized from an F16, converted from a
+/// snapshot, pulled from its upstream -- each derivation marked recorded or
+/// inferred, and a link that is gone named as gone. A snapshot says what was
+/// converted from it, and whether the listing folds it.
+[[nodiscard]] std::string render_model_info(const harness::Config& config, std::string_view name,
+                                            const BusyProgress& progress = {},
+                                            const std::filesystem::path& models_dir = {});
 
 /// The body of `apogee models status` — which backend each role resolves to,
 /// and whether that backend is actually configured.

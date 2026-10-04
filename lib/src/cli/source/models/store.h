@@ -72,6 +72,23 @@ struct StoreRoots {
 /// A random id of the same shape, for weights nothing can be hashed for.
 [[nodiscard]] std::string random_weight_id();
 
+/// One set of weights by the name every verb takes: `<model>/<format>/<id>`.
+struct WeightsHandle {
+    std::string model;
+    std::string format;
+    std::string id;
+};
+
+/// `<model>/<format>/<id>`.
+[[nodiscard]] std::string weights_handle(std::string_view model, std::string_view format,
+                                         std::string_view id);
+
+/// `text` read as a handle, asking nothing of the disk: a model name with no
+/// separator in it, a format, an id. Nullopt for anything else -- a path, a
+/// bare model, a ref. What a record's `ref` names when a conversion or a
+/// quantization made the file from weights in the store (`models/lineage.h`).
+[[nodiscard]] std::optional<WeightsHandle> parse_weights_handle(std::string_view text);
+
 // --- paths ---------------------------------------------------------------------------
 
 [[nodiscard]] std::filesystem::path model_dir(const StoreRoots& roots, std::string_view format,

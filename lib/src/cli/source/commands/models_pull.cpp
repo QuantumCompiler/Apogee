@@ -6,8 +6,10 @@
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -1095,9 +1097,17 @@ QuantizedModel quantize_model(const models::StoreRoots& roots, std::string_view 
                : std::filesystem::path{harness::expand_env_and_home(field)}.lexically_normal();
 }
 
-/// The backend a chain registers for `model` at `level`: `Qwen3-8B-Q4_K_M`.
-[[nodiscard]] std::string backend_name(const std::string& model, std::string_view level) {
-    return display_name(model) + "-" + std::string{level};
+/// The backend a chain registers at `level`: `<base>-F16`, `<base>-Q4KM` --
+/// the level without its underscores, as the user names backends by hand
+/// (2026-10-03). The file keeps the table's spelling.
+[[nodiscard]] std::string backend_name(const std::string& base, std::string_view level) {
+    std::string name = base + "-";
+    for (const char c : level) {
+        if (c != '_') {
+            name += c;
+        }
+    }
+    return name;
 }
 
 /// Refuses, before the first stage, a chain whose registrations would refuse
@@ -1117,6 +1127,11 @@ void check_registrations(const models::StoreRoots& roots, const std::filesystem:
     } catch (const std::exception& e) {
         fail(e.what());
     }
+    std::string text;
+    {
+        std::ifstream in{config_path, std::ios::binary};
+        text.assign(std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{});
+    }
     std::vector<std::string> existing;
     existing.reserve(config.backends.size());
     for (const auto& [name, backend] : config.backends) {
@@ -1132,6 +1147,16 @@ void check_registrations(const models::StoreRoots& roots, const std::filesystem:
         }
         const auto found = config.backends.find(name);
         if (found == config.backends.end()) {
+            // A name the config cannot hold is refused now by the one edit
+            // that will add it, run on the text and kept nowhere.
+            try {
+                harness::BackendConfig stub;
+                stub.type = harness::BackendType::LlamaCpp;
+                stub.model_path = name;
+                text = harness::append_backend(text, name, stub, false);
+            } catch (const std::exception& e) {
+                fail(e.what());
+            }
             continue;
         }
         const std::filesystem::path path = configured_path(found->second.model_path);
@@ -1241,6 +1266,19 @@ namespace {
     return levels;
 }
 
+/// `--base-name` names what `--register` makes: refused without it, or
+/// given empty -- before anything is fetched or made.
+void check_base_name(const std::string& base_name, bool given, bool registers) {
+    if (given && !registers) {
+        fail(
+            "--base-name names the backends --register makes: add --register or "
+            "--register-with");
+    }
+    if (given && base_name.empty()) {
+        fail("--base-name cannot be empty -- leave it out to name the backends after the model");
+    }
+}
+
 }  // namespace
 
 Quantizer default_quantizer() {
@@ -1278,9 +1316,10 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
             snapshot_from.clear();
         }
     }
-    std::vector<std::string> names{backend_name(model, "F16")};
+    const std::string base = request.base_name.empty() ? display_name(model) : request.base_name;
+    std::vector<std::string> names{backend_name(base, "F16")};
     for (const std::string& level : levels) {
-        names.push_back(backend_name(model, level));
+        names.push_back(backend_name(base, level));
     }
     check_registrations(roots, request.config_path, model, names);
 
@@ -1288,7 +1327,9 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
     for (const std::string& level : levels) {
         joined += (joined.empty() ? "" : ",") + level;
     }
-    const std::string with = levels.empty() ? " --register" : " --register-with " + joined;
+    const std::string with =
+        (levels.empty() ? " --register" : " --register-with " + joined) +
+        (request.base_name.empty() ? std::string{} : " --base-name " + request.base_name);
     const auto convert_resume = [&with](const std::string& from) {
         return "apogee models convert " + from + with;
     };
@@ -1375,12 +1416,20 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                          "too, each its own backend (comma-separated)")
             ->delimiter(',')
             ->type_name(words_value(models::quant_type_names()));
+    auto pull_base_name = std::make_shared<std::string>();
+    const CLI::Option* pull_base_name_option = pull->add_option(
+        "--base-name", *pull_base_name,
+        "With --register: what each backend's name begins with, before -F16, -Q4KM ... "
+        "(default: the model's name)");
 
     pull->callback([pull_ref, pull_yes, pull_safetensors, pull_register, pull_register_with,
-                    pull_register_option, models_dir, &context]() {
+                    pull_register_option, pull_base_name, pull_base_name_option, models_dir,
+                    &context]() {
         const std::string& ref = *pull_ref;
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
-        if (*pull_register || pull_register_option->count() > 0) {
+        const bool registers = *pull_register || pull_register_option->count() > 0;
+        check_base_name(*pull_base_name, pull_base_name_option->count() > 0, registers);
+        if (registers) {
             if (!*pull_safetensors) {
                 fail(
                     "--register needs --safetensors: the chain converts a full-weight pull. A "
@@ -1393,6 +1442,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 .snapshot = {},
                 .snapshot_from = {},
                 .levels = buildable_levels(*pull_register_with),
+                .base_name = *pull_base_name,
             });
             return;
         }
@@ -1667,11 +1717,19 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                          "backend (comma-separated)")
             ->delimiter(',')
             ->type_name(words_value(models::quant_type_names()));
+    auto convert_base_name = std::make_shared<std::string>();
+    const CLI::Option* convert_base_name_option = convert->add_option(
+        "--base-name", *convert_base_name,
+        "With --register: what each backend's name begins with, before -F16, -Q4KM ... "
+        "(default: the model's name)");
 
     convert->callback([convert_in, convert_type, convert_from, convert_register,
-                       convert_register_with, register_with_option, models_dir, &context]() {
+                       convert_register_with, register_with_option, convert_base_name,
+                       convert_base_name_option, models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
-        if (*convert_register || register_with_option->count() > 0) {
+        const bool registers = *convert_register || register_with_option->count() > 0;
+        check_base_name(*convert_base_name, convert_base_name_option->count() > 0, registers);
+        if (registers) {
             if (*convert_type != "f16") {
                 fail(
                     "--register makes the F16 -- the source every quantization starts from; "
@@ -1684,6 +1742,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 .snapshot = *convert_in,
                 .snapshot_from = *convert_from,
                 .levels = buildable_levels(*convert_register_with),
+                .base_name = *convert_base_name,
             });
             return;
         }

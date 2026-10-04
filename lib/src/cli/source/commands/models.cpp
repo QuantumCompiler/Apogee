@@ -17,6 +17,7 @@
 #include "harness/paths.h"
 #include "harness/roles.h"
 #include "models/kv_cache.h"
+#include "models/lineage.h"
 #include "models/sidecar.h"
 #include "models/snapshot.h"
 #include "models/store.h"
@@ -92,11 +93,66 @@ void pad(std::ostringstream& out, const std::string& value, std::size_t width, b
 }
 
 /// What a model's sidecar says was checked when it was acquired.
-[[nodiscard]] std::string describe_record(const std::filesystem::path& model) {
-    const std::optional<models::Sidecar> sidecar = models::load_sidecar(model);
+[[nodiscard]] std::string describe_record(const std::optional<models::Sidecar>& sidecar) {
     // "no record" rather than "unverified": a model placed by hand is
     // legitimate, it simply has nothing to be rechecked against.
     return sidecar.has_value() ? sidecar->verification.summary() : "no record";
+}
+
+/// The store `models_dir` and the config's `paths.hf_dir` make.
+[[nodiscard]] models::StoreRoots store_roots_for(const harness::Config& config,
+                                                 const std::filesystem::path& models_dir) {
+    models::StoreRoots roots = models::StoreRoots::at(models_dir);
+    if (!config.paths.hf_dir.empty()) {
+        roots.safetensors =
+            std::filesystem::path{harness::expand_env_and_home(config.paths.hf_dir)};
+    }
+    return roots;
+}
+
+/// A source as a user knows it.
+[[nodiscard]] std::string source_name(std::string_view source) {
+    if (source == "huggingface") {
+        return "Hugging Face";
+    }
+    if (source == "ollama") {
+        return "Ollama";
+    }
+    return std::string{source};
+}
+
+/// One link of a chain, as `info` says it (M4). A derivation says whether a
+/// record or the store's shape is the evidence, and a broken link what is gone.
+[[nodiscard]] std::string describe_link(const models::LineageLink& link) {
+    const models::Origin& origin = link.origin;
+    switch (origin.kind) {
+        case models::OriginKind::Unknown:
+            return "unknown -- no record says where it came from";
+        case models::OriginKind::Pulled:
+            return "pulled from " + origin.from +
+                   (origin.detail.empty() ? "" : " (" + source_name(origin.detail) + ")");
+        case models::OriginKind::Converted:
+            return "converted from " + origin.from +
+                   (origin.inferred ? " (inferred)" : " (recorded)") +
+                   (link.missing ? " -- source snapshot no longer on disk" : "");
+        case models::OriginKind::Quantized:
+            return "quantized" + (origin.detail.empty() ? "" : " to " + origin.detail) + " from " +
+                   origin.from + " (recorded)" + (link.missing ? " -- no longer on disk" : "");
+        case models::OriginKind::Trained:
+            return "a fine-tune" + (origin.detail.empty() ? "" : " (" + origin.detail + ")") +
+                   ", promoted as " + origin.from;
+    }
+    return {};
+}
+
+/// `info`'s lineage lines: the chain back from `origin`, one link a line.
+void render_lineage(std::ostream& out, const models::Lineage& lineage,
+                    const models::Origin& origin) {
+    bool first = true;
+    for (const models::LineageLink& link : lineage.chain(origin)) {
+        out << (first ? "lineage:      " : "              ") << describe_link(link) << "\n";
+        first = false;
+    }
 }
 
 /// `info`'s window and cache lines: what a conversation costs on top of the
@@ -140,11 +196,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     // What the model store holds -- listed before anything is read, so the
     // sweep below knows how many reads it has to do and can say so (M1).
     // Listing is a directory walk; the header reads are what take the time.
-    models::StoreRoots roots = models::StoreRoots::at(models_dir);
-    if (!config.paths.hf_dir.empty()) {
-        roots.safetensors =
-            std::filesystem::path{harness::expand_env_and_home(config.paths.hf_dir)};
-    }
+    const models::StoreRoots roots = store_roots_for(config, models_dir);
     std::vector<std::filesystem::path> configured;
     for (const auto& [key, backend] : config.backends) {
         if (!backend.model_path.empty()) {
@@ -153,17 +205,52 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                     .lexically_normal());
         }
     }
-    std::vector<models::StoredGguf> stored_ggufs;
-    std::vector<models::StoredSnapshot> stored_snapshots;
+    const auto is_configured = [&configured](const std::filesystem::path& path) {
+        return std::ranges::find(configured, path.lexically_normal()) != configured.end();
+    };
+    // Every stored file, its record filled in by the sweep as it reads each
+    // one -- within that file's counted step, as before -- so the lineage
+    // (M4), applied once everything is read, adds no read of its own.
+    std::vector<models::RecordedGguf> recorded_ggufs;
+    std::vector<models::RecordedSnapshot> stored_snapshots;
     if (!models_dir.empty()) {
         for (models::StoredGguf& stored : models::list_store_ggufs(roots)) {
-            if (std::ranges::find(configured, stored.file.lexically_normal()) == configured.end()) {
-                stored_ggufs.push_back(std::move(stored));
-            }
-            // else its backend's row already says everything
+            recorded_ggufs.push_back({.stored = std::move(stored), .record = std::nullopt});
         }
-        stored_snapshots = models::list_store_snapshots(roots);
+        for (models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
+            stored_snapshots.push_back({.stored = std::move(stored), .record = std::nullopt});
+        }
     }
+    std::vector<std::size_t> stored_ggufs;
+    for (std::size_t at = 0; at < recorded_ggufs.size(); ++at) {
+        if (!is_configured(recorded_ggufs[at].stored.file)) {
+            stored_ggufs.push_back(at);
+        }
+        // else its backend's row already says everything
+    }
+    // A local file's record, read as its row is built: kept for the lineage
+    // when the file is stored.
+    const auto record_for = [&recorded_ggufs](const std::filesystem::path& path) {
+        std::optional<models::Sidecar> record = models::load_sidecar(path);
+        const std::filesystem::path normal = path.lexically_normal();
+        for (models::RecordedGguf& gguf : recorded_ggufs) {
+            if (gguf.stored.file.lexically_normal() == normal) {
+                gguf.record = record;
+            }
+        }
+        return record;
+    };
+
+    // The rows the lineage decides, once every record is in: each GGUF row's
+    // file and record, and each snapshot row's directory.
+    struct GgufRow {
+        std::size_t row;
+        std::filesystem::path file;
+        std::optional<models::Sidecar> record;
+    };
+
+    std::vector<GgufRow> gguf_rows;
+    std::vector<std::pair<std::size_t, std::filesystem::path>> snapshot_rows;
     std::size_t reads = stored_ggufs.size() + stored_snapshots.size();
     for (const auto& [key, backend] : config.backends) {
         if (is_local(backend.type) && !harness::expand_env(backend.model_path).empty()) {
@@ -242,7 +329,9 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         const std::filesystem::path path{expanded};
         row.model = path.filename().string();
         reading("reading model headers: ", row.model);
-        row.verified = describe_record(path);
+        const std::optional<models::Sidecar> record = record_for(path);
+        row.verified = describe_record(record);
+        gguf_rows.push_back({.row = rows.size(), .file = path, .record = record});
 
         const models::GgufInfo info = models::inspect_gguf(path);
         if (!info.parsed) {
@@ -273,19 +362,19 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     // made, until the user wires it up. Each by the handle the other verbs
     // take: `<model>/<format>/<id>`.
     if (!models_dir.empty()) {
-        for (const models::StoredGguf& stored : stored_ggufs) {
+        for (const std::size_t at : stored_ggufs) {
+            const models::StoredGguf& stored = recorded_ggufs[at].stored;
             reading("reading model headers: ", stored.file.filename().string());
             ModelRow row;
             // Not a backend: it is a file waiting to be pointed at.
             row.backend = "(not configured)";
             row.type = "-";
-            row.model = stored.model + "/gguf/" + stored.id;
-            row.provenance = "local";
-            if (const std::optional<models::Sidecar> record = models::load_sidecar(stored.file);
-                record.has_value() && !record->source.empty()) {
-                row.provenance = record->source;
-            }
-            row.verified = describe_record(stored.file);
+            row.model = models::weights_handle(stored.model, models::kGgufFormat, stored.id);
+            const std::optional<models::Sidecar> record = record_for(stored.file);
+            row.provenance =
+                record.has_value() && !record->source.empty() ? record->source : "local";
+            row.verified = describe_record(record);
+            gguf_rows.push_back({.row = rows.size(), .file = stored.file, .record = record});
 
             const models::GgufInfo info = models::inspect_gguf(stored.file);
             row.state = info.parsed ? "ok" : "unreadable";
@@ -309,13 +398,15 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         // SafeTensors sets -- trainable, not runnable -- listed so a user can
         // see what `convert` and `apogee train` can take, without a backend
         // ever pointing at one.
-        for (const models::StoredSnapshot& stored : stored_snapshots) {
+        for (models::RecordedSnapshot& recorded : stored_snapshots) {
+            const models::StoredSnapshot& stored = recorded.stored;
             reading("reading snapshots: ", stored.model);
             ModelRow row;
             row.backend = "(not configured)";
             row.type = "-";
-            row.model = stored.model + "/safetensors/" + stored.id;
-            const std::optional<models::Snapshot> record = models::load_snapshot(stored.dir);
+            row.model = models::weights_handle(stored.model, models::kSafetensorsFormat, stored.id);
+            recorded.record = models::load_snapshot(stored.dir);
+            const std::optional<models::Snapshot>& record = recorded.record;
             row.provenance =
                 record.has_value() && !record->source.empty() ? record->source : "local";
             const std::string architecture = models::snapshot_architecture(stored.dir);
@@ -332,6 +423,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                 row.note = "damaged by an older pull -- 'apogee models repair " + stored.model +
                            "/safetensors/" + stored.id + "'";
             }
+            snapshot_rows.emplace_back(rows.size(), stored.dir);
             rows.push_back(std::move(row));
         }
 
@@ -367,14 +459,41 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         }
     }
 
+    // Every record read: where each file came from (M4). A GGUF made from a
+    // snapshot says so; a snapshot whose job is done -- a conversion made a
+    // GGUF of it -- is folded from the table, never when it needs attention
+    // or a backend points at it, and nothing about the store changes.
+    const models::Lineage lineage{std::move(recorded_ggufs), std::move(stored_snapshots)};
+    for (const GgufRow& gguf : gguf_rows) {
+        if (lineage.converted(lineage.origin_of(gguf.file, gguf.record))) {
+            rows[gguf.row].provenance = "converted";
+        }
+    }
+    for (const auto& [at, dir] : snapshot_rows) {
+        ModelRow& row = rows[at];
+        row.consumed =
+            !row.attention && !is_configured(dir) && lineage.consumed(row.model).has_value();
+    }
+
     std::ranges::sort(rows,
                       [](const ModelRow& a, const ModelRow& b) { return a.backend < b.backend; });
     return rows;
 }
 
-std::string render_model_table(const std::vector<ModelRow>& rows, const ansi::Style& style) {
-    if (rows.empty()) {
+std::string render_model_table(const std::vector<ModelRow>& all_rows, const ansi::Style& style,
+                               bool all) {
+    if (all_rows.empty()) {
         return "no backends configured -- run 'apogee config init' to write a starter config\n";
+    }
+    // Consumed snapshots fold out unless asked for, and the fold is said (M4).
+    std::vector<ModelRow> rows;
+    std::size_t folded = 0;
+    for (const ModelRow& row : all_rows) {
+        if (row.consumed && !all) {
+            ++folded;
+        } else {
+            rows.push_back(row);
+        }
     }
 
     using Get = std::function<const std::string&(const ModelRow&)>;
@@ -420,6 +539,15 @@ std::string render_model_table(const std::vector<ModelRow>& rows, const ansi::St
             out << paint(row, "    " + row.note) << "\n";
         }
     }
+    if (folded > 0) {
+        out << "\n"
+            << style.dim(folded == 1 ? "1 snapshot consumed by a conversion is folded -- --all "
+                                       "lists it"
+                                     : std::to_string(folded) +
+                                           " snapshots consumed by conversions are folded -- "
+                                           "--all lists them")
+            << "\n";
+    }
     return out.str();
 }
 
@@ -445,49 +573,22 @@ std::string render_model_jsonl(const std::vector<ModelRow>& rows) {
     return out.str();
 }
 
-std::string render_model_info(const harness::Config& config, std::string_view backend,
-                              const BusyProgress& progress) {
-    const auto entry = config.backends.find(std::string{backend});
-    if (entry == config.backends.end()) {
-        return {};
-    }
-    const harness::BackendConfig& value = entry->second;
+namespace {
 
-    std::ostringstream out;
-    out << "backend:      " << backend << "\n";
-    out << "type:         " << harness::to_string(value.type) << "\n";
-    if (!value.model.empty()) {
-        out << "model:        " << value.model << "\n";
-    }
-    const std::string roles = roles_for(config, std::string{backend});
-    out << "roles:        " << (roles.empty() ? "-" : roles) << "\n";
-
-    if (!is_local(value.type)) {
-        // A cloud backend has no file to inspect, and saying so beats printing
-        // empty GGUF fields that read like a failed read.
-        out << "source:       remote (no local file to inspect)\n";
-        return out.str();
-    }
-
-    const std::string expanded = harness::expand_env(value.model_path);
-    if (expanded.empty()) {
-        out << "model_path:   (unset)\n";
-        out << "header:       skipped -- no model_path to read\n";
-        return out.str();
-    }
-
-    out << "model_path:   " << expanded << "\n";
+/// `info`'s header block for the GGUF at `path`: what the file says, and for a
+/// model, the window `backend` gives it.
+void render_gguf(std::ostream& out, const std::filesystem::path& path,
+                 const harness::BackendConfig& backend, const BusyProgress& progress) {
     if (progress) {
-        progress("reading " + std::filesystem::path{expanded}.filename().string(), 0, 0);
+        progress("reading " + path.filename().string(), 0, 0);
     }
-    const models::GgufInfo info = models::inspect_gguf(std::filesystem::path{expanded});
+    const models::GgufInfo info = models::inspect_gguf(path);
     if (!info.parsed) {
         // The reason, always. An unreadable header rendering as blank fields is
         // the exact failure this surface exists to prevent.
         out << "header:       FAILED -- " << info.parse_error << "\n";
         // A stored file names itself: <model>/gguf/<id>/<file>.
-        const std::filesystem::path file{expanded};
-        const std::filesystem::path id_dir = file.parent_path();
+        const std::filesystem::path id_dir = path.parent_path();
         if (models::is_weight_id(id_dir.filename().string()) &&
             id_dir.parent_path().filename() == models::kGgufFormat) {
             out << "repair:       apogee models repair "
@@ -496,7 +597,7 @@ std::string render_model_info(const harness::Config& config, std::string_view ba
         } else {
             out << "repair:       re-download the file, or point model_path at another\n";
         }
-        return out.str();
+        return;
     }
 
     out << "header:       ok (GGUF v" << info.version << ")\n";
@@ -504,11 +605,10 @@ std::string render_model_info(const harness::Config& config, std::string_view ba
     // Stated separately from the architecture above, and stated at all rather
     // than omitted: a user comparing two models needs to know how much Apogee
     // actually knows about each.
-    const std::string profile =
-        describe_profile(info.architecture, std::filesystem::path{expanded}.filename().string());
+    const std::string profile = describe_profile(info.architecture, path.filename().string());
     out << "profile:      " << profile << "\n";
-    if (const backends::ModelProfile* resolved = backends::resolve_profile(
-            {}, info.architecture, std::filesystem::path{expanded}.filename().string());
+    if (const backends::ModelProfile* resolved =
+            backends::resolve_profile({}, info.architecture, path.filename().string());
         resolved != nullptr) {
         // The evidence line is what makes `verified` auditable rather than a
         // bare adjective: it says which model was run, and when.
@@ -528,7 +628,7 @@ std::string render_model_info(const harness::Config& config, std::string_view ba
                     : "none -- most likely a base (pretrained) model, which continues text "
                       "rather than answering; for chat, use its instruction-tuned release")
             << "\n";
-        render_window(out, info, value);
+        render_window(out, info, backend);
     }
     if (info.is_projector()) {
         out << "note:         a multimodal projector -- belongs on mmproj_path, not model_path\n";
@@ -536,6 +636,160 @@ std::string render_model_info(const harness::Config& config, std::string_view ba
         out << "note:         combined text+vision blob -- " << (info.tensors - info.text_tensors)
             << " vision/projector tensors\n";
     }
+}
+
+/// The backends whose `model_path` is `path`, as "a, b".
+[[nodiscard]] std::string backends_on(const harness::Config& config,
+                                      const std::filesystem::path& path) {
+    std::string out;
+    for (const auto& [key, backend] : config.backends) {
+        if (!backend.model_path.empty() &&
+            std::filesystem::path{harness::expand_env_and_home(backend.model_path)}
+                    .lexically_normal() == path.lexically_normal()) {
+            out += (out.empty() ? "" : ", ") + key;
+        }
+    }
+    return out;
+}
+
+/// `info` on one stored GGUF, by its handle: the file, where it came from,
+/// and its header -- for a model no backend points at yet (M4).
+[[nodiscard]] std::string render_stored_gguf(const harness::Config& config,
+                                             const models::StoredGguf& stored,
+                                             const models::Lineage& lineage,
+                                             const BusyProgress& progress) {
+    std::ostringstream out;
+    out << "weights:      " << models::weights_handle(stored.model, models::kGgufFormat, stored.id)
+        << "\n";
+    const std::string backends = backends_on(config, stored.file);
+    out << "backends:     "
+        << (backends.empty() ? "none -- 'apogee config add-backend <name> --type llamacpp "
+                               "--model-path <the path below>'"
+                             : backends)
+        << "\n";
+    out << "model_path:   " << stored.file.string() << "\n";
+    if (!stored.projector.empty()) {
+        out << "mmproj_path:  " << stored.projector.string() << "\n";
+    }
+    render_lineage(out, lineage, lineage.origin_of(stored.file, std::nullopt));
+    render_gguf(out, stored.file, harness::BackendConfig{}, progress);
+    return out.str();
+}
+
+/// `info` on one stored SafeTensors set: where it came from, what was made
+/// of it, and whether the listing folds it (M4).
+[[nodiscard]] std::string render_snapshot(const harness::Config& config,
+                                          const models::StoredSnapshot& stored,
+                                          const models::Lineage& lineage) {
+    const std::string handle =
+        models::weights_handle(stored.model, models::kSafetensorsFormat, stored.id);
+    std::ostringstream out;
+    out << "weights:      " << handle << "\n";
+    out << "path:         " << stored.dir.string() << "\n";
+    out << "format:       SafeTensors -- full weights, trainable, not runnable\n";
+    render_lineage(out, lineage, lineage.origin_of(handle));
+    const std::string architecture = models::snapshot_architecture(stored.dir);
+    out << "architecture: " << (architecture.empty() ? "-" : architecture) << "\n";
+    const std::optional<models::Snapshot> record = models::load_snapshot(stored.dir);
+    out << "record:       "
+        << (record.has_value() ? std::to_string(record->files.size()) + " file(s) on record"
+                               : "none")
+        << "\n";
+    const std::optional<models::Consumption> consumed = lineage.consumed(handle);
+    if (!consumed.has_value()) {
+        out << "made from it: nothing yet -- 'apogee models convert " << handle
+            << "' makes a GGUF of it\n";
+    } else {
+        bool first = true;
+        for (const std::string& gguf : consumed->by) {
+            out << (first ? "made from it: " : "              ") << gguf
+                << (consumed->inferred ? " (inferred)" : " (recorded)") << "\n";
+            first = false;
+        }
+    }
+    if (models::config_is_download_record(stored.dir)) {
+        out << "repair:       apogee models repair " << handle << "\n";
+    } else if (consumed.has_value() && backends_on(config, stored.dir).empty()) {
+        out << "listing:      folded -- a conversion consumed it; 'apogee models list --all' "
+               "shows it\n";
+    }
+    return out.str();
+}
+
+/// `info` on one set of weights in the store, by its handle or id (M4);
+/// empty when `name` names none.
+[[nodiscard]] std::string render_stored_weights(const harness::Config& config,
+                                                std::string_view name, const BusyProgress& progress,
+                                                const std::filesystem::path& models_dir) {
+    const models::StoreRoots roots = store_roots_for(config, models_dir);
+    const models::StoreTarget target = models::resolve_store_target(roots, name);
+    if (!target.error.empty() || target.outside || target.id.empty()) {
+        return {};
+    }
+    if (progress) {
+        progress("reading the store's records", 0, 0);
+    }
+    const models::Lineage lineage = models::read_lineage(roots);
+    if (target.format == models::kGgufFormat) {
+        for (const models::StoredGguf& stored : models::list_store_ggufs(roots, target.model)) {
+            if (stored.id == target.id) {
+                return render_stored_gguf(config, stored, lineage, progress);
+            }
+        }
+        return {};
+    }
+    for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots, target.model)) {
+        if (stored.id == target.id) {
+            return render_snapshot(config, stored, lineage);
+        }
+    }
+    return {};
+}
+
+}  // namespace
+
+std::string render_model_info(const harness::Config& config, std::string_view name,
+                              const BusyProgress& progress,
+                              const std::filesystem::path& models_dir) {
+    const auto entry = config.backends.find(std::string{name});
+    if (entry == config.backends.end()) {
+        // Not a backend: one set of weights in the store (M4).
+        return models_dir.empty() ? std::string{}
+                                  : render_stored_weights(config, name, progress, models_dir);
+    }
+    const harness::BackendConfig& value = entry->second;
+
+    std::ostringstream out;
+    out << "backend:      " << name << "\n";
+    out << "type:         " << harness::to_string(value.type) << "\n";
+    if (!value.model.empty()) {
+        out << "model:        " << value.model << "\n";
+    }
+    const std::string roles = roles_for(config, std::string{name});
+    out << "roles:        " << (roles.empty() ? "-" : roles) << "\n";
+
+    if (!is_local(value.type)) {
+        // A cloud backend has no file to inspect, and saying so beats printing
+        // empty GGUF fields that read like a failed read.
+        out << "source:       remote (no local file to inspect)\n";
+        return out.str();
+    }
+
+    const std::string expanded = harness::expand_env(value.model_path);
+    if (expanded.empty()) {
+        out << "model_path:   (unset)\n";
+        out << "header:       skipped -- no model_path to read\n";
+        return out.str();
+    }
+
+    out << "model_path:   " << expanded << "\n";
+    const std::filesystem::path path{expanded};
+    if (!models_dir.empty()) {
+        // Where it came from, back to the upstream it was pulled as (M4).
+        const models::Lineage lineage = models::read_lineage(store_roots_for(config, models_dir));
+        render_lineage(out, lineage, lineage.origin_of(path, models::load_sidecar(path)));
+    }
+    render_gguf(out, path, value, progress);
     return out.str();
 }
 
@@ -626,12 +880,15 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
     auto format = std::make_shared<std::string>();
     auto no_color = std::make_shared<bool>(false);
     auto list_quiet = std::make_shared<bool>(false);
+    auto list_all = std::make_shared<bool>(false);
     CLI::App* list = cmd->add_subcommand("list", "List configured backends and their models");
     list->add_option("--output-format", *format, "text (default) or stream-json")
         ->check(CLI::IsMember({"text", "stream-json"}));
     list->add_flag("--no-color", *no_color, "Disable coloured output");
     list->add_flag("-q,--quiet", *list_quiet, "No progress line while the models are read");
-    list->callback([load, format, no_color, list_quiet, &context]() {
+    list->add_flag("--all", *list_all,
+                   "Also list the SafeTensors sets a conversion has already consumed");
+    list->callback([load, format, no_color, list_quiet, list_all, &context]() {
         const harness::Config config = load();
         std::vector<ModelRow> rows;
         {
@@ -648,14 +905,18 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
             return;
         }
         std::cout << render_model_table(
-            rows, ansi::Style::detect(*no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto));
+            rows, ansi::Style::detect(*no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto),
+            *list_all);
     });
 
     auto info_name = std::make_shared<std::string>();
     auto info_quiet = std::make_shared<bool>(false);
-    CLI::App* info = cmd->add_subcommand("info", "Show one backend's model in detail");
-    info->add_option("backend", *info_name, "Backend key from the config")
-        ->type_name(kBackendValue)
+    CLI::App* info = cmd->add_subcommand(
+        "info", "Show one backend's model, or one set of stored weights, in detail");
+    info->add_option("name", *info_name,
+                     "A backend key from the config, or stored weights: <model>/<format>/<id> "
+                     "or an id")
+        ->type_name(kBackendOrWeightsValue)
         ->required();
     info->add_flag("-q,--quiet", *info_quiet, "No progress line while the model is read");
     info->callback([load, info_name, info_quiet]() {
@@ -663,10 +924,31 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
         std::string body;
         {
             BusyLine busy{std::cerr, "reading the model", busy_options(*info_quiet)};
-            body = render_model_info(config, *info_name, busy.sink());
+            body = render_model_info(config, *info_name, busy.sink(), harness::models_dir());
         }
         if (body.empty()) {
-            fail("no backend named '" + *info_name + "'");
+            // A whole model is not one thing to show: name what it holds.
+            const models::StoreRoots roots = store_roots_for(config, harness::models_dir());
+            const models::StoreTarget target = models::resolve_store_target(roots, *info_name);
+            if (target.error.empty() && !target.outside && target.id.empty()) {
+                std::string sets;
+                for (const models::StoredGguf& stored :
+                     models::list_store_ggufs(roots, target.model)) {
+                    if (target.format.empty() || target.format == models::kGgufFormat) {
+                        sets += "\n  " + models::weights_handle(stored.model, models::kGgufFormat,
+                                                                stored.id);
+                    }
+                }
+                for (const models::StoredSnapshot& stored :
+                     models::list_store_snapshots(roots, target.model)) {
+                    if (target.format.empty() || target.format == models::kSafetensorsFormat) {
+                        sets += "\n  " + models::weights_handle(
+                                             stored.model, models::kSafetensorsFormat, stored.id);
+                    }
+                }
+                fail("'" + *info_name + "' is a model -- name one set of its weights:" + sets);
+            }
+            fail("no backend or stored weights named '" + *info_name + "'");
         }
         std::cout << body;
     });

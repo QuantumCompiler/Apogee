@@ -544,14 +544,13 @@ TEST_CASE("a flag's value is never mistaken for a subcommand", "[commands][compl
 }
 
 TEST_CASE("a positional completes by what it declares, once", "[commands][completion][tree]") {
-    // `models info <backend>`: declared BACKEND, so it completes; once given,
-    // there is no second positional and nothing more is offered.
-    CHECK(complete_line({"models", "info"}) == std::vector<std::string>{"claude", "local"});
-    CHECK(complete_line({"models", "info"}, "lo") == std::vector<std::string>{"local"});
+    // `train rollback <backend>`: declared BACKEND, so it completes; once
+    // given, there is no second positional and nothing more is offered.
+    CHECK(complete_line({"train", "rollback"}) == std::vector<std::string>{"claude", "local"});
+    CHECK(complete_line({"train", "rollback"}, "lo") == std::vector<std::string>{"local"});
     // Every positional given: only a flag can follow, so flags are offered.
     CHECK(complete_line({"models", "info", "claude"}) ==
           std::vector<std::string>{"--help", "--quiet", "-h", "-q"});
-    CHECK(complete_line({"train", "rollback"}) == std::vector<std::string>{"claude", "local"});
     // A positional that is a file or free text offers nothing, which hands
     // the word back to the shell's own file completion.
     CHECK(complete_line({"models", "delete"}).empty());
@@ -918,6 +917,8 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "mcp create --args",
                                          "mcp test tool",
                                          "mcp test arguments",
+                                         "models convert --base-name",
+                                         "models pull --base-name",
                                          "serve --bind"};
 
 }  // namespace

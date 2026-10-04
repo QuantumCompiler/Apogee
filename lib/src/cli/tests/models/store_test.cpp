@@ -6,6 +6,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -56,6 +57,26 @@ TEST_CASE("a weight id is the first twelve hex of a sha256", "[models][store]") 
     const std::string random = apogee::models::random_weight_id();
     CHECK(apogee::models::is_weight_id(random));
     CHECK(random != apogee::models::random_weight_id());
+}
+
+TEST_CASE("a handle is read without asking the disk, and only a handle is one", "[models][store]") {
+    // What a conversion's or a quantization's record names as its parent (M4).
+    const std::optional<apogee::models::WeightsHandle> handle =
+        apogee::models::parse_weights_handle("org--m/gguf/0123456789ab");
+    REQUIRE(handle.has_value());
+    CHECK(handle->model == "org--m");
+    CHECK(handle->format == "gguf");
+    CHECK(handle->id == "0123456789ab");
+    CHECK(apogee::models::weights_handle(handle->model, handle->format, handle->id) ==
+          "org--m/gguf/0123456789ab");
+    CHECK(apogee::models::parse_weights_handle("org--m/safetensors/0123456789ab").has_value());
+    for (const char* not_one :
+         {"org--m", "org--m/gguf", "org--m/gguf/", "org--m/onnx/0123456789ab",
+          "org--m/gguf/0123456789AB", "org--m/gguf/0123456789ab/x.gguf", "/models/m/gguf/x",
+          "../gguf/0123456789ab", "/gguf/0123456789ab", "org/m:file.gguf"}) {
+        INFO(not_one);
+        CHECK_FALSE(apogee::models::parse_weights_handle(not_one).has_value());
+    }
 }
 
 TEST_CASE("a SafeTensors set's id covers its shards and nothing else", "[models][store]") {

@@ -1,5 +1,5 @@
 ---
-name: apogee-spike-investigate
+name: apogee-backlog-investigate-spike
 description: Run an evidence-gathering spike for Apogee — answer a "can we / how should we" question by probing the real binary or codebase in a sandbox, then report the findings only, including the backlog documents that would need to be created (never creating them). Use when the user asks for a spike ("do a spike into X", "spike this", "investigate whether we could…").
 ---
 
@@ -11,7 +11,7 @@ A spike answers a design question with **evidence, not opinion**. Its deliverabl
 
 - A spike **produces a report, and only a report**: walls, measurements, the documents that would need to be created, and the questions only the user can answer.
 - A spike **does not build** anything shippable, does not create backlog documents, and does not edit SPEC/ROADMAP/README — even when the split is obvious. Those happen only if the user asks afterwards.
-- **"Execute the spike" / "execute the plan" means create the backlog documents** (via `/apogee-backlog-create-item`, one per item in the split, placed in the index table the user named) — it never means implementing. Building happens later via `/apogee-backlog-execute-item`.
+- **"Execute the spike" / "execute the plan" means create the backlog documents** (via `/apogee-backlog-create-spike`, the whole split in one pass with the evidence baked in; a single stray item can go through `/apogee-backlog-create-item`) — it never means implementing. Building happens later via `/apogee-backlog-execute-item`.
 - Findings live **in the report, not the repo**. Do not save a spike write-up file unless the user explicitly asks for one; "internalize it in your context" is the default.
 
 ## 2. Ground first

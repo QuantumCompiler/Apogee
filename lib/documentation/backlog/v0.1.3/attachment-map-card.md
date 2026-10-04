@@ -38,4 +38,4 @@
 - [ ] The card's tokens count against the attachment share, and an unknown-window backend (where nothing is inlined) still gets the card only if it fits — never unconditionally.
 - [ ] After `/compact`, the next message carries the card again, once.
 
-**Scope note.** Item **26q**, earmarked for **v0.1.3** (the release's end, after 26p); gated on nothing pending. Out of scope: any graph machinery (the walkable structure is [30d](../v0.1.7/attachment-code-graph.md)/[30e](../v0.1.7/attachment-graph-turns.md)); score display and floors ([M5](../maintenance/retrieval-reporting-floor.md)); changing what the `@` mention sends.
+**Scope note.** Item **26q**, earmarked for **v0.1.3** (the release's end, after 26p); gated on nothing pending. Out of scope: any graph machinery (the walkable structure is [30d](../v0.1.7/attachment-code-graph.md)/[30e](../v0.1.7/attachment-graph-turns.md)); score display and floors ([26s](retrieval-reporting-floor.md)); changing what the `@` mention sends.

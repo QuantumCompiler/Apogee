@@ -152,6 +152,15 @@ TEST_CASE("the store's models complete by name and by handle, per format",
     CHECK(home.names(c::kGgufIdValue, {"org--gguf"}).names ==
           std::vector<std::string>{"333333333333"});
     CHECK(home.names(c::kGgufIdValue).names.empty());  // no model named yet
+
+    // `models info` shows a backend or one set of weights (M4): both, by
+    // handle -- a whole model is not one thing to show.
+    const std::vector<std::string> info = home.names(c::kBackendOrWeightsValue).names;
+    CHECK(has(info, "claude"));
+    CHECK(has(info, "org--both/gguf/111111111111"));
+    CHECK(has(info, "org--both/safetensors/222222222222"));
+    CHECK(has(info, "org--gguf/gguf/333333333333"));
+    CHECK_FALSE(has(info, "org--both"));
 }
 
 TEST_CASE("collections, datasets, kits and runs complete from the data directory",

@@ -1,5 +1,5 @@
 ---
-name: apogee-maintenance-pull-request
+name: apogee-maintenance-summarize-pull-request
 description: Draft the merge-request description for the current branch — what shipped, which backlog items it closed, decisions made, docs updated, how it was verified. Use when the user is opening an MR/PR or asks to "write the PR description", "describe this branch", "draft the merge request".
 ---
 
@@ -9,7 +9,7 @@ Drafts the MR description for the current branch against `stable` (the repo's ma
 
 ## 0. Precondition
 
-The docs should already be reconciled — if `apogee-maintenance-documents` hasn't been run on this branch, run it first. Describing stale docs produces a stale description.
+The docs should already be reconciled — if `apogee-maintenance-update-documents` hasn't been run on this branch, run it first. Describing stale docs produces a stale description.
 
 ## 1. Gather the evidence
 
