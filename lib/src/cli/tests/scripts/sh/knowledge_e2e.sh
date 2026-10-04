@@ -129,8 +129,8 @@ grep -q "^User: should we drop the cancel button?" "$APOGEE_HOME/knowledge/raw/$
 cp "$CONFIG" "$WORK_DIR/config.no-utility"
 "$APOGEE_BIN" config set-default-utility prose >/dev/null || fail "set-default-utility"
 printf 'should we drop the cancel button?\n/capture\n/exit\n' | "$APOGEE_BIN" chat -m clerk >"$WORK_DIR/chat2.out" 2>"$WORK_DIR/chat2.err" || fail "chat /capture with a utility model: $(cat "$WORK_DIR/chat2.err")"
-grep -q "distilling this conversation into a record with prose" "$WORK_DIR/chat2.err" || fail "/capture did not name the utility clerk: $(cat "$WORK_DIR/chat2.err")"
-grep -q "capture failed" "$WORK_DIR/chat2.err" || fail "/capture did not ask the utility model: $(cat "$WORK_DIR/chat2.err")"
+grep -q "capture by prose failed" "$WORK_DIR/chat2.err" || fail "/capture did not name the utility clerk: $(cat "$WORK_DIR/chat2.err")"
+grep -q "failed: the clerk did not return a record" "$WORK_DIR/chat2.err" || fail "/capture did not ask the utility model: $(cat "$WORK_DIR/chat2.err")"
 cp "$WORK_DIR/config.no-utility" "$CONFIG"
 
 # --- query: shipped by default, every branch on request, the retriever named --

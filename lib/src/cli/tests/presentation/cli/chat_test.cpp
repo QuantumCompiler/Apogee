@@ -458,6 +458,13 @@ TEST_CASE("a utility model restates a follow-up for retrieval; the chat is asked
     }
     CHECK(asked ==
           std::vector<std::string>{"Tell me about Project Heron.", "where does it deploy?"});
+    // The rewrite was a side call (26n): on a pipe it is drawn nowhere, and
+    // no message of the chat carries it.
+    CHECK(chat.err.find("rewriting the follow-up") == std::string::npos);
+    CHECK(chat.out.find("rewriting the follow-up") == std::string::npos);
+    for (const ChatMessage& message : session.messages) {
+        CHECK(message.content.plain_text().find("rewriting the follow-up") == std::string::npos);
+    }
 }
 
 TEST_CASE("a utility model summarises a large tool result, and compacts a full context",
@@ -1108,4 +1115,80 @@ TEST_CASE("recall never bills a backend for a summary", "[chat][recall]") {
     apogee::harness::Config config;
     config.models.default_utility = "local";
     CHECK(apogee::commands::recall_summariser(harness, config, "billed", reason) == "local");
+}
+
+TEST_CASE("machine mode hears a turn's side calls as tool_status lines",
+          "[chat][cli][helpers][machine][side-call]") {
+    // The tool-summary and compaction turn of the test above, driven: each
+    // side call is the existing display-prose event (26n), never new vocabulary.
+    const std::string long_answer(1200, 'a');
+    const nlohmann::json chatty = nlohmann::json::array(
+        {{{"tool_calls", {{{"name", "read_file"}, {"arguments", {{"path", "big.log"}}}}}}},
+         {{"text", long_answer}},
+         {{"text", "second answer"}}});
+    HelperChat chat{chatty,
+                    {"the log, in short", "Log Review", "what was said, in short"},
+                    "    context_size: 300\n",
+                    ""};
+    const std::filesystem::path work = chat.home.path() / "work";
+    std::filesystem::create_directories(work);
+    {
+        std::ofstream log{work / "big.log", std::ios::binary};
+        for (int line = 0; line < 400; ++line) {
+            log << "INFO worker processed a batch\n";
+        }
+    }
+    std::ofstream{chat.config_path, std::ios::binary | std::ios::app}
+        << "tools:\n  fs_root: " << work.string() << "\n";
+    const std::string input = std::string{R"({"type":"user","text":"what is in big.log?"})"} +
+                              "\n" + R"({"type":"user","text":"and then?"})" + "\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--tools", "--input-format", "stream-json", "--output-format",
+                      "stream-json"},
+                     input) == 0);
+    CHECK(chat.out.find(R"("type":"tool_status")") != std::string::npos);
+    CHECK(chat.out.find("utility — summarising read_file's 12 KB result with helper") !=
+          std::string::npos);
+    CHECK(chat.out.find("utility — compacting the conversation with helper") != std::string::npos);
+    // Display prose only: the saved chat carries none of it.
+    for (const ChatMessage& message : HelperChat::only_session().messages) {
+        CHECK(message.content.plain_text().find("compacting the conversation") ==
+              std::string::npos);
+    }
+}
+
+TEST_CASE("machine mode hears a follow-up's rewrite as a tool_status line",
+          "[chat][rag][cli][helpers][machine][side-call]") {
+    HelperChat chat{texts({"Heron is the billing ledger.", "It deploys to Frankfurt."}),
+                    {"Heron Notes", "Project Heron deployment region"}};
+    const std::filesystem::path docs = chat.home.path() / "docs";
+    std::filesystem::create_directories(docs);
+    std::ofstream{docs / "heron.md", std::ios::binary}
+        << "Project Heron is the billing ledger. It deploys to Frankfurt.\n";
+    REQUIRE(chat.run({"embed", "ingest", "notes", docs.string()}) == 0);
+    const std::string input =
+        std::string{R"({"type":"user","text":"Tell me about Project Heron."})"} + "\n" +
+        R"({"type":"user","text":"where does it deploy?"})" + "\n";
+    REQUIRE(chat.run({"chat", "--rag", "notes", "--input-format", "stream-json", "--output-format",
+                      "stream-json"},
+                     input) == 0);
+    // Once: the first question stands alone and is not restated.
+    const std::string said = "utility — rewriting the follow-up into a search query with helper";
+    CHECK(chat.out.find(said) != std::string::npos);
+    CHECK(chat.out.find(said) == chat.out.rfind(said));
+}
+
+TEST_CASE("machine mode hears the rerank judge as a tool_status line",
+          "[chat][rag][cli][helpers][machine][side-call]") {
+    HelperChat chat{texts({"Heron is the billing ledger."}), {"[1]", "Heron Notes"}};
+    const std::filesystem::path docs = chat.home.path() / "docs";
+    std::filesystem::create_directories(docs);
+    std::ofstream{docs / "heron.md", std::ios::binary}
+        << "Project Heron is the billing ledger. It deploys to Frankfurt.\n";
+    REQUIRE(chat.run({"embed", "ingest", "notes", docs.string()}) == 0);
+    REQUIRE(chat.run({"chat", "--rag", "notes", "--rerank", "on", "--input-format", "stream-json",
+                      "--output-format", "stream-json"},
+                     std::string{R"({"type":"user","text":"Tell me about Project Heron."})"} +
+                         "\n") == 0);
+    CHECK(chat.out.find("rerank — judging") != std::string::npos);
 }

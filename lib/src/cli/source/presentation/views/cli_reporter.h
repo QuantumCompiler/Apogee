@@ -59,8 +59,16 @@ public:
     void on_thinking() override;
     void on_thinking_token(std::string_view chunk) override;
     void on_thinking_budget_reached() override;
+    /// A line that stays, said during a turn: above the thinking block when
+    /// one is open, so the block's rows stay its own (26n); else as any
+    /// other line.
+    void keep_line(std::string_view line);
+
     /// `[memory] 2 past chats, 1 decision`, a line that stays (26l).
     void on_recall(int chats, int decisions) override;
+    /// `· <role> — <what it is doing>` inside the thinking block, completed
+    /// in place with what it took (26n).
+    void on_side_call(const agentloop::SideCall& call) override;
     void on_tool_status(std::string_view detail) override;
     void on_notice(std::string_view text) override;
     /// Printed, and kept, only under `--verbose`: in an ordinary run the

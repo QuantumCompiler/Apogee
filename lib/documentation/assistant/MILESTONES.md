@@ -530,6 +530,46 @@ Asked for directly (Taylor, 2026-09-23, with a Qwen3.5 transcript): "the formatt
 
 ---
 
+### 2026-10-04 — `thinking-side-calls` (backlog item 26n): a turn's other model calls, in the thinking block
+
+**Why.** A turn is no longer one model call. Around the chat model a question can run the embedder, the utility model -- restating a follow-up, summarising a tool result, compacting -- the rerank judge, and on `/capture` the clerk. That work was invisible, or a status-line blip, while the chat model's own reasoning had a home. The user asked for one story in one place.
+
+**What was built**
+
+- [x] **One Reporter event** (`agentloop/side_call`, `Reporter::on_side_call`): a side call's role and what it is doing, said when it starts and again when it is over, with its elapsed time. `SideCallScope` says both; a null sink says nothing; no number is ever estimated.
+- [x] **Said where the calls are made**:
+  - retrieval: the question's embedding and the rerank judge (`RagTurn::on_side_call`), so `auto_rag`, a chat's attachments and recall all narrate them;
+  - the loop: a tool result's summary;
+  - `chat`: the follow-up rewrite (only when there is an earlier turn), mid-turn compaction, and the `/capture` clerk, whose block then collapses instead of printing a bare status line -- the clerk is named in a failed capture's line instead (`capture by prose failed: …`), which a pipe still shows.
+- [x] **Drawn inside the thinking block** (`ThinkingView::side_call`, `side_call_done`):
+  - `· <role> — <what it is doing>`, dim, each on a line of its own;
+  - cut to the width, interleaved with the reasoning in arrival order;
+  - completed in place with ` · 0.6 s`.
+
+  A block of side calls alone stays open when the step begins, so its reasoning joins it; one with no reasoning collapses to `✻ Worked for Ns`.
+- [x] **Everywhere else, nothing new.** Machine mode says a side call as the existing `tool_status` event at its start, and `cli.machine_schema_conformance` passes unchanged. `serve` gets no frame, a pipe draws nothing, and no transcript, `result` or answer carries any of it.
+- [x] **Lines said during a turn land above the block** (`ThinkingView::print_above`, `CliReporter::keep_line`) -- found on a real terminal, where a retrieval line printed into a block of side calls and the block's next erase missed by a row.
+
+**On a real terminal** (Gemma 4 12B, a `notes` collection embedded by Embedding-Gemma, `--rerank on`):
+- the block read `· embedding — the question → Embedding-Gemma-300M · 0.4 s`, then `· rerank — judging 2 results with Gemma4-12B-Q4KM · 8.7 s`, then Gemma's own reasoning, in one block that collapsed to `✻ Thought for`;
+- the PTY chat check drives the same story with mock models on every run: a follow-up's rewrite narrated, `✻ Worked for`, and a clean saved chat.
+
+**Tests**: 14 new cases -- the scope and the suffix; the view (arrival order, own lines, completion in place, `Worked for`, the cut, an inactive view); the reporter (one block across the step, a pipe, lines above the block against the terminal model); machine mode's `tool_status`; retrieval's embedding and judge; the loop's summary; and in `chat`, machine mode hearing the tool summary, compaction, the rewrite once and the judge, while a pipe and the saved chat hear nothing. The PTY chat check gained an eighth case.
+
+**Guardrails, each mutation-tested (20 mutants, all caught -- three only once their tests were sharpened: the cut, the judge, `retrieve_for_collection`'s sink), in a separate git worktree:** the scope's end, time and tokens; the view's opening, own line, completion, wording, reasoning flag and cut; the reporter's open block, both draws and lines above the block; machine mode's single line; each emission site.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The line | `· <role> — <what it is doing>`, completed with the time *(confirmed by the user)* | |
+| A block with no reasoning | Still appears, and collapses *(confirmed by the user)*, to `Worked for` *(for veto)* | `Thought for` would say it thought. |
+| The first-cut set | Embedding, rerank, rewrite, summary, compaction, the clerk *(confirmed by the user)*; vision and transcription stay with their attachment lines *(for veto)* | Those run in the indexer's background worker, which the item keeps off the block. |
+| `auto_rag`'s choice | A status-line notice *(confirmed by the user)*, now above an open block | One-shot state, not a side call. |
+| Machine mode | `tool_status`, at a call's start | The existing display-prose event; no vocabulary change. |
+| `serve` | No frame *(for veto)* | Its retrieval has `rag_search`/`rag_result`; progress on `notice` would change that frame's meaning. |
+| Tokens | Not yet reported by any call site | Shown only when truly known. |
+
 ## Milestone H — `apogee chat`
 
 **Goal.** The richest v0.1.0 surface, and the one that proves the harness holds together over a conversation rather than a single turn: a persistent, resumable REPL where switching models mid-session is a lookup, not a reconstruction.

@@ -33,6 +33,16 @@ struct Harness {
     }
 };
 
+/// Non-overlapping occurrences of `needle`.
+std::size_t count_of(std::string_view haystack, std::string_view needle) {
+    std::size_t n = 0;
+    for (std::size_t at = haystack.find(needle); at != std::string_view::npos;
+         at = haystack.find(needle, at + needle.size())) {
+        ++n;
+    }
+    return n;
+}
+
 }  // namespace
 
 TEST_CASE("the answer goes to stdout and progress to stderr", "[ux][reporter]") {
@@ -115,6 +125,56 @@ TEST_CASE("a spent budget reaches the thinking block's summary", "[ux][reporter]
     reporter.on_answer_end();
     CHECK(h.progress.str().find("(budget reached)") != std::string::npos);
     CHECK(h.answer.str() == "answer\n");
+}
+
+TEST_CASE("side calls before the step and its reasoning are one block",
+          "[ux][reporter][side-call]") {
+    Harness h;
+    CliReporter reporter = h.make();
+    apogee::agentloop::SideCall call{.role = "utility", .detail = "rewriting"};
+    reporter.on_side_call(call);
+    call.done = true;
+    call.seconds = 0.4;
+    reporter.on_side_call(call);
+    // The loop's step begins: the block stays open for its reasoning.
+    reporter.on_thinking();
+    reporter.on_thinking_token("pondering");
+    reporter.on_clear_status();
+    reporter.on_answer_start();
+    reporter.on_answer_token("answer");
+    reporter.on_answer_end();
+    CHECK(h.progress.str().find("· utility — rewriting · 0.4 s") != std::string::npos);
+    CHECK(count_of(h.progress.str(), "Thought for") == 1);
+    CHECK(count_of(h.progress.str(), "Worked for") == 0);
+    // Never the answer's.
+    CHECK(h.answer.str() == "answer\n");
+}
+
+TEST_CASE("a line said during a turn lands above the open block, never inside it",
+          "[ux][reporter][side-call]") {
+    // Found on a real terminal (2026-10-04): the retrieval line printed into
+    // a block of side calls, and the block's next erase missed by a row.
+    Harness h;
+    CliReporter reporter = h.make();
+    reporter.on_side_call({.role = "embedding", .detail = "the question"});
+    reporter.keep_line("[warn] 1 chunk(s) from 'notes'");
+    reporter.on_recall(1, 0);
+    reporter.on_thinking();
+    reporter.on_thinking_token("pondering");
+    reporter.on_clear_status();
+    apogee::testing::TerminalModel screen{40};
+    screen.feed(h.progress.str());
+    CHECK(screen.lines() == std::vector<std::string>{"[warn] 1 chunk(s) from 'notes'",
+                                                     "[memory] 1 past chat", "✻ Thought for 1s"});
+}
+
+TEST_CASE("a pipe draws no side call", "[ux][reporter][side-call]") {
+    Harness h;
+    CliReporter reporter = h.make(/*decorate=*/false);
+    reporter.on_side_call({.role = "embedding", .detail = "zarquon-label"});
+    reporter.on_clear_status();
+    CHECK(h.progress.str().find("zarquon-label") == std::string::npos);
+    CHECK(h.answer.str().find("zarquon-label") == std::string::npos);
 }
 
 TEST_CASE("an empty thinking token opens nothing", "[ux][reporter]") {

@@ -76,6 +76,12 @@ void CliReporter::settle_answer() {
 
 void CliReporter::on_thinking() {
     settle_answer();
+    // A block of side calls alone stays open: the step's reasoning joins it,
+    // one story in arrival order (26n), and its header already says so.
+    if (thinking_.open() && !thinking_.reasoned()) {
+        thinking_characters_ = 0;
+        return;
+    }
     // Back to the resting state: any open reasoning block collapses to its
     // summary before the spinner takes the line back.
     thinking_.finish();
@@ -120,14 +126,32 @@ void CliReporter::on_notice(std::string_view text) {
     status_.print_line(options_.style.tag(ansi::Role::Warning) + " " + std::string{text});
 }
 
+void CliReporter::on_side_call(const agentloop::SideCall& call) {
+    const std::string label = call.role + " — " + call.detail;
+    if (call.done) {
+        thinking_.side_call_done(label, agentloop::side_call_suffix(call));
+        return;
+    }
+    if (!thinking_.open()) {
+        // The block takes the line from the spinner, as reasoning does.
+        status_.stop_spinner();
+    }
+    thinking_.side_call(label);
+}
+
 void CliReporter::on_recall(int chats, int decisions) {
     if (chats <= 0 && decisions <= 0) {
         return;
     }
+    keep_line(options_.style.dim("[memory] " + agentloop::describe_recall(chats, decisions)));
+}
+
+void CliReporter::keep_line(std::string_view line) {
+    if (thinking_.print_above(line)) {
+        return;
+    }
     settle_answer();
-    thinking_.finish();
-    status_.print_line(
-        options_.style.dim("[memory] " + agentloop::describe_recall(chats, decisions)));
+    status_.print_line(std::string{line});
 }
 
 void CliReporter::on_progress(std::string_view text) {

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "agentloop/budget.h"
+#include "agentloop/side_call.h"
 #include "contracts/cancellation.h"
 #include "contracts/config.h"
 #include "contracts/types.h"
@@ -87,7 +88,8 @@ public:
     /// knowledge collection -- unless that is the collection `auto_rag`
     /// already searched -- at most `agentloop::kRecallItems` in all.
     [[nodiscard]] Recalled for_turn(const std::string& query, const agentloop::TurnBudget& budget,
-                                    std::int64_t share_used, std::string_view rag_collection);
+                                    std::int64_t share_used, std::string_view rag_collection,
+                                    const agentloop::SideCallSink& on_side_call = {});
 
     /// After each turn: a chat that has become due is marked as this
     /// process's, so a crash leaves it to the next start.

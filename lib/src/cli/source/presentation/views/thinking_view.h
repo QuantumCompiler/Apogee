@@ -69,6 +69,26 @@ public:
         budget_reached_ = true;
     }
 
+    /// A side call's line inside the block (26n): `· <label>`, dim like the
+    /// reasoning, cut to the width, opening the block when nothing has. A
+    /// block that holds only side calls collapses to `Worked for`, not
+    /// `Thought for`.
+    void side_call(std::string_view label);
+
+    /// Completes the latest line for `label` in place with `suffix`.
+    void side_call_done(std::string_view label, std::string_view suffix);
+
+    /// Prints `line` above the open block -- erased, the line written, the
+    /// block painted again below it -- so a line kept during a turn never
+    /// lands inside the block's rows. False, printing nothing, when no block
+    /// is painted (26n).
+    bool print_above(std::string_view line);
+
+    /// Whether this block holds reasoning, rather than side calls alone.
+    [[nodiscard]] bool reasoned() const noexcept {
+        return reasoned_;
+    }
+
     /// Erases the region without leaving a summary. For the path where an
     /// answer or an error takes over and no reasoning happened.
     void abandon();
@@ -101,6 +121,12 @@ private:
     std::size_t painted_ = 0;
     bool open_ = false;
     bool budget_reached_ = false;
+    bool reasoned_ = false;
+
+    /// Opens a block when none is: its clock, its flags.
+    void open_block();
+    /// Adds `text` to the window and repaints.
+    void append(std::string_view text);
     std::int64_t started_ = 0;
     Clock clock_;
 };

@@ -182,6 +182,11 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
                    const std::function<void(const std::string&)>& notice, const RagSettings& rag,
                    const std::string& review_note, ChatAttachments* attached, ChatRecall* recall) {
     const std::vector<harness::ChatMessage> incoming = build_messages({}, {}, input, {});
+    // The turn's model calls besides the chat model's own, said where the
+    // surface says them -- the terminal, inside the thinking block (26n).
+    const agentloop::SideCallSink side = [&reporter](const agentloop::SideCall& call) {
+        reporter.on_side_call(call);
+    };
 
     // Context is measured against what is ABOUT TO BE SENT -- the saved history
     // plus this turn -- not the history alone. Measuring before appending means
@@ -202,7 +207,11 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         // Compacts the PRIOR history only: folding the message the user just
         // typed into a summary of the conversation so far would summarise away
         // the question being asked.
-        session.messages = agentloop::compact_history(harness, session.messages, compactor);
+        {
+            const agentloop::SideCallScope said{side, "utility",
+                                                "compacting the conversation with " + compactor};
+            session.messages = agentloop::compact_history(harness, session.messages, compactor);
+        }
         ++session.compactions;
         if (attached != nullptr) {
             attached->after_compaction();
@@ -270,8 +279,14 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     if (rag_choice.active() || (attached != nullptr && attached->retrieves())) {
         const std::string rewriter =
             helper_backend(harness.config(), harness::ModelRole::Utility, session.backend);
+        std::optional<agentloop::SideCallScope> said;
+        if (agentloop::has_earlier_turn(session.messages)) {
+            said.emplace(side, "utility",
+                         "rewriting the follow-up into a search query with " + rewriter);
+        }
         const agentloop::QueryRewrite rewrite =
             agentloop::rewrite_query(harness, rewriter, session.messages, input, {});
+        said.reset();
         if (rewrite.rewritten) {
             reporter.on_progress("search query by " + rewriter + ": " + rewrite.query);
         } else if (!rewrite.note.empty()) {
@@ -285,8 +300,12 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         // model itself every turn would cost more than the ranking saves.
         if (const std::string utility = named_utility(harness.config());
             !utility.empty() && agentloop::has_earlier_turn(session.messages)) {
+            std::optional<agentloop::SideCallScope> said;
+            said.emplace(side, "utility",
+                         "restating the follow-up to rank the tools, with " + utility);
             const agentloop::QueryRewrite rewrite =
                 agentloop::rewrite_query(harness, utility, session.messages, input, {});
+            said.reset();
             if (rewrite.rewritten) {
                 reporter.on_progress("tools ranked for, by " + utility + ": " + rewrite.query);
                 loop_options.selection_query = rewrite.query;
@@ -302,7 +321,7 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     std::int64_t share_used = 0;
     if (attached != nullptr) {
         ChatAttachments::Turn turn =
-            attached->for_turn(session.messages.size() - 1, query, budget, rag.limit, {});
+            attached->for_turn(session.messages.size() - 1, query, budget, rag.limit, {}, side);
         loop_options.inline_attachments = std::move(turn.inlined);
         if (turn.retrieved.has_value()) {
             if (turn.retrieved->error.empty() && !turn.retrieved->prefix.empty()) {
@@ -320,7 +339,7 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         const harness::Config& config = turn_config.has_value() ? *turn_config : fallback;
         const agentloop::RagResult retrieved = retrieve_for_collection(
             harness, config, rag_choice.collection, query, rag.limit, session.retriever,
-            session.rerank, {}, session.backend, budget, share_used);
+            session.rerank, {}, session.backend, budget, share_used, side);
         if (retrieved.error.empty() && !retrieved.prefix.empty()) {
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
                                                  retrieved.prefix.begin(), retrieved.prefix.end());
@@ -332,8 +351,9 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     // transient like the rest, and said, so the user can see why the model
     // knows it.
     if (recall != nullptr && recall->active()) {
-        const Recalled recalled = recall->for_turn(
-            query, budget, share_used, rag_choice.active() ? rag_choice.collection : std::string{});
+        const Recalled recalled =
+            recall->for_turn(query, budget, share_used,
+                             rag_choice.active() ? rag_choice.collection : std::string{}, side);
         if (!recalled.prefix.empty()) {
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
                                                  recalled.prefix.begin(), recalled.prefix.end());
@@ -1015,15 +1035,22 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             // load (Milestone Y) -- unless a utility model is named (26b).
             const std::string utility = named_utility(config);
             const std::string clerk = utility.empty() ? session.backend : utility;
-            reporter.status().print_line(
-                style.tag(ansi::Role::Apogee) + " distilling this conversation into a record" +
-                (clerk == session.backend ? "" : " with " + clerk) + "...");
+            // Narrated in the thinking block like any side call, which then
+            // collapses: the clerk is a model call of its own (26n).
+            std::optional<agentloop::SideCallScope> said;
+            said.emplace(
+                [&reporter](const agentloop::SideCall& call) { reporter.on_side_call(call); },
+                "clerk", "distilling this conversation into a record with " + clerk);
             const CaptureResult result =
                 capture_and_store(harness, config, config_path, inputs,
                                   knowledge::make_structured_clerk(harness, clerk));
+            said.reset();
+            reporter.on_clear_status();
             if (!result.ok()) {
-                reporter.status().print_line(style.tag(ansi::Role::Error) +
-                                             " capture failed: " + result.error);
+                // The clerk named, as the line its narration replaced did:
+                // on a pipe that line is not drawn at all (26n).
+                reporter.status().print_line(style.tag(ansi::Role::Error) + " capture by " + clerk +
+                                             " failed: " + result.error);
                 return;
             }
             for (const std::string& note : result.notes) {
@@ -1350,7 +1377,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                                   : agent::ConfirmFn{}},
                 reporter,
                 [&reporter, &style](const std::string& message) {
-                    reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + message);
+                    // Above the thinking block when side calls have opened
+                    // one (26n): never inside its rows.
+                    reporter.keep_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
                 rag_settings, review_note, &attached, &recall);
             title.start_if_due(session);

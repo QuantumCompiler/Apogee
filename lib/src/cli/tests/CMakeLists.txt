@@ -130,6 +130,7 @@ add_library(apogee_tests_business OBJECT
     business/agentloop/question_test.cpp
     business/agentloop/thinking_test.cpp
     business/agentloop/recall_test.cpp
+    business/agentloop/side_call_test.cpp
     business/tools/fs_test.cpp
     business/tools/shell_test.cpp
     business/tools/notes_test.cpp

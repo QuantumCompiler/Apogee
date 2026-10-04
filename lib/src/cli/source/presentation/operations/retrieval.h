@@ -79,6 +79,6 @@ struct RagChoice {
     const std::string& question, int limit, std::string_view retriever_flag,
     std::string_view rerank_flag, const harness::CancellationToken& cancellation,
     std::string_view conversation = {}, const agentloop::TurnBudget& budget = {},
-    std::int64_t share_used = 0);
+    std::int64_t share_used = 0, const agentloop::SideCallSink& on_side_call = {});
 
 }  // namespace apogee::commands

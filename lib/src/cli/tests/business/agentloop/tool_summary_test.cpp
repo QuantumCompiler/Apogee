@@ -35,9 +35,14 @@ using apogee::harness::ToolCall;
 /// Keeps the progress lines a run reports.
 struct Progress : apogee::agentloop::Reporter {
     std::vector<std::string> lines;
+    std::vector<apogee::agentloop::SideCall> side_calls;
 
     void on_progress(std::string_view line) override {
         lines.emplace_back(line);
+    }
+
+    void on_side_call(const apogee::agentloop::SideCall& call) override {
+        side_calls.push_back(call);
     }
 };
 
@@ -137,6 +142,11 @@ TEST_CASE("the loop summarises a result over the threshold, only with a utility 
         // Said, for --verbose: which tool, how big, and who summarised it.
         REQUIRE(progress.lines.size() == 1);
         CHECK(progress.lines.front() == "read_file's 9 KB result summarised by helper");
+        // And narrated as the side call it is (26n).
+        REQUIRE(progress.side_calls.size() == 2);
+        CHECK(progress.side_calls[0].role == "utility");
+        CHECK(progress.side_calls[0].detail == "summarising read_file's 9 KB result with helper");
+        CHECK(progress.side_calls[1].done);
         CHECK(result_seen(*two.chat).find("this is a summary by helper") != std::string::npos);
         CHECK(result_seen(*two.chat).ends_with("three errors"));
         REQUIRE(two.helper->requests().size() == 1);

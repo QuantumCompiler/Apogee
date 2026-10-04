@@ -120,7 +120,8 @@ public:
     /// (`4:30`) looked up in a recording's timeline.
     [[nodiscard]] Turn for_turn(std::size_t user_message, const std::string& query,
                                 const agentloop::TurnBudget& budget, int limit,
-                                const harness::CancellationToken& cancellation);
+                                const harness::CancellationToken& cancellation,
+                                const agentloop::SideCallSink& on_side_call = {});
 
     /// After the run: an inlined attachment the budget could not send is
     /// retrieved from then on, and said; so is media it could not send as it

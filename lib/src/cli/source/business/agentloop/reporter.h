@@ -2,6 +2,8 @@
 
 #include <string_view>
 
+#include "agentloop/side_call.h"
+
 /// Everything the loop wants to say, said through here.
 ///
 /// **This interface is the reason the loop can be shared.** Ommi's single most
@@ -63,6 +65,14 @@ public:
     /// past chats, and how many recorded decisions. Said before the turn
     /// runs, so a user can see why the model knows something; never on
     /// `serve`, which never recalls.
+    /// A model call besides the chat model's own (26n) -- when it starts,
+    /// and again when it is over, with what it took when known. The terminal
+    /// draws it inside the thinking block; machine mode says it as a
+    /// `tool_status`; everything else ignores it. Never persisted.
+    virtual void on_side_call(const SideCall& call) {
+        (void)call;
+    }
+
     virtual void on_recall(int chats, int decisions) {
         (void)chats;
         (void)decisions;

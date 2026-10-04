@@ -10,6 +10,7 @@
 #include "agentloop/budget.h"
 #include "agentloop/embed_func.h"
 #include "agentloop/retriever.h"
+#include "agentloop/side_call.h"
 #include "contracts/cancellation.h"
 #include "contracts/config.h"
 #include "contracts/types.h"
@@ -114,6 +115,10 @@ struct RagTurn {
     const harness::Harness* harness = nullptr;
     const harness::Config* config = nullptr;
     harness::CancellationToken cancellation;
+
+    /// Where the turn's own model calls are said -- the embedder reading the
+    /// question, the rerank judge (26n). Null says nothing.
+    SideCallSink on_side_call;
 
     /// How the excerpts are introduced to the model; empty for the user's
     /// documents. Recall's are notes on earlier conversations (26l).

@@ -279,6 +279,65 @@ TEST_CASE("a verbose transcript ends with the budget note", "[ux][thinking]") {
     CHECK(count(h.bytes(), "(budget reached)") == 1);
 }
 
+TEST_CASE("side calls sit in the block in arrival order, completed in place",
+          "[ux][thinking][side-call]") {
+    Harness h;
+    ThinkingView view = h.make(ThinkingView::Options{.width = 60});
+    view.side_call("embedding — the question → embedder");
+    view.side_call_done("embedding — the question → embedder", " · 0.2 s");
+    view.write("weighing it");
+    view.side_call("rerank — judging 12 results with judge");
+    const std::string painted = h.bytes();
+    const auto embedding = painted.rfind("· embedding — the question → embedder · 0.2 s");
+    const auto reasoning = painted.rfind("weighing it");
+    const auto rerank = painted.rfind("· rerank — judging 12 results with judge");
+    REQUIRE(embedding != std::string::npos);
+    REQUIRE(reasoning != std::string::npos);
+    REQUIRE(rerank != std::string::npos);
+    CHECK(embedding < reasoning);
+    CHECK(reasoning < rerank);
+    // Each on a line of its own, whatever the reasoning was in the middle of.
+    CHECK(painted.find("weighing it\n  · rerank") != std::string::npos);
+    CHECK(view.reasoned());
+
+    // It collapses as reasoning does: nothing of it left after the summary.
+    view.finish();
+    const std::string all = h.bytes();
+    constexpr std::string_view kEraseCsi = "\033[2K";
+    const std::string tail = all.substr(all.rfind(kEraseCsi) + kEraseCsi.size());
+    CHECK(tail == "✻ Thought for 1s\n\n");
+}
+
+TEST_CASE("a block of side calls alone worked, it did not think", "[ux][thinking][side-call]") {
+    Harness h;
+    ThinkingView view = h.make();
+    view.side_call("utility — rewriting the follow-up into a search query with helper");
+    CHECK(view.open());
+    CHECK_FALSE(view.reasoned());
+    view.finish();
+    CHECK(count(h.bytes(), "✻ Worked for 1s") == 1);
+    CHECK(count(h.bytes(), "Thought for") == 0);
+}
+
+TEST_CASE("a side call's line is cut to the width, never wrapped past it",
+          "[ux][thinking][side-call]") {
+    Harness h;
+    ThinkingView view = h.make(ThinkingView::Options{.width = 30});
+    view.side_call("utility — " + std::string(100, 'x'));
+    const std::string painted = h.bytes();
+    // One row, ending in the ellipsis: cut, never wrapped onto a second.
+    CHECK(painted.find("x…") != std::string::npos);
+    CHECK(painted.find("\n  xxx") == std::string::npos);
+}
+
+TEST_CASE("an inactive view draws no side call at all", "[ux][thinking][side-call]") {
+    Harness h;
+    ThinkingView view = h.make(ThinkingView::Options{.width = 40, .active = false});
+    view.side_call("embedding — the question → embedder");
+    view.finish();
+    CHECK(h.bytes().empty());
+}
+
 TEST_CASE("finish is idempotent", "[ux][thinking]") {
     // The end-of-turn path calls it unconditionally.
     Harness h;

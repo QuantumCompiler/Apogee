@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Chat behaviours that only reproduce against a real terminal, or a real kill.
 
-Seven checks:
+Eight checks:
 
   typeahead   Text typed BEFORE the first prompt is discarded once; text typed
               after it is honoured.  Only reproducible on a PTY -- `tcflush`
@@ -23,6 +23,10 @@ Seven checks:
   typeahead-hidden
               Words typed while a reply streams are not echoed into it; the
               next prompt shows them, once.
+
+  side-calls  A follow-up's rewrite by the utility model is narrated inside
+              the thinking block on a terminal, which collapses as reasoning
+              does; the saved chat carries none of it (26n).
 
   interrupt   Ctrl-C in the middle of a reply ends the process with the
               terminal's echo back on -- it was off during the turn, and a
@@ -282,6 +286,46 @@ def check_markdown(binary, home, env):
     return failures
 
 
+def check_side_calls(binary, home, env):
+    """A follow-up's rewrite is narrated inside the thinking block, and the
+    block collapses; the saved chat carries none of it (26n)."""
+    docs = os.path.join(home, "docs")
+    os.makedirs(docs)
+    with open(os.path.join(docs, "heron.txt"), "w", encoding="utf-8") as handle:
+        handle.write("Project Heron is the billing ledger. It deploys to Frankfurt.\n")
+    helper = os.path.join(home, "helper.json")
+    with open(helper, "w", encoding="utf-8") as handle:
+        json.dump({"turns": [{"text": "Heron Notes"},
+                             {"text": "Project Heron deployment region"}]}, handle)
+    scripted(binary, env, home, [{"text": "Heron is the billing ledger."},
+                                 {"text": "It deploys to Frankfurt."}])
+    for args in (["config", "add-backend", "helper", "--type", "mock", "--model-path", helper],
+                 ["config", "set-default-utility", "helper"],
+                 ["embed", "ingest", "notes", docs]):
+        if subprocess.run([binary, *args], env=env, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode != 0:
+            raise RuntimeError(f"setup failed: {args}")
+    term = Pty(binary, env, ("--rag", "notes"))
+    term.drain(2.0)
+    term.send(b"Tell me about Project Heron.\r")
+    term.drain(3.0)
+    term.send(b"where does it deploy?\r")
+    term.drain(3.0)
+    term.send(b"/exit\r")
+    term.drain(2.0)
+    term.close()
+    text = term.text()
+    failures = []
+    if b"utility \xe2\x80\x94 rewriting the follow-up into a search query with helper" not in text:
+        failures.append(f"the rewrite was not narrated in the block: {text!r}")
+    if b"Worked for" not in text:
+        failures.append(f"a block of side calls alone did not collapse to 'Worked for': {text!r}")
+    for session in sessions(home):
+        if "rewriting the follow-up" in json.dumps(session):
+            failures.append("the narration reached the saved chat")
+    return failures
+
+
 def check_typeahead_hidden(binary, home, env):
     """Typed during a reply: not echoed into it, shown once at the prompt."""
     scripted(binary, env, home, [
@@ -397,6 +441,7 @@ def main():
                         ("spacing", check_spacing),
                         ("markdown", check_markdown),
                         ("typeahead-hidden", check_typeahead_hidden),
+                        ("side-calls", check_side_calls),
                         ("interrupt", check_interrupt)):
         home = tempfile.mkdtemp(prefix=f"apogee-chat-{name}-")
         try:
@@ -415,7 +460,8 @@ def main():
 
     print("typeahead discarded once; completed turns survive a kill -9; "
           "the banner and each question stand apart; answers render, raw with --raw; "
-          "typing mid-reply waits for the prompt; Ctrl-C restores echo - OK")
+          "typing mid-reply waits for the prompt; side calls are narrated in the block; "
+          "Ctrl-C restores echo - OK")
     return 0
 
 

@@ -434,8 +434,16 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
                 if (!options.summary_model.empty() && content.size() > kToolSummaryThreshold) {
                     // The utility model reads it first, so the chat model
                     // reads a summary instead of the whole of it (26b).
-                    if (std::optional<std::string> summary = summarize_tool_result(
-                            harness, options.summary_model, call, content, options.cancellation)) {
+                    std::optional<SideCallScope> said;
+                    said.emplace([&reporter](const SideCall& side) { reporter.on_side_call(side); },
+                                 "utility",
+                                 "summarising " + call.name + "'s " +
+                                     std::to_string((content.size() + 1023) / 1024) +
+                                     " KB result with " + options.summary_model);
+                    std::optional<std::string> summary = summarize_tool_result(
+                        harness, options.summary_model, call, content, options.cancellation);
+                    said.reset();
+                    if (summary.has_value()) {
                         reporter.on_progress(call.name + "'s " +
                                              std::to_string((content.size() + 1023) / 1024) +
                                              " KB result summarised by " + options.summary_model);

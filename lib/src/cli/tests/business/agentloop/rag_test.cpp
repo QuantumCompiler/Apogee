@@ -255,6 +255,28 @@ TEST_CASE("a vector turn retrieves by cosine and reports vector", "[agentloop][r
     CHECK_FALSE(result.reranked);
 }
 
+TEST_CASE("a vector turn says its embedding call, start and finish",
+          "[agentloop][rag][side-call]") {
+    const Scratch scratch;
+    const auto embedder = toy_embedder("toy-v1");
+    seed_vectors(scratch, embedder);
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "tell me about zarquon");
+    turn.embedder = embedder;
+    std::vector<apogee::agentloop::SideCall> said;
+    turn.on_side_call = [&said](const apogee::agentloop::SideCall& call) { said.push_back(call); };
+    (void)apogee::agentloop::retrieve_for_turn(turn);
+    REQUIRE(said.size() == 2);
+    CHECK(said[0].role == "embedding");
+    CHECK(said[0].detail == "the question → toy");
+    CHECK(said[1].done);
+    // A lexical turn embeds nothing, and says nothing.
+    said.clear();
+    apogee::agentloop::RagTurn lexical = turn_for(scratch, "tell me about zarquon");
+    lexical.on_side_call = turn.on_side_call;
+    (void)apogee::agentloop::retrieve_for_turn(lexical);
+    CHECK(said.empty());
+}
+
 TEST_CASE("a model mismatch falls to lexical with the re-ingest hint, never a cross-space query",
           "[agentloop][rag][vector]") {
     // Ingested under toy-v1, queried under toy-v2: the first acceptance
@@ -490,7 +512,13 @@ TEST_CASE(
     turn.config = &config;
     turn.collection = "notes";
     turn.graph_enabled = true;
+    std::vector<apogee::agentloop::SideCall> said;
+    turn.on_side_call = [&said](const apogee::agentloop::SideCall& call) { said.push_back(call); };
     const RagResult judged = apogee::agentloop::retrieve_for_turn(turn);
+    // The judge is a model call of its own, said (26n).
+    REQUIRE(said.size() == 2);
+    CHECK(said[0].role == "rerank");
+    CHECK(said[0].detail.find("with judge") != std::string::npos);
     CHECK(judged.reranked);
     CHECK(judged.chunks == 0);
     CHECK(judged.top_score == 0.0);

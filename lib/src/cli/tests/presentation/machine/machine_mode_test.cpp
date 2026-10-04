@@ -110,6 +110,20 @@ TEST_CASE("the session event carries a protocol version", "[commands][machine]")
     CHECK(session.at("model") == "m");
 }
 
+TEST_CASE("a side call is a tool_status line, and no new event type",
+          "[commands][machine][side-call]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    apogee::agentloop::SideCall call{.role = "rerank", .detail = "judging 12 results with judge"};
+    reporter.on_side_call(call);
+    call.done = true;
+    reporter.on_side_call(call);
+    const std::vector<nlohmann::json> all = events(out.str());
+    REQUIRE(all.size() == 1);
+    CHECK(all[0].at("type") == "tool_status");
+    CHECK(all[0].at("text") == "rerank — judging 12 results with judge");
+}
+
 TEST_CASE("what a turn recalled is a memory event, and nothing when it recalled nothing",
           "[commands][machine][recall]") {
     std::ostringstream out;

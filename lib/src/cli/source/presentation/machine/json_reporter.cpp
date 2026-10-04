@@ -57,6 +57,15 @@ void JsonReporter::on_thinking_token(std::string_view chunk) {
     write(object.dump());
 }
 
+void JsonReporter::on_side_call(const agentloop::SideCall& call) {
+    if (call.done) {
+        return;
+    }
+    nlohmann::json object = event("tool_status");
+    object["text"] = call.role + " — " + call.detail;
+    write(object.dump());
+}
+
 void JsonReporter::on_recall(int chats, int decisions) {
     if (chats <= 0 && decisions <= 0) {
         return;

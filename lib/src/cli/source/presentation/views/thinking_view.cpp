@@ -8,6 +8,28 @@
 namespace apogee::commands {
 namespace {
 
+/// `text` cut to at most `cells` terminal columns, never inside a character.
+std::string cut_to(const std::string& text, std::size_t cells) {
+    if (ansi::display_width(text) <= cells) {
+        return text;
+    }
+    std::string out;
+    std::size_t used = 0;
+    std::size_t at = 0;
+    while (at < text.size()) {
+        const std::size_t length = std::max<std::size_t>(
+            1, ansi::utf8_sequence_length(static_cast<unsigned char>(text[at])));
+        const std::size_t width = ansi::codepoint_cells(ansi::decode_utf8(text, at, length));
+        if (used + width + 1 > cells) {
+            break;
+        }
+        out.append(text, at, length);
+        used += width;
+        at += length;
+    }
+    return out + "…";
+}
+
 std::int64_t now_seconds() {
     return std::chrono::duration_cast<std::chrono::seconds>(
                std::chrono::steady_clock::now().time_since_epoch())
@@ -47,17 +69,86 @@ void ThinkingView::write(std::string_view chunk) {
         }
         writer_.write(chunk);
         open_ = true;
+        reasoned_ = true;
         return;
     }
 
+    open_block();
+    reasoned_ = true;
+    append(chunk);
+}
+
+void ThinkingView::open_block() {
     if (!open_) {
         open_ = true;
         budget_reached_ = false;
+        reasoned_ = false;
         started_ = clock_();
         painted_ = 0;
     }
+}
 
-    tail_ += chunk;
+void ThinkingView::side_call(std::string_view label) {
+    if (!options_.active || label.empty()) {
+        return;
+    }
+    const std::string line = cut_to(std::string{"· "} + std::string{label}, content_width());
+    if (options_.verbose) {
+        if (!open_) {
+            budget_reached_ = false;
+        }
+        open_ = true;
+        writer_.write(options_.style.dim(line) + "\n");
+        return;
+    }
+    open_block();
+    // A line of its own, whatever the reasoning was in the middle of.
+    std::string text;
+    if (!tail_.empty() && tail_.back() != '\n') {
+        text += '\n';
+    }
+    text += line + "\n";
+    append(text);
+}
+
+void ThinkingView::side_call_done(std::string_view label, std::string_view suffix) {
+    if (!options_.active || suffix.empty() || !open_) {
+        return;
+    }
+    const std::string opened = std::string{"· "} + std::string{label};
+    if (options_.verbose) {
+        writer_.write(options_.style.dim(cut_to(opened, content_width()) + std::string{suffix}) +
+                      "\n");
+        return;
+    }
+    // The latest line the call opened, completed where it stands -- cut so
+    // that it still fits with its suffix.
+    const std::string started = cut_to(opened, content_width()) + "\n";
+    const std::size_t at = tail_.rfind(started);
+    if (at == std::string::npos) {
+        return;
+    }
+    const std::size_t suffix_cells = ansi::display_width(suffix);
+    const std::size_t room =
+        content_width() > suffix_cells + 1 ? content_width() - suffix_cells : 1;
+    tail_.replace(at, started.size(), cut_to(opened, room) + std::string{suffix} + "\n");
+    writer_.with_lock([this](std::ostream& out) { repaint_locked(out); });
+}
+
+bool ThinkingView::print_above(std::string_view line) {
+    if (!open_ || !options_.active || options_.verbose || painted_ == 0) {
+        return false;
+    }
+    writer_.with_lock([this, line](std::ostream& out) {
+        erase_locked(out);
+        out << line << "\n";
+        repaint_locked(out);
+    });
+    return true;
+}
+
+void ThinkingView::append(std::string_view text) {
+    tail_ += text;
     if (tail_.size() > kMaxRetainedTail) {
         // Trim from the front, then advance to the next codepoint boundary so
         // the retained text never starts mid-sequence.
@@ -114,9 +205,10 @@ void ThinkingView::finish() {
     }
 
     const std::int64_t seconds = std::max<std::int64_t>(1, clock_() - started_);
-    const std::string summary =
-        options_.style.dim("✻ Thought for " + std::to_string(seconds) + "s" +
-                           (budget_reached_ ? std::string{" (budget reached)"} : std::string{}));
+    // A block of side calls alone did no thinking: it worked (26n).
+    const std::string summary = options_.style.dim(
+        std::string{reasoned_ ? "✻ Thought for " : "✻ Worked for "} + std::to_string(seconds) +
+        "s" + (budget_reached_ ? std::string{" (budget reached)"} : std::string{}));
     budget_reached_ = false;
     tail_.clear();
 

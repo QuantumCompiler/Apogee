@@ -562,7 +562,8 @@ bool ChatAttachments::retrieves() const {
 
 ChatAttachments::Turn ChatAttachments::for_turn(std::size_t user_message, const std::string& query,
                                                 const agentloop::TurnBudget& budget, int limit,
-                                                const harness::CancellationToken& cancellation) {
+                                                const harness::CancellationToken& cancellation,
+                                                const agentloop::SideCallSink& on_side_call) {
     Turn turn;
     bool anchored = false;
     for (logger::Attachment& attachment : session_.attachments) {
@@ -629,6 +630,7 @@ ChatAttachments::Turn ChatAttachments::for_turn(std::size_t user_message, const 
         rag.embedder = embedder_;
         rag.embedder_reason = lexical_reason_;
         rag.conversation = session_.backend;
+        rag.on_side_call = on_side_call;
         rag.harness = &harness_;
         rag.config = &harness_.config();
         rag.cancellation = cancellation;

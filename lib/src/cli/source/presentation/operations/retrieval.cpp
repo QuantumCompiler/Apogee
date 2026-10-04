@@ -10,8 +10,11 @@ agentloop::RagResult retrieve_for_collection(
     const harness::Harness& harness, const harness::Config& config, std::string_view collection,
     const std::string& question, int limit, std::string_view retriever_flag,
     std::string_view rerank_flag, const harness::CancellationToken& cancellation,
-    std::string_view conversation, const agentloop::TurnBudget& budget, std::int64_t share_used) {
+    std::string_view conversation, const agentloop::TurnBudget& budget, std::int64_t share_used,
+    const agentloop::SideCallSink& on_side_call) {
     agentloop::RagTurn turn;
+    // Its embedder and judge said where the surface says them (26n).
+    turn.on_side_call = on_side_call;
     turn.conversation = std::string{conversation};
     turn.budget = budget;
     turn.share_used = share_used;

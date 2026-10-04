@@ -93,6 +93,9 @@ public:
     void on_thinking_budget_reached() override;
     /// A `memory` event: the past chats and decisions a turn was handed (26l).
     void on_recall(int chats, int decisions) override;
+    /// A side call, as the existing `tool_status` event: display prose,
+    /// said when it starts (26n). No new event type.
+    void on_side_call(const agentloop::SideCall& call) override;
     void on_tool_status(std::string_view detail) override;
     /// A `notice` event: `{"type":"notice","text":...}`.
     void on_notice(std::string_view text) override;
