@@ -70,6 +70,13 @@ struct RagResult {
     /// What `prefix` costs, by the turn's count: the share a later retrieval
     /// in the same turn no longer has (26d).
     std::int64_t tokens = 0;
+
+    /// How strongly the search's best hit matched, read on its retriever's
+    /// own scale (26s); `floored` when it was under that retriever's floor,
+    /// and then nothing was injected.
+    MatchStrength strength;
+    /// That best hit's raw score, for the line beside the band.
+    double best_score = 0.0;
 };
 
 /// Everything one turn's retrieval needs, gathered by the surface.

@@ -304,3 +304,79 @@ TEST_CASE("the embedder is resolved through the role chain and reports model and
     CHECK_FALSE(apogee::agentloop::resolve_embedder(harness, config, "chat", reason).has_value());
     CHECK(reason.find("cannot embed") != std::string::npos);
 }
+
+TEST_CASE("each retriever's strength is read on its own scale, and each has its floor",
+          "[agentloop][retriever][floor]") {
+    using apogee::agentloop::match_strength;
+    using apogee::agentloop::MatchEvidence;
+    using apogee::agentloop::rrf_ceiling;
+    using apogee::agentloop::WordCoverage;
+    const auto lexical = [](std::size_t found, std::size_t asked) {
+        return match_strength(
+            MatchEvidence{.retriever = "lexical", .score = 0.95, .words = {found, asked}});
+    };
+    // Lexical by the question's words, since BM25 saturates: none floors.
+    CHECK(lexical(0, 3).floored);
+    CHECK(lexical(0, 3).measure == "none of the question's words");
+    CHECK_FALSE(lexical(1, 3).floored);
+    CHECK(lexical(1, 3).band == "weak");
+    CHECK(lexical(2, 4).band == "fair");
+    CHECK(lexical(3, 4).band == "strong");
+    CHECK(lexical(3, 4).measure == "3 of 4 question words");
+    // A question of stop words gives nothing to read it by: no band, no floor.
+    CHECK(lexical(0, 0).band.empty());
+    CHECK_FALSE(lexical(0, 0).floored);
+
+    const auto vector = [](double cosine) {
+        return match_strength(MatchEvidence{.retriever = "vector", .score = cosine});
+    };
+    CHECK(vector(0.249).floored);
+    CHECK_FALSE(vector(0.25).floored);
+    CHECK(vector(0.25).band == "weak");
+    CHECK(vector(0.4).band == "fair");
+    CHECK(vector(0.6).band == "strong");
+    CHECK(vector(0.6).measure.empty());  // the cosine is its own measure
+
+    // Hybrid by RRF's ceiling: first in both lists is the best there is.
+    CHECK(rrf_ceiling() == 2.0 / 61.0);
+    const auto hybrid = [](double fraction, double cosine, std::size_t found) {
+        return match_strength(MatchEvidence{.retriever = "hybrid",
+                                            .score = fraction * rrf_ceiling(),
+                                            .words = {found, 3},
+                                            .cosine = cosine});
+    };
+    CHECK(hybrid(1.0, 0.9, 3).band == "strong");
+    CHECK(hybrid(1.0, 0.9, 3).measure == "100% of RRF's ceiling");
+    CHECK(hybrid(0.5, 0.3, 0).band == "fair");
+    CHECK_FALSE(hybrid(0.5, 0.3, 0).floored);
+    CHECK(hybrid(0.3, 0.3, 1).band == "weak");
+    CHECK(hybrid(0.24, 0.9, 3).floored);
+    // Where ranks cannot tell -- one chunk is first in the vector half by
+    // construction -- neither half's evidence floors it: no cosine to speak
+    // of, and none of the question's words.
+    CHECK(hybrid(0.5, 0.1, 0).floored);
+    CHECK(hybrid(0.5, 0.1, 0).measure ==
+          "50% of RRF's ceiling, but cosine 0.10 and none of the question's words");
+    CHECK_FALSE(hybrid(0.5, 0.1, 1).floored);
+    CHECK_FALSE(hybrid(0.5, 0.3, 0).floored);
+}
+
+TEST_CASE("the question's words are its content words, matched word for word",
+          "[agentloop][retriever][floor]") {
+    using apogee::agentloop::word_coverage;
+    const auto covered = [](std::string_view question, std::string_view text) {
+        const apogee::agentloop::WordCoverage coverage = word_coverage(question, text);
+        return std::pair{coverage.found, coverage.asked};
+    };
+    // Stop words never count: "what", "is", "the", "of" ask nothing.
+    CHECK(covered("What is the capital of France?", "The launch code is 7731.") ==
+          std::pair<std::size_t, std::size_t>{0, 2});
+    CHECK(covered("What is the capital of France?", "Paris is the CAPITAL of france.") ==
+          std::pair<std::size_t, std::size_t>{2, 2});
+    // Word for word, as the lexical index matches: "Who painted the Mona
+    // Lisa?" found "painter" in the docs under a shared stem (2026-10-04).
+    CHECK(covered("Who painted the Mona Lisa?", "the painter is answer_view") ==
+          std::pair<std::size_t, std::size_t>{0, 3});
+    CHECK(covered("cat", "category") == std::pair<std::size_t, std::size_t>{0, 1});
+    CHECK(covered("what is it?", "anything") == std::pair<std::size_t, std::size_t>{0, 0});
+}

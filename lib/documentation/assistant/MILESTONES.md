@@ -3372,6 +3372,71 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 
 ---
 
+### 2026-10-04 — `retrieval-reporting-floor` (backlog item 26s): how strong a match, and a floor below which nothing is injected
+
+**Why.** The attachment-representation spike (2026-10-03, a sandboxed probe) measured two faults.
+- **The line misled.** A hybrid turn's score is Reciprocal Rank Fusion, whose best possible value (first in both lists) is 2/61 ≈ 0.033. The stress test's "top 0.023" and "top 0.031" were mid-to-high rank agreement, and the user and the assistant alike read them as junk.
+- **The injection had no floor.** It checked only for emptiness. A one-file attach handed the model a 0.000-score excerpt, and an unrelated question injected excerpts at 0.950 lexical, the same score an on-topic one got, because normalised BM25 saturates. Misleading context is worse than none: the stress-test model built its spiral on excerpts that did not answer.
+
+**What was built**
+
+- [x] **Strength, per retriever** (`agentloop/retriever`: `match_strength`, `MatchEvidence`, `MatchStrength`), read off the search's best hit on its own scale. The three scales stay apart.
+  - **Hybrid:** the score over RRF's ceiling (`rrf_ceiling()`, 2/61).
+  - **Vector:** the cosine as it is.
+  - **Lexical:** how many of the question's content words the hit holds, word for word as the index matches, stop words left out (`word_coverage`). BM25's saturation is why.
+  - Bands are `strong` / `fair` / `weak`, with each edge a named constant.
+- [x] **The floor** (`agentloop/rag`, in `retrieve_for_turn`, so attachments, `--rag`/`auto_rag`, `complete`, `serve`, `analyze` and recall all get it).
+  - The confirmed floors: a hybrid match under a quarter of RRF's ceiling, a cosine under 0.25, a lexical match holding none of the question's words.
+  - Under the floor the turn injects nothing, chunks or graph section, and says so. The turn itself runs.
+  - A hybrid search keeps its vector half (`fuse_rrf` over its two searches, exactly `Store::search_hybrid`), so the best hit's cosine is evidence.
+- [x] **The one line**, from the one renderer (`operations/retrieval`), for chat, `complete` and machine mode (whose diagnostics ride stderr). The strength comes first, then the raw score and retriever, then what it was read by:
+  - `4 excerpts from the attachments, strong match (0.032 [hybrid], 100% of RRF's ceiling)`
+  - `… fair match (0.930 [lexical], 2 of 3 question words)`
+  - floored: `nothing relevant in the attachments -- the best match is under the floor (0.660 [lexical], none of the question's words)`, and the same for a collection, its origin kept.
+- [x] **Tests**:
+  - **Tables:** every band edge and floor per retriever, and `word_coverage`.
+  - **The probe's fixtures through `retrieve_for_turn`:** the one-line file, the saturated off-topic question beside an on-topic one, a cosine of 0, a hybrid one-chunk store, a cosine alone as evidence, and first in both lists.
+  - **The line's goldens.**
+  - **End to end:** a one-line attachment with an unrelated question, where nothing is injected, the turn still answers, and the identical line appears on `complete` and in machine mode.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Per-retriever floors | **By measurement** *(recorded 2026-10-03)* | No shared threshold can exist across the three scales. |
+| How strength reads | A word band per retriever, raw score and retriever in parentheses *(default, confirmed)* | The word for a person, the facts for anyone checking. |
+| The floors | RRF under 25% of its ceiling, cosine under 0.25, lexical under one content word *(default, confirmed)* | Named constants, as confirmed. |
+| Where the floor applies | Attachment and `auto_rag` turns alike, an explicit `--retriever` too *(default, confirmed)* | One function, so every surface. |
+| Hybrid's floor | **Also floored when neither half has evidence: a cosine under 0.25 and none of the question's words** *(group run, flagged for veto)* | At the fetch depth a hybrid search uses (50 a half), a hit's RRF never falls under a quarter of the ceiling, so the confirmed floor alone could never fire. A single chunk is first in the vector half by construction. The two other floors already confirmed are the evidence. |
+| Word coverage | **Word for word**, stop words out *(group run)* | Measured: a five-letter shared stem let "painted" count for "painter". The lexical index itself matches whole words. |
+
+**Verified on the real binary.**
+
+- **Lexical** (no embedding model, `lib/documentation/assistant` attached, Qwen3-VL-8B answering):
+  - "What is photosynthesis?" went from `4 excerpts …, top 0.660 [lexical]` to `nothing relevant in the attachments -- the best match is under the floor (0.660 [lexical], none of the question's words)`. It matched only "what" and "is".
+  - "How is a release cut and published?" reads `fair match (0.930 [lexical], 2 of 3 question words)`.
+  - "Who painted the Mona Lisa?" and the sourdough question read `weak match (…, 1 of 3)` and `(…, 1 of 4)`. The docs do hold "painted" and "home", and the model answered from its own knowledge.
+- **Hybrid** (Embedding-Gemma): an on-topic question reads `strong match (0.032 [hybrid], 98% of RRF's ceiling)` where it read `top 0.032`.
+
+**Found, and left for the user (flagged).** Measured on Embedding-Gemma over the same docs:
+- **Off-topic questions still score cosine 0.56–0.59** ("bake sourdough bread", "the Mona Lisa"), against 0.71–0.76 for on-topic ones. The confirmed cosine floor of 0.25 therefore never fires on this model, and neither does hybrid's evidence rule.
+- **Rank agreement is not relevance.** The sourdough question's hybrid line reads `strong match (0.027 [hybrid], 85% of RRF's ceiling)`, because both halves ranked the same chunk first.
+
+A floor near 0.65 would separate this model's cases. Cosine baselines differ by embedding model, though, so a fixed higher floor would drop real matches on another; a per-model floor is the user's call.
+
+One more thing worth knowing: the probe's "unrelated" question, "What is the capital of France?", is in these docs verbatim, in the record of the search's OR-joining, so it matches for real.
+
+**Guardrails, each mutation-tested (17 mutants, all caught).**
+- **Lexical:** no floor; stop words counted; and against the first draft's stem rule, endings not shared. On the word-for-word code: a word counted when absent; case kept.
+- **Vector:** no floor; the strong edge moved.
+- **Hybrid:** no evidence rule; no RRF floor; the cosine ignored; the wrong ceiling.
+- **The turn:** the floor not applied; no cosine looked up.
+- **The line:** floored unsaid, for attachments and for a collection; no band.
+
+**Not verified.**
+- **Cloud embedders** (OpenAI, Google) were not run; their cosine baselines may differ from Embedding-Gemma's either way.
+- **The rerank judge** reorders after the floor; a turn the judge would have rescued is not.
+
 ## Milestone T — The public inference plane
 
 **Goal.** The third surface: `apogee serve`, an OpenAI-compatible HTTP server for **server deployments** — the executable on a server, remote mobile or desktop clients making REST calls to it — over the same agent loop every other surface runs, with server-owned sessions that are ordinary chat sessions, and the listening-socket invariant given its one reviewed exception.

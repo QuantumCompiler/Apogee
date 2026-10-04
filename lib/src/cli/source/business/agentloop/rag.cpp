@@ -9,6 +9,7 @@
 #include "agentloop/graph_context.h"
 #include "agentloop/rerank.h"
 #include "embedstore/store.h"
+#include "embedstore/vector.h"
 
 namespace apogee::agentloop {
 namespace {
@@ -204,6 +205,9 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
 
     // --- run exactly what was decided ---------------------------------------------
     std::vector<embedstore::SearchHit> hits;
+    // A hybrid search's vector half, kept: where ranks cannot say how well
+    // the best hit matched, its cosine can (26s).
+    std::vector<embedstore::SearchHit> vector_half;
     try {
         if (decision.retriever == Retriever::Lexical) {
             hits = store->search(turn.question, fetch);
@@ -220,9 +224,15 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
             if (vectors.size() != 1) {
                 throw std::runtime_error("the embedder returned no vector for the question");
             }
-            hits = decision.retriever == Retriever::Vector
-                       ? store->search_vector(vectors.front(), fetch)
-                       : store->search_hybrid(vectors.front(), turn.question, fetch);
+            if (decision.retriever == Retriever::Vector) {
+                hits = store->search_vector(vectors.front(), fetch);
+            } else {
+                // `Store::search_hybrid`, its halves in hand.
+                vector_half = store->search_vector(vectors.front(), embedstore::kHybridFetchDepth);
+                hits = embedstore::fuse_rrf(
+                    {vector_half, store->search(turn.question, embedstore::kHybridFetchDepth)},
+                    fetch);
+            }
         }
     } catch (const std::exception& e) {
         if (decision.retriever == Retriever::Lexical) {
@@ -246,13 +256,38 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
         return turn.exclude_sources.contains(hit.chunk.source);
     });
 
+    // --- how well it matched, and the floor (26s) -------------------------------
+    //
+    // Read off the search's best hit on its own retriever's scale. Under the
+    // floor the turn injects nothing -- misleading context is worse than none
+    // -- and says so; the turn itself still runs.
+    if (!hits.empty()) {
+        const embedstore::SearchHit& best =
+            *std::ranges::max_element(hits, {}, &embedstore::SearchHit::score);
+        MatchEvidence evidence{.retriever = result.retriever,
+                               .score = best.score,
+                               .words = word_coverage(turn.question, best.chunk.text),
+                               .cosine = std::nullopt};
+        if (const auto in_vectors =
+                std::ranges::find(vector_half, best.chunk.id,
+                                  [](const embedstore::SearchHit& hit) { return hit.chunk.id; });
+            in_vectors != vector_half.end()) {
+            evidence.cosine = in_vectors->score;
+        }
+        result.strength = match_strength(evidence);
+        result.best_score = best.score;
+        if (result.strength.floored) {
+            hits.clear();
+        }
+    }
+
     // --- the graph, seeded BEFORE the judge -----------------------------------
     //
     // The seeds are the retrieval-ordered top-k, captured here so graph
     // context survives a judge that drops every chunk. Best-effort: a
     // failure is a note, never the reason the turn loses its chunks.
     std::string graph_section;
-    if (turn.graph_enabled) {
+    if (turn.graph_enabled && !result.strength.floored) {
         std::vector<embedstore::ChunkRef> seeds;
         for (const embedstore::SearchHit& hit : hits) {
             if (turn.limit > 0 && seeds.size() >= static_cast<std::size_t>(turn.limit)) {

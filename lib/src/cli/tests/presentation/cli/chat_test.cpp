@@ -1354,3 +1354,46 @@ TEST_CASE(
         CHECK(chat.err.find("tools off") == std::string::npos);
     }
 }
+
+TEST_CASE("an attachment with nothing relevant injects nothing, says so the same way everywhere",
+          "[chat][cli][attachments][floor]") {
+    // A window nobody knows inlines nothing, so a one-line file is retrieved
+    // per turn -- the probe's case (26s): an unrelated question matched it on
+    // "is" and "the", and the excerpt reached the model at 0.000.
+    const std::string floored_line =
+        "nothing relevant in the attachments -- the best match is under "
+        "the floor (";
+    std::string terminal_line;
+    {
+        HelperChat chat{texts({"answered: {{last_user}}"}), {}};
+        const std::filesystem::path notes = chat.home.path() / "notes.md";
+        std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+        INFO(chat.err);
+        REQUIRE(chat.run({"complete", "--attach", notes.string(),
+                          "What is the capital of France?"}) == 0);
+        // The turn still answers -- with nothing injected into it.
+        CHECK(chat.out.find("answered: What is the capital of France?") != std::string::npos);
+        CHECK(chat.out.find("7731") == std::string::npos);
+        const std::size_t at = chat.err.find(floored_line);
+        REQUIRE(at != std::string::npos);
+        terminal_line = chat.err.substr(at, chat.err.find('\n', at) - at);
+        // The raw score and its retriever ride beside the words.
+        CHECK(terminal_line.find("[lexical], none of the question's words)") != std::string::npos);
+    }
+    {
+        // Machine mode says the identical line: one renderer.
+        HelperChat chat{texts({"driven"}), {"Driven"}};
+        const std::filesystem::path notes = chat.home.path() / "notes.md";
+        std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+        const std::string input =
+            R"({"type":"attach","path":")" + notes.generic_string() + "\"}\n" +
+            R"({"type":"user","text":"What is the capital of France?"})" + "\n";
+        INFO(chat.err);
+        REQUIRE(
+            chat.run({"chat", "--input-format", "stream-json", "--output-format", "stream-json"},
+                     input) == 0);
+        // Its diagnostics ride stderr, stdout being the protocol's alone.
+        CHECK(chat.err.find("apogee: " + terminal_line + "\n") != std::string::npos);
+        CHECK(chat.out.find("7731") == std::string::npos);
+    }
+}

@@ -805,3 +805,93 @@ TEST_CASE("a later retrieval in the turn gets what the earlier one left of the s
     CHECK(result.tokens > 0);
     CHECK(result.tokens <= 700);
 }
+
+TEST_CASE("under its retriever's floor a turn injects nothing, and the result says why",
+          "[agentloop][rag][floor]") {
+    // The probe's two cases (2026-10-03): a one-line file and an unrelated
+    // question -- which matched on "is" and "the" -- and an off-topic question
+    // over a lexical index, whose BM25 scores saturate.
+    const Scratch one;
+    {
+        Store store{one.db()};
+        store.replace_source("notes.md", {"The launch code is 7731."});
+    }
+    const RagResult unrelated =
+        apogee::agentloop::retrieve_for_turn(turn_for(one, "What is the capital of France?"));
+    CHECK(unrelated.retriever == "lexical");
+    CHECK(unrelated.strength.floored);
+    CHECK(unrelated.strength.measure == "none of the question's words");
+    CHECK(unrelated.prefix.empty());
+    CHECK(unrelated.chunks == 0);
+    // On topic, injected as ever, and said how strongly.
+    const RagResult asked =
+        apogee::agentloop::retrieve_for_turn(turn_for(one, "What is the launch code?"));
+    CHECK_FALSE(asked.strength.floored);
+    CHECK(asked.strength.band == "strong");
+    CHECK(asked.chunks == 1);
+    CHECK(asked.best_score > 0.0);
+
+    const Scratch many;
+    {
+        Store store{many.db()};
+        std::vector<std::string> chunks;
+        for (int i = 0; i < 12; ++i) {
+            chunks.push_back("the release is cut from the branch and the tag is pushed " +
+                             std::to_string(i));
+        }
+        store.replace_source("docs.md", chunks);
+    }
+    const RagResult off_topic =
+        apogee::agentloop::retrieve_for_turn(turn_for(many, "What is the capital of France?"));
+    CHECK(off_topic.strength.floored);
+    CHECK(off_topic.prefix.empty());
+    const RagResult on_topic =
+        apogee::agentloop::retrieve_for_turn(turn_for(many, "How is the release tag pushed?"));
+    CHECK_FALSE(on_topic.strength.floored);
+    CHECK_FALSE(on_topic.prefix.empty());
+}
+
+TEST_CASE("a vector or hybrid turn floors on its own scale: a cosine, and both halves' evidence",
+          "[agentloop][rag][floor]") {
+    const auto embedder = toy_embedder("toy-v1");
+    // One chunk, pointing the "zarquon" way.
+    const Scratch scratch;
+    {
+        Store store{scratch.db()};
+        const std::vector<std::string> chunks{std::string{kSecret}};
+        store.replace_source("notes.md", chunks, embedder.embed(chunks, {}));
+        store.set_embedding_model(embedder.model, 2);
+    }
+    apogee::agentloop::RagTurn vector = turn_for(scratch, "bicycle repair");
+    vector.embedder = embedder;
+    vector.retriever_flag = "vector";
+    const RagResult orthogonal = apogee::agentloop::retrieve_for_turn(vector);
+    CHECK(orthogonal.retriever == "vector");
+    CHECK(orthogonal.strength.floored);  // cosine 0
+    CHECK(orthogonal.prefix.empty());
+
+    // Hybrid: the one chunk is first in the vector half by construction, so
+    // its rank says nothing -- no cosine and no shared word floor it.
+    apogee::agentloop::RagTurn hybrid = turn_for(scratch, "bicycle repair");
+    hybrid.embedder = embedder;
+    hybrid.retriever_flag = "hybrid";
+    const RagResult unrelated = apogee::agentloop::retrieve_for_turn(hybrid);
+    CHECK(unrelated.retriever == "hybrid");
+    CHECK(unrelated.strength.floored);
+    CHECK(unrelated.prefix.empty());
+    // Close in meaning with no word in common: the vector half's cosine is
+    // its evidence, and it is injected.
+    hybrid.question = "xzarquon";
+    const RagResult meaning = apogee::agentloop::retrieve_for_turn(hybrid);
+    CHECK_FALSE(meaning.strength.floored);
+    CHECK(meaning.strength.band == "fair");
+    CHECK(meaning.chunks == 1);
+    // First in both lists: the strongest match there is, not "top 0.032".
+    hybrid.question = "zarquon protocol widgets";
+    const RagResult top = apogee::agentloop::retrieve_for_turn(hybrid);
+    CHECK_FALSE(top.strength.floored);
+    CHECK(top.strength.band == "strong");
+    CHECK(top.strength.measure == "100% of RRF's ceiling");
+    CHECK(top.best_score == apogee::agentloop::rrf_ceiling());
+    CHECK(top.chunks == 1);
+}

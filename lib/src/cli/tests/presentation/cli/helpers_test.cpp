@@ -184,6 +184,7 @@ TEST_CASE("an attachment with no prompt text still forms a valid turn", "[comman
 namespace {
 
 using apogee::commands::choose_rag_collection;
+using apogee::commands::describe_attachment_retrieval;
 using apogee::commands::describe_retrieval;
 using apogee::commands::RagChoice;
 using apogee::commands::RagSource;
@@ -264,19 +265,59 @@ TEST_CASE(
     CHECK(plain.graph_entities == 0);
 }
 
+TEST_CASE("one renderer: each retriever's strength, raw score kept, and the floor said",
+          "[commands][helpers][rag][floor]") {
+    using apogee::agentloop::MatchStrength;
+    const auto with = [](std::string retriever, double best, MatchStrength strength,
+                         std::int64_t chunks) {
+        apogee::agentloop::RagResult result;
+        result.retriever = std::move(retriever);
+        result.best_score = best;
+        result.top_score = best;
+        result.strength = std::move(strength);
+        result.chunks = chunks;
+        return result;
+    };
+    // A hybrid turn first in both lists: a strong match, not "top 0.032".
+    const auto hybrid =
+        with("hybrid", 2.0 / 61.0, {.band = "strong", .measure = "100% of RRF's ceiling"}, 2);
+    CHECK(describe_attachment_retrieval(hybrid) ==
+          "2 excerpts from the attachments, strong match (0.032 [hybrid], 100% of RRF's "
+          "ceiling)");
+    const auto cosine = with("vector", 0.452, {.band = "fair"}, 1);
+    CHECK(describe_attachment_retrieval(cosine) ==
+          "1 excerpt from the attachments, fair match (0.452 [vector])");
+    // A question of stop words: no band to read, the raw facts alone.
+    const auto unread = with("lexical", 0.950, {}, 1);
+    CHECK(describe_attachment_retrieval(unread) ==
+          "1 excerpt from the attachments (0.950 [lexical])");
+    // Floored: nothing injected, and said -- never a quiet absence.
+    const auto floored =
+        with("lexical", 0.950,
+             {.band = "weak", .floored = true, .measure = "none of the question's words"}, 0);
+    CHECK(describe_attachment_retrieval(floored) ==
+          "nothing relevant in the attachments -- the best match is under the floor (0.950 "
+          "[lexical], none of the question's words)");
+    const RagChoice notes{.collection = "notes", .source = RagSource::Config};
+    CHECK(describe_retrieval(notes, floored) ==
+          "nothing relevant in 'notes' -- the best match is under the floor (0.950 [lexical], none "
+          "of the question's words) (auto_rag)");
+}
+
 TEST_CASE("the retrieval line names chunks, score, retriever, and its origin",
           "[commands][helpers][rag]") {
     apogee::agentloop::RagResult result;
     result.chunks = 3;
     result.top_score = 0.869;
+    result.best_score = 0.869;
     result.retriever = "lexical";
+    result.strength = {.band = "strong", .floored = false, .measure = "3 of 4 question words"};
 
     const RagChoice from_flag{.collection = "notes", .source = RagSource::Flag};
     const std::string flagged = describe_retrieval(from_flag, result);
-    CHECK(flagged.find("3 chunk(s)") != std::string::npos);
-    CHECK(flagged.find("'notes'") != std::string::npos);
-    CHECK(flagged.find("0.869") != std::string::npos);
-    CHECK(flagged.find("[lexical]") != std::string::npos);
+    // How strong first, the raw score and its retriever beside it (26s).
+    CHECK(flagged ==
+          "3 chunk(s) from 'notes', strong match (0.869 [lexical], 3 of 4 question words)");
     CHECK(flagged.find("auto_rag") == std::string::npos);
 
     // Injection nobody typed a flag for is the one that must announce itself:
@@ -301,7 +342,7 @@ TEST_CASE("the retrieval line names chunks, score, retriever, and its origin",
     // retrieved.
     apogee::agentloop::RagResult expanded = result;
     expanded.graph_entities = 4;
-    CHECK(describe_retrieval(from_flag, expanded).find("[lexical] +4 graph entities") !=
+    CHECK(describe_retrieval(from_flag, expanded).find("question words) +4 graph entities") !=
           std::string::npos);
     apogee::agentloop::RagResult graph_only;
     graph_only.retriever = "lexical";

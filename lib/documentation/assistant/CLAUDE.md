@@ -146,9 +146,10 @@ The first version of this did **not** catch that drift, and the reason is worth 
 - `hybrid` is explicit only; `auto` never resolves to it. A hybrid ask without a vector half runs and is *reported* lexical.
 - A store whose vectors came from another model, or that holds any chunk without a vector, or more than one vector width, is demoted **wholesale** to lexical with the re-ingest hint — never queried as a fraction.
 - Rerank can never cost context: every judge failure returns raw order with `reranked: false`, and `reranked` is set from the same place as the ordering.
+- **How strong a match is, and the floor, are per retriever too** (26s): a turn's best hit is read on its own retriever's scale -- RRF over its ceiling (2/61), a cosine as it is, a lexical hit by how many of the question's words it holds, since BM25 saturates -- and under that retriever's floor the turn injects nothing and its line says so. Never one threshold across the scales, and the raw score and retriever always ride beside the word.
 - **Spend** (user decision, 2026-09-13): a whole collection is never vectorised through a metered embedder on Apogee's initiative; a question against one already built is one small call and is allowed. Whether an embedder is metered is a fact the provider states, never a type list.
 
-**Enforcement.** `tests/business/agentloop/retrieval_test.cpp` is the exhaustive rule table (flag/pin/auto × embedder × store), `tests/business/agentloop/rerank_test.cpp` has one case per failure path, and `cli.config_lifecycle` drives the real binary through a model mismatch, an explicit-vector refusal, hybrid, and a `check` that rejects a `retriever:` typo. All mutation-tested.
+**Enforcement.** `tests/business/agentloop/retrieval_test.cpp` is the exhaustive rule table (flag/pin/auto × embedder × store) and, since 26s, every band edge and floor per retriever, `tests/business/agentloop/rerank_test.cpp` has one case per failure path, and `cli.config_lifecycle` drives the real binary through a model mismatch, an explicit-vector refusal, hybrid, and a `check` that rejects a `retriever:` typo. All mutation-tested.
 
 ### ⚠ Secrets are unleakable by construction
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -124,5 +125,70 @@ struct IngestRetrieval {
 
 [[nodiscard]] IngestRetrieval resolve_ingest_retriever(std::string_view flag, std::string_view pin,
                                                        const EmbedderFacts& embedder);
+
+/// How strongly a turn's best hit matched, as a person reads it (26s).
+///
+/// Per retriever, because the three scales are incomparable: a hybrid
+/// score is Reciprocal Rank Fusion, whose best possible value -- first in both
+/// lists -- is 2/61, so `0.032` is a top match that reads as a poor one;
+/// cosine is read as it is; normalised BM25 saturates (an unrelated question
+/// scored 0.950 on the probe), so a lexical match is read by how many of the
+/// question's own words the hit holds instead.
+struct MatchStrength {
+    /// `strong`, `fair` or `weak`; empty when there was nothing to read it by.
+    std::string band;
+    /// Under the retriever's floor: the turn injects nothing, and says so.
+    bool floored = false;
+    /// What it was read by, for the line: `98% of RRF's ceiling`, `2 of 3
+    /// question words`; empty for cosine, which the score itself is.
+    std::string measure;
+};
+
+/// The floors, named (26s, defaults confirmed, tuned by tests): a hybrid
+/// match under a quarter of RRF's ceiling, a cosine under 0.25, a lexical
+/// match holding none of the question's words.
+inline constexpr double kRrfFloor = 0.25;
+inline constexpr double kCosineFloor = 0.25;
+inline constexpr std::size_t kLexicalFloorWords = 1;
+
+/// The band edges above each floor.
+inline constexpr double kRrfStrong = 0.75;
+inline constexpr double kRrfFair = 0.5;
+inline constexpr double kCosineStrong = 0.6;
+inline constexpr double kCosineFair = 0.4;
+inline constexpr double kWordsStrong = 0.75;
+inline constexpr double kWordsFair = 0.4;
+
+/// RRF's best possible score: first in both of a hybrid search's lists.
+[[nodiscard]] double rrf_ceiling() noexcept;
+
+/// How many of `question`'s content words -- stop words left out -- `text`
+/// holds, word for word, as the lexical index itself matches: measured on
+/// the docs, sharing a stem let "painted" count for "painter".
+struct WordCoverage {
+    std::size_t found = 0;
+    std::size_t asked = 0;
+};
+
+[[nodiscard]] WordCoverage word_coverage(std::string_view question, std::string_view text);
+
+/// What a turn's best hit gives to read its strength by.
+struct MatchEvidence {
+    /// The retriever that RAN: `lexical`, `vector` or `hybrid`.
+    std::string retriever;
+    /// The best hit's score, on that retriever's scale.
+    double score = 0.0;
+    /// The question's words the best hit holds.
+    WordCoverage words;
+    /// A hybrid hit's cosine in the vector half, when it was in it.
+    std::optional<double> cosine;
+};
+
+/// The band and the floor for `evidence`. A hybrid match is floored under a
+/// quarter of RRF's ceiling -- which at the fetch depth a hybrid search uses
+/// a hit never falls to -- and, where ranks cannot tell, when neither half
+/// has evidence for it: a cosine under 0.25 and none of the question's
+/// words.
+[[nodiscard]] MatchStrength match_strength(const MatchEvidence& evidence);
 
 }  // namespace apogee::agentloop

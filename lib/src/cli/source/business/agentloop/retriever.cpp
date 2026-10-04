@@ -1,6 +1,13 @@
 #include "agentloop/retriever.h"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <set>
+
+#include "embedstore/vector.h"
 
 namespace apogee::agentloop {
 namespace {
@@ -197,6 +204,115 @@ IngestRetrieval resolve_ingest_retriever(std::string_view flag, std::string_view
     }
     out.retriever = Retriever::Vector;
     return out;
+}
+
+namespace {
+
+/// Words a question is made of that say nothing about what it asks.
+constexpr std::array<std::string_view, 64> kStopWords{
+    "a",      "about", "all",   "an",   "and",   "any", "are",   "as",   "at",    "be",
+    "been",   "but",   "by",    "can",  "could", "did", "do",    "does", "for",   "from",
+    "had",    "has",   "have",  "how",  "i",     "if",  "in",    "into", "is",    "it",
+    "its",    "me",    "my",    "no",   "not",   "of",  "on",    "or",   "our",   "please",
+    "should", "so",    "some",  "tell", "that",  "the", "their", "them", "there", "these",
+    "they",   "this",  "those", "to",   "was",   "we",  "were",  "what", "when",  "where",
+    "which",  "who",   "why",   "you"};
+
+/// The lowercase words of `text`: runs of letters, digits and any byte past
+/// ASCII, so a word in another script stays a word.
+[[nodiscard]] std::vector<std::string> words_of(std::string_view text) {
+    std::vector<std::string> out;
+    std::string word;
+    for (const char c : text) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (std::isalnum(byte) != 0 || byte >= 0x80) {
+            word += static_cast<char>(std::tolower(byte));
+        } else if (!word.empty()) {
+            out.push_back(std::move(word));
+            word.clear();
+        }
+    }
+    if (!word.empty()) {
+        out.push_back(std::move(word));
+    }
+    return out;
+}
+
+[[nodiscard]] std::string band_of(double value, double strong, double fair) {
+    if (value >= strong) {
+        return "strong";
+    }
+    return value >= fair ? "fair" : "weak";
+}
+
+[[nodiscard]] std::string percent(double fraction) {
+    return std::to_string(std::lround(fraction * 100.0)) + "%";
+}
+
+[[nodiscard]] std::string two_places(double value) {
+    std::array<char, 32> text{};
+    std::snprintf(text.data(), text.size(), "%.2f", value);
+    return text.data();
+}
+
+}  // namespace
+
+double rrf_ceiling() noexcept {
+    return 2.0 / static_cast<double>(embedstore::kRrfK + 1);
+}
+
+WordCoverage word_coverage(std::string_view question, std::string_view text) {
+    std::set<std::string> asked;
+    for (std::string& word : words_of(question)) {
+        if (std::ranges::find(kStopWords, word) == kStopWords.end()) {
+            asked.insert(std::move(word));
+        }
+    }
+    std::set<std::string> held;
+    for (std::string& word : words_of(text)) {
+        held.insert(std::move(word));
+    }
+    WordCoverage coverage;
+    coverage.asked = asked.size();
+    for (const std::string& word : asked) {
+        coverage.found += held.contains(word) ? 1 : 0;
+    }
+    return coverage;
+}
+
+MatchStrength match_strength(const MatchEvidence& evidence) {
+    MatchStrength strength;
+    const WordCoverage& words = evidence.words;
+    const double held = words.asked == 0
+                            ? 0.0
+                            : static_cast<double>(words.found) / static_cast<double>(words.asked);
+    if (evidence.retriever == kLexical) {
+        if (words.asked == 0) {
+            return strength;  // a question of stop words: nothing to read it by
+        }
+        strength.floored = words.found < kLexicalFloorWords;
+        strength.band = band_of(held, kWordsStrong, kWordsFair);
+        strength.measure = words.found == 0 ? std::string{"none of the question's words"}
+                                            : std::to_string(words.found) + " of " +
+                                                  std::to_string(words.asked) + " question words";
+        return strength;
+    }
+    if (evidence.retriever == kVector) {
+        strength.floored = evidence.score < kCosineFloor;
+        strength.band = band_of(evidence.score, kCosineStrong, kCosineFair);
+        return strength;
+    }
+    const double fraction = evidence.score / rrf_ceiling();
+    strength.band = band_of(fraction, kRrfStrong, kRrfFair);
+    strength.measure = percent(std::min(fraction, 1.0)) + " of RRF's ceiling";
+    const double cosine = evidence.cosine.value_or(0.0);
+    const bool no_evidence = cosine < kCosineFloor && words.found < kLexicalFloorWords;
+    strength.floored = fraction < kRrfFloor || no_evidence;
+    if (no_evidence && fraction >= kRrfFloor) {
+        strength.measure +=
+            ", but cosine " + two_places(cosine) + " and none of the question's words";
+    }
+    return strength;
 }
 
 }  // namespace apogee::agentloop
