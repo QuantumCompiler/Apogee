@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -61,6 +62,19 @@ struct ToolDialect {
     bool native = true;
 };
 
+/// The sampling values one rung of the ladder offers (26h,
+/// `backends/sampling.h`): a request, a backend's config, a model file, a
+/// family's published default. Each field unset where that rung says nothing,
+/// so the next one down is asked.
+struct SamplingRung {
+    std::optional<double> temperature;
+    std::optional<double> top_p;
+    std::optional<std::int64_t> top_k;
+    std::optional<double> min_p;
+    std::optional<double> repeat_penalty;
+    std::optional<double> presence_penalty;
+};
+
 /// One family's behaviour.
 struct ModelProfile {
     /// The id, and the value a user may set as `chat_template:` to force it.
@@ -105,6 +119,15 @@ struct ModelProfile {
 
     /// What was seen, or why it could not be. Shown by `models info`.
     std::string evidence;
+
+    /// How the family's authors ask for it to be sampled (26h), with thinking
+    /// on and with it off -- the same for a family that does not split them.
+    /// Below a model file's own `general.sampling.*` keys, above greedy; unset
+    /// where the card says nothing.
+    SamplingRung sampling_thinking;
+    SamplingRung sampling_answering;
+    /// Where those values come from, the card named. Shown by `models info`.
+    std::string sampling_source;
 };
 
 /// Every profile this build knows.

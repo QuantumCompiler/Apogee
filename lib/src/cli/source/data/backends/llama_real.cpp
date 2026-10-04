@@ -242,11 +242,13 @@ bool prefill_grammar(const llama_vocab* vocab, llama_sampler& grammar, std::stri
 }
 
 /// The sampler chain for one generation: the grammar when there is one, then
-/// greedy selection. Greedy: deterministic, and per-family sampling belongs to
-/// its own item (sampling-profiles). Null with `error` when the grammar does
-/// not compile, or does not accept the opening it is advanced past.
+/// the settings (26h) -- penalties, then the top-k, top-p and min-p cuts, then
+/// the temperature and a seeded draw, llama-server's order. Temperature 0 is
+/// greedy instead, byte-for-byte reproducible; penalties apply either way,
+/// being deterministic. Null with `error` when the grammar does not compile,
+/// or does not accept the opening it is advanced past.
 SamplerPtr make_sampler(const llama_vocab* vocab, const SamplingGrammar& grammar,
-                        std::string& error) {
+                        const SamplingSettings& settings, std::string& error) {
     SamplerPtr chain{llama_sampler_chain_init(llama_sampler_chain_default_params())};
     if (!grammar.gbnf.empty()) {
         llama_log().forget();
@@ -278,7 +280,35 @@ SamplerPtr make_sampler(const llama_vocab* vocab, const SamplingGrammar& grammar
         // The chain owns what is added to it.
         llama_sampler_chain_add(chain.get(), constrained.release());
     }
-    llama_sampler_chain_add(chain.get(), llama_sampler_init_greedy());
+    if (settings.repeat_penalty != 1.0 || settings.presence_penalty != 0.0) {
+        // Over the last 64 tokens, llama-server's default window; no
+        // frequency penalty, which no rung sets.
+        constexpr std::int32_t kPenaltyWindow = 64;
+        llama_sampler_chain_add(chain.get(), llama_sampler_init_penalties(
+                                                 llama_vocab_n_tokens(vocab), kPenaltyWindow,
+                                                 static_cast<float>(settings.repeat_penalty), 0.0F,
+                                                 static_cast<float>(settings.presence_penalty)));
+    }
+    if (settings.greedy()) {
+        llama_sampler_chain_add(chain.get(), llama_sampler_init_greedy());
+        return chain;
+    }
+    if (settings.top_k > 0) {
+        llama_sampler_chain_add(
+            chain.get(), llama_sampler_init_top_k(static_cast<std::int32_t>(settings.top_k)));
+    }
+    if (settings.top_p < 1.0) {
+        llama_sampler_chain_add(chain.get(),
+                                llama_sampler_init_top_p(static_cast<float>(settings.top_p), 1));
+    }
+    if (settings.min_p > 0.0) {
+        llama_sampler_chain_add(chain.get(),
+                                llama_sampler_init_min_p(static_cast<float>(settings.min_p), 1));
+    }
+    llama_sampler_chain_add(chain.get(),
+                            llama_sampler_init_temp(static_cast<float>(settings.temperature)));
+    llama_sampler_chain_add(chain.get(),
+                            llama_sampler_init_dist(settings.seed.value_or(LLAMA_DEFAULT_SEED)));
     return chain;
 }
 
@@ -369,10 +399,12 @@ public:
         return llama_sampler_sample(sampler_.get(), context_.get(), -1);
     }
 
-    [[nodiscard]] bool set_grammar(const SamplingGrammar& grammar, std::string& error) override {
-        // A fresh chain every generation: a grammar's state is one reply's.
-        SamplerPtr chain =
-            make_sampler(llama_model_get_vocab(llama_get_model(context_.get())), grammar, error);
+    [[nodiscard]] bool set_sampling(const SamplingGrammar& grammar,
+                                    const SamplingSettings& settings, std::string& error) override {
+        // A fresh chain every generation: a grammar's state is one reply's,
+        // and a seed drawn for one answer is not the next one's.
+        SamplerPtr chain = make_sampler(llama_model_get_vocab(llama_get_model(context_.get())),
+                                        grammar, settings, error);
         if (chain == nullptr) {
             return false;
         }
@@ -725,7 +757,7 @@ public:
         // Compiled once here, where the caller can still fall back: a
         // grammar that fails at the first sample would leave the prompt
         // without the schema and the answer unheld.
-        if (make_sampler(vocab_, out.grammar, error) == nullptr) {
+        if (make_sampler(vocab_, out.grammar, SamplingSettings{}, error) == nullptr) {
             return false;
         }
         out.holds_schema = true;
@@ -818,7 +850,7 @@ public:
         }
 
         std::string error;
-        SamplerPtr sampler = make_sampler(vocab_, SamplingGrammar{}, error);
+        SamplerPtr sampler = make_sampler(vocab_, SamplingGrammar{}, SamplingSettings{}, error);
         // Checkpoints where the memory cannot be rewound -- a recurrent or
         // hybrid model -- and where it keeps only a sliding window (26m).
         const std::int64_t sliding_window = llama_model_n_swa(model_.get());

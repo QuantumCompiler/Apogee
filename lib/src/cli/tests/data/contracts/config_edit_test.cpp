@@ -287,6 +287,36 @@ TEST_CASE("a cache type is written after the window it keeps", "[config_edit][ca
           apogee::harness::KvCacheType::Q4_0);
 }
 
+TEST_CASE("a backend's sampling is written after its temperature, and reads back",
+          "[config_edit][sampling]") {
+    // 26h: every knob the config parses, the editor writes -- or an entry
+    // added with them would lose them on the way to the file.
+    BackendConfig backend;
+    backend.type = BackendType::LlamaCpp;
+    backend.model_path = "/m/Qwen.gguf";
+    backend.temperature = 0.7;
+    backend.top_p = 0.8;
+    backend.top_k = 20;
+    backend.min_p = 0.05;
+    backend.repeat_penalty = 1.1;
+    backend.presence_penalty = 1.5;
+    backend.seed = 42;
+    const std::string added = append_backend("backends:\n", "local", backend, false);
+    CHECK(added ==
+          "backends:\n  local:\n    type: llamacpp\n    model_path: /m/Qwen.gguf\n"
+          "    temperature: 0.7\n    top_p: 0.8\n    top_k: 20\n    min_p: 0.05\n"
+          "    repeat_penalty: 1.1\n    presence_penalty: 1.5\n    seed: 42\n");
+    const apogee::harness::Config config = apogee::harness::parse_config(added, "<test>");
+    const auto* read = config.find_backend("local");
+    REQUIRE(read != nullptr);
+    CHECK(read->top_p == 0.8);
+    CHECK(read->top_k == 20);
+    CHECK(read->min_p == 0.05);
+    CHECK(read->repeat_penalty == 1.1);
+    CHECK(read->presence_penalty == 1.5);
+    CHECK(read->seed == 42);
+}
+
 TEST_CASE("an api_key is stored literally, not expanded, on write", "[config_edit]") {
     const apogee::testing::EnvGuard key{"NEW_KEY", "sk-should-not-appear"};
     const std::string added = append_backend("", "a", anthropic_backend(), false);

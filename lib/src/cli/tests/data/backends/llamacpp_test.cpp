@@ -8,7 +8,10 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
+#include <random>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "backends/llamacpp_tokens.h"
@@ -2168,4 +2171,159 @@ TEST_CASE("the projector's rate is the model's own, once it is loaded",
     CHECK(fixture.provider->audio_sample_rate() == 0);
     (void)fixture.provider->chat(turn({ChatMessage::user("hello")}), {});
     CHECK(fixture.provider->audio_sample_rate() == 24000);
+}
+
+// --- Sampling (26h) ------------------------------------------------------------
+
+namespace {
+
+/// A provider over a model whose header names `architecture` and, where the
+/// file recommends any, its `general.sampling.*` values -- written to a
+/// scratch file the provider reads as it would a real model's.
+struct Sampled {
+    std::filesystem::path path;
+    FakeLlamaRuntime* runtime = nullptr;
+    std::unique_ptr<LlamaCppProvider> provider;
+
+    Sampled(const std::string& architecture, std::optional<float> file_temperature,
+            LlamaCppProvider::Options options = {})
+        : path{std::filesystem::temp_directory_path() /
+               ("apogee-sampling-" + std::to_string(std::random_device{}()) + ".gguf")} {
+        apogee::testing::GgufBuilder builder;
+        builder.magic().u32(3).u64(1).u64(file_temperature.has_value() ? 3 : 2);
+        builder.string_kv("general.architecture", architecture);
+        builder.string_kv("tokenizer.chat_template", "{{ messages }}");
+        if (file_temperature.has_value()) {
+            builder.f32_kv("general.sampling.temp", *file_temperature);
+        }
+        builder.tensor("token_embd.weight");
+        REQUIRE(builder.write_to(path));
+        auto owned = std::make_unique<FakeLlamaRuntime>();
+        runtime = owned.get();
+        options.backend_name = "local";
+        options.model = "test-model";
+        options.model_path = path.string();
+        provider = std::make_unique<LlamaCppProvider>(std::move(options), std::move(owned));
+    }
+
+    Sampled(const Sampled&) = delete;
+    Sampled& operator=(const Sampled&) = delete;
+    Sampled(Sampled&&) = delete;
+    Sampled& operator=(Sampled&&) = delete;
+
+    ~Sampled() {
+        std::error_code code;
+        std::filesystem::remove(path, code);
+    }
+
+    /// What the last generation sampled with.
+    [[nodiscard]] apogee::backends::SamplingSettings last(const ChatRequest& request) {
+        (void)provider->chat(request, {});
+        REQUIRE(runtime->model != nullptr);
+        REQUIRE_FALSE(runtime->model->contexts.front()->samplings.empty());
+        return runtime->model->contexts.front()->samplings.back();
+    }
+};
+
+}  // namespace
+
+TEST_CASE("the request's temperature reaches the sampler", "[backends][llamacpp][sampling]") {
+    // The regression this item fixes: `-t 0.9` was accepted and the model
+    // sampled greedily anyway, on every local model.
+    Sampled sampled{"llama", std::nullopt};
+    ChatRequest request = turn({ChatMessage::user("alpha beta")});
+    request.temperature = 0.9;
+    const apogee::backends::SamplingSettings settings = sampled.last(request);
+    CHECK(settings.temperature == 0.9);
+    CHECK_FALSE(settings.greedy());
+}
+
+TEST_CASE("temperature 0 is greedy whatever the rungs below suggest",
+          "[backends][sampling][llamacpp]") {
+    // The file recommends sampling; the request asks for greedy, and gets it.
+    Sampled sampled{"qwen35", 1.0F};
+    ChatRequest request = turn({ChatMessage::user("alpha beta")});
+    request.temperature = 0.0;
+    CHECK(sampled.last(request).greedy());
+}
+
+TEST_CASE("with no temperature asked, the model file's recommendation is used",
+          "[backends][llamacpp][sampling]") {
+    Sampled sampled{"llama", 0.6F};
+    const apogee::backends::SamplingSettings settings =
+        sampled.last(turn({ChatMessage::user("alpha beta")}));
+    CHECK(settings.temperature == static_cast<double>(0.6F));
+    CHECK(sampled.provider->sampling_for(turn({})).temperature.source ==
+          apogee::backends::SamplingSource::ModelFile);
+}
+
+TEST_CASE("a file that says nothing gets its family's card, thinking or not",
+          "[backends][llamacpp][sampling]") {
+    // Qwen's card: 0.6 with thinking, 0.7 without -- greedy loops on its
+    // thinking models, which is why "nothing configured" must not mean greedy.
+    Sampled sampled{"qwen35", std::nullopt};
+    const apogee::backends::SamplingSettings thinking =
+        sampled.last(turn({ChatMessage::user("alpha beta")}));
+    CHECK(thinking.temperature == 0.6);
+    CHECK(thinking.top_k == 20);
+
+    ChatRequest answering = turn({ChatMessage::user("alpha beta")});
+    answering.transient.skip_reasoning = true;
+    CHECK(sampled.provider->sampling_for(answering).temperature.value == 0.7);
+}
+
+TEST_CASE("an unprofiled model that recommends nothing samples greedily",
+          "[backends][llamacpp][sampling]") {
+    Sampled sampled{"mystery-arch", std::nullopt};
+    CHECK(sampled.last(turn({ChatMessage::user("alpha beta")})).greedy());
+}
+
+TEST_CASE("the config's sampling and seed reach the sampler", "[backends][llamacpp][sampling]") {
+    apogee::harness::BackendConfig entry;
+    entry.type = apogee::harness::BackendType::LlamaCpp;
+    entry.model_path = "/models/test.gguf";
+    entry.temperature = 0.8;
+    entry.top_p = 0.9;
+    entry.top_k = 40;
+    entry.min_p = 0.05;
+    entry.repeat_penalty = 1.1;
+    entry.presence_penalty = 0.4;
+    entry.seed = 7;
+    const LlamaCppProvider::Options options = LlamaCppProvider::options_from("local", entry);
+    CHECK(options.sampling.temperature == 0.8);
+    CHECK(options.sampling.top_k == 40);
+    REQUIRE(options.seed.has_value());
+    CHECK(*options.seed == 7U);
+
+    // The config outranks the file, and the request outranks the config.
+    Sampled sampled{"qwen35", 1.0F, options};
+    const apogee::backends::SamplingSettings settings =
+        sampled.last(turn({ChatMessage::user("alpha beta")}));
+    CHECK(settings.temperature == 0.8);
+    CHECK(settings.top_p == 0.9);
+    CHECK(settings.top_k == 40);
+    CHECK(settings.min_p == 0.05);
+    CHECK(settings.repeat_penalty == 1.1);
+    CHECK(settings.presence_penalty == 0.4);
+    REQUIRE(settings.seed.has_value());
+    CHECK(*settings.seed == 7U);
+
+    ChatRequest asked = turn({ChatMessage::user("alpha beta")});
+    asked.temperature = 0.3;
+    CHECK(sampled.last(asked).temperature == 0.3);
+}
+
+TEST_CASE("a side request samples by its own temperature, not the turn's",
+          "[backends][llamacpp][sampling]") {
+    // The title, the clerk, the judge: each asks for 0, and each gets greedy
+    // on its own context while the conversation keeps its settings.
+    Sampled sampled{"qwen35", std::nullopt};
+    (void)sampled.provider->chat(turn({ChatMessage::user("alpha beta")}), {});
+    ChatRequest side = turn({ChatMessage::user("title this")});
+    side.temperature = 0.0;
+    side.transient.side_request = true;
+    (void)sampled.provider->chat(side, {});
+    REQUIRE(sampled.runtime->model->contexts.size() >= 2);
+    CHECK(sampled.runtime->model->contexts.back()->samplings.back().greedy());
+    CHECK_FALSE(sampled.runtime->model->contexts.front()->samplings.back().greedy());
 }

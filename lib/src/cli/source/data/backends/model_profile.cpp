@@ -19,6 +19,9 @@ namespace {
     return haystack.find(needle) != std::string_view::npos;
 }
 
+/// Gemma's card gives one setting, thinking or not.
+constexpr SamplingRung kGemmaSampling{.temperature = 1.0, .top_p = 0.95, .top_k = 64, .min_p = 0.0};
+
 }  // namespace
 
 const std::vector<ModelProfile>& model_profiles() {
@@ -42,21 +45,32 @@ const std::vector<ModelProfile>& model_profiles() {
                         .tools = {},
                         .verified = true,
                         .evidence = "gemma-3-1b-it Q8_0, 2026-09-07: embedded chat template "
-                                    "applied, answered cleanly, no reasoning or framing markers"});
+                                    "applied, answered cleanly, no reasoning or framing markers",
+                        .sampling_thinking = kGemmaSampling,
+                        .sampling_answering = kGemmaSampling,
+                        .sampling_source = "Gemma model card: temperature 1.0, top-k 64, "
+                                           "top-p 0.95, min-p 0"});
 
         // Qwen 3.x. Emits <think>…</think> AROUND the answer -- observed
         // directly: "What is 2+2?" came back as "<think>\n\n</think>\n\n4",
         // with every one of those characters reaching the user.
-        list.push_back({.name = "qwen3",
-                        .architectures = {"qwen35", "qwen3", "qwen3moe", "qwen35moe", "qwen2"},
-                        .name_hints = {"qwen"},
-                        .reasoning = {{.open = "<think>", .close = "</think>"}},
-                        // What Qwen's template writes for enable_thinking=false.
-                        .skip_reasoning = "<think>\n\n</think>\n\n",
-                        .tools = {},
-                        .verified = true,
-                        .evidence = "qwen3.6-27b Q4_K_M, 2026-09-07: emitted a literal "
-                                    "<think></think> block into the answer text"});
+        list.push_back(
+            {.name = "qwen3",
+             .architectures = {"qwen35", "qwen3", "qwen3moe", "qwen35moe", "qwen2"},
+             .name_hints = {"qwen"},
+             .reasoning = {{.open = "<think>", .close = "</think>"}},
+             // What Qwen's template writes for enable_thinking=false.
+             .skip_reasoning = "<think>\n\n</think>\n\n",
+             .tools = {},
+             .verified = true,
+             .evidence = "qwen3.6-27b Q4_K_M, 2026-09-07: emitted a literal "
+                         "<think></think> block into the answer text",
+             .sampling_thinking = {.temperature = 0.6, .top_p = 0.95, .top_k = 20, .min_p = 0.0},
+             .sampling_answering = {.temperature = 0.7, .top_p = 0.8, .top_k = 20, .min_p = 0.0},
+             .sampling_source = "Qwen3 model card, best practices: thinking "
+                                "temperature 0.6, top-p 0.95, top-k 20, min-p 0; "
+                                "without thinking 0.7, 0.8, 20, 0 -- never greedy, "
+                                "which loops"});
 
         // gpt-oss. The family this item was gated on, and the only one here
         // that emits BOTH mechanisms the item is about.
@@ -94,7 +108,10 @@ const std::vector<ModelProfile>& model_profiles() {
                          "<|channel|>analysis<|message|>…<|end|><|start|>assistant"
                          "<|channel|>final<|message|> framing into the answer, and called a "
                          "tool as <|channel|>commentary to=functions.NAME <|constrain|>json"
-                         "<|message|>{json}"});
+                         "<|message|>{json}",
+             .sampling_thinking = {.temperature = 1.0, .top_p = 1.0},
+             .sampling_answering = {.temperature = 1.0, .top_p = 1.0},
+             .sampling_source = "gpt-oss model card: temperature 1.0, top-p 1.0"});
 
         // --- Registered, NOT verified ----------------------------------------
 
@@ -114,7 +131,11 @@ const std::vector<ModelProfile>& model_profiles() {
                         .evidence = "not verified: the llama3.2 files available carry no chat "
                                     "template and degenerate on every prompt -- likely base "
                                     "models. Registered so the family is a declared gap, not a "
-                                    "silent one"});
+                                    "silent one",
+                        .sampling_thinking = {.temperature = 0.6, .top_p = 0.9},
+                        .sampling_answering = {.temperature = 0.6, .top_p = 0.9},
+                        .sampling_source = "Llama 3.1 and 3.2 Instruct generation config: "
+                                           "temperature 0.6, top-p 0.9"});
 
         // ChatML-speaking families. Registered because recognising a reasoning
         // wrapper costs nothing and missing one is expensive, but unverified:
@@ -136,7 +157,11 @@ const std::vector<ModelProfile>& model_profiles() {
                         .tools = {},
                         .verified = false,
                         .evidence = "not verified: shares Qwen's <think> convention, which was "
-                                    "verified on Qwen but not on this family"});
+                                    "verified on Qwen but not on this family",
+                        .sampling_thinking = {.temperature = 0.6, .top_p = 0.95},
+                        .sampling_answering = {.temperature = 0.6, .top_p = 0.95},
+                        .sampling_source = "DeepSeek-R1 model card, usage recommendations: "
+                                           "temperature 0.6, top-p 0.95"});
 
         return list;
     }();

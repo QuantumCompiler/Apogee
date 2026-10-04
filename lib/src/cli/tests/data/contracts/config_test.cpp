@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "support/env_guard.h"
@@ -927,4 +928,56 @@ TEST_CASE(
     CHECK(regime.kits == std::vector<std::string>{"a"});
     CHECK_THROWS_AS(apogee::harness::parse_regime_spec("- a\n", "r.yaml", "r"),
                     apogee::harness::ConfigError);
+}
+
+TEST_CASE("a backend's sampling knobs parse, and each out-of-range value is refused by name",
+          "[config][sampling]") {
+    // 26h: beside the temperature, the knobs a local model samples with.
+    const Config config = load_text(
+        "backends:\n"
+        "  local:\n    type: llamacpp\n    model_path: /m/a.gguf\n"
+        "    top_p: 0.8\n    top_k: 20\n    min_p: 0.05\n    repeat_penalty: 1.1\n"
+        "    presence_penalty: -0.5\n    seed: 42\n"
+        "  bare:\n    type: llamacpp\n    model_path: /m/a.gguf\n");
+    const auto* local = config.find_backend("local");
+    REQUIRE(local != nullptr);
+    CHECK(local->top_p == 0.8);
+    CHECK(local->top_k == 20);
+    CHECK(local->min_p == 0.05);
+    CHECK(local->repeat_penalty == 1.1);
+    CHECK(local->presence_penalty == -0.5);
+    CHECK(local->seed == 42);
+    // Unset stays unset: the model file and its family are asked next.
+    const auto* bare = config.find_backend("bare");
+    CHECK_FALSE(bare->top_p.has_value());
+    CHECK_FALSE(bare->top_k.has_value());
+    CHECK_FALSE(bare->seed.has_value());
+
+    const std::pair<const char*, const char*> refused[] = {
+        {"top_p: 0", "top_p"},
+        {"top_p: 1.5", "top_p"},
+        {"top_k: -1", "top_k"},
+        {"min_p: 2", "min_p"},
+        {"repeat_penalty: 0", "repeat_penalty"},
+        {"presence_penalty: 3", "presence_penalty"},
+        {"seed: -1", "seed"},
+        {"seed: 4294967295", "seed"},
+        {"top_p: warm", "top_p"},
+    };
+    for (const auto& [line, key] : refused) {
+        INFO(line);
+        try {
+            (void)load_text(std::string{"backends:\n  x:\n    type: llamacpp\n    "} + line + "\n");
+            FAIL("expected a ConfigError");
+        } catch (const ConfigError& e) {
+            CHECK(std::string{e.what()}.find(std::string{"backends.x."} + key) !=
+                  std::string::npos);
+        }
+    }
+    // The edges a rule allows.
+    const Config edges = load_text(
+        "backends:\n  x:\n    type: llamacpp\n    top_p: 1\n    top_k: 0\n    min_p: 0\n"
+        "    presence_penalty: 2\n    seed: 4294967294\n");
+    CHECK(edges.find_backend("x")->top_p == 1.0);
+    CHECK(edges.find_backend("x")->seed == 4294967294);
 }

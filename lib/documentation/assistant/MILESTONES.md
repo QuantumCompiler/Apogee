@@ -951,7 +951,7 @@ Every saved transcript held its calls and results as IR, with no `<tool_call>`, 
 | Acceptance models | **8B-class and up** (the user's call) | Qwen3-VL-8B and Qwen3.8-27B. |
 | Profile filters | Replaced by `common`'s parser wherever Jinja renders *(default taken)* | One parser per template, maintained upstream; the filters stay for the fallback. |
 | Streaming | Re-read per token, emit the difference *(default taken)* | llama-server's method; quadratic, and nothing at chat lengths. |
-| Sampling | Greedy, plus the lazy grammar *(default taken)* | Per-family sampling is [26h](../backlog/v0.1.3/sampling-profiles.md); the chain it will extend is `make_sampler`. |
+| Sampling | Greedy, plus the lazy grammar *(default taken)* | Per-family sampling is [26h](#milestone-j--local-inference); the chain it will extend is `make_sampler`. |
 | Tool choice | `auto`, parallel calls off *(default taken)* | One call per step is easier to gate and to show. |
 | Repeated calls | The third identical call is answered unrun *(default taken)* | The spike's 3B read one file three times and ran the shell eight. |
 | Image turns | Carry tools too *(default taken)* | A model asked about a picture can act on it (the Milestone O rule). |
@@ -1165,9 +1165,93 @@ Every saved transcript held its calls and results as IR, with no `<tool_call>`, 
 - [x] **A stop's token is not claimed by the cache** (`Generation::last_unfed`): it still counts as generated, and the conversation's cached tokens stop before it. The scripted context now refuses any decode past its end, so the gap cannot come back quietly.
 - [x] **Tests**: 7 new cases: the marker ending the reply unseen, a near-marker kept and a held one flushed, a stop's token and the next turn's decode, the notice once and in place of the tools line, the template noticed in the header, both `template:` lines, and every guessed framing's stops.
 
-**On real weights** (the new binary, both files as they are): Gemma 4 12B gave the notice once, answered, and stopped at its guessed format's marker after 6 s instead of running to its cap. Llama 3.1 8B gave the notice and still loops to its cap, repeating itself rather than writing any marker; a base model under greedy sampling does that, and taming it belongs to sampling ([26h](../backlog/v0.1.3/sampling-profiles.md)). The fix that makes those chats work is the instruct release.
+**On real weights** (the new binary, both files as they are): Gemma 4 12B gave the notice once, answered, and stopped at its guessed format's marker after 6 s instead of running to its cap. Llama 3.1 8B gave the notice and still loops to its cap, repeating itself rather than writing any marker; a base model under greedy sampling does that, and taming it belongs to sampling ([26h](#milestone-j--local-inference)). The fix that makes those chats work is the instruct release.
 
 **Guardrails, each mutation-tested (13 mutants, all caught), run in a separate git worktree against the whole unit suite:** a marker never ending the reply, nothing held back, held text lost at the end, the reply going on past a marker; the stop's token claimed, or never marked; the notice every turn, never, or beside the tools line; the fallback with no stops; the template unnoticed or its value not stepped over; `models info` inverted.
+
+### 2026-10-03 — `sampling-profiles` (backlog item 26h): sampled the way the model's authors ask
+
+**Why.** The llama.cpp backend sampled greedily whatever was asked: `chat -t 0.7`, `/temperature` and a backend's `temperature:` were accepted and silently ignored on every local model, since 25b. Greedy decoding is also what Qwen advises against for its thinking models, which loop under it. Ommi honoured the temperature on its local path, so this was a regression, not only a missing feature.
+
+**What was built**
+
+- [x] **One ladder, per knob** (`backends/sampling.h/.cpp`). Each of temperature, top-p, top-k, min-p, repeat penalty and presence penalty takes the first rung that sets it:
+  1. the request's own -- `-t`, `/temperature`;
+  2. the backend's config;
+  3. the model file's `general.sampling.*` -- the authors' recommendation, which a conversion writes from `generation_config.json`;
+  4. the family's published default, split by thinking on and off;
+  5. llama.cpp's neutral value, which is greedy.
+
+  Per knob, not per rung: a file that names a temperature and no top-k leaves the top-k to its family.
+- [x] **The file's recommendation is read from the header** (`GgufInfo::sampling`): `temp`, `top_p`, `top_k`, `min_p` and `penalty_repeat`, any number type, a wrongly typed key stepped over. No weights are loaded. Every installed Gemma 4, Qwen3-VL, Qwen3.8 and Llama 3.x carries some of these; gpt-oss and Qwen3-Omni carry none.
+- [x] **Family defaults with their source** (`ModelProfile::sampling_thinking`, `sampling_answering`, `sampling_source`):
+  - Qwen3: 0.6, top-p 0.95, top-k 20, min-p 0 when thinking; 0.7, 0.8, 20, 0 when not.
+  - Gemma: 1.0, top-k 64, top-p 0.95, min-p 0.
+  - gpt-oss: 1.0, top-p 1.0.
+  - Llama 3.x: 0.6, top-p 0.9.
+  - DeepSeek-R1: 0.6, top-p 0.95.
+
+  `chatml` names none. A request that skips reasoning gets the family's no-thinking values.
+- [x] **One sampler chain** (`make_sampler`, `llama_real.cpp`): the grammar first, as before -- the schema grammar's prefill step kept -- then the penalties, the top-k, top-p and min-p cuts, the temperature and a seeded draw, llama-server's order.
+  - Temperature 0 is greedy, byte for byte reproducible.
+  - The penalties apply under greedy too, being deterministic.
+  - `LlamaContext::set_grammar` became `set_sampling(grammar, settings)`, rebuilt every generation, so one answer's seed is not the next one's.
+- [x] **The knobs in the config** (`top_p`, `top_k`, `min_p`, `repeat_penalty`, `presence_penalty`, `seed`), each range-checked at load and named in a refusal:
+  - written by the one editor;
+  - settable by `config add-backend` and its admin twin -- the config's own rules check both, since every edit re-parses what it writes;
+  - shown by the admin view, completed by `config get`, documented in the starter template.
+- [x] **`models info` shows what is in force and where each value came from**, the family's card named when it supplied one. On a cloud backend, it names any of the knobs that are set but not sent: the vendor samples with the temperature alone.
+
+**On real weights** (the family models, one at a time, each loaded once; no Qwen3.8-27B inference -- the user's call):
+- **`apogee complete -m Llama3.2-3B-Q4KM`:** `-t 0.9` twice gave two different sentences; `-t 0` twice gave byte-identical ones. Before this, all four would have been the same.
+- **`models info`, header only:**
+  - Qwen3.8-27B reads 1.0, 0.95, 20 from its file, min-p 0 from the Qwen3 card;
+  - Qwen3-VL-8B reads 0.7, 0.8, 20 from its file;
+  - Gemma 4 12B reads 1.0, 0.95, 64 from its file;
+  - Llama 3.1 8B reads 0.6, 0.9 from its file;
+  - gpt-oss-20b reads 1.0, 1.0 from its card, its file naming none.
+- **The spike's six tasks, sampled by the ladder** (the production loop and registry, each task its own conversation, a driver allowing every prompt):
+
+| Task | Qwen3-VL-8B (Q4_K_M) | Gemma 4 12B (Q4_K_M) | gpt-oss-20b (F16) | Llama 3.1 8B (Q4_K_M) |
+|---|---|---|---|---|
+| read a file | pass | pass | pass | pass |
+| write a file | pass | pass | pass | pass |
+| count lines with the shell | pass | pass | pass | pass |
+| list a folder, then read | pass | pass | pass | pass |
+| find a URL, then fetch it | pass | pass | pass | made up an address and a title |
+| `17 * 23`, no tool | pass | pass | pass | right answer, through the shell |
+| | **6/6** | **6/6** | **6/6** | 5/6 |
+
+The defaults lost no task: Llama 3.1 8B failed the URL task greedily too (26g's runs looped twelve calls on an invented address).
+
+**Tests**: 27 new cases, 230 assertions:
+- the ladder rung by rung and per knob;
+- the family source credited only when used;
+- the seed;
+- the header's five keys across number types;
+- `-t` reaching the sampler -- the regression;
+- greedy at 0 over a file that suggests otherwise;
+- the file, family (thinking or not), unprofiled and config rungs through the provider;
+- a side request's own temperature;
+- the config's bounds and the editor's round trip;
+- `add-backend` and the admin create byte-identical, both refusing a bad value;
+- `models info` local and cloud.
+
+**Guardrails, each mutation-tested (18 mutants, all caught), in a separate git worktree:** the ladder reordered twice, a default changed, the family credited wrongly, thinking ignored or inverted, a knob or the seed dropped at every hop (resolver, provider, header, editor, CLI, admin), the request's temperature dropped, a bound loosened.
+
+**Found on the way.** The test binary linked the SQLite amalgamation twice since A4 -- once by name, once through `embedstore`, which already hands it on -- and the linker said so on every build. Now once.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| A GGUF's sampling against its family's | The file's first *(confirmed by the user)* | It is specific to the model, and most files carry it. |
+| Tests | Scripted and recorded goldens pin temperature 0 *(confirmed by the user)* | Deterministic; every side request already asks for 0 (titles, the clerk, rerank, rewrites, summaries, media). |
+| Cloud backends | Only the temperature is sent; `models info` names the rest as unsent | The item's seam is the local backend. Each vendor's own top-p and top-k mapping would be wire changes of their own. |
+| The request rung | The temperature alone | `-t` and `/temperature` already existed. The rest are per backend, as the item's "as needed" left them. |
+| The seed | Config only; unset draws one per answer | "A seed is settable", and per-backend is where it repeats. |
+| Penalties under greedy | Applied | Deterministic, so `-t 0` stays reproducible with a configured penalty. |
+| The acceptance models | The model families, replacing the doc's two | The standing real-weights rule. The 27B named in the criterion was read header-only, never run. |
 
 ## Milestone K — The install contract
 

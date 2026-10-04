@@ -11,6 +11,7 @@
 #include <sstream>
 
 #include "backends/model_profile.h"
+#include "backends/sampling.h"
 #include "cli/models_pull.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
@@ -575,6 +576,41 @@ std::string render_model_jsonl(const std::vector<ModelRow>& rows) {
 
 namespace {
 
+/// `info`'s sampling line (26h): what an answer from this model samples with
+/// and where each value came from -- the config, the file's own
+/// recommendation, its family's card, or llama.cpp's neutral value. With
+/// thinking on, as a conversation starts.
+void render_sampling(std::ostream& out, const models::GgufInfo& info,
+                     const harness::BackendConfig& backend, const std::filesystem::path& path) {
+    const backends::ModelProfile* family =
+        backends::resolve_profile({}, info.architecture, path.filename().string());
+    const backends::ResolvedSampling resolved = backends::resolve_sampling(backends::SamplingLadder{
+        .config = backends::config_rung(backend),
+        .model_file = backends::model_file_rung(info.sampling),
+        .family = backends::family_rung(family, true),
+        .family_source = family == nullptr ? std::string{} : family->sampling_source,
+        .seed = backends::config_seed(backend)});
+    out << "sampling:     " << backends::describe_sampling(resolved) << "\n";
+}
+
+/// The local-only sampling knobs `backend` sets (26h), which a cloud backend
+/// does not send: its vendor is sampled with the temperature alone.
+[[nodiscard]] std::string unsent_sampling(const harness::BackendConfig& backend) {
+    std::string out;
+    const auto add = [&out](bool set, std::string_view key) {
+        if (set) {
+            out += (out.empty() ? "" : ", ") + std::string{key};
+        }
+    };
+    add(backend.top_p.has_value(), "top_p");
+    add(backend.top_k.has_value(), "top_k");
+    add(backend.min_p.has_value(), "min_p");
+    add(backend.repeat_penalty.has_value(), "repeat_penalty");
+    add(backend.presence_penalty.has_value(), "presence_penalty");
+    add(backend.seed.has_value(), "seed");
+    return out;
+}
+
 /// `info`'s header block for the GGUF at `path`: what the file says, and for a
 /// model, the window `backend` gives it.
 void render_gguf(std::ostream& out, const std::filesystem::path& path,
@@ -629,6 +665,7 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
                       "rather than answering; for chat, use its instruction-tuned release")
             << "\n";
         render_window(out, info, backend);
+        render_sampling(out, info, backend, path);
     }
     if (info.is_projector()) {
         out << "note:         a multimodal projector -- belongs on mmproj_path, not model_path\n";
@@ -772,6 +809,11 @@ std::string render_model_info(const harness::Config& config, std::string_view na
         // A cloud backend has no file to inspect, and saying so beats printing
         // empty GGUF fields that read like a failed read.
         out << "source:       remote (no local file to inspect)\n";
+        if (const std::string unsent = unsent_sampling(value); !unsent.empty()) {
+            out << "sampling:     " << unsent << " set but not sent -- this "
+                << harness::to_string(value.type)
+                << " backend samples with the temperature alone\n";
+        }
         return out.str();
     }
 

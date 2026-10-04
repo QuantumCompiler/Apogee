@@ -250,11 +250,20 @@ backends:
   # idle_unload_seconds releases the weights after a quiet spell -- worth
   # setting if you switch between a local and a cloud backend in one session,
   # since the model is the largest thing the process holds.
+  # A local model samples the way its file recommends (the general.sampling.*
+  # keys a conversion writes), else as its family's model card advises, else
+  # greedily. -t and a temperature here outrank both; top_p, top_k, min_p,
+  # repeat_penalty and presence_penalty sit beside it, and a seed makes sampled
+  # answers repeat. Temperature 0 is greedy. `apogee models info <backend>`
+  # shows what is in force and where each value came from.
   # local:
   #   type: llamacpp
   #   model_path: "${HOME}/.cache/llms/my-model.gguf"
   #   # context_size: 65536
   #   # cache_type: q8_0
+  #   # temperature: 0.7
+  #   # top_p: 0.8
+  #   # seed: 42
   #   # idle_unload_seconds: 900
 
   # ── Local vision ────────────────────────────────────────────────────────────

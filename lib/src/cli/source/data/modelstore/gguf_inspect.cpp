@@ -270,6 +270,53 @@ constexpr std::uint64_t kMaxLayerValues = 1U << 16U;
 
 /// Reads an integer, a bool, or an array of either, as integers. Anything
 /// else is stepped over and comes back empty.
+/// Any scalar number as a double -- the sampling keys are floats in one
+/// conversion and integers in another. Unset, the value stepped over, for a
+/// string, an array or a bool.
+[[nodiscard]] std::optional<double> read_number(Cursor& cursor, ValueType type) {
+    if (type == ValueType::Float32) {
+        return static_cast<double>(cursor.number<float>());
+    }
+    if (type == ValueType::Float64) {
+        return cursor.number<double>();
+    }
+    if (type == ValueType::Bool || fixed_width(type) == 0) {
+        skip_value(cursor, type);
+        return std::nullopt;
+    }
+    return static_cast<double>(read_integer(cursor, type).value_or(0));
+}
+
+/// Reads one `general.sampling.*` value into `sampling`; false for a key that
+/// is not one of the five it keeps, leaving the cursor where it was.
+[[nodiscard]] bool read_sampling(Cursor& cursor, std::string_view key, ValueType type,
+                                 GgufSampling& sampling) {
+    constexpr std::string_view prefix = "general.sampling.";
+    if (!key.starts_with(prefix)) {
+        return false;
+    }
+    const std::string_view name = key.substr(prefix.size());
+    std::optional<double>* slot = nullptr;
+    if (name == "temp") {
+        slot = &sampling.temperature;
+    } else if (name == "top_p") {
+        slot = &sampling.top_p;
+    } else if (name == "min_p") {
+        slot = &sampling.min_p;
+    } else if (name == "penalty_repeat") {
+        slot = &sampling.repeat_penalty;
+    } else if (name != "top_k") {
+        return false;
+    }
+    const std::optional<double> value = read_number(cursor, type);
+    if (slot != nullptr) {
+        *slot = value;
+    } else if (value.has_value()) {
+        sampling.top_k = static_cast<std::int64_t>(*value);
+    }
+    return true;
+}
+
 [[nodiscard]] std::vector<std::int64_t> read_integers(Cursor& cursor, ValueType type) {
     if (type != ValueType::Array) {
         if (fixed_width(type) == 0 || type == ValueType::Float32 || type == ValueType::Float64) {
@@ -423,6 +470,9 @@ GgufInfo inspect_gguf(std::istream& in, std::uint64_t size) {
                 attention.insert_or_assign(key, read_integers(cursor, type));
                 continue;
             }
+            if (read_sampling(cursor, key, type, info.sampling)) {
+                continue;
+            }
 
             // Only these keys and the attention geometry are worth
             // materialising. Everything else is stepped over -- the vocabulary
@@ -474,6 +524,7 @@ GgufInfo inspect_gguf(std::istream& in, std::uint64_t size) {
         info.has_chat_template = false;
         info.projector_vision = false;
         info.projector_audio = false;
+        info.sampling = {};
     }
 
     return info;

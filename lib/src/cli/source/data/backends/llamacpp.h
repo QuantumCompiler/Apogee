@@ -11,6 +11,7 @@
 
 #include "backends/llama_runtime.h"
 #include "backends/model_profile.h"
+#include "backends/sampling.h"
 #include "contracts/config.h"
 #include "contracts/provider.h"
 #include "modelstore/gguf_inspect.h"
@@ -91,6 +92,11 @@ public:
         /// Cap on generated tokens when the request does not set one.
         std::int64_t max_tokens = 2048;
 
+        /// The config's rung of the sampling ladder, and its seed (26h): below
+        /// the request's own, above the model file's recommendation.
+        SamplingRung sampling;
+        std::optional<std::uint32_t> seed;
+
         /// Unload the model after this long with no request. Zero never
         /// unloads. A resident 16GB model is the single largest thing this
         /// process holds, so a long-lived `apogee chat` that has moved to a
@@ -117,6 +123,11 @@ public:
                                               const harness::BackendConfig& config);
 
     [[nodiscard]] std::string_view backend_name() const noexcept override;
+
+    /// What `request` samples with, each value with the rung it came from
+    /// (26h): the request, the config, the model file's own recommendation,
+    /// its family's card, greedy. Reads the header, never the weights.
+    [[nodiscard]] ResolvedSampling sampling_for(const harness::ChatRequest& request) const;
 
     /// Costs nothing per call.
     [[nodiscard]] bool generation_is_metered() const noexcept override {

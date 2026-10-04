@@ -56,6 +56,7 @@ add_library(apogee_tests_data OBJECT
     data/backends/embedding_batch_test.cpp
     data/backends/llamacpp_embed_test.cpp
     data/backends/llamacpp_test.cpp
+    data/backends/sampling_test.cpp
     data/backends/claude_cli_events_test.cpp
     data/backends/claude_cli_test.cpp
     data/backends/ollama_cli_test.cpp
@@ -275,11 +276,12 @@ foreach(target IN LISTS APOGEE_TEST_TARGETS)
 endforeach()
 
 # The migration test builds a schema-v2 database by hand, through SQLite
-# itself, so the v3 migration runs against a real predecessor. Same
-# amalgamation the store uses, nothing else.
+# itself, so the v3 migration runs against a real predecessor -- the same
+# amalgamation the store uses, which `embedstore` links publicly, so it
+# reaches the tests with it and is never linked twice.
 target_link_libraries(apogee_tests PRIVATE
     apogee_tests_infrastructure apogee_tests_data apogee_tests_business apogee_tests_presentation
-    apogee_core Catch2::Catch2WithMain apogee_sqlite3)
+    apogee_core Catch2::Catch2WithMain)
 
 catch_discover_tests(apogee_tests)
 

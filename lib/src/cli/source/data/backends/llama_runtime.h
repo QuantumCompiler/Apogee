@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -51,6 +52,25 @@ struct SamplingGrammar {
     /// advanced past it before the first sample, as llama-server does; a
     /// lazy one never is, and empty advances nothing (26f).
     std::string prefill;
+};
+
+/// What one generation samples with (26h), resolved before it gets here --
+/// the request, the backend's config, the model file, its family
+/// (`backends/sampling.h`). Temperature 0 is greedy and byte-for-byte
+/// reproducible; the other knobs' defaults leave the distribution alone.
+struct SamplingSettings {
+    double temperature = 0.0;
+    double top_p = 1.0;
+    std::int64_t top_k = 0;  ///< 0: no top-k cut.
+    double min_p = 0.0;
+    double repeat_penalty = 1.0;  ///< 1: no penalty.
+    double presence_penalty = 0.0;
+    /// Unset draws a fresh seed for every generation.
+    std::optional<std::uint32_t> seed;
+
+    [[nodiscard]] bool greedy() const noexcept {
+        return temperature <= 0.0;
+    }
 };
 
 /// A reply, read back through the model's own template format.
@@ -207,13 +227,16 @@ public:
     /// Samples the next token given the current state.
     [[nodiscard]] virtual std::int32_t sample() = 0;
 
-    /// The grammar every sample obeys from now on; an empty one removes it.
-    /// Set before each generation, since a grammar holds state across the
-    /// tokens of one reply. False with `error` when it does not compile.
+    /// How every sample is drawn from now on: the grammar it obeys (an empty
+    /// one constrains nothing) and the settings it is drawn with (26h). Set
+    /// before each generation, since a grammar holds state across the tokens
+    /// of one reply. False with `error` when the grammar does not compile.
     ///
-    /// The default accepts only "none": a runtime that cannot constrain must
-    /// say so rather than sample freely under a grammar it ignored.
-    [[nodiscard]] virtual bool set_grammar(const SamplingGrammar& grammar, std::string& error) {
+    /// The default accepts only "no grammar": a runtime that cannot constrain
+    /// must say so rather than sample freely under a grammar it ignored.
+    [[nodiscard]] virtual bool set_sampling(const SamplingGrammar& grammar,
+                                            const SamplingSettings& /*settings*/,
+                                            std::string& error) {
         if (grammar.gbnf.empty()) {
             return true;
         }

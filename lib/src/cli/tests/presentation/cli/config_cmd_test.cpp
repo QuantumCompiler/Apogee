@@ -125,3 +125,40 @@ TEST_CASE("a name two stored GGUFs share is refused with both listed",
     CHECK(out.find("  " + two.string()) != std::string::npos);
     CHECK(home.config_text() == kConfig);
 }
+
+TEST_CASE("add-backend takes a local model's sampling, and the config's rules refuse a bad one",
+          "[commands][config][add-backend][sampling]") {
+    // 26h: the knobs the config parses, settable where every other backend
+    // field is -- and checked by the config's own rules, not a second copy.
+    const CliHome home{kConfig};
+    std::string out;
+    REQUIRE(home.run({"config",    "add-backend",
+                      "local",     "--type",
+                      "llamacpp",  "--model-path",
+                      "/m/a.gguf", "--temperature",
+                      "0.7",       "--top-p",
+                      "0.8",       "--top-k",
+                      "20",        "--min-p",
+                      "0.05",      "--repeat-penalty",
+                      "1.1",       "--presence-penalty",
+                      "1.5",       "--seed",
+                      "42"},
+                     &out) == 0);
+    const apogee::harness::Config config =
+        apogee::harness::parse_config(home.config_text(), "<test>");
+    const auto* local = config.find_backend("local");
+    REQUIRE(local != nullptr);
+    CHECK(local->top_p == 0.8);
+    CHECK(local->top_k == 20);
+    CHECK(local->min_p == 0.05);
+    CHECK(local->repeat_penalty == 1.1);
+    CHECK(local->presence_penalty == 1.5);
+    CHECK(local->seed == 42);
+
+    const std::string before = home.config_text();
+    CHECK(home.run({"config", "add-backend", "bad", "--type", "llamacpp", "--model-path",
+                    "/m/a.gguf", "--top-p", "1.5"},
+                   &out) != 0);
+    CHECK(out.find("top_p") != std::string::npos);
+    CHECK(home.config_text() == before);
+}

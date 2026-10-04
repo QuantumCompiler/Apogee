@@ -12,7 +12,7 @@ Switching thinking off goes through the template's own `enable_thinking` now tha
 - **Parity across backends.** The same setting maps to each vendor's own control: Anthropic's thinking budget, OpenAI's reasoning effort, Gemini's thinking budget. A backend with no control says so in `models info` rather than pretending.
 - **Thinking is displayed live and never persisted**, unchanged.
 - **Honest about budgets.** A budget that cut reasoning short is reported on the thinking line and in machine mode's thinking event, so an answer that suffered for it can be understood.
-- **One sampler chain** (with [26h](sampling-profiles.md)): the budget is a sampler in the chain, not a second generation loop.
+- **One sampler chain** (with [26h](../../assistant/MILESTONES.md#milestone-j--local-inference)): the budget is a sampler in the chain, not a second generation loop.
 
 **Seam + files.**
 - `contracts/types.h`: `ChatRequest` gains a thinking setting (mode and budget); `transient.skip_reasoning` becomes its `off` case.
@@ -21,13 +21,13 @@ Switching thinking off goes through the template's own `enable_thinking` now tha
 - `agentloop/`: `auto`'s decision, asked of the utility model as a side request when one is set.
 - `cli/chat.cpp`, `cli/complete.cpp`: the flag and the slash command, a row in chat's command table (`cli/chat_completer.cpp`, which `/help`, completion and dispatch all read) with `on`, `off` and `auto` as its values.
 - `views/thinking_view.cpp`: the budget note on the summary line.
-- `harness/config.*`: the per-backend default.
+- `contracts/config.*`: the per-backend default.
 
 **Reference (Ommi).** Ommi displayed and filtered reasoning (think_filter.go, CHAT.md) but had no control over whether or how long a model thought.
 
 **Decisions made:**
 - 2026-09-25 — Asked for by the user ("Reliability").
-- 2026-09-25 — After 25b (the template's switch) and [26h](sampling-profiles.md) (the chain the budget joins).
+- 2026-09-25 — After 25b (the template's switch) and [26h](../../assistant/MILESTONES.md#milestone-j--local-inference) (the chain the budget joins).
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): thinking defaults to `on` unless configured — today's behaviour; `auto` stays opt-in until measured.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): judge-less `auto` thinks for questions over 200 characters or containing code, maths or "why/how", and not otherwise — measured against the six-task battery and a chat-question set before ship.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): no thinking budget unless configured; `--think-budget N` and `thinking_budget:` set one — a budget changes answers, so it is chosen, never implied.
@@ -45,4 +45,4 @@ Switching thinking off goes through the template's own `enable_thinking` now tha
 - [ ] `--think-budget 256` stops thinking at 256 tokens and says so.
 - [ ] The same `--think off` on an Anthropic backend sends no thinking parameter, and on OpenAI the lowest effort.
 
-**Scope note.** Item **26i**; build after 26h (25b shipped 2026-09-25). Out of scope: per-tool-step thinking policies.
+**Scope note.** Item **26i**; gated on nothing pending (26h shipped 2026-10-03: the chain is `make_sampler` in `llama_real.cpp`, set every generation through `LlamaContext::set_sampling(grammar, SamplingSettings)`, with the ladder in `backends/sampling.h` -- the budget sampler joins that chain; 25b shipped 2026-09-25). Out of scope: per-tool-step thinking policies.

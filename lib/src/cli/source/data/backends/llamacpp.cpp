@@ -516,11 +516,25 @@ LlamaCppProvider::Options LlamaCppProvider::options_from(const std::string& back
     if (config.idle_unload_seconds.has_value() && *config.idle_unload_seconds > 0) {
         options.idle_unload = std::chrono::seconds{*config.idle_unload_seconds};
     }
+    options.sampling = config_rung(config);
+    options.seed = config_seed(config);
     return options;
 }
 
 std::string_view LlamaCppProvider::backend_name() const noexcept {
     return options_.backend_name;
+}
+
+ResolvedSampling LlamaCppProvider::sampling_for(const harness::ChatRequest& request) const {
+    const ModelProfile* family = profile();
+    return resolve_sampling(
+        SamplingLadder{.request = SamplingRung{.temperature = request.temperature},
+                       .config = options_.sampling,
+                       .model_file = model_file_rung(header().sampling),
+                       // A request that skips the reasoning is the family's no-thinking case.
+                       .family = family_rung(family, !request.transient.skip_reasoning),
+                       .family_source = family == nullptr ? std::string{} : family->sampling_source,
+                       .seed = options_.seed});
 }
 
 const ModelProfile* LlamaCppProvider::profile() const {
@@ -1002,16 +1016,18 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
 
     const std::int64_t limit = generation_limit(request);
 
-    // The grammar is set every generation -- the session's context outlives
+    // The sampler is set every generation -- the session's context outlives
     // any one request, and a call's grammar from the last turn must not
-    // constrain this one. None on the fallback path.
-    if (std::string error;
-        !context.set_grammar(chat != nullptr ? chat->grammar : SamplingGrammar{}, error)) {
+    // constrain this one, nor its temperature draw this one's tokens. No
+    // grammar on the fallback path.
+    const SamplingSettings sampling = sampling_for(request).settings();
+    if (std::string error; !context.set_sampling(
+            chat != nullptr ? chat->grammar : SamplingGrammar{}, sampling, error)) {
         // The reader still parses a call without it; unconstrained is the
         // permissive reading, and the user is told. A schema's grammar was
         // compiled when the prompt was rendered, so this is the rare case of
         // one that compiled there and not here -- its answer is validated.
-        (void)context.set_grammar(SamplingGrammar{}, error);
+        (void)context.set_sampling(SamplingGrammar{}, sampling, error);
         const bool held = chat != nullptr && chat->holds_schema;
         notice(options,
                (held ? "the answer on " + options_.model + " runs without its schema's grammar: "

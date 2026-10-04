@@ -180,12 +180,16 @@ public:
 
     /// Every grammar set, in order -- including the empty ones that clear it.
     std::vector<backends::SamplingGrammar> grammars;
+    /// Every sampling setting handed over with them, in the same order (26h).
+    std::vector<backends::SamplingSettings> samplings;
     /// When set, a non-empty grammar is refused with this.
     std::string grammar_error;
 
-    [[nodiscard]] bool set_grammar(const backends::SamplingGrammar& grammar,
-                                   std::string& error) override {
+    [[nodiscard]] bool set_sampling(const backends::SamplingGrammar& grammar,
+                                    const backends::SamplingSettings& settings,
+                                    std::string& error) override {
         grammars.push_back(grammar);
+        samplings.push_back(settings);
         if (!grammar.gbnf.empty() && !grammar_error.empty()) {
             error = grammar_error;
             return false;
@@ -335,9 +339,10 @@ public:
         return state_->decode_multimodal(media, text, position, error);
     }
 
-    [[nodiscard]] bool set_grammar(const backends::SamplingGrammar& grammar,
-                                   std::string& error) override {
-        return state_->set_grammar(grammar, error);
+    [[nodiscard]] bool set_sampling(const backends::SamplingGrammar& grammar,
+                                    const backends::SamplingSettings& settings,
+                                    std::string& error) override {
+        return state_->set_sampling(grammar, settings, error);
     }
 
     [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {

@@ -197,6 +197,57 @@ TEST_CASE("a cache type added over HTTP is byte-identical to the CLI's, and a ba
     CHECK(Fixture::bytes(fixture.http_config).find("other:") == std::string::npos);
 }
 
+TEST_CASE("a backend's sampling added over HTTP is byte-identical to the CLI's, and read back",
+          "[httpserver][admin][parity][sampling]") {
+    // 26h: the same knobs on both surfaces, written by the one editor.
+    const Fixture fixture;
+    fixture.cli({"config",    "add-backend",
+                 "local",     "--type",
+                 "llamacpp",  "--model-path",
+                 "/m/a.gguf", "--temperature",
+                 "0.7",       "--top-p",
+                 "0.8",       "--top-k",
+                 "20",        "--min-p",
+                 "0.05",      "--repeat-penalty",
+                 "1.1",       "--presence-penalty",
+                 "1.5",       "--seed",
+                 "42"});
+    const HttpResponse created =
+        admin_create_backend(fixture.context(), post(nlohmann::json{{"name", "local"},
+                                                                    {"type", "llamacpp"},
+                                                                    {"model_path", "/m/a.gguf"},
+                                                                    {"temperature", 0.7},
+                                                                    {"top_p", 0.8},
+                                                                    {"top_k", 20},
+                                                                    {"min_p", 0.05},
+                                                                    {"repeat_penalty", 1.1},
+                                                                    {"presence_penalty", 1.5},
+                                                                    {"seed", 42}}));
+    REQUIRE(created.status == 201);
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    const nlohmann::json view = parsed(created);
+    CHECK(view["top_p"] == 0.8);
+    CHECK(view["top_k"] == 20);
+    CHECK(view["min_p"] == 0.05);
+    CHECK(view["repeat_penalty"] == 1.1);
+    CHECK(view["presence_penalty"] == 1.5);
+    CHECK(view["seed"] == 42);
+
+    // A value the config's rules refuse is refused here too, and nothing lands.
+    const HttpResponse refused = admin_create_backend(
+        fixture.context(),
+        post(nlohmann::json{
+            {"name", "other"}, {"type", "llamacpp"}, {"model_path", "/m/a.gguf"}, {"top_p", 1.5}}));
+    CHECK(refused.status >= 400);
+    CHECK(refused.body.find("top_p") != std::string::npos);
+    const HttpResponse typed = admin_create_backend(
+        fixture.context(),
+        post(nlohmann::json{
+            {"name", "other"}, {"type", "llamacpp"}, {"model_path", "/m/a.gguf"}, {"top_k", 2.5}}));
+    CHECK(typed.status == 400);
+    CHECK(Fixture::bytes(fixture.http_config).find("other:") == std::string::npos);
+}
+
 TEST_CASE("an HTTP add-backend is byte-identical to the CLI's on the same file",
           "[httpserver][admin][parity]") {
     // The parity invariant's first end-to-end proof: not "the same fields",

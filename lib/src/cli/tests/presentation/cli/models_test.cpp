@@ -1059,3 +1059,63 @@ TEST_CASE("info on a whole model, or nothing stored, yields nothing for the call
     CHECK(store.info("org--m/gguf/999999999999").empty());
     CHECK(store.info("no-such-backend").empty());
 }
+
+TEST_CASE("info shows what a local model samples with, and where each value came from",
+          "[commands][models][info][sampling]") {
+    // 26h: the file's own recommendation, the family's card below it, the
+    // config above both.
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        ("apogee-models-info-sampling-" + std::to_string(std::random_device{}()) + ".gguf");
+    {
+        apogee::testing::GgufBuilder builder;
+        builder.magic().u32(3).u64(1).u64(3);
+        builder.string_kv("general.architecture", "qwen35");
+        builder.f32_kv("general.sampling.temp", 1.0F);
+        builder.f32_kv("general.sampling.top_p", 0.95F);
+        builder.tensor("token_embd.weight");
+        REQUIRE(builder.write_to(path));
+    }
+    Config config = sample_config();
+    BackendConfig local;
+    local.type = BackendType::LlamaCpp;
+    local.model_path = path.string();
+    local.seed = 42;
+    config.backends["local"] = local;
+    BackendConfig pinned = local;
+    pinned.temperature = 0.0;
+    config.backends["pinned"] = pinned;
+
+    const std::string body = render_model_info(config, "local");
+    CHECK(body.find("sampling:     temperature 1 (model file) · top-p 0.95 (model file) · "
+                    "top-k 20 (family)") != std::string::npos);
+    CHECK(body.find("seed 42 (config)") != std::string::npos);
+    CHECK(body.find("family values from the Qwen3 model card") != std::string::npos);
+    // Asked for greedy, it says so rather than listing cuts it never applies.
+    CHECK(
+        render_model_info(config, "pinned").find("sampling:     greedy, temperature 0 (config)") !=
+        std::string::npos);
+    std::error_code code;
+    std::filesystem::remove(path, code);
+}
+
+TEST_CASE("info on a cloud backend says which local-only knobs it does not send",
+          "[commands][models][info][sampling]") {
+    Config config = sample_config();
+    BackendConfig cloud;
+    cloud.type = BackendType::Anthropic;
+    cloud.model = "claude-sonnet-5";
+    cloud.temperature = 0.5;
+    cloud.top_k = 40;
+    cloud.seed = 1;
+    config.backends["cloud"] = cloud;
+    const std::string body = render_model_info(config, "cloud");
+    CHECK(body.find("sampling:     top_k, seed set but not sent -- this anthropic backend "
+                    "samples with the temperature alone") != std::string::npos);
+
+    BackendConfig plain = cloud;
+    plain.top_k.reset();
+    plain.seed.reset();
+    config.backends["plain"] = plain;
+    CHECK(render_model_info(config, "plain").find("sampling:") == std::string::npos);
+}

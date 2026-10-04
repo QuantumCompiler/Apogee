@@ -403,3 +403,69 @@ TEST_CASE("a stream shorter than it claims fails inside a skip, as a reason",
     CHECK_FALSE(short_tail.parsed);
     CHECK(short_tail.parse_error == "could not read the file");
 }
+
+TEST_CASE("a file's own sampling recommendation is read, whatever its number types",
+          "[models][gguf][sampling]") {
+    // What a conversion writes from generation_config.json (26h): floats for
+    // the temperature and the cuts, an integer for top-k -- and the read
+    // stays in step with the keys around them.
+    Builder builder;
+    builder.magic().u32(3).u64(1).u64(7);
+    builder.string_kv("general.architecture", "qwen3vl");
+    builder.u32_kv("general.sampling.top_k", 20);
+    builder.f32_kv("general.sampling.top_p", 0.8F);
+    builder.f32_kv("general.sampling.temp", 0.7F);
+    builder.f32_kv("general.sampling.min_p", 0.05F);
+    builder.f32_kv("general.sampling.penalty_repeat", 1.1F);
+    // A sampling key nothing here uses is stepped over.
+    builder.f32_kv("general.sampling.mirostat_tau", 5.0F);
+    builder.tensor("token_embd.weight");
+    const GgufInfo info = inspect_bytes(builder.bytes(), "sampling");
+    REQUIRE(info.parsed);
+    CHECK(info.architecture == "qwen3vl");
+    REQUIRE(info.sampling.temperature.has_value());
+    CHECK(*info.sampling.temperature == static_cast<double>(0.7F));
+    CHECK(info.sampling.top_p == static_cast<double>(0.8F));
+    CHECK(info.sampling.top_k == 20);
+    CHECK(info.sampling.min_p == static_cast<double>(0.05F));
+    CHECK(info.sampling.repeat_penalty == static_cast<double>(1.1F));
+    CHECK(info.tensors == 1);
+}
+
+TEST_CASE("a file that recommends no sampling leaves every value unset",
+          "[models][gguf][sampling]") {
+    const GgufInfo info = inspect_bytes(well_formed(), "no-sampling");
+    REQUIRE(info.parsed);
+    CHECK_FALSE(info.sampling.temperature.has_value());
+    CHECK_FALSE(info.sampling.top_p.has_value());
+    CHECK_FALSE(info.sampling.top_k.has_value());
+    CHECK_FALSE(info.sampling.min_p.has_value());
+    CHECK_FALSE(info.sampling.repeat_penalty.has_value());
+}
+
+TEST_CASE("a sampling key of the wrong type is stepped over, not misread",
+          "[models][gguf][sampling]") {
+    // A string where a number belongs reads as no recommendation; the read
+    // continues past it.
+    Builder builder;
+    builder.magic().u32(3).u64(1).u64(3);
+    builder.string_kv("general.sampling.temp", "warm");
+    builder.f32_kv("general.sampling.top_p", 0.9F);
+    builder.string_kv("general.architecture", "llama");
+    builder.tensor("token_embd.weight");
+    const GgufInfo info = inspect_bytes(builder.bytes(), "sampling-typed");
+    REQUIRE(info.parsed);
+    CHECK_FALSE(info.sampling.temperature.has_value());
+    CHECK(info.sampling.top_p == static_cast<double>(0.9F));
+    CHECK(info.architecture == "llama");
+}
+
+TEST_CASE("a header that fails to read carries no sampling", "[models][gguf][sampling]") {
+    Builder builder;
+    builder.magic().u32(3).u64(1).u64(2);
+    builder.f32_kv("general.sampling.temp", 0.7F);
+    builder.u32(42);  // a key whose length runs past the end
+    const GgufInfo info = inspect_bytes(builder.bytes(), "sampling-truncated");
+    REQUIRE_FALSE(info.parsed);
+    CHECK_FALSE(info.sampling.temperature.has_value());
+}

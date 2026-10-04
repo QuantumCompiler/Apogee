@@ -281,7 +281,9 @@ back to here, an unset helper resolves as `models.default` does.
 The twin of `apogee config add-backend`. Body: `name` and `type` (required),
 then any of `model`, `model_path`, `api_key`, `embedding_model`,
 `system_prompt`, `context_size`, `cache_type` (a local model's attention
-cache: `f16`, `q8_0` or `q4_0`), `max_tokens`, `temperature`, and `force`
+cache: `f16`, `q8_0` or `q4_0`), `max_tokens`, `temperature`, a local model's
+sampling beyond it -- `top_p`, `top_k`, `min_p`, `repeat_penalty`,
+`presence_penalty`, `seed` (each checked by the config's own rules) -- and `force`
 (the `--force` twin: replace an existing entry). `201` with the view; `409`
 (`type: conflict`) on a name collision without `force`; `400` on a bad type,
 cache type or body.

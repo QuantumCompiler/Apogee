@@ -248,6 +248,24 @@ Lines format_backend_entry(std::string_view name, const BackendConfig& backend,
     if (backend.temperature.has_value()) {
         field("temperature", number_scalar(*backend.temperature));
     }
+    if (backend.top_p.has_value()) {
+        field("top_p", number_scalar(*backend.top_p));
+    }
+    if (backend.top_k.has_value()) {
+        field("top_k", std::to_string(*backend.top_k));
+    }
+    if (backend.min_p.has_value()) {
+        field("min_p", number_scalar(*backend.min_p));
+    }
+    if (backend.repeat_penalty.has_value()) {
+        field("repeat_penalty", number_scalar(*backend.repeat_penalty));
+    }
+    if (backend.presence_penalty.has_value()) {
+        field("presence_penalty", number_scalar(*backend.presence_penalty));
+    }
+    if (backend.seed.has_value()) {
+        field("seed", std::to_string(*backend.seed));
+    }
     if (!backend.system_prompt.empty()) {
         field("system_prompt", yaml_scalar(backend.system_prompt));
     }

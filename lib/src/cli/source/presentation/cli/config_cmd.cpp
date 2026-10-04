@@ -375,6 +375,30 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
         return backend->temperature.has_value() ? std::to_string(*backend->temperature)
                                                 : std::string{};
     }
+    const auto real = [](const std::optional<double>& value) {
+        return value.has_value() ? std::to_string(*value) : std::string{};
+    };
+    const auto whole = [](const std::optional<std::int64_t>& value) {
+        return value.has_value() ? std::to_string(*value) : std::string{};
+    };
+    if (field == "top_p") {
+        return real(backend->top_p);
+    }
+    if (field == "top_k") {
+        return whole(backend->top_k);
+    }
+    if (field == "min_p") {
+        return real(backend->min_p);
+    }
+    if (field == "repeat_penalty") {
+        return real(backend->repeat_penalty);
+    }
+    if (field == "presence_penalty") {
+        return real(backend->presence_penalty);
+    }
+    if (field == "seed") {
+        return whole(backend->seed);
+    }
     return std::nullopt;
 }
 
@@ -393,12 +417,24 @@ struct AddBackendFlags {
     std::int64_t context_size = 0;
     std::int64_t max_tokens = 0;
     double temperature = 0.0;
+    double top_p = 0.0;
+    std::int64_t top_k = 0;
+    double min_p = 0.0;
+    double repeat_penalty = 0.0;
+    double presence_penalty = 0.0;
+    std::int64_t seed = 0;
     bool force = false;
 
     CLI::Option* type_option = nullptr;
     CLI::Option* context_size_option = nullptr;
     CLI::Option* max_tokens_option = nullptr;
     CLI::Option* temperature_option = nullptr;
+    CLI::Option* top_p_option = nullptr;
+    CLI::Option* top_k_option = nullptr;
+    CLI::Option* min_p_option = nullptr;
+    CLI::Option* repeat_penalty_option = nullptr;
+    CLI::Option* presence_penalty_option = nullptr;
+    CLI::Option* seed_option = nullptr;
 };
 
 /// A name the model store knows fills what the flags leave open (M7): a
@@ -499,6 +535,20 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
         cmd->add_option("--max-tokens", flags->max_tokens, "Maximum tokens to generate");
     flags->temperature_option =
         cmd->add_option("--temperature", flags->temperature, "Sampling temperature");
+    // A local model's sampling beyond the temperature (26h); the config's own
+    // rules check each value when the entry is written.
+    flags->top_p_option =
+        cmd->add_option("--top-p", flags->top_p, "Nucleus sampling: the probability mass kept");
+    flags->top_k_option =
+        cmd->add_option("--top-k", flags->top_k, "Sample from the k likeliest tokens (0: all)");
+    flags->min_p_option =
+        cmd->add_option("--min-p", flags->min_p, "Drop tokens below this share of the likeliest");
+    flags->repeat_penalty_option = cmd->add_option("--repeat-penalty", flags->repeat_penalty,
+                                                   "Penalty on repeated tokens (1: none)");
+    flags->presence_penalty_option = cmd->add_option("--presence-penalty", flags->presence_penalty,
+                                                     "Penalty on tokens already present");
+    flags->seed_option =
+        cmd->add_option("--seed", flags->seed, "A fixed sampling seed, so answers repeat");
     cmd->add_flag("-f,--force", flags->force, "Replace an existing entry with this name");
 
     cmd->callback([&context, flags]() {
@@ -532,6 +582,24 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
         }
         if (flags->temperature_option->count() > 0) {
             backend.temperature = flags->temperature;
+        }
+        if (flags->top_p_option->count() > 0) {
+            backend.top_p = flags->top_p;
+        }
+        if (flags->top_k_option->count() > 0) {
+            backend.top_k = flags->top_k;
+        }
+        if (flags->min_p_option->count() > 0) {
+            backend.min_p = flags->min_p;
+        }
+        if (flags->repeat_penalty_option->count() > 0) {
+            backend.repeat_penalty = flags->repeat_penalty;
+        }
+        if (flags->presence_penalty_option->count() > 0) {
+            backend.presence_penalty = flags->presence_penalty;
+        }
+        if (flags->seed_option->count() > 0) {
+            backend.seed = flags->seed;
         }
 
         apply_edit(path, [flags, &backend](std::string_view content) {
@@ -810,7 +878,8 @@ std::vector<std::string> config_keys(const harness::Config& config) {
     for (const std::string& name : config.backend_names()) {
         entry("backends", name,
               {"type", "api_key", "model", "model_path", "mmproj_path", "embedding_model",
-               "system_prompt", "context_size", "cache_type", "max_tokens", "temperature"});
+               "system_prompt", "context_size", "cache_type", "max_tokens", "temperature", "top_p",
+               "top_k", "min_p", "repeat_penalty", "presence_penalty", "seed"});
     }
     for (const std::string& name : config.mcp_server_names()) {
         entry("mcp_servers", name, {"command", "enabled", "args", "env"});

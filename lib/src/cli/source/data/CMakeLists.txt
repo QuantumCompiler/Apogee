@@ -151,6 +151,8 @@ apogee_add_module(backends
     backends/native_tool_calls.cpp
     backends/model_profile.h
     backends/model_profile.cpp
+    backends/sampling.h
+    backends/sampling.cpp
     backends/chat_template.h
     backends/chat_template.cpp
     backends/llamacpp_tokens.h

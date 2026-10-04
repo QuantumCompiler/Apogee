@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <istream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -103,6 +104,17 @@ struct AttentionHeader {
     bool latent_attention = false;
 };
 
+/// A model file's own sampling recommendation (26h): the `general.sampling.*`
+/// keys a conversion writes from the model's `generation_config.json`. Each is
+/// unset when the file does not say -- most files say some and not others.
+struct GgufSampling {
+    std::optional<double> temperature;     ///< `general.sampling.temp`
+    std::optional<double> top_p;           ///< `general.sampling.top_p`
+    std::optional<std::int64_t> top_k;     ///< `general.sampling.top_k`
+    std::optional<double> min_p;           ///< `general.sampling.min_p`
+    std::optional<double> repeat_penalty;  ///< `general.sampling.penalty_repeat`
+};
+
 /// What a header read found. `parsed == false` always carries a `parse_error`.
 struct GgufInfo {
     /// The header was understood end to end.
@@ -157,6 +169,9 @@ struct GgufInfo {
     /// and `clip.has_audio_encoder` (26b). False on a file that is not one.
     bool projector_vision = false;
     bool projector_audio = false;
+
+    /// How the model's authors ask for it to be sampled, where the file says.
+    GgufSampling sampling;
 
     /// Whether the weights are already quantized.
     ///

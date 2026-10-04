@@ -86,6 +86,12 @@ enum class KvCacheType : std::uint8_t { F16, Q8_0, Q4_0 };
 /// tools outside Apogee's gate, so an agent's tool policy cannot hold there.
 [[nodiscard]] bool is_vendor_cli(BackendType type) noexcept;
 
+/// The largest `top_k` and `seed` a backend may name (26h). A vocabulary runs
+/// to a few hundred thousand tokens, and llama.cpp reads the 32-bit maximum as
+/// "draw a seed", so a fixed one stops just short of it.
+inline constexpr std::int64_t kMaxTopK = 1'000'000;
+inline constexpr std::int64_t kMaxSeed = 4'294'967'294;
+
 /// One entry under `backends:`.
 ///
 /// Which fields matter depends on the type -- api_key for the cloud types,
@@ -138,6 +144,19 @@ struct BackendConfig {
 
     std::optional<std::int64_t> max_tokens;
     std::optional<double> temperature;
+
+    /// A local backend's sampling beyond the temperature (26h). Each unset
+    /// takes the model file's own recommendation, then its family's published
+    /// default, then llama.cpp's neutral value; a cloud backend ignores them,
+    /// and `models info` says so.
+    std::optional<double> top_p;
+    std::optional<std::int64_t> top_k;
+    std::optional<double> min_p;
+    std::optional<double> repeat_penalty;
+    std::optional<double> presence_penalty;
+    /// A fixed sampling seed, so sampled output repeats. Unset draws a fresh
+    /// one for every generation; at temperature 0 it does not matter.
+    std::optional<std::int64_t> seed;
 
     /// Vendor-CLI backends: the binary to spawn, resolved from PATH when it
     /// has no separator. Apogee never installs, bundles, or modifies it -- the

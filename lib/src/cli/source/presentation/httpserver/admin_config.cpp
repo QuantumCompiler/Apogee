@@ -126,6 +126,20 @@ nlohmann::json backend_view(std::string_view name, const harness::BackendConfig&
     if (backend.temperature.has_value()) {
         out["temperature"] = *backend.temperature;
     }
+    for (const auto& [key, value] :
+         {std::pair{"top_p", backend.top_p}, std::pair{"min_p", backend.min_p},
+          std::pair{"repeat_penalty", backend.repeat_penalty},
+          std::pair{"presence_penalty", backend.presence_penalty}}) {
+        if (value.has_value()) {
+            out[key] = *value;
+        }
+    }
+    if (backend.top_k.has_value()) {
+        out["top_k"] = *backend.top_k;
+    }
+    if (backend.seed.has_value()) {
+        out["seed"] = *backend.seed;
+    }
     if (!backend.binary.empty()) {
         out["binary"] = backend.binary;
     }
@@ -215,16 +229,15 @@ HttpResponse admin_create_backend(const AdminConfigContext& context, const HttpR
     if (!error.empty()) {
         return error_response(400, error);
     }
-    for (const char* key : {"context_size", "max_tokens"}) {
+    for (const auto& [key, slot] :
+         {std::pair{"context_size", &backend.context_size},
+          std::pair{"max_tokens", &backend.max_tokens}, std::pair{"top_k", &backend.top_k},
+          std::pair{"seed", &backend.seed}}) {
         if (const auto it = body.find(key); it != body.end() && !it->is_null()) {
             if (!it->is_number_integer()) {
                 return error_response(400, std::string{key} + " must be an integer");
             }
-            if (std::string_view{key} == "context_size") {
-                backend.context_size = it->get<std::int64_t>();
-            } else {
-                backend.max_tokens = it->get<std::int64_t>();
-            }
+            *slot = it->get<std::int64_t>();
         }
     }
     if (const std::optional<std::string> cache = optional_string(body, "cache_type", error);
@@ -238,11 +251,18 @@ HttpResponse admin_create_backend(const AdminConfigContext& context, const HttpR
     if (!error.empty()) {
         return error_response(400, error);
     }
-    if (const auto it = body.find("temperature"); it != body.end() && !it->is_null()) {
-        if (!it->is_number()) {
-            return error_response(400, "temperature must be a number");
+    // The sampling knobs (26h) as `config add-backend` takes them; the
+    // config's own rules check each value when the entry is written.
+    for (const auto& [key, slot] :
+         {std::pair{"temperature", &backend.temperature}, std::pair{"top_p", &backend.top_p},
+          std::pair{"min_p", &backend.min_p}, std::pair{"repeat_penalty", &backend.repeat_penalty},
+          std::pair{"presence_penalty", &backend.presence_penalty}}) {
+        if (const auto it = body.find(key); it != body.end() && !it->is_null()) {
+            if (!it->is_number()) {
+                return error_response(400, std::string{key} + " must be a number");
+            }
+            *slot = it->get<double>();
         }
-        backend.temperature = it->get<double>();
     }
     bool force = false;
     if (const auto it = body.find("force"); it != body.end() && !it->is_null()) {

@@ -118,6 +118,30 @@ std::optional<double> number(const YAML::Node& node, std::string_view origin,
     }
 }
 
+/// A number at `node` within a range, unset when absent. `range` is how the
+/// rule reads in the failure ("between 0 and 1"), since a bound may be open.
+template <typename Accept>
+std::optional<double> number_in(const YAML::Node& node, std::string_view origin,
+                                const std::string& key, Accept accept, std::string_view range) {
+    const std::optional<double> value = number(node, origin, key);
+    if (value.has_value() && !accept(*value)) {
+        fail(origin, key + ": must be " + std::string{range});
+    }
+    return value;
+}
+
+/// A whole number at `node` in `[low, high]`, unset when absent.
+std::optional<std::int64_t> integer_in(const YAML::Node& node, std::string_view origin,
+                                       const std::string& key, std::int64_t low,
+                                       std::int64_t high) {
+    const std::optional<std::int64_t> value = integer(node, origin, key);
+    if (value.has_value() && (*value < low || *value > high)) {
+        fail(origin,
+             key + ": must be between " + std::to_string(low) + " and " + std::to_string(high));
+    }
+    return value;
+}
+
 BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
                             const std::string& name) {
     const std::string where = "backends." + name;
@@ -158,6 +182,20 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     }
     backend.max_tokens = integer(node["max_tokens"], origin, where + ".max_tokens");
     backend.temperature = number(node["temperature"], origin, where + ".temperature");
+    backend.top_p = number_in(
+        node["top_p"], origin, where + ".top_p", [](double p) { return p > 0.0 && p <= 1.0; },
+        "above 0 and at most 1");
+    backend.top_k = integer_in(node["top_k"], origin, where + ".top_k", 0, kMaxTopK);
+    backend.min_p = number_in(
+        node["min_p"], origin, where + ".min_p", [](double p) { return p >= 0.0 && p <= 1.0; },
+        "between 0 and 1");
+    backend.repeat_penalty = number_in(
+        node["repeat_penalty"], origin, where + ".repeat_penalty", [](double p) { return p > 0.0; },
+        "above 0 (1 is no penalty)");
+    backend.presence_penalty = number_in(
+        node["presence_penalty"], origin, where + ".presence_penalty",
+        [](double p) { return p >= -2.0 && p <= 2.0; }, "between -2 and 2");
+    backend.seed = integer_in(node["seed"], origin, where + ".seed", 0, kMaxSeed);
     backend.binary = scalar(node["binary"], origin, where + ".binary");
     backend.mode = scalar(node["mode"], origin, where + ".mode");
     backend.host = scalar(node["host"], origin, where + ".host");
