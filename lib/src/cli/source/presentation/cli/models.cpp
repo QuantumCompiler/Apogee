@@ -10,7 +10,12 @@
 #include <optional>
 #include <sstream>
 
+#include "backends/anthropic_wire.h"
+#include "backends/google.h"
+#include "backends/google_wire.h"
 #include "backends/model_profile.h"
+#include "backends/openai.h"
+#include "backends/openai_wire.h"
 #include "backends/sampling.h"
 #include "cli/models_pull.h"
 #include "contracts/layout.h"
@@ -593,6 +598,63 @@ void render_sampling(std::ostream& out, const models::GgufInfo& info,
     out << "sampling:     " << backends::describe_sampling(resolved) << "\n";
 }
 
+/// `info`'s thinking line (26i): the mode and budget a conversation starts
+/// with -- each the config's or the default -- and what this backend does
+/// with them, or that it has no such control.
+[[nodiscard]] std::string describe_thinking(const harness::BackendConfig& backend,
+                                            const models::GgufInfo* header = nullptr) {
+    const harness::ThinkingMode mode = backend.thinking.value_or(harness::ThinkingMode::On);
+    std::string line = std::string{harness::to_string(mode)} +
+                       (backend.thinking.has_value() ? " (config)" : " (default)");
+    line += backend.thinking_budget.has_value()
+                ? ", at most " + std::to_string(*backend.thinking_budget) + " tokens (config)"
+                : ", no budget";
+    switch (backend.type) {
+        case harness::BackendType::LlamaCpp:
+            // What the model's own template says it can do -- a switch to
+            // render, reasoning to count, or neither.
+            if (header == nullptr || !header->has_chat_template) {
+                return line + " -- off renders the template's own switch, where it has one";
+            }
+            if (header->template_thinking.switchable) {
+                return line +
+                       " -- off renders the template's own switch; a budget counts "
+                       "between its reasoning tags";
+            }
+            if (header->template_thinking.reasons) {
+                return line +
+                       " -- the template has no off switch, so this model thinks as "
+                       "trained; a budget counts between its reasoning tags";
+            }
+            return line + " -- the template names no reasoning: nothing to switch off or count";
+        case harness::BackendType::Anthropic:
+            return line + " -- Anthropic thinks only with a budget, at least " +
+                   std::to_string(backends::anthropic::kMinThinkingBudget) +
+                   " tokens; off sends none";
+        case harness::BackendType::OpenAI: {
+            const std::string model =
+                backend.model.empty() ? backends::OpenAIProvider::Options{}.model : backend.model;
+            return backends::openai::is_reasoning_model(model)
+                       ? line + " -- sent as the reasoning effort; off is the model's lowest"
+                       : line + " -- " + model + " does not reason, so nothing is sent";
+        }
+        case harness::BackendType::Google: {
+            const std::string model =
+                backend.model.empty() ? backends::GoogleProvider::Options{}.model : backend.model;
+            return backends::google::model_thinks(model)
+                       ? line + " -- sent as Gemini's thinking budget; off asks for the least"
+                       : line + " -- " + model + " does not think, so nothing is sent";
+        }
+        case harness::BackendType::ClaudeCli:
+        case harness::BackendType::CodexCli:
+        case harness::BackendType::GeminiCli:
+        case harness::BackendType::OllamaCli:
+        case harness::BackendType::Mock:
+            break;
+    }
+    return line + " -- no control here: this backend thinks as it decides";
+}
+
 /// The local-only sampling knobs `backend` sets (26h), which a cloud backend
 /// does not send: its vendor is sampled with the temperature alone.
 [[nodiscard]] std::string unsent_sampling(const harness::BackendConfig& backend) {
@@ -666,6 +728,7 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
             << "\n";
         render_window(out, info, backend);
         render_sampling(out, info, backend, path);
+        out << "thinking:     " << describe_thinking(backend, &info) << "\n";
     }
     if (info.is_projector()) {
         out << "note:         a multimodal projector -- belongs on mmproj_path, not model_path\n";
@@ -809,6 +872,7 @@ std::string render_model_info(const harness::Config& config, std::string_view na
         // A cloud backend has no file to inspect, and saying so beats printing
         // empty GGUF fields that read like a failed read.
         out << "source:       remote (no local file to inspect)\n";
+        out << "thinking:     " << describe_thinking(value) << "\n";
         if (const std::string unsent = unsent_sampling(value); !unsent.empty()) {
             out << "sampling:     " << unsent << " set but not sent -- this "
                 << harness::to_string(value.type)

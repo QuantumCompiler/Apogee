@@ -6,6 +6,8 @@
 #include <vector>
 
 struct llama_model;
+struct llama_sampler;
+struct llama_vocab;
 
 /// llama.cpp's own chat layer (`common/chat.h`, the one llama-server runs),
 /// behind an interface of standard types.
@@ -56,6 +58,10 @@ struct Inputs {
     /// The template's own switch. Off asks a thinking model to answer
     /// without reasoning first, where its template has that switch.
     bool enable_thinking = true;
+    /// A template's `reasoning_effort` -- gpt-oss's switch, which has no
+    /// off, only `low` (26i). Empty passes none; a template without the
+    /// variable ignores it.
+    std::string reasoning_effort;
     /// Off renders the messages alone, without the assistant's opening:
     /// a prefix of the full prompt (25c measures where a message starts).
     bool add_generation_prompt = true;
@@ -117,6 +123,11 @@ struct Rendered {
     /// the first sample.
     std::string generation_prompt;
     bool supports_thinking = false;
+    /// Where the format's reasoning opens and the ways it may close
+    /// (`<think>`, `</think>`) -- what a thinking budget counts between
+    /// (26i). Empty where the format has none.
+    std::string thinking_start_tag;
+    std::vector<std::string> thinking_end_tags;
     /// The format's name, for a diagnostic.
     std::string format;
     std::unique_ptr<ReplyParser> parser;
@@ -147,6 +158,20 @@ public:
 private:
     std::unique_ptr<Impl> impl_;
 };
+
+/// The reasoning budget llama-server runs (`common/reasoning-budget.h`, 26i):
+/// a sampler that counts the tokens between `start` and any of `ends`, and
+/// past `budget` forces the first end -- the model must then answer. It is fed
+/// `prefill`, the reply's opening the prompt already holds, so a prompt that
+/// opens the reasoning itself starts it counting. Null when `start` or `ends`
+/// tokenizes to nothing. The caller owns it until it joins a chain.
+[[nodiscard]] llama_sampler* reasoning_budget(const llama_vocab* vocab, const std::string& start,
+                                              const std::vector<std::string>& ends,
+                                              std::int32_t budget, const std::string& prefill);
+
+/// Whether a sampler `reasoning_budget` made has run out and is ending the
+/// reasoning -- true from the moment it starts forcing the close.
+[[nodiscard]] bool reasoning_budget_spent(const llama_sampler* sampler);
 
 /// What free memory holds of the model at `path` (26a): llama.cpp's own
 /// fitter (`common/fit.h`, `common_fit_params`, the one llama-server runs),

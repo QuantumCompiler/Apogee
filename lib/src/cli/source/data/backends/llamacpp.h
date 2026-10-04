@@ -399,6 +399,9 @@ private:
     mutable bool template_noticed_ = false;
     /// The schema-fallback reasons already said (26f).
     mutable std::set<std::string, std::less<>> schema_noticed_;
+    /// Whether a thinking budget this model's format cannot count has been
+    /// said this conversation (26i).
+    mutable bool budget_noticed_ = false;
     /// `general.architecture` of the loaded model, empty before the first load.
     mutable std::string architecture_;
     mutable const ModelProfile* profile_ = nullptr;

@@ -58,6 +58,7 @@ public:
 
     void on_thinking() override;
     void on_thinking_token(std::string_view chunk) override;
+    void on_thinking_budget_reached() override;
     void on_tool_status(std::string_view detail) override;
     void on_notice(std::string_view text) override;
     /// Printed, and kept, only under `--verbose`: in an ordinary run the

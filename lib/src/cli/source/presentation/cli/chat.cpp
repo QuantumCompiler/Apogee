@@ -79,6 +79,9 @@ struct ChatFlags {
     CLI::Option* rerank_option = nullptr;
     double temperature = 0.0;
     std::int64_t max_tokens = 0;
+    /// Whether the model thinks first, and for how long (26i).
+    std::string think;
+    std::int64_t think_budget = 0;
     bool tools = false;
     bool search = false;
     bool no_color = false;
@@ -98,6 +101,7 @@ struct ChatFlags {
 
     CLI::Option* temperature_option = nullptr;
     CLI::Option* max_tokens_option = nullptr;
+    CLI::Option* think_budget_option = nullptr;
 };
 
 }  // namespace
@@ -203,6 +207,11 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     loop_options.model = session.backend;
     loop_options.temperature = session.params.temperature;
     loop_options.max_tokens = session.params.max_tokens;
+    // Whether the model thinks first (26i): `/think` or the flag, else the
+    // backend's; `auto` asks the utility model, when one is set.
+    loop_options.thinking = resolve_thinking(
+        session.params.thinking, session.params.thinking_budget, harness.config(), session.backend);
+    loop_options.thinking_judge = named_utility(harness.config());
     loop_options.stream_answer = true;
     // A large tool result is summarised by the utility model, when one is
     // set, before the chat model reads it (26b).
@@ -500,6 +509,13 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         cmd->add_option("-t,--temperature", flags->temperature, "Sampling temperature");
     flags->max_tokens_option =
         cmd->add_option("-n,--max-tokens", flags->max_tokens, "Maximum tokens per reply");
+    cmd->add_option("--think", flags->think,
+                    "Whether a reasoning model thinks first: on, off, or auto (per question)")
+        ->check(CLI::IsMember({"on", "off", "auto"}));
+    flags->think_budget_option =
+        cmd->add_option("--think-budget", flags->think_budget,
+                        "The most tokens a reasoning model may think for before it answers")
+            ->check(CLI::Range(std::int64_t{0}, harness::kMaxThinkingBudget));
     cmd->add_flag("--tools", flags->tools, "Let the model call tools");
     cmd->add_flag("--search", flags->search, "Enable the provider's server-side web search");
     cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
@@ -642,6 +658,12 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         }
         if (flags->max_tokens_option->count() > 0) {
             session.params.max_tokens = flags->max_tokens;
+        }
+        if (!flags->think.empty()) {
+            session.params.thinking = harness::thinking_mode_from_string(flags->think);
+        }
+        if (flags->think_budget_option->count() > 0) {
+            session.params.thinking_budget = flags->think_budget;
         }
         if (!flags->system_prompt.empty()) {
             session.params.system_prompt = flags->system_prompt;
@@ -1087,6 +1109,27 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                         } catch (const std::exception&) {
                             reporter.status().print_line(style.tag(ansi::Role::Error) +
                                                          " not a number: '" + argument + "'");
+                        }
+                        break;
+                    case ChatVerb::Think:
+                        if (argument.empty()) {
+                            const harness::Thinking thinking = resolve_thinking(
+                                session.params.thinking, session.params.thinking_budget,
+                                harness.config(), session.backend);
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Apogee) +
+                                " thinking: " + std::string{harness::to_string(thinking.mode)} +
+                                (thinking.budget.has_value()
+                                     ? ", at most " + std::to_string(*thinking.budget) + " tokens"
+                                     : std::string{}));
+                        } else if (const std::optional<harness::ThinkingMode> mode =
+                                       harness::thinking_mode_from_string(argument);
+                                   mode.has_value()) {
+                            session.params.thinking = mode;
+                        } else {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " not a thinking mode: '" + argument +
+                                                         "' (on, off or auto)");
                         }
                         break;
                     case ChatVerb::MaxTokens:

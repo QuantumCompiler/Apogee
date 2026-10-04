@@ -120,7 +120,7 @@ constexpr std::int64_t kReasonedTokens = 4096;
                                     bool& reasoning, const harness::CancellationToken& cancellation,
                                     std::string& error) {
     if (reasoning) {
-        request.transient.skip_reasoning = false;
+        request.thinking.mode = harness::ThinkingMode::On;
         request.max_tokens =
             std::max<std::int64_t>(request.max_tokens.value_or(0), kReasonedTokens);
         return ask(harness, request, cancellation, error);
@@ -730,7 +730,7 @@ harness::ChatRequest describe_request(const std::string& backend, const std::str
     // Not a turn of the conversation: a local model reads it on its own
     // context, and the chat's cache is untouched.
     request.transient.side_request = true;
-    request.transient.skip_reasoning = true;
+    request.thinking.mode = harness::ThinkingMode::Off;
     return request;
 }
 
@@ -745,7 +745,7 @@ harness::ChatRequest transcribe_request(const std::string& backend, std::string_
     request.max_tokens = kTranscribeTokens;
     request.temperature = 0.0;
     request.transient.side_request = true;
-    request.transient.skip_reasoning = true;
+    request.thinking.mode = harness::ThinkingMode::Off;
     return request;
 }
 

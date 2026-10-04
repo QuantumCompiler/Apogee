@@ -30,6 +30,11 @@ public:
     /// each tool call completes -- the resting state between tools.
     virtual void on_thinking() {}
 
+    /// The reasoning reached the turn's thinking budget and was ended there
+    /// (26i). Fires while the reasoning is still being shown, so the line
+    /// that summarises it can say so; at most once a model call.
+    virtual void on_thinking_budget_reached() {}
+
     /// One chunk of the model's live reasoning.
     ///
     /// Fires between on_thinking and the answer, and can fire on runs whose

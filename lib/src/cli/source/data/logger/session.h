@@ -35,6 +35,12 @@ struct InferenceParams {
     std::optional<double> temperature;
     std::optional<std::int64_t> max_tokens;
     std::string system_prompt;
+    /// Whether the model thinks first, and for how long (26i), as `--think`
+    /// or `/think` set them. Absent from an older file: unset, the backend's.
+    /// Saved as `think` and `think_budget` -- a setting, never thinking itself,
+    /// and named so a file holding any reasoning still stands out.
+    std::optional<harness::ThinkingMode> thinking;
+    std::optional<std::int64_t> thinking_budget;
 };
 
 /// Why a resume was imperfect.

@@ -89,6 +89,8 @@ public:
 
     void on_thinking() override;
     void on_thinking_token(std::string_view chunk) override;
+    /// A `thinking` event carrying `budget_reached: true` (26i).
+    void on_thinking_budget_reached() override;
     void on_tool_status(std::string_view detail) override;
     /// A `notice` event: `{"type":"notice","text":...}`.
     void on_notice(std::string_view text) override;

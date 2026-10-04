@@ -39,6 +39,15 @@ void JsonReporter::on_thinking() {
     write(event("thinking").dump());
 }
 
+void JsonReporter::on_thinking_budget_reached() {
+    // The same event the turn's thinking opened with, now saying the
+    // reasoning was ended at its budget (26i) -- an added field, as the
+    // protocol grows.
+    nlohmann::json object = event("thinking");
+    object["budget_reached"] = true;
+    write(object.dump());
+}
+
 void JsonReporter::on_thinking_token(std::string_view chunk) {
     if (chunk.empty()) {
         return;

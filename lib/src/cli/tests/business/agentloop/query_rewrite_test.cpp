@@ -65,7 +65,7 @@ TEST_CASE("the rewrite request shows the conversation, the question once, as a s
         rewrite_request("helper", kFollowUp, "How big is the second one?");
     CHECK(request.model == "helper");
     CHECK(request.transient.side_request);
-    CHECK(request.transient.skip_reasoning);
+    CHECK(request.thinking.off());
     CHECK(request.max_tokens == 64);
     REQUIRE(request.messages.size() == 1);
     const std::string prompt = request.messages.front().content.plain_text();

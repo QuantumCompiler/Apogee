@@ -46,7 +46,7 @@ One JSON object per line on stdout. Every object has a `type`.
 | Event | Meaning |
 |---|---|
 | `session` | Once, first. Names the protocol version and the model. |
-| `thinking` | The model began reasoning. No text. |
+| `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, or the backend's `thinking_budget`). |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
 | `tool_status` | A tool is running, described in `text` for display. |
 | `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`). Show it and keep it; it never ends the turn. |

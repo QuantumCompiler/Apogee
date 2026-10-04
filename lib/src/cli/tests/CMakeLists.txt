@@ -126,6 +126,7 @@ add_library(apogee_tests_business OBJECT
     business/agentloop/attachments_test.cpp
     business/agentloop/media_test.cpp
     business/agentloop/question_test.cpp
+    business/agentloop/thinking_test.cpp
     business/tools/fs_test.cpp
     business/tools/shell_test.cpp
     business/tools/notes_test.cpp

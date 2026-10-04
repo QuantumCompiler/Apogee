@@ -45,6 +45,18 @@ struct RequestOptions {
 /// The effort band for a token budget: "" (off), "low", "medium", or "high".
 [[nodiscard]] std::string effort_for_budget(std::int64_t budget_tokens);
 
+/// Whether `model` reasons -- the o-series and gpt-5 on, its chat snapshot
+/// aside -- and so takes an effort at all (26i). Sent to any other model,
+/// the field is refused.
+[[nodiscard]] bool is_reasoning_model(std::string_view model) noexcept;
+
+/// A request's thinking as OpenAI's effort (26i): off is the model's lowest
+/// (`none` from gpt-5.1, `minimal` on gpt-5, `low` on the o-series), a
+/// budget its band, on with no budget the band of `configured`; nothing at
+/// all for a model that does not reason.
+[[nodiscard]] std::string effort_for(const harness::Thinking& thinking, std::string_view model,
+                                     std::int64_t configured);
+
 /// Builds the JSON body for POST /v1/responses.
 [[nodiscard]] nlohmann::json build_request(const harness::ChatRequest& request,
                                            const RequestOptions& options);

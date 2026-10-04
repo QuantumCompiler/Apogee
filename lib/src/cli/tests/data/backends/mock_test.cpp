@@ -258,6 +258,11 @@ TEST_CASE("placeholders expand against the request: the last tool result and the
     CHECK(
         apogee::backends::expand_mock_text("got {{last_tool_result}} under {{system}}", request) ==
         "got line \"quoted\"\nsecond under PERSONA");
+    // What thinking was asked for (26i).
+    CHECK(apogee::backends::expand_mock_text("{{thinking}}", request) == "on");
+    request.thinking =
+        apogee::harness::Thinking{.mode = apogee::harness::ThinkingMode::Off, .budget = 64};
+    CHECK(apogee::backends::expand_mock_text("{{thinking}}", request) == "off:64");
     // The :json forms are string literals, quotes included, so a scripted JSON
     // answer can carry a tool result verbatim.
     const std::string answer =

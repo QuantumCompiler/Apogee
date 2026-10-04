@@ -461,9 +461,22 @@ GgufInfo inspect_gguf(std::istream& in, std::uint64_t size) {
                 continue;
             }
             if (key == "tokenizer.chat_template") {
-                // Its presence is the fact; the template itself is not read.
                 info.has_chat_template = true;
-                skip_value(cursor, type);
+                if (type != ValueType::String) {
+                    skip_value(cursor, type);
+                    continue;
+                }
+                // Read only for what it says about reasoning (26i): whether
+                // the model can be asked not to think, and whether it names
+                // reasoning at all.
+                const std::string text = cursor.string();
+                info.template_thinking.switchable =
+                    text.find("enable_thinking") != std::string::npos ||
+                    text.find("reasoning_effort") != std::string::npos;
+                info.template_thinking.reasons =
+                    info.template_thinking.switchable ||
+                    text.find("<think>") != std::string::npos ||
+                    text.find("reasoning_content") != std::string::npos;
                 continue;
             }
             if (is_attention_key(key)) {
@@ -522,6 +535,7 @@ GgufInfo inspect_gguf(std::istream& in, std::uint64_t size) {
         info.architecture.clear();
         info.name.clear();
         info.has_chat_template = false;
+        info.template_thinking = {};
         info.projector_vision = false;
         info.projector_audio = false;
         info.sampling = {};

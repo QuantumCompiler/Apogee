@@ -266,6 +266,12 @@ Lines format_backend_entry(std::string_view name, const BackendConfig& backend,
     if (backend.seed.has_value()) {
         field("seed", std::to_string(*backend.seed));
     }
+    if (backend.thinking.has_value()) {
+        field("thinking", std::string{to_string(*backend.thinking)});
+    }
+    if (backend.thinking_budget.has_value()) {
+        field("thinking_budget", std::to_string(*backend.thinking_budget));
+    }
     if (!backend.system_prompt.empty()) {
         field("system_prompt", yaml_scalar(backend.system_prompt));
     }

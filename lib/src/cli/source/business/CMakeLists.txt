@@ -42,6 +42,8 @@ apogee_add_module(agentloop
     agentloop/tool_selection.cpp
     agentloop/tool_summary.h
     agentloop/tool_summary.cpp
+    agentloop/thinking.h
+    agentloop/thinking.cpp
     agentloop/rag.h
     agentloop/rag.cpp
     agentloop/graph_context.h

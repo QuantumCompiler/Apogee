@@ -154,6 +154,7 @@ indicator. The vocabulary is the same one the terminal status line shows.
 | `model_loading` / `model_ready` | `start` / `done` | `name` = backend | A local model is loading; loading finished. |
 | `notice` | `done` | `detail` = the line | Something the user should read that is neither progress nor an error: a local model whose chat template cannot take tools, so it is answering without them; a reply that did not match its template's format, kept as text with no tool call run; a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`). |
 | `thinking` | `start` | — | The model is working: the top of each loop iteration. |
+| `thinking_budget` | `done` | — | The model's reasoning reached its thinking budget and was ended there; the answer that follows had no more thought than that. |
 | `tool_call` | `start` / `done` | `name` = tool | A server-side tool call. |
 | `token_count` | `done` | `tokens`, `tokens_per_second`, `detail: "estimated"` when estimated | After the answer. |
 
@@ -283,8 +284,9 @@ then any of `model`, `model_path`, `api_key`, `embedding_model`,
 `system_prompt`, `context_size`, `cache_type` (a local model's attention
 cache: `f16`, `q8_0` or `q4_0`), `max_tokens`, `temperature`, a local model's
 sampling beyond it -- `top_p`, `top_k`, `min_p`, `repeat_penalty`,
-`presence_penalty`, `seed` (each checked by the config's own rules) -- and `force`
-(the `--force` twin: replace an existing entry). `201` with the view; `409`
+`presence_penalty`, `seed` (each checked by the config's own rules) -- whether
+its model reasons first, `thinking` (`on`, `off` or `auto`) and `thinking_budget`
+(tokens) -- and `force` (the `--force` twin: replace an existing entry). `201` with the view; `409`
 (`type: conflict`) on a name collision without `force`; `400` on a bad type,
 cache type or body.
 

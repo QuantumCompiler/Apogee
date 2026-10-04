@@ -116,7 +116,7 @@ harness::ChatRequest rewrite_request(const std::string& backend,
     // context, and the chat's cache is untouched.
     request.transient.side_request = true;
     // A reasoning model would think for hundreds of tokens before one line.
-    request.transient.skip_reasoning = true;
+    request.thinking.mode = harness::ThinkingMode::Off;
     return request;
 }
 

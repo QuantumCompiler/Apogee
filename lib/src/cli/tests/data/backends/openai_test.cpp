@@ -243,6 +243,48 @@ TEST_CASE("reasoning is requested with a summary, or not at all", "[backends][op
     CHECK(reasoning.at("summary") == "auto");
 }
 
+TEST_CASE("only a reasoning model is sent an effort", "[backends][openai][thinking]") {
+    using apogee::backends::openai::is_reasoning_model;
+    CHECK(is_reasoning_model("gpt-5"));
+    CHECK(is_reasoning_model("gpt-5-mini"));
+    CHECK(is_reasoning_model("gpt-5.1"));
+    CHECK(is_reasoning_model("o3-mini"));
+    CHECK(is_reasoning_model("o4-mini"));
+    CHECK_FALSE(is_reasoning_model("gpt-5-chat-latest"));
+    CHECK_FALSE(is_reasoning_model("gpt-4.1"));
+    CHECK_FALSE(is_reasoning_model("gpt-4o"));
+}
+
+TEST_CASE("a turn's thinking becomes OpenAI's effort", "[backends][openai][thinking]") {
+    using apogee::backends::openai::effort_for;
+    using apogee::harness::Thinking;
+    using apogee::harness::ThinkingMode;
+    const Thinking off{.mode = ThinkingMode::Off};
+    // Off is each generation's least.
+    CHECK(effort_for(off, "gpt-5", 4096) == "minimal");
+    CHECK(effort_for(off, "gpt-5-mini", 0) == "minimal");
+    CHECK(effort_for(off, "gpt-5.1", 0) == "none");
+    CHECK(effort_for(off, "o3", 0) == "low");
+    // On with a budget is its band; with none, the backend's own.
+    CHECK(effort_for(Thinking{.budget = 32000}, "gpt-5", 0) == "high");
+    CHECK(effort_for(Thinking{}, "gpt-5", 4096) == "medium");
+    CHECK(effort_for(Thinking{}, "gpt-5", 0).empty());
+    // A model that does not reason is sent nothing, whatever was asked.
+    CHECK(effort_for(off, "gpt-4.1", 0).empty());
+    CHECK(effort_for(Thinking{.budget = 4096}, "gpt-4.1", 4096).empty());
+}
+
+TEST_CASE("thinking asked off sends the lowest effort", "[backends][openai][thinking]") {
+    OpenAIProvider::Options options;
+    options.thinking_budget_tokens = 4096;
+    Fixture f = make_provider({sse(kTextStream)}, options);
+    ChatRequest request = chat_request();
+    request.thinking.mode = apogee::harness::ThinkingMode::Off;
+    (void)f.provider->stream_chat(request, {});
+    const json body = json::parse(f.transport->requests()[0].body);
+    CHECK(body.at("reasoning").at("effort") == "minimal");
+}
+
 TEST_CASE("web_search is a server-side tool when enabled", "[backends][openai][wire]") {
     OpenAIProvider::Options options;
     options.web_search = true;

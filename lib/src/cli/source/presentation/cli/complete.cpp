@@ -48,6 +48,9 @@ struct CompleteFlags {
     std::vector<std::string> attach;
     double temperature = 0.0;
     std::int64_t max_tokens = 0;
+    /// Whether the model thinks first, and for how long (26i).
+    std::string think;
+    std::int64_t think_budget = 0;
     bool quiet = false;
     bool verbose = false;
     bool all_backends = false;
@@ -66,6 +69,7 @@ struct CompleteFlags {
 
     CLI::Option* temperature_option = nullptr;
     CLI::Option* max_tokens_option = nullptr;
+    CLI::Option* think_budget_option = nullptr;
     /// Kept so an explicit `--rag ""` can be told from no flag at all.
     CLI::Option* rag_option = nullptr;
 };
@@ -198,6 +202,12 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                                              : resolve_max_tokens(std::nullopt, config, model);
     request.temperature = temperature;
     request.max_tokens = max_tokens;
+    // Whether the model thinks first (26i): the flags, else the backend's.
+    const harness::Thinking thinking = resolve_thinking(
+        flags.think.empty() ? std::nullopt : harness::thinking_mode_from_string(flags.think),
+        flags.think_budget_option->count() > 0 ? std::optional<std::int64_t>{flags.think_budget}
+                                               : std::nullopt,
+        config, model);
 
     // Machine mode: the SAME loop, a different Reporter. Nothing below this
     // point knows which one is in use, which is the Reporter seam's whole
@@ -211,6 +221,8 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         machine_options.model = model;
         machine_options.temperature = temperature;
         machine_options.max_tokens = max_tokens;
+        machine_options.thinking = thinking;
+        machine_options.thinking_judge = named_utility(config);
         machine_options.stream_answer = true;
         machine_options.summary_model = named_utility(config);
         std::optional<OneShotAttachments> machine_attachments;
@@ -306,6 +318,8 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     loop_options.model = model;
     loop_options.temperature = temperature;
     loop_options.max_tokens = max_tokens;
+    loop_options.thinking = thinking;
+    loop_options.thinking_judge = named_utility(config);
     loop_options.stream_answer = true;
     // A large tool result is summarised by the utility model, when one is
     // set, before the model reads it (26b).
@@ -496,6 +510,13 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
         cmd->add_option("-t,--temperature", flags->temperature, "Sampling temperature");
     flags->max_tokens_option =
         cmd->add_option("-n,--max-tokens", flags->max_tokens, "Maximum tokens to generate");
+    cmd->add_option("--think", flags->think,
+                    "Whether a reasoning model thinks first: on, off, or auto (for this question)")
+        ->check(CLI::IsMember({"on", "off", "auto"}));
+    flags->think_budget_option =
+        cmd->add_option("--think-budget", flags->think_budget,
+                        "The most tokens a reasoning model may think for before it answers")
+            ->check(CLI::Range(std::int64_t{0}, harness::kMaxThinkingBudget));
     cmd->add_flag("-q,--quiet", flags->quiet, "Suppress all output except the answer");
     cmd->add_flag("-v,--verbose", flags->verbose, "Print progress notes to stderr");
     cmd->add_flag("--all-backends", flags->all_backends,

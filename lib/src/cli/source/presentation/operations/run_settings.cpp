@@ -11,6 +11,24 @@ const harness::BackendConfig* entry_for(const harness::Config& config,
 
 }  // namespace
 
+harness::Thinking resolve_thinking(const std::optional<harness::ThinkingMode>& mode,
+                                   const std::optional<std::int64_t>& budget,
+                                   const harness::Config& config, std::string_view backend_name) {
+    const harness::BackendConfig* entry = entry_for(config, backend_name);
+    harness::Thinking thinking;
+    if (mode.has_value()) {
+        thinking.mode = *mode;
+    } else if (entry != nullptr && entry->thinking.has_value()) {
+        thinking.mode = *entry->thinking;
+    }
+    if (budget.has_value()) {
+        thinking.budget = budget;
+    } else if (entry != nullptr) {
+        thinking.budget = entry->thinking_budget;
+    }
+    return thinking;
+}
+
 std::optional<double> resolve_temperature(const std::optional<double>& flag_value,
                                           const harness::Config& config,
                                           std::string_view backend_name) {

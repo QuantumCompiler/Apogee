@@ -1,5 +1,7 @@
 #include "backends/google_wire.h"
 
+#include <algorithm>
+#include <array>
 #include <utility>
 
 #include "contracts/errors.h"
@@ -168,7 +170,10 @@ nlohmann::json build_request(const harness::ChatRequest& request, const RequestO
     if (request.temperature.has_value()) {
         generation["temperature"] = *request.temperature;
     }
-    if (options.thinking_budget_tokens > 0) {
+    if (options.thinking_off_budget.has_value()) {
+        // Asked off: the least thinking the model allows, nothing to show.
+        generation["thinkingConfig"] = {{"thinkingBudget", *options.thinking_off_budget}};
+    } else if (options.thinking_budget_tokens > 0) {
         // includeThoughts is what makes reasoning parts appear at all; without
         // it the budget applies but nothing is emitted to display.
         generation["thinkingConfig"] = {{"includeThoughts", true},
@@ -227,6 +232,24 @@ harness::FinishReason finish_reason_from_string(std::string_view reason) {
         return harness::FinishReason::ContentFilter;
     }
     return harness::FinishReason::Other;
+}
+
+bool model_thinks(std::string_view model) noexcept {
+    return std::ranges::none_of(
+        std::array<std::string_view, 3>{"gemini-1.", "gemini-2.0", "gemini-pro"},
+        [model](std::string_view old) { return model.starts_with(old); });
+}
+
+std::optional<std::int64_t> thinking_off_budget(std::string_view model) noexcept {
+    if (!model_thinks(model)) {
+        return std::nullopt;
+    }
+    return model.find("-pro") != std::string_view::npos ? kProMinThinkingBudget : 0;
+}
+
+std::int64_t thinking_budget_for(std::string_view model, std::int64_t budget) noexcept {
+    return model.find("-pro") != std::string_view::npos ? std::max(budget, kProMinThinkingBudget)
+                                                        : budget;
 }
 
 harness::ChatResponse parse_response(const nlohmann::json& body, std::string* thinking_out) {

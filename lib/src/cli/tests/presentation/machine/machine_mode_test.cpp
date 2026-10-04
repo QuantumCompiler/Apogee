@@ -110,6 +110,20 @@ TEST_CASE("the session event carries a protocol version", "[commands][machine]")
     CHECK(session.at("model") == "m");
 }
 
+TEST_CASE("a spent thinking budget is said on a thinking event", "[commands][machine][thinking]") {
+    // 26i: an added field on an existing event, so a driver that does not
+    // know it reads an ordinary thinking event.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.on_thinking();
+    reporter.on_thinking_budget_reached();
+    const std::vector<nlohmann::json> all = events(out.str());
+    REQUIRE(all.size() == 2);
+    CHECK_FALSE(all[0].contains("budget_reached"));
+    CHECK(all[1].at("type") == "thinking");
+    CHECK(all[1].at("budget_reached") == true);
+}
+
 TEST_CASE("thinking is distinctly typed and never reaches the answer",
           "[commands][machine][thinking]") {
     // The harness-wide rule, enforced at this surface: a driver that drops

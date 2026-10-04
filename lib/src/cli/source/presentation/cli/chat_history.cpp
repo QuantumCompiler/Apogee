@@ -123,7 +123,7 @@ harness::ChatRequest title_request(const logger::Session& session, std::string_v
     request.transient.side_request = true;
     // A reasoning model otherwise thinks for hundreds of tokens before six
     // words -- the most expensive part of the request, by far.
-    request.transient.skip_reasoning = true;
+    request.thinking.mode = harness::ThinkingMode::Off;
     return request;
 }
 

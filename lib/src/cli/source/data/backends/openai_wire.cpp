@@ -1,5 +1,7 @@
 #include "backends/openai_wire.h"
 
+#include <algorithm>
+#include <array>
 #include <utility>
 
 #include "contracts/errors.h"
@@ -45,6 +47,32 @@ std::string effort_for_budget(std::int64_t budget_tokens) {
         return "medium";
     }
     return "high";
+}
+
+bool is_reasoning_model(std::string_view model) noexcept {
+    // gpt-5's chat snapshot is the one gpt-5 that does not reason.
+    if (model.starts_with("gpt-5-chat")) {
+        return false;
+    }
+    return std::ranges::any_of(
+        std::array<std::string_view, 4>{"o1", "o3", "o4", "gpt-5"},
+        [model](std::string_view family) { return model.starts_with(family); });
+}
+
+std::string effort_for(const harness::Thinking& thinking, std::string_view model,
+                       std::int64_t configured) {
+    if (!is_reasoning_model(model)) {
+        return {};
+    }
+    if (thinking.off()) {
+        // Each generation's least: gpt-5.1 on can stop reasoning (`none`),
+        // gpt-5 only reduce it (`minimal`), the o-series no lower than `low`.
+        if (model.starts_with("gpt-5.")) {
+            return "none";
+        }
+        return model.starts_with("gpt-5") ? "minimal" : "low";
+    }
+    return effort_for_budget(thinking.budget.value_or(configured));
 }
 
 nlohmann::json input_items(const harness::ChatMessage& message) {

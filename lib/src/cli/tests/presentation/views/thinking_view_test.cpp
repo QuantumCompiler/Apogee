@@ -250,6 +250,35 @@ TEST_CASE("two blocks in one turn produce two summaries", "[ux][thinking]") {
     CHECK(count(h.bytes(), "✻ Thought for") == 2);
 }
 
+TEST_CASE("a block the budget cut says so on its summary, and only that block", "[ux][thinking]") {
+    // 26i: an answer that suffered for a short budget can be understood.
+    Harness h;
+    ThinkingView view = h.make();
+    view.write("reasoning");
+    view.note_budget_reached();
+    view.finish();
+    CHECK(count(h.bytes(), "✻ Thought for 1s (budget reached)") == 1);
+
+    // The next block starts clean.
+    view.write("more reasoning");
+    view.finish();
+    CHECK(count(h.bytes(), "(budget reached)") == 1);
+}
+
+TEST_CASE("a verbose transcript ends with the budget note", "[ux][thinking]") {
+    Harness h;
+    ThinkingView::Options options;
+    options.verbose = true;
+    ThinkingView view = h.make(options);
+    view.write("every word");
+    view.note_budget_reached();
+    view.finish();
+    CHECK(h.bytes().find("every word\n✻ (budget reached)\n") != std::string::npos);
+    view.write("again");
+    view.finish();
+    CHECK(count(h.bytes(), "(budget reached)") == 1);
+}
+
 TEST_CASE("finish is idempotent", "[ux][thinking]") {
     // The end-of-turn path calls it unconditionally.
     Harness h;

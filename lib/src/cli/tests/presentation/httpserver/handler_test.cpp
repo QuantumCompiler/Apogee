@@ -62,6 +62,8 @@ backends:
   second:
     type: mock
     model: mock-2
+    thinking: off
+    thinking_budget: 300
   tiny:
     type: mock
     model: mock-tiny
@@ -419,6 +421,30 @@ TEST_CASE("stream false never produces SSE", "[httpserver][sse]") {
     const HttpResponse response = fixture.send(post("/v1/chat/completions", body));
     CHECK_FALSE(response.streamed());
     CHECK(parsed(response)["object"] == "chat.completion");
+}
+
+TEST_CASE("a served request thinks as its backend is configured to", "[httpserver][thinking]") {
+    // 26i: mode parity -- `serve` applies a backend's `thinking` and
+    // `thinking_budget` as chat and complete do. A request carries no override.
+    const Fixture fixture;
+    nlohmann::json body = chat_body("hello");
+    body["model"] = "second";
+    REQUIRE(fixture.send(post("/v1/chat/completions", body)).status == 200);
+    REQUIRE_FALSE(fixture.second->requests().empty());
+    CHECK(fixture.second->requests().back().thinking.off());
+    CHECK(fixture.second->requests().back().thinking.budget == 300);
+
+    // The legacy completion route too.
+    REQUIRE(
+        fixture
+            .send(post("/v1/completions", nlohmann::json{{"model", "second"}, {"prompt", "hello"}}))
+            .status == 200);
+    CHECK(fixture.second->requests().back().thinking.off());
+
+    // A backend that says nothing thinks as its model does.
+    REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("hello"))).status == 200);
+    CHECK(fixture.provider->requests().back().thinking.mode == apogee::harness::ThinkingMode::On);
+    CHECK_FALSE(fixture.provider->requests().back().thinking.budget.has_value());
 }
 
 TEST_CASE("meta-frames appear only when asked for, always on an empty delta",

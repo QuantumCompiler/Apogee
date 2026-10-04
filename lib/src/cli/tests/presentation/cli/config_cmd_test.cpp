@@ -162,3 +162,35 @@ TEST_CASE("add-backend takes a local model's sampling, and the config's rules re
     CHECK(out.find("top_p") != std::string::npos);
     CHECK(home.config_text() == before);
 }
+
+TEST_CASE("add-backend takes a thinking default and budget, and refuses a bad one",
+          "[commands][config][add-backend][thinking]") {
+    const CliHome home{kConfig};
+    std::string out;
+    REQUIRE(home.run({"config", "add-backend", "local", "--type", "llamacpp", "--model-path",
+                      "/m/a.gguf", "--thinking", "auto", "--thinking-budget", "2048"},
+                     &out) == 0);
+    const apogee::harness::Config config =
+        apogee::harness::parse_config(home.config_text(), "<test>");
+    const auto* local = config.find_backend("local");
+    REQUIRE(local != nullptr);
+    CHECK(local->thinking == apogee::harness::ThinkingMode::Auto);
+    CHECK(local->thinking_budget == 2048);
+    // `config get` reads both back.
+    out.clear();
+    REQUIRE(home.run({"config", "get", "backends.local.thinking"}, &out) == 0);
+    CHECK(out == "auto\n");
+    out.clear();
+    REQUIRE(home.run({"config", "get", "backends.local.thinking_budget"}, &out) == 0);
+    CHECK(out == "2048\n");
+
+    const std::string before = home.config_text();
+    CHECK(home.run({"config", "add-backend", "bad", "--type", "llamacpp", "--model-path",
+                    "/m/a.gguf", "--thinking", "sometimes"},
+                   &out) != 0);
+    CHECK(home.run({"config", "add-backend", "bad", "--type", "llamacpp", "--model-path",
+                    "/m/a.gguf", "--thinking-budget", "-1"},
+                   &out) != 0);
+    CHECK(out.find("thinking_budget") != std::string::npos);
+    CHECK(home.config_text() == before);
+}

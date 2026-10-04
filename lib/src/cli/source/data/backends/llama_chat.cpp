@@ -14,6 +14,7 @@
 #include <fit.h>
 #include <llama.h>
 #include <log.h>
+#include <reasoning-budget.h>
 
 #include <algorithm>
 #include <exception>
@@ -108,6 +109,10 @@ bool Templates::render(const Inputs& inputs, Rendered& out, std::string& error) 
     request.use_jinja = true;
     request.add_generation_prompt = inputs.add_generation_prompt;
     request.enable_thinking = inputs.enable_thinking;
+    if (!inputs.reasoning_effort.empty()) {
+        // Template variables travel as JSON text, as llama-server passes them.
+        request.chat_template_kwargs["reasoning_effort"] = "\"" + inputs.reasoning_effort + "\"";
+    }
     // Reasoning separated into its own field, set on the inputs as well as
     // the parser: the template's rendering and the parser's reading both key
     // on it (found by the spike, 2026-09-25).
@@ -153,6 +158,8 @@ bool Templates::render(const Inputs& inputs, Rendered& out, std::string& error) 
     out.supports_thinking = params.supports_thinking;
     out.stops = params.additional_stops;
     out.generation_prompt = params.generation_prompt;
+    out.thinking_start_tag = params.thinking_start_tag;
+    out.thinking_end_tags = params.thinking_end_tags;
     out.format = common_chat_format_name(params.format);
 
     out.preserved_tokens.clear();
@@ -219,6 +226,39 @@ bool Templates::render(const Inputs& inputs, Rendered& out, std::string& error) 
     }
     out.parser = std::make_unique<ReplyParser>(std::move(parser));
     return true;
+}
+
+llama_sampler* reasoning_budget(const llama_vocab* vocab, const std::string& start,
+                                const std::vector<std::string>& ends, std::int32_t budget,
+                                const std::string& prefill) {
+    // As llama-server builds it (`common/sampling.cpp`): the tags tokenized
+    // with their special tokens, the first end the one forced.
+    const llama_tokens opening = common_tokenize(vocab, start, false, true);
+    std::vector<llama_tokens> closings;
+    for (const std::string& end : ends) {
+        if (llama_tokens tokens = common_tokenize(vocab, end, false, true); !tokens.empty()) {
+            closings.push_back(std::move(tokens));
+        }
+    }
+    if (opening.empty() || closings.empty()) {
+        return nullptr;
+    }
+    llama_sampler* sampler =
+        common_reasoning_budget_init(vocab, {opening}, closings, closings.front(), budget);
+    if (sampler == nullptr) {
+        return nullptr;
+    }
+    // The reply's opening, already in the prompt: a template that opens the
+    // reasoning there starts the count before the first sample.
+    for (const llama_token token : common_tokenize(vocab, prefill, false, true)) {
+        llama_sampler_accept(sampler, token);
+    }
+    return sampler;
+}
+
+bool reasoning_budget_spent(const llama_sampler* sampler) {
+    const common_reasoning_budget_state state = common_reasoning_budget_get_state(sampler);
+    return state == REASONING_BUDGET_FORCING || state == REASONING_BUDGET_WAITING_UTF8;
 }
 
 std::int64_t fit_window(const std::string& path, std::int32_t gpu_layers, std::int32_t cache_type,

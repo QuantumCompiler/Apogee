@@ -265,6 +265,34 @@ TEST_CASE("a chat template is noticed without being read", "[models][gguf]") {
     CHECK_FALSE(bare.has_chat_template);
 }
 
+TEST_CASE("a template's reasoning is read: a switch, a think block, or neither",
+          "[models][gguf][thinking]") {
+    // 26i: what `models info` says a local model's thinking control can do.
+    const auto read = [](std::string_view text) {
+        Builder builder;
+        builder.magic().u32(3).u64(1).u64(2);
+        builder.string_kv("tokenizer.chat_template", text);
+        builder.string_kv("general.architecture", "qwen3");
+        builder.tensor("token_embd.weight");
+        const GgufInfo info = inspect_bytes(builder.bytes(), "templated");
+        REQUIRE(info.parsed);
+        // The read stays in step past the template it now reads.
+        CHECK(info.architecture == "qwen3");
+        return info.template_thinking;
+    };
+    const auto qwen = read("{% if enable_thinking is false %}<think>\n\n</think>{% endif %}");
+    CHECK(qwen.switchable);
+    CHECK(qwen.reasons);
+    const auto gpt_oss = read("{{ reasoning_effort | default('medium') }}");
+    CHECK(gpt_oss.switchable);
+    const auto always = read("{{ '<think>' }}{{ m.reasoning_content }}");
+    CHECK_FALSE(always.switchable);
+    CHECK(always.reasons);
+    const auto llama = read("{% for m in messages %}{{ m.content }}{% endfor %}");
+    CHECK_FALSE(llama.switchable);
+    CHECK_FALSE(llama.reasons);
+}
+
 TEST_CASE("a projector's encoder flags are read", "[models][gguf]") {
     // What `check` and the audio capability answer from, without a load.
     const GgufInfo both = inspect_bytes(apogee::testing::projector_gguf(true, true), "both");

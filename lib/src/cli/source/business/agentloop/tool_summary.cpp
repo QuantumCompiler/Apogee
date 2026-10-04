@@ -57,7 +57,7 @@ harness::ChatRequest summary_request(const std::string& backend, const harness::
     // Not a turn of the conversation: the chat's cache is untouched, and a
     // local utility model runs it on its own context.
     request.transient.side_request = true;
-    request.transient.skip_reasoning = true;
+    request.thinking.mode = harness::ThinkingMode::Off;
     return request;
 }
 

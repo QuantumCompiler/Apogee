@@ -399,6 +399,13 @@ std::optional<std::string> lookup(const Config& config, std::string_view key, bo
     if (field == "seed") {
         return whole(backend->seed);
     }
+    if (field == "thinking") {
+        return backend->thinking.has_value() ? std::string{harness::to_string(*backend->thinking)}
+                                             : std::string{};
+    }
+    if (field == "thinking_budget") {
+        return whole(backend->thinking_budget);
+    }
     return std::nullopt;
 }
 
@@ -423,6 +430,8 @@ struct AddBackendFlags {
     double repeat_penalty = 0.0;
     double presence_penalty = 0.0;
     std::int64_t seed = 0;
+    std::string thinking;
+    std::int64_t thinking_budget = 0;
     bool force = false;
 
     CLI::Option* type_option = nullptr;
@@ -435,6 +444,7 @@ struct AddBackendFlags {
     CLI::Option* repeat_penalty_option = nullptr;
     CLI::Option* presence_penalty_option = nullptr;
     CLI::Option* seed_option = nullptr;
+    CLI::Option* thinking_budget_option = nullptr;
 };
 
 /// A name the model store knows fills what the flags leave open (M7): a
@@ -549,6 +559,13 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
                                                      "Penalty on tokens already present");
     flags->seed_option =
         cmd->add_option("--seed", flags->seed, "A fixed sampling seed, so answers repeat");
+    // Whether a reasoning model thinks, and for how long (26i).
+    cmd->add_option("--thinking", flags->thinking,
+                    "Whether a reasoning model thinks first: on (the default), off or auto")
+        ->check(CLI::IsMember({"on", "off", "auto"}));
+    flags->thinking_budget_option =
+        cmd->add_option("--thinking-budget", flags->thinking_budget,
+                        "The most tokens a reasoning model may think for before it answers");
     cmd->add_flag("-f,--force", flags->force, "Replace an existing entry with this name");
 
     cmd->callback([&context, flags]() {
@@ -600,6 +617,12 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
         }
         if (flags->seed_option->count() > 0) {
             backend.seed = flags->seed;
+        }
+        if (!flags->thinking.empty()) {
+            backend.thinking = harness::thinking_mode_from_string(flags->thinking);
+        }
+        if (flags->thinking_budget_option->count() > 0) {
+            backend.thinking_budget = flags->thinking_budget;
         }
 
         apply_edit(path, [flags, &backend](std::string_view content) {
@@ -879,7 +902,8 @@ std::vector<std::string> config_keys(const harness::Config& config) {
         entry("backends", name,
               {"type", "api_key", "model", "model_path", "mmproj_path", "embedding_model",
                "system_prompt", "context_size", "cache_type", "max_tokens", "temperature", "top_p",
-               "top_k", "min_p", "repeat_penalty", "presence_penalty", "seed"});
+               "top_k", "min_p", "repeat_penalty", "presence_penalty", "seed", "thinking",
+               "thinking_budget"});
     }
     for (const std::string& name : config.mcp_server_names()) {
         entry("mcp_servers", name, {"command", "enabled", "args", "env"});

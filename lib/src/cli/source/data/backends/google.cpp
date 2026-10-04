@@ -129,7 +129,16 @@ google::RequestOptions GoogleProvider::request_options(const harness::ChatReques
     google::RequestOptions options;
     options.model = options_.model;
     options.max_output_tokens = request.max_tokens.value_or(options_.max_tokens);
-    options.thinking_budget_tokens = options_.thinking_budget_tokens;
+    // Thinking as Gemini takes it (26i): off is the least the model allows,
+    // a budget its own or the backend's, a model that does not think none.
+    if (request.thinking.off()) {
+        options.thinking_off_budget = google::thinking_off_budget(options_.model);
+    } else if (google::model_thinks(options_.model)) {
+        const std::int64_t budget =
+            request.thinking.budget.value_or(options_.thinking_budget_tokens);
+        options.thinking_budget_tokens =
+            budget > 0 ? google::thinking_budget_for(options_.model, budget) : 0;
+    }
     options.web_search = options_.web_search;
     return options;
 }

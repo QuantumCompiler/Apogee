@@ -190,6 +190,21 @@ TEST_CASE("the reporter turns loop events into frames in the order a client expe
     CHECK(captured.bytes.find("private working") == std::string::npos);
 }
 
+TEST_CASE("a spent thinking budget is its own meta-frame",
+          "[httpserver][sse][reporter][thinking]") {
+    // 26i: a client showing a status sees that the reasoning was cut short.
+    Captured captured;
+    const apogee::harness::CancellationToken token;
+    SseWriter writer{captured.writer(), token};
+    SseReporter reporter{writer, identity(), SseReporter::Options{.emit_events = true}};
+    reporter.on_thinking();
+    reporter.on_thinking_budget_reached();
+    REQUIRE(captured.frames.size() == 2);
+    CHECK(captured.frames[1]["meta"]["type"] == "thinking_budget");
+    CHECK(captured.frames[1]["meta"]["phase"] == "done");
+    CHECK(captured.frames[1]["choices"][0]["delta"]["content"] == "");
+}
+
 TEST_CASE("without the opt-in, only content frames are written", "[httpserver][sse][reporter]") {
     Captured captured;
     const apogee::harness::CancellationToken token;

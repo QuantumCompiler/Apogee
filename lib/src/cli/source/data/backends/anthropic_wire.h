@@ -63,7 +63,9 @@ struct RequestOptions {
     std::string model;
     std::int64_t max_tokens = 4096;
 
-    /// Enables extended thinking with this budget. 0 leaves it off.
+    /// Enables extended thinking with this budget. 0 leaves it off. While
+    /// it is on the request leaves out the temperature -- the API accepts
+    /// none but its own -- and keeps `max_tokens` above the budget.
     std::int64_t thinking_budget_tokens = 0;
 
     /// Adds Anthropic's server-side web_search tool.
@@ -119,5 +121,16 @@ void fold_structured_output(harness::ChatResponse& response);
 /// Falls back to the status line when the body is not the documented shape --
 /// a gateway 502 is HTML, not JSON.
 [[nodiscard]] std::string error_message(long status, std::string_view body);
+
+/// The smallest thinking budget the API takes, and the answer's room kept
+/// above whatever budget is sent (26i).
+inline constexpr std::int64_t kMinThinkingBudget = 1024;
+inline constexpr std::int64_t kThinkingAnswerRoom = 1024;
+
+/// A request's thinking as Anthropic's budget (26i): off sends none -- the
+/// API thinks only when asked -- a budget is sent at the API's floor or
+/// above, and on with no budget keeps `configured`, the backend's own.
+[[nodiscard]] std::int64_t thinking_budget_for(const harness::Thinking& thinking,
+                                               std::int64_t configured);
 
 }  // namespace apogee::backends::anthropic

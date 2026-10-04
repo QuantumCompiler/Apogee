@@ -877,7 +877,8 @@ TEST_CASE("skipping reasoning closes the family's think block before the answer"
         LlamaCppProvider provider{std::move(options), std::move(owned)};
         ChatRequest request = turn({ChatMessage::user("name this")});
         request.transient.side_request = true;
-        request.transient.skip_reasoning = skip;
+        request.thinking.mode =
+            skip ? apogee::harness::ThinkingMode::Off : apogee::harness::ThinkingMode::On;
         (void)provider.chat(request, {});
         return runtime->model->tokenized.back();
     };
@@ -1192,13 +1193,91 @@ TEST_CASE("thinking reaches only the thinking sink", "[backends][llamacpp][tools
 TEST_CASE("skipping reasoning is the template's own switch", "[backends][llamacpp][tools]") {
     TemplateFixture fixture{{"Title"}};
     ChatRequest request = turn({ChatMessage::user("name this chat")});
-    request.transient.skip_reasoning = true;
+    request.thinking.mode = apogee::harness::ThinkingMode::Off;
     (void)fixture.provider->chat(request, {});
     REQUIRE_FALSE(fixture.runtime->model->chat_renders.empty());
     CHECK_FALSE(fixture.runtime->model->chat_renders.back().enable_thinking);
     // The fallback's closed think block is not appended on top of it.
     const std::string& prompt = fixture.runtime->model->tokenized.back();
     CHECK(prompt.ends_with("assistant(no-think):"));
+}
+
+TEST_CASE("thinking off also asks gpt-oss's switch for its lowest effort",
+          "[backends][llamacpp][thinking]") {
+    // gpt-oss has no off: its template reads `reasoning_effort`, and `low` is
+    // the least it does. Templates that do not read it ignore it.
+    TemplateFixture fixture{{"answer"}};
+    ChatRequest request = turn({ChatMessage::user("x")});
+    request.thinking.mode = apogee::harness::ThinkingMode::Off;
+    (void)fixture.provider->chat(request, {});
+    CHECK_FALSE(fixture.runtime->model->chat_renders.back().enable_thinking);
+    CHECK(fixture.runtime->model->chat_renders.back().reasoning_effort == "low");
+
+    // On leaves every template at its own default.
+    request.thinking.mode = apogee::harness::ThinkingMode::On;
+    (void)fixture.provider->chat(request, {});
+    CHECK(fixture.runtime->model->chat_renders.back().enable_thinking);
+    CHECK(fixture.runtime->model->chat_renders.back().reasoning_effort.empty());
+}
+
+TEST_CASE("a thinking budget is counted between the format's own reasoning tags",
+          "[backends][llamacpp][thinking]") {
+    TemplateFixture fixture{{"<think>", "pondering", "</think>", "The", " answer"}};
+    fixture.runtime->thinking_tags = true;
+    ChatRequest request = turn({ChatMessage::user("think first")});
+    request.thinking.budget = 64;
+    (void)fixture.provider->chat(request, {});
+    const auto& budgeted = fixture.runtime->model->contexts.front()->samplings.back();
+    REQUIRE(budgeted.reasoning_budget.has_value());
+    CHECK(budgeted.reasoning_budget->tokens == 64);
+    CHECK(budgeted.reasoning_budget->start == "<think>");
+    CHECK(budgeted.reasoning_budget->ends == std::vector<std::string>{"</think>"});
+    // The prompt's own opening, so a template that opens the block itself
+    // starts the count already inside it.
+    CHECK(budgeted.reasoning_budget->prefill == " assistant:");
+
+    // Off has nothing to count, and no budget asked is no limit.
+    request.thinking.mode = apogee::harness::ThinkingMode::Off;
+    (void)fixture.provider->chat(request, {});
+    CHECK_FALSE(fixture.runtime->model->contexts.front()->samplings.back().reasoning_budget);
+    request.thinking = {};
+    (void)fixture.provider->chat(request, {});
+    CHECK_FALSE(fixture.runtime->model->contexts.front()->samplings.back().reasoning_budget);
+}
+
+TEST_CASE("a budget a format cannot count is said, once a conversation",
+          "[backends][llamacpp][thinking]") {
+    TemplateFixture fixture{{"answer"}};
+    Captured seen;
+    ChatRequest request = turn({ChatMessage::user("x")});
+    request.thinking.budget = 64;
+    (void)fixture.provider->stream_chat(request, seen.options);
+    (void)fixture.provider->stream_chat(request, seen.options);
+    const auto said = std::ranges::count_if(seen.notices, [](const std::string& notice) {
+        return notice.find("thinking budget is not applied") != std::string::npos;
+    });
+    CHECK(said == 1);
+    CHECK_FALSE(fixture.runtime->model->contexts.front()->samplings.back().reasoning_budget);
+}
+
+TEST_CASE("a spent budget is said once, while the reasoning is still on screen",
+          "[backends][llamacpp][thinking]") {
+    TemplateFixture fixture{{"<think>", "a", "b", "c", "</think>", "done"}};
+    fixture.runtime->thinking_tags = true;
+    fixture.runtime->budget_spent_after = 2;
+    std::vector<apogee::harness::StatusEvent> spent;
+    apogee::harness::StreamOptions options;
+    options.on_status = [&spent](const apogee::harness::StatusEvent& event) {
+        if (event.type == apogee::harness::StatusEvent::Type::ThinkingBudget) {
+            spent.push_back(event);
+        }
+    };
+    ChatRequest request = turn({ChatMessage::user("think first")});
+    request.thinking.budget = 2;
+    (void)fixture.provider->stream_chat(request, options);
+    REQUIRE(spent.size() == 1);
+    CHECK(spent.front().tokens == 2);
+    CHECK(spent.front().detail.find("2 tokens") != std::string::npos);
 }
 
 TEST_CASE("a template that cannot render falls back, and says so once when tools were asked for",
@@ -2268,7 +2347,7 @@ TEST_CASE("a file that says nothing gets its family's card, thinking or not",
     CHECK(thinking.top_k == 20);
 
     ChatRequest answering = turn({ChatMessage::user("alpha beta")});
-    answering.transient.skip_reasoning = true;
+    answering.thinking.mode = apogee::harness::ThinkingMode::Off;
     CHECK(sampled.provider->sampling_for(answering).temperature.value == 0.7);
 }
 

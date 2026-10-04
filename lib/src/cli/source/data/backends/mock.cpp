@@ -58,6 +58,13 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
                 nlohmann::json(request.transient.response_schema).dump());
     replace_all(out, "{{last_tool_result}}", last_tool_result);
     replace_all(out, "{{system}}", system);
+    // Whether the model was asked to think, and for how long (26i):
+    // `on`, `off` or `auto`, with `:N` for a budget.
+    replace_all(
+        out, "{{thinking}}",
+        std::string{harness::to_string(request.thinking.mode)} +
+            (request.thinking.budget.has_value() ? ":" + std::to_string(*request.thinking.budget)
+                                                 : std::string{}));
     return out;
 }
 

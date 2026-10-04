@@ -65,6 +65,11 @@ void SseReporter::on_thinking() {
         simple_event(harness::StatusEvent::Type::Thinking, harness::StatusEvent::Phase::Start));
 }
 
+void SseReporter::on_thinking_budget_reached() {
+    emit_meta(simple_event(harness::StatusEvent::Type::ThinkingBudget,
+                           harness::StatusEvent::Phase::Done));
+}
+
 void SseReporter::on_thinking_token(std::string_view /*chunk*/) {
     // Reasoning is display metadata and never part of a served response. A
     // client that wants the model's working live would get it as its own

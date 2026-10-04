@@ -53,6 +53,26 @@ TEST_CASE("a session round-trips through serialize/deserialize", "[chat][session
     CHECK(loaded.warnings.empty());
 }
 
+TEST_CASE("a session's thinking setting is saved and read back", "[chat][session][thinking]") {
+    // 26i: a resumed chat thinks as it did, whether `/think` changed it or
+    // `--think` began it.
+    Session session = sample();
+    session.params.thinking = apogee::harness::ThinkingMode::Off;
+    session.params.thinking_budget = 256;
+    const std::string text = apogee::logger::serialize(session);
+    const auto loaded = deserialize(text, {});
+    CHECK(loaded.session.params.thinking == apogee::harness::ThinkingMode::Off);
+    CHECK(loaded.session.params.thinking_budget == 256);
+    // The setting, never the reasoning: the file still says no "thinking".
+    CHECK(text.find("thinking") == std::string::npos);
+    // An older file has none, and gets the backend's.
+    CHECK_FALSE(deserialize(apogee::logger::serialize(sample()), {}).session.params.thinking);
+    // A mode this build does not know reads as unset, not as a failure.
+    auto json = nlohmann::json::parse(text);
+    json["params"]["think"] = "sometimes";
+    CHECK_FALSE(deserialize(json.dump(), {}).session.params.thinking);
+}
+
 TEST_CASE("every written session carries the current schema version", "[chat][session]") {
     const auto json = nlohmann::json::parse(apogee::logger::serialize(sample()));
     CHECK(json.at("schema_version") == apogee::logger::kCurrentSchemaVersion);

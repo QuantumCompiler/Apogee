@@ -981,3 +981,41 @@ TEST_CASE("a backend's sampling knobs parse, and each out-of-range value is refu
     CHECK(edges.find_backend("x")->top_p == 1.0);
     CHECK(edges.find_backend("x")->seed == 4294967294);
 }
+
+TEST_CASE("a backend's thinking default and budget parse, and a bad one is refused by name",
+          "[config][thinking]") {
+    // 26i: whether the backend's model reasons first, and for how long.
+    const Config config = load_text(
+        "backends:\n"
+        "  local:\n    type: llamacpp\n    model_path: /m/a.gguf\n"
+        "    thinking: auto\n    thinking_budget: 2048\n"
+        "  quiet:\n    type: llamacpp\n    model_path: /m/a.gguf\n    thinking: off\n"
+        "  bare:\n    type: llamacpp\n    model_path: /m/a.gguf\n");
+    CHECK(config.find_backend("local")->thinking == apogee::harness::ThinkingMode::Auto);
+    CHECK(config.find_backend("local")->thinking_budget == 2048);
+    CHECK(config.find_backend("quiet")->thinking == apogee::harness::ThinkingMode::Off);
+    // Unset is the model's own: thinking on, no budget.
+    CHECK_FALSE(config.find_backend("bare")->thinking.has_value());
+    CHECK_FALSE(config.find_backend("bare")->thinking_budget.has_value());
+
+    const std::pair<const char*, const char*> refused[] = {
+        {"thinking: sometimes", "is not a thinking mode (accepted: on, off, auto)"},
+        {"thinking_budget: -1", "thinking_budget"},
+        {"thinking_budget: 1000001", "thinking_budget"},
+        {"thinking_budget: lots", "thinking_budget"},
+    };
+    for (const auto& [line, said] : refused) {
+        INFO(line);
+        try {
+            (void)load_text(std::string{"backends:\n  x:\n    type: llamacpp\n    "} + line + "\n");
+            FAIL("expected a ConfigError");
+        } catch (const ConfigError& e) {
+            CHECK(std::string{e.what()}.find(said) != std::string::npos);
+            CHECK(std::string{e.what()}.find("backends.x.thinking") != std::string::npos);
+        }
+    }
+    // A budget of 0 is a budget: answer straight away.
+    CHECK(load_text("backends:\n  x:\n    type: llamacpp\n    thinking_budget: 0\n")
+              .find_backend("x")
+              ->thinking_budget == 0);
+}

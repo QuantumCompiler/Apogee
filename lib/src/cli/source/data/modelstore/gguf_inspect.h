@@ -165,6 +165,18 @@ struct GgufInfo {
     /// than answering.
     bool has_chat_template = false;
 
+    /// What the chat template says about reasoning (26i), read from its text.
+    struct TemplateThinking {
+        /// The template takes a switch that turns reasoning off or down --
+        /// `enable_thinking` (Qwen3, Gemma 4) or `reasoning_effort` (gpt-oss).
+        bool switchable = false;
+        /// The template names reasoning at all: a switch, a `<think>` block,
+        /// or a `reasoning_content` field.
+        bool reasons = false;
+    };
+
+    TemplateThinking template_thinking;
+
     /// A projector's own statement of what it reads: `clip.has_vision_encoder`
     /// and `clip.has_audio_encoder` (26b). False on a file that is not one.
     bool projector_vision = false;

@@ -429,6 +429,52 @@ TEST_CASE("extended thinking is requested only when a budget is set",
     CHECK(body.at("thinking").at("budget_tokens") == 2048);
 }
 
+TEST_CASE("a turn's thinking becomes Anthropic's budget", "[backends][anthropic][thinking]") {
+    using apogee::backends::anthropic::kMinThinkingBudget;
+    using apogee::backends::anthropic::thinking_budget_for;
+    using apogee::harness::Thinking;
+    using apogee::harness::ThinkingMode;
+    // Off sends none, whatever the backend was configured with.
+    CHECK(thinking_budget_for(Thinking{.mode = ThinkingMode::Off, .budget = 4096}, 2048) == 0);
+    // On with no budget keeps the backend's own -- none, by default.
+    CHECK(thinking_budget_for(Thinking{}, 2048) == 2048);
+    CHECK(thinking_budget_for(Thinking{}, 0) == 0);
+    // A budget asked is sent, at the API's floor or above.
+    CHECK(thinking_budget_for(Thinking{.budget = 4096}, 0) == 4096);
+    CHECK(thinking_budget_for(Thinking{.budget = 256}, 0) == kMinThinkingBudget);
+}
+
+TEST_CASE("thinking asked off sends no thinking, even on a backend configured to think",
+          "[backends][anthropic][thinking]") {
+    AnthropicProvider::Options options;
+    options.thinking_budget_tokens = 2048;
+    Fixture f = make_provider({sse(kTextStream)}, options);
+    ChatRequest request = chat_request();
+    request.thinking.mode = apogee::harness::ThinkingMode::Off;
+    request.temperature = 0.2;
+    (void)f.provider->stream_chat(request, {});
+    const json body = json::parse(f.transport->requests()[0].body);
+    CHECK_FALSE(body.contains("thinking"));
+    CHECK(body.at("temperature") == 0.2);
+}
+
+TEST_CASE("a thinking request leaves out the temperature and keeps room for the answer",
+          "[backends][anthropic][thinking]") {
+    // The API refuses a temperature with thinking on, and a max_tokens at or
+    // below the budget: the budget would eat the whole answer.
+    AnthropicProvider::Options options;
+    options.max_tokens = 1000;
+    Fixture f = make_provider({sse(kThinkingToolStream)}, options);
+    ChatRequest request = chat_request();
+    request.thinking.budget = 4096;
+    request.temperature = 0.7;
+    (void)f.provider->stream_chat(request, {});
+    const json body = json::parse(f.transport->requests()[0].body);
+    CHECK(body.at("thinking").at("budget_tokens") == 4096);
+    CHECK_FALSE(body.contains("temperature"));
+    CHECK(body.at("max_tokens") == 4096 + apogee::backends::anthropic::kThinkingAnswerRoom);
+}
+
 TEST_CASE("required headers are sent", "[backends][anthropic]") {
     Fixture f = make_provider({sse(kTextStream)});
     (void)f.provider->stream_chat(chat_request(), {});

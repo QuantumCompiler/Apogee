@@ -42,6 +42,9 @@ void ThinkingView::write(std::string_view chunk) {
 
     if (options_.verbose) {
         // A permanent transcript: no cursor movement, no collapse.
+        if (!open_) {
+            budget_reached_ = false;
+        }
         writer_.write(chunk);
         open_ = true;
         return;
@@ -49,6 +52,7 @@ void ThinkingView::write(std::string_view chunk) {
 
     if (!open_) {
         open_ = true;
+        budget_reached_ = false;
         started_ = clock_();
         painted_ = 0;
     }
@@ -99,7 +103,10 @@ void ThinkingView::finish() {
     open_ = false;
 
     if (options_.verbose) {
-        writer_.write("\n");
+        // No summary to carry the note: the transcript ends with it instead.
+        writer_.write(budget_reached_ ? "\n" + options_.style.dim("✻ (budget reached)") + "\n"
+                                      : std::string{"\n"});
+        budget_reached_ = false;
         return;
     }
     if (!options_.active) {
@@ -108,7 +115,9 @@ void ThinkingView::finish() {
 
     const std::int64_t seconds = std::max<std::int64_t>(1, clock_() - started_);
     const std::string summary =
-        options_.style.dim("✻ Thought for " + std::to_string(seconds) + "s");
+        options_.style.dim("✻ Thought for " + std::to_string(seconds) + "s" +
+                           (budget_reached_ ? std::string{" (budget reached)"} : std::string{}));
+    budget_reached_ = false;
     tail_.clear();
 
     writer_.with_lock([this, &summary](std::ostream& out) {

@@ -248,6 +248,40 @@ TEST_CASE("a backend's sampling added over HTTP is byte-identical to the CLI's, 
     CHECK(Fixture::bytes(fixture.http_config).find("other:") == std::string::npos);
 }
 
+TEST_CASE("a backend's thinking added over HTTP is byte-identical to the CLI's, and read back",
+          "[httpserver][admin][parity][thinking]") {
+    const Fixture fixture;
+    fixture.cli({"config", "add-backend", "local", "--type", "llamacpp", "--model-path",
+                 "/m/a.gguf", "--thinking", "off", "--thinking-budget", "512"});
+    const HttpResponse created =
+        admin_create_backend(fixture.context(), post(nlohmann::json{{"name", "local"},
+                                                                    {"type", "llamacpp"},
+                                                                    {"model_path", "/m/a.gguf"},
+                                                                    {"thinking", "off"},
+                                                                    {"thinking_budget", 512}}));
+    REQUIRE(created.status == 201);
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    const nlohmann::json view = parsed(created);
+    CHECK(view["thinking"] == "off");
+    CHECK(view["thinking_budget"] == 512);
+
+    // A mode that is not one is refused, and nothing lands.
+    const HttpResponse refused =
+        admin_create_backend(fixture.context(), post(nlohmann::json{{"name", "other"},
+                                                                    {"type", "llamacpp"},
+                                                                    {"model_path", "/m/a.gguf"},
+                                                                    {"thinking", "sometimes"}}));
+    CHECK(refused.status == 400);
+    CHECK(refused.body.find("on, off, auto") != std::string::npos);
+    const HttpResponse negative =
+        admin_create_backend(fixture.context(), post(nlohmann::json{{"name", "other"},
+                                                                    {"type", "llamacpp"},
+                                                                    {"model_path", "/m/a.gguf"},
+                                                                    {"thinking_budget", -1}}));
+    CHECK(negative.status >= 400);
+    CHECK(Fixture::bytes(fixture.http_config).find("other:") == std::string::npos);
+}
+
 TEST_CASE("an HTTP add-backend is byte-identical to the CLI's on the same file",
           "[httpserver][admin][parity]") {
     // The parity invariant's first end-to-end proof: not "the same fields",

@@ -68,6 +68,20 @@ struct SamplingSettings {
     /// Unset draws a fresh seed for every generation.
     std::optional<std::uint32_t> seed;
 
+    /// A thinking budget (26i): the most tokens between the format's
+    /// reasoning tags before its close is forced and the model must answer.
+    struct ReasoningBudget {
+        std::int64_t tokens = 0;
+        std::string start;
+        std::vector<std::string> ends;
+        /// The reply's opening the prompt already holds -- where a template
+        /// that opens the reasoning itself starts the count.
+        std::string prefill;
+    };
+
+    /// Unset for none; set only where the format names its tags.
+    std::optional<ReasoningBudget> reasoning_budget;
+
     [[nodiscard]] bool greedy() const noexcept {
         return temperature <= 0.0;
     }
@@ -103,6 +117,8 @@ struct ChatRenderOptions {
     /// The template's own switch. Off asks a thinking model to answer
     /// without reasoning first, where its template has that switch.
     bool enable_thinking = true;
+    /// A template's `reasoning_effort` (gpt-oss's switch, 26i); empty for none.
+    std::string reasoning_effort;
     /// Off renders the messages alone -- a prefix of the full prompt, whose
     /// length is where its next message starts.
     bool add_generation_prompt = true;
@@ -128,6 +144,12 @@ struct ChatRendering {
     std::vector<std::string> stops;
     /// The template format's name, for a diagnostic.
     std::string format;
+    /// The reply's opening, which the prompt already ends with, and where the
+    /// format's reasoning opens and may close -- what a thinking budget counts
+    /// between (26i). The tags are empty where the format has none.
+    std::string generation_prompt;
+    std::string thinking_start;
+    std::vector<std::string> thinking_ends;
     std::unique_ptr<ReplyReader> reader;
 };
 
@@ -241,6 +263,13 @@ public:
             return true;
         }
         error = "this context cannot apply a grammar";
+        return false;
+    }
+
+    /// Whether the generation's thinking budget has run out and its close is
+    /// being forced (26i), asked after each sample. A runtime with no budget
+    /// sampler never says so.
+    [[nodiscard]] virtual bool reasoning_budget_spent() const {
         return false;
     }
 

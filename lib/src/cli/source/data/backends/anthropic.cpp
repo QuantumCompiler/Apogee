@@ -259,7 +259,8 @@ anthropic::RequestOptions AnthropicProvider::request_options(const harness::Chat
     anthropic::RequestOptions options;
     options.model = options_.model;
     options.max_tokens = request.max_tokens.value_or(options_.max_tokens);
-    options.thinking_budget_tokens = options_.thinking_budget_tokens;
+    options.thinking_budget_tokens =
+        anthropic::thinking_budget_for(request.thinking, options_.thinking_budget_tokens);
     options.web_search = options_.web_search;
     options.web_search_max_uses = options_.web_search_max_uses;
     options.stream = stream;

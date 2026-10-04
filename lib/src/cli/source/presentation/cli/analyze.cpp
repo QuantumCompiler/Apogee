@@ -602,6 +602,9 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
         const std::optional<std::int64_t> max_tokens =
             flags->max_tokens_option->count() > 0 ? std::optional<std::int64_t>{flags->max_tokens}
                                                   : resolve_max_tokens(std::nullopt, config, model);
+        // The backend's thinking default (26i), as every surface applies it.
+        const harness::Thinking thinking =
+            resolve_thinking(std::nullopt, std::nullopt, config, model);
         const harness::AgentToolPolicy policy = loaded.config.tools;
         const bool stdout_tty = platform::is_terminal(platform::StandardStream::Out);
         const std::filesystem::path save_dir = save_directory(*flags, loaded, home);
@@ -708,6 +711,8 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
             options.model = model;
             options.temperature = temperature;
             options.max_tokens = max_tokens;
+            options.thinking = thinking;
+            options.thinking_judge = named_utility(config);
             options.stream_answer = true;
             options.tools = registry.empty() ? nullptr : &registry;
             // Past a dozen and a half tools, the ones the question needs (26g).
@@ -785,6 +790,8 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
         options.model = model;
         options.temperature = temperature;
         options.max_tokens = max_tokens;
+        options.thinking = thinking;
+        options.thinking_judge = named_utility(config);
         options.tools = registry.empty() ? nullptr : &registry;
         // Past a dozen and a half tools, the ones each question needs (26g);
         // one selection for an interactive session's every turn.

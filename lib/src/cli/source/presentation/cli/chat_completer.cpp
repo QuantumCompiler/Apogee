@@ -22,6 +22,9 @@ constexpr std::array kCommands{
     ChatCommandSpec{"system", ChatVerb::System, "<text>", "Replace the system prompt"},
     ChatCommandSpec{"temperature", ChatVerb::Temperature, "<number>",
                     "Set the sampling temperature"},
+    ChatCommandSpec{"think", ChatVerb::Think, "[on|off|auto]",
+                    "Show or set whether the model thinks first: on, off, or auto per question",
+                    ArgumentValues::ThinkingModes},
     ChatCommandSpec{"max-tokens", ChatVerb::MaxTokens, "<number>",
                     "Cap each answer's length in tokens"},
     ChatCommandSpec{"compact", ChatVerb::Compact, "",
@@ -230,6 +233,11 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
             break;
         case ArgumentValues::Paths:
             break;  // completed as paths, below
+        case ArgumentValues::ThinkingModes:
+            choices.push_back({"on", "Think before every answer"});
+            choices.push_back({"off", "Answer without thinking first"});
+            choices.push_back({"auto", "Think when the question needs it"});
+            break;
         case ArgumentValues::AttachmentNames:
             if (sources.attachment_names) {
                 for (std::string& name : sources.attachment_names()) {

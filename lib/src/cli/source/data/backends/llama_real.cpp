@@ -27,6 +27,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -248,8 +249,25 @@ bool prefill_grammar(const llama_vocab* vocab, llama_sampler& grammar, std::stri
 /// being deterministic. Null with `error` when the grammar does not compile,
 /// or does not accept the opening it is advanced past.
 SamplerPtr make_sampler(const llama_vocab* vocab, const SamplingGrammar& grammar,
-                        const SamplingSettings& settings, std::string& error) {
+                        const SamplingSettings& settings, std::string& error,
+                        llama_sampler** budget = nullptr) {
     SamplerPtr chain{llama_sampler_chain_init(llama_sampler_chain_default_params())};
+    // The thinking budget first (26i): forcing the reasoning's close masks
+    // every other token, and the grammar after it holds the close too.
+    if (settings.reasoning_budget.has_value()) {
+        const SamplingSettings::ReasoningBudget& wanted = *settings.reasoning_budget;
+        if (llama_sampler* counting = llama_chat::reasoning_budget(
+                vocab, wanted.start, wanted.ends,
+                static_cast<std::int32_t>(std::min<std::int64_t>(
+                    wanted.tokens, std::numeric_limits<std::int32_t>::max())),
+                wanted.prefill);
+            counting != nullptr) {
+            if (budget != nullptr) {
+                *budget = counting;
+            }
+            llama_sampler_chain_add(chain.get(), counting);
+        }
+    }
     if (!grammar.gbnf.empty()) {
         llama_log().forget();
         SamplerPtr constrained;
@@ -396,19 +414,33 @@ public:
         // `llama_sampler_sample` accepts the token itself. A second accept
         // here was harmless while the chain was greedy alone, and would
         // advance a grammar twice per token (found by 25b, 2026-09-25).
-        return llama_sampler_sample(sampler_.get(), context_.get(), -1);
+        const std::int32_t token = llama_sampler_sample(sampler_.get(), context_.get(), -1);
+        // Spent stays spent for the generation: the forced close ends in
+        // "done", which a later look could not tell from a natural end.
+        if (budget_ != nullptr && !budget_spent_) {
+            budget_spent_ = llama_chat::reasoning_budget_spent(budget_);
+        }
+        return token;
+    }
+
+    [[nodiscard]] bool reasoning_budget_spent() const override {
+        return budget_spent_;
     }
 
     [[nodiscard]] bool set_sampling(const SamplingGrammar& grammar,
                                     const SamplingSettings& settings, std::string& error) override {
         // A fresh chain every generation: a grammar's state is one reply's,
         // and a seed drawn for one answer is not the next one's.
+        llama_sampler* budget = nullptr;
         SamplerPtr chain = make_sampler(llama_model_get_vocab(llama_get_model(context_.get())),
-                                        grammar, settings, error);
+                                        grammar, settings, error, &budget);
         if (chain == nullptr) {
             return false;
         }
         sampler_ = std::move(chain);
+        // The chain owns the budget sampler; this only looks at it.
+        budget_ = budget;
+        budget_spent_ = false;
         return true;
     }
 
@@ -612,6 +644,10 @@ private:
 
     std::unique_ptr<llama_context, ContextDeleter> context_;
     SamplerPtr sampler_;
+    /// The thinking budget inside `sampler_`, when the generation has one --
+    /// owned by the chain, watched here (26i).
+    llama_sampler* budget_ = nullptr;
+    bool budget_spent_ = false;
     std::int64_t evaluated_ = 0;
     bool checkpoints_needed_ = false;
     /// Oldest first; at most kMaxCheckpoints.
@@ -711,6 +747,7 @@ public:
 
         llama_chat::Inputs inputs;
         inputs.enable_thinking = options.enable_thinking;
+        inputs.reasoning_effort = options.reasoning_effort;
         inputs.add_generation_prompt = options.add_generation_prompt;
         inputs.json_schema = options.response_schema;
         inputs.messages.reserve(messages.size());
@@ -742,6 +779,9 @@ public:
         out.preserved_tokens = std::move(rendered.preserved_tokens);
         out.stops = std::move(rendered.stops);
         out.format = std::move(rendered.format);
+        out.thinking_start = std::move(rendered.thinking_start_tag);
+        out.thinking_ends = std::move(rendered.thinking_end_tags);
+        out.generation_prompt = rendered.generation_prompt;
         out.reader = std::make_unique<RealReplyReader>(std::move(rendered.parser));
         if (options.response_schema.empty()) {
             return true;

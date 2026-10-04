@@ -184,7 +184,8 @@ openai::RequestOptions OpenAIProvider::request_options(const harness::ChatReques
     openai::RequestOptions options;
     options.model = options_.model;
     options.max_output_tokens = request.max_tokens.value_or(options_.max_tokens);
-    options.reasoning_effort = openai::effort_for_budget(options_.thinking_budget_tokens);
+    options.reasoning_effort =
+        openai::effort_for(request.thinking, options_.model, options_.thinking_budget_tokens);
     options.web_search = options_.web_search;
     options.stream = stream;
     return options;

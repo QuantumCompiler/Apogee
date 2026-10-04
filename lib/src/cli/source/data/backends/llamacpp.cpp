@@ -300,6 +300,26 @@ void notice(const harness::StreamOptions& options, std::string text) {
     options.on_status(event);
 }
 
+/// The template variable gpt-oss switches its reasoning with (26i): it has
+/// no off, only `low`, which is what off asks for. Other templates ignore it.
+[[nodiscard]] std::string thinking_effort(const harness::Thinking& thinking) {
+    return thinking.off() ? "low" : std::string{};
+}
+
+/// Tells the turn its reasoning hit the budget (26i), while the reasoning is
+/// still on screen to be summarised.
+void budget_reached(const harness::StreamOptions& options, std::int64_t budget) {
+    if (!options.on_status) {
+        return;
+    }
+    harness::StatusEvent event;
+    event.type = harness::StatusEvent::Type::ThinkingBudget;
+    event.phase = harness::StatusEvent::Phase::Done;
+    event.tokens = budget;
+    event.detail = "the thinking budget of " + std::to_string(budget) + " tokens was reached";
+    options.on_status(event);
+}
+
 /// An id for a call the model's format left without one: nine letters and
 /// digits, the shape the strictest template in use (Mistral's) insists on, so
 /// the call and its result can be matched when the transcript renders again.
@@ -532,7 +552,7 @@ ResolvedSampling LlamaCppProvider::sampling_for(const harness::ChatRequest& requ
                        .config = options_.sampling,
                        .model_file = model_file_rung(header().sampling),
                        // A request that skips the reasoning is the family's no-thinking case.
-                       .family = family_rung(family, !request.transient.skip_reasoning),
+                       .family = family_rung(family, !request.thinking.off()),
                        .family_source = family == nullptr ? std::string{} : family->sampling_source,
                        .seed = options_.seed});
 }
@@ -769,7 +789,8 @@ LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
     // ignores it (Qwen's closed think block is exactly this switch). Kept
     // under a schema too: the grammar admits the reasoning before the
     // answer, so a thinking model still thinks (26f).
-    render.enable_thinking = !request.transient.skip_reasoning;
+    render.enable_thinking = !request.thinking.off();
+    render.reasoning_effort = thinking_effort(request.thinking);
 
     // A schema is held by a grammar on the tools-less pass, the loop's rule
     // for every provider whose JSON mode cannot share a turn with tools: a
@@ -798,7 +819,7 @@ LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
     RenderedPrompt fallback = llama_tokens::render_prompt(*model_, options_.model, messages, true);
     rendered.text = std::move(fallback.text);
     rendered.stops = std::move(fallback.stops);
-    if (request.transient.skip_reasoning) {
+    if (request.thinking.off()) {
         // After the generation prompt, so the model's first token is already
         // the answer's.
         rendered.text += reasoning_skip_for(profile());
@@ -839,7 +860,8 @@ std::vector<std::int64_t> LlamaCppProvider::checkpoint_marks(
         // The same inputs as the full prompt, schema included, so the two
         // agree on every token before the last user message.
         ChatRenderOptions render;
-        render.enable_thinking = !request.transient.skip_reasoning;
+        render.enable_thinking = !request.thinking.off();
+        render.reasoning_effort = thinking_effort(request.thinking);
         render.add_generation_prompt = false;
         if (held) {
             render.response_schema = request.transient.response_schema;
@@ -1020,7 +1042,25 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     // any one request, and a call's grammar from the last turn must not
     // constrain this one, nor its temperature draw this one's tokens. No
     // grammar on the fallback path.
-    const SamplingSettings sampling = sampling_for(request).settings();
+    SamplingSettings sampling = sampling_for(request).settings();
+    // A thinking budget (26i), counted between the format's own reasoning
+    // tags; a format that names none has nothing to count, and is said so.
+    const std::optional<std::int64_t> budget =
+        request.thinking.off() ? std::nullopt : request.thinking.budget;
+    if (budget.has_value()) {
+        if (chat != nullptr && !chat->thinking_start.empty() && !chat->thinking_ends.empty()) {
+            sampling.reasoning_budget =
+                SamplingSettings::ReasoningBudget{.tokens = *budget,
+                                                  .start = chat->thinking_start,
+                                                  .ends = chat->thinking_ends,
+                                                  .prefill = chat->generation_prompt};
+        } else if (!request.transient.side_request && !budget_noticed_) {
+            // Once a conversation: every step of every turn would say it.
+            budget_noticed_ = true;
+            notice(options, "the thinking budget is not applied on " + options_.model +
+                                ": its chat format names no reasoning to count");
+        }
+    }
     if (std::string error; !context.set_sampling(
             chat != nullptr ? chat->grammar : SamplingGrammar{}, sampling, error)) {
         // The reader still parses a call without it; unconstrained is the
@@ -1087,6 +1127,7 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     // a non-event; an exception mid-conversation is not.
     const std::int64_t wall = context.capacity();
 
+    bool budget_said = false;
     std::int64_t produced = 0;
     for (; produced < limit; ++produced) {
         if (wall > 0 && prompt_end + produced >= wall) {
@@ -1099,6 +1140,11 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
         options.cancellation.throw_if_cancelled();
 
         const std::int32_t token = context.sample();
+        if (!budget_said && sampling.reasoning_budget.has_value() &&
+            context.reasoning_budget_spent()) {
+            budget_said = true;
+            budget_reached(options, sampling.reasoning_budget->tokens);
+        }
         if (model_->is_eog(token)) {
             break;
         }

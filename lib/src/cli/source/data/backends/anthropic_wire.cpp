@@ -129,11 +129,26 @@ nlohmann::json content_blocks(const harness::MessageContent& content) {
     return blocks;
 }
 
+std::int64_t thinking_budget_for(const harness::Thinking& thinking, std::int64_t configured) {
+    if (thinking.off()) {
+        return 0;
+    }
+    if (thinking.budget.has_value()) {
+        return std::max(*thinking.budget, kMinThinkingBudget);
+    }
+    return configured;
+}
+
 nlohmann::json build_request(const harness::ChatRequest& request, const RequestOptions& options,
                              const ThinkingCache& thinking) {
+    // Extended thinking needs its answer's room above the budget.
+    const std::int64_t max_tokens =
+        options.thinking_budget_tokens > 0
+            ? std::max(options.max_tokens, options.thinking_budget_tokens + kThinkingAnswerRoom)
+            : options.max_tokens;
     nlohmann::json body{
         {"model", options.model},
-        {"max_tokens", options.max_tokens},
+        {"max_tokens", max_tokens},
     };
 
     std::string system_prompt;
@@ -222,7 +237,8 @@ nlohmann::json build_request(const harness::ChatRequest& request, const RequestO
     if (!system_prompt.empty()) {
         body["system"] = system_prompt;
     }
-    if (request.temperature.has_value()) {
+    // While it thinks the API takes no temperature but its own (26i).
+    if (request.temperature.has_value() && options.thinking_budget_tokens == 0) {
         body["temperature"] = *request.temperature;
     }
     if (options.stream) {

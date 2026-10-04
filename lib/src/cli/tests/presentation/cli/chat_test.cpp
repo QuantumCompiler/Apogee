@@ -145,7 +145,7 @@ TEST_CASE("the title request carries the questions, not the answers", "[chat][ti
     CHECK(text.find("be terse") == std::string::npos);
     // Cheap to run: no history of its own, no reasoning first, a small cap.
     CHECK(request.transient.side_request);
-    CHECK(request.transient.skip_reasoning);
+    CHECK(request.thinking.off());
     REQUIRE(request.max_tokens.has_value());
     CHECK(*request.max_tokens <= 64);
 
@@ -828,4 +828,66 @@ TEST_CASE("a collection gets what the attachments leave of the retrieval share",
     REQUIRE(chat.run({"chat", "--rag", "notes"}, "/attach " + file.string() + "\nzarquon?\n") == 0);
     CHECK(chat.err.find("excerpts from the attachments") != std::string::npos);
     CHECK(chat.err.find("0 of 2 chunks fit the context budget") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Whether the model thinks first (26i)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("/think shows and sets the chat's thinking, and the session keeps it",
+          "[chat][cli][thinking]") {
+    HelperChat chat{texts({"first answer"}), {"Thinking Title"}, "    thinking_budget: 512\n"};
+    REQUIRE(chat.run({"chat"}, "/think\n/think off\nfirst question\n/think sometimes\n") == 0);
+    const std::string said = chat.out + chat.err;
+    // Bare: what the next question gets -- the backend's budget included.
+    CHECK(said.find("thinking: on, at most 512 tokens") != std::string::npos);
+    CHECK(said.find("not a thinking mode: 'sometimes' (on, off or auto)") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(session.params.thinking == apogee::harness::ThinkingMode::Off);
+    // The budget stayed the backend's: only what was set is saved.
+    CHECK_FALSE(session.params.thinking_budget.has_value());
+    // Off asks no judge: the helper's one reply went to the title.
+    CHECK(session.title == "Thinking Title");
+}
+
+TEST_CASE("chat --think auto asks the utility model per question, and --verbose says what it decided",
+          "[chat][cli][thinking][helpers]") {
+    HelperChat chat{texts({"Rayleigh scattering."}), {"no", "Sky Title"}};
+    REQUIRE(chat.run({"chat", "--think", "auto", "--think-budget", "256", "--verbose"},
+                     "Why is the sky blue?\n") == 0);
+    CHECK(chat.err.find("thinking: auto -- off, by the utility model") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(session.params.thinking == apogee::harness::ThinkingMode::Auto);
+    CHECK(session.params.thinking_budget == 256);
+    // The judge took exactly its one reply, before the title.
+    CHECK(session.title == "Sky Title");
+    CHECK(replies(session) == std::vector<std::string>{"Rayleigh scattering."});
+}
+
+TEST_CASE("what --think asks for reaches the model, and the backend's default otherwise",
+          "[chat][cli][thinking]") {
+    // The mock's `{{thinking}}` says what the request carried.
+    HelperChat chat{texts({"{{thinking}}", "{{thinking}}"}),
+                    {"Title"},
+                    "    thinking: off\n    thinking_budget: 128\n"};
+    REQUIRE(chat.run({"chat", "--think", "on"}, "first\n/think auto\nsecond\n") == 0);
+    // `/think auto` with a judge that says nothing useful ("Title") -- the
+    // rule, and "second" is short and plain.
+    CHECK(replies(HelperChat::only_session()) == std::vector<std::string>{"on:128", "off:128"});
+
+    HelperChat complete{texts({"{{thinking}}"}), {"unused"}, "    thinking: off\n"};
+    REQUIRE(complete.run({"complete", "hello"}) == 0);
+    CHECK(complete.out.find("off") != std::string::npos);
+    REQUIRE(complete.run({"complete", "--think", "on", "--think-budget", "64", "hello"}) == 0);
+    CHECK(complete.out.find("on:64") != std::string::npos);
+}
+
+TEST_CASE("complete takes the same thinking flags, and refuses a bad one",
+          "[chat][cli][thinking][helpers]") {
+    HelperChat chat{texts({"391"}), {"yes"}};
+    REQUIRE(chat.run({"complete", "--think", "auto", "--verbose", "Hello there!"}) == 0);
+    CHECK(chat.err.find("thinking: auto -- on, by the utility model") != std::string::npos);
+    CHECK(chat.run({"complete", "--think", "sometimes", "Hello"}) != 0);
+    CHECK(chat.run({"complete", "--think-budget", "-1", "Hello"}) != 0);
+    CHECK(chat.run({"chat", "--think", "sometimes"}, "") != 0);
 }

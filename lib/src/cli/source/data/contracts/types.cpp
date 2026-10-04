@@ -26,7 +26,7 @@ constexpr std::array<std::pair<std::string_view, FinishReason>, 6> kFinishReason
     {"other", FinishReason::Other},
 }};
 
-constexpr std::array<std::pair<std::string_view, StatusEvent::Type>, 10> kStatusTypeNames{{
+constexpr std::array<std::pair<std::string_view, StatusEvent::Type>, 11> kStatusTypeNames{{
     {"model_loading", StatusEvent::Type::ModelLoading},
     {"model_ready", StatusEvent::Type::ModelReady},
     {"thinking", StatusEvent::Type::Thinking},
@@ -37,6 +37,7 @@ constexpr std::array<std::pair<std::string_view, StatusEvent::Type>, 10> kStatus
     {"context_warning", StatusEvent::Type::ContextWarning},
     {"notice", StatusEvent::Type::Notice},
     {"prompt_cache", StatusEvent::Type::PromptCache},
+    {"thinking_budget", StatusEvent::Type::ThinkingBudget},
 }};
 
 /// Reads an optional string field, tolerating null.
@@ -52,6 +53,31 @@ std::string optional_string(const nlohmann::json& in, std::string_view key) {
 }
 
 }  // namespace
+
+std::string_view to_string(ThinkingMode mode) noexcept {
+    switch (mode) {
+        case ThinkingMode::On:
+            return "on";
+        case ThinkingMode::Off:
+            return "off";
+        case ThinkingMode::Auto:
+            return "auto";
+    }
+    return "on";
+}
+
+std::optional<ThinkingMode> thinking_mode_from_string(std::string_view text) noexcept {
+    if (text == "on") {
+        return ThinkingMode::On;
+    }
+    if (text == "off") {
+        return ThinkingMode::Off;
+    }
+    if (text == "auto") {
+        return ThinkingMode::Auto;
+    }
+    return std::nullopt;
+}
 
 std::string_view to_string(Role role) noexcept {
     for (const auto& [name, value] : kRoleNames) {

@@ -317,6 +317,25 @@ TEST_CASE("a backend's sampling is written after its temperature, and reads back
     CHECK(read->seed == 42);
 }
 
+TEST_CASE("a backend's thinking is written after its sampling, and reads back",
+          "[config_edit][thinking]") {
+    BackendConfig backend;
+    backend.type = BackendType::LlamaCpp;
+    backend.model_path = "/m/Qwen.gguf";
+    backend.seed = 42;
+    backend.thinking = apogee::harness::ThinkingMode::Auto;
+    backend.thinking_budget = 2048;
+    const std::string added = append_backend("backends:\n", "local", backend, false);
+    CHECK(added ==
+          "backends:\n  local:\n    type: llamacpp\n    model_path: /m/Qwen.gguf\n"
+          "    seed: 42\n    thinking: auto\n    thinking_budget: 2048\n");
+    const apogee::harness::Config config = apogee::harness::parse_config(added, "<test>");
+    const auto* read = config.find_backend("local");
+    REQUIRE(read != nullptr);
+    CHECK(read->thinking == apogee::harness::ThinkingMode::Auto);
+    CHECK(read->thinking_budget == 2048);
+}
+
 TEST_CASE("an api_key is stored literally, not expanded, on write", "[config_edit]") {
     const apogee::testing::EnvGuard key{"NEW_KEY", "sk-should-not-appear"};
     const std::string added = append_backend("", "a", anthropic_backend(), false);

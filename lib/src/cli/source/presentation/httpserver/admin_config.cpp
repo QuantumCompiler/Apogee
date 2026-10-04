@@ -140,6 +140,12 @@ nlohmann::json backend_view(std::string_view name, const harness::BackendConfig&
     if (backend.seed.has_value()) {
         out["seed"] = *backend.seed;
     }
+    if (backend.thinking.has_value()) {
+        out["thinking"] = harness::to_string(*backend.thinking);
+    }
+    if (backend.thinking_budget.has_value()) {
+        out["thinking_budget"] = *backend.thinking_budget;
+    }
     if (!backend.binary.empty()) {
         out["binary"] = backend.binary;
     }
@@ -232,7 +238,8 @@ HttpResponse admin_create_backend(const AdminConfigContext& context, const HttpR
     for (const auto& [key, slot] :
          {std::pair{"context_size", &backend.context_size},
           std::pair{"max_tokens", &backend.max_tokens}, std::pair{"top_k", &backend.top_k},
-          std::pair{"seed", &backend.seed}}) {
+          std::pair{"seed", &backend.seed},
+          std::pair{"thinking_budget", &backend.thinking_budget}}) {
         if (const auto it = body.find(key); it != body.end() && !it->is_null()) {
             if (!it->is_number_integer()) {
                 return error_response(400, std::string{key} + " must be an integer");
@@ -246,6 +253,14 @@ HttpResponse admin_create_backend(const AdminConfigContext& context, const HttpR
         if (!backend.cache_type.has_value()) {
             return error_response(
                 400, "cache_type: unknown value '" + *cache + "' (accepted: f16, q8_0, q4_0)");
+        }
+    }
+    if (const std::optional<std::string> thinking = optional_string(body, "thinking", error);
+        thinking.has_value() && !thinking->empty()) {
+        backend.thinking = harness::thinking_mode_from_string(*thinking);
+        if (!backend.thinking.has_value()) {
+            return error_response(
+                400, "thinking: unknown value '" + *thinking + "' (accepted: on, off, auto)");
         }
     }
     if (!error.empty()) {

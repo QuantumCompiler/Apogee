@@ -218,6 +218,48 @@ TEST_CASE("a thinking budget passes through as a token count", "[backends][googl
     CHECK(thinking.at("includeThoughts") == true);
 }
 
+TEST_CASE("a turn's thinking becomes Gemini's budget", "[backends][google][thinking]") {
+    using apogee::backends::google::kProMinThinkingBudget;
+    using apogee::backends::google::model_thinks;
+    using apogee::backends::google::thinking_budget_for;
+    using apogee::backends::google::thinking_off_budget;
+    CHECK(model_thinks("gemini-2.5-flash"));
+    CHECK(model_thinks("gemini-2.5-pro"));
+    CHECK_FALSE(model_thinks("gemini-2.0-flash"));
+    CHECK_FALSE(model_thinks("gemini-1.5-pro"));
+    // Off: 0 where thinking can stop, a Pro model's floor where it cannot,
+    // and nothing for a model that never thinks.
+    CHECK(thinking_off_budget("gemini-2.5-flash") == 0);
+    CHECK(thinking_off_budget("gemini-2.5-pro") == kProMinThinkingBudget);
+    CHECK_FALSE(thinking_off_budget("gemini-2.0-flash").has_value());
+    CHECK(thinking_budget_for("gemini-2.5-pro", 64) == kProMinThinkingBudget);
+    CHECK(thinking_budget_for("gemini-2.5-flash", 64) == 64);
+}
+
+TEST_CASE("thinking asked off sends the least budget, and asks for no thoughts",
+          "[backends][google][thinking]") {
+    GoogleProvider::Options options;
+    options.model = "gemini-2.5-flash";
+    options.thinking_budget_tokens = 2048;
+    Fixture f = make_provider({sse(kTextStream)}, options);
+    ChatRequest request = chat_request();
+    request.thinking.mode = apogee::harness::ThinkingMode::Off;
+    (void)f.provider->stream_chat(request, {});
+    const json thinking =
+        json::parse(f.transport->requests()[0].body).at("generationConfig").at("thinkingConfig");
+    CHECK(thinking.at("thinkingBudget") == 0);
+    CHECK_FALSE(thinking.contains("includeThoughts"));
+
+    // A turn's budget outranks the backend's own.
+    Fixture budgeted = make_provider({sse(kTextStream)}, options);
+    request.thinking = apogee::harness::Thinking{.budget = 512};
+    (void)budgeted.provider->stream_chat(request, {});
+    CHECK(json::parse(budgeted.transport->requests()[0].body)
+              .at("generationConfig")
+              .at("thinkingConfig")
+              .at("thinkingBudget") == 512);
+}
+
 TEST_CASE("google_search is added when web search is enabled", "[backends][google][wire]") {
     GoogleProvider::Options options;
     options.web_search = true;

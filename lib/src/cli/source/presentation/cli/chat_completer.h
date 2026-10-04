@@ -34,6 +34,7 @@ enum class ChatVerb : std::uint8_t {
     Models,
     System,
     Temperature,
+    Think,
     MaxTokens,
     Compact,
     Title,
@@ -59,6 +60,8 @@ enum class ArgumentValues : std::uint8_t {
     Paths,
     /// What is attached to this chat (26d).
     AttachmentNames,
+    /// `on`, `off`, `auto` (26i).
+    ThinkingModes,
 };
 
 /// One row of the table.

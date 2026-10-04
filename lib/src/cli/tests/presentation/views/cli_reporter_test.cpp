@@ -92,6 +92,20 @@ TEST_CASE("thinking never reaches the answer stream", "[ux][reporter]") {
     CHECK(h.answer.str().find("secret deliberation") == std::string::npos);
 }
 
+TEST_CASE("a spent budget reaches the thinking block's summary", "[ux][reporter][thinking]") {
+    Harness h;
+    CliReporter reporter = h.make();
+    reporter.on_thinking();
+    reporter.on_thinking_token("deliberation");
+    reporter.on_thinking_budget_reached();
+    reporter.on_clear_status();
+    reporter.on_answer_start();
+    reporter.on_answer_token("answer");
+    reporter.on_answer_end();
+    CHECK(h.progress.str().find("(budget reached)") != std::string::npos);
+    CHECK(h.answer.str() == "answer\n");
+}
+
 TEST_CASE("an empty thinking token opens nothing", "[ux][reporter]") {
     // Redacted-thinking models send empty payloads on every turn.
     Harness h;

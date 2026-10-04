@@ -159,6 +159,32 @@ struct ChatMessage {
     [[nodiscard]] static ChatMessage from_tool_result(const ToolResult& result);
 };
 
+/// Whether a reasoning model thinks before it answers (26i): `on`, `off`, or
+/// `auto` -- decided per question by the loop, so a provider is only ever
+/// asked for `on` or `off` and reads an undecided `auto` as `on`.
+enum class ThinkingMode : std::uint8_t { On, Off, Auto };
+
+/// "on", "off", "auto".
+[[nodiscard]] std::string_view to_string(ThinkingMode mode) noexcept;
+/// The mode a word names, or unset for anything else.
+[[nodiscard]] std::optional<ThinkingMode> thinking_mode_from_string(std::string_view text) noexcept;
+
+/// What a request asks of a reasoning model's thinking (26i): whether, and
+/// for how long. Each backend maps it to its own control -- a local
+/// template's switch and a budget sampler, Anthropic's thinking budget,
+/// OpenAI's reasoning effort, Gemini's thinking budget -- and one with no
+/// control ignores it, which `models info` says.
+struct Thinking {
+    ThinkingMode mode = ThinkingMode::On;
+    /// The most tokens it may spend reasoning before it must answer. Unset
+    /// for none: a budget changes answers, so it is chosen, never implied.
+    std::optional<std::int64_t> budget;
+
+    [[nodiscard]] bool off() const noexcept {
+        return mode == ThinkingMode::Off;
+    }
+};
+
 /// A request as the harness understands it.
 struct ChatRequest {
     std::vector<ChatMessage> messages;
@@ -169,6 +195,12 @@ struct ChatRequest {
     std::optional<double> temperature;
     std::optional<std::int64_t> max_tokens;
     std::vector<Tool> tools;
+
+    /// Whether the model reasons first, and for how long (26i). Off is also
+    /// what a side request asks for when its answer needs no working -- a
+    /// title, a rewrite -- and on a thinking model the reasoning would cost
+    /// far more than the answer. A provider with no such control ignores it.
+    Thinking thinking;
 
     /// Per-request, process-local state that must NEVER reach the wire or a
     /// session file.
@@ -193,13 +225,6 @@ struct ChatRequest {
         /// with the conversation, so a write-back would clobber the session's
         /// state, and it may run concurrently with a real turn.
         bool side_request = false;
-
-        /// Asks for the answer without the model reasoning first, where its
-        /// family has a switch for that (a local Qwen's closed think block).
-        /// For a request whose answer needs no working -- a title -- and on a
-        /// thinking model the reasoning would cost far more than the answer.
-        /// A provider with no such switch ignores it.
-        bool skip_reasoning = false;
 
         /// When set, asks the provider to constrain its answer to this JSON
         /// Schema. Providers that cannot leave it alone and the caller's
@@ -302,6 +327,10 @@ struct StatusEvent {
         /// the prompt, `used_tokens` the part reused. Progress: shown where
         /// the user asked for it (`--verbose`).
         PromptCache,
+        /// The model's reasoning reached the request's thinking budget and
+        /// was ended there (26i), so an answer that suffered for it can be
+        /// understood. Only a backend that can tell sends it.
+        ThinkingBudget,
     };
     enum class Phase : std::uint8_t { Start, Done, Error };
 

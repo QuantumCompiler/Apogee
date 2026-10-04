@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -142,6 +143,15 @@ public:
             return eog_token;
         }
         return script[sampled++];
+    }
+
+    /// When set, a generation with a thinking budget reports it spent from
+    /// this many samples on (26i).
+    std::optional<std::size_t> budget_spent_after;
+
+    [[nodiscard]] bool reasoning_budget_spent() const override {
+        return budget_spent_after.has_value() && !samplings.empty() &&
+               samplings.back().reasoning_budget.has_value() && sampled >= *budget_spent_after;
     }
 
     /// Whether this context decodes media (its model has a projector); the
@@ -333,6 +343,10 @@ public:
         return state_->sample();
     }
 
+    [[nodiscard]] bool reasoning_budget_spent() const override {
+        return state_->reasoning_budget_spent();
+    }
+
     [[nodiscard]] std::int64_t decode_multimodal(const std::vector<backends::MediaInput>& media,
                                                  std::string_view text, std::int64_t position,
                                                  std::string& error) override {
@@ -412,6 +426,11 @@ public:
     /// Whether `render_chat` renders -- the model ships a template llama.cpp's
     /// chat layer can read. Off, it answers as a GGUF with no template does.
     bool chat_template = false;
+    /// Whether its format names reasoning tags (26i): a thinking model's.
+    bool thinking_tags = false;
+    /// Passed to every context: a budget reported spent from this many
+    /// samples on.
+    std::optional<std::size_t> budget_spent_after;
     /// When set, `render_chat` fails with it: a template that cannot render.
     std::string chat_template_error;
     /// A template that renders a conversation-so-far differently from the
@@ -441,6 +460,7 @@ public:
         bool enable_thinking = true;
         bool add_generation_prompt = true;
         std::string response_schema;
+        std::string reasoning_effort;
     };
 
     mutable std::vector<ChatRender> chat_renders;
@@ -497,7 +517,8 @@ public:
                                    backends::ChatRendering& out,
                                    std::string& error) const override {
         chat_renders.push_back({messages, tools, options.enable_thinking,
-                                options.add_generation_prompt, options.response_schema});
+                                options.add_generation_prompt, options.response_schema,
+                                options.reasoning_effort});
         if (!chat_template) {
             error = "the model ships no chat template";
             return false;
@@ -557,6 +578,13 @@ public:
             out.holds_schema = true;
         }
         out.prompt = std::move(prompt);
+        if (thinking_tags) {
+            // A thinking model's format names where reasoning opens and
+            // closes, what a budget counts between (26i).
+            out.thinking_start = "<think>";
+            out.thinking_ends = {"</think>"};
+            out.generation_prompt = opening;
+        }
         out.preserved_tokens = {id_for("<tool_call>"), id_for("</tool_call>")};
         out.stops = stops;
         out.format = "fake";
@@ -679,6 +707,7 @@ public:
         state->sliding_window = sliding_window;
         state->sliding_keep = sliding_keep;
         state->grammar_error = grammar_error;
+        state->budget_spent_after = budget_spent_after;
         state->multimodal = decodes_media;
         contexts.push_back(state);
         // The provider owns its contexts and destroys a side request's the
@@ -729,6 +758,8 @@ public:
     std::string builtin_template_prefix;
     /// Applied to every model: see FakeLlamaModel.
     bool chat_template = false;
+    bool thinking_tags = false;
+    std::optional<std::size_t> budget_spent_after;
     std::string chat_template_error;
     bool unstable_prefix = false;
     bool system_first_only = false;
@@ -775,6 +806,8 @@ public:
         loaded->special_words = special_words;
         loaded->stops = stops;
         loaded->grammar_error = grammar_error;
+        loaded->thinking_tags = thinking_tags;
+        loaded->budget_spent_after = budget_spent_after;
         loaded->schema_error = schema_error;
         loaded->trained_length = trained_length;
         loaded->fitted = request.fit_window ? fitted : 0;

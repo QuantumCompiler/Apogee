@@ -1253,6 +1253,69 @@ The defaults lost no task: Llama 3.1 8B failed the URL task greedily too (26g's 
 | Penalties under greedy | Applied | Deterministic, so `-t 0` stays reproducible with a configured penalty. |
 | The acceptance models | The model families, replacing the doc's two | The standing real-weights rule. The 27B named in the criterion was read header-only, never run. |
 
+### 2026-10-03 — `thinking-control` (backlog item 26i): on, off, automatic, and a budget
+
+**Why.** Reasoning was most of the time a thinking model took to answer -- 26 of 57 seconds of one ordinary answer on the reference machine (2026-09-25) -- and the same cost for a capital city as for a proof. Nothing could turn it down: the only switch was a Qwen-only `skip_reasoning` the title request used. Ommi displayed and filtered reasoning but never controlled it.
+
+**What was built**
+
+- [x] **One setting on every request** (`harness::Thinking` on `ChatRequest`): a mode -- `on`, `off` or `auto` -- and an optional budget in tokens. It replaces `transient.skip_reasoning`, which was its `off`; every side request that skipped reasoning now asks for `off`.
+- [x] **Set where every other run setting is set.**
+  - `--think on|off|auto` and `--think-budget N` on `chat` and `complete`.
+  - `/think` in chat, a row in the one command table with its three values completing: bare, it says what the next question gets; with a mode, it sets it. A chat saves both in its session (`think`, `think_budget`), so a resumed chat thinks as it did.
+  - A backend's `thinking:` and `thinking_budget:` in the config, settable by `config add-backend` and its admin twin, read by `config get`, documented in the starter template.
+  - `serve`, `analyze` and the legacy completion route apply the backend's setting too.
+- [x] **`auto`, decided once per question** (`agentloop/thinking`). The utility model, when the config names one, is asked one word -- greedy, a side request, its own thinking off -- and its yes or no decides. Without one, or when it fails or says anything else, a rule decides: think for a question over 200 characters, or one holding code, arithmetic, or the words why or how. The decision is made once per turn, so every step of a tool loop agrees, and `--verbose` says what decided it.
+- [x] **The local model's own switch** (`llamacpp`). `off` renders the template's `enable_thinking=false` (Qwen3, Gemma 4) and asks `reasoning_effort=low` (gpt-oss's least: it has no off).
+- [x] **The budget is a sampler in the one chain** -- llama.cpp's reasoning-budget sampler, first in `make_sampler`. It counts between the format's own reasoning tags, from inside the block when the template opens it, and forces the close tag at N. A format with no reasoning tags gets no budget, and the conversation is told once.
+- [x] **Every vendor's own control** (`*_wire`):
+  - Anthropic: off sends no thinking; a budget is sent at the API's 1024 floor or above, with `max_tokens` kept 1024 above it and no temperature while it thinks.
+  - OpenAI: off is each model's least effort -- `none` from gpt-5.1, `minimal` on gpt-5, `low` on the o-series -- and a model that does not reason is sent no effort at all.
+  - Gemini: off is `thinkingBudget` 0, or 128 on a Pro model, which cannot stop; models before 2.5 are sent none.
+- [x] **The display says what happened.** A budget that cut reasoning short reads `✻ Thought for 20s (budget reached)`, or ends a verbose transcript; machine mode sends a second `thinking` event with `"budget_reached": true`; `serve` a `thinking_budget` meta-frame. Thinking still never reaches history.
+- [x] **`models info` says what control there is.** A `thinking:` line on every backend: the mode and budget and where each came from, and what this backend does with them. A local model's template is read for whether it has a switch, names reasoning without one, or names none; a vendor CLI or the mock says it has no control here.
+
+**On real weights** (the families, one at a time, each loaded once, through the production loop; no Qwen3.8-27B -- the user's call, "only where nothing else works"; the mutation build ran beside gpt-oss, Qwen and Llama, whose times are therefore rough):
+
+| | Gemma 4 12B (Q4_K_M) | gpt-oss-20b (F16) | Qwen3-VL-8B (Q4_K_M) | Llama 3.1 8B (Q4_K_M) |
+|---|---|---|---|---|
+| on: thinking, first answer token | 1,176 chars, 35 s (the load included) | 1,101 chars, 11 s | none: it does not think | none |
+| off: thinking, first answer token | **none**, 0.32 s | 139 chars (`low`), 2.0 s | none, 0.05 s | none, 0.03 s |
+| budget 256 | **reached and said**: 584 chars, 9.8 s | **reached and said**: 572 chars | said not applied: no reasoning tags | said not applied |
+| ten chat questions, on / auto | 217 s / 150 s | 105 s / 116 s | no difference | no difference |
+| the six-task battery, on / auto | 6/6 / 6/6 | 6/6 / 6/6 | 6/6 / 6/6 | 6/6 / 4/6 |
+
+- **The arithmetic question answered with thinking off** on Gemma 4 ("A train leaves at 09:40…") began in 0.32 s with no thinking block.
+- **`auto` on the chat set, by the rule:** Gemma answered "Is 221 a prime number?" right in 3 s instead of 38, and the lookups in under a second. Its tool battery under `auto` was slower (83 s against 62): flipping the switch between tasks re-reads the whole tools prompt, because Gemma's template places the switch at the top. That is why `auto` stays opt-in.
+- **Llama 3.1 8B's two misses under `auto`** are sampling, not thinking: the template has no switch, and the first prompt of every task was the same size either way. It invented a call as text, and globbed `17 * 23` in the shell, as it has before (26g, 26h).
+- **The rule's literal "how"** sends small talk like "Hello! How are you today?" to thinking -- a known cost of the confirmed rule, measured, not changed.
+
+**Tests**: 37 new cases:
+- `auto`: the rule's table and the judge, with yes, no, anything else, unreachable, and no judge named;
+- the loop: deciding once and setting every request, and a backend's budget status reaching the reporter;
+- the local backend's switch, its budget, both notices;
+- each vendor's table and its wire body;
+- the config, the editor, `add-backend`, the admin create and the session round trip;
+- `/think`, `--think` end to end through the mock's new `{{thinking}}` placeholder, and `serve` applying the backend's default;
+- the three reporters, the view, the template reading, `models info`.
+
+**Guardrails, each mutation-tested (36 mutants, all caught), in a separate git worktree:** the rule's boundary, words and operators; the judge's verdict, failure and own thinking; the budget dropped, kept when off, its prefill, its once-only notice and status; each vendor mapping; the config bound and refusal; the editor, the session, `/think`, each reporter, the view, `models info`, `serve`'s default.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The default | `on` unless configured; `auto` opt-in *(confirmed by the user)* | Today's behaviour. The measurement above keeps `auto` opt-in. |
+| Judge-less `auto` | Over 200 characters, or code, maths, why or how *(confirmed by the user)* | Measured against the battery and ten chat questions, above. |
+| A budget | None unless chosen *(confirmed by the user)* | A budget changes answers. |
+| Qwen3.8-27B | Only where nothing else works *(the user's call)* | Gemma 4 and gpt-oss carry the switch the acceptance needed. |
+| Anthropic | Off sends nothing; a budget at the 1024 floor, room above it, no temperature | The API's own rules. |
+| OpenAI | Off is each model's least effort; nothing to a model that does not reason | The API refuses an effort a model does not take. |
+| Gemini | Off is 0, 128 on Pro; nothing before 2.5 | Pro cannot stop thinking; older models take no thinking config. |
+| A format with no reasoning tags | No budget, said once a conversation | Nothing to count; every step saying it would be noise. |
+| `serve`, `analyze`, legacy completions | The backend's setting; no per-request override | Mode parity. An override is named, not built. |
+| The session's keys | `think`, `think_budget` | A setting, not reasoning: the cleanliness check still finds no `thinking` in a saved file. |
+
 ## Milestone K — The install contract
 
 **Goal.** Make v0.1.0 shippable, and do it by closing Ommi's dominant early bug class rather than by documenting it. Ommi lost real time to *silent install drift*: `make install` seeded one tree, `install.sh` another, the updater a third, and `check` validated a fourth — each list correct when written, diverging one commit at a time, and never failing loudly. The fix adopted here is structural: one layout declaration, and every install path reads it.
@@ -3396,7 +3459,7 @@ Also checked:
 - **Heat, first.** Measured with `macmon`, the 14-inch M3 Max's GPU reaches 95–97 °C within about 25 s of steady generation, and its clock falls from 1,372 MHz to about 610 MHz after two minutes. Generation fell from 17.5 to 12.3 tokens/s over those two minutes and was still falling. After an hour of builds and model runs, it measured 5.2 tokens/s generating and 73 reading, against 13.6 and 152 when cool.
 - **Ruled out.** CPU load from builds (12 busy cores cost 7%). Graphics from the terminal and this desktop app, which kept the GPU "96% busy" at rest yet cost the model little. Apogee itself: llama.cpp's own benchmark, at the same pin, matches it.
 - **This machine supports High Power mode** (`pmset -g cap`), which runs the fans harder. It is the user's setting to change, not Apogee's.
-- **The rest is tokens.** Qwen3.8's reasoning before every step, and every byte a tool returns. That is what the smaller first page, and [thinking control](../backlog/v0.1.3/thinking-control.md), address.
+- **The rest is tokens.** Qwen3.8's reasoning before every step, and every byte a tool returns. That is what the smaller first page, and [thinking control](#milestone-j--local-inference) (26i, shipped 2026-10-03), address.
 
 **Guardrails, each mutation-tested (51 mutants, every one run against the whole unit suite).** 48 were caught outright, and 3 once their tests were strengthened. The mutants, by area:
 - **Landmarks:** `<main>` ignored; no dominant article, or any largest article taken.

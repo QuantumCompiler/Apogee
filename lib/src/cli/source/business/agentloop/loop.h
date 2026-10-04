@@ -40,6 +40,13 @@ struct Options {
     std::optional<double> temperature;
     std::optional<std::int64_t> max_tokens;
 
+    /// Whether the model reasons before answering, and for how long (26i).
+    /// `auto` is decided once per turn, for its question.
+    harness::Thinking thinking;
+    /// The backend `auto` asks -- the utility model, when the config names
+    /// one. Empty decides by rule.
+    std::string thinking_judge;
+
     /// Tools the model may call. Empty means a plain single-turn completion.
     const agent::ToolRegistry* tools = nullptr;
 

@@ -14,6 +14,7 @@
 #include "agentloop/query_rewrite.h"
 #include "agentloop/rag.h"
 #include "agentloop/retriever.h"
+#include "agentloop/thinking.h"
 #include "contracts/errors.h"
 #include "events/bus.h"
 #include "harness/roles.h"
@@ -421,6 +422,10 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
     loop_options.model = plan.backend;
     loop_options.temperature = plan.temperature;
     loop_options.max_tokens = plan.max_tokens;
+    // The backend's thinking default (26i); a request carries no override.
+    loop_options.thinking =
+        commands::resolve_thinking(std::nullopt, std::nullopt, config, plan.backend);
+    loop_options.thinking_judge = commands::named_utility(config);
     loop_options.stream_answer = plan.stream;
     loop_options.cancellation = cancellation;
     // A large tool result is summarised by the utility model, when one is
@@ -733,6 +738,10 @@ HttpResponse Handler::completions(const HttpRequest& request) {
         chat_request.max_tokens = max_tokens.has_value()
                                       ? max_tokens
                                       : commands::resolve_max_tokens(std::nullopt, config, backend);
+        // The backend's thinking default (26i), `auto` decided for the prompt.
+        chat_request.thinking = agentloop::resolve_turn_thinking(
+            *harness_, commands::resolve_thinking(std::nullopt, std::nullopt, config, backend),
+            commands::named_utility(config), prompt, {});
 
         StreamIdentity identity;
         identity.id = fresh_id("cmpl-");

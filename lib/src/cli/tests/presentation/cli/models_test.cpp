@@ -1099,6 +1099,87 @@ TEST_CASE("info shows what a local model samples with, and where each value came
     std::filesystem::remove(path, code);
 }
 
+TEST_CASE("info says what a local model's thinking control can do, from its own template",
+          "[commands][models][info][thinking]") {
+    const auto file = [](std::string_view name, std::string_view text) {
+        const std::filesystem::path path = std::filesystem::temp_directory_path() /
+                                           ("apogee-models-info-" + std::string{name} + "-" +
+                                            std::to_string(std::random_device{}()) + ".gguf");
+        apogee::testing::GgufBuilder builder;
+        builder.magic().u32(3).u64(1).u64(2);
+        builder.string_kv("general.architecture", "qwen3");
+        builder.string_kv("tokenizer.chat_template", text);
+        builder.tensor("token_embd.weight");
+        REQUIRE(builder.write_to(path));
+        return path;
+    };
+    const std::filesystem::path switched = file("switched", "{{ enable_thinking }}<think>");
+    const std::filesystem::path plain = file("plain", "{{ m.content }}");
+    const std::filesystem::path always = file("always", "<think>");
+    Config config = sample_config();
+    BackendConfig local;
+    local.type = BackendType::LlamaCpp;
+    local.model_path = switched.string();
+    local.thinking = apogee::harness::ThinkingMode::Auto;
+    local.thinking_budget = 1024;
+    config.backends["switched"] = local;
+    local.model_path = plain.string();
+    local.thinking.reset();
+    local.thinking_budget.reset();
+    config.backends["plain"] = local;
+    local.model_path = always.string();
+    config.backends["always"] = local;
+
+    CHECK(render_model_info(config, "switched")
+              .find("thinking:     auto (config), at most 1024 tokens (config) -- off renders the "
+                    "template's own switch") != std::string::npos);
+    CHECK(render_model_info(config, "plain")
+              .find("thinking:     on (default), no budget -- the template names no reasoning") !=
+          std::string::npos);
+    CHECK(render_model_info(config, "always").find("the template has no off switch") !=
+          std::string::npos);
+    for (const auto& path : {switched, plain, always}) {
+        std::error_code code;
+        std::filesystem::remove(path, code);
+    }
+}
+
+TEST_CASE("info says how each cloud backend takes thinking, or that it cannot",
+          "[commands][models][info][thinking]") {
+    Config config = sample_config();
+    BackendConfig cloud;
+    cloud.type = BackendType::Anthropic;
+    cloud.model = "claude-sonnet-5";
+    cloud.thinking = apogee::harness::ThinkingMode::Off;
+    config.backends["claude"] = cloud;
+    CHECK(render_model_info(config, "claude")
+              .find("thinking:     off (config), no budget -- Anthropic thinks only with a "
+                    "budget, at least 1024 tokens; off sends none") != std::string::npos);
+
+    BackendConfig openai;
+    openai.type = BackendType::OpenAI;
+    openai.model = "gpt-4.1";
+    config.backends["older"] = openai;
+    CHECK(render_model_info(config, "older").find("gpt-4.1 does not reason, so nothing is sent") !=
+          std::string::npos);
+    openai.model.clear();
+    config.backends["newer"] = openai;
+    CHECK(render_model_info(config, "newer").find("sent as the reasoning effort") !=
+          std::string::npos);
+
+    BackendConfig gemini;
+    gemini.type = BackendType::Google;
+    gemini.model = "gemini-2.0-flash";
+    config.backends["flash"] = gemini;
+    CHECK(render_model_info(config, "flash").find("gemini-2.0-flash does not think") !=
+          std::string::npos);
+
+    BackendConfig vendor;
+    vendor.type = BackendType::ClaudeCli;
+    config.backends["vendor"] = vendor;
+    CHECK(render_model_info(config, "vendor").find("no control here") != std::string::npos);
+}
+
 TEST_CASE("info on a cloud backend says which local-only knobs it does not send",
           "[commands][models][info][sampling]") {
     Config config = sample_config();

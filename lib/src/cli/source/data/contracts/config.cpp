@@ -196,6 +196,16 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
         node["presence_penalty"], origin, where + ".presence_penalty",
         [](double p) { return p >= -2.0 && p <= 2.0; }, "between -2 and 2");
     backend.seed = integer_in(node["seed"], origin, where + ".seed", 0, kMaxSeed);
+    if (const std::string thinking = scalar(node["thinking"], origin, where + ".thinking");
+        !thinking.empty()) {
+        backend.thinking = thinking_mode_from_string(thinking);
+        if (!backend.thinking.has_value()) {
+            fail(origin, where + ".thinking: '" + thinking +
+                             "' is not a thinking mode (accepted: on, off, auto)");
+        }
+    }
+    backend.thinking_budget = integer_in(node["thinking_budget"], origin,
+                                         where + ".thinking_budget", 0, kMaxThinkingBudget);
     backend.binary = scalar(node["binary"], origin, where + ".binary");
     backend.mode = scalar(node["mode"], origin, where + ".mode");
     backend.host = scalar(node["host"], origin, where + ".host");

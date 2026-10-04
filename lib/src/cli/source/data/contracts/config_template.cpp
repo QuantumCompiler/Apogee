@@ -256,6 +256,11 @@ backends:
   # repeat_penalty and presence_penalty sit beside it, and a seed makes sampled
   # answers repeat. Temperature 0 is greedy. `apogee models info <backend>`
   # shows what is in force and where each value came from.
+  # thinking -- on (the default), off or auto -- is whether a reasoning model
+  # thinks before it answers; auto decides per question, through the utility
+  # model when one is set. thinking_budget caps the tokens it may think for.
+  # Both work on cloud backends too, mapped to each vendor's own control;
+  # --think and --think-budget, and /think in a chat, outrank them.
   # local:
   #   type: llamacpp
   #   model_path: "${HOME}/.cache/llms/my-model.gguf"
@@ -264,6 +269,8 @@ backends:
   #   # temperature: 0.7
   #   # top_p: 0.8
   #   # seed: 42
+  #   # thinking: auto
+  #   # thinking_budget: 2048
   #   # idle_unload_seconds: 900
 
   # ── Local vision ────────────────────────────────────────────────────────────

@@ -191,7 +191,7 @@ TEST_CASE("the requests that describe and transcribe", "[agentloop][media]") {
     CHECK(parts[1].text.starts_with("This is an image. Describe it"));
     CHECK(parts[1].text.find("copy every piece of text") != std::string::npos);
     CHECK(described.transient.side_request);
-    CHECK(described.transient.skip_reasoning);
+    CHECK(described.thinking.off());
     CHECK(described.max_tokens == 1024);
 
     // A frame says what it is first: after the prompt, the line read as a cue
@@ -238,7 +238,7 @@ TEST_CASE("an empty answer with the reasoning skipped is asked again with it on"
     Models models{"  default_vision: eyes\n"};
     models.eyes->sees = true;
     models.eyes->reply = [](const apogee::harness::ChatRequest& request) {
-        return request.transient.skip_reasoning ? std::string{} : std::string{"a dog"};
+        return request.thinking.off() ? std::string{} : std::string{"a dog"};
     };
     const auto read = read_media(scratch.write("dog.jpg"), Medium::Image,
                                  job_for(models, scratch, Medium::Image));
@@ -246,8 +246,8 @@ TEST_CASE("an empty answer with the reasoning skipped is asked again with it on"
     CHECK(read.text.find("a dog") != std::string::npos);
     const auto requests = models.eyes->requests();
     REQUIRE(requests.size() == 2);
-    CHECK(requests[0].transient.skip_reasoning);
-    CHECK_FALSE(requests[1].transient.skip_reasoning);
+    CHECK(requests[0].thinking.off());
+    CHECK_FALSE(requests[1].thinking.off());
     CHECK(requests[1].max_tokens >= 4096);
 
     // Nothing at all, either way: said, never indexed as a description.

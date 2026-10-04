@@ -82,6 +82,11 @@ void CliReporter::on_thinking() {
     status_.start_spinner("Thinking…");
 }
 
+void CliReporter::on_thinking_budget_reached() {
+    // The block still open is the one the budget cut; its summary says so.
+    thinking_.note_budget_reached();
+}
+
 void CliReporter::on_thinking_token(std::string_view chunk) {
     if (chunk.empty()) {
         // Redacted-thinking models emit empty payloads. The view must not open

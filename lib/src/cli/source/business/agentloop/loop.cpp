@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "agentloop/budget.h"
+#include "agentloop/thinking.h"
 #include "agentloop/tool_summary.h"
 #include "contracts/errors.h"
 
@@ -156,6 +157,18 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
     // (26c): earlier turns' tool results as stubs, and on overflow the
     // lowest priorities trimmed. Only what is sent changes, never `history`.
     const TurnBudget budget = turn_budget(harness, options.model, options.max_tokens);
+
+    // Whether this question is reasoned about (26i): asked once, so every
+    // step of the turn agrees -- a tool loop that thought on one step and
+    // not the next would read as two answers.
+    ThinkingDecision decided;
+    const harness::Thinking thinking =
+        resolve_turn_thinking(harness, options.thinking, options.thinking_judge,
+                              selection_query(options, history), options.cancellation, &decided);
+    if (options.thinking.mode == harness::ThinkingMode::Auto) {
+        reporter.on_progress(std::string{"thinking: auto -- "} + (thinking.off() ? "off" : "on") +
+                             ", by " + decided.by);
+    }
     const std::size_t turn_start = current_turn_start(history);
     bool stubs_said = false;
     std::vector<std::string> trims_said;
@@ -197,6 +210,7 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
         request.model = options.model;
         request.temperature = options.temperature;
         request.max_tokens = options.max_tokens;
+        request.thinking = thinking;
         // On the final pass the tools are withdrawn, which is what forces an
         // answer instead of another tool call. Set before the messages: the
         // budget counts the definitions too.
@@ -264,6 +278,8 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
                 reporter.on_notice(event.detail);
             } else if (event.type == harness::StatusEvent::Type::PromptCache) {
                 reporter.on_progress(event.detail);
+            } else if (event.type == harness::StatusEvent::Type::ThinkingBudget) {
+                reporter.on_thinking_budget_reached();
             }
         };
         stream.on_token = [&](std::string_view chunk) {

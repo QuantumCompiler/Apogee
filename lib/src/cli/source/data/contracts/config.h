@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include "contracts/types.h"
+
 /// The config engine's read path.
 ///
 /// Loading is typed and total: a config either parses into these structs or
@@ -91,6 +93,8 @@ enum class KvCacheType : std::uint8_t { F16, Q8_0, Q4_0 };
 /// "draw a seed", so a fixed one stops just short of it.
 inline constexpr std::int64_t kMaxTopK = 1'000'000;
 inline constexpr std::int64_t kMaxSeed = 4'294'967'294;
+/// The largest `thinking_budget` a backend may name (26i).
+inline constexpr std::int64_t kMaxThinkingBudget = 1'000'000;
 
 /// One entry under `backends:`.
 ///
@@ -157,6 +161,13 @@ struct BackendConfig {
     /// A fixed sampling seed, so sampled output repeats. Unset draws a fresh
     /// one for every generation; at temperature 0 it does not matter.
     std::optional<std::int64_t> seed;
+
+    /// Whether a reasoning model thinks, unless a request says (26i): `on`,
+    /// `off` or `auto`. Unset is `on`, as before; `auto` decides per question.
+    std::optional<ThinkingMode> thinking;
+    /// The most tokens it may reason for before it must answer. Unset is no
+    /// budget: a budget changes answers, so it is chosen, never implied.
+    std::optional<std::int64_t> thinking_budget;
 
     /// Vendor-CLI backends: the binary to spawn, resolved from PATH when it
     /// has no separator. Apogee never installs, bundles, or modifies it -- the

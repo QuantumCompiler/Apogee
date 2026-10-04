@@ -37,6 +37,8 @@ struct MockTurn {
     /// messages; the
     /// `{{last_tool_result:json}}` / `{{system:json}}` forms expand to a
     /// JSON string literal, quotes included, for use inside a JSON answer.
+    /// `{{thinking}}` is the thinking the request asked for -- `on`, `off`
+    /// or `auto`, with `:N` for a budget (26i).
     std::string text;
 
     /// Tool calls to attach to the response.

@@ -16,6 +16,13 @@ namespace apogee::commands {
 /// backend entry's own value, then nothing.
 ///
 /// The flag always wins -- it is the most specific thing the user said.
+/// A turn's thinking (26i): the mode and the budget each from the flag or
+/// the session when set, else the backend's config, else on with no budget.
+[[nodiscard]] harness::Thinking resolve_thinking(const std::optional<harness::ThinkingMode>& mode,
+                                                 const std::optional<std::int64_t>& budget,
+                                                 const harness::Config& config,
+                                                 std::string_view backend_name);
+
 [[nodiscard]] std::optional<double> resolve_temperature(const std::optional<double>& flag_value,
                                                         const harness::Config& config,
                                                         std::string_view backend_name);

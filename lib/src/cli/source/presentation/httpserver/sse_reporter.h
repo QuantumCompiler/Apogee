@@ -49,6 +49,8 @@ public:
 
     void on_thinking() override;
     void on_thinking_token(std::string_view chunk) override;
+    /// A `thinking_budget` meta-frame (26i).
+    void on_thinking_budget_reached() override;
     void on_tool_status(std::string_view detail) override;
     /// A `notice` meta-frame, `detail` the line.
     void on_notice(std::string_view text) override;

@@ -62,6 +62,13 @@ public:
     /// end-of-turn path calls this unconditionally.
     void finish();
 
+    /// The reasoning hit its thinking budget (26i): the summary this block
+    /// collapses to says so -- `✻ Thought for 20s (budget reached)` -- so an
+    /// answer that suffered for it can be understood.
+    void note_budget_reached() noexcept {
+        budget_reached_ = true;
+    }
+
     /// Erases the region without leaving a summary. For the path where an
     /// answer or an error takes over and no reasoning happened.
     void abandon();
@@ -93,6 +100,7 @@ private:
     std::string tail_;
     std::size_t painted_ = 0;
     bool open_ = false;
+    bool budget_reached_ = false;
     std::int64_t started_ = 0;
     Clock clock_;
 };
