@@ -123,6 +123,19 @@ std::vector<harness::Tool> advertised_tools(const Options& options) {
 
 RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>& history,
               const Options& options, Reporter& reporter) {
+    // A model with no chat template has no tool format (26r): offered tools,
+    // it only imitates calling them. Withheld here, once, for every surface --
+    // ask_user with them, since it is one -- and each surface says so where
+    // it starts. The turn itself runs: framing, never a gate.
+    if ((options.tools != nullptr || options.ask) &&
+        harness.model_behavior_for(options.model).base_model) {
+        Options bare = options;
+        bare.tools = nullptr;
+        bare.tool_selection = nullptr;
+        bare.ask = {};
+        return run(harness, history, bare, reporter);
+    }
+
     RunResult result;
     result.tokens.estimated = false;
 

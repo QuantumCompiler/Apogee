@@ -265,4 +265,15 @@ std::string reasoning_skip_for(const ModelProfile* profile) {
     return profile == nullptr ? std::string{} : profile->skip_reasoning;
 }
 
+const std::vector<std::string>& base_turn_markers() {
+    static const std::vector<std::string> markers{
+        // ChatML (Qwen, many fine-tunes).
+        "<|im_start|>", "<|im_end|>", "<|im_sep|>",
+        // The <|end|> style (Phi, GPT-2 and its heirs, Llama 3's base).
+        "<|end|>", "<|endoftext|>", "<|end_of_text|>",
+        // The <|eot_*|> style (Llama 3).
+        "<|eot_id|>", "<|eot|>", "<|eom_id|>"};
+    return markers;
+}
+
 }  // namespace apogee::backends

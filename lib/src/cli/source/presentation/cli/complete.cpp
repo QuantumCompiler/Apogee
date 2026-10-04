@@ -458,6 +458,10 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         loop_options.permission = make_permission_checker(config, approvals);
         loop_options.confirm =
             terminal_confirm_fn(reporter.status(), reporter_options.style, config_path, approvals);
+        if (is_base_model(harness, model)) {
+            reporter.status().print_line(reporter_options.style.tag(ansi::Role::Warning) + " " +
+                                         base_model_tools_note(model));
+        }
     }
 
     std::vector<harness::ChatMessage> history = request.messages;

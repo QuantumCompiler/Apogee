@@ -32,6 +32,11 @@ struct ModelBehavior {
     /// Whether this family emits control-token tool calls in addition to, or
     /// instead of, an injected text protocol.
     bool native_tool_calls = false;
+    /// The model ships no chat template (26r): almost always a base model,
+    /// which continues text rather than answering and has no tool format. A
+    /// fact read from the file, never a guess from its name -- the session
+    /// still runs; the surfaces say so, and offer it no tools.
+    bool base_model = false;
 
     /// Open/close wrappers this family puts private reasoning in. An empty
     /// vector on a KNOWN profile is a verified "this family emits none"; on an

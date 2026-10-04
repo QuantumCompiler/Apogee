@@ -191,6 +191,15 @@ std::unique_ptr<agentloop::ToolSelection> make_tool_selection(
         registry.size());
 }
 
+bool is_base_model(const harness::Harness& harness, std::string_view model) {
+    return harness.model_behavior_for(model).base_model;
+}
+
+std::string base_model_tools_note(std::string_view model) {
+    return "tools off: " + std::string{model} +
+           " is a base model, with no tool format to call them in -- it answers without them";
+}
+
 std::function<void(std::string_view)> mcp_status_line(StatusLine& status) {
     return [&status](std::string_view line) {
         if (line.find("warning") != std::string_view::npos) {

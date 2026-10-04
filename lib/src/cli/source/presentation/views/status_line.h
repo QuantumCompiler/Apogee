@@ -108,6 +108,9 @@ public:
     /// zero. Safe from any thread; the next frame shows it.
     void set_spinner_label(std::string label, std::size_t done = 0, std::size_t total = 0);
 
+    /// What the spinner says, running or last run. Safe from any thread.
+    [[nodiscard]] std::string spinner_label();
+
     /// Updates the live token estimate shown in the spinner.
     void set_token_estimate(std::int64_t tokens);
 

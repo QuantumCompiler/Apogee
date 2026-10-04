@@ -107,6 +107,13 @@ struct BuiltInToolOptions {
 /// something the user should still be able to read once the prompt is up.
 [[nodiscard]] std::function<void(std::string_view)> mcp_status_line(StatusLine& status);
 
+/// Whether `model` is a base model (26r): its file ships no chat template.
+[[nodiscard]] bool is_base_model(const harness::Harness& harness, std::string_view model);
+
+/// The one line a surface started with `--tools` says when its model is a
+/// base model, whose turns run without tools (the loop withholds them).
+[[nodiscard]] std::string base_model_tools_note(std::string_view model);
+
 /// The most of a response `fetch_url` reads: past it the fetch is refused,
 /// naming the size, rather than holding an unbounded body in memory to keep
 /// its first 8 KB (5 MB, the reader item's recorded default, 2026-09-25).

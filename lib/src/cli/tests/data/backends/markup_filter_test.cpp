@@ -3,7 +3,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <utility>
 #include <vector>
+
+#include "backends/model_profile.h"
 
 /// The control-token header filter, against real observed output.
 ///
@@ -101,4 +104,81 @@ TEST_CASE("a reply that starts with a blank line keeps it", "[backends][markup]"
     // back: a Markdown answer opening on a blank line is not framing.
     CHECK(strip_markup_headers("<|start|>assistant\n\n- a bullet", gpt_oss_headers()) ==
           "\n\n- a bullet");
+}
+
+namespace {
+
+using apogee::backends::TurnMarkerFilter;
+
+/// `stream` through a base model's filter in `pieces`, as a stream arrives:
+/// what came out, and whether a marker ended it.
+std::pair<std::string, bool> through(const std::vector<std::string>& pieces) {
+    TurnMarkerFilter filter{apogee::backends::base_turn_markers()};
+    std::string out;
+    bool stopped = false;
+    for (const std::string& piece : pieces) {
+        out += filter.write(piece, stopped);
+        if (stopped) {
+            break;
+        }
+    }
+    if (!stopped) {
+        out += filter.flush();
+    }
+    return {out, stopped};
+}
+
+}  // namespace
+
+TEST_CASE("a base model's spilled turn markers end its reply, whole, chained or cut short",
+          "[backends][markup][base]") {
+    // The motivating session's byte patterns (Gemma 4 E4B, 2026-10-03).
+    CHECK(through({"It is 67°F in Lehi.<|end|"}) ==
+          std::pair<std::string, bool>{"It is 67°F in Lehi.", false});
+    CHECK(through({"Bitcoin is at $67,200.<|end|><|im|"}).first == "Bitcoin is at $67,200.");
+    CHECK(through({"Bitcoin is at $67,200.<|end|><|im|"}).second);
+    // Each family, whole: the reply is over, whatever it invents next.
+    CHECK(through({"Paris.<|im_end|>\n<|im_start|>user\nand Spain?"}).first == "Paris.");
+    CHECK(through({"Paris.<|eot_id|>assistant"}).first == "Paris.");
+    CHECK(through({"Paris.<|endoftext|>The"}).first == "Paris.");
+    // Cut short and followed by more: ended all the same.
+    CHECK(through({"Paris.<|im|\nuser: more"}).first == "Paris.");
+    CHECK(through({"Paris.<|end\nUser:"}).first == "Paris.");
+
+    SECTION("split anywhere across reads, no part of a marker gets out") {
+        const std::string stream = "The Jazz won 112-104.<|end|><|im|";
+        for (std::size_t first = 1; first < stream.size(); ++first) {
+            for (std::size_t second = first + 1; second <= stream.size(); ++second) {
+                const auto [out, stopped] =
+                    through({stream.substr(0, first), stream.substr(first, second - first),
+                             stream.substr(second)});
+                INFO(first << " " << second);
+                CHECK(out == "The Jazz won 112-104.");
+            }
+        }
+    }
+    SECTION("a fragment still open when the stream ends is never emitted") {
+        CHECK(through({"Done.", "<|"}).first == "Done.");
+        CHECK(through({"Done.<|e"}).first == "Done.");
+        CHECK(through({"Done.<|zz"}).first == "Done.");
+        // A lone `<` was never one.
+        CHECK(through({"a < b and b <"}).first == "a < b and b <");
+    }
+    SECTION("a marker of no family is dropped where it stands, and the reply goes on") {
+        // Seen on Gemma 4 E4B: `Bitcoin is 3000 <|fiap| (via Mark ...`.
+        CHECK(through({"Bitcoin is 3000 <|fiap| (via Mark)"}) ==
+              std::pair<std::string, bool>{"Bitcoin is 3000  (via Mark)", false});
+        CHECK(through({"x <|foo|> y"}).first == "x  y");
+        CHECK(through({"the <|e is a ", "letter"}).first == "the  is a letter");
+        CHECK(through({"<|im|> goes, ", "<|e"}).first == " goes, ");
+        // A `<|` that starts no name is text.
+        CHECK(through({"a <| b, and <||> too"}).first == "a <| b, and <||> too");
+    }
+    SECTION("with no markers it is a pass-through") {
+        TurnMarkerFilter none;
+        bool stopped = false;
+        CHECK(none.write("a <|end|> b", stopped) == "a <|end|> b");
+        CHECK_FALSE(stopped);
+        CHECK_FALSE(none.active());
+    }
 }

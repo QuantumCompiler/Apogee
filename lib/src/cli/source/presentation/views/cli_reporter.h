@@ -64,6 +64,11 @@ public:
     /// other line.
     void keep_line(std::string_view line);
 
+    /// What the spinner says while a step waits on the model: `Thinking…`,
+    /// or with what the session is -- `Thinking… · base model` (26r), so the
+    /// state outlives the banner's scroll without decorating any answer.
+    void set_resting_label(std::string label);
+
     /// `[memory] 2 past chats, 1 decision`, a line that stays (26l).
     void on_recall(int chats, int decisions) override;
     /// `· <role> — <what it is doing>` inside the thinking block, completed
@@ -104,6 +109,7 @@ private:
     /// Absent, answers go to the stream as written -- the pipe contract.
     std::optional<AnswerView> answer_view_;
     std::int64_t thinking_characters_ = 0;
+    std::string resting_label_ = "Thinking…";
     bool emitted_ = false;
     /// Whether the current answer has shown any text yet. Until it has, its
     /// whitespace is held: a thinking model opens its answer with the blank

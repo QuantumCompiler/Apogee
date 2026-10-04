@@ -35,6 +35,42 @@ namespace {
     return std::string_view::npos;
 }
 
+/// A cut-short marker's name needs two letters (26r): `<|im|` is ChatML's,
+/// `<|e` could be anything.
+constexpr std::size_t kShortestCutName = 2;
+
+/// A `<|` spilled at `open`: where its name ends, where it does, and whether
+/// it closed with `|>`. Unresolved while the text runs out before it ends.
+struct SpilledMarker {
+    bool resolved = false;
+    std::size_t name_end = 0;
+    std::size_t end = 0;
+    bool complete = false;
+};
+
+[[nodiscard]] SpilledMarker spilled_marker(std::string_view text, std::size_t open) {
+    SpilledMarker marker;
+    std::size_t end = open + 2;
+    while (end < text.size() && is_ident_byte(static_cast<unsigned char>(text[end])) &&
+           text[end] != '-') {
+        ++end;
+    }
+    marker.name_end = end;
+    if (end == text.size()) {
+        return marker;  // the name may go on
+    }
+    if (text[end] == '|') {
+        if (end + 1 == text.size()) {
+            return marker;  // `|>` may follow
+        }
+        marker.complete = text[end + 1] == '>';
+        end += marker.complete ? 2 : 1;
+    }
+    marker.resolved = true;
+    marker.end = end;
+    return marker;
+}
+
 }  // namespace
 
 std::string MarkupFilter::write(std::string_view chunk) {
@@ -177,6 +213,69 @@ std::string strip_markup_headers(std::string_view text, const std::vector<Header
     MarkupFilter filter{headers};
     std::string out = filter.write(text);
     out += filter.flush();
+    return out;
+}
+
+TurnMarkerFilter::TurnMarkerFilter(const std::vector<std::string>& markers) {
+    for (const std::string& marker : markers) {
+        if (marker.size() > 4 && marker.starts_with("<|") && marker.ends_with("|>")) {
+            names_.push_back(marker.substr(2, marker.size() - 4));
+        }
+    }
+}
+
+bool TurnMarkerFilter::known(std::string_view name, bool complete) const {
+    return std::ranges::any_of(names_, [&](const std::string& known) {
+        return complete ? name == known
+                        : name.size() >= kShortestCutName && known.starts_with(name);
+    });
+}
+
+std::string TurnMarkerFilter::write(std::string_view chunk, bool& stopped) {
+    if (!active()) {
+        return std::string{chunk};
+    }
+    if (stopped_) {
+        return {};
+    }
+    pending_ += chunk;
+    std::string out;
+    std::size_t at = 0;
+    while (true) {
+        const std::size_t open = pending_.find("<|", at);
+        if (open == std::string::npos) {
+            // A last `<` may be the start of one.
+            const std::size_t keep = pending_.size() > at && pending_.back() == '<' ? 1 : 0;
+            out += pending_.substr(at, pending_.size() - at - keep);
+            pending_.erase(0, pending_.size() - keep);
+            return out;
+        }
+        out += pending_.substr(at, open - at);
+        const SpilledMarker marker = spilled_marker(pending_, open);
+        if (!marker.resolved) {
+            // The name, its `|` or its `>` may still come.
+            pending_.erase(0, open);
+            return out;
+        }
+        if (known(std::string_view{pending_}.substr(open + 2, marker.name_end - open - 2),
+                  marker.complete)) {
+            stopped = true;
+            stopped_ = true;
+            pending_.clear();
+            return out;
+        }
+        if (marker.name_end == open + 2) {
+            out += "<|";  // no name: text, as `a <| b` is
+            at = open + 2;
+            continue;
+        }
+        at = marker.end;  // a marker of no family: noise, dropped where it stands
+    }
+}
+
+std::string TurnMarkerFilter::flush() {
+    std::string out = !stopped_ && pending_ == "<" ? pending_ : std::string{};
+    pending_.clear();
     return out;
 }
 

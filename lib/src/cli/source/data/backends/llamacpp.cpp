@@ -610,7 +610,11 @@ std::int64_t LlamaCppProvider::session_window() const {
 }
 
 harness::ModelBehavior LlamaCppProvider::model_behavior() const {
-    return behavior_for(profile());
+    harness::ModelBehavior behavior = behavior_for(profile());
+    // From the header alone, so asking needs no model load (26r).
+    const models::GgufInfo& info = header();
+    behavior.base_model = info.parsed && !info.has_chat_template;
+    return behavior;
 }
 
 bool LlamaCppProvider::accepts_images() const noexcept {
@@ -1215,10 +1219,7 @@ void LlamaCppProvider::notice_if_toolless(const harness::ChatRequest& request,
             template_noticed_ = true;
             const std::string file = std::filesystem::path{options_.model}.filename().string();
             notice(options, (file.empty() ? options_.model : file) +
-                                " ships no chat template, so it is most likely a base "
-                                "(pretrained) model: it continues text rather than answering, "
-                                "and cannot use tools. For chat, use its instruction-tuned "
-                                "release, usually named '-it' or '-Instruct'");
+                                " ships no chat template, so it is " + models::base_model_note());
         }
         return;
     }
@@ -1326,8 +1327,13 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
     if (chat != nullptr) {
         reply.emplace(*chat, options);
     }
-    // On the fallback, the guessed framing's own turn markers end the reply.
+    // On the fallback, the guessed framing's own turn markers end the reply
+    // -- and with no template at all, any known family's, whole or cut short
+    // (26r): a base model imitating a transcript writes them all.
     StopWatch watch{stops};
+    TurnMarkerFilter spill{chat == nullptr && model_behavior().base_model
+                               ? base_turn_markers()
+                               : std::vector<std::string>{}};
     bool stopped = false;
 
     std::string answer;
@@ -1411,8 +1417,8 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
                 break;  // a stop string: not fed back, the reply is over
             }
         } else {
-            const std::string visible =
-                pump(think.write(watch.write(model_->token_text(token), stopped)));
+            const std::string visible = pump(
+                think.write(spill.write(watch.write(model_->token_text(token), stopped), stopped)));
             answer += visible;
             if (options.on_token && !visible.empty()) {
                 options.on_token(visible);
@@ -1448,8 +1454,11 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
             }
         }
     } else {
-        // What the watch still held could have become a marker and did not.
-        std::string tail = pump(think.write(watch.flush()));
+        // What the watch still held could have become a marker and did not;
+        // a turn marker's fragment still open is dropped (26r).
+        bool ended = false;
+        std::string tail = spill.write(watch.flush(), ended);
+        tail = pump(think.write(tail + spill.flush()));
         answer += tail;
         if (options.on_token && !tail.empty()) {
             options.on_token(tail);

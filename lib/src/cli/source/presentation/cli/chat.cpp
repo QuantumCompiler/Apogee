@@ -833,9 +833,21 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         }
 
         if (decorate) {
+            // A base model is said in the banner and the spinner, all session
+            // (26r) -- never on an answer.
             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + model +
+                                         (is_base_model(harness, model) ? "  ·  base model" : "") +
                                          "  ·  chat " + session.chat_id +
                                          "  ·  /help for commands");
+        }
+        // Tools withheld from a base model are said once, at the start, on a
+        // terminal and a pipe alike -- never into machine mode's stream.
+        if (flags->tools && flags->output_format != OutputFormat::StreamJson &&
+            is_base_model(harness, model)) {
+            reporter.status().print_line(style.tag(ansi::Role::Warning) + " " +
+                                         base_model_tools_note(model));
+        }
+        if (decorate) {
             // The banner stands apart from the first prompt.
             reporter.status().print_line("");
         }
@@ -1261,8 +1273,14 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                             // was constructed up front and history is neutral IR.
                             session.backend = argument;
                             harness.resume_conversation(session.backend, session.chat_id);
+                            const bool base = is_base_model(harness, argument);
                             reporter.status().print_line(style.tag(ansi::Role::Apogee) +
-                                                         " switched to " + argument);
+                                                         " switched to " + argument +
+                                                         (base ? " -- a base model" : ""));
+                            if (base && flags->tools) {
+                                reporter.status().print_line(style.tag(ansi::Role::Warning) + " " +
+                                                             base_model_tools_note(argument));
+                            }
                         }
                         break;
                     case ChatVerb::Branch:
@@ -1467,6 +1485,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             if (reader->interactive()) {
                 typeahead.emplace();
             }
+            reporter.set_resting_label(
+                is_base_model(harness, session.backend) ? "Thinking… · base model" : "Thinking…");
             run_chat_turn(
                 harness, session, input, flags->tools ? &registry : nullptr, selection.get(),
                 flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},

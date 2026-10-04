@@ -16,6 +16,7 @@
 
 #include "backends/llamacpp_tokens.h"
 #include "contracts/errors.h"
+#include "modelstore/gguf_inspect.h"
 #include "support/fake_llama.h"
 #include "support/gguf_builder.h"
 
@@ -2098,6 +2099,11 @@ TEST_CASE("a model file with no chat template is said to be a base model, once a
     CHECK(first.lines.front().find("base (pretrained) model") != std::string::npos);
     CHECK(first.lines.front().find("cannot use tools") != std::string::npos);
     CHECK(first.lines.front().find("'-it' or '-Instruct'") != std::string::npos);
+    // The one wording `models info` uses too (26r).
+    CHECK(first.lines.front() == "apogee-template-bare.gguf ships no chat template, so it is " +
+                                     apogee::models::base_model_note());
+    // And the fact itself crosses as plain data, for the surfaces to act on.
+    CHECK(provider.model_behavior().base_model);
 
     // Once: a second turn, tools or not, is not told again.
     Notices second;
@@ -2118,6 +2124,48 @@ TEST_CASE("a model file with no chat template is said to be a base model, once a
     (void)other.stream_chat(with_tools({ChatMessage::user("x")}), third.options);
     REQUIRE(third.lines.size() == 1);
     CHECK(third.lines.front().find("is answering without tools") != std::string::npos);
+    CHECK_FALSE(other.model_behavior().base_model);
+
+    std::error_code code;
+    std::filesystem::remove(bare, code);
+    std::filesystem::remove(templated, code);
+}
+
+TEST_CASE(
+    "a base model's spilled markers never reach the answer, and what is shown is what is kept",
+    "[backends][llamacpp][template][base]") {
+    const auto run = [](const std::filesystem::path& file, std::vector<std::string> pieces,
+                        std::string& streamed) {
+        auto owned = std::make_unique<FakeLlamaRuntime>();
+        owned->script_text = std::move(pieces);
+        owned->eog_token = -1;
+        LlamaCppProvider::Options options;
+        options.backend_name = "local";
+        options.model = file.string();
+        options.model_path = file.string();
+        LlamaCppProvider provider{std::move(options), std::move(owned)};
+        apogee::harness::StreamOptions stream;
+        stream.on_token = [&streamed](std::string_view piece) { streamed += piece; };
+        return provider.stream_chat(turn({ChatMessage::user("how warm is it?")}), stream)
+            .message.content.plain_text();
+    };
+    // No template (26r): the motivating session's spill, a piece at a time.
+    const std::filesystem::path bare = header_with_template(false, "spill");
+    std::string streamed;
+    CHECK(run(bare, {"It is 67", "°F.", "<|end", "|><|im", "|", "user"}, streamed) ==
+          "It is 67°F.");
+    CHECK(streamed == "It is 67°F.");
+    // A fragment the stream ends inside: never emitted, never kept.
+    streamed.clear();
+    CHECK(run(bare, {"Done", "<|"}, streamed) == "Done");
+    CHECK(streamed == "Done");
+
+    // A model with a template may be quoting one: its text is left alone.
+    const std::filesystem::path templated = header_with_template(true, "quoting");
+    streamed.clear();
+    const std::string quoted = run(templated, {"Write ", "<|end|>", " to end a turn."}, streamed);
+    CHECK(quoted == "Write <|end|> to end a turn.");
+    CHECK(streamed == quoted);
 
     std::error_code code;
     std::filesystem::remove(bare, code);

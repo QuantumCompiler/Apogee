@@ -23,6 +23,7 @@
 #include "harness/roles.h"
 #include "machine/json_reporter.h"
 #include "models/lineage.h"
+#include "modelstore/gguf_inspect.h"
 #include "modelstore/kv_cache.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
@@ -721,10 +722,8 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         // A file without one is almost always a base model, and a chat with
         // it reads as a broken chat unless it is said where a user looks.
         out << "template:     "
-            << (info.has_chat_template
-                    ? "the model's own"
-                    : "none -- most likely a base (pretrained) model, which continues text "
-                      "rather than answering; for chat, use its instruction-tuned release")
+            << (info.has_chat_template ? std::string{"the model's own"}
+                                       : "none, so it is " + models::base_model_note())
             << "\n";
         render_window(out, info, backend);
         render_sampling(out, info, backend, path);

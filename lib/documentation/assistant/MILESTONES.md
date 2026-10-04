@@ -1576,6 +1576,73 @@ The defaults lost no task: Llama 3.1 8B failed the URL task greedily too (26g's 
 | The GPU | Not idle; each method against its own baseline, minutes apart | Nothing here controls the desktop's apps. No method came near the bar, so the noise does not change the answer. |
 | The outcome | Closed as measured, not built; the script kept for the next pin | A later llama.cpp, or an edit-only mode, may change this. |
 
+### 2026-10-04 — `base-model-sessions` (backlog item 26r): a base model's session, honest and clean
+
+**Why.** The user's transcript (2026-10-03, `Gemma4-E4B-Q4KM`, a base model pulled that day) showed a session the product *knew* was compromised and let limp anyway. There was one dim warning at the top. Then came a fabricated temperature, a Bitcoin price ending `67,200.000000000005`, and invented playoff results, each presented like a real answer. Turn-marker fragments (`<|end|`, `<|end|><|im|`) spilled onto the screen, and `--tools` stayed offered to a model the warning itself said cannot use them. The 2026-09-28 fix ("Base models said, and stopped", above) said the warning once and stopped the guessed framing's *own* markers. A base model writes every family's markers, whole or cut short, and one warning scrolls away. Framing, never a gate: the session still runs.
+
+**What was built**
+
+- [x] **The fact, as plain data** (`ModelBehavior::base_model`). It is set by the local backend from the file's header (no chat template), so asking needs no model load.
+- [x] **The spill, closed at the source** (`backends/markup_filter`, `TurnMarkerFilter`). It runs in the backend's one funnel, after the guessed framing's stops, for a model with no template only. The screen, the returned answer, the saved session and machine mode therefore see the same bytes.
+  - A known family's marker ends the reply, as the guessed framing's own do. That holds whole (`<|im_end|>`) or cut short with two letters at least (`<|end|`, `<|im|`).
+  - The families live in the profile registry (`base_turn_markers()`): ChatML's `<|im_*|>`, the `<|end|>` style and the `<|eot_*|>` style.
+  - A marker of no known family (`<|fiap|`, seen on this model) is dropped where it stands, and the reply goes on.
+  - A `<|` fragment still open at end of stream is never emitted. A `<|` that starts no name (`a <| b`) is text.
+  - A model with a template is never filtered, so its literal `<|end|>` stands.
+- [x] **Tools honestly off** (`agentloop/loop`). A base model's turns run with no tools, no tool selection and no `ask_user`, on every surface, from one rule in the loop.
+  - `chat --tools` and `complete --tools` say once, at the start: `tools off: <model> is a base model, with no tool format to call them in -- it answers without them`.
+  - Machine mode adds nothing to its stream; the backend's own notice already says "cannot use tools".
+- [x] **The state, all session.**
+  - The banner says `<model>  ·  base model  ·  chat …`.
+  - The spinner says `Thinking… · base model` while a step waits (`CliReporter::set_resting_label`).
+  - `/model` to a base model says `switched to X -- a base model` and, with tools, the tools-off line.
+  - No answer is decorated.
+- [x] **One wording** (`models::base_model_note()`) shared by `models info` and the conversation's warning. It gains the missing sentence: what a base model says "can be confidently wrong".
+- [x] **Tests**:
+  - **The filter's replay fixtures:** the motivating patterns, each family, cut-short markers followed by more text, every two-point split of the stream, the end-of-stream fragment, unknown markers, and the nameless `<|`.
+  - **The backend:** the spill reaches neither the answer nor the stream, and the two match; a templated model's `<|end|>` stands.
+  - **The loop:** no tools and no `ask_user` for a base model; both for an instruct one.
+  - **`chat_test`:** `chat --tools` and `complete --tools` with a base model, with zero tools in every request and `tools off` said once; an instruct model keeps its tools, unsaid.
+  - **The spinner's label**, and the shared wording in `models info`.
+  - **The PTY check's `base-model` case:** the banner, the spinner and the one line on a real terminal.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Framing, not gating | **The session runs, ungated** *(recorded 2026-10-03)* | The open-models principle. |
+| The indicator | Banner plus the spinner's resting state *(default, confirmed)* | Visible all session; never on an answer. |
+| Where the families live | The profile registry *(default, confirmed)* | New ones join the registry, not the filter. |
+| Machine mode | **No new events or fields**; the answer it streams is the backend's one answer *(default confirmed, read this way: flagged for veto)* | The filter is in the backend's one funnel, as the item asks ("one filter home"), so every surface and the transcript see the same bytes. Machine mode's protocol is unchanged; the text it carries no longer holds the spill. |
+| The warning's sentence | Added *(default, confirmed)* | A base model's answers are continuations. |
+| A marker of no family | **Dropped where it stands, the reply going on** *(group run, flagged for veto)* | The guardrail says no `<|` fragment reaches the screen. Gemma 4 E4B wrote `<|fiap|` mid-answer. Ending the reply there would cut text the user may want. |
+| Cut short | **Two letters at least** *(group run)* | `<|im|` is ChatML's; `<|e` could be anything, and is dropped as noise rather than ending the reply. |
+| Where tools are withheld | **The loop, for every surface** *(group run)* | Mode parity: the rule lives once. Each surface says it where it starts; machine mode already hears the backend's notice. |
+| What counts as a base model | **No chat template in the header** *(group run)* | The fact the 2026-09-28 fix already used; never a guess from a name. |
+
+**Verified on real weights.** Google's Gemma 4 E4B base (Q4_K_M) is the transcript's own model. It ran a four-question `chat --tools` session (temperature, Bitcoin, the NBA finals, what to wear) on the binary before this item and after it, twice each:
+
+| | Before | After |
+|---|---|---|
+| `<\|` fragments on screen and in the saved session | 5, then 3 (`<\|fiap\|`, `<\|and Mark`, …) | **0 and 0** |
+| Tool calls | none (the model imitated, never called) | none, and none offered; `tools off` said once |
+| The warning | without the confidently-wrong sentence | `base_model_note()`'s words |
+| Saved answers equal to what was printed | yes | yes |
+
+The answers stayed what a base model writes: continuations, often confidently wrong, streamed ungated. Meta, Qwen and OpenAI have no base build installed, so those families were skipped.
+
+**Guardrails, each mutation-tested (17 mutants, all caught).**
+- **The filter:** no family known; cut-short markers unknown; one letter enough; a lone `<` not held; an open fragment flushed; a family-less marker kept; a nameless `<|` dropped.
+- **The families:** no ChatML.
+- **The backend:** the filter never built; the end of stream unfiltered; never a base model.
+- **The loop:** tools offered to a base model; `ask_user` kept.
+- **The surfaces:** the spinner's label unused; `tools off` unsaid in `chat`; unsaid in `complete`.
+- **The wording:** no confidently-wrong sentence.
+
+**Not verified.**
+- **The banner and spinner on real weights:** checked on a real terminal with a mock base model (the PTY case), not with Gemma, which ran on a pipe.
+- **A base model with a forced `chat_template:`** is still treated as base, since the header still has no template. That case was not exercised.
+
 ## Milestone K — The install contract
 
 **Goal.** Make v0.1.0 shippable, and do it by closing Ommi's dominant early bug class rather than by documenting it. Ommi lost real time to *silent install drift*: `make install` seeded one tree, `install.sh` another, the updater a third, and `check` validated a fourth — each list correct when written, diverging one commit at a time, and never failing loudly. The fix adopted here is structural: one layout declaration, and every install path reads it.

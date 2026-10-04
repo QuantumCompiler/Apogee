@@ -322,3 +322,19 @@ TEST_CASE("a progress note is printed only under --verbose", "[ux][reporter]") {
           std::string::npos);
     CHECK(verbose.answer.str().empty());
 }
+
+TEST_CASE("the spinner says what the session is while a step waits", "[ux][reporter][base]") {
+    // A base model's session says so all session long (26r), in the
+    // spinner's resting label -- never on an answer.
+    Harness h;
+    CliReporter reporter = h.make();
+    reporter.on_thinking();
+    CHECK(reporter.status().spinner_label() == "Thinking…");
+    reporter.set_resting_label("Thinking… · base model");
+    reporter.on_thinking();
+    CHECK(reporter.status().spinner_label() == "Thinking… · base model");
+    reporter.on_answer_start();
+    reporter.on_answer_token("an answer");
+    reporter.on_answer_end();
+    CHECK(h.answer.str().find("base model") == std::string::npos);
+}

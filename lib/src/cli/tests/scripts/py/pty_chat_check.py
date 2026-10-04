@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Chat behaviours that only reproduce against a real terminal, or a real kill.
 
-Nine checks:
+Ten checks:
 
   typeahead   Text typed BEFORE the first prompt is discarded once; text typed
               after it is honoured.  Only reproducible on a PTY -- `tcflush`
@@ -26,6 +26,9 @@ Nine checks:
 
   presets     `--allow write_file` writes with no prompt, and the same session
               still asks before `run_command` (26o).
+
+  base-model  A base model's session says so in its banner and its spinner,
+              and says once that its tools are off (26r).
 
   side-calls  A follow-up's rewrite by the utility model is narrated inside
               the thinking block on a terminal, which collapses as reasoning
@@ -363,6 +366,39 @@ def check_presets(binary, home, env):
     return failures
 
 
+def check_base_model(binary, home, env):
+    """A base model's chat: `base model` in the banner and the spinner, and
+    `tools off` said once (26r)."""
+    script = os.path.join(home, "script.json")
+    with open(script, "w", encoding="utf-8") as handle:
+        json.dump({"turns": [{"text": "It continues the text.\n", "delay_ms": 600}],
+                   "base_model": True}, handle)
+    for args in (["config", "add-backend", "scripted", "--type", "mock",
+                  "--model-path", script],
+                 ["config", "set-default", "scripted"]):
+        if subprocess.run([binary, *args], env=env,
+                          stdout=subprocess.DEVNULL).returncode != 0:
+            raise RuntimeError(f"setup failed: {args}")
+    term = Pty(binary, env, ("--tools",))
+    term.drain(2.0)
+    term.send(b"hello\r")
+    term.drain(3.0)
+    term.send(b"/exit\r")
+    term.drain(2.0)
+    term.close()
+    text = term.text()
+    failures = []
+    if b"scripted  \xc2\xb7  base model  \xc2\xb7  chat " not in text:
+        failures.append(f"the banner does not say base model: {text!r}")
+    if text.count(b"tools off: scripted is a base model") != 1:
+        failures.append(f"tools off was not said exactly once: {text!r}")
+    if "Thinking… · base model".encode() not in text:
+        failures.append(f"the spinner did not say base model: {text!r}")
+    if b"It continues the text." not in text:
+        failures.append(f"the turn did not run: {text!r}")
+    return failures
+
+
 def check_typeahead_hidden(binary, home, env):
     """Typed during a reply: not echoed into it, shown once at the prompt."""
     scripted(binary, env, home, [
@@ -480,6 +516,7 @@ def main():
                         ("typeahead-hidden", check_typeahead_hidden),
                         ("side-calls", check_side_calls),
                         ("presets", check_presets),
+                        ("base-model", check_base_model),
                         ("interrupt", check_interrupt)):
         home = tempfile.mkdtemp(prefix=f"apogee-chat-{name}-")
         try:
@@ -498,7 +535,7 @@ def main():
 
     print("typeahead discarded once; completed turns survive a kill -9; "
           "the banner and each question stand apart; answers render, raw with --raw; "
-          "typing mid-reply waits for the prompt; side calls are narrated in the block; a preset is the session answer given early; "
+          "typing mid-reply waits for the prompt; side calls are narrated in the block; a preset is the session answer given early; a base model is said and its tools are off; "
           "Ctrl-C restores echo - OK")
     return 0
 

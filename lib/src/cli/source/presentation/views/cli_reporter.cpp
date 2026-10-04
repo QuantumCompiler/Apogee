@@ -86,7 +86,11 @@ void CliReporter::on_thinking() {
     // summary before the spinner takes the line back.
     thinking_.finish();
     thinking_characters_ = 0;
-    status_.start_spinner("Thinking…");
+    status_.start_spinner(resting_label_);
+}
+
+void CliReporter::set_resting_label(std::string label) {
+    resting_label_ = std::move(label);
 }
 
 void CliReporter::on_thinking_budget_reached() {

@@ -544,4 +544,10 @@ GgufInfo inspect_gguf(std::istream& in, std::uint64_t size) {
     return info;
 }
 
+std::string base_model_note() {
+    return "most likely a base (pretrained) model: it continues text rather than answering, so "
+           "what it says can be confidently wrong, and it cannot use tools. For chat, use its "
+           "instruction-tuned release, usually named '-it' or '-Instruct'";
+}
+
 }  // namespace apogee::models

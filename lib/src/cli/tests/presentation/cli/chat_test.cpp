@@ -1307,3 +1307,50 @@ TEST_CASE("the slash verbs answer for the chat, and /permissions says from where
     CHECK((chat.out + chat.err).find("write_file   ask    (default)") != std::string::npos);
     CHECK((chat.out + chat.err).find("this session") == std::string::npos);
 }
+
+TEST_CASE(
+    "a base model's turns run without tools, said once at the start; an instruct one keeps them",
+    "[chat][cli][tools][base]") {
+    const auto count_of = [](std::string_view haystack, std::string_view needle) {
+        std::size_t n = 0;
+        for (std::size_t at = haystack.find(needle); at != std::string_view::npos;
+             at = haystack.find(needle, at + needle.size())) {
+            ++n;
+        }
+        return n;
+    };
+    const auto base_script = [](HelperChat& chat, const std::vector<std::string>& replies) {
+        // A script that says its model is a base model: one with no chat
+        // template (26r).
+        std::ofstream{chat.home.path() / "chatty.json", std::ios::binary}
+            << nlohmann::json{{"turns", texts(replies)}, {"base_model", true}}.dump();
+    };
+    {
+        HelperChat chat{texts({}), {"Base"}};
+        base_script(chat, {"tools {{tool_count}}", "still {{tool_count}}"});
+        INFO(chat.err);
+        REQUIRE(chat.run({"chat", "--tools"}, "hello\nagain\n") == 0);
+        // Asked and answered, ungated -- with no tool in either request.
+        CHECK(chat.out.find("tools 0") != std::string::npos);
+        CHECK(chat.out.find("still 0") != std::string::npos);
+        // Said once, at the start.
+        CHECK(count_of(chat.err, "tools off: chatty is a base model") == 1);
+    }
+    {
+        HelperChat chat{texts({}), {}};
+        base_script(chat, {"tools {{tool_count}}"});
+        INFO(chat.err);
+        REQUIRE(chat.run({"complete", "--tools", "hello"}) == 0);
+        CHECK(chat.out.find("tools 0") != std::string::npos);
+        CHECK(count_of(chat.err, "tools off: chatty is a base model") == 1);
+    }
+    {
+        // An instruct model keeps every tool, and nothing is said.
+        HelperChat chat{texts({"tools {{tool_count}}"}), {"Instruct"}};
+        INFO(chat.err);
+        REQUIRE(chat.run({"chat", "--tools"}, "hello\n") == 0);
+        CHECK(chat.out.find("tools 0") == std::string::npos);
+        CHECK(chat.out.find("tools ") != std::string::npos);
+        CHECK(chat.err.find("tools off") == std::string::npos);
+    }
+}

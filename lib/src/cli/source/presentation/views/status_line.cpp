@@ -280,6 +280,11 @@ void StatusLine::set_spinner_label(std::string label, std::size_t done, std::siz
     count_ = BusyCount{.done = done, .total = total};
 }
 
+std::string StatusLine::spinner_label() {
+    const std::scoped_lock lock{label_mutex_};
+    return spinner_label_;
+}
+
 void StatusLine::set_token_estimate(std::int64_t tokens) {
     token_estimate_.store(tokens);
 }

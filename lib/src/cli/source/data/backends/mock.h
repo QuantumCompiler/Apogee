@@ -38,7 +38,8 @@ struct MockTurn {
     /// `{{last_tool_result:json}}` / `{{system:json}}` forms expand to a
     /// JSON string literal, quotes included, for use inside a JSON answer.
     /// `{{thinking}}` is the thinking the request asked for -- `on`, `off`
-    /// or `auto`, with `:N` for a budget (26i).
+    /// or `auto`, with `:N` for a budget (26i). `{{tool_count}}` is how many
+    /// tool definitions the request carried (26r).
     std::string text;
 
     /// Tool calls to attach to the response.
@@ -66,6 +67,10 @@ struct MockTurn {
 /// Whether a script file carries a top-level `"metered": true`. False for a
 /// bare list of turns or an absent key.
 [[nodiscard]] bool load_mock_script_metered(const std::filesystem::path& path);
+
+/// Whether a script file says its model is a base model (`"base_model":
+/// true`, 26r): one with no chat template, so the surfaces offer it no tools.
+[[nodiscard]] bool load_mock_script_base_model(const std::filesystem::path& path);
 
 /// `text` with its placeholders expanded against `request`.
 [[nodiscard]] std::string expand_mock_text(std::string_view text,

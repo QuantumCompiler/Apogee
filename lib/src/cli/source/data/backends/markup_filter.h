@@ -92,4 +92,52 @@ private:
 [[nodiscard]] std::string strip_markup_headers(std::string_view text,
                                                const std::vector<HeaderMarker>& headers);
 
+/// The turn markers a model with no chat template spills (26r).
+///
+/// A base model read every family's transcripts in pretraining, and writes
+/// their markers as it imitates a conversation -- whole, chained, or cut short
+/// (`<|end|`, `<|end|><|im|`). With no template none of them can be anything
+/// but noise, so one of a known family (`model_profile.h`'s
+/// `base_turn_markers`) ends the reply, as the guessed framing's own markers
+/// already do, and a `<|` fragment still open when the stream ends is never
+/// emitted. One of no known family (`<|fiap|`, seen on Gemma 4 E4B) is dropped
+/// where it stands and the reply goes on: with no template a marker is noise
+/// by definition. A `<|` that starts no name (`a <| b`) is text.
+///
+/// Built only for a model with no template: one that has a template may be
+/// quoting `<|end|>`, and is never filtered here. Text that could still be a
+/// marker is held until a later write resolves it, so a fragment split across
+/// reads never reaches anyone in part.
+class TurnMarkerFilter {
+public:
+    TurnMarkerFilter() = default;
+
+    /// `markers` whole, as `<|im_end|>`. An empty list makes `write` a pure
+    /// pass-through.
+    explicit TurnMarkerFilter(const std::vector<std::string>& markers);
+
+    /// Consumes `chunk` and returns the text safe to emit now. Sets `stopped`
+    /// when a known marker ended the reply; it and everything after it are
+    /// dropped.
+    [[nodiscard]] std::string write(std::string_view chunk, bool& stopped);
+
+    /// What is still held at end of stream: a `<|` fragment that never closed
+    /// is dropped; a lone `<` was never one, and comes out.
+    [[nodiscard]] std::string flush();
+
+    [[nodiscard]] bool active() const noexcept {
+        return !names_.empty();
+    }
+
+private:
+    /// Whether `name` -- between `<|` and, when `complete`, `|>` -- is a
+    /// known family's marker, or one cut short.
+    [[nodiscard]] bool known(std::string_view name, bool complete) const;
+
+    /// The markers' names: `im_end` for `<|im_end|>`.
+    std::vector<std::string> names_;
+    std::string pending_;
+    bool stopped_ = false;
+};
+
 }  // namespace apogee::backends

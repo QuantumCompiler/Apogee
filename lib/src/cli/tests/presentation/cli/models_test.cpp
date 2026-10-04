@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "harness/roles.h"
+#include "modelstore/gguf_inspect.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
@@ -284,9 +285,12 @@ TEST_CASE("info on a readable model reports the header and its resolved profile"
     CHECK(body.find("architecture: qwen35") != std::string::npos);
     CHECK(body.find("profile:      qwen3") != std::string::npos);
     CHECK(body.find("1 total, 1 text") != std::string::npos);
-    // No template in the header: said, with what that means.
-    CHECK(body.find("template:     none -- most likely a base (pretrained) model") !=
+    // No template in the header: said, with what that means -- in the
+    // conversation warning's own words (26r), the confidently-wrong sentence
+    // among them.
+    CHECK(body.find("template:     none, so it is " + apogee::models::base_model_note() + "\n") !=
           std::string::npos);
+    CHECK(apogee::models::base_model_note().find("can be confidently wrong") != std::string::npos);
 }
 
 TEST_CASE("info states the window a local backend gets and what its cache costs",

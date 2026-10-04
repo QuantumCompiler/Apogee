@@ -222,6 +222,11 @@ struct GgufInfo {
 /// `parsed == false` with a reason a user can act on.
 [[nodiscard]] GgufInfo inspect_gguf(const std::filesystem::path& path);
 
+/// What a model file with no chat template is, in the one wording the
+/// conversation's warning and `models info` share (26r): "most likely a base
+/// (pretrained) model: it continues text rather than answering, so …".
+[[nodiscard]] std::string base_model_note();
+
 /// Reads a header from `in`, a stream of `size` bytes positioned at its start:
 /// what the path overload does once the file is open, with the same
 /// guarantees. Exposed so a test can hand it a stream that counts what a read

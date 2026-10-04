@@ -1002,3 +1002,32 @@ TEST_CASE("the loop sends an inlined attachment on its message, and names one it
     CHECK(f.history[0].content.plain_text() == "what is the code?");
     CHECK(result.inline_dropped == std::vector<std::string>{"gone.md"});
 }
+
+TEST_CASE("a base model is offered no tools and no ask_user, and its turn still runs",
+          "[agentloop][tools][base]") {
+    // No chat template, no tool format (26r): offered tools, a base model
+    // only imitates calling them. Withheld for every surface, here.
+    ToolRegistry registry;
+    registry.add(echo_tool());
+    const auto with_base = [&](bool base) {
+        MockProvider::Options mock;
+        mock.backend_name = "mock";
+        mock.turns = {text_turn("it continues the text")};
+        mock.behavior.base_model = base;
+        auto provider = std::make_shared<MockProvider>(std::move(mock));
+        Harness harness{Config{}};
+        harness.register_provider("mock", provider);
+        harness.use_default_router();
+        std::vector<ChatMessage> history{ChatMessage::user("hello")};
+        Options options = options_with(registry);
+        options.ask = [](const QuestionRequest&) { return Answers{}; };
+        RecordingReporter reporter;
+        const RunResult result = apogee::agentloop::run(harness, history, options, reporter);
+        CHECK(result.answer == "it continues the text");
+        REQUIRE(provider->requests().size() == 1);
+        return provider->requests().front().tools.size();
+    };
+    CHECK(with_base(true) == 0);
+    // An instruct model keeps its tool and ask_user.
+    CHECK(with_base(false) == 2);
+}

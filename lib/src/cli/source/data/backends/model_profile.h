@@ -173,6 +173,13 @@ struct ModelProfile {
 /// recognising too little.
 [[nodiscard]] std::vector<HeaderMarker> header_markers_for(const ModelProfile* profile);
 
+/// The turn markers of the families a base model imitates (26r): ChatML's
+/// `<|im_*|>`, the `<|end|>` style and the `<|eot_*|>` style. A model with no
+/// chat template that writes one of them has finished its reply and begun
+/// inventing the next turn (`markup_filter.h`'s `TurnMarkerFilter`). A family
+/// found spilling another joins here, never in the filter.
+[[nodiscard]] const std::vector<std::string>& base_turn_markers();
+
 /// What skips this family's reasoning (see `ModelProfile::skip_reasoning`).
 /// Empty for nullptr: an uncharacterised family's switch is not guessed at,
 /// because a wrong one lands in the prompt as text.

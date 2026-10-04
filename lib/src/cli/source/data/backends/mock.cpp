@@ -48,6 +48,8 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
         }
     }
     replace_all(out, "{{last_user}}", last_user);
+    // How many tool definitions the request carried (26r).
+    replace_all(out, "{{tool_count}}", std::to_string(request.tools.size()));
     // The `:json` variants expand to a JSON string literal, quotes included,
     // so a scripted JSON answer can carry a tool result verbatim.
     replace_all(out, "{{last_tool_result:json}}", nlohmann::json(last_tool_result).dump());
@@ -140,6 +142,15 @@ bool load_mock_script_metered(const std::filesystem::path& path) {
     }
     const nlohmann::json script = nlohmann::json::parse(in, nullptr, false);
     return script.is_object() && script.value("metered", false);
+}
+
+bool load_mock_script_base_model(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        return false;
+    }
+    const nlohmann::json script = nlohmann::json::parse(in, nullptr, false);
+    return script.is_object() && script.value("base_model", false);
 }
 
 // ---------------------------------------------------------------------------
