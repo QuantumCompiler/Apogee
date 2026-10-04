@@ -422,6 +422,32 @@ TEST_CASE("an inlined attachment is trimmed last, and with the exchange it rode"
     }
 }
 
+TEST_CASE("two attachments on one message are taken off one at a time, the other kept",
+          "[agentloop][budget][attachments]") {
+    // A folder's text and its map ride the same message (26q); the text goes
+    // first, and the map stays -- never taken off with it unsaid, nor put
+    // back with the text it rode beside.
+    const std::vector<ChatMessage> history{ChatMessage::user("go")};
+    const std::vector<apogee::agentloop::InlineAttachment> inlined{
+        {.message = 0, .name = "src", .text = std::string(2000, 'F')},
+        {.message = 0, .name = "src (map)", .text = std::string(100, 'M')}};
+
+    const Assembly roomy =
+        assemble_request(scripted(100000), ChatRequest{}, history, {}, {}, 0, 0, inlined);
+    CHECK(roomy.messages[0].content.plain_text() ==
+          std::string(100, 'M') + "\n" + std::string(2000, 'F') + "\ngo");
+
+    const Assembly map_only =
+        assemble_request(scripted(500), ChatRequest{}, history, {}, {}, 0, 0, inlined);
+    CHECK(map_only.inline_dropped == std::vector<std::string>{"src"});
+    CHECK(map_only.messages[0].content.plain_text() == std::string(100, 'M') + "\ngo");
+
+    const Assembly neither =
+        assemble_request(scripted(50), ChatRequest{}, history, {}, {}, 0, 0, inlined);
+    CHECK(neither.inline_dropped == std::vector<std::string>{"src", "src (map)"});
+    CHECK(neither.messages[0].content.plain_text() == "go");
+}
+
 TEST_CASE("an inlined attachment goes ahead of an image, as a text part",
           "[agentloop][budget][attachments]") {
     const std::vector<ChatMessage> history{

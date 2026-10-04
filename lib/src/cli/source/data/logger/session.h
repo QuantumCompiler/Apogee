@@ -94,6 +94,10 @@ struct Attachment {
     /// it is rebuilt from the chat's index -- so the transcript keeps the
     /// message as typed.
     std::optional<std::size_t> inline_at;
+    /// The message its map card rides (26q) -- a folder's or a glob's, never
+    /// one file's -- or nullopt when it has none. Rebuilt from `files`, like
+    /// the inlined text, so the transcript keeps the message as typed.
+    std::optional<std::size_t> map_at;
 };
 
 /// One saved conversation.

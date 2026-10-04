@@ -156,9 +156,16 @@ public:
                 continue;  // its message is gone: compacted, or never sent
             }
             harness::ChatMessage& message = sent_[attachment.message];
-            anchors_.push_back(Anchor{.position = attachment.message,
-                                      .name = attachment.name,
-                                      .original = message.content});
+            // Every attachment on one message remembers the message as it
+            // was before the first of them, so taking one off rebuilds it
+            // from the rest (26q: a folder's map rides beside its text).
+            const auto earlier = std::ranges::find(anchors_, attachment.message, &Anchor::position);
+            anchors_.push_back(
+                Anchor{.position = attachment.message,
+                       .name = attachment.name,
+                       .base = earlier != anchors_.end() ? earlier->base : message.content,
+                       .text = attachment.text,
+                       .parts = attachment.parts});
             message.content = with_prefix(message.content, attachment.text, attachment.parts);
         }
     }
@@ -338,7 +345,13 @@ private:
         while (over() && !anchors_.empty()) {
             const Anchor anchor = anchors_.front();
             anchors_.erase(anchors_.begin());
-            sent_[anchor.position].content = anchor.original;
+            harness::MessageContent content = anchor.base;
+            for (const Anchor& rest : anchors_) {
+                if (rest.position == anchor.position) {
+                    content = with_prefix(content, rest.text, rest.parts);
+                }
+            }
+            sent_[anchor.position].content = std::move(content);
             out_.inline_dropped.push_back(anchor.name);
             ++stripped;
             rebuild();
@@ -352,7 +365,10 @@ private:
     struct Anchor {
         std::size_t position = 0;
         std::string name;
-        harness::MessageContent original;
+        /// The message before any attachment rode it.
+        harness::MessageContent base;
+        std::string text;
+        std::vector<harness::ContentPart> parts;
     };
 
     const TurnBudget& budget_;

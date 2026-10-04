@@ -149,6 +149,9 @@ std::string serialize(const Session& session) {
             if (attachment.inline_at.has_value()) {
                 entry["inline_at"] = *attachment.inline_at;
             }
+            if (const std::optional<std::size_t> at = attachment.map_at; at.has_value()) {
+                entry["map_at"] = *at;
+            }
             attachments.push_back(std::move(entry));
         }
         out["attachments"] = std::move(attachments);
@@ -263,6 +266,10 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
                 if (const auto at = entry.find("inline_at");
                     at != entry.end() && at->is_number_unsigned()) {
                     attachment.inline_at = at->get<std::size_t>();
+                }
+                if (const auto at = entry.find("map_at");
+                    at != entry.end() && at->is_number_unsigned()) {
+                    attachment.map_at = at->get<std::size_t>();
                 }
                 session.attachments.push_back(std::move(attachment));
             } catch (const std::exception&) {

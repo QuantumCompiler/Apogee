@@ -144,6 +144,29 @@ struct AttachmentExcerpt {
 /// The block an inlined file rides its message as.
 [[nodiscard]] std::string render_inline_attachment(std::string_view name, std::string_view text);
 
+/// The map card's bounds (26q): directories this many levels deep, in at
+/// most this many lines, the rest folded into counted lines -- a map that
+/// scrolls is a context bomb pretending to help.
+inline constexpr int kMapCardDepth = 2;
+inline constexpr std::size_t kMapCardLines = 30;
+/// The extensions the card's mix line names before folding the rest.
+inline constexpr std::size_t kMapCardExtensions = 8;
+
+struct MapCardCaps {
+    int depth = kMapCardDepth;
+    std::size_t lines = kMapCardLines;
+};
+
+/// The map a folder or glob attachment rides its message with (26q): the
+/// prefix every attached path starts with, its directories `caps.depth`
+/// deep with the files under each, the extension mix, and the totals the
+/// user was told. Built from the names alone -- no disk, no model -- so the
+/// same files render the same bytes, and a model that knows
+/// `business/agentloop/` exists does not invent `lib/src/core/`.
+[[nodiscard]] std::string render_map_card(std::string_view name,
+                                          const std::vector<std::string>& files,
+                                          std::int64_t chunks, const MapCardCaps& caps = {});
+
 /// Reads an image, audio or a video into its text form (26e) -- a closure
 /// over the models that describe and transcribe, as the embedder is one over
 /// the model that embeds.
@@ -192,6 +215,10 @@ public:
 
     /// A file's whole text, rebuilt exactly from its chunks' offsets.
     [[nodiscard]] std::string text_of(std::string_view sha256) const;
+
+    /// How many chunks these contents are indexed as, together -- the store
+    /// opened once for a whole folder's files.
+    [[nodiscard]] std::int64_t chunks_of(const std::vector<std::string>& sha256s) const;
 
     /// Removes content `sha256`.
     void remove(std::string_view sha256);

@@ -685,3 +685,149 @@ TEST_CASE("a recording over a minute is read through its text, not as it is",
     CHECK(fixture.heard("attached short.m4a: 1 file, 1 chunk, transcribed by chat"));
     CHECK(fixture.heard(" -- read as it is with your next message, then"));
 }
+
+namespace {
+
+/// The inlined entry named `name`, or null.
+const apogee::agentloop::InlineAttachment* riding(const ChatAttachments::Turn& turn,
+                                                  std::string_view name) {
+    const auto it =
+        std::ranges::find(turn.inlined, name, &apogee::agentloop::InlineAttachment::name);
+    return it == turn.inlined.end() ? nullptr : &*it;
+}
+
+}  // namespace
+
+TEST_CASE("a folder rides its message with a map of itself; one file is its own map",
+          "[commands][attachments][map]") {
+    Fixture fixture;
+    fixture.write("proj/src/a.cpp", "int a;\n");
+    fixture.write("proj/src/b.cpp", "int b;\n");
+    fixture.write("proj/docs/x.md", "the docs\n");
+    fixture.write("solo.md", "alone\n");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    REQUIRE(attached.attach("proj", fixture.work));
+    REQUIRE(attached.attach("solo.md", fixture.work));
+    REQUIRE(attached.attach("proj/src/*.cpp", fixture.work));
+    attached.settle();
+    CHECK(fixture.heard("attached proj: 3 files, 3 chunks, with a map of its folders -- "));
+    CHECK_FALSE(fixture.heard("attached solo.md: 1 file, 1 chunk, with a map"));
+
+    const ChatAttachments::Turn turn = attached.for_turn(2, "where is b?", fixture.budget(), 4, {});
+    const auto* map = riding(turn, "proj (map)");
+    REQUIRE(map != nullptr);
+    CHECK(map->message == 2);
+    CHECK(map->text ==
+          "--- map of attachment: proj ---\n"
+          "3 files, 3 chunks. Every path in it starts with proj/; its directories, each with the "
+          "files under it:\n"
+          "docs/  1 file\n"
+          "src/  2 files\n"
+          "By extension: .cpp 2, .md 1\n"
+          "--- end of map: proj ---\n");
+    // After the text it maps, so it is read first and trimmed last.
+    const auto* text = riding(turn, "proj");
+    REQUIRE(text != nullptr);
+    CHECK(text < map);
+    CHECK(riding(turn, "solo.md (map)") == nullptr);
+    // A glob is mapped where its files start, named as it was spelled.
+    const auto* glob = riding(turn, "proj/src/*.cpp (map)");
+    REQUIRE(glob != nullptr);
+    CHECK(
+        glob->text.starts_with("--- map of attachment: proj/src/*.cpp ---\n2 files, 2 chunks. "
+                               "Every path in it starts with proj/src/;"));
+
+    CHECK(fixture.session.attachments[0].map_at == std::optional<std::size_t>{2});
+    CHECK_FALSE(fixture.session.attachments[1].map_at.has_value());
+    CHECK(attached.describe()[0].ends_with(", inlined, with a map of its folders"));
+
+    // Resumed, the same bytes on the same message: a cached prompt holds.
+    ChatAttachments resumed{*fixture.harness, fixture.session, ChatAttachments::index_for("chat-1"),
+                            fixture.hooks()};
+    const ChatAttachments::Turn later = resumed.for_turn(4, "and a?", fixture.budget(), 4, {});
+    const auto* again = riding(later, "proj (map)");
+    REQUIRE(again != nullptr);
+    CHECK(again->message == 2);
+    CHECK(again->text == map->text);
+}
+
+TEST_CASE("after compaction a folder's map rides the next message, once; trimmed, it is said",
+          "[commands][attachments][map]") {
+    Fixture fixture;
+    fixture.write("proj/src/a.cpp", "int a;\n");
+    fixture.write("proj/docs/x.md", "the docs\n");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    REQUIRE(attached.attach("proj", fixture.work));
+    attached.settle();
+    REQUIRE(riding(attached.for_turn(0, "q", fixture.budget(), 4, {}), "proj (map)") != nullptr);
+
+    attached.after_compaction();
+    CHECK(fixture.heard("the attachments' maps ride your next message again"));
+    CHECK_FALSE(fixture.session.attachments[0].map_at.has_value());
+    const ChatAttachments::Turn next = attached.for_turn(6, "q", fixture.budget(), 4, {});
+    REQUIRE(riding(next, "proj (map)") != nullptr);
+    CHECK(riding(next, "proj (map)")->message == 6);
+    // Once: the turn after, it still rides message 6, not the newest.
+    const ChatAttachments::Turn after = attached.for_turn(8, "q", fixture.budget(), 4, {});
+    REQUIRE(riding(after, "proj (map)") != nullptr);
+    CHECK(riding(after, "proj (map)")->message == 6);
+
+    attached.after_turn({"proj (map)"});
+    CHECK(fixture.heard("the map of proj no longer fits the conversation -- it is left out"));
+    CHECK(riding(attached.for_turn(10, "q", fixture.budget(), 4, {}), "proj (map)") == nullptr);
+}
+
+TEST_CASE("a map takes its place in the attachment share, and none is drawn on an unknown window",
+          "[commands][attachments][map]") {
+    // A folder of forty long-named folders: its text far past the share, its
+    // map within it -- and big enough that a file which fits the share alone
+    // no longer fits beside it.
+    Fixture fixture;
+    for (int i = 0; i < 40; ++i) {
+        fixture.write("wide/" + std::string(60, static_cast<char>('a' + (i % 26))) +
+                          std::to_string(10 + i) + "/f.txt",
+                      std::string(400, 'w') + "\n");
+    }
+    std::string fill;
+    for (int line = 0; line < 64; ++line) {
+        fill += "the fill line " + std::to_string(100 + line) + " says nothing at all, at length\n";
+    }
+    fixture.write("fill.md", fill);
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    REQUIRE(attached.attach("wide", fixture.work));
+    attached.settle();
+    CHECK(fixture.heard(", with a map of its folders -- its excerpts are retrieved each turn"));
+    REQUIRE(attached.attach("fill.md", fixture.work));
+    attached.settle();
+    const auto line = [](const Fixture& where) {
+        const auto it = std::ranges::find_if(where.said, [](const std::string& said) {
+            return said.starts_with("attached fill.md:");
+        });
+        return it == where.said.end() ? std::string{} : *it;
+    };
+    CHECK(line(fixture).ends_with("-- its excerpts are retrieved each turn"));
+
+    // Alone, the same file is inlined.
+    Fixture alone;
+    alone.write("fill.md", fill);
+    ChatAttachments only{*alone.harness, alone.session, ChatAttachments::index_for("chat-1"),
+                         alone.hooks()};
+    REQUIRE(only.attach("fill.md", alone.work));
+    only.settle();
+    CHECK(line(alone).ends_with("-- inlined whole"));
+
+    // A backend whose window nobody knows inlines nothing, and maps nothing.
+    Fixture unknown;
+    unknown.session.backend = "embedder";
+    unknown.write("proj/a.md", "a\n");
+    unknown.write("proj/b/c.md", "c\n");
+    ChatAttachments blind{*unknown.harness, unknown.session, ChatAttachments::index_for("chat-1"),
+                          unknown.hooks()};
+    REQUIRE(blind.attach("proj", unknown.work));
+    blind.settle();
+    CHECK(unknown.heard(", no map: the model's window is unknown -- "));
+    CHECK(riding(blind.for_turn(0, "q", unknown.budget(), 4, {}), "proj (map)") == nullptr);
+}

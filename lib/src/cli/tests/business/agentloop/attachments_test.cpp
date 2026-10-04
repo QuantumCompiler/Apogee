@@ -633,3 +633,151 @@ TEST_CASE("the chunks covering a moment are found by their times", "[agentloop][
     // Past the end, nothing.
     CHECK(apogee::agentloop::hits_at(store, {3600.0}, {}, 1.0).empty());
 }
+
+namespace {
+
+using apogee::agentloop::MapCardCaps;
+using apogee::agentloop::render_map_card;
+
+/// A project's names, as a folder attach cites them.
+std::vector<std::string> project_files() {
+    return {"proj/src/agentloop/loop.cpp", "proj/src/agentloop/loop.h",
+            "proj/src/agentloop/rag.cpp",  "proj/src/embedstore/store.cpp",
+            "proj/src/embedstore/store.h", "proj/src/main.cpp",
+            "proj/docs/README.md",         "proj/Makefile"};
+}
+
+/// The card's tree: the lines between its header and its mix line.
+std::vector<std::string> tree_lines(const std::string& card) {
+    std::vector<std::string> lines;
+    std::size_t start = card.find('\n', card.find('\n') + 1) + 1;
+    for (std::size_t end = card.find('\n', start); end != std::string::npos;
+         end = card.find('\n', start)) {
+        const std::string line = card.substr(start, end - start);
+        if (line.starts_with("By extension: ")) {
+            break;
+        }
+        lines.push_back(line);
+        start = end + 1;
+    }
+    return lines;
+}
+
+}  // namespace
+
+TEST_CASE("a folder's map card: its prefix, its directories with their counts, its mix",
+          "[agentloop][attachments][map]") {
+    CHECK(render_map_card("proj", project_files(), 12) ==
+          "--- map of attachment: proj ---\n"
+          "8 files, 12 chunks. Every path in it starts with proj/; its directories, each with "
+          "the files under it:\n"
+          "docs/  1 file\n"
+          "src/  6 files\n"
+          "  agentloop/  3 files\n"
+          "  embedstore/  2 files\n"
+          "1 file directly in proj/\n"
+          "By extension: .cpp 4, .h 2, (none) 1, .md 1\n"
+          "--- end of map: proj ---\n");
+
+    SECTION("past its lines, what is inside folds into one counted line") {
+        CHECK(tree_lines(render_map_card("proj", project_files(), 12, MapCardCaps{.lines = 4})) ==
+              std::vector<std::string>{"docs/  1 file", "src/  6 files",
+                                       "  ... 2 directories, 5 files", "1 file directly in proj/"});
+    }
+    SECTION("and past the top directories themselves, they fold too") {
+        CHECK(tree_lines(render_map_card("proj", project_files(), 12, MapCardCaps{.lines = 2})) ==
+              std::vector<std::string>{"... 2 directories, 7 files", "1 file directly in proj/"});
+    }
+    SECTION("one level deep, no directory is opened") {
+        CHECK(
+            tree_lines(render_map_card("proj", project_files(), 12, MapCardCaps{.depth = 1})) ==
+            std::vector<std::string>{"docs/  1 file", "src/  6 files", "1 file directly in proj/"});
+    }
+    SECTION("names with nothing in common start at the working directory") {
+        const std::string card = render_map_card("*.md", {"a.md", "b.md"}, 2);
+        CHECK(card.find("Its paths start at the working directory;") != std::string::npos);
+        CHECK(tree_lines(card) == std::vector<std::string>{"2 files directly in the working "
+                                                           "directory"});
+    }
+}
+
+TEST_CASE("no map card scrolls: a deep tree, a flat thousand files and a glob stay in bounds",
+          "[agentloop][attachments][map]") {
+    std::vector<std::string> deep;
+    for (int top = 0; top < 50; ++top) {
+        for (int inner = 0; inner < 10; ++inner) {
+            for (int leaf = 0; leaf < 3; ++leaf) {
+                deep.push_back("repo/t" + std::to_string(100 + top) + "/i" +
+                               std::to_string(10 + inner) + "/x/y/f" + std::to_string(leaf) +
+                               ".cpp");
+            }
+        }
+    }
+    const std::string deep_card = render_map_card("repo", deep, 1500);
+    CHECK(tree_lines(deep_card).size() == apogee::agentloop::kMapCardLines);
+    CHECK(tree_lines(deep_card).back() == "... 21 more directories, 630 files");
+    // Never deeper than the cap: nothing at the third level.
+    for (const std::string& line : tree_lines(deep_card)) {
+        CHECK_FALSE(line.starts_with("    "));
+    }
+
+    // Under the top count, the inner directories share what is left.
+    std::vector<std::string> wide;
+    for (int top = 0; top < 5; ++top) {
+        for (int inner = 0; inner < 20; ++inner) {
+            wide.push_back("w/t" + std::to_string(top) + "/i" + std::to_string(10 + inner) +
+                           "/f.h");
+        }
+    }
+    const std::vector<std::string> wide_tree = tree_lines(render_map_card("w", wide, 100));
+    CHECK(wide_tree.size() == apogee::agentloop::kMapCardLines);
+    CHECK(wide_tree[0] == "t0/  20 files");
+    CHECK(wide_tree.back() == "t4/  20 files");
+
+    std::vector<std::string> flat;
+    for (int i = 0; i < 1000; ++i) {
+        flat.push_back("docs/page" + std::to_string(1000 + i) + ".md");
+    }
+    const std::string flat_card = render_map_card("docs", flat, 1000);
+    CHECK(tree_lines(flat_card) == std::vector<std::string>{"1000 files directly in docs/"});
+    CHECK(flat_card.find("By extension: .md 1000\n") != std::string::npos);
+
+    // A glob is named as it was spelled; its map starts where its files do.
+    const std::string glob =
+        render_map_card("src/**/*.cpp", {"src/a/one.cpp", "src/a/two.cpp", "src/b/three.cpp"}, 3);
+    CHECK(
+        glob.starts_with("--- map of attachment: src/**/*.cpp ---\n3 files, 3 chunks. Every "
+                         "path in it starts with src/;"));
+    CHECK(tree_lines(glob) == std::vector<std::string>{"a/  2 files", "b/  1 file"});
+
+    // Past eight extensions, the rest are counted together.
+    std::vector<std::string> mixed;
+    for (const char* extension : {".a", ".b", ".c", ".d", ".e", ".f", ".g", ".h", ".i", ".j"}) {
+        mixed.push_back(std::string{"m/file"} + extension);
+    }
+    CHECK(render_map_card("m", mixed, 10)
+              .find("By extension: .a 1, .b 1, .c 1, .d 1, .e 1, .f 1, .g 1, .h 1, other 2\n") !=
+          std::string::npos);
+}
+
+TEST_CASE("a map card comes from the names a folder attach finds, rooted where they start",
+          "[agentloop][attachments][map]") {
+    const apogee::testing::TempDir work{"map-walk-" + std::to_string(std::random_device{}())};
+    for (const char* name :
+         {"tree/src/core/a.cpp", "tree/src/core/b.cpp", "tree/src/io/c.cpp", "tree/README.md"}) {
+        const std::filesystem::path path = work.path() / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream{path} << "x\n";
+    }
+    const FoundFiles found = find_attachment_files("tree", work.path());
+    REQUIRE(found.error.empty());
+    std::vector<std::string> names;
+    for (const FoundFile& file : found.files) {
+        names.push_back(file.name);
+    }
+    const std::string card = render_map_card("tree", names, 4);
+    CHECK(card.find("Every path in it starts with tree/;") != std::string::npos);
+    CHECK(tree_lines(card) == std::vector<std::string>{"src/  3 files", "  core/  2 files",
+                                                       "  io/  1 file",
+                                                       "1 file directly in tree/"});
+}

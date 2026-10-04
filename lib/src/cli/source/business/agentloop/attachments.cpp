@@ -579,6 +579,167 @@ std::string render_inline_attachment(std::string_view name, std::string_view tex
            (text.ends_with('\n') ? "" : "\n") + "--- end of " + std::string{name} + " ---\n";
 }
 
+namespace {
+
+/// One directory of a map card, with every file under it.
+struct MapDirectory {
+    std::size_t files = 0;
+    std::map<std::string, MapDirectory> children;
+};
+
+std::string files_counted(std::size_t count) {
+    return std::to_string(count) + (count == 1 ? " file" : " files");
+}
+
+/// Lists `directory`'s children, each a line with its count, deeper while
+/// `level` is under the cap, until `remaining` runs out -- the last line
+/// left folding the rest. Bounded by the depth cap:
+/// NOLINTNEXTLINE(misc-no-recursion)
+void list_directories(const MapDirectory& directory, int level, const MapCardCaps& caps,
+                      const std::string& indent, std::size_t& remaining,
+                      std::vector<std::string>& lines) {
+    if (level >= caps.depth) {
+        return;
+    }
+    std::size_t shown = 0;
+    for (auto it = directory.children.begin(); it != directory.children.end(); ++it) {
+        const std::size_t rest = directory.children.size() - shown;
+        if (remaining == 0) {
+            return;
+        }
+        if (remaining == 1 && rest > 1) {
+            std::size_t files = 0;
+            for (auto folded = it; folded != directory.children.end(); ++folded) {
+                files += folded->second.files;
+            }
+            lines.push_back(indent + "... " + std::to_string(rest) +
+                            (shown > 0 ? " more directories, " : " directories, ") +
+                            files_counted(files));
+            remaining = 0;
+            return;
+        }
+        lines.push_back(indent + it->first + "/  " + files_counted(it->second.files));
+        --remaining;
+        ++shown;
+        list_directories(it->second, level + 1, caps, indent + "  ", remaining, lines);
+    }
+}
+
+/// Each name split at its slashes.
+std::vector<std::vector<std::string>> split_names(const std::vector<std::string>& files) {
+    std::vector<std::vector<std::string>> split;
+    split.reserve(files.size());
+    for (const std::string& file : files) {
+        std::vector<std::string> parts;
+        std::size_t start = 0;
+        for (std::size_t slash = file.find('/'); slash != std::string::npos;
+             slash = file.find('/', start)) {
+            parts.push_back(file.substr(start, slash - start));
+            start = slash + 1;
+        }
+        parts.push_back(file.substr(start));
+        split.push_back(std::move(parts));
+    }
+    return split;
+}
+
+/// How many directories every name starts with: the prefix a citation needs.
+std::size_t common_directories(const std::vector<std::vector<std::string>>& split) {
+    std::size_t common = split.empty() ? 0 : split.front().size() - 1;
+    for (const std::vector<std::string>& parts : split) {
+        common = std::min(common, parts.size() - 1);
+        for (std::size_t i = 0; i < common; ++i) {
+            if (parts[i] != split.front()[i]) {
+                common = i;
+                break;
+            }
+        }
+    }
+    return common;
+}
+
+/// `.cpp 200, .h 190, (none) 3, other 19`: the most common first, eight
+/// named.
+std::string extension_mix(const std::map<std::string, std::size_t>& extensions) {
+    std::vector<std::pair<std::string, std::size_t>> mix{extensions.begin(), extensions.end()};
+    std::ranges::stable_sort(mix, [](const auto& a, const auto& b) { return a.second > b.second; });
+    std::string out;
+    std::size_t other = 0;
+    for (std::size_t i = 0; i < mix.size(); ++i) {
+        if (i < kMapCardExtensions) {
+            out += (i == 0 ? "" : ", ") + mix[i].first + " " + std::to_string(mix[i].second);
+        } else {
+            other += mix[i].second;
+        }
+    }
+    if (other > 0) {
+        out += ", other " + std::to_string(other);
+    }
+    return out;
+}
+
+}  // namespace
+
+std::string render_map_card(std::string_view name, const std::vector<std::string>& files,
+                            std::int64_t chunks, const MapCardCaps& caps) {
+    const std::vector<std::vector<std::string>> split = split_names(files);
+    const std::size_t common = common_directories(split);
+    std::string root;
+    for (std::size_t i = 0; i < common; ++i) {
+        root += split.front()[i] + "/";
+    }
+
+    MapDirectory tree;
+    std::size_t here = 0;
+    std::map<std::string, std::size_t> extensions;
+    for (const std::vector<std::string>& parts : split) {
+        MapDirectory* directory = &tree;
+        for (std::size_t i = common; i + 1 < parts.size(); ++i) {
+            directory = &directory->children[parts[i]];
+            ++directory->files;
+        }
+        here += parts.size() == common + 1 ? 1 : 0;
+        const std::string& base = parts.back();
+        const std::size_t dot = base.rfind('.');
+        ++extensions[dot == std::string::npos || dot == 0 ? std::string{"(none)"}
+                                                          : base.substr(dot)];
+    }
+
+    // The tree's lines: every top directory, if they fit, then what is
+    // inside them while lines last; a line for the files at the root.
+    std::vector<std::string> lines;
+    std::size_t remaining = caps.lines - std::min(caps.lines, here > 0 ? std::size_t{1} : 0);
+    if (tree.children.size() > remaining) {
+        MapCardCaps flat = caps;
+        flat.depth = 1;
+        list_directories(tree, 0, flat, "", remaining, lines);
+    } else {
+        // Each top directory has its line before any is opened.
+        std::size_t inner = remaining - tree.children.size();
+        for (const auto& [directory, below] : tree.children) {
+            lines.push_back(directory + "/  " + files_counted(below.files));
+            list_directories(below, 1, caps, "  ", inner, lines);
+        }
+    }
+    if (here > 0 && lines.size() < caps.lines) {
+        lines.push_back(files_counted(here) + " directly in " +
+                        (root.empty() ? std::string{"the working directory"} : root));
+    }
+
+    std::string card = "--- map of attachment: " + std::string{name} + " ---\n" +
+                       files_counted(files.size()) + ", " + std::to_string(chunks) +
+                       (chunks == 1 ? " chunk. " : " chunks. ");
+    card += root.empty() ? std::string{"Its paths start at the working directory"}
+                         : "Every path in it starts with " + root;
+    card += "; its directories, each with the files under it:\n";
+    for (const std::string& line : lines) {
+        card += line + "\n";
+    }
+    card += "By extension: " + extension_mix(extensions) + "\n";
+    card += "--- end of map: " + std::string{name} + " ---\n";
+    return card;
+}
+
 AttachmentIndex::AttachmentIndex(std::filesystem::path store_path, std::filesystem::path others,
                                  std::optional<Embedder> embedder, MediaReader media)
     : store_path_{std::move(store_path)},
@@ -816,6 +977,20 @@ std::string AttachmentIndex::text_of(std::string_view sha256) const {
         end = meta.value("end", end);
     }
     return text;
+}
+
+std::int64_t AttachmentIndex::chunks_of(const std::vector<std::string>& sha256s) const {
+    std::error_code code;
+    if (!std::filesystem::exists(store_path_, code)) {
+        return 0;
+    }
+    const embedstore::Store store{store_path_};
+    std::int64_t total = 0;
+    for (const std::string& sha256 : sha256s) {
+        total +=
+            static_cast<std::int64_t>(store.chunks_by_source(attachment_source(sha256)).size());
+    }
+    return total;
 }
 
 void AttachmentIndex::remove(std::string_view sha256) {

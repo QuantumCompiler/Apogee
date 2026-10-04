@@ -129,7 +129,9 @@ public:
     void after_turn(const std::vector<std::string>& inline_dropped);
 
     /// After compaction: the messages the inlined attachments rode are gone,
-    /// so every one is retrieved from then on.
+    /// so every one is retrieved from then on -- and each folder's map rides
+    /// the next message once more (26q), the structure it gives being worth
+    /// its few lines again.
     void after_compaction();
 
 private:
@@ -166,6 +168,11 @@ private:
     [[nodiscard]] std::filesystem::path scratch() const;
     void record(Indexed indexed, const agentloop::TurnBudget& budget);
     [[nodiscard]] std::string inline_text(const logger::Attachment& attachment);
+    /// A folder's or a glob's map card (26q), rebuilt from its files and the
+    /// index; empty for one file, which is its own map.
+    [[nodiscard]] std::string map_text(const logger::Attachment& attachment);
+    [[nodiscard]] std::int64_t map_tokens(const agentloop::TurnBudget& budget,
+                                          const logger::Attachment& attachment);
     [[nodiscard]] std::int64_t inline_tokens_in_use(const agentloop::TurnBudget& budget);
     void save() const;
 
@@ -190,6 +197,11 @@ private:
     /// Rebuilt inline blocks and their token counts, by attachment name.
     std::map<std::string, std::string> inline_texts_;
     std::map<std::string, std::int64_t> inline_costs_;
+    /// Maps settled, or folded by compaction, waiting for the next user
+    /// message (26q); and the rebuilt cards and their token counts.
+    std::set<std::string> pending_map_;
+    std::map<std::string, std::string> map_texts_;
+    std::map<std::string, std::int64_t> map_costs_;
 };
 
 /// The paths `message` mentions: each word that starts with `@`, as

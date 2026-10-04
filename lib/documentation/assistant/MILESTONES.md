@@ -913,6 +913,71 @@ The two lines in `llama_real.cpp` (WAV decoding and mergeable frames) and the he
 | Reporting | `Reporter::on_recall`: a `[memory]` line, a `memory` event | One event every surface adapts; the server's adapter never sees it. |
 | The acceptance models | The families *(the standing rule)* | |
 
+### 2026-10-04 — `attachment-map-card` (backlog item 26q): a folder attached with a map of itself
+
+**Why.** A folder attach gave the model excerpts and no map. In the attachment-representation spike (2026-10-03), a model given this whole repository and asked how its RAG works invented `lib/src/core/`, failed, guessed again, and cycled until the turn died. Excerpts answer "what does this code say". Nothing answered "where is anything".
+
+**What was built**
+
+- [x] **The card** (`agentloop/attachments`, `render_map_card`), built from the names the attach already found: no disk read and no model call.
+  - **What it says:** the prefix every attached path starts with; the directories two levels deep, each with the files under it; the files at the root; the extension mix; and the totals the user was told.
+  - **Bounded:** at most 30 tree lines (`kMapCardDepth`, `kMapCardLines`, `MapCardCaps`), eight extensions named and the rest counted as `other`.
+  - **Folding:** every top directory gets its line before any is opened. What does not fit folds into a counted line (`... 21 more directories, 630 files`).
+  - The same names always render the same bytes.
+- [x] **It rides like an inlined file** (`cli/chat_attachments`):
+  - A folder or glob of two files or more is given a card when the card fits the attachment share beside what is inlined already. It is counted in that share, so a file that fits alone is retrieved beside a big map.
+  - Where the window is unknown nothing is inlined, so nothing is mapped either.
+  - The attach line says which: `attached proj: 3 files, 3 chunks, with a map of its folders -- …`, or `no map: …` with why.
+  - The card is anchored on the next user message (`Attachment::map_at`, saved as `map_at`) and sent there on every request, rebuilt from the attachment's names and the index's chunk count (`AttachmentIndex::chunks_of`). A resumed chat sends the same bytes, and the saved message stays as typed.
+  - It is sent after its attachment's own text on that message, so the model reads the map first and a trim takes the text before the map.
+  - A trimmed map is dropped from then on, and said.
+  - After compaction the map rides the next message, once.
+  - `complete` and machine mode get it through the same class.
+- [x] **Two attachments on one message, trimmed one at a time** (`agentloop/budget`). Before, taking one off restored the message as it had been before *that* one, so a second strip could put the first back. That was rare while one message rarely carried two attachments; the map makes it common. Each attachment on a message now remembers the message as it was before the first of them, and a strip rebuilds the message from the rest.
+- [x] **Tests**:
+  - **Goldens:** the card for a project's names, byte-exact, including the folds at four and two lines, one level deep, and names with no common prefix.
+  - **Bounds:** a deep tree (50 × 10), a wide one sharing its inner lines, a flat thousand files, a glob, and the extension fold.
+  - **A real folder walk** feeding the card.
+  - **In chat:** the attach line; the card after its text on the message; none for one file; a glob rooted where its files start; the same bytes when resumed; after compaction on the next message once; a trimmed map said and gone; the share counted; none on an unknown window.
+  - **On the surfaces:** `complete --attach` sending it on the prompt; a chat's saved message as typed.
+  - **The budget's two-attachment case**, and `map_at` round-tripped.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Depth and size | 2 levels, 30 lines, named constants *(default, confirmed)* | A map that scrolls is a context bomb. |
+| The mix | Extension counts, no content sniffing *(default, confirmed)* | Instant and deterministic. |
+| Kept how | **Anchored like an inlined file and rebuilt each request, never saved as text** *(recorded 2026-10-03: "persisted history, not a transient prefix")* | It rides the same message every turn, so a cached prompt holds, and the transcript keeps the message as typed, the rule inlined files already follow. |
+| The root | **The directories every attached name starts with** *(group run, flagged for veto)* | It is the prefix a citation needs, always true of every name. A glob is named as spelled and rooted where its files start. |
+| What gets a card | **Two files or more** *(group run)* | One file is its own map, even when it is a folder's only file. |
+| An unknown window | **No card, and said** *(group run)* | The item says "never unconditionally", and an unknown window never reads as room for anything inlined. |
+| Its place on the message | **After its text: read first, trimmed last** *(group run)* | It is the smallest and most useful part of an attachment. |
+| A trimmed map | **Dropped from then on, and said** *(group run)* | As an inlined file is. |
+| The chunk total | **Counted from the index** *(group run)* | The same on resume, so the card's bytes never change under a cached prompt. |
+| The strip fix | **Built here** *(group run)* | The card makes two attachments on one message the normal case, and without the fix a trim could quietly bring one back. |
+
+**Verified on real weights.** Each family ran in one `chat --tools` process, with `lib/src/cli/source` (467 files) attached and indexed by Embedding-Gemma. Each was asked "What are the top-level directories of the attached source tree, and what does each one hold? Give each directory's path, and two of the directories inside each.", on the binary before this item and after it:
+
+| Family | Before | After |
+|---|---|---|
+| Qwen3-VL-8B | `business`, `agent`, `agentloop` from the excerpts, and no more | `business/` (with `agentloop/`, 40 files, and `knowledge/`, 12, both right), `data/`, … |
+| Llama 3.1 8B | Answered with raw tool calls on invented paths (`lib/src/business`, `lib/src/tools`) | `business`, `data`, `infrastructure`, `presentation`: all four, and only those |
+| Gemma 4 12B | Described a different tree (`src/cli`, with `assets/` and `build/`) | `business/` (`agent/`, `agentloop/`), `data/` (`backends/`, `contracts/`), … |
+| gpt-oss 20B | 21 paths cited, 12 of them invented (`completions/bash/`, `ApogeeDependencies.cmake`) | 4 paths cited, all real |
+
+A retrieval question ("where is the logic that decides which retriever a turn uses?") was asked first: every family found `agentloop/retriever.cpp` with or without the card. Retrieval answers *what*; the card is for *where*.
+
+**Guardrails, each mutation-tested (18 mutants, all caught).**
+- **The card:** deeper than the cap; no fold line; top directories not reserved; no common prefix; every extension named; the root's files unsaid.
+- **The budget:** a strip dropping the others; the base taken as the message stands.
+- **In chat:** one file mapped; the map costing nothing; mapped past the share; the map before its text; compaction forgetting it; the map following every message; a trimmed map kept; no chunks counted.
+- **The session:** `map_at` not written; `map_at` not read.
+
+**Not verified.**
+- **Cloud backends** get the card through the same request assembly; none was run.
+- **The answers' directory names** were checked by hand against the tree. The script flagged only slash-separated paths that do not exist.
+
 ## Milestone I — The full cloud set
 
 **Goal.** Widen cloud coverage from one vendor to three, and in doing so settle the question the `LLMProvider` seam was built to answer: is a backend really just a translator? The answer is a cross-provider conformance table in which the loop, the tools, and the assertions are shared and only the wire fixture differs.

@@ -41,6 +41,9 @@ namespace {
 /// from the same attachment's text.
 constexpr std::string_view kAsItIs = " (as it is)";
 
+/// What a trim names an attachment's map card by (26q).
+constexpr std::string_view kMapCard = " (map)";
+
 /// How the files of one attachment were read, when a model read them:
 /// "described by X", "transcribed by X", "a timeline". Empty for text.
 [[nodiscard]] std::string reading_of(const std::vector<logger::AttachedFile>& files) {
@@ -424,11 +427,27 @@ void ChatAttachments::record(Indexed indexed, const agentloop::TurnBudget& budge
     pending_inline_.erase(indexed.name);
     inline_texts_.erase(indexed.name);
     inline_costs_.erase(indexed.name);
+    pending_map_.erase(indexed.name);
+    map_texts_.erase(indexed.name);
+    map_costs_.erase(indexed.name);
 
-    session_.attachments.push_back(
-        logger::Attachment{.name = indexed.name, .files = std::move(files), .inline_at = {}});
+    session_.attachments.push_back(logger::Attachment{
+        .name = indexed.name, .files = std::move(files), .inline_at = {}, .map_at = {}});
     const logger::Attachment& attachment = session_.attachments.back();
-    const std::int64_t in_use = inline_tokens_in_use(budget);
+    std::int64_t in_use = inline_tokens_in_use(budget);
+    // A folder's or a glob's map first (26q): a few lines, and what keeps a
+    // model from inventing paths -- inside the attachment share, never past
+    // it, so where nothing is inlined nothing is mapped either.
+    bool mapped = false;
+    const bool mappable = !map_text(attachment).empty();
+    if (mappable) {
+        const std::int64_t card = map_tokens(budget, attachment);
+        mapped = agentloop::fits_inline(budget, in_use, card);
+        if (mapped) {
+            pending_map_.insert(attachment.name);
+            in_use += card;
+        }
+    }
     const std::string text = inline_text(attachment);
     harness::ChatRequest request;
     request.messages.push_back(harness::ChatMessage::user(text));
@@ -446,6 +465,12 @@ void ChatAttachments::record(Indexed indexed, const agentloop::TurnBudget& budge
 
     std::string line = "attached " + attachment.name + ": " + files_of(attachment.files.size()) +
                        ", " + std::to_string(chunks) + (chunks == 1 ? " chunk" : " chunks");
+    if (mapped) {
+        line += ", with a map of its folders";
+    } else if (mappable) {
+        line += budget.budget.known() ? ", no map: it does not fit the attachment share"
+                                      : ", no map: the model's window is unknown";
+    }
     if (const std::string reading = reading_of(attachment.files); !reading.empty()) {
         line += ", " + reading;
     }
@@ -476,9 +501,45 @@ std::string ChatAttachments::inline_text(const logger::Attachment& attachment) {
     return text;
 }
 
+std::string ChatAttachments::map_text(const logger::Attachment& attachment) {
+    if (attachment.files.size() < 2) {
+        return {};
+    }
+    if (const auto it = map_texts_.find(attachment.name); it != map_texts_.end()) {
+        return it->second;
+    }
+    std::vector<std::string> names;
+    std::vector<std::string> contents;
+    for (const logger::AttachedFile& file : attachment.files) {
+        names.push_back(file.name);
+        contents.push_back(file.sha256);
+    }
+    const agentloop::AttachmentIndex index{store_path_, {}, std::nullopt};
+    std::string card =
+        agentloop::render_map_card(attachment.name, names, index.chunks_of(contents));
+    map_texts_[attachment.name] = card;
+    return card;
+}
+
+std::int64_t ChatAttachments::map_tokens(const agentloop::TurnBudget& budget,
+                                         const logger::Attachment& attachment) {
+    if (const auto it = map_costs_.find(attachment.name); it != map_costs_.end()) {
+        return it->second;
+    }
+    harness::ChatRequest request;
+    request.messages.push_back(harness::ChatMessage::user(map_text(attachment)));
+    const std::int64_t tokens = budget.tokens(request).tokens;
+    map_costs_[attachment.name] = tokens;
+    return tokens;
+}
+
 std::int64_t ChatAttachments::inline_tokens_in_use(const agentloop::TurnBudget& budget) {
     std::int64_t total = 0;
     for (const logger::Attachment& attachment : session_.attachments) {
+        // A map rides the same share as the text (26q).
+        if (attachment.map_at.has_value() || pending_map_.contains(attachment.name)) {
+            total += map_tokens(budget, attachment);
+        }
         if (!attachment.inline_at.has_value() && !pending_inline_.contains(attachment.name)) {
             continue;
         }
@@ -519,6 +580,9 @@ bool ChatAttachments::detach(std::string_view name) {
     pending_native_.erase(key);
     inline_texts_.erase(key);
     inline_costs_.erase(key);
+    pending_map_.erase(key);
+    map_texts_.erase(key);
+    map_costs_.erase(key);
     save();
     return true;
 }
@@ -538,6 +602,9 @@ std::vector<std::string> ChatAttachments::describe() const {
         }
         if (pending_native_.contains(attachment.name)) {
             state = "read as it is with your next message, then " + state;
+        }
+        if (attachment.map_at.has_value() || pending_map_.contains(attachment.name)) {
+            state += ", with a map of its folders";
         }
         const std::string reading = reading_of(attachment.files);
         lines.push_back(attachment.name + " -- " + files_of(attachment.files.size()) + ", " +
@@ -571,8 +638,13 @@ ChatAttachments::Turn ChatAttachments::for_turn(std::size_t user_message, const 
             attachment.inline_at = user_message;
             anchored = true;
         }
+        if (pending_map_.contains(attachment.name)) {
+            attachment.map_at = user_message;
+            anchored = true;
+        }
     }
     pending_inline_.clear();
+    pending_map_.clear();
 
     std::set<std::string> inline_sources;
     const auto in_front = [&](const logger::Attachment& attachment) {
@@ -594,14 +666,22 @@ ChatAttachments::Turn ChatAttachments::for_turn(std::size_t user_message, const 
             in_front(attachment);
             as_it_is = true;
         }
-        if (!attachment.inline_at.has_value() ||
-            (as_it_is && *attachment.inline_at == user_message)) {
-            continue;
+        if (attachment.inline_at.has_value() &&
+            (!as_it_is || *attachment.inline_at != user_message)) {
+            turn.inlined.push_back(agentloop::InlineAttachment{.message = *attachment.inline_at,
+                                                               .name = attachment.name,
+                                                               .text = inline_text(attachment)});
+            in_front(attachment);
         }
-        turn.inlined.push_back(agentloop::InlineAttachment{.message = *attachment.inline_at,
-                                                           .name = attachment.name,
-                                                           .text = inline_text(attachment)});
-        in_front(attachment);
+        // Its map after its text, so the model reads the map first and a
+        // trim takes the text before it (26q). The map holds no content, so
+        // the files are searched as ever.
+        if (attachment.map_at.has_value()) {
+            turn.inlined.push_back(
+                agentloop::InlineAttachment{.message = *attachment.map_at,
+                                            .name = attachment.name + std::string{kMapCard},
+                                            .text = map_text(attachment)});
+        }
     }
     pending_native_.clear();
     if (retrieves()) {
@@ -650,6 +730,19 @@ ChatAttachments::Turn ChatAttachments::for_turn(std::size_t user_message, const 
 void ChatAttachments::after_turn(const std::vector<std::string>& inline_dropped) {
     bool changed = false;
     for (const std::string& name : inline_dropped) {
+        if (name.ends_with(kMapCard)) {
+            const std::string owner = name.substr(0, name.size() - kMapCard.size());
+            const auto it =
+                std::ranges::find(session_.attachments, owner, &logger::Attachment::name);
+            if (it != session_.attachments.end() && it->map_at.has_value()) {
+                it->map_at.reset();
+                changed = true;
+                hooks_.say("the map of " + owner +
+                               " no longer fits the conversation -- it is left out from now on",
+                           true);
+            }
+            continue;
+        }
         if (name.ends_with(kAsItIs)) {
             hooks_.say(name.substr(0, name.size() - kAsItIs.size()) +
                            " did not fit this request as it is, so the model did not see it -- "
@@ -675,10 +768,18 @@ void ChatAttachments::after_turn(const std::vector<std::string>& inline_dropped)
 
 void ChatAttachments::after_compaction() {
     bool changed = false;
+    bool remapped = false;
     for (logger::Attachment& attachment : session_.attachments) {
         if (attachment.inline_at.has_value()) {
             attachment.inline_at.reset();
             changed = true;
+        }
+        // A map rides once more, on the next message (26q): what the
+        // attachment looks like outlives the summary that replaced it.
+        if (attachment.map_at.has_value()) {
+            attachment.map_at.reset();
+            pending_map_.insert(attachment.name);
+            remapped = true;
         }
     }
     if (changed) {
@@ -686,6 +787,11 @@ void ChatAttachments::after_compaction() {
             "compaction folded the messages the attachments rode -- their excerpts are "
             "retrieved from now on",
             false);
+    }
+    if (remapped) {
+        hooks_.say("the attachments' maps ride your next message again", false);
+    }
+    if (changed || remapped) {
         save();
     }
 }

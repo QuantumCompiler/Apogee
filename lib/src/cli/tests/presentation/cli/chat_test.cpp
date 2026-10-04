@@ -775,6 +775,43 @@ TEST_CASE("complete --attach sends an inlined file on the prompt", "[chat][cli][
     CHECK(chat.out.find("what is the code?") != std::string::npos);
 }
 
+TEST_CASE("a folder attached sends its map on the prompt, and never into the saved chat",
+          "[chat][cli][attachments][map]") {
+    const auto folder = [](const std::filesystem::path& root) {
+        std::filesystem::create_directories(root / "src");
+        std::filesystem::create_directories(root / "docs");
+        std::ofstream{root / "src" / "main.cpp"} << "int main() {}\n";
+        std::ofstream{root / "docs" / "guide.md"} << "the guide\n";
+    };
+    {
+        // complete: the one-shot surface, through the same class.
+        HelperChat chat{texts({"{{last_user}}"}), {}, "    context_size: 8000\n"};
+        folder(chat.home.path() / "proj");
+        INFO(chat.err);
+        REQUIRE(chat.run({"complete", "--attach", (chat.home.path() / "proj").string(),
+                          "where is main?"}) == 0);
+        CHECK(chat.err.find("2 files, 2 chunks, with a map of its folders") != std::string::npos);
+        CHECK(chat.out.find("--- map of attachment: ") != std::string::npos);
+        CHECK(chat.out.find("docs/  1 file\nsrc/  1 file\n") != std::string::npos);
+        CHECK(chat.out.find("where is main?") != std::string::npos);
+    }
+    {
+        // chat: the map rides the request; the saved message is as typed.
+        HelperChat chat{texts({"{{last_user}}"}), {"Mapped"}, "    context_size: 8000\n"};
+        folder(chat.home.path() / "proj");
+        INFO(chat.err);
+        REQUIRE(chat.run({"chat"}, "/attach " + (chat.home.path() / "proj").string() +
+                                       "\nwhere is main?\n") == 0);
+        CHECK(chat.out.find("--- map of attachment: ") != std::string::npos);
+        const apogee::logger::Session session = HelperChat::only_session();
+        REQUIRE(session.attachments.size() == 1);
+        REQUIRE(session.attachments[0].map_at.has_value());
+        const apogee::harness::ChatMessage& asked =
+            session.messages.at(*session.attachments[0].map_at);
+        CHECK(asked.content.plain_text() == "where is main?");
+    }
+}
+
 TEST_CASE("an inlined attachment whose exchange the budget dropped is retrieved from then on",
           "[chat][cli][attachments]") {
     // A 4,000-token window holds 2,000 after the reserve; the second question
