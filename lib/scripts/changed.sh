@@ -99,6 +99,9 @@ if [ -z "$changed" ]; then
     answer "$name" false "unchanged since ${from:0:12}: the $name pipeline builds nothing, and its deliverables are copied from the release"
 fi
 count="$(printf '%s\n' "$changed" | wc -l | tr -d ' ')"
-# The first few, so a log says what made this a change.
-printf '%s\n' "$changed" | head -n 10 | sed 's/^/changed: /'
+# The first few, so a log says what made this a change. Not `printf | head`:
+# under pipefail, `head` leaving after ten lines while printf still writes a
+# long list fails the pipeline -- "printf: write error: Broken pipe", which
+# stopped v0.1.3's first CI run (790 files) before anything was built.
+sed -n '1,10s/^/changed: /p' <<<"$changed"
 answer "$name" true "$count of its files changed since ${from:0:12}: the $name pipeline runs"
