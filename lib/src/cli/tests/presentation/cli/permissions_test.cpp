@@ -22,6 +22,7 @@
 #include "support/env_guard.h"
 #include "support/fake_mcp_server.h"
 #include "support/fake_transport.h"
+#include "tools/environment.h"
 #include "views/status_line.h"
 #include "views/terminal.h"
 
@@ -484,6 +485,10 @@ TEST_CASE("a read-only policy keeps only tools that never write, MCP included; n
     // The filtered registry keeps the environment note: a read-only agent
     // needs the date as much as any other.
     CHECK(read_only.environment().starts_with("Environment:\n- Today is "));
+    // And its policy is read off what it holds (26p): it kept fetch_url, and
+    // this config names no search.
+    CHECK(read_only.environment().ends_with(apogee::tools::render_tool_use_policy(
+        apogee::tools::ToolReach{.search = false, .read_pages = true})));
     CHECK(read_only.find("mcp__srv__echo") != nullptr);   // the server said read-only
     CHECK(read_only.find("mcp__srv__write") == nullptr);  // it did not
     // What the loop advertises IS the filtered set.

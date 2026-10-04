@@ -145,25 +145,30 @@ public:
     /// again (26g).
     [[nodiscard]] std::map<std::string, std::string, std::less<>> definition_hashes() const;
 
+    /// What renders the note, from the registry it is asked of.
+    using EnvironmentRender = std::function<std::string(const ToolRegistry&)>;
+
     /// The note the loop hands a model beside these tools, each turn: where
-    /// they act and what day it is (25d). Rendered when asked, so a
-    /// conversation that crosses midnight is told the new date. Set where
+    /// they act and what day it is (25d), and since 26p when to reach for
+    /// them. Rendered when asked, so a conversation that crosses midnight is
+    /// told the new date, and from the registry asking, so one built from
+    /// this one -- a read-only agent's -- says only what it holds. Set where
     /// the tools are registered, so no surface can build a registry without
     /// it.
-    void set_environment(std::function<std::string()> render);
+    void set_environment(EnvironmentRender render);
 
     /// The note, or empty when none was set.
     [[nodiscard]] std::string environment() const;
 
     /// What renders it -- for a registry built from this one, which must
     /// carry it.
-    [[nodiscard]] const std::function<std::string()>& environment_source() const noexcept {
+    [[nodiscard]] const EnvironmentRender& environment_source() const noexcept {
         return environment_;
     }
 
 private:
     std::map<std::string, Tool, std::less<>> tools_;
-    std::function<std::string()> environment_;
+    EnvironmentRender environment_;
 };
 
 /// Everything dispatch needs beyond the registry itself.

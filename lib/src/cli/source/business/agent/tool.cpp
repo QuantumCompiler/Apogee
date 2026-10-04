@@ -42,12 +42,12 @@ std::vector<std::string> ToolRegistry::names() const {
     return out;
 }
 
-void ToolRegistry::set_environment(std::function<std::string()> render) {
+void ToolRegistry::set_environment(EnvironmentRender render) {
     environment_ = std::move(render);
 }
 
 std::string ToolRegistry::environment() const {
-    return environment_ ? environment_() : std::string{};
+    return environment_ ? environment_(*this) : std::string{};
 }
 
 std::vector<harness::Tool> ToolRegistry::definitions() const {

@@ -252,6 +252,41 @@ TEST_CASE("every request with tools carries the environment note, and history ne
     }
 }
 
+TEST_CASE("the note, its tool-use policy with it, is the same bytes on every turn of a chat",
+          "[tools][environment][policy][transient]") {
+    // The prefix-cache property (25d), now with the policy (26p): a note that
+    // changed between turns would have a local model read the whole
+    // conversation again on every one.
+    World world{{says("hello"), calls({ToolCall{"s", "web_search", R"({"query":"weather"})"}}),
+                 says("sunny")}};
+    world.registry.add(apogee::agent::make_fetch_url_tool(
+        [](std::string_view) { return apogee::agent::FetchResult{}; }));
+    world.registry.add(apogee::agent::make_web_search_tool(
+        [](const apogee::agent::SearchRequest&) { return apogee::agent::SearchResponse{}; },
+        "127.0.0.1", 5));
+    Options options;
+    options.model = "mock";
+    options.tools = &world.registry;
+    options.permission = [](const apogee::agent::GateRequest&) { return Permission::Allow; };
+    std::vector<ChatMessage> history{ChatMessage::user("Hello, how are you?")};
+    QuietReporter reporter;
+    (void)apogee::agentloop::run(*world.harness, history, options, reporter);
+    history.push_back(ChatMessage::user("What is the current temperature in Lehi Utah?"));
+    (void)apogee::agentloop::run(*world.harness, history, options, reporter);
+
+    // Two turns, three requests: one note.
+    REQUIRE(world.provider->requests().size() == 3);
+    const std::string note = world.provider->requests()[0].messages.front().content.plain_text();
+    CHECK(note.find("How to use these tools: ") != std::string::npos);
+    for (const apogee::harness::ChatRequest& request : world.provider->requests()) {
+        CHECK(request.messages.front().content.plain_text() == note);
+        CHECK(request.is_transient(0));
+    }
+    for (const ChatMessage& message : history) {
+        CHECK(message.content.plain_text().find("How to use these tools") == std::string::npos);
+    }
+}
+
 TEST_CASE("every built-in tool's parameters are a JSON Schema a template can read",
           "[tools][schema]") {
     // A schema that does not parse fails the whole tool list at render time:

@@ -3,10 +3,11 @@
 #include <filesystem>
 #include <string>
 
+#include "agent/tool.h"
 #include "platform/platform.h"
 
 /// The environment note (25d): where a model with tools is and what day it
-/// is.
+/// is -- and since 26p, when to reach for them.
 ///
 /// A model cannot know the date, and one given tools also has to know the
 /// folder its paths start from and the shell its commands run in. A model
@@ -35,5 +36,26 @@ struct Environment {
 /// needs the time can run `date`.
 [[nodiscard]] std::string render_environment_note(const Environment& environment,
                                                   const platform::LocalDate& date);
+
+/// What the registered tools let a model find out for itself (26p), by
+/// capability: a model offered a search it is never told to use answers
+/// "I can't check real-time information" -- and searches fine once told.
+struct ToolReach {
+    /// The web, by a query (`web_search`).
+    bool search = false;
+    /// A page, by its URL (`fetch_url`).
+    bool read_pages = false;
+};
+
+[[nodiscard]] ToolReach tool_reach(const agent::ToolRegistry& registry);
+
+/// The note's policy paragraph: for what the model cannot know, the matching
+/// tool before an answer, and never a claim that it lacks what a tool gives.
+/// **Only what `reach` holds** -- no search without a search tool, no page
+/// without a reader -- and empty when it holds neither, since telling a model
+/// to use a tool it lacks invents the capability this exists to have it use.
+/// It names capabilities, not tools, and asks for a tool only where one is
+/// needed: a model that knows the answer answers.
+[[nodiscard]] std::string render_tool_use_policy(const ToolReach& reach);
 
 }  // namespace apogee::tools

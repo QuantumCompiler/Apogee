@@ -388,6 +388,12 @@ TEST_CASE("the first page is the smaller: a lookup reads less, reading on reads 
     };
     CHECK(tool.description.find("The first call returns up to 6 KB") != std::string::npos);
     CHECK(tool.description.find("reading on up to 12 KB a call") != std::string::npos);
+    // When to read a page comes first (26p), what comes back after.
+    CHECK(
+        tool.description.starts_with("Read a web page for what it says now: a URL the user "
+                                     "gives you, a link a search result or another page "
+                                     "names, or a page whose address you know."));
+    CHECK(tool.description.find("It cannot search") != std::string::npos);
     const ToolOutcome first = run(R"({"url":"https://text.test/"})");
     const std::size_t at = first.content.find("offset ");
     REQUIRE(at != std::string::npos);

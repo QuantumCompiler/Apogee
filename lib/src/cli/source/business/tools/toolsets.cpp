@@ -94,9 +94,16 @@ void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOption
     if (!disabled(options, "fs")) {
         environment.fs_root = effective_fs_root(options.fs_root).path;
     }
-    registry.set_environment([environment] {
-        return render_environment_note(environment,
-                                       platform::local_date(std::chrono::system_clock::now()));
+    // The policy is read off the registry asking (26p), so it names only
+    // what that registry holds: fetch_url and web_search are registered
+    // beside these, and a read-only agent's copy keeps them.
+    registry.set_environment([environment](const agent::ToolRegistry& tools) {
+        std::string note = render_environment_note(
+            environment, platform::local_date(std::chrono::system_clock::now()));
+        if (const std::string policy = render_tool_use_policy(tool_reach(tools)); !policy.empty()) {
+            note += "\n\n" + policy;
+        }
+        return note;
     });
 }
 

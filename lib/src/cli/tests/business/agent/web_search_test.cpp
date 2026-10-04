@@ -321,6 +321,25 @@ TEST_CASE("web_search is outbound to the configured host, and says what it would
     CHECK(tool.description.find("top 5 results") != std::string::npos);
 }
 
+TEST_CASE("web_search's description leads with when to search, then what comes back",
+          "[agent][search][policy]") {
+    // A model reads the start of a description for whether the tool fits
+    // (26p): a weather question refused as "real-time information" was
+    // answered by this tool the moment the user said to search.
+    Instance searx;
+    const std::string description =
+        make_web_search_tool(make_searxng_provider(instance(), searx.fetcher()), "127.0.0.1", 5)
+            .description;
+    CHECK(
+        description.starts_with("Search the web for anything current, recent or that you "
+                                "cannot know from memory: "));
+    for (const std::string_view trigger :
+         {"weather", "news", "prices", "scores", "after your training data"}) {
+        INFO(trigger);
+        CHECK(description.find(trigger) < description.find("Returns the top"));
+    }
+}
+
 TEST_CASE("the search section is read once: off, usable, or named as broken",
           "[agent][search][config]") {
     std::string problem;

@@ -270,16 +270,18 @@ Tool make_fetch_url_tool(UrlFetcher fetcher, std::size_t max_bytes, std::size_t 
     first_bytes = std::min(first_bytes, max_bytes);
     Tool tool;
     tool.name = std::string{kFetchUrlToolName};
+    // When to reach for it first (26p), then what comes back.
     tool.description =
-        "Fetch a web page and read its main content as Markdown: its headings, lists, code, "
-        "tables and links (absolute URLs you can fetch next), without the menus, banners and "
-        "footers around it. The first call returns up to " +
+        "Read a web page for what it says now: a URL the user gives you, a link a search result "
+        "or another page names, or a page whose address you know. It returns the page's main "
+        "content as Markdown: its headings, lists, code, tables and links (absolute URLs you can "
+        "fetch next), without the menus, banners and footers around it. The first call returns "
+        "up to " +
         std::to_string(first_bytes / 1024) + " KB of the page, and reading on up to " +
         std::to_string(max_bytes / 1024) +
         " KB a call: a longer page says so and gives the offset to read on from. It reads "
         "HTML and text (plain, Markdown, JSON, XML); a PDF, an image or any other file is "
-        "refused. Use it to read a URL you already have -- from the user, or from a search "
-        "result. It cannot search: give it a URL, not a query. A website the user has not "
+        "refused. It cannot search: give it a URL, not a query. A website the user has not "
         "allowed is asked about first, and may be refused.";
     tool.parameters_schema = nlohmann::json{
         {"type", "object"},

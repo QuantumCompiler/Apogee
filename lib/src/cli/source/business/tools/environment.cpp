@@ -3,6 +3,9 @@
 #include <array>
 #include <cstdlib>
 
+#include "agent/fetch_url.h"
+#include "agent/web_search.h"
+
 namespace apogee::tools {
 namespace {
 
@@ -60,6 +63,35 @@ std::string render_environment_note(const Environment& environment,
     }
     note.pop_back();
     return note;
+}
+
+ToolReach tool_reach(const agent::ToolRegistry& registry) {
+    return ToolReach{.search = registry.find(agent::kWebSearchToolName) != nullptr,
+                     .read_pages = registry.find(agent::kFetchUrlToolName) != nullptr};
+}
+
+std::string render_tool_use_policy(const ToolReach& reach) {
+    if (!reach.search && !reach.read_pages) {
+        return {};
+    }
+    std::string policy = "How to use these tools: when a question turns on ";
+    if (reach.search) {
+        policy +=
+            "something current, recent or beyond what you can know -- the weather, news, "
+            "prices, scores, schedules";
+        policy += reach.read_pages ? ", what a web page says now -- search the web and read the "
+                                     "pages you find"
+                                   : " -- search the web";
+    } else {
+        policy +=
+            "what a web page says now -- a link the user gives you, or a page whose address you "
+            "know -- read the page";
+    }
+    policy +=
+        " before you answer, rather than answering from memory or saying you cannot. Never say "
+        "you lack access to information one of your tools can get. When you already know the "
+        "answer, just answer.";
+    return policy;
 }
 
 }  // namespace apogee::tools

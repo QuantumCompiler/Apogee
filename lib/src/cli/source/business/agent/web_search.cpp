@@ -360,8 +360,13 @@ std::string render_search(const SearchRequest& request, const SearchResponse& re
 Tool make_web_search_tool(SearchProvider provider, std::string host, std::size_t count) {
     Tool tool;
     tool.name = std::string{kWebSearchToolName};
+    // When to reach for it first, what it returns second (26p): a model reads
+    // a description for whether a tool fits the question in front of it.
     tool.description =
-        "Search the web. Returns the top " + std::to_string(count) +
+        "Search the web for anything current, recent or that you cannot know from memory: the "
+        "weather, news, prices, scores, schedules, releases, or anything after your training "
+        "data. Returns the top " +
+        std::to_string(count) +
         " results, each with its title, URL, date when known, and a snippet. Use it to find "
         "pages, then read one with fetch_url. time_range limits the results to the past day, "
         "week, month or year.";

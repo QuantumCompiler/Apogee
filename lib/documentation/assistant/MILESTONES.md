@@ -3738,6 +3738,68 @@ Also checked:
 - **Machine mode's argv path** is the same code as `complete`'s pipe path, not separately driven by a front-end.
 - **`--allow-host` on a real website** is covered by unit tests, not by a live fetch.
 
+### 2026-10-04 — `tool-use-policy` (backlog item 26p): reaching for the tool instead of refusing
+
+**Why.** The user's transcript (2026-10-03): Qwen3-VL-8B with `--tools` and search configured answered "What is the current temperature in Lehi Utah?" with *"I can't provide real-time weather information"*. Told to search, it searched and answered correctly. Nothing in the prompt pushed back on the trained refusal. The environment note (25d) said the date, the system and the folder, but nothing about when to use a tool. `web_search`'s description said what it *returns*, not when to reach for it.
+
+**What was built**
+
+- [x] **A policy paragraph in the environment note** (`tools/environment`: `tool_reach`, `render_tool_use_policy`).
+  - It follows the note after a blank line: for anything current, recent or beyond what the model can know (the weather, news, prices, scores, schedules, what a page says now), search the web and read what it finds before answering. It must never say it lacks access to information one of its tools can get, and when it already knows the answer, it just answers.
+  - **Composed from what the registry holds**, by capability:
+    - with search and a reader, the whole paragraph;
+    - with search alone, no promise of reading pages;
+    - with a reader alone, reading a page the user links or whose address the model knows, and no search named;
+    - with neither, no paragraph at all.
+- [x] **The note is rendered from the registry that asks for it** (`ToolRegistry::EnvironmentRender`, a renderer handed the registry). `fetch_url` and `web_search` are registered beside the native toolsets that set the note, and a read-only agent's filtered copy keeps them, so each registry's note says what that registry holds. `apply_tool_policy` copies the renderer unchanged.
+- [x] **Descriptions that lead with when to call the tool.**
+  - `web_search` now starts: "Search the web for anything current, recent or that you cannot know from memory: the weather, news, prices, scores, schedules, releases, or anything after your training data", and only then what it returns.
+  - `fetch_url` now starts: "Read a web page for what it says now: a URL the user gives you, a link a search result or another page names, or a page whose address you know."
+  - The descriptions also feed 26g's ranking, so the weather words now rank `web_search` for a weather question.
+- [x] **Tests**:
+  - **Goldens**: one per composition.
+  - **Size**: the paragraph stays under 512 bytes, well inside a note the budget never trims.
+  - **The note reads the registry when asked**, including a tool added after the note was set.
+  - **A read-only agent's note** carries the reader-only paragraph.
+  - **Byte-identical across turns**: a two-turn chat through the loop (three requests) sends the same note bytes on every request, and none of them reach history. This pins the prefix-cache property.
+  - **Trigger phrases**: both descriptions' trigger phrases come before what they return.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Policy, not heuristics | **Prompt-side** *(recorded 2026-10-03)* | Refusal detection or re-prompting treats the symptom per conversation at inference cost. |
+| The wording | The drafted policy, refined: the paragraph opens "How to use these tools:", and gains "When you already know the answer, just answer" *(default, confirmed; refined during the build)* | The draft told a model what to reach for, but not when to stop. Small talk must not search. |
+| Which descriptions | `web_search` and `fetch_url` only *(default, confirmed)* | The live runs showed no missed reach for files, the shell or git. |
+| What the paragraph names | Capabilities, not tools *(default, confirmed)* | An MCP tool that fits benefits without an edit. |
+| How capability is read | **By the two built-in tools' names** *(group run, flagged for veto)* | The doc's own rule is "no search claim without `web_search`, no page-reading claim without `fetch_url`". A generic flag on `Tool` would be speculative plumbing for tools that do not exist yet. |
+| Where the composition lives | **The renderer is handed the registry asking** *(group run)* | Capturing the tools when the note was set would miss `web_search` on some surfaces and a filtered copy's removals on others. Rendering per request from the asking registry is exact and still byte-stable, since the registry does not change during a session. |
+| A family that ignores it | **Not built** *(recorded 2026-10-03; the need now shown, below)* | The per-family line stays deferred, as the item says. Llama 3.1 8B's small-talk search is the evidence for it. |
+
+**Verified on real weights.** Each family ran in its own `serve --tools` process, model loaded once, against the user's SearXNG. Three independent conversations each asked "Hello, how are you?" and then the weather question, on the binary before this item and after it. Weather questions that searched on the first ask:
+
+| Family | Before | After |
+|---|---|---|
+| Qwen3-VL-8B | 1 of 3; twice "I can't provide real-time weather information", the transcript reproduced | **3 of 3**, each answering a temperature |
+| Llama 3.1 8B | 0 of 3; each reached for `run_command` and `curl` instead | **3 of 3**, each answering a temperature |
+| Gemma 4 12B | 3 of 3 | 3 of 3 |
+| gpt-oss 20B | 3 of 3 searched, but each then claimed it had no access to live data | 3 of 3 searched; one answered with the temperature, one said it needed to read a page, one still claimed it had no way. Its page fetches went to hosts not in `tools.allowed_hosts`, which a served request refuses (nobody can answer the prompt), so the claim followed real refusals. |
+
+- **Small talk** called no tool on Qwen, Gemma and gpt-oss, before and after.
+- **Llama 3.1 8B searches on "Hello" before and after.** The paragraph's last sentence did not change that. It is the demonstrated need the deferred per-family line waits for.
+- **The acceptance case, on `chat`:** `apogee chat --tools` on Qwen3-VL-8B answered "Hello" with no tool and the weather question with one `web_search`, giving a temperature.
+- **With search left unconfigured**, the same question got "I cannot directly provide the current temperature": the honest answer when no tool can find it.
+
+**Guardrails, each mutation-tested (12 mutants, all caught).**
+- **The paragraph:** a search claimed for a reader alone; a paragraph with nothing to reach; page reading promised without a reader; the never-claim sentence dropped.
+- **Reach:** search read off the reader's name.
+- **The note:** the policy from every tool rather than the registry's; a different note each time it is asked; the policy run into the last line; the note rendered from an empty registry; a read-only agent's copy without one.
+- **The descriptions:** each old lead restored.
+
+**Not verified.**
+- **Cloud backends** get the same note and descriptions through the same request assembly; no cloud model was run.
+- **MCP tools** reach the paragraph's wording but cannot switch it on: a session without `fetch_url` or `web_search` has no paragraph, whatever its MCP servers offer.
+
 ## Milestone W — The MCP client
 
 **Goal.** The model picking up anyone else's tools: a from-scratch client for stdio MCP servers whose tools join the shared loop as first-class registry entries, with the subprocess discipline Ommi earned the hard way, `apogee mcp` and its admin twins over one scaffold core, and Apogee hosting a server of its own.

@@ -6,7 +6,9 @@
 #include <random>
 #include <string>
 
+#include "agent/fetch_url.h"
 #include "agent/tool.h"
+#include "agent/web_search.h"
 #include "support/env_guard.h"
 #include "tools/toolsets.h"
 
@@ -19,6 +21,8 @@ using apogee::platform::LocalDate;
 using apogee::platform::OperatingSystem;
 using apogee::tools::Environment;
 using apogee::tools::render_environment_note;
+using apogee::tools::render_tool_use_policy;
+using apogee::tools::ToolReach;
 
 LocalDate monday() {
     LocalDate date;
@@ -114,4 +118,71 @@ TEST_CASE("the native toolsets set the note on the registry they fill, whatever 
 
     // A registry nobody set a note on renders nothing.
     CHECK(apogee::agent::ToolRegistry{}.environment().empty());
+}
+
+TEST_CASE("the tool-use policy says only what the tools can reach, and nothing without them",
+          "[tools][environment][policy]") {
+    // Search and a reader: the whole paragraph.
+    CHECK(render_tool_use_policy(ToolReach{.search = true, .read_pages = true}) ==
+          "How to use these tools: when a question turns on something current, recent or beyond "
+          "what you can know -- the weather, news, prices, scores, schedules, what a web page "
+          "says now -- search the web and read the pages you find before you answer, rather "
+          "than answering from memory or saying you cannot. Never say you lack access to "
+          "information one of your tools can get. When you already know the answer, just "
+          "answer.");
+    // A search with no reader promises no page.
+    CHECK(render_tool_use_policy(ToolReach{.search = true, .read_pages = false}) ==
+          "How to use these tools: when a question turns on something current, recent or beyond "
+          "what you can know -- the weather, news, prices, scores, schedules -- search the web "
+          "before you answer, rather than answering from memory or saying you cannot. Never say "
+          "you lack access to information one of your tools can get. When you already know the "
+          "answer, just answer.");
+    // A reader with no search promises no search: "I can't check that" stays
+    // the honest answer to a weather question.
+    const std::string reading = render_tool_use_policy(ToolReach{.read_pages = true});
+    CHECK(reading ==
+          "How to use these tools: when a question turns on what a web page says now -- a link "
+          "the user gives you, or a page whose address you know -- read the page before you "
+          "answer, rather than answering from memory or saying you cannot. Never say you lack "
+          "access to information one of your tools can get. When you already know the answer, "
+          "just answer.");
+    CHECK(reading.find("search") == std::string::npos);
+    // Neither: no paragraph at all.
+    CHECK(render_tool_use_policy(ToolReach{}).empty());
+    // One paragraph, never pressure on the note the budget never trims (26c).
+    CHECK(render_tool_use_policy(ToolReach{.search = true, .read_pages = true}).size() < 512);
+}
+
+TEST_CASE("the note carries the policy for the tools its registry holds, read when it is asked",
+          "[tools][environment][policy]") {
+    const apogee::testing::TempDir temp{"tools-policy-" + std::to_string(std::random_device{}())};
+    apogee::tools::ToolsetOptions options;
+    options.fs_root = temp.path();
+    options.working_directory = temp.path();
+    options.notes_dir = temp.path() / "notes";
+    options.disabled = {"rag"};
+    apogee::agent::ToolRegistry registry;
+    apogee::tools::register_native_toolsets(registry, options);
+
+    // The native toolsets reach nothing on the web: the note stands alone.
+    CHECK(apogee::tools::tool_reach(registry).search == false);
+    CHECK(registry.environment().find("How to use these tools") == std::string::npos);
+    CHECK_FALSE(registry.environment().ends_with("\n"));
+
+    // A reader registered after the note was set is still read: the policy
+    // is composed when the note is asked for, from the registry asking.
+    registry.add(apogee::agent::make_fetch_url_tool(
+        [](std::string_view) { return apogee::agent::FetchResult{}; }));
+    const std::string reading = registry.environment();
+    CHECK(reading.ends_with("\n\n" + render_tool_use_policy(ToolReach{.read_pages = true})));
+
+    registry.add(apogee::agent::make_web_search_tool(
+        [](const apogee::agent::SearchRequest&) { return apogee::agent::SearchResponse{}; },
+        "127.0.0.1", 5));
+    const std::string full = registry.environment();
+    CHECK(full.starts_with("Environment:\n- Today is "));
+    CHECK(full.ends_with("\n\n" +
+                         render_tool_use_policy(ToolReach{.search = true, .read_pages = true})));
+    // Asked again, the same bytes: what a local model's cached prompt needs.
+    CHECK(registry.environment() == full);
 }
