@@ -15,12 +15,12 @@
 #include "agentloop/embed_func.h"
 #include "agentloop/graph_context.h"
 #include "agentloop/media.h"
-#include "backends/http_client.h"
 #include "commands/embed.h"
 #include "commands/tool_vectors.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
 #include "platform/platform.h"
+#include "transport/http_client.h"
 #include "version/version.h"
 
 namespace apogee::commands {

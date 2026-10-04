@@ -4,8 +4,8 @@
 
 #include <string_view>
 
-#include "harness/assets.h"
-#include "harness/config.h"
+#include "contracts/assets.h"
+#include "contracts/config.h"
 #include "httpserver/admin_config.h"
 #include "httpserver/http_types.h"
 

@@ -18,7 +18,7 @@
 #endif
 
 #include "backends/llama_runtime.h"
-#include "models/gguf_inspect.h"
+#include "modelstore/gguf_inspect.h"
 #include "support/gguf_builder.h"
 
 /// Quantization, and the refusal that must exist in every build.

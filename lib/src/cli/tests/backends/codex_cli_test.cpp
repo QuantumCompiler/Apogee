@@ -10,10 +10,10 @@
 #include <vector>
 
 #include "backends/codex_cli_events.h"
-#include "backends/jsonl_framer.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 #include "platform/child_process.h"
 #include "support/fake_child.h"
+#include "transport/jsonl_framer.h"
 
 /// The Codex backend, against recorded output from a real ChatGPT session.
 ///

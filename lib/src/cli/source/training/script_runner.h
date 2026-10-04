@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 #include "platform/child_process.h"
 
 /// The C++ side of the training track's Python boundary.

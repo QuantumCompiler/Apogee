@@ -6,9 +6,9 @@
 
 #include "agentloop/embed_func.h"
 #include "commands/embed.h"
-#include "harness/config_edit.h"
-#include "harness/errors.h"
-#include "harness/layout.h"
+#include "contracts/config_edit.h"
+#include "contracts/errors.h"
+#include "contracts/layout.h"
 #include "knowledge/store.h"
 
 namespace apogee::commands {

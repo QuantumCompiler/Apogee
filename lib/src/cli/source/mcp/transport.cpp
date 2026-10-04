@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include "backends/jsonl_framer.h"
+#include "transport/jsonl_framer.h"
 
 namespace apogee::mcp {
 

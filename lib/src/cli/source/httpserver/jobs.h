@@ -14,8 +14,8 @@
 #include <thread>
 #include <vector>
 
+#include "contracts/cancellation.h"
 #include "events/bus.h"
-#include "harness/cancellation.h"
 
 /// The async-job substrate for long-running admin work.
 ///

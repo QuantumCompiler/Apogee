@@ -9,7 +9,7 @@
 #include <sstream>
 
 #include "commands/complete_sources.h"
-#include "harness/paths.h"
+#include "contracts/paths.h"
 
 namespace apogee::commands {
 namespace {

@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "backends/llamacpp.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 #include "harness/harness.h"
 #include "support/fake_llama.h"
 

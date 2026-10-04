@@ -17,13 +17,13 @@
 #include "backends/factory.h"
 #include "commands/graph.h"
 #include "commands/status_line.h"
+#include "contracts/config.h"
+#include "contracts/config_edit.h"
+#include "contracts/layout.h"
+#include "contracts/paths.h"
 #include "embedstore/ingest.h"
 #include "embedstore/store.h"
-#include "harness/config.h"
-#include "harness/config_edit.h"
 #include "harness/harness.h"
-#include "harness/layout.h"
-#include "harness/paths.h"
 
 namespace apogee::commands {
 namespace {

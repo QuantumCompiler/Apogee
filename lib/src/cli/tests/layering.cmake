@@ -25,6 +25,84 @@ if(NOT DEFINED APOGEE_SOURCE_DIR)
     message(FATAL_ERROR "APOGEE_SOURCE_DIR must be set")
 endif()
 
+# ---- The four layers (Architecture A1) ----------------------------------------
+#
+# Every package sits in one layer, and a package includes only its own layer
+# and the ones below: Presentation -> Business -> Data -> Infrastructure. The
+# map is the spike's (2026-10-03), as A1 built it -- `transport` and `mcp` where
+# their includes put them. A package with no row fails here: a new package
+# declares its layer the day it exists. Same-layer includes are allowed; the
+# per-package rules below narrow them where it matters.
+set(LAYER_presentation commands httpserver markdown render)
+set(LAYER_business harness agentloop agent tools knowledge graph training scaffold models mcp)
+set(LAYER_data contracts backends embedstore logger secrets modelstore transport)
+set(LAYER_infrastructure platform ansi events version)
+set(LAYERS presentation business data infrastructure)
+
+set(layer_index 0)
+foreach(layer IN LISTS LAYERS)
+    foreach(package IN LISTS LAYER_${layer})
+        set(LAYER_OF_${package} ${layer_index})
+        set(LAYER_NAME_${package} ${layer})
+    endforeach()
+    math(EXPR layer_index "${layer_index} + 1")
+endforeach()
+
+file(GLOB package_dirs LIST_DIRECTORIES true "${APOGEE_SOURCE_DIR}/*")
+set(PACKAGES "")
+foreach(dir IN LISTS package_dirs)
+    if(IS_DIRECTORY "${dir}")
+        get_filename_component(package "${dir}" NAME)
+        if(NOT DEFINED LAYER_OF_${package})
+            message(FATAL_ERROR "the package '${package}' is in no layer -- give it a row in "
+                                "tests/layering.cmake's layer map (Presentation, Business, Data "
+                                "or Infrastructure)")
+        endif()
+        list(APPEND PACKAGES ${package})
+    endif()
+endforeach()
+foreach(layer IN LISTS LAYERS)
+    foreach(package IN LISTS LAYER_${layer})
+        if(NOT package IN_LIST PACKAGES)
+            message(FATAL_ERROR "the layer map names '${package}', which is not a package under "
+                                "${APOGEE_SOURCE_DIR} -- a package that moved must move here too")
+        endif()
+    endforeach()
+endforeach()
+
+set(UPWARD "")
+set(layered_sources 0)
+foreach(package IN LISTS PACKAGES)
+    file(GLOB_RECURSE package_sources "${APOGEE_SOURCE_DIR}/${package}/*.h"
+                                      "${APOGEE_SOURCE_DIR}/${package}/*.cpp")
+    foreach(source IN LISTS package_sources)
+        math(EXPR layered_sources "${layered_sources} + 1")
+        file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"[a-z_]+/")
+        foreach(line IN LISTS project_includes)
+            string(REGEX REPLACE "^[ \t]*#[ \t]*include[ \t]*\"([a-z_]+)/.*" "\\1" target "${line}")
+            if(DEFINED LAYER_OF_${target} AND LAYER_OF_${target} LESS LAYER_OF_${package})
+                file(RELATIVE_PATH relative "${APOGEE_SOURCE_DIR}" "${source}")
+                list(APPEND UPWARD
+                     "  ${relative} (${LAYER_NAME_${package}}) includes ${target}/ (${LAYER_NAME_${target}})")
+            endif()
+        endforeach()
+    endforeach()
+endforeach()
+if(layered_sources EQUAL 0)
+    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR} -- this check would pass "
+                        "vacuously")
+endif()
+if(NOT UPWARD STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${UPWARD}")
+    message(FATAL_ERROR "an include reaches up a layer:\n${pretty}\n"
+                        "A package includes its own layer and those below: Presentation -> "
+                        "Business -> Data -> Infrastructure. What a lower layer needs from a "
+                        "higher one crosses as an interface declared below and implemented "
+                        "above (contracts/provider.h's ProviderRegistry), or as plain data.")
+endif()
+
+# ---- The named rules ------------------------------------------------------------
+
 set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph training)
 
 set(ALL_SOURCES "")
@@ -41,22 +119,11 @@ endforeach()
 set(VIOLATIONS "")
 foreach(source IN LISTS ALL_SOURCES)
     file(STRINGS "${source}" offending REGEX "^[ \t]*#[ \t]*include[ \t]*[\"<]backends/")
-    # The one allowance: `mcp/` reads newline-delimited JSON off a child's
-    # pipe, which is exactly what `backends/jsonl_framer.h` was written to do
-    # for the vendor CLIs -- a pure line splitter with no provider in it. A
-    # second framer would be a second copy of the chunk-boundary bug class
-    # the first one exists to hold. Nothing else under `backends/` is
-    # reachable from `mcp/`.
-    if(source MATCHES "/mcp/")
-        list(FILTER offending EXCLUDE REGEX "backends/jsonl_framer\\.h")
-    endif()
-    # The same allowance for `training/`: its Python drivers speak JSONL over
-    # a child's stdout, and the one framer is the one that has been tested
-    # against every chunk boundary. Nothing else under `backends/` is
-    # reachable from `training/`.
-    if(source MATCHES "/training/")
-        list(FILTER offending EXCLUDE REGEX "backends/jsonl_framer\\.h")
-    endif()
+    # `mcp/` and `training/` read newline-delimited JSON off a child's pipe
+    # with the one JSONL framer, tested against every chunk boundary -- since
+    # A1 it is `transport/jsonl_framer.h`, a primitive beside the HTTP client,
+    # so no allowance into `backends/` is needed: nothing under it is
+    # reachable from either.
     if(NOT offending STREQUAL "")
         get_filename_component(name "${source}" NAME)
         list(APPEND VIOLATIONS "  ${name}: ${offending}")
@@ -98,8 +165,8 @@ if(NOT VIOLATIONS STREQUAL "")
                         "events/ is a leaf so that anything can publish to it.")
 endif()
 
-# `secrets/` sits beside the harness: it may include `harness/` (for the
-# backend types) and itself, and nothing else. The day it includes
+# `secrets/` sits on the contracts: it may include `contracts/` (for the
+# backend types and the config editor) and itself, and nothing else. The day it includes
 # `httpserver/` or `commands/`, the one place that returns a key has grown a
 # dependency on a surface that renders -- the leak the package exists to
 # make impossible.
@@ -112,16 +179,16 @@ endif()
 foreach(source IN LISTS secrets_sources)
     file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
     foreach(line IN LISTS project_includes)
-        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(secrets|harness)/")
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(secrets|contracts)/")
             get_filename_component(name "${source}" NAME)
-            list(APPEND VIOLATIONS "  secrets/${name} reaches past the harness: ${line}")
+            list(APPEND VIOLATIONS "  secrets/${name} reaches past the contracts: ${line}")
         endif()
     endforeach()
 endforeach()
 if(NOT VIOLATIONS STREQUAL "")
     string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
     message(FATAL_ERROR "the secrets package includes a surface:\n${pretty}\n"
-                        "secrets/ may include only harness/ and itself.")
+                        "secrets/ may include only contracts/ and itself.")
 endif()
 
 # `markdown/` renders an answer for a terminal: it may include `ansi/` (the
@@ -165,7 +232,7 @@ endif()
 foreach(source IN LISTS knowledge_sources)
     file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
     foreach(line IN LISTS project_includes)
-        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(knowledge|embedstore|agentloop|agent|harness|platform)/")
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(knowledge|embedstore|agentloop|agent|harness|contracts|platform)/")
             get_filename_component(name "${source}" NAME)
             list(APPEND VIOLATIONS "  knowledge/${name} reaches a surface: ${line}")
         endif()
@@ -175,7 +242,7 @@ if(NOT VIOLATIONS STREQUAL "")
     string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
     message(FATAL_ERROR "the knowledge package includes a surface:\n${pretty}\n"
                         "knowledge/ may include only embedstore/, agentloop/, agent/, harness/, "
-                        "platform/ and itself.")
+                        "contracts/, platform/ and itself.")
 endif()
 
 # `graph/` is a domain core like `knowledge/`: the extraction contract and
@@ -192,7 +259,7 @@ endif()
 foreach(source IN LISTS graph_sources)
     file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
     foreach(line IN LISTS project_includes)
-        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(graph|embedstore|knowledge|agentloop|agent|harness|platform)/")
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(graph|embedstore|knowledge|agentloop|agent|harness|contracts|platform)/")
             get_filename_component(name "${source}" NAME)
             list(APPEND VIOLATIONS "  graph/${name} reaches a surface: ${line}")
         endif()
@@ -202,15 +269,15 @@ if(NOT VIOLATIONS STREQUAL "")
     string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
     message(FATAL_ERROR "the graph package includes a surface:\n${pretty}\n"
                         "graph/ may include only embedstore/, knowledge/, agentloop/, agent/, "
-                        "harness/, platform/ and itself.")
+                        "harness/, contracts/, platform/ and itself.")
 endif()
 
 # `training/` is a domain core like `graph/`: the Python boundary, the kits,
 # the synth core and the dataset store every surface shares. It may include
-# the harness, the platform seam, the loop's closures' types and itself --
-# never a surface, and never a backend beyond the framer allowance above:
-# generation arrives as a closure. `models/sha256.h` is a pure function the
-# run item's manifests will hash with, allowed by name.
+# the harness, the contracts, the platform seam, the loop's closures' types
+# and itself -- never a surface, and never a backend: generation arrives as a
+# closure. The JSONL framer, `transport/jsonl_framer.h`, is allowed by name;
+# the run manifests hash with `contracts/sha256.h`.
 file(GLOB_RECURSE training_sources "${APOGEE_SOURCE_DIR}/training/*.h"
                                    "${APOGEE_SOURCE_DIR}/training/*.cpp")
 if(training_sources STREQUAL "")
@@ -220,9 +287,8 @@ endif()
 foreach(source IN LISTS training_sources)
     file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
     foreach(line IN LISTS project_includes)
-        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(training|harness|platform|agentloop|agent)/"
-           AND NOT line MATCHES "#[ \t]*include[ \t]*\"backends/jsonl_framer\\.h\""
-           AND NOT line MATCHES "#[ \t]*include[ \t]*\"models/sha256\\.h\"")
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(training|harness|contracts|platform|agentloop|agent)/"
+           AND NOT line MATCHES "#[ \t]*include[ \t]*\"transport/jsonl_framer\\.h\"")
             get_filename_component(name "${source}" NAME)
             list(APPEND VIOLATIONS "  training/${name} reaches a surface: ${line}")
         endif()
@@ -231,9 +297,46 @@ endforeach()
 if(NOT VIOLATIONS STREQUAL "")
     string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
     message(FATAL_ERROR "the training package includes a surface:\n${pretty}\n"
-                        "training/ may include only harness/, platform/, agentloop/, agent/, "
-                        "backends/jsonl_framer.h, models/sha256.h and itself.")
+                        "training/ may include only harness/, contracts/, platform/, agentloop/, "
+                        "agent/, transport/jsonl_framer.h and itself.")
+endif()
+
+# The packages A1 carved, each held to the floor it was carved for.
+# `contracts/` is the Data floor every implementor reads its interfaces from:
+# it includes the platform seam and itself only -- a convenience that drags
+# business logic down into it is the drift the layer exists to prevent.
+# `modelstore/` (model files as data) and `transport/` (the HTTP client, the
+# SSE parser, the JSONL framer) stand on the contracts and the platform, and
+# nothing beside them.
+foreach(rule "contracts:contracts|platform"
+             "modelstore:modelstore|contracts|platform"
+             "transport:transport|contracts|platform")
+    string(REPLACE ":" ";" parts "${rule}")
+    list(GET parts 0 package)
+    list(GET parts 1 allowed)
+    file(GLOB_RECURSE carved_sources "${APOGEE_SOURCE_DIR}/${package}/*.h"
+                                     "${APOGEE_SOURCE_DIR}/${package}/*.cpp")
+    if(carved_sources STREQUAL "")
+        message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/${package} — "
+                            "this check would pass vacuously")
+    endif()
+    foreach(source IN LISTS carved_sources)
+        file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+        foreach(line IN LISTS project_includes)
+            if(NOT line MATCHES "#[ \t]*include[ \t]*\"(${allowed})/")
+                get_filename_component(name "${source}" NAME)
+                list(APPEND VIOLATIONS "  ${package}/${name} reaches past ${allowed}: ${line}")
+            endif()
+        endforeach()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "a carved package includes more than its floor:\n${pretty}\n"
+                        "contracts/ may include only platform/ and itself; modelstore/ and "
+                        "transport/ only contracts/, platform/ and themselves.")
 endif()
 
 list(LENGTH ALL_SOURCES count)
-message(STATUS "layering: ${count} sources across ${GUARDED_PACKAGES}, no backends includes - OK")
+message(STATUS "layering: ${layered_sources} sources in four layers with no upward include; "
+               "${count} across ${GUARDED_PACKAGES} with no backends include - OK")

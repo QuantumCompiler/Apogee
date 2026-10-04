@@ -18,27 +18,27 @@
 #include <utility>
 #include <vector>
 
-#include "backends/http_client.h"
 #include "commands/download_progress.h"
 #include "commands/helpers.h"
 #include "commands/interrupt.h"
 #include "commands/model_chain.h"
 #include "commands/models_migrate.h"
 #include "commands/status_line.h"
-#include "harness/config.h"
-#include "harness/config_edit.h"
-#include "harness/layout.h"
-#include "harness/paths.h"
+#include "contracts/config.h"
+#include "contracts/config_edit.h"
+#include "contracts/layout.h"
+#include "contracts/paths.h"
 #include "models/acquire.h"
 #include "models/convert.h"
-#include "models/gguf_inspect.h"
 #include "models/quantize.h"
-#include "models/snapshot.h"
 #include "models/source_hf.h"
 #include "models/source_ollama.h"
-#include "models/store.h"
+#include "modelstore/gguf_inspect.h"
+#include "modelstore/snapshot.h"
+#include "modelstore/store.h"
 #include "training/convert.h"
 #include "training/python_env.h"
+#include "transport/http_client.h"
 
 namespace apogee::commands {
 namespace {

@@ -15,7 +15,7 @@ Switching thinking off goes through the template's own `enable_thinking` now tha
 - **One sampler chain** (with [26h](sampling-profiles.md)): the budget is a sampler in the chain, not a second generation loop.
 
 **Seam + files.**
-- `harness/types.h`: `ChatRequest` gains a thinking setting (mode and budget); `transient.skip_reasoning` becomes its `off` case.
+- `contracts/types.h`: `ChatRequest` gains a thinking setting (mode and budget); `transient.skip_reasoning` becomes its `off` case.
 - `backends/llamacpp.cpp` and `llama_real.cpp`: `enable_thinking` into the render, and the budget sampler.
 - `backends/anthropic*.cpp`, `openai*.cpp`, `google*.cpp`: the vendor mappings.
 - `agentloop/`: `auto`'s decision, asked of the utility model as a side request when one is set.

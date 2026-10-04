@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "contracts/types.h"
 #include "harness/harness.h"
-#include "harness/types.h"
 
 /// History shaping: token estimation, compaction, and transient splicing.
 namespace apogee::agentloop {

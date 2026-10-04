@@ -7,9 +7,9 @@
 #include <sstream>
 #include <system_error>
 
-#include "harness/assets.h"
-#include "harness/layout.h"
-#include "harness/paths.h"
+#include "contracts/assets.h"
+#include "contracts/layout.h"
+#include "contracts/paths.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {

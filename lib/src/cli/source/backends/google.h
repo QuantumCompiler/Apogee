@@ -6,9 +6,9 @@
 #include <vector>
 
 #include "backends/google_wire.h"
-#include "backends/http_client.h"
-#include "harness/config.h"
-#include "harness/provider.h"
+#include "contracts/config.h"
+#include "contracts/provider.h"
+#include "transport/http_client.h"
 
 /// The Google Gemini backend — `generateContent`, direct HTTPS, API-key path.
 ///

@@ -13,9 +13,9 @@
 #include <system_error>
 #include <utility>
 
-#include "harness/errors.h"
+#include "contracts/errors.h"
+#include "contracts/sha256.h"
 #include "harness/roles.h"
-#include "models/sha256.h"
 #include "platform/ffmpeg.h"
 
 namespace apogee::agentloop {

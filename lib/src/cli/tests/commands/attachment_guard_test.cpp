@@ -9,7 +9,7 @@
 
 #include "backends/mock.h"
 #include "commands/helpers.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 
 /// The attachment guard, asserted across every surface that accepts media.

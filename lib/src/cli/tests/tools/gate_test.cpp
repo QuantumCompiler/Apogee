@@ -15,7 +15,7 @@
 #include "agentloop/loop.h"
 #include "agentloop/reporter.h"
 #include "backends/mock.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 #include "support/env_guard.h"
 #include "tools/toolsets.h"

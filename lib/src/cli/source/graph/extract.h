@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 
 namespace apogee::harness {
 class Harness;

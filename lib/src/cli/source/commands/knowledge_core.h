@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "agentloop/retriever.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 #include "knowledge/clerk.h"
 #include "knowledge/record.h"

@@ -8,9 +8,9 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
+#include "contracts/types.h"
 #include "harness/harness.h"
-#include "harness/types.h"
 
 /// Images, audio and video, attached to a conversation (26e).
 ///

@@ -4,7 +4,7 @@
 #include <string>
 
 #include "agentloop/structured.h"
-#include "harness/assets.h"
+#include "contracts/assets.h"
 
 /// Every bundled schema is a valid draft-07 JSON Schema, closed
 /// (`additionalProperties: false`) at the top, and ends -- in both its

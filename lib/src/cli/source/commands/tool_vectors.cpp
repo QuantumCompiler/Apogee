@@ -7,8 +7,8 @@
 #include <sstream>
 #include <utility>
 
-#include "harness/config_edit.h"
-#include "harness/paths.h"
+#include "contracts/config_edit.h"
+#include "contracts/paths.h"
 
 namespace apogee::commands {
 namespace {

@@ -7,10 +7,10 @@
 #include <vector>
 
 #include "commands/command.h"
+#include "contracts/config.h"
 #include "embedstore/graph.h"
 #include "embedstore/store.h"
 #include "graph/build.h"
-#include "harness/config.h"
 
 /// `apogee graph` -- build and inspect the knowledge graph over a collection
 /// or a named multi-collection graph.

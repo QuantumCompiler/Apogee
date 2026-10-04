@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "backends/gemini_cli_events.h"
-#include "backends/jsonl_framer.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 #include "support/fake_child.h"
+#include "transport/jsonl_framer.h"
 
 /// The Gemini backend, against recorded output from a real Google-login session.
 ///

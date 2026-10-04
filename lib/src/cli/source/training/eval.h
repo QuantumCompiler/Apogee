@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 #include "training/kit.h"
 #include "training/trainer.h"
 

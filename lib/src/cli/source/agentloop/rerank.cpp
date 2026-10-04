@@ -5,9 +5,9 @@
 #include <algorithm>
 #include <exception>
 
+#include "contracts/types.h"
 #include "embedstore/chunk.h"
 #include "harness/roles.h"
-#include "harness/types.h"
 
 namespace apogee::agentloop {
 namespace {

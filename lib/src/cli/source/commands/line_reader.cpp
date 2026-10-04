@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "ansi/text_width.h"
-#include "harness/paths.h"
+#include "contracts/paths.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {

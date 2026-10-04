@@ -7,8 +7,8 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/cancellation.h"
-#include "harness/config.h"
+#include "contracts/cancellation.h"
+#include "contracts/config.h"
 #include "training/kit.h"
 #include "training/pipeline.h"
 #include "training/synth.h"

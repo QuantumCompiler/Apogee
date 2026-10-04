@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "commands/command.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 
 namespace apogee::commands {
 

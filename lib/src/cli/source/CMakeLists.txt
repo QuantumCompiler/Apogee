@@ -34,24 +34,24 @@ add_library(apogee_core STATIC
     platform/platform.h
     platform/platform.cpp
     commands/command.h
-    models/gguf_inspect.h
-    models/gguf_inspect.cpp
-    models/kv_cache.h
-    models/kv_cache.cpp
+    modelstore/gguf_inspect.h
+    modelstore/gguf_inspect.cpp
+    modelstore/kv_cache.h
+    modelstore/kv_cache.cpp
     models/lineage.h
     models/lineage.cpp
-    models/sha256.h
-    models/sha256.cpp
-    models/sidecar.h
-    models/sidecar.cpp
+    contracts/sha256.h
+    contracts/sha256.cpp
+    modelstore/sidecar.h
+    modelstore/sidecar.cpp
     models/acquire.h
     models/acquire.cpp
     models/source_ollama.h
     models/source_ollama.cpp
     models/source_hf.h
     models/source_hf.cpp
-    models/snapshot.h
-    models/snapshot.cpp
+    modelstore/snapshot.h
+    modelstore/snapshot.cpp
 
     training/python_env.h
     training/python_env.cpp
@@ -93,8 +93,10 @@ add_library(apogee_core STATIC
     models/quantize.cpp
     models/convert.h
     models/convert.cpp
-    models/store.h
-    models/store.cpp
+    modelstore/store.h
+    modelstore/store.cpp
+    modelstore/hf_ref.h
+    modelstore/hf_ref.cpp
     models/migrate.h
     models/migrate.cpp
     commands/model_chain.h
@@ -199,33 +201,33 @@ add_library(apogee_core STATIC
     logger/operational.h
     logger/operational.cpp
 
-    harness/layout.h
-    harness/layout.cpp
-    harness/paths.h
-    harness/paths.cpp
+    contracts/layout.h
+    contracts/layout.cpp
+    contracts/paths.h
+    contracts/paths.cpp
     harness/roles.h
     harness/roles.cpp
-    harness/config.h
-    harness/config.cpp
-    harness/config_template.cpp
-    harness/config_edit.h
-    harness/config_edit.cpp
-    harness/host.h
-    harness/host.cpp
-    harness/assets.h
-    harness/assets.cpp
-    harness/assets_training.cpp
-    harness/assets_converter.cpp
-    harness/errors.h
-    harness/errors.cpp
-    harness/cancellation.h
-    harness/cancellation.cpp
-    harness/types.h
-    harness/types.cpp
-    harness/behavior.h
-    harness/behavior.cpp
-    harness/provider.h
-    harness/provider.cpp
+    contracts/config.h
+    contracts/config.cpp
+    contracts/config_template.cpp
+    contracts/config_edit.h
+    contracts/config_edit.cpp
+    contracts/host.h
+    contracts/host.cpp
+    contracts/assets.h
+    contracts/assets.cpp
+    contracts/assets_training.cpp
+    contracts/assets_converter.cpp
+    contracts/errors.h
+    contracts/errors.cpp
+    contracts/cancellation.h
+    contracts/cancellation.cpp
+    contracts/types.h
+    contracts/types.cpp
+    contracts/behavior.h
+    contracts/behavior.cpp
+    contracts/provider.h
+    contracts/provider.cpp
     harness/context_windows.h
     harness/context_windows.cpp
     harness/harness.h
@@ -234,10 +236,10 @@ add_library(apogee_core STATIC
     backends/backends.h
     backends/mock.h
     backends/mock.cpp
-    backends/http_client.h
-    backends/http_client.cpp
-    backends/sse_parser.h
-    backends/sse_parser.cpp
+    transport/http_client.h
+    transport/http_client.cpp
+    transport/sse_parser.h
+    transport/sse_parser.cpp
     backends/anthropic_wire.h
     backends/anthropic_wire.cpp
     backends/anthropic.h
@@ -265,8 +267,8 @@ add_library(apogee_core STATIC
     backends/cli_event.h
     backends/claude_cli.h
     backends/claude_cli.cpp
-    backends/jsonl_framer.h
-    backends/jsonl_framer.cpp
+    transport/jsonl_framer.h
+    transport/jsonl_framer.cpp
     backends/claude_cli_events.h
     backends/claude_cli_events.cpp
     backends/llama_runtime.h
@@ -347,7 +349,7 @@ add_library(apogee_core STATIC
     events/bus.cpp
 
     # The credential store and the one key resolver. Beside the harness:
-    # includes harness/config.h and nothing from backends/.
+    # includes contracts/config.h and nothing from backends/.
     secrets/secrets.h
     secrets/store.h
     secrets/store.cpp

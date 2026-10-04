@@ -10,8 +10,8 @@
 
 #include "agentloop/agentloop.h"
 #include "backends/backends.h"
+#include "contracts/assets.h"
 #include "embedstore/embedstore.h"
-#include "harness/assets.h"
 #include "harness/harness.h"
 #include "httpserver/httpserver.h"
 #include "mcp/mcp.h"

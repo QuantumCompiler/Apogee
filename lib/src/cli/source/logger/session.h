@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "harness/types.h"
+#include "contracts/types.h"
 
 /// Persisted chat sessions.
 ///

@@ -8,7 +8,7 @@
 #include <random>
 #include <string>
 
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "httpserver/http_types.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"

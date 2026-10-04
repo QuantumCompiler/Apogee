@@ -1,7 +1,7 @@
 #pragma once
 
 #include "agent/tool.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 
 /// The RAG-query toolset: the model searching an ingested collection itself.

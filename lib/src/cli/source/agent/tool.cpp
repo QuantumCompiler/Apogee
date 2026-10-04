@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "models/sha256.h"
+#include "contracts/sha256.h"
 
 namespace apogee::agent {
 

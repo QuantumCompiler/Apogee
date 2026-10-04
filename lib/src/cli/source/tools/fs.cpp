@@ -11,7 +11,7 @@
 #include <system_error>
 #include <vector>
 
-#include "harness/config_edit.h"
+#include "contracts/config_edit.h"
 #include "platform/platform.h"
 #include "tools/args.h"
 

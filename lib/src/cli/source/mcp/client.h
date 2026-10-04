@@ -16,7 +16,7 @@
 #include <thread>
 #include <vector>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 #include "mcp/transport.h"
 #include "mcp/types.h"
 

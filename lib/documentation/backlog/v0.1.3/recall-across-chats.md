@@ -8,7 +8,7 @@ A small model has no memory beyond its window. This gives it the user's history 
 - **Never on a server.** `serve` answers remote clients and must never inject one client's history into another's turn, so recall is off on `serve`, structurally rather than by a default someone can flip.
 - **Transient, budgeted, reported.** Recalled text is injected like RAG, never written into the new chat's history, trimmed by the budget, and always announced, so a user can see why the model knows something.
 - **One retriever resolver.** The chats index is a collection like any other, searched through `resolve_turn_retriever` and reported as such.
-- **Private.** Summaries are derived from sessions and inherit their privacy: a private layout row, `0600`, validated by `check`, declared in `harness/layout.h` in the same commit.
+- **Private.** Summaries are derived from sessions and inherit their privacy: a private layout row, `0600`, validated by `check`, declared in `contracts/layout.h` in the same commit.
 - **Deletions propagate.** `chats delete` removes the chat's summary from the index; a chat that is still open is never summarised.
 - **Controllable.** `/recall off` for the session, `--no-recall` for a run, `memory.recall` in the config. A chat marked private (`/private`) is never summarised.
 
@@ -17,7 +17,7 @@ A small model has no memory beyond its window. This gives it the user's history 
 - `commands/chat.cpp`: summarise on exit in the background, and the slash commands.
 - `commands/chat_history.cpp`: deleting from the index.
 - `harness/config.*` and the template: `memory.recall`.
-- `harness/layout.h`: the private row for the chats index.
+- `contracts/layout.h`: the private row for the chats index.
 - `commands/check.cpp`: the index's size and mode.
 - Machine mode: a `memory` meta event beside the existing retrieval one, in [machine-mode.md](../../reference/machine-mode.md).
 

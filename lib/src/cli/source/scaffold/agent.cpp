@@ -3,9 +3,9 @@
 #include <stdexcept>
 #include <system_error>
 
-#include "harness/assets.h"
-#include "harness/config_edit.h"
-#include "harness/paths.h"
+#include "contracts/assets.h"
+#include "contracts/config_edit.h"
+#include "contracts/paths.h"
 
 namespace apogee::scaffold {
 

@@ -11,9 +11,9 @@
 #include <sstream>
 #include <stdexcept>
 
-#include "harness/config_edit.h"
-#include "harness/layout.h"
-#include "harness/paths.h"
+#include "contracts/config_edit.h"
+#include "contracts/layout.h"
+#include "contracts/paths.h"
 
 namespace apogee::logger {
 namespace {

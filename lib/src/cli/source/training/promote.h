@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 #include "training/manifest.h"
 #include "training/store.h"
 #include "training/trainer.h"

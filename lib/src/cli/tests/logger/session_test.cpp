@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "harness/config_edit.h"
-#include "harness/types.h"
+#include "contracts/config_edit.h"
+#include "contracts/types.h"
 #include "support/env_guard.h"
 
 using apogee::harness::ChatMessage;

@@ -8,10 +8,10 @@
 #include <vector>
 
 #include "commands/command.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "models/quantize.h"
-#include "models/sidecar.h"
-#include "models/store.h"
+#include "modelstore/sidecar.h"
+#include "modelstore/store.h"
 
 namespace CLI {
 class App;

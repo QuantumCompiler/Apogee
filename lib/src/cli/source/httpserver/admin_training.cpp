@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "harness/layout.h"
+#include "contracts/layout.h"
 #include "training/cycle.h"
 #include "training/manifest.h"
 #include "training/store.h"

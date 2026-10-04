@@ -13,9 +13,9 @@
 
 #include "commands/registry.h"
 #include "commands/root.h"
-#include "harness/config_edit.h"
-#include "models/sidecar.h"
-#include "models/snapshot.h"
+#include "contracts/config_edit.h"
+#include "modelstore/sidecar.h"
+#include "modelstore/snapshot.h"
 #include "support/env_guard.h"
 
 /// `apogee train setup` refusals -- an interpreter named in the config that
@@ -110,8 +110,8 @@ TEST_CASE("the trainer detection names its reason when nothing fits", "[commands
 
 #include <nlohmann/json.hpp>
 
-#include "harness/assets.h"
-#include "harness/layout.h"
+#include "contracts/assets.h"
+#include "contracts/layout.h"
 #include "models/quantize.h"
 #include "training/manifest.h"
 #include "training/store.h"

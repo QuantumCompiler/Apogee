@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "backends/mock.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 #include "platform/child_process.h"
 #include "support/env_guard.h"

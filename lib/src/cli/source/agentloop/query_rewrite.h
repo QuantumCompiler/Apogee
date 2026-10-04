@@ -3,9 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
+#include "contracts/types.h"
 #include "harness/harness.h"
-#include "harness/types.h"
 
 /// Turning a follow-up question into a search query that stands on its own
 /// (26b).

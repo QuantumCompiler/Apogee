@@ -8,10 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "models/sha256.h"
-#include "models/sidecar.h"
-#include "models/snapshot.h"
-#include "models/store.h"
+#include "contracts/sha256.h"
+#include "modelstore/sidecar.h"
+#include "modelstore/snapshot.h"
+#include "modelstore/store.h"
 #include "support/env_guard.h"
 
 namespace {

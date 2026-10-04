@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-#include "harness/config.h"
+#include "contracts/config.h"
 
 /// The one resolver for `models:` role pointers.
 ///

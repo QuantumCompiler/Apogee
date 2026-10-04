@@ -6,8 +6,8 @@
 #include <string_view>
 #include <vector>
 
+#include "contracts/cancellation.h"
 #include "embedstore/store.h"
-#include "harness/cancellation.h"
 #include "harness/harness.h"
 
 /// A generation model reorders retrieved chunks -- the relevance judgement

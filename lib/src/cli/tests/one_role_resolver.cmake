@@ -30,21 +30,30 @@ endif()
 
 # Files entitled to touch the raw fields:
 #   harness/roles.cpp    -- the resolver itself; this IS the one chain
-#   harness/config.cpp   -- parses them out of YAML
-#   harness/config_edit.cpp / config_template.cpp -- writes and documents them
+#   contracts/config.cpp   -- parses them out of YAML
+#   contracts/config_edit.cpp / config_template.cpp -- writes and documents them
 #   harness/harness.cpp  -- holds default_model() for display; calls the resolver
 #   commands/config_cmd.cpp -- `config get models.default` must print the raw value
 #   commands/check.cpp   -- validates each pointer AS WRITTEN, which is the one
 #                           place the unresolved value is the point
 set(allowed
     "harness/roles.cpp"
-    "harness/config.cpp"
-    "harness/config_edit.cpp"
-    "harness/config_template.cpp"
+    "contracts/config.cpp"
+    "contracts/config_edit.cpp"
+    "contracts/config_template.cpp"
     "harness/harness.cpp"
     "commands/config_cmd.cpp"
     "commands/check.cpp"
 )
+
+# Every allowance names a file that exists: one left behind by a move would
+# allow nothing -- or, worse, allow a new file that took the old name (A1).
+foreach(entry IN LISTS allowed)
+    if(NOT EXISTS "${SOURCE_DIR}/${entry}")
+        message(FATAL_ERROR "the allowlist names ${entry}, which is not under ${SOURCE_DIR} -- "
+                            "a file that moved must move here too")
+    endif()
+endforeach()
 
 set(offenders "")
 set(scanned 0)

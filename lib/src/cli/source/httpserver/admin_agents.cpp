@@ -11,9 +11,9 @@
 #include <system_error>
 #include <vector>
 
-#include "harness/assets.h"
-#include "harness/config_edit.h"
-#include "harness/paths.h"
+#include "contracts/assets.h"
+#include "contracts/config_edit.h"
+#include "contracts/paths.h"
 #include "scaffold/agent.h"
 
 namespace apogee::httpserver {

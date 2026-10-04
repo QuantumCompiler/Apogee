@@ -10,9 +10,9 @@
 #include <system_error>
 #include <vector>
 
-#include "harness/config.h"
-#include "models/sidecar.h"
-#include "models/store.h"
+#include "contracts/config.h"
+#include "modelstore/sidecar.h"
+#include "modelstore/store.h"
 #include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "support/file_time.h"

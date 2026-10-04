@@ -10,10 +10,10 @@
 #include "agentloop/budget.h"
 #include "agentloop/embed_func.h"
 #include "agentloop/retriever.h"
-#include "harness/cancellation.h"
-#include "harness/config.h"
+#include "contracts/cancellation.h"
+#include "contracts/config.h"
+#include "contracts/types.h"
 #include "harness/harness.h"
-#include "harness/types.h"
 
 /// Retrieval-augmented generation: finding relevant chunks and splicing them
 /// into one outgoing request.

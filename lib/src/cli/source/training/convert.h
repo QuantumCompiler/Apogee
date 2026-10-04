@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/assets.h"
+#include "contracts/assets.h"
 #include "training/promote.h"
 #include "training/python_env.h"
 

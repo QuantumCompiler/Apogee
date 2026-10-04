@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "backends/mock.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 
 using apogee::agentloop::compact_history;
 using apogee::agentloop::ContextUsage;

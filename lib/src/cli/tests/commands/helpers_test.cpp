@@ -8,8 +8,8 @@
 #include <random>
 #include <string>
 
+#include "contracts/config.h"
 #include "embedstore/store.h"
-#include "harness/config.h"
 #include "harness/roles.h"
 #include "support/env_guard.h"
 

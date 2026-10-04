@@ -8,8 +8,8 @@
 #include "ansi/ansi.h"
 #include "commands/command.h"
 #include "commands/status_line.h"
-#include "harness/config.h"
-#include "models/gguf_inspect.h"
+#include "contracts/config.h"
+#include "modelstore/gguf_inspect.h"
 #include "secrets/resolve.h"
 
 /// `apogee models` — what this machine has, and which backend each role uses.

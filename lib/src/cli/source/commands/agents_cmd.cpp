@@ -13,10 +13,10 @@
 #include <vector>
 
 #include "commands/helpers.h"
-#include "harness/assets.h"
-#include "harness/config.h"
-#include "harness/config_edit.h"
-#include "harness/paths.h"
+#include "contracts/assets.h"
+#include "contracts/config.h"
+#include "contracts/config_edit.h"
+#include "contracts/paths.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
 #include "scaffold/agent.h"

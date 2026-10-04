@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/types.h"
+#include "contracts/types.h"
 
 /// Native (control-token) tool calls: recognising a call a model emits as its
 /// **own tokens** rather than through an injected prose protocol.

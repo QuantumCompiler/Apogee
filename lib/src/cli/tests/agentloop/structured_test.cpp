@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "backends/mock.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 
 /// Structured output: the validator, the JSON extractor, the instruction

@@ -11,10 +11,10 @@
 
 #include "backends/llama_runtime.h"
 #include "backends/model_profile.h"
-#include "harness/config.h"
-#include "harness/provider.h"
-#include "models/gguf_inspect.h"
-#include "models/kv_cache.h"
+#include "contracts/config.h"
+#include "contracts/provider.h"
+#include "modelstore/gguf_inspect.h"
+#include "modelstore/kv_cache.h"
 
 /// Local inference: llama.cpp linked into this process.
 ///

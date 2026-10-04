@@ -35,8 +35,8 @@
 #include <vector>
 
 #include "backends/llama_chat.h"
-#include "models/gguf_inspect.h"
-#include "models/kv_cache.h"
+#include "modelstore/gguf_inspect.h"
+#include "modelstore/kv_cache.h"
 
 namespace apogee::backends {
 namespace {

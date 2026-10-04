@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 #include "training/script_runner.h"
 #include "training/trainer.h"
 

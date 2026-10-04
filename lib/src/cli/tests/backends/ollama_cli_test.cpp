@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "backends/ollama_cli_output.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 #include "platform/child_process.h"
 #include "support/fake_child.h"
 

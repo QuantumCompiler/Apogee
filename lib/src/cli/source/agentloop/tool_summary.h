@@ -4,9 +4,9 @@
 #include <optional>
 #include <string>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
+#include "contracts/types.h"
 #include "harness/harness.h"
-#include "harness/types.h"
 
 /// A large tool result, summarised by the utility model before it reaches the
 /// chat model (26b).

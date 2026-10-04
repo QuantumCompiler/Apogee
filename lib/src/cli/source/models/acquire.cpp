@@ -11,8 +11,8 @@
 #include <system_error>
 #include <utility>
 
-#include "models/gguf_inspect.h"
-#include "models/sha256.h"
+#include "contracts/sha256.h"
+#include "modelstore/gguf_inspect.h"
 
 namespace apogee::models {
 namespace {

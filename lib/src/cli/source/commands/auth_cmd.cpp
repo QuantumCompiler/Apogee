@@ -10,7 +10,7 @@
 #include <stdexcept>
 
 #include "commands/helpers.h"
-#include "harness/paths.h"
+#include "contracts/paths.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {

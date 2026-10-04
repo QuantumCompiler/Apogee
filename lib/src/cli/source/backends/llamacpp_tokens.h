@@ -8,7 +8,7 @@
 
 #include "backends/chat_template.h"
 #include "backends/llama_runtime.h"
-#include "harness/types.h"
+#include "contracts/types.h"
 
 /// Tokenization for the local backend: exact counting, and the prefix
 /// arithmetic that makes the KV cache worth having.

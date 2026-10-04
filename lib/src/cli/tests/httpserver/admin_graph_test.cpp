@@ -16,10 +16,10 @@
 
 #include "agentloop/graph_context.h"
 #include "backends/mock.h"
+#include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "embedstore/store.h"
 #include "events/bus.h"
-#include "harness/config.h"
-#include "harness/config_edit.h"
 #include "harness/harness.h"
 #include "httpserver/handler.h"
 #include "httpserver/jobs.h"

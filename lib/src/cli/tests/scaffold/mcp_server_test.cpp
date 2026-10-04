@@ -9,8 +9,8 @@
 #include <stdexcept>
 #include <string>
 
-#include "harness/config.h"
-#include "harness/layout.h"
+#include "contracts/config.h"
+#include "contracts/layout.h"
 #include "support/env_guard.h"
 
 /// The scaffold core: files, the entry, register-only, and every refusal.

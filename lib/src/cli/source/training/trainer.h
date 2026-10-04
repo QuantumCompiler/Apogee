@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 
 /// The trainer contract: what a fine-tuning run asks of whatever executes
 /// it, and the JSONL progress protocol that execution speaks back.

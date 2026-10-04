@@ -4,7 +4,7 @@
 #include <utility>
 
 #include "backends/claude_cli_events.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 
 namespace apogee::backends {
 namespace {

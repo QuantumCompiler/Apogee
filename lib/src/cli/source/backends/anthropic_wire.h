@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "harness/types.h"
+#include "contracts/types.h"
 
 /// Translation between Apogee's IR and the Anthropic Messages API wire format.
 ///

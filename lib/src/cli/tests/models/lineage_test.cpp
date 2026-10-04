@@ -10,9 +10,9 @@
 #include <string>
 #include <vector>
 
-#include "models/sidecar.h"
-#include "models/snapshot.h"
-#include "models/store.h"
+#include "modelstore/sidecar.h"
+#include "modelstore/snapshot.h"
+#include "modelstore/store.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
 

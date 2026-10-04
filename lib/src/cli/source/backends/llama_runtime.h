@@ -9,8 +9,8 @@
 #include <utility>
 #include <vector>
 
-#include "harness/config.h"
-#include "harness/types.h"
+#include "contracts/config.h"
+#include "contracts/types.h"
 
 /// The slice of llama.cpp the local backend needs, behind an interface.
 ///

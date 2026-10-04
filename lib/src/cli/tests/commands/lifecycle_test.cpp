@@ -13,8 +13,8 @@
 #include "commands/registry.h"
 #include "commands/root.h"
 #include "commands/uninstall.h"
-#include "harness/config.h"
-#include "harness/layout.h"
+#include "contracts/config.h"
+#include "contracts/layout.h"
 
 /// The lifecycle surfaces: shell completion, and what uninstall plans to remove.
 namespace {

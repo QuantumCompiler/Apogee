@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "secrets/store.h"
 
 /// The one key resolver.

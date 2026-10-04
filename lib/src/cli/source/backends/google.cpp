@@ -4,8 +4,8 @@
 
 #include "backends/embedding_batch.h"
 #include "backends/google_embed.h"
-#include "backends/sse_parser.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
+#include "transport/sse_parser.h"
 
 namespace apogee::backends {
 namespace {

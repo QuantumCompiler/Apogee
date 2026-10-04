@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/provider.h"
+#include "contracts/provider.h"
 #include "support/env_guard.h"
 
 /// Fakes for media attachments (26e): a provider whose model sees, hears or

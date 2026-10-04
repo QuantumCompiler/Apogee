@@ -15,10 +15,10 @@
 #include "agent/fetch_url.h"
 #include "agent/readable.h"
 #include "agentloop/media.h"
+#include "contracts/errors.h"
+#include "contracts/sha256.h"
 #include "embedstore/chunk.h"
 #include "embedstore/ingest.h"
-#include "harness/errors.h"
-#include "models/sha256.h"
 #include "platform/child_process.h"
 
 namespace apogee::agentloop {

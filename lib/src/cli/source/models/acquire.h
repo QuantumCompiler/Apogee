@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include "models/sidecar.h"
+#include "modelstore/sidecar.h"
 
 /// Getting a model onto disk without ever leaving a half-one there.
 ///

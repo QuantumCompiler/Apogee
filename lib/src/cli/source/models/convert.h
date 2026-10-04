@@ -6,8 +6,8 @@
 #include <string>
 #include <string_view>
 
-#include "harness/cancellation.h"
-#include "models/gguf_inspect.h"
+#include "contracts/cancellation.h"
+#include "modelstore/gguf_inspect.h"
 
 /// A SafeTensors snapshot turned into a GGUF -- `apogee models convert`.
 ///

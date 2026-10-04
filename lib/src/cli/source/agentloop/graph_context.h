@@ -8,9 +8,9 @@
 #include <string_view>
 #include <vector>
 
+#include "contracts/config.h"
 #include "embedstore/graph.h"
 #include "embedstore/store.h"
-#include "harness/config.h"
 
 /// Retrieval-time expansion: the knowledge graph rendered as the section a
 /// turn's transient prefix carries after the chunk list.

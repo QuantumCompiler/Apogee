@@ -11,10 +11,10 @@
 #include "agentloop/loop.h"
 #include "agentloop/reporter.h"
 #include "agentloop/structured.h"
+#include "contracts/errors.h"
+#include "contracts/types.h"
 #include "embedstore/graph.h"
-#include "harness/errors.h"
 #include "harness/harness.h"
-#include "harness/types.h"
 
 // The extractor's prompt and schema are GENERATED from lib/src/cli/assets/
 // clerks/extract_prompt.txt and extract_schema.json. The shipped files and
@@ -320,9 +320,8 @@ ExtractFn make_structured_extractor(const harness::Harness& harness, std::string
         options.cancellation = cancellation;
         agentloop::NullReporter reporter;
         try {
-            const agentloop::StructuredResult result =
-                agentloop::run_structured(harness, history, options, reporter,
-                                          extract_schema_text());
+            const agentloop::StructuredResult result = agentloop::run_structured(
+                harness, history, options, reporter, extract_schema_text());
             outcome.attempts = result.attempts;
             if (!result.conforms || !result.json.has_value()) {
                 outcome.error = "the extractor did not return entities and relations";

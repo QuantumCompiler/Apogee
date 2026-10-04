@@ -17,7 +17,7 @@
 #include "agentloop/budget.h"
 #include "agentloop/loop.h"
 #include "agentloop/rag.h"
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 #include "harness/harness.h"
 #include "logger/session.h"
 

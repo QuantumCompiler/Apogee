@@ -3,8 +3,8 @@
 #include <filesystem>
 #include <string_view>
 
+#include "contracts/config.h"
 #include "events/bus.h"
-#include "harness/config.h"
 #include "httpserver/admin_agents.h"
 #include "httpserver/admin_auth_routes.h"
 #include "httpserver/admin_config.h"

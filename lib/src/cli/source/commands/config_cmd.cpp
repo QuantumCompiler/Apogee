@@ -12,12 +12,12 @@
 #include <vector>
 
 #include "commands/graph.h"
-#include "harness/config.h"
-#include "harness/config_edit.h"
-#include "harness/host.h"
-#include "harness/layout.h"
-#include "harness/paths.h"
-#include "models/store.h"
+#include "contracts/config.h"
+#include "contracts/config_edit.h"
+#include "contracts/host.h"
+#include "contracts/layout.h"
+#include "contracts/paths.h"
+#include "modelstore/store.h"
 #include "tools/toolsets.h"
 
 namespace apogee::commands {

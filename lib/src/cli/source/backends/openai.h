@@ -5,10 +5,10 @@
 #include <string>
 #include <vector>
 
-#include "backends/http_client.h"
 #include "backends/openai_wire.h"
-#include "harness/config.h"
-#include "harness/provider.h"
+#include "contracts/config.h"
+#include "contracts/provider.h"
+#include "transport/http_client.h"
 
 /// The OpenAI backend — Responses API, direct HTTPS, API-key path.
 ///

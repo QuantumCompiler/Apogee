@@ -7,8 +7,8 @@
 #include <fstream>
 #include <system_error>
 
-#include "harness/config_edit.h"
-#include "models/sha256.h"
+#include "contracts/config_edit.h"
+#include "contracts/sha256.h"
 
 namespace apogee::training {
 namespace {

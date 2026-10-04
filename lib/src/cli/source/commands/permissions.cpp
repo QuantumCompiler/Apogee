@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "agent/web_search.h"
-#include "harness/config_edit.h"
-#include "harness/host.h"
+#include "contracts/config_edit.h"
+#include "contracts/host.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {

@@ -7,7 +7,7 @@
 #include <fstream>
 #include <system_error>
 
-#include "models/snapshot.h"
+#include "modelstore/snapshot.h"
 
 namespace apogee::models {
 namespace {

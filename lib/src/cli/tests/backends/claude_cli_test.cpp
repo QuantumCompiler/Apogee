@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "harness/errors.h"
+#include "contracts/errors.h"
 #include "support/fake_child.h"
 
 /// The provider, against a scripted child.

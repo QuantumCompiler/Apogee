@@ -11,7 +11,7 @@
 
 #include "agentloop/structured.h"
 #include "backends/mock.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 
 /// The extraction contract: the prompt and schema pinned to the shipped

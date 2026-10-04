@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "commands/command.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 
 /// The hidden `apogee __complete` verb — the shell-completion protocol.
 ///

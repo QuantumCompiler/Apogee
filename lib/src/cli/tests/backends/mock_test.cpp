@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "harness/errors.h"
+#include "contracts/errors.h"
 
 using apogee::backends::MockProvider;
 using apogee::backends::MockTurn;

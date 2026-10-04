@@ -7,7 +7,7 @@
 - **Scales never mix.** Strength is computed per retriever (RRF, cosine, normalized BM25) and the retriever tag stays on the line — the rule `RagResult::retriever` already states ("a number shown without its retriever invites exactly the comparison that cannot be made") extends to the floor: there is no single threshold constant.
 - **The floor is honest, not silent.** Below-floor is a said outcome ("nothing relevant…"), never a quiet absence; the existing principle that answering without retrieved context beats refusing is untouched — the turn still runs.
 - **Lexical saturation is respected.** Normalized BM25 cannot tell the probe's irrelevant question from its on-topic one by score; its floor must use a different signal (question-term coverage of the hit) or be honestly absent — never a score threshold that the measurement shows cannot work.
-- **Raw facts survive for machines.** Wherever the result reaches a machine surface (28e's JSON reads, machine-mode events), the raw score and retriever ride along; the readable strength is presentation.
+- **Raw facts survive for machines.** Wherever the result reaches a machine surface (29e's JSON reads, machine-mode events), the raw score and retriever ride along; the readable strength is presentation.
 - Code style carries: `.h`/`.cpp` pairs, smart pointers only.
 
 **Seam + files.**
@@ -41,4 +41,4 @@
 - [ ] An on-topic lexical turn injects as today; an off-topic one with saturated scores floors on term coverage and says so.
 - [ ] The raw score and retriever remain visible (parenthesized on the human line, fields on machine surfaces).
 
-**Scope note.** Item **26s**, earmarked for **v0.1.3** (the release's end, after 26r; Maintenance's M5 — and before that M6 — until 2026-10-03's moves); gated on nothing pending. Out of scope: reranking changes (the judge's rules are 26b's, untouched); embedding-quality work; the structural map card ([26q](attachment-map-card.md)) and graph wiring ([30d](../v0.1.7/attachment-code-graph.md), [30e](../v0.1.7/attachment-graph-turns.md)), which fix the *other* failure the stress test showed.
+**Scope note.** Item **26s**, earmarked for **v0.1.3** (the release's end, after 26r; Maintenance's M5 — and before that M6 — until 2026-10-03's moves); gated on nothing pending. Out of scope: reranking changes (the judge's rules are 26b's, untouched); embedding-quality work; the structural map card ([26q](attachment-map-card.md)) and graph wiring ([27n](../v0.1.4/attachment-code-graph.md), [27o](../v0.1.4/attachment-graph-turns.md)), which fix the *other* failure the stress test showed.

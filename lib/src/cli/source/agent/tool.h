@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/types.h"
+#include "contracts/types.h"
 
 /// Tools the model can call, and the registry that dispatches them.
 ///

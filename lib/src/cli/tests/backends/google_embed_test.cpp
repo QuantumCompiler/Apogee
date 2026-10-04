@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "backends/google.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 #include "harness/harness.h"
 #include "support/embedding_fixtures.h"
 #include "support/fake_transport.h"

@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "backends/ollama_cli_output.h"
-#include "harness/config.h"
-#include "harness/provider.h"
+#include "contracts/config.h"
+#include "contracts/provider.h"
 #include "platform/child_process.h"
 
 /// Ollama's cloud models, driven through the official `ollama` CLI.

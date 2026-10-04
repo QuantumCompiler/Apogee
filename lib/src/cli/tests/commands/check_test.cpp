@@ -12,10 +12,10 @@
 #include <utility>
 #include <vector>
 
+#include "contracts/assets.h"
+#include "contracts/config.h"
+#include "contracts/layout.h"
 #include "embedstore/store.h"
-#include "harness/assets.h"
-#include "harness/config.h"
-#include "harness/layout.h"
 #include "httpserver/admin_auth.h"
 #include "knowledge/record.h"
 #include "knowledge/store.h"

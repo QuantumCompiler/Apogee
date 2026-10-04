@@ -24,13 +24,22 @@ endif()
 set(allowed
     "secrets/resolve.cpp"          # the chain itself
     "secrets/store.cpp"            # the slot file; never names a variable
-    "harness/config.cpp"           # parses the api_key field
-    "harness/config_edit.cpp"      # writes the api_key field
-    "harness/config_template.cpp"  # the starter config's commentary
+    "contracts/config.cpp"           # parses the api_key field
+    "contracts/config_edit.cpp"      # writes the api_key field
+    "contracts/config_template.cpp"  # the starter config's commentary
     "commands/config_cmd.cpp"      # the --api-key flag, stored literally
     "httpserver/admin_config.cpp"  # api_key_set in the view; is_literal_api_key
     "commands/auth_cmd.cpp"        # names the variables to TELL the user which to export
 )
+
+# Every allowance names a file that exists: one left behind by a move would
+# allow nothing -- or, worse, allow a new file that took the old name (A1).
+foreach(entry IN LISTS allowed)
+    if(NOT EXISTS "${SOURCE_DIR}/${entry}")
+        message(FATAL_ERROR "the allowlist names ${entry}, which is not under ${SOURCE_DIR} -- "
+                            "a file that moved must move here too")
+    endif()
+endforeach()
 
 set(offenders "")
 set(scanned 0)

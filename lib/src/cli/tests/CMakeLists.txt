@@ -18,15 +18,15 @@ add_executable(apogee_tests
     platform/ffmpeg_test.cpp
     commands/registry_test.cpp
     commands/root_test.cpp
-    harness/config_test.cpp
-    harness/config_edit_test.cpp
-    harness/host_test.cpp
-    harness/paths_test.cpp
-    harness/types_test.cpp
+    contracts/config_test.cpp
+    contracts/config_edit_test.cpp
+    contracts/host_test.cpp
+    contracts/paths_test.cpp
+    contracts/types_test.cpp
     harness/harness_test.cpp
     backends/mock_test.cpp
-    backends/sse_parser_test.cpp
-    backends/http_client_test.cpp
+    transport/sse_parser_test.cpp
+    transport/http_client_test.cpp
     backends/anthropic_test.cpp
     backends/factory_test.cpp
     backends/openai_test.cpp
@@ -42,16 +42,16 @@ add_executable(apogee_tests
     backends/codex_cli_test.cpp
     backends/gemini_cli_test.cpp
     harness/roles_test.cpp
-    models/gguf_inspect_test.cpp
-    models/kv_cache_test.cpp
+    modelstore/gguf_inspect_test.cpp
+    modelstore/kv_cache_test.cpp
     models/lineage_test.cpp
-    models/sha256_test.cpp
+    contracts/sha256_test.cpp
     models/acquire_test.cpp
     models/convert_test.cpp
-    models/store_test.cpp
+    modelstore/store_test.cpp
     models/migrate_test.cpp
     models/quantize_test.cpp
-    models/sidecar_test.cpp
+    modelstore/sidecar_test.cpp
     models/source_ollama_test.cpp
     models/source_hf_test.cpp
     commands/models_pull_test.cpp
@@ -62,7 +62,7 @@ add_executable(apogee_tests
     commands/models_test.cpp
     commands/config_cmd_test.cpp
     commands/attachment_guard_test.cpp
-    backends/jsonl_framer_test.cpp
+    transport/jsonl_framer_test.cpp
     backends/think_filter_test.cpp
     backends/markup_filter_test.cpp
     backends/native_tool_calls_test.cpp
@@ -142,7 +142,7 @@ add_executable(apogee_tests
     agentloop/structured_test.cpp
     agentloop/review_context_test.cpp
     render/json_report_test.cpp
-    harness/assets_test.cpp
+    contracts/assets_test.cpp
     bundled_agents_test.cpp
     commands/analyze_test.cpp
     commands/agents_test.cpp

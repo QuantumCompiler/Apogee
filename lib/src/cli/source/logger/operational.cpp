@@ -7,8 +7,8 @@
 #include <mutex>
 #include <sstream>
 
-#include "harness/layout.h"
-#include "harness/paths.h"
+#include "contracts/layout.h"
+#include "contracts/paths.h"
 
 namespace apogee::logger {
 namespace {

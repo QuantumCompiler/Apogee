@@ -20,7 +20,7 @@ Proposed order of precedence:
 - `backends/llama_runtime.h`: the settings passed with each generation.
 - `backends/llamacpp.cpp`: the precedence resolution.
 - `backends/model_profile.h/.cpp`: per-family defaults, split by thinking on or off.
-- `harness/config.h/.cpp` and the template: the new per-backend knobs beside `temperature`.
+- `contracts/config.h/.cpp` and the template: the new per-backend knobs beside `temperature`.
 - `commands/models.cpp` (`models info`): the settings in force and their source.
 - `commands/chat.cpp`: `/temperature` already exists and gains the others as needed.
 

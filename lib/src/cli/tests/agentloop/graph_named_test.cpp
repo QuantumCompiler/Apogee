@@ -8,8 +8,8 @@
 
 #include "agentloop/graph_context.h"
 #include "agentloop/rag.h"
+#include "contracts/config.h"
 #include "embedstore/store.h"
-#include "harness/config.h"
 #include "support/env_guard.h"
 
 /// The retrieval precedence rule: a BUILT named graph covers its members

@@ -9,8 +9,8 @@
 
 #include "agentloop/embed_func.h"
 #include "agentloop/retriever.h"
+#include "contracts/layout.h"
 #include "embedstore/store.h"
-#include "harness/layout.h"
 #include "tools/args.h"
 
 namespace apogee::tools {

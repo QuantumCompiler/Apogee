@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "harness/types.h"
+#include "contracts/types.h"
 #include "support/env_guard.h"
 
 /// The dataset store and the miners: one chat-line shape with role before

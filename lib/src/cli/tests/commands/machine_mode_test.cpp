@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "backends/jsonl_framer.h"
 #include "commands/json_reporter.h"
+#include "transport/jsonl_framer.h"
 
 /// Machine mode: the JSONL protocol a GUI drives Apogee over.
 ///

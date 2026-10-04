@@ -13,7 +13,7 @@
 
 #include "agentloop/content.h"
 #include "backends/llamacpp_tokens.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 #include "harness/harness.h"
 #include "support/fake_llama.h"
 #include "support/gguf_builder.h"

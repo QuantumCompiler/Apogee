@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <string_view>
 
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "httpserver/http_types.h"
 
 /// The config-editing slice of the control plane: backends and the three role

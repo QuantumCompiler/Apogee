@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 #include "support/fake_child.h"
 
 /// The C++ side of the Python boundary: every line shape classified, the

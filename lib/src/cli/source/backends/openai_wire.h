@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-#include "harness/types.h"
+#include "contracts/types.h"
 
 /// Translation between Apogee's IR and the OpenAI **Responses API**.
 ///

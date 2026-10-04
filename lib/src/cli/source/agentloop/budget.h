@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "agentloop/content.h"
+#include "contracts/types.h"
 #include "harness/harness.h"
-#include "harness/types.h"
 
 /// The per-turn context budget (26c): each request assembled against the
 /// model's real window, by priority, instead of from each source's own cap.

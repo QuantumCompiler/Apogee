@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "agent/tool.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 #include "tools/git.h"
 

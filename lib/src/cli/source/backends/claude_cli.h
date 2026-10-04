@@ -10,10 +10,10 @@
 #include <vector>
 
 #include "backends/cli_event.h"
-#include "backends/jsonl_framer.h"
-#include "harness/config.h"
-#include "harness/provider.h"
+#include "contracts/config.h"
+#include "contracts/provider.h"
 #include "platform/child_process.h"
+#include "transport/jsonl_framer.h"
 
 /// Claude driven through the official `claude` CLI as a long-lived child.
 ///

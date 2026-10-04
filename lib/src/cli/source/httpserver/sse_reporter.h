@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "agentloop/reporter.h"
-#include "harness/types.h"
+#include "contracts/types.h"
 #include "httpserver/sse_writer.h"
 
 /// The `agentloop::Reporter` → SSE adapter: the third surface over one seam.

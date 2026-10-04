@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "backends/llama_runtime.h"
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 
 /// The provider side of in-process embeddings: batching and cancellation over
 /// the runtime seam's `embed_batch`.

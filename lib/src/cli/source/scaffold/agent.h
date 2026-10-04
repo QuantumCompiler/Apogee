@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/config.h"
+#include "contracts/config.h"
 
 /// The TTY-free core that creates an agent: the same function `apogee agents
 /// create` and `POST /v1/admin/agents` call, so an agent made over HTTP is

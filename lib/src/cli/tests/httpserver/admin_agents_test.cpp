@@ -12,7 +12,7 @@
 
 #include "commands/registry.h"
 #include "commands/root.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "httpserver/http_types.h"
 #include "support/env_guard.h"
 

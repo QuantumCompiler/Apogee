@@ -12,9 +12,9 @@
 #include <string_view>
 #include <vector>
 
-#include "backends/jsonl_framer.h"
 #include "mcp/types.h"
 #include "platform/child_process.h"
+#include "transport/jsonl_framer.h"
 
 /// How frames reach a server and come back.
 ///

@@ -8,7 +8,7 @@
 #include <sstream>
 
 #include "commands/chat_attachments.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 
 namespace apogee::commands {
 namespace {

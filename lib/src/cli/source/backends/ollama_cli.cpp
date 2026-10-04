@@ -2,8 +2,8 @@
 
 #include <utility>
 
-#include "backends/http_client.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
+#include "transport/http_client.h"
 
 namespace apogee::backends {
 namespace {

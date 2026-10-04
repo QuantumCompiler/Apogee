@@ -11,8 +11,8 @@
 
 #include "agentloop/budget.h"
 #include "agentloop/embed_func.h"
+#include "contracts/cancellation.h"
 #include "embedstore/store.h"
-#include "harness/cancellation.h"
 #include "harness/harness.h"
 #include "logger/session.h"
 

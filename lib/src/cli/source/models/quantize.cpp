@@ -9,7 +9,7 @@
 #include <system_error>
 #include <utility>
 
-#include "models/gguf_inspect.h"
+#include "modelstore/gguf_inspect.h"
 
 #if defined(APOGEE_ENABLE_LLAMA)
 #include <llama.h>

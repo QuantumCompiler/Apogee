@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "agent/readable.h"
-#include "harness/host.h"
+#include "contracts/host.h"
 
 namespace apogee::agent {
 namespace {

@@ -9,7 +9,7 @@
 #include "agent/tool.h"
 #include "agentloop/question.h"
 #include "agentloop/reporter.h"
-#include "harness/types.h"
+#include "contracts/types.h"
 
 /// The `agentloop::Reporter` → JSONL adapter: Apogee's machine mode.
 ///

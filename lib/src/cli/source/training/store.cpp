@@ -6,7 +6,7 @@
 #include <fstream>
 #include <system_error>
 
-#include "harness/config_edit.h"
+#include "contracts/config_edit.h"
 
 namespace apogee::training {
 

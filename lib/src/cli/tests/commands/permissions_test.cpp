@@ -19,7 +19,7 @@
 #include "commands/json_reporter.h"
 #include "commands/status_line.h"
 #include "commands/terminal.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "platform/platform.h"
 #include "support/env_guard.h"
 #include "support/fake_mcp_server.h"

@@ -7,7 +7,7 @@
 #include <string>
 
 #include "backends/google_wire.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 #include "support/fake_transport.h"
 
 using apogee::backends::GoogleProvider;

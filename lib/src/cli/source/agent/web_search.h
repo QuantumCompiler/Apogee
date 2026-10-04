@@ -9,7 +9,7 @@
 
 #include "agent/fetch_url.h"
 #include "agent/tool.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 
 /// `web_search` -- find pages, answered by a SearXNG instance the user runs
 /// (25e).

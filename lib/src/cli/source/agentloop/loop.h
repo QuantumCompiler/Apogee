@@ -12,8 +12,8 @@
 #include "agentloop/question.h"
 #include "agentloop/reporter.h"
 #include "agentloop/tool_selection.h"
+#include "contracts/types.h"
 #include "harness/harness.h"
-#include "harness/types.h"
 
 /// The model→tool→model loop.
 ///

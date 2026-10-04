@@ -10,8 +10,8 @@
 #include "agent/tool.h"
 #include "agentloop/loop.h"
 #include "backends/mock.h"
-#include "harness/config.h"
-#include "harness/errors.h"
+#include "contracts/config.h"
+#include "contracts/errors.h"
 
 /// Tool selection by relevance (26g): the lexical ranking as a table, the
 /// vector ranking over scripted embeddings and its cache, the selection's

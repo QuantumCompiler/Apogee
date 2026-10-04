@@ -8,10 +8,10 @@
 #include "agent/tool.h"
 #include "agentloop/loop.h"
 #include "backends/anthropic.h"
-#include "backends/http_client.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 #include "support/fake_transport.h"
+#include "transport/http_client.h"
 
 using apogee::agent::Tool;
 using apogee::agent::ToolOutcome;

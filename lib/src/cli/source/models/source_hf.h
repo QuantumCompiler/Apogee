@@ -7,8 +7,9 @@
 #include <string_view>
 #include <vector>
 
-#include "backends/http_client.h"
 #include "models/acquire.h"
+#include "modelstore/hf_ref.h"
+#include "transport/http_client.h"
 
 /// Downloading a model file directly from Hugging Face.
 ///
@@ -43,23 +44,6 @@
 /// ladder here typically runs size and header checks and reports honestly that
 /// no digest was published. That is the common case Apogee had to be built for.
 namespace apogee::models {
-
-/// A parsed Hugging Face ref.
-struct HfRef {
-    std::string owner;
-    std::string repo;
-    /// Empty when the ref named no file, which means "resolve it".
-    std::string file;
-    /// Empty means the default branch.
-    std::string revision;
-
-    [[nodiscard]] std::string repo_id() const {
-        return owner + "/" + repo;
-    }
-};
-
-/// Parses `ref`. Returns nullopt when it is not owner/repo shaped.
-[[nodiscard]] std::optional<HfRef> parse_hf_ref(std::string_view ref);
 
 /// The download URL for a fully-resolved ref.
 [[nodiscard]] std::string hf_download_url(const HfRef& ref);
@@ -119,9 +103,6 @@ struct HfTree {
 
 /// Whether `path` is a dataset data file worth downloading.
 [[nodiscard]] bool dataset_file_wanted(std::string_view path) noexcept;
-
-/// The directory a snapshot or a downloaded dataset lands in: `owner--repo`.
-[[nodiscard]] std::string repo_directory_name(const HfRef& ref);
 
 /// Lists a repository's GGUF files.
 [[nodiscard]] HfListing list_gguf_files(backends::HttpClient& client, const HfRef& ref,

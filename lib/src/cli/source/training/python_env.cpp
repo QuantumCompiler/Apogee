@@ -8,7 +8,7 @@
 #include <fstream>
 #include <system_error>
 
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "platform/child_process.h"
 
 namespace apogee::training {

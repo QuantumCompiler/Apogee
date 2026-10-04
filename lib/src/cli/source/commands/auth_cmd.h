@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "commands/command.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 

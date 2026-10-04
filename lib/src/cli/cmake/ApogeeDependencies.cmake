@@ -20,7 +20,7 @@
 #                                  marshaling a struct back to YAML strips
 #                                  comments and reorders keys. Writes go
 #                                  through the text-surgery helpers in
-#                                  harness/config_edit.h. See config-engine.
+#                                  contracts/config_edit.h. See config-engine.
 #   CLI parsing CLI11           -- wired below
 #   Line editing replxx         -- wired below. Used ONLY by the chat REPL's
 #                                  interactive path; a non-TTY run never

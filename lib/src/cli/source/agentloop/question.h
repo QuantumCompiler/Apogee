@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/types.h"
+#include "contracts/types.h"
 
 /// `ask_user` — the model asking the user a multiple-choice question mid-turn.
 ///

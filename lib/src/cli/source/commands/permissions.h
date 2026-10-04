@@ -10,7 +10,7 @@
 #include "ansi/ansi.h"
 #include "commands/json_reporter.h"
 #include "commands/status_line.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 
 /// The permission gate's two halves, as every surface wires them.
 ///

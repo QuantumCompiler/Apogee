@@ -7,9 +7,9 @@
 #include <string>
 
 #include "agent/tool.h"
+#include "contracts/config.h"
+#include "contracts/layout.h"
 #include "embedstore/store.h"
-#include "harness/config.h"
-#include "harness/layout.h"
 #include "support/env_guard.h"
 
 /// The RAG-query toolset over a seeded lexical store: the retriever that ran

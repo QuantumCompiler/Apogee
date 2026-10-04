@@ -10,7 +10,7 @@
 #include "commands/agents_cmd.h"
 #include "commands/registry.h"
 #include "commands/root.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "support/env_guard.h"
 
 /// `apogee agents` in-process: create scaffolds a runnable agent, list sees

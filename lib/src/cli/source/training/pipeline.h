@@ -10,8 +10,8 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/cancellation.h"
-#include "harness/config.h"
+#include "contracts/cancellation.h"
+#include "contracts/config.h"
 #include "training/eval.h"
 #include "training/manifest.h"
 #include "training/trainer.h"

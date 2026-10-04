@@ -5,7 +5,7 @@
 #include <exception>
 #include <string_view>
 
-#include "harness/errors.h"
+#include "contracts/errors.h"
 
 namespace apogee::agentloop {
 namespace {

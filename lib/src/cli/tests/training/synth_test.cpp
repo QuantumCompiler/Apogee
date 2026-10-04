@@ -9,7 +9,7 @@
 #include <thread>
 #include <vector>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 
 /// The synth core, model-free: the contract prompt, the per-batch
 /// instruction, the array extraction and the aliases, de-duplication, the

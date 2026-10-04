@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "harness/config.h"
-#include "harness/provider.h"
+#include "contracts/config.h"
+#include "contracts/provider.h"
 #include "platform/child_process.h"
 
 /// OpenAI's subscription path, through the official `codex` CLI.

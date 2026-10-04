@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "models/snapshot.h"
+#include "modelstore/snapshot.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
 

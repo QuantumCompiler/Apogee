@@ -7,9 +7,9 @@
 #include <vector>
 
 #include "backends/mock.h"
-#include "harness/config.h"
+#include "contracts/config.h"
+#include "contracts/errors.h"
 #include "harness/context_windows.h"
-#include "harness/errors.h"
 
 using apogee::backends::MockEmbeddingProvider;
 using apogee::backends::MockProvider;

@@ -7,7 +7,7 @@
 #include <random>
 #include <string>
 
-#include "harness/types.h"
+#include "contracts/types.h"
 #include "logger/session.h"
 #include "support/env_guard.h"
 

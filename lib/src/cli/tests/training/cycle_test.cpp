@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "harness/types.h"
+#include "contracts/types.h"
 #include "support/env_guard.h"
 #include "training/mock_trainer.h"
 

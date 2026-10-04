@@ -7,7 +7,7 @@
 #include <string>
 
 #include "agent/tool.h"
-#include "harness/layout.h"
+#include "contracts/layout.h"
 #include "support/env_guard.h"
 
 /// The notes toolset: keys that can never be paths, and the four tools.

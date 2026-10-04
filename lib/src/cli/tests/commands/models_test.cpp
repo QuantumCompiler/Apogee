@@ -15,9 +15,9 @@
 #include <vector>
 
 #include "harness/roles.h"
-#include "models/sidecar.h"
-#include "models/snapshot.h"
-#include "models/store.h"
+#include "modelstore/sidecar.h"
+#include "modelstore/snapshot.h"
+#include "modelstore/store.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"

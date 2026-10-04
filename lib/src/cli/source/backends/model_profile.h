@@ -7,7 +7,7 @@
 
 #include "backends/markup_filter.h"
 #include "backends/think_filter.h"
-#include "harness/behavior.h"
+#include "contracts/behavior.h"
 
 /// What Apogee knows about how one **family** of local model behaves.
 ///

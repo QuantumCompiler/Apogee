@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "harness/assets.h"
-#include "models/sha256.h"
+#include "contracts/assets.h"
+#include "contracts/sha256.h"
 #include "support/env_guard.h"
 
 using apogee::training::converter_arguments;

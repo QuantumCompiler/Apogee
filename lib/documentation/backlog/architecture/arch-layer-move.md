@@ -1,13 +1,13 @@
 # Architecture A2: the move into four layers
 
-**What / why.** With the contracts carved ([A1](arch-contracts-carve.md)), the measured graph obeys the four-layer model — and this item makes the directories say so: every package `git mv`'d into `lib/src/cli/source/<layer>/<module>/`, the tests tree mirrored as `tests/<layer>/<module>/`, and **nothing else**. The layer assignment, from the spike (2026-10-03):
+**What / why.** With the contracts carved ([A1](../../assistant/MILESTONES.md#milestone-aa--the-four-layers)), the measured graph obeys the four-layer model — and this item makes the directories say so: every package `git mv`'d into `lib/src/cli/source/<layer>/<module>/`, the tests tree mirrored as `tests/<layer>/<module>/`, and **nothing else**. The layer assignment, from the spike (2026-10-03):
 
 | Layer | Modules |
 |---|---|
 | `presentation/` | `commands`, `httpserver`, `markdown`, `render` |
-| `business/` | `harness`, `agentloop`, `agent`, `tools`, `knowledge`, `graph`, `training`, `scaffold`, `models` |
-| `data/` | `contracts`, `backends`, `embedstore`, `logger`, `secrets`, `mcp`, `modelstore` |
-| `infrastructure/` | `platform`, `ansi`, `events`, `version`, `transport` |
+| `business/` | `harness`, `agentloop`, `agent`, `tools`, `knowledge`, `graph`, `training`, `scaffold`, `models`, `mcp` |
+| `data/` | `contracts`, `backends`, `embedstore`, `logger`, `secrets`, `modelstore`, `transport` |
+| `infrastructure/` | `platform`, `ansi`, `events`, `version` |
 
 The migration-cost killer is the include rule the user chose: **short paths stay** — each layer directory joins the include path, so `#include "agentloop/loop.h"` is byte-stable and roughly 95% of include lines never change; the layer lives in the tree and (after [A4](arch-build-enforcement.md)) in the link graph, not in the spelling. Layers are **per application** (the user's call): this reshapes `lib/src/cli/` only, and each future GUI app repeats the shape inside its own self-contained build.
 
@@ -23,6 +23,8 @@ The migration-cost killer is the include rule the user chose: **short paths stay
 **Reference (Ommi).** No analog as an event — Ommi was born with its layout. The precedent is Apogee's own 2026-08-24 layout decision and its same-day mechanical rewrite of every seam path, which this item repeats at larger scale with better tooling (the rename-only property is checkable; it wasn't then).
 
 **Decisions made** (dated):
+- 2026-10-03 *(A1, at build)* — `transport` sits in **Data**, not Infrastructure: `http_client` speaks the contracts' cancellation token and errors (see A1's record).
+- 2026-10-03 *(A1, at build)* — `mcp` sits in **Business**, not Data: it registers into and serves the agent's `ToolRegistry`, which stays in `agent/` (see A1's record).
 - 2026-10-03 — The user's calls, recorded at specing: short include paths (per-layer include dirs; the build graph carries the layer); layers per application; the move isolated from all judgment diffs (A1 before, A3 after) so it reviews as renames.
 
 **Open calls:**
@@ -43,4 +45,4 @@ The migration-cost killer is the include rule the user chose: **short paths stay
 - [ ] CLAUDE.md, DEVELOPER.md and every pending backlog document describe the layered tree; no document anywhere names a flat `source/<pkg>/` path.
 - [ ] The no-listen, layering, one-key-resolver and completion checks all still fail their planted violations post-move.
 
-**Scope note.** **Architecture item A2**; build after [A1](arch-contracts-carve.md), **in a quiet window at a release boundary of the taker's choosing**. Out of scope: any module content changes ([A3](arch-commands-modules.md)); CMake target splits ([A4](arch-build-enforcement.md)); the GUI apps (they adopt the shape when they exist).
+**Scope note.** **Architecture item A2**; build after [A1](../../assistant/MILESTONES.md#milestone-aa--the-four-layers), **in a quiet window at a release boundary of the taker's choosing**. Out of scope: any module content changes ([A3](arch-commands-modules.md)); CMake target splits ([A4](arch-build-enforcement.md)); the GUI apps (they adopt the shape when they exist).

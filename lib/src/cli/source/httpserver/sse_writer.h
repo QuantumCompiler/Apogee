@@ -8,8 +8,8 @@
 #include <string>
 #include <string_view>
 
-#include "harness/cancellation.h"
-#include "harness/types.h"
+#include "contracts/cancellation.h"
+#include "contracts/types.h"
 #include "httpserver/http_types.h"
 
 /// Server-sent events in the OpenAI streaming dialect.

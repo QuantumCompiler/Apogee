@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "backends/mock.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 
 /// A follow-up searched as a standalone question (26b).

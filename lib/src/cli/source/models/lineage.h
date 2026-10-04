@@ -7,9 +7,9 @@
 #include <string_view>
 #include <vector>
 
-#include "models/sidecar.h"
-#include "models/snapshot.h"
-#include "models/store.h"
+#include "modelstore/sidecar.h"
+#include "modelstore/snapshot.h"
+#include "modelstore/store.h"
 
 /// Where a stored model came from, read from the records the store already
 /// keeps (M4).

@@ -7,14 +7,14 @@
 #include <string>
 
 #include "agent/tool.h"
-#include "backends/http_client.h"
 #include "backends/mock.h"
 #include "backends/openai.h"
 #include "commands/helpers.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 #include "support/env_guard.h"
 #include "support/fake_transport.h"
+#include "transport/http_client.h"
 
 /// The tool-vector cache under `cache/` and how a surface picks what ranks
 /// its tools (26g): vectors only from an embedder that costs nothing, words

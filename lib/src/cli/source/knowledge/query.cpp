@@ -6,7 +6,7 @@
 #include "agentloop/embed_func.h"
 #include "agentloop/graph_context.h"
 #include "agentloop/rerank.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 
 namespace apogee::knowledge {
 namespace {

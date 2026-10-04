@@ -4,7 +4,7 @@
 #include <chrono>
 #include <system_error>
 
-#include "harness/layout.h"
+#include "contracts/layout.h"
 #include "platform/platform.h"
 #include "tools/environment.h"
 #include "tools/fs.h"

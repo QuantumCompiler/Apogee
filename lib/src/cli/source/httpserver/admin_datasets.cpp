@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "commands/datasets.h"
-#include "harness/config.h"
-#include "harness/layout.h"
+#include "contracts/config.h"
+#include "contracts/layout.h"
 #include "httpserver/handler.h"
 #include "training/datasets.h"
 #include "training/kit.h"

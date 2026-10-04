@@ -8,10 +8,10 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/behavior.h"
-#include "harness/config.h"
-#include "harness/provider.h"
-#include "harness/types.h"
+#include "contracts/behavior.h"
+#include "contracts/config.h"
+#include "contracts/provider.h"
+#include "contracts/types.h"
 
 /// The registry and router: the harness proper.
 ///
@@ -94,10 +94,10 @@ enum class Medium : std::uint8_t { Image, Audio, Video };
 [[nodiscard]] std::string_view to_string(Medium medium) noexcept;
 
 /// Owns the providers and routes requests to them.
-class Harness {
+class Harness : public ProviderRegistry {
 public:
     explicit Harness(Config config);
-    ~Harness();
+    ~Harness() override;
 
     Harness(const Harness&) = delete;
     Harness& operator=(const Harness&) = delete;
@@ -106,15 +106,15 @@ public:
 
     /// Registers `provider` under `name`. Replaces any existing registration —
     /// a caller rebuilding one backend should not have to tear down the rest.
-    void register_provider(std::string name, std::shared_ptr<LLMProvider> provider);
+    void register_provider(std::string name, std::shared_ptr<LLMProvider> provider) override;
 
     /// Builds a SimpleRouter over the currently registered providers.
     /// Call after registering; re-call after registering more.
-    void use_default_router();
+    void use_default_router() override;
 
     void set_router(std::unique_ptr<ModelRouter> router);
 
-    [[nodiscard]] const Config& config() const noexcept {
+    [[nodiscard]] const Config& config() const noexcept override {
         return config_;
     }
 

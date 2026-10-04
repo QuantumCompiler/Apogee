@@ -13,7 +13,7 @@
 #include "agentloop/retriever.h"
 #include "commands/helpers.h"
 #include "commands/interrupt.h"
-#include "harness/layout.h"
+#include "contracts/layout.h"
 #include "harness/roles.h"
 
 namespace apogee::commands {

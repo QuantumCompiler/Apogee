@@ -13,8 +13,8 @@
 #include <system_error>
 #include <vector>
 
-#include "models/sha256.h"
-#include "models/sidecar.h"
+#include "contracts/sha256.h"
+#include "modelstore/sidecar.h"
 #include "support/gguf_builder.h"
 
 /// The acquisition ladder, and the promise that nothing partial ever lands.

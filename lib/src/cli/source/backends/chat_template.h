@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/types.h"
+#include "contracts/types.h"
 
 /// Rendering an IR conversation into the flat prompt string a local model
 /// expects.

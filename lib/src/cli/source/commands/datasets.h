@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "commands/command.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 #include "training/datasets.h"
 #include "training/kit.h"

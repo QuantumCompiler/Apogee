@@ -6,10 +6,10 @@
 #include <string_view>
 #include <vector>
 
+#include "contracts/cancellation.h"
 #include "embedstore/graph.h"
 #include "embedstore/store.h"
 #include "graph/extract.h"
-#include "harness/cancellation.h"
 
 namespace apogee::harness {
 class Harness;

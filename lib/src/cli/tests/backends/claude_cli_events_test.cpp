@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "backends/jsonl_framer.h"
+#include "transport/jsonl_framer.h"
 
 /// The fixture-replay suite — this item's named guardrail.
 ///

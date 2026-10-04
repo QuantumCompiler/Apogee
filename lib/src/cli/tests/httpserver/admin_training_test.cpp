@@ -9,10 +9,10 @@
 #include <random>
 #include <string>
 
+#include "contracts/config.h"
+#include "contracts/layout.h"
 #include "events/bus.h"
-#include "harness/config.h"
 #include "harness/harness.h"
-#include "harness/layout.h"
 #include "httpserver/admin.h"
 #include "httpserver/handler.h"
 #include "httpserver/jobs.h"

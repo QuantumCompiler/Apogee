@@ -10,8 +10,8 @@
 
 #include "agent/tool.h"
 #include "backends/mock.h"
-#include "harness/config.h"
-#include "harness/errors.h"
+#include "contracts/config.h"
+#include "contracts/errors.h"
 
 using apogee::agent::Permission;
 using apogee::agent::Tool;

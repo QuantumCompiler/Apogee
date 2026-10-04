@@ -9,7 +9,7 @@
 
 #include "agentloop/content.h"
 #include "backends/mock.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 
 using apogee::agentloop::assemble_request;

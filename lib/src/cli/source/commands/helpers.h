@@ -15,15 +15,15 @@
 #include "agentloop/budget.h"
 #include "agentloop/rag.h"
 #include "agentloop/tool_selection.h"
-#include "backends/http_client.h"
 #include "commands/status_line.h"
-#include "harness/cancellation.h"
-#include "harness/config.h"
+#include "contracts/cancellation.h"
+#include "contracts/config.h"
+#include "contracts/types.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
-#include "harness/types.h"
 #include "mcp/registry.h"
 #include "tools/toolsets.h"
+#include "transport/http_client.h"
 
 /// Shared plumbing for the CLI commands.
 ///

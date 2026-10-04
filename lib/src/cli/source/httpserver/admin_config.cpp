@@ -8,8 +8,8 @@
 #include <utility>
 #include <vector>
 
-#include "harness/config_edit.h"
-#include "harness/host.h"
+#include "contracts/config_edit.h"
+#include "contracts/host.h"
 #include "harness/roles.h"
 #include "scaffold/mcp_server.h"
 #include "tools/toolsets.h"

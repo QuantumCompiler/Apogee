@@ -10,7 +10,7 @@
 #include <thread>
 #include <vector>
 
-#include "models/gguf_inspect.h"
+#include "modelstore/gguf_inspect.h"
 #include "support/env_guard.h"
 #include "training/mock_trainer.h"
 

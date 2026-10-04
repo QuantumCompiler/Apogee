@@ -1983,7 +1983,7 @@ Asked for by the user (2026-09-25): the CLI pluggable into **other people's** ha
 
 **The recommendation: grow the JSONL contract; do not reframe it.** JSON-RPC/LSP framing would break every `protocol_version: 1` driver to buy request/response multiplexing the walls do not demand — turns serialize by design, and the one axis that wants a peer protocol (host tools) is **already answered by MCP as a sidecar**, proven above, wanting only per-run wiring. The decisive finding is that the existing tolerance rules make the contract **retrofittable in both directions**: an unknown inbound line is ignored (verified live), so a new host can send a `hello` to an old binary harmlessly, and rule 1 means an old host survives every additive event. The gaps close as additions: a handshake and a written stability promise (W1), a schema artifact pinned like the prose doc (W2), turn ids and an inbound cancel (W3, W4), per-run wiring for host MCP servers and the file-tool root (W6, W8 — W8's *default* also changes under item 25a's launch-folder rule, which shipped later the same day, [Milestone V](#milestone-v--the-native-toolsets); the spike's evidence is the v0.1.2 binary, and the per-run declaration remains the integration half), and `--output-format json` on the read commands a host UI needs (W7).
 
-**Split (2026-09-25), all five specced into the v0.1.5 table:** 28a the handshake and the stability promise → 28b per-run integration wiring → 28c turn ids and cancel → 28d the schema artifact → 28e machine-readable reads. **Parked with evidence, the user's call:** a push channel (v1's "events arrive in response to turns, never unprompted" held comfortably for an embedding host — the case for push is config/model change notification for long-lived embeds, and 28a's capability field is where it would negotiate if ever wanted). A SPEC revision naming third-party embedding as a product surface is proposed alongside the split rather than made unilaterally.
+**Split (2026-09-25), all five specced into the v0.1.5 table:** 29a the handshake and the stability promise → 29b per-run integration wiring → 29c turn ids and cancel → 29d the schema artifact → 29e machine-readable reads. **Parked with evidence, the user's call:** a push channel (v1's "events arrive in response to turns, never unprompted" held comfortably for an embedding host — the case for push is config/model change notification for long-lived embeds, and 29a's capability field is where it would negotiate if ever wanted). A SPEC revision naming third-party embedding as a product surface is proposed alongside the split rather than made unilaterally.
 
 ---
 
@@ -2395,7 +2395,7 @@ Every other header read goes through the same function, so each is faster the sa
   - `--all` lists everything; nothing about the store changes, so `check`, `train` and `models delete` see what they saw before.
   - Deleting a snapshot's GGUFs brings it back, because the listing follows the store.
   - A GGUF whose chain passes through a conversion reads `converted` in SOURCE, backend or not; everything else reads what it read before.
-  - `--output-format stream-json` keeps every row: the fold is the table's, and lineage in machine output is 28e's.
+  - `--output-format stream-json` keeps every row: the fold is the table's, and lineage in machine output is 29e's.
 - [x] **The sweep reads nothing twice** ([M2](#milestone-n--model-operations)'s cost discipline).
   - Each file's record is read inside its own counted step of the busy line, as before, and the lineage is applied in one pass over the finished rows.
   - The first version read every record up front. That would have left the busy line on its uncounted label while the records loaded. It would also have hung `cli.busy_line`, which holds the sweep on a named-pipe sidecar until it sees a counted frame. It was caught reading that test, before it ran.
@@ -2425,8 +2425,8 @@ Every other header read goes through the same function, so each is faster the sa
 | A fine-tune | Does not consume its base | The base model stays unrunnable until it is converted. |
 | Discoverability of the fold | `models list --all`, plus one tail line counting what is folded *(default taken)* | The fold is visible, never silent. |
 | SOURCE | `converted` for a GGUF whose chain reaches a conversion, recorded or inferred; unchanged otherwise *(default taken)* | The full chain lives in `models info`, not in new columns. |
-| A snapshot a backend points at | Never folded *(default taken)* | Possible once MLX (31a) runs one directly; a backend's own model is never hidden. |
-| Machine output | `stream-json` keeps every row | A machine reader is not misled by `(not configured)`, and lineage there is 28e's. |
+| A snapshot a backend points at | Never folded *(default taken)* | Possible once MLX (27a) runs one directly; a backend's own model is never hidden. |
+| Machine output | `stream-json` keeps every row | A machine reader is not misled by `(not configured)`, and lineage there is 29e's. |
 | `models info` | Takes `<model>/<format>/<id>` or an id as well as a backend | The acceptance needs it: a fresh conversion is not a backend yet, and a folded snapshot must stay reachable. |
 | M3's chain | Stamps the same records through the same functions, nothing extra *(default taken)* | Proven through the command line: chain, then `info` and `list`. |
 
@@ -2485,7 +2485,7 @@ So, **by the user's call**, the item builds on what is installed: no `apogee com
   - A flag given always wins: a `--model-path` given, or another `--type`, fills nothing, and a `--mmproj-path` given is kept.
   - Two stored GGUFs of one name are refused, both listed.
   - `--type` is no longer required by the parser. When nothing fills it, the callback throws the parser's own `RequiredError`, so a name the store does not know still reads `--type is required` and exits 106.
-- [x] **The format → type map** (`models/store.h`, `backend_type_for_format`): `gguf` → `llamacpp`, one row per format beside the formats themselves, so MLX's `mlx/` (31b) is one more row.
+- [x] **The format → type map** (`models/store.h`, `backend_type_for_format`): `gguf` → `llamacpp`, one row per format beside the formats themselves, so MLX's `mlx/` (27b) is one more row.
   - `stored_gguf_at` (the stored GGUF a backend points at) and `stored_ggufs_named` (the stored GGUFs of a name) are the lookups delete, add-backend and completion share.
 - [x] **Completion, through the resolver that exists** (`commands/complete_sources.cpp`), with two name kinds:
   - `MODEL_OR_BACKEND`, for `models delete`: store models, handles, and the backends whose model is stored, never a cloud one.
@@ -2614,7 +2614,7 @@ The lesson is the cheap one: **a plan inherited from the reference implementatio
 | Family | Embedded chat template | Observed |
 |---|---|---|
 | `gemma3` (1b-it Q8_0) | **yes** | Clean. Answered "Paris". Nothing to strip. |
-| `qwen3` (3.6-28b Q4_K_M) | **yes** | **Emitted `<think>\n\n</think>\n\n4` — all of it reaching the user.** |
+| `qwen3` (3.6-29b Q4_K_M) | **yes** | **Emitted `<think>\n\n</think>\n\n4` — all of it reaching the user.** |
 | `llama3` (3.2-3b, local files) | **no** | Degenerate on every prompt. |
 
 This item was written from Ommi's Gemma 4, which shipped **no** chat template and had to be reverse-engineered — that was the case the bespoke-override slot existed for. **Gemma 3 ships a good template and needs no help at all.** The family that needed help was Llama, and its files here carry a content hash where a name should be and degenerate like base models, so nothing about it could be verified.
@@ -3761,3 +3761,54 @@ The prefill, which lives only in the llama build, was checked on real weights in
 **Verified on the real binary.** `cli.train_lifecycle` continues with the mock and no Python: a two-stage pipeline whose second stage regresses the first's suite aborting under the cumulative gate (stage 0 fused, the last stage not, the lineage in the stage manifests), `pipeline status` with the resume hint, `resume` after the data is fixed completing and the last stage promoted like any run, a complete run refused; a regime over two kits with the mock backend as the teacher and `--no-promote` (a dataset and a suite per kit, one pipeline, no new ledger); the cycle from a queue directory -- skipped with nothing queued, a pass promoting into `training.cycle.backend` with the anchor set and the file consumed and not a config line removed, a regression failing, discarding and tripping the breaker at `k=1`, the halted loop refused naming `cycle resume` and reported by `check`, resumed and running again with the lock released; `train status` rolling both up; `check` green. The merge-blocking build passes every test (1445) through `cicd.sh`; a rebuild after the lock's lint fix passed all but two in a parallel `ctest` -- two models-package cases of the known temp-directory flake class, untouched by this item, passing serially and on three repeats; the llama build passes all but the two embedstore ingest cases of the same class, passing serially. `make lint` ran clean over the tree once the lock moved into the platform seam (the full run's one error was that deleter; the three files it changed re-linted clean in the error classes). The format check is clean.
 
 **Guardrails, each mutation-tested.** 82 mutants, every one caught in its final form. Four were re-formed after the first run because `make format` had reflowed the lines their first shape named, and one was re-formed because its first shape was equivalent (dropping the "no prior data" short-circuit on the previous-cycle half changes nothing while scores are non-negative; the re-form makes no data *fail*, which the gate must not). **Two survived on first contact, and one of them was the design finding above:** "a failed gate still promotes" survived because no test could reach a regression -- the cycle read the last *passed* stage's score, which is 100% by definition, so the dual gate was dead code, in the reference as much as here; the cycle now reads the final stage and a soft-gate case drives a real regression through it. The other was a config test that refused a pipeline with no `stages` key but never one with `stages: []`. The mutations: stage 1's base not the fused checkpoint, the last stage fused too, the cumulative suite only the stage's own, a hard-gate failure ignored, the gate below 100%, a transition not written, `parent_run` and `pipeline_run_id` not set, resume always from stage 0, a complete run and a drifted spec resumable, cancellation not aborting, rehearsal never mixed and the fraction ignored, a failed stage not fused under continue, `completed_at` never set, `last_passed` counting every stage, the stage run never marked complete, its eval not recorded, the judge's baseline the candidate itself, a stage-count mismatch and a path-shaped id accepted; the teacher flag not winning, `--all-kits` unsorted and overriding `--kit`, the regime's `iters` never overriding, no kits accepted, the eval suite not materialised, the count not passed, `promote_run_id` not set, an empty teacher output not an error; `k = 0` not disabling the breaker, a halt ignored, resume not resetting the count, non-jsonl files collected, consumed files copied not moved, consent not required, the watermark ignored, the newest session not tracked, blank lines merged, the threshold ignored, no prior data failing, the anchor half ignored, the first passing score read instead of the last, a pass not resetting the count, a skip counted as a failure, the breaker tripping one late, no data still training, a failed gate still promoting, the queue not consumed, the anchor never set and overwritten on every pass, the lock not required and not exclusive and never released, the breaker not checked, stage datasets not replaced by the merge, the history not saved on a failure, the watermark not advanced, a failed promotion counted as a pass, the pinned anchor ignored, `consecutive_fails` not persisted, `history_exists` always true; a sessions source without consent loading, an unknown source type loading, the threshold unbounded, zero stages accepted, `eval_suite` not required, the breaker's default not 3; the active pipeline a complete one, pipelines oldest first; `?kind=pipeline` keeping the runs, the cycle route answering with no history, `active_pipeline` never reported; the mock's answer ignored and not carried into the fused checkpoint; a halted cycle not warned and a non-llamacpp cycle backend ok by the doctor; a failed cycle exiting 0, `--no-promote` ignored, the config edited despite a failed build, a resume refusal not honoured at the command.
+
+---
+
+## Milestone AA — The four layers
+
+**Goal.** Make the CLI's source say what it is: four layers -- **Presentation → Business → Data → Infrastructure** -- each package in one, each including only its own layer and those below, the law enforced by the build itself. Asked for by the user on 2026-10-03 and specced from a spike that measured the real include graph into the standing **Architecture** queue (A1–A4). In C++ nothing makes this free; Go's import cycles made it free for Ommi, which is why the layering here has always been a guarded convention, and this milestone turns it into structure.
+
+### 2026-10-03 — `arch-contracts-carve` (architecture item A1): the contracts carved to the Data floor
+
+**Why.** The spike measured 22 packages and 81 include edges, and exactly **six edge types fought the four-layer model**: `backends → harness ×44`, `backends → models ×5`, `logger → harness ×6`, `secrets → harness ×2`, `mcp → agent ×2`, `mcp → harness ×1`, with a true cycle between `backends` and `models`. One root cause: the contracts every implementor reads -- the provider interface, the IR, errors, the config engine -- lived in `harness/`, a Business package, so the Data layer reached up for them. Re-measured at build: the same 81 edges, the same six types.
+
+**What was built**
+
+- [x] **`contracts/`, the Data floor** -- the provider interface, the message IR (`types.h`), `errors.h`, `cancellation.h`, `ModelBehavior` (`behavior.h`), the config engine (`config.h/.cpp`, its template, and the comment-preserving editor `config_edit.h/.cpp`), the layout contract (`layout.h`) and `paths.h`.
+  - With them, the moved files' own dependencies: the host rule (`host.h`), the bundled assets (`assets.h/.cpp` and the two generated units, whose generator now writes here), and `sha256.h`.
+  - It includes `platform/` and itself only, held there by `harness.layering`.
+- [x] **`modelstore/`, model files as data** -- `store`, `sidecar`, `snapshot`, `gguf_inspect`, `kv_cache`.
+  - Also `hf_ref.h/.cpp`: `HfRef`, `parse_hf_ref` and `repo_directory_name`, moved verbatim out of `models/source_hf` because the store names its directories with them.
+  - `snapshot.h`'s include of `source_hf.h`, which it never used, is gone.
+  - The backends read the header reader and the cache arithmetic from here, so the `backends ↔ models` cycle is gone both ways.
+- [x] **`transport/`, the wire primitives** -- the HTTP client, the SSE parser, the JSONL framer. `mcp/` and `training/` read the framer from here, so their named allowances into `backends/` are gone.
+- [x] **The factory fills the Harness without including it.** No carve could remove `backends/factory.h → harness/harness.h`: the Harness stays Business.
+  - `contracts/provider.h` gains `ProviderRegistry`: the three things the factory asks -- the config, `register_provider`, `use_default_router`.
+  - The Harness implements it, and `build_providers` takes it. Every call site still passes a Harness, unchanged.
+  - The capability-interface pattern CLAUDE.md prescribes, pointed the other way.
+- [x] **The four-layer law in the layering test** (`tests/layering.cmake`).
+  - The layer map holds every package, and any include that reaches up a layer fails, naming the file and both layers.
+  - A package with no row fails, and so does a row naming no package, so a new package declares its layer the day it exists.
+  - `contracts/`, `modelstore/` and `transport/` are held to their floors, and `secrets/`, `knowledge/`, `graph/` and `training/` to allow-lists naming `contracts/`.
+  - Each rule was verified against a planted violation in a scratch copy of the tree: a Data→Business include, a Business→Presentation include, `contracts/` reaching sideways, `modelstore/` and `transport/` past their floors, `secrets/` past the contracts, an unmapped package, a map row naming a missing package, and `mcp/` including a backend -- nine planted, nine caught by name.
+- [x] **The checks that name paths moved with them.** `cli.one_key_resolver`'s and `cli.one_role_resolver`'s allow-lists now name `contracts/`. Each now refuses an allow-list entry that names no file, so a file that moves without its entry fails loudly instead of being scanned under a stale allowance. Both were verified against a removed file.
+- [x] **Every includer updated** -- 549 include lines in 314 files, a scripted rewrite, then clang-format re-sorting the include blocks. **Namespaces did not move**: `apogee::harness::Config` lives in `contracts/config.h`. The include path is what the layers govern, and renaming namespaces would have touched thousands of lines for no layering gain.
+- [x] **Tests mirrored**: `tests/contracts/` (config, config edit, host, paths, types, assets, sha256), `tests/modelstore/` (store, sidecar, header reader, cache arithmetic), `tests/transport/` (HTTP client, SSE parser, framer).
+
+**The measurement after:** 91 edges, **zero upward**. `backends/`, `logger/` and `secrets/` include nothing from `harness/` or `agent/`; `contracts/` reaches only `platform/`; `modelstore/` and `transport/` only the contracts and the platform.
+
+**Decisions** -- the spike's file lists were right in spirit and short in four places, each settled the conservative way: move a dependency with what needs it, never change what code does.
+
+| Decision | Choice | Why |
+|---|---|---|
+| The config engine | Moves whole, loading with the types *(default taken)* | Splitting load from types would be a seam nobody asked for. |
+| What else `contracts/` takes | `host`, the bundled assets and the config template, `sha256` | The moved files' own dependencies; without them `contracts/` would include upward or sideways. |
+| `modelstore/` | Takes `snapshot` and the HF ref helpers (`hf_ref`, moved verbatim) | The store's own dependencies. |
+| `transport/`'s layer | **Data**, not Infrastructure | `http_client` speaks the contracts' cancellation token and errors; A2's table updated. |
+| `mcp/`'s layer | **Business**, and `agent/tool.h` stays put | The spike read `mcp → agent` as one struct; the use is the whole `ToolRegistry` and dispatch. Moving those to the floor would drag Business logic down; only `commands/` includes `mcp/`. |
+| The factory's reach into the Harness | `ProviderRegistry` in `contracts/`, implemented by the Harness | Dependency inversion; no call site changes. |
+| Namespaces | Unchanged | The include path is what the layers govern. |
+| `events/` | Stays put *(default taken)* | Already a leaf; Infrastructure by assignment. |
+| `transport/` before A2 | Named now, flat beside the others *(default taken)* | A2 makes the directories say the layers. |
+
+**Verified.** `make test` green on the llama build -- all 2,009, the usual one skip -- with no test logic edited: the config editor's byte-golden suite, `cli.one_key_resolver`, `cli.one_role_resolver`, `cli.install_parity` and `cli.no_listen_symbols` among them. The asset generator reproduces the moved units with only their path lines changed. Lint shows 0 errors.

@@ -11,8 +11,8 @@
 
 #include "agentloop/graph_context.h"
 #include "commands/graph.h"
-#include "harness/config.h"
-#include "harness/config_edit.h"
+#include "contracts/config.h"
+#include "contracts/config_edit.h"
 
 namespace apogee::httpserver {
 namespace {

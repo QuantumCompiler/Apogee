@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "support/cli_home.h"
 #include "support/gguf_builder.h"
 

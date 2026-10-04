@@ -3,8 +3,8 @@
 #include <utility>
 
 #include "backends/codex_cli_events.h"
-#include "backends/jsonl_framer.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
+#include "transport/jsonl_framer.h"
 
 namespace apogee::backends {
 namespace {

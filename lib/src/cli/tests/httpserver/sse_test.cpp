@@ -4,8 +4,8 @@
 #include <string>
 #include <vector>
 
-#include "harness/cancellation.h"
-#include "harness/types.h"
+#include "contracts/cancellation.h"
+#include "contracts/types.h"
 #include "httpserver/sse_reporter.h"
 #include "httpserver/sse_writer.h"
 

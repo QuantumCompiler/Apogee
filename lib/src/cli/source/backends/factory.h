@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "harness/config.h"
-#include "harness/harness.h"
+#include "contracts/config.h"
+#include "contracts/provider.h"
 #include "secrets/resolve.h"
 
 /// Construction of providers from config.
@@ -61,14 +61,16 @@ struct BuildOptions {
 };
 
 /// Constructs a provider for every backend in `config` and registers it on
-/// `harness`, then installs the default router.
+/// `harness`, then installs the default router. `harness` is the Harness, seen
+/// through the interface it implements (`contracts/provider.h`): this layer
+/// fills it without including it (A1).
 ///
 /// **A backend that cannot be built is skipped, not fatal.** A config with an
 /// Anthropic entry whose key is unset and a working local entry must still let
 /// the local one run — otherwise one unconfigured backend takes down every
 /// other. The reason is recorded per entry so a caller can explain the gap
 /// when the model the user actually asked for is the one that was skipped.
-[[nodiscard]] BuildResult build_providers(harness::Harness& harness,
+[[nodiscard]] BuildResult build_providers(harness::ProviderRegistry& harness,
                                           const BuildOptions& options = {});
 
 /// Constructs one provider from a single entry, or nullptr with `reason` set.

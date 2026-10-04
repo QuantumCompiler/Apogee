@@ -11,7 +11,7 @@
 
 #include "agentloop/budget.h"
 #include "agentloop/tool_summary.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 
 namespace apogee::agentloop {
 namespace {

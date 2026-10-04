@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "backends/mock.h"
+#include "contracts/config.h"
 #include "embedstore/graph.h"
 #include "embedstore/store.h"
-#include "harness/config.h"
 #include "harness/harness.h"
 #include "knowledge/record.h"
 #include "knowledge/store.h"

@@ -6,7 +6,7 @@
 #include <memory>
 #include <string>
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 #include "support/fake_mcp_server.h"
 
 /// The client against the scripted fleet: the handshake, the cache, the

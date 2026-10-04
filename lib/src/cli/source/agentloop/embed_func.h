@@ -7,8 +7,8 @@
 #include <string_view>
 #include <vector>
 
-#include "harness/cancellation.h"
-#include "harness/config.h"
+#include "contracts/cancellation.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 
 /// The one embedding seam the retrieval layer consumes.

@@ -12,8 +12,8 @@
 #include <vector>
 
 #include "agentloop/embed_func.h"
-#include "harness/cancellation.h"
-#include "harness/types.h"
+#include "contracts/cancellation.h"
+#include "contracts/types.h"
 
 /// Tool selection by relevance (26g): each turn offers the tools that bear on
 /// its question rather than every tool registered -- native tools one by

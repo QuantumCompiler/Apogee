@@ -12,7 +12,7 @@
 #include "backends/mock.h"
 #include "backends/ollama_cli.h"
 #include "backends/openai.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
 
@@ -187,7 +187,7 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
     return nullptr;
 }
 
-BuildResult build_providers(harness::Harness& harness, const BuildOptions& options) {
+BuildResult build_providers(harness::ProviderRegistry& harness, const BuildOptions& options) {
     BuildResult result;
 
     for (const auto& [name, config] : harness.config().backends) {

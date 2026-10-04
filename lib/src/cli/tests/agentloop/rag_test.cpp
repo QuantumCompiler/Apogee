@@ -18,8 +18,8 @@
 #include "agentloop/retriever.h"
 #include "backends/mock.h"
 #include "commands/helpers.h"
+#include "contracts/config.h"
 #include "embedstore/store.h"
-#include "harness/config.h"
 #include "harness/harness.h"
 
 /// RAG injection, and the one property that makes it safe to use every turn:

@@ -3,7 +3,7 @@
 #include <system_error>
 #include <utility>
 
-#include "harness/layout.h"
+#include "contracts/layout.h"
 
 namespace apogee::agentloop {
 namespace {

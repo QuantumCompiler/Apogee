@@ -1,6 +1,6 @@
 #include "agentloop/embed_func.h"
 
-#include "harness/provider.h"
+#include "contracts/provider.h"
 #include "harness/roles.h"
 
 namespace apogee::agentloop {

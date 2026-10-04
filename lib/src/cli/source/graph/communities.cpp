@@ -8,9 +8,9 @@
 
 #include "agentloop/loop.h"
 #include "agentloop/reporter.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
+#include "contracts/types.h"
 #include "harness/harness.h"
-#include "harness/types.h"
 
 // The summariser's prompt is GENERATED from lib/src/cli/assets/clerks/
 // community_prompt.txt; tests/graph/communities_test.cpp fails the build the

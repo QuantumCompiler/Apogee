@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "harness/provider.h"
+#include "contracts/provider.h"
 
 /// A provider that answers from a script, with no network and no model.
 ///

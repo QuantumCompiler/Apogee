@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "harness/config_edit.h"
+#include "contracts/config_edit.h"
 
 namespace apogee::secrets {
 namespace {

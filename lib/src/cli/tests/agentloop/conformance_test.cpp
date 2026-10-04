@@ -13,13 +13,13 @@
 #include "backends/anthropic_wire.h"
 #include "backends/google.h"
 #include "backends/google_wire.h"
-#include "backends/http_client.h"
 #include "backends/mock.h"
 #include "backends/openai.h"
 #include "backends/openai_wire.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "harness/harness.h"
 #include "support/fake_transport.h"
+#include "transport/http_client.h"
 
 /// **The cross-provider conformance table.**
 ///

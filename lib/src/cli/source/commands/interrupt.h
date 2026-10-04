@@ -1,6 +1,6 @@
 #pragma once
 
-#include "harness/cancellation.h"
+#include "contracts/cancellation.h"
 
 /// Ctrl-C for a command that runs a long child process.
 ///

@@ -9,7 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 
-#include "harness/config_edit.h"
+#include "contracts/config_edit.h"
 
 namespace apogee::httpserver {
 namespace {

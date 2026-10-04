@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "harness/config.h"
+#include "contracts/config.h"
 #include "secrets/store.h"
 
 namespace apogee::httpserver {

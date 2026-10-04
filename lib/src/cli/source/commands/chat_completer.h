@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "commands/line_reader.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 
 /// What `apogee chat` offers as the user types: its commands after a `/` at
 /// the start of the line, each command's own values after it, and paths after

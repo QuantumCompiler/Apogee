@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "harness/layout.h"
+#include "contracts/layout.h"
 #include "support/env_guard.h"
 
 /// The credential store: a private file, a type with no key field, and a

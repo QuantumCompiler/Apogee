@@ -4,7 +4,7 @@
 #include <optional>
 
 #include "agentloop/budget.h"
-#include "harness/errors.h"
+#include "contracts/errors.h"
 
 namespace apogee::agentloop {
 namespace {

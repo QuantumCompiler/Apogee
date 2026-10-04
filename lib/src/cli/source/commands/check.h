@@ -8,7 +8,7 @@
 
 #include "commands/command.h"
 #include "commands/status_line.h"
-#include "harness/config.h"
+#include "contracts/config.h"
 
 /// `apogee check` — the install doctor.
 ///

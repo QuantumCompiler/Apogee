@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "commands/command.h"
-#include "harness/config.h"
-#include "models/store.h"
+#include "contracts/config.h"
+#include "modelstore/store.h"
 #include "training/eval.h"
 #include "training/promote.h"
 #include "training/python_env.h"

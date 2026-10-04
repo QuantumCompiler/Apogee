@@ -9,7 +9,7 @@ Two caches:
 **Core constraint(s).**
 - **A cache that cannot be used is discarded, never trusted.** A key mismatch, a model file changed, a llama.cpp that refuses the state: each means the cache is removed and the prompt is read as today, with one line saying so. Ommi's "self-healing cache" lesson (CHAT.md) came from M-RoPE Qwen models refusing replay, the same family this targets.
 - **Correctness first.** A restore must leave the context exactly as decoding the prefix would; output after a restore equals output without it under greedy sampling.
-- **Bounded, and in `cache/`.** State files go under the `cache/` layout row ("safe to delete"), with a total size cap and least-recently-used eviction. Sizes are large: 64 KiB a token for Qwen3.8 at `f16`, 34 KiB at `q8_0`, the default since [26a](../../assistant/MILESTONES.md#milestone-j--local-inference) (`models/kv_cache.h` gives any model's cost per position from its header). `check` reports the total.
+- **Bounded, and in `cache/`.** State files go under the `cache/` layout row ("safe to delete"), with a total size cap and least-recently-used eviction. Sizes are large: 64 KiB a token for Qwen3.8 at `f16`, 34 KiB at `q8_0`, the default since [26a](../../assistant/MILESTONES.md#milestone-j--local-inference) (`modelstore/kv_cache.h` gives any model's cost per position from its header). `check` reports the total.
 - **Private.** A chat's cache holds its conversation, so its files are `0600`, like sessions.
 - **Side requests never read or write the session's cache.**
 
@@ -17,7 +17,7 @@ Two caches:
 - `backends/llama_runtime.h`: `LlamaContext` gains `save_state(path, tokens)` and `load_state(path) → tokens`.
 - `backends/llama_real.cpp`: the llama.h calls.
 - `backends/llamacpp.cpp`: the prefix cache consulted when a session context is created; the chat cache restored when a resumed session's first prompt matches; `session_tokens_` set from what was restored, so prefix matching continues as today.
-- `harness/layout.h`: `cache/` is already declared, and gains a documented subdirectory.
+- `contracts/layout.h`: `cache/` is already declared, and gains a documented subdirectory.
 - `commands/chat.cpp`: save at exit (the per-turn save stays the transcript only).
 - `commands/check.cpp`: the cache's size and its cap.
 

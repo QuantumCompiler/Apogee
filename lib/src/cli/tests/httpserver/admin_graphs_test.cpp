@@ -13,9 +13,9 @@
 #include "agentloop/graph_context.h"
 #include "commands/registry.h"
 #include "commands/root.h"
+#include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "embedstore/store.h"
-#include "harness/config.h"
-#include "harness/config_edit.h"
 #include "httpserver/http_types.h"
 #include "support/env_guard.h"
 

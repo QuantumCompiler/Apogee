@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "models/store.h"
+#include "modelstore/store.h"
 
 /// The flat layout's files, moved into the model store (`store.h`).
 ///

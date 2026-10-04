@@ -3,8 +3,8 @@
 #include <string_view>
 #include <utility>
 
-#include "harness/assets.h"
-#include "harness/layout.h"
+#include "contracts/assets.h"
+#include "contracts/layout.h"
 #include "training/script_runner.h"
 
 namespace apogee::training {

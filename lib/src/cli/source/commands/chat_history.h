@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "commands/command.h"
-#include "harness/types.h"
+#include "contracts/types.h"
 #include "logger/session.h"
 
 /// `apogee chats` — list, inspect, and rename saved conversations.

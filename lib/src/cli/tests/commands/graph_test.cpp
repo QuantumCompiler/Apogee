@@ -16,8 +16,8 @@
 #include "commands/helpers.h"
 #include "commands/registry.h"
 #include "commands/root.h"
+#include "contracts/config.h"
 #include "embedstore/store.h"
-#include "harness/config.h"
 #include "harness/harness.h"
 #include "support/env_guard.h"
 

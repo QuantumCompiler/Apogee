@@ -13,9 +13,9 @@
 
 #include "agent/tool.h"
 #include "commands/helpers.h"
-#include "harness/config.h"
-#include "harness/config_edit.h"
-#include "harness/paths.h"
+#include "contracts/config.h"
+#include "contracts/config_edit.h"
+#include "contracts/paths.h"
 #include "mcp/registry.h"
 #include "mcp/serve_stdio.h"
 #include "scaffold/mcp_server.h"

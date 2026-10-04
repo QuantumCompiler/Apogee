@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "contracts/errors.h"
 #include "harness/context_windows.h"
-#include "harness/errors.h"
 #include "harness/roles.h"
 
 namespace apogee::harness {

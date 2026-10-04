@@ -14,10 +14,10 @@
 #include "backends/llamacpp_tokens.h"
 #include "backends/markup_filter.h"
 #include "backends/native_tool_calls.h"
+#include "contracts/errors.h"
 #include "events/bus.h"
-#include "harness/errors.h"
 #include "logger/operational.h"
-#include "models/gguf_inspect.h"
+#include "modelstore/gguf_inspect.h"
 
 namespace apogee::backends {
 namespace {

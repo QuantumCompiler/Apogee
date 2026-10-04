@@ -8,8 +8,8 @@
 #include "agentloop/loop.h"
 #include "agentloop/reporter.h"
 #include "agentloop/structured.h"
+#include "contracts/types.h"
 #include "harness/harness.h"
-#include "harness/types.h"
 
 // The clerk's prompt and schema are GENERATED from lib/src/cli/assets/clerks/
 // capture_prompt.txt and capture_schema.json (the script is recorded in

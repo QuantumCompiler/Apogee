@@ -13,9 +13,9 @@
 
 #include "commands/registry.h"
 #include "commands/root.h"
+#include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "events/bus.h"
-#include "harness/config.h"
-#include "harness/config_edit.h"
 #include "harness/harness.h"
 #include "httpserver/admin.h"
 #include "httpserver/handler.h"

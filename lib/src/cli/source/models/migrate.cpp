@@ -2,8 +2,8 @@
 
 #include <system_error>
 
-#include "models/sidecar.h"
-#include "models/snapshot.h"
+#include "modelstore/sidecar.h"
+#include "modelstore/snapshot.h"
 
 namespace apogee::models {
 namespace {
