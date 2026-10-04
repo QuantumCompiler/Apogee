@@ -1028,6 +1028,15 @@ void check_memory(CheckReport& report, const CheckInputs& inputs) {
     }
     const std::size_t chats = agentloop::RecallIndex{index, std::nullopt}.chats();
     const std::uintmax_t bytes = std::filesystem::file_size(index, code);
+    const std::string counted = std::to_string(chats) + " chat(s) summarised, " +
+                                format_progress_size(static_cast<std::int64_t>(bytes));
+    const std::string off = recall ? "" : "; recall is off (memory.recall)";
+    if (!harness::supports_private_modes()) {
+        // Reported, not silently passed: see the Status::Skipped comment.
+        add(report, Status::Skipped, "Memory", "recall",
+            counted + " -- mode check not applicable on this platform (no POSIX file modes)" + off);
+        return;
+    }
     const std::filesystem::perms mode = std::filesystem::status(index, code).permissions();
     if ((mode & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) !=
         std::filesystem::perms::none) {
@@ -1036,10 +1045,7 @@ void check_memory(CheckReport& report, const CheckInputs& inputs) {
             "chmod 600 " + index.string());
         return;
     }
-    add(report, Status::Ok, "Memory", "recall",
-        std::to_string(chats) + " chat(s) summarised, " +
-            format_progress_size(static_cast<std::int64_t>(bytes)) + " -- private" +
-            (recall ? "" : "; recall is off (memory.recall)"));
+    add(report, Status::Ok, "Memory", "recall", counted + " -- private" + off);
 }
 
 /// The `Graph` section: every collection whose `graph:` block says anything

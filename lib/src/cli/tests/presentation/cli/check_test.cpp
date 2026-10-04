@@ -1517,8 +1517,13 @@ TEST_CASE("recall's summaries are counted, and an index others can read fails",
         const CheckReport report = run_checks(inputs_for(install));
         const apogee::commands::CheckRow* row = row_with(report, "recall");
         REQUIRE(row != nullptr);
-        CHECK(row->status == Status::Ok);
+        // Skipped, never passed, where there are no POSIX modes to check.
+        CHECK(row->status ==
+              (apogee::harness::supports_private_modes() ? Status::Ok : Status::Skipped));
         CHECK(row->detail.find("1 chat(s) summarised") != std::string::npos);
+    }
+    if (!apogee::harness::supports_private_modes()) {
+        return;
     }
     std::filesystem::permissions(index, std::filesystem::perms::others_read,
                                  std::filesystem::perm_options::add);

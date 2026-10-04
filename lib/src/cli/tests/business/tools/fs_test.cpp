@@ -118,7 +118,9 @@ TEST_CASE("read_file returns the text, and a file past the cap as its size inste
     std::ofstream{box.root / "cap.txt"} << std::string(16, 'c');
     CHECK(box.run("read_file", R"({"path":"cap.txt"})").content == std::string(16, 'c'));
     // Past the cap, none of it: its size and length, and how to read it.
-    std::ofstream{box.root / "big.txt"} << "xxxxxxxxxx\nxxxxxxxxxx\nxxxxxxxxxx";
+    // Binary, so its size is the same 32 bytes on Windows, where a text-mode
+    // stream writes each newline as two.
+    std::ofstream{box.root / "big.txt", std::ios::binary} << "xxxxxxxxxx\nxxxxxxxxxx\nxxxxxxxxxx";
     const ToolOutcome capped = box.run("read_file", R"({"path":"big.txt"})");
     CHECK(capped.is_error);
     CHECK(capped.content.find("is 32 bytes, 3 lines") != std::string::npos);

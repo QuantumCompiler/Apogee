@@ -243,10 +243,12 @@ TEST_CASE("a resumed chat starts from its saved state", "[backends][llamacpp][pr
     const fs::path state = disk.cache / "chats" / "20260101-120000-abcd.state";
     REQUIRE(fs::exists(state));
     // Private: a chat's state is its conversation.
-    CHECK((fs::status(state).permissions() & (fs::perms::group_all | fs::perms::others_all)) ==
-          fs::perms::none);
-    CHECK((fs::status(state.parent_path()).permissions() &
-           (fs::perms::group_all | fs::perms::others_all)) == fs::perms::none);
+    if (apogee::harness::supports_private_modes()) {
+        CHECK((fs::status(state).permissions() & (fs::perms::group_all | fs::perms::others_all)) ==
+              fs::perms::none);
+        CHECK((fs::status(state.parent_path()).permissions() &
+               (fs::perms::group_all | fs::perms::others_all)) == fs::perms::none);
+    }
 
     Process resumed{disk};
     resumed.provider->resume_conversation("20260101-120000-abcd");

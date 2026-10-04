@@ -191,6 +191,11 @@ TEST_CASE("inside a git repository, a folder leaves out what git ignores",
     if (apogee::platform::find_on_path("git").empty()) {
         SKIP("git is not installed");
     }
+    if (!apogee::platform::supports_child_processes()) {
+        // The walk asks `git ls-files` through a child process, which this
+        // platform's build cannot start yet: it walks the folder instead.
+        SKIP("this build starts no child processes, so git cannot be asked");
+    }
     const Scratch scratch;
     (void)scratch.write("repo/.gitignore", "build/\n*.log\n");
     (void)scratch.write("repo/main.cpp", "int main() {}");
@@ -259,8 +264,13 @@ TEST_CASE("HTML is read as its main content, links resolved against the file",
     REQUIRE(read.ok());
     CHECK(read.reader == "html");
     CHECK(read.text.find("Read the") != std::string::npos);
-    const std::string link =
-        "file://" + (scratch.dir.path() / "site" / "other.html").generic_string();
+    // A file URL's path starts with a slash -- before a Windows drive letter
+    // too: file:///D:/...
+    std::string target = (scratch.dir.path() / "site" / "other.html").generic_string();
+    if (!target.starts_with('/')) {
+        target.insert(0, "/");
+    }
+    const std::string link = "file://" + target;
     CHECK(read.text.find(link) != std::string::npos);
     CHECK(read.text.find("file.invalid") == std::string::npos);
 }

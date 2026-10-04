@@ -41,6 +41,10 @@ namespace {
 /// from the same attachment's text.
 constexpr std::string_view kAsItIs = " (as it is)";
 
+/// What ends a sentence, and so may follow an `@` mention without being
+/// part of its name.
+constexpr std::string_view kSentenceEnds = ".,;:!?)]}'\"";
+
 /// What a trim names an attachment's map card by (26q).
 constexpr std::string_view kMapCard = " (map)";
 
@@ -835,19 +839,32 @@ std::vector<std::string> mentioned_paths(std::string_view message) {
 
 std::optional<std::string> existing_mention(std::string_view mention,
                                             const std::filesystem::path& working_directory) {
+    const auto resolved = [&](const std::string& spelling) {
+        const std::filesystem::path path{spelling};
+        return path.is_relative() ? working_directory / path : path;
+    };
     std::string candidate{mention};
     for (;;) {
-        std::filesystem::path path{candidate};
-        if (path.is_relative()) {
-            path = working_directory / path;
-        }
         std::error_code code;
-        if (!candidate.empty() && std::filesystem::exists(path, code)) {
+        if (!candidate.empty() && std::filesystem::exists(resolved(candidate), code)) {
+            // Windows reads "report.pdf." as "report.pdf" -- a name there
+            // never ends in a dot -- so a sentence's punctuation still names
+            // the file. Where a shorter spelling is the same file, the rest
+            // was the sentence's. A POSIX file truly named "report.pdf." is
+            // a different file, and keeps its name.
+            std::string shorter = candidate;
+            while (!shorter.empty() &&
+                   kSentenceEnds.find(shorter.back()) != std::string_view::npos) {
+                shorter.pop_back();
+                if (!shorter.empty() &&
+                    std::filesystem::equivalent(resolved(candidate), resolved(shorter), code)) {
+                    candidate = shorter;
+                }
+            }
             return candidate;
         }
         // "summarize @report.pdf." -- the full stop is the sentence's.
-        if (candidate.empty() ||
-            std::string_view{".,;:!?)]}'\""}.find(candidate.back()) == std::string_view::npos) {
+        if (candidate.empty() || kSentenceEnds.find(candidate.back()) == std::string_view::npos) {
             return std::nullopt;
         }
         candidate.pop_back();

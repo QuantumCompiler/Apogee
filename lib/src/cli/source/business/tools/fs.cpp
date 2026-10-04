@@ -442,10 +442,16 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
                              : "No such file: " + path->string() +
                                    ". edit_file changes an existing file; write_file creates one");
         }
-        std::ifstream in{*path, std::ios::binary};
-        std::string content{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
-        if (!in.good() && !in.eof()) {
-            return error("could not read " + path->string());
+        std::string content;
+        {
+            // Closed before the edit is renamed over it: Windows refuses to
+            // replace a file that is still open, so an edit there failed
+            // every time (found on the first Windows run, 2026-10-04).
+            std::ifstream in{*path, std::ios::binary};
+            content.assign(std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{});
+            if (!in.good() && !in.eof()) {
+                return error("could not read " + path->string());
+            }
         }
 
         std::vector<std::size_t> found = occurrences(content, *old_text);

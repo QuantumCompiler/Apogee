@@ -10,6 +10,8 @@
 #include <system_error>
 #include <vector>
 
+#include "contracts/layout.h"
+
 /// The prompt cache's files (26j): which model they were made with, where
 /// each lives, who may read them, and what is evicted first.
 namespace {
@@ -86,7 +88,9 @@ TEST_CASE("a model's prefix files go when its file is replaced, said once", "[pr
     CHECK_FALSE(fs::exists(prefix));
     // Claimed for the new file: not said again.
     CHECK_FALSE(cache.claim_model(replaced, "a").has_value());
-    CHECK(owner_only(scratch.root / "prompt"));
+    if (apogee::harness::supports_private_modes()) {
+        CHECK(owner_only(scratch.root / "prompt"));
+    }
 }
 
 TEST_CASE("a prefix file is named by its tokens, cache type and window", "[prompt-cache]") {
@@ -129,7 +133,9 @@ TEST_CASE("a chat's record round-trips, and goes with its state", "[prompt-cache
     CHECK(read->cache_type == KvCacheType::F16);
     CHECK(read->window == 32768);
     CHECK(read->tokens == 2400);
-    CHECK(owner_only(scratch.root / "chats" / "chat.json"));
+    if (apogee::harness::supports_private_modes()) {
+        CHECK(owner_only(scratch.root / "chats" / "chat.json"));
+    }
     scratch.write(cache.chat_path("chat"), "state");
     cache.remove_chat("chat");
     CHECK_FALSE(fs::exists(cache.chat_path("chat")));
@@ -144,7 +150,9 @@ TEST_CASE("a state settles private and in place", "[prompt-cache]") {
     fs::permissions(written, fs::perms::all);
     REQUIRE(PromptCache::settle(written, scratch.root / "x.state"));
     CHECK_FALSE(fs::exists(written));
-    CHECK(owner_only(scratch.root / "x.state"));
+    if (apogee::harness::supports_private_modes()) {
+        CHECK(owner_only(scratch.root / "x.state"));
+    }
 }
 
 TEST_CASE("over its cap, the least recently used state goes first, never the one just kept",

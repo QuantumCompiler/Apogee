@@ -618,13 +618,13 @@ TEST_CASE("a small file attached is inlined; the transcript keeps the message as
     INFO(chat.err);
     REQUIRE(chat.run({"chat", "--verbose"},
                      "/attach " + notes.string() + "\nwhat is the code?\n" + mention + "\n") == 0);
-    CHECK(chat.err.find("attached " + notes.generic_string() + ": 1 file, 1 chunk") !=
-          std::string::npos);
+    // Named as the user typed it: a Windows path keeps its backslashes.
+    CHECK(chat.err.find("attached " + notes.string() + ": 1 file, 1 chunk") != std::string::npos);
     CHECK(chat.err.find("-- inlined whole") != std::string::npos);
 
     const apogee::logger::Session session = HelperChat::only_session();
     REQUIRE(session.attachments.size() == 1);
-    CHECK(session.attachments[0].name == notes.generic_string());
+    CHECK(session.attachments[0].name == notes.string());
     // It rides the first question; the mention names what is already attached.
     CHECK(session.attachments[0].inline_at == std::optional<std::size_t>{0});
     std::vector<std::string> asked;
@@ -653,7 +653,7 @@ TEST_CASE("an @ mention attaches exactly as /attach would; one naming nothing st
           std::string::npos);
     const apogee::logger::Session session = HelperChat::only_session();
     REQUIRE(session.attachments.size() == 1);
-    CHECK(session.attachments[0].name == report.generic_string());
+    CHECK(session.attachments[0].name == report.string());
     CHECK(session.attachments[0].inline_at == std::optional<std::size_t>{0});
     REQUIRE_FALSE(session.messages.empty());
     CHECK(session.messages.front().content.plain_text() == message);
@@ -682,7 +682,7 @@ TEST_CASE("chat --image attaches the picture: seen with the first message, descr
     std::ofstream{picture, std::ios::binary} << "PNGBYTES";
     INFO(chat.err);
     REQUIRE(chat.run({"chat", "--image", picture.string()}, "what is it?\nand now?\n") == 0);
-    CHECK(chat.err.find("attached " + picture.generic_string() +
+    CHECK(chat.err.find("attached " + picture.string() +
                         ": 1 file, 1 chunk, described by helper") != std::string::npos);
     CHECK(chat.err.find("-- read as it is with your next message, then inlined whole") !=
           std::string::npos);
@@ -1091,8 +1091,14 @@ TEST_CASE("a chat a process left behind is summarised at the next start, an open
         id);
     std::filesystem::create_directories(chat.home.path() / "memory" / "pending");
     std::ofstream{chat.home.path() / "memory" / "pending" / id} << "999999999\n";
-    // And another chat still open in a process that is running.
-    std::ofstream{chat.home.path() / "memory" / "pending" / "open-elsewhere"} << "1\n";
+    // And another chat still open in a process that is running: init or
+    // launchd on POSIX, the System process on Windows, where there is no 1.
+#if defined(_WIN32)
+    constexpr std::string_view kAlwaysRunning = "4\n";
+#else
+    constexpr std::string_view kAlwaysRunning = "1\n";
+#endif
+    std::ofstream{chat.home.path() / "memory" / "pending" / "open-elsewhere"} << kAlwaysRunning;
 
     (void)chat.script("helper", texts({"Left behind: Postgres 16."}));
     REQUIRE(chat.run({"chat"}, "") == 0);

@@ -11,6 +11,7 @@
 
 #include "agentloop/rag.h"
 #include "backends/mock.h"
+#include "contracts/layout.h"
 #include "embedstore/store.h"
 #include "harness/harness.h"
 
@@ -171,8 +172,10 @@ TEST_CASE("the index holds one summary a chat, privately, and forgets one on req
     CHECK(index.chats() == 2);
     CHECK(index.summarised_at("chat-a") == "2026-10-03T00:00:00Z");
     CHECK(index.summarised_at("missing").empty());
-    CHECK(owner_only(scratch.index));
-    CHECK(owner_only(scratch.index.parent_path()));
+    if (apogee::harness::supports_private_modes()) {
+        CHECK(owner_only(scratch.index));
+        CHECK(owner_only(scratch.index.parent_path()));
+    }
     // With vectors from an embedder that costs nothing.
     CHECK(apogee::embedstore::Store{scratch.index}.embedding_model().recorded());
 

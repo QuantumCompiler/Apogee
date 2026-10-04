@@ -352,6 +352,14 @@ TEST_CASE("@ mentions are paths at the start of a word, quoted or not",
     CHECK(existing_mention("report.pdf),", work.path()) ==
           std::optional<std::string>{"report.pdf"});
     CHECK_FALSE(existing_mention("nothing.txt", work.path()).has_value());
+#if !defined(_WIN32)
+    // Where a name can end in a dot, one that does is a different file from
+    // the name without it, and keeps its name. (Windows reads the two as one
+    // file, and the sentence's dot goes, as above.)
+    std::ofstream{work.path() / "notes.txt."} << "y";
+    std::ofstream{work.path() / "notes.txt"} << "z";
+    CHECK(existing_mention("notes.txt.", work.path()) == std::optional<std::string>{"notes.txt."});
+#endif
 }
 
 TEST_CASE("an attachment retrieved per turn costs nothing against the inline share",
