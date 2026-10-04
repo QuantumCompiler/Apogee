@@ -420,6 +420,15 @@ struct KnowledgeConfig {
     [[nodiscard]] std::string collection() const;
 };
 
+/// The `memory:` section (26l). Read-only here: hand-edited, like `auto_rag`.
+struct MemoryConfig {
+    /// Whether `chat` summarises its finished chats and recalls them in new
+    /// ones. On by default (the user's call); `--no-recall` turns it off for
+    /// a run and `/recall off` for a session. Never on `serve`, whatever
+    /// this says.
+    bool recall = true;
+};
+
 /// Optional search roots that pre-populate path prompts. All optional; a
 /// missing value means "no default", not an error.
 struct PathsConfig {
@@ -696,6 +705,7 @@ struct Config {
     PermissionsConfig permissions;
     ToolsConfig tools;
     KnowledgeConfig knowledge;
+    MemoryConfig memory;
     UiConfig ui;
     TrainingConfig training;
 

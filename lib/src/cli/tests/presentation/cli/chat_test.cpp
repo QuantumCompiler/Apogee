@@ -13,13 +13,16 @@
 #include <string>
 #include <vector>
 
+#include "agentloop/recall.h"
 #include "backends/mock.h"
 #include "cli/chat_attachments.h"
 #include "cli/chat_history.h"
+#include "cli/chat_recall.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
+#include "embedstore/store.h"
 #include "logger/operational.h"
 #include "logger/session.h"
 #include "support/env_guard.h"
@@ -934,4 +937,175 @@ TEST_CASE("a compacted chat's state is saved after the turn that reads it",
     CHECK(session.compactions == 1);
     // Once after the third turn, once at the exit.
     CHECK(occurrences(chat.err, "nothing saved for " + session.chat_id) == 2);
+}
+
+// ---------------------------------------------------------------------------
+// Recall across chats (26l)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+[[nodiscard]] std::size_t recalled_chats(const HelperChat& chat) {
+    return apogee::agentloop::RecallIndex{chat.home.path() / "memory" / "chats.db", std::nullopt}
+        .chats();
+}
+
+/// The first chat: two turns stating a fact, summarised at its exit.
+[[nodiscard]] std::string first_chat(HelperChat& chat) {
+    REQUIRE(chat.run({"chat", "--verbose"}, "Our project uses Postgres 16.\nThanks.\n") == 0);
+    CHECK(chat.err.find("[memory] summarised for recall by helper") != std::string::npos);
+    const std::string id = HelperChat::only_session().chat_id;
+    // The next chat echoes what it was sent, and titles itself.
+    (void)chat.script("chatty", texts({"{{system}}"}));
+    (void)chat.script("helper", texts({"Later Title"}));
+    return id;
+}
+
+}  // namespace
+
+TEST_CASE("a finished chat is recalled in a new one, and never written into it",
+          "[chat][cli][recall][helpers]") {
+    HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "The project uses Postgres 16."}};
+    const std::string first = first_chat(chat);
+    CHECK(recalled_chats(chat) == 1);
+
+    REQUIRE(chat.run({"chat"}, "Which Postgres version does the project use?\n") == 0);
+    CHECK((chat.out + chat.err).find("[memory] 1 past chat") != std::string::npos);
+    const auto sessions = apogee::logger::list_sessions();
+    REQUIRE(sessions.size() == 2);
+    const apogee::logger::Session& later =
+        sessions.front().chat_id == first ? sessions.back() : sessions.front();
+    // The model was handed the summary, as notes on an earlier conversation.
+    const std::string sent = replies(later).front();
+    CHECK(sent.find(std::string{apogee::agentloop::kRecallHeader}) != std::string::npos);
+    CHECK(sent.find("Postgres 16") != std::string::npos);
+    // Transient: no message of the new chat carries it.
+    for (const ChatMessage& message : later.messages) {
+        if (message.role != apogee::harness::Role::Assistant) {
+            CHECK(message.content.plain_text().find("Postgres 16") == std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("recall stops for a run, for a session, and for good when the chat is deleted",
+          "[chat][cli][recall][helpers]") {
+    HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "The project uses Postgres 16."}};
+    const std::string first = first_chat(chat);
+    const std::string question = "Which Postgres version does the project use?\n";
+    const auto recalled_in_last = [&chat] {
+        const auto sessions = apogee::logger::list_sessions();
+        for (const auto& session : sessions) {
+            for (const std::string& reply : replies(session)) {
+                if (reply.find(std::string{apogee::agentloop::kRecallHeader}) !=
+                    std::string::npos) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    REQUIRE(chat.run({"chat", "--no-recall"}, question) == 0);
+    CHECK_FALSE(recalled_in_last());
+    REQUIRE(chat.run({"chat"}, "/recall off\n" + question) == 0);
+    CHECK_FALSE(recalled_in_last());
+
+    REQUIRE(chat.run({"chats", "delete", first}) == 0);
+    CHECK(recalled_chats(chat) == 0);
+    REQUIRE(chat.run({"chat"}, question) == 0);
+    CHECK_FALSE(recalled_in_last());
+}
+
+TEST_CASE("a private chat, or one of a single turn, is never summarised",
+          "[chat][cli][recall][helpers]") {
+    HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "The project uses Postgres 16."}};
+    REQUIRE(chat.run({"chat", "--verbose"}, "Postgres 16.\n/private\nThanks.\n") == 0);
+    CHECK(chat.err.find("summarised for recall by") == std::string::npos);
+    CHECK(chat.err.find("it will never be summarised for recall") != std::string::npos);
+    CHECK(recalled_chats(chat) == 0);
+    CHECK(HelperChat::only_session().private_chat);
+
+    HelperChat single{texts({"Noted."}), {"Title", "The project uses Postgres 16."}};
+    REQUIRE(single.run({"chat", "--verbose"}, "Postgres 16.\n") == 0);
+    CHECK(recalled_chats(single) == 0);
+}
+
+TEST_CASE("complete never recalls", "[chat][cli][recall][helpers]") {
+    HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "The project uses Postgres 16."}};
+    (void)first_chat(chat);
+    REQUIRE(chat.run({"complete", "Which Postgres version does the project use?"}) == 0);
+    CHECK(chat.out.find(std::string{apogee::agentloop::kRecallHeader}) == std::string::npos);
+}
+
+TEST_CASE("a chat a process left behind is summarised at the next start, an open one is not",
+          "[chat][cli][recall][helpers]") {
+    HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "Left behind: Postgres 16."}};
+    REQUIRE(chat.run({"chat", "--no-recall"}, "Our project uses Postgres 16.\nThanks.\n") == 0);
+    const std::string id = HelperChat::only_session().chat_id;
+    // As if it had died: no summary, and a marker naming a process gone.
+    apogee::agentloop::RecallIndex{chat.home.path() / "memory" / "chats.db", std::nullopt}.remove(
+        id);
+    std::filesystem::create_directories(chat.home.path() / "memory" / "pending");
+    std::ofstream{chat.home.path() / "memory" / "pending" / id} << "999999999\n";
+    // And another chat still open in a process that is running.
+    std::ofstream{chat.home.path() / "memory" / "pending" / "open-elsewhere"} << "1\n";
+
+    (void)chat.script("helper", texts({"Left behind: Postgres 16."}));
+    REQUIRE(chat.run({"chat"}, "") == 0);
+    CHECK(chat.err.find("left by a chat that did not finish") != std::string::npos);
+    CHECK(recalled_chats(chat) == 1);
+    CHECK_FALSE(std::filesystem::exists(chat.home.path() / "memory" / "pending" / id));
+    CHECK(std::filesystem::exists(chat.home.path() / "memory" / "pending" / "open-elsewhere"));
+}
+
+TEST_CASE("a chat never recalls itself, and is not summarised again unchanged",
+          "[chat][cli][recall][helpers]") {
+    HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "The project uses Postgres 16."}};
+    const std::string first = first_chat(chat);
+    // Resumed and asked: its own summary is not "an earlier conversation".
+    REQUIRE(chat.run({"chat", "--resume", first},
+                     "Which Postgres version does the project use?\n") == 0);
+    CHECK((chat.out + chat.err).find("past chat") == std::string::npos);
+    // Continued, it is summarised again, as it now stands.
+    CHECK(chat.err.find("[memory] summarised for recall") != std::string::npos);
+    // Resumed and left as it was: the summary it has stands.
+    REQUIRE(chat.run({"chat", "--resume", first, "--verbose"}, "") == 0);
+    CHECK(chat.err.find("summarised for recall") == std::string::npos);
+}
+
+TEST_CASE("/private takes back a summary already kept", "[chat][cli][recall][helpers]") {
+    HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "The project uses Postgres 16."}};
+    const std::string first = first_chat(chat);
+    REQUIRE(recalled_chats(chat) == 1);
+    REQUIRE(chat.run({"chat", "--resume", first}, "/private\n") == 0);
+    CHECK(recalled_chats(chat) == 0);
+}
+
+TEST_CASE("a recorded decision is recalled beside past chats", "[chat][cli][recall][helpers]") {
+    HelperChat chat{texts({"{{system}}"}), {"Title"}};
+    std::filesystem::create_directories(chat.home.path() / "embeddings");
+    apogee::embedstore::Store{chat.home.path() / "embeddings" / "knowledge.db"}.replace_source(
+        "record-1", {"Decision: the migration targets Postgres 16, chosen for its JSON support."});
+    REQUIRE(chat.run({"chat"}, "Which Postgres version does the migration target?\n") == 0);
+    CHECK((chat.out + chat.err).find("[memory] 1 decision") != std::string::npos);
+    CHECK(replies(HelperChat::only_session()).front().find("Postgres 16") != std::string::npos);
+}
+
+TEST_CASE("recall never bills a backend for a summary", "[chat][recall]") {
+    apogee::harness::Harness harness{apogee::harness::Config{}};
+    apogee::backends::MockProvider::Options billed;
+    billed.backend_name = "billed";
+    billed.metered = true;
+    harness.register_provider("billed", std::make_shared<apogee::backends::MockProvider>(billed));
+    apogee::backends::MockProvider::Options local;
+    local.backend_name = "local";
+    harness.register_provider("local", std::make_shared<apogee::backends::MockProvider>(local));
+    harness.use_default_router();
+    std::string reason;
+    CHECK(apogee::commands::recall_summariser(harness, {}, "local", reason) == "local");
+    CHECK(apogee::commands::recall_summariser(harness, {}, "billed", reason).empty());
+    CHECK(reason.find("billed per call") != std::string::npos);
+    apogee::harness::Config config;
+    config.models.default_utility = "local";
+    CHECK(apogee::commands::recall_summariser(harness, config, "billed", reason) == "local");
 }

@@ -404,6 +404,18 @@ backends:
 #   auto_capture: false
 #   db: knowledge          # the collection records go into
 
+# ── Memory (recall across chats) ─────────────────────────────────────────────
+# A finished chat of two turns or more is summarised once -- what was asked,
+# decided and stated -- by the utility model (or the chat's own model when it
+# is local), and its summary kept privately under memory/. A new chat's turns
+# then recall the few past chats, and recorded decisions, that bear on the
+# question, reported as `[memory] 2 past chats, 1 decision`. Only `chat`
+# recalls -- never `complete`, agents or `serve`. `--no-recall` turns it off
+# for a run, `/recall off` for a session, and `/private` keeps a chat from
+# ever being summarised.
+# memory:
+#   recall: true
+
 # ── Training (fine-tuning local models) ──────────────────────────────────────
 # The training track runs its Python drivers -- dataset preparation and the
 # trainers -- inside a virtual environment Apogee owns under training/venv/,

@@ -1019,3 +1019,13 @@ TEST_CASE("a backend's thinking default and budget parse, and a bad one is refus
               .find_backend("x")
               ->thinking_budget == 0);
 }
+
+TEST_CASE("memory.recall is on unless the config turns it off", "[config][recall]") {
+    // 26l: on in chat by default (the user's call).
+    CHECK(load_text("backends:\n  x:\n    type: mock\n").memory.recall);
+    // A section that does not say keeps it on.
+    CHECK(load_text("memory: {}\n").memory.recall);
+    CHECK_FALSE(load_text("memory:\n  recall: false\n").memory.recall);
+    CHECK_THROWS_AS(load_text("memory:\n  recall: sometimes\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("memory: yes\n"), ConfigError);
+}

@@ -57,6 +57,16 @@ void JsonReporter::on_thinking_token(std::string_view chunk) {
     write(object.dump());
 }
 
+void JsonReporter::on_recall(int chats, int decisions) {
+    if (chats <= 0 && decisions <= 0) {
+        return;
+    }
+    nlohmann::json object = event("memory");
+    object["chats"] = chats;
+    object["decisions"] = decisions;
+    write(object.dump());
+}
+
 void JsonReporter::on_notice(std::string_view text) {
     if (text.empty()) {
         return;

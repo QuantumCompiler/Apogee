@@ -136,6 +136,10 @@ struct Session {
     /// How many times this session has been compacted.
     int compactions = 0;
 
+    /// Marked with `/private` (26l): never summarised for recall, its summary
+    /// removed if it had one. Absent from an older file: false.
+    bool private_chat = false;
+
     /// The session's `--retriever` SETTING (`lexical` / `vector` / `hybrid`;
     /// empty means auto) and its `--rerank` setting (a backend, `off`, or
     /// empty for the collections' pins). What the user chose, never what auto

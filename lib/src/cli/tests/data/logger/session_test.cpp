@@ -73,6 +73,15 @@ TEST_CASE("a session's thinking setting is saved and read back", "[chat][session
     CHECK_FALSE(deserialize(json.dump(), {}).session.params.thinking);
 }
 
+TEST_CASE("a private chat stays private when saved and read back", "[chat][session][recall]") {
+    Session session = sample();
+    CHECK(nlohmann::json::parse(apogee::logger::serialize(session)).contains("private") == false);
+    session.private_chat = true;
+    const auto loaded = deserialize(apogee::logger::serialize(session), {});
+    CHECK(loaded.session.private_chat);
+    CHECK_FALSE(deserialize(apogee::logger::serialize(sample()), {}).session.private_chat);
+}
+
 TEST_CASE("every written session carries the current schema version", "[chat][session]") {
     const auto json = nlohmann::json::parse(apogee::logger::serialize(sample()));
     CHECK(json.at("schema_version") == apogee::logger::kCurrentSchemaVersion);

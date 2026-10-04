@@ -47,6 +47,9 @@ constexpr std::array kCommands{
     ChatCommandSpec{"attachments", ChatVerb::Attachments, "", "List what is attached"},
     ChatCommandSpec{"detach", ChatVerb::Detach, "<name>", "Detach an attachment",
                     ArgumentValues::AttachmentNames},
+    ChatCommandSpec{"recall", ChatVerb::Recall, "[on|off]",
+                    "Show or set whether turns recall earlier chats", ArgumentValues::OnOff},
+    ChatCommandSpec{"private", ChatVerb::Private, "", "Never summarise this chat for recall"},
     ChatCommandSpec{"exit", ChatVerb::Exit, "", "Save and leave"},
     ChatCommandSpec{"quit", ChatVerb::Exit, "", "Save and leave"},
 };
@@ -233,6 +236,10 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
             break;
         case ArgumentValues::Paths:
             break;  // completed as paths, below
+        case ArgumentValues::OnOff:
+            choices.push_back({"on", "Recall earlier chats that bear on each question"});
+            choices.push_back({"off", "Recall nothing for the rest of this chat"});
+            break;
         case ArgumentValues::ThinkingModes:
             choices.push_back({"on", "Think before every answer"});
             choices.push_back({"off", "Answer without thinking first"});

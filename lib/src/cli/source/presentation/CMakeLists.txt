@@ -181,6 +181,8 @@ apogee_add_module(cli
     cli/chat_attachments.cpp
     cli/chat_history.h
     cli/chat_history.cpp
+    cli/chat_recall.h
+    cli/chat_recall.cpp
     cli/complete_sources.h
 )
 target_link_libraries(apogee_presentation_cli PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json)

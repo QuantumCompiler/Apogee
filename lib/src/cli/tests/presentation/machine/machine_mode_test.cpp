@@ -110,6 +110,19 @@ TEST_CASE("the session event carries a protocol version", "[commands][machine]")
     CHECK(session.at("model") == "m");
 }
 
+TEST_CASE("what a turn recalled is a memory event, and nothing when it recalled nothing",
+          "[commands][machine][recall]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.on_recall(0, 0);
+    reporter.on_recall(2, 1);
+    const std::vector<nlohmann::json> all = events(out.str());
+    REQUIRE(all.size() == 1);
+    CHECK(all[0].at("type") == "memory");
+    CHECK(all[0].at("chats") == 2);
+    CHECK(all[0].at("decisions") == 1);
+}
+
 TEST_CASE("a spent thinking budget is said on a thinking event", "[commands][machine][thinking]") {
     // 26i: an added field on an existing event, so a driver that does not
     // know it reads an ordinary thinking event.

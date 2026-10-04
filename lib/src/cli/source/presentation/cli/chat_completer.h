@@ -45,6 +45,8 @@ enum class ChatVerb : std::uint8_t {
     Attach,
     Attachments,
     Detach,
+    Recall,
+    Private,
     Exit,
 };
 
@@ -62,6 +64,8 @@ enum class ArgumentValues : std::uint8_t {
     AttachmentNames,
     /// `on`, `off`, `auto` (26i).
     ThinkingModes,
+    /// `on`, `off` (26l).
+    OnOff,
 };
 
 /// One row of the table.

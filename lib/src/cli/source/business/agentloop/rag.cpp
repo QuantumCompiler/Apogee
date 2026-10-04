@@ -54,23 +54,30 @@ namespace {
 }  // namespace
 
 std::string render_rag_context(const std::vector<std::string>& chunks) {
-    if (chunks.empty()) {
-        return {};
-    }
-
     // Framed as retrieved excerpts, explicitly. Without that framing a model
     // reads an injected document as something the user said and answers about
     // the document rather than about the question -- and the more relevant the
     // retrieval, the more confidently it does so.
-    std::string out =
+    return render_rag_context(
+        chunks, std::string_view{},
         "The following excerpts were retrieved from the user's documents and may be relevant. "
         "Use them if they help; ignore them if they do not, and do not mention them unless they "
-        "informed your answer.\n";
+        "informed your answer.");
+}
 
+std::string render_rag_context(const std::vector<std::string>& chunks,
+                               std::string_view graph_section, std::string_view header) {
+    if (chunks.empty()) {
+        return {};
+    }
+    std::string out = std::string{header} + "\n";
     for (std::size_t index = 0; index < chunks.size(); ++index) {
         out += "\n--- excerpt " + std::to_string(index + 1) + " ---\n";
         out += chunks[index];
         out += "\n";
+    }
+    if (!graph_section.empty()) {
+        out += "\n" + std::string{graph_section} + "\n";
     }
     return out;
 }
@@ -323,7 +330,8 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
         const auto render = [&](std::size_t count) {
             const std::vector<std::string> leading{
                 texts.begin(), texts.begin() + static_cast<std::ptrdiff_t>(count)};
-            return render_rag_context(leading, graph_section);
+            return turn.header.empty() ? render_rag_context(leading, graph_section)
+                                       : render_rag_context(leading, graph_section, turn.header);
         };
         const std::size_t fit = fitting_prefix(turn.budget, share, texts.size(), render);
         if (fit < texts.size()) {
@@ -349,7 +357,9 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
     // RRF -- small numbers are normal there, and the label says which scale.
     // The graph section rides after the chunk list, in the same transient
     // message, so it augments them and never crowds them out.
-    result.prefix.push_back(harness::ChatMessage::system(render_rag_context(texts, graph_section)));
+    result.prefix.push_back(harness::ChatMessage::system(
+        turn.header.empty() ? render_rag_context(texts, graph_section)
+                            : render_rag_context(texts, graph_section, turn.header)));
     result.tokens = prefix_tokens(turn.budget, result.prefix);
     return result;
 }

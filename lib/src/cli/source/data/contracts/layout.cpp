@@ -14,7 +14,7 @@ namespace {
 /// Order matters only for readability -- `create_directories` handles nesting
 /// -- but keeping it stable keeps `apogee check` output stable, and diffing
 /// two installs is easier when both enumerate in the same order.
-constexpr std::array<LayoutEntry, 14> kDirectories{{
+constexpr std::array<LayoutEntry, 15> kDirectories{{
     // `config` is a row like any other, even though `config_dir()` is the
     // accessor callers use. Leaving it out was the first version, and it
     // immediately produced the bug this whole file exists to prevent: seeding
@@ -27,6 +27,8 @@ constexpr std::array<LayoutEntry, 14> kDirectories{{
     // As private as the chats they belong to: an attachment's text is
     // whatever the user attached to a conversation (26d).
     {"attachments", "each chat's attached files, indexed; deleted with the chat", true, true},
+    // Summaries of the chats themselves, as private as they are (26l).
+    {"memory", "summaries of past chats, searched by recall; a chat's goes with it", true, true},
     {"models",
      "the model store: <model>/gguf and <model>/safetensors, one directory per set of weights "
      "(models/store.h)",
@@ -57,6 +59,14 @@ std::filesystem::path sessions_dir() {
 
 std::filesystem::path attachments_dir() {
     return apogee_home() / "attachments";
+}
+
+std::filesystem::path memory_dir() {
+    return apogee_home() / "memory";
+}
+
+std::filesystem::path recall_index_path() {
+    return memory_dir() / "chats.db";
 }
 
 std::filesystem::path logs_dir() {

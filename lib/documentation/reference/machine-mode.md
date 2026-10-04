@@ -33,6 +33,7 @@ One JSON object per line on stdout. Every object has a `type`.
 {"type":"session","protocol_version":1,"model":"claude-sonnet-5"}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
+{"type":"memory","chats":2,"decisions":1}
 {"type":"tool_status","text":"fetch_url https://…"}
 {"type":"answer_start"}
 {"type":"answer_delta","text":"…"}
@@ -48,6 +49,7 @@ One JSON object per line on stdout. Every object has a `type`.
 | `session` | Once, first. Names the protocol version and the model. |
 | `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, or the backend's `thinking_budget`). |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
+| `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. |
 | `tool_status` | A tool is running, described in `text` for display. |
 | `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`). Show it and keep it; it never ends the turn. |
 | `answer_start` / `answer_end` | Bracket one answer's deltas. |

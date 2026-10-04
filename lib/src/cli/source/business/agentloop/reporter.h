@@ -59,6 +59,15 @@ public:
     /// The terminal prints it under `--verbose`; everything else drops it.
     virtual void on_progress(std::string_view) {}
 
+    /// What a turn was handed from earlier conversations (26l): how many
+    /// past chats, and how many recorded decisions. Said before the turn
+    /// runs, so a user can see why the model knows something; never on
+    /// `serve`, which never recalls.
+    virtual void on_recall(int chats, int decisions) {
+        (void)chats;
+        (void)decisions;
+    }
+
     /// Erase any transient status indicator. Called once immediately before the
     /// final answer, and on error paths.
     virtual void on_clear_status() {}

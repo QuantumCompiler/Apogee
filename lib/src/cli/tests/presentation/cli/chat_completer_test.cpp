@@ -144,7 +144,7 @@ TEST_CASE("a partial command narrows, and a command taking an argument gains a s
     CHECK(labels(mo) == std::vector<std::string>{"/model", "/models"});
 
     CHECK(texts(suggest_chat_input("/re", project())) ==
-          std::vector<std::string>{"/retriever ", "/rerank "});
+          std::vector<std::string>{"/retriever ", "/rerank ", "/recall "});
     CHECK(suggest_chat_input("/zzz", project()).candidates.empty());
 }
 
@@ -178,6 +178,8 @@ TEST_CASE("a command's own values follow it", "[chat][completer]") {
     CHECK(texts(suggest_chat_input("/think ", project())) ==
           std::vector<std::string>{"on", "off", "auto"});
     CHECK(texts(suggest_chat_input("/think o", project())) ==
+          std::vector<std::string>{"on", "off"});
+    CHECK(texts(suggest_chat_input("/recall ", project())) ==
           std::vector<std::string>{"on", "off"});
 
     std::vector<std::string> statuses;

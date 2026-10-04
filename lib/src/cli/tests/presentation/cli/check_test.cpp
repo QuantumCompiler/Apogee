@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "agentloop/recall.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
@@ -1496,6 +1497,36 @@ TEST_CASE("models in the flat layout are a warning naming the migration, never a
     CHECK(legacy->remedy == "apogee models migrate");
     // And --fix leaves them exactly where they were.
     CHECK(std::filesystem::exists(install.root / "models" / "old.gguf"));
+}
+
+TEST_CASE("recall's summaries are counted, and an index others can read fails",
+          "[commands][check][recall]") {
+    Install install;
+    install.seed();
+    {
+        const CheckReport report = run_checks(inputs_for(install));
+        const apogee::commands::CheckRow* row = row_with(report, "recall");
+        REQUIRE(row != nullptr);
+        CHECK(row->detail.find("nothing summarised yet") != std::string::npos);
+    }
+    const std::filesystem::path index = install.root / "memory" / "chats.db";
+    std::string note;
+    REQUIRE(apogee::agentloop::RecallIndex{index, std::nullopt}.put(
+        {.chat_id = "c", .summary = "Uses Postgres 16."}, {}, note));
+    {
+        const CheckReport report = run_checks(inputs_for(install));
+        const apogee::commands::CheckRow* row = row_with(report, "recall");
+        REQUIRE(row != nullptr);
+        CHECK(row->status == Status::Ok);
+        CHECK(row->detail.find("1 chat(s) summarised") != std::string::npos);
+    }
+    std::filesystem::permissions(index, std::filesystem::perms::others_read,
+                                 std::filesystem::perm_options::add);
+    const CheckReport report = run_checks(inputs_for(install));
+    const apogee::commands::CheckRow* row = row_with(report, "recall");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Fail);
+    CHECK(row->remedy.find("chmod 600") != std::string::npos);
 }
 
 TEST_CASE("the prompt cache's saved states are reported against their cap",

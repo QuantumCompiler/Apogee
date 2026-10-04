@@ -3,6 +3,7 @@
 #include <optional>
 #include <utility>
 
+#include "agentloop/recall.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -117,6 +118,16 @@ void CliReporter::on_notice(std::string_view text) {
     settle_answer();
     thinking_.finish();
     status_.print_line(options_.style.tag(ansi::Role::Warning) + " " + std::string{text});
+}
+
+void CliReporter::on_recall(int chats, int decisions) {
+    if (chats <= 0 && decisions <= 0) {
+        return;
+    }
+    settle_answer();
+    thinking_.finish();
+    status_.print_line(
+        options_.style.dim("[memory] " + agentloop::describe_recall(chats, decisions)));
 }
 
 void CliReporter::on_progress(std::string_view text) {

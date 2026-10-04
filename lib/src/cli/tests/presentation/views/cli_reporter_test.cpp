@@ -92,6 +92,17 @@ TEST_CASE("thinking never reaches the answer stream", "[ux][reporter]") {
     CHECK(h.answer.str().find("secret deliberation") == std::string::npos);
 }
 
+TEST_CASE("what a turn recalled is said on the status line, never in the answer",
+          "[ux][reporter][recall]") {
+    Harness h;
+    CliReporter reporter = h.make();
+    reporter.on_recall(0, 0);
+    CHECK(h.progress.str().find("[memory]") == std::string::npos);
+    reporter.on_recall(2, 1);
+    CHECK(h.progress.str().find("[memory] 2 past chats, 1 decision") != std::string::npos);
+    CHECK(h.answer.str().empty());
+}
+
 TEST_CASE("a spent budget reaches the thinking block's summary", "[ux][reporter][thinking]") {
     Harness h;
     CliReporter reporter = h.make();

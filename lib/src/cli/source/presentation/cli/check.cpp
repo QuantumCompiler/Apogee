@@ -17,6 +17,7 @@
 
 #include "agent/fetch_url.h"
 #include "agent/web_search.h"
+#include "agentloop/recall.h"
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
 #include "agentloop/structured.h"
@@ -1011,6 +1012,36 @@ void check_attachments(CheckReport& report, const CheckInputs& inputs) {
                            " MB -- each deleted with its chat");
 }
 
+/// The `Memory` section (26l): recall's summaries -- how many chats, what
+/// they take -- and that the index is its owner's alone, like the sessions it
+/// is distilled from.
+void check_memory(CheckReport& report, const CheckInputs& inputs) {
+    std::error_code code;
+    const std::filesystem::path index = inputs.home / "memory" / "chats.db";
+    const bool recall =
+        inputs.config_missing || !inputs.config_error.empty() || inputs.config.memory.recall;
+    if (!std::filesystem::exists(index, code)) {
+        add(report, Status::Ok, "Memory", "recall",
+            recall ? "nothing summarised yet -- a chat of two turns or more is, when it ends"
+                   : "off (memory.recall)");
+        return;
+    }
+    const std::size_t chats = agentloop::RecallIndex{index, std::nullopt}.chats();
+    const std::uintmax_t bytes = std::filesystem::file_size(index, code);
+    const std::filesystem::perms mode = std::filesystem::status(index, code).permissions();
+    if ((mode & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) !=
+        std::filesystem::perms::none) {
+        add(report, Status::Fail, "Memory", "recall",
+            "the summaries' index is readable by others: " + index.string(),
+            "chmod 600 " + index.string());
+        return;
+    }
+    add(report, Status::Ok, "Memory", "recall",
+        std::to_string(chats) + " chat(s) summarised, " +
+            format_progress_size(static_cast<std::int64_t>(bytes)) + " -- private" +
+            (recall ? "" : "; recall is off (memory.recall)"));
+}
+
 /// The `Graph` section: every collection whose `graph:` block says anything
 /// -- `extract_backend` must name a configured backend, and an enabled graph
 /// should exist on disk. Hops and the entity cap are validated at load.
@@ -1443,6 +1474,7 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_knowledge(report, inputs);
     say(inputs, "checking attachments");
     check_attachments(report, inputs);
+    check_memory(report, inputs);
     say(inputs, "checking graphs");
     check_graphs(report, inputs);
     say(inputs, "checking training");

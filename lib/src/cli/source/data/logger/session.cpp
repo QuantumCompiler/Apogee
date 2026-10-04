@@ -116,6 +116,9 @@ std::string serialize(const Session& session) {
         {"compactions", session.compactions},
         {"messages", session.messages},
     };
+    if (session.private_chat) {
+        out["private"] = true;
+    }
     if (!session.custom_name.empty()) {
         out["custom_name"] = session.custom_name;
     }
@@ -207,6 +210,9 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
     session.updated_at = string_field(parsed, "updated_at", loaded.warnings);
     session.turns = parsed.value("turns", 0);
     session.compactions = parsed.value("compactions", 0);
+    if (const auto it = parsed.find("private"); it != parsed.end() && it->is_boolean()) {
+        session.private_chat = it->get<bool>();
+    }
 
     if (const auto params = parsed.find("params"); params != parsed.end() && params->is_object()) {
         if (const auto it = params->find("temperature"); it != params->end() && it->is_number()) {

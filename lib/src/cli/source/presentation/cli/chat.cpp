@@ -22,6 +22,7 @@
 #include "cli/chat_attachments.h"
 #include "cli/chat_completer.h"
 #include "cli/chat_history.h"
+#include "cli/chat_recall.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/permissions.h"
@@ -81,6 +82,8 @@ struct ChatFlags {
     std::int64_t max_tokens = 0;
     /// Whether the model thinks first, and for how long (26i).
     std::string think;
+    /// Recall no earlier chats in this run (26l).
+    bool no_recall = false;
     std::int64_t think_budget = 0;
     bool tools = false;
     bool search = false;
@@ -177,7 +180,7 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
                    agentloop::ToolSelection* selection, const agentloop::AskFn& ask,
                    const ToolGate& gate, agentloop::Reporter& reporter,
                    const std::function<void(const std::string&)>& notice, const RagSettings& rag,
-                   const std::string& review_note, ChatAttachments* attached) {
+                   const std::string& review_note, ChatAttachments* attached, ChatRecall* recall) {
     const std::vector<harness::ChatMessage> incoming = build_messages({}, {}, input, {});
 
     // Context is measured against what is ABOUT TO BE SENT -- the saved history
@@ -321,8 +324,21 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         if (retrieved.error.empty() && !retrieved.prefix.empty()) {
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
                                                  retrieved.prefix.begin(), retrieved.prefix.end());
+            share_used += retrieved.tokens;
         }
         notice(describe_retrieval(rag_choice, retrieved));
+    }
+    // What earlier chats established, within what the share has left (26l):
+    // transient like the rest, and said, so the user can see why the model
+    // knows it.
+    if (recall != nullptr && recall->active()) {
+        const Recalled recalled = recall->for_turn(
+            query, budget, share_used, rag_choice.active() ? rag_choice.collection : std::string{});
+        if (!recalled.prefix.empty()) {
+            loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
+                                                 recalled.prefix.begin(), recalled.prefix.end());
+            reporter.on_recall(recalled.chats, recalled.decisions);
+        }
     }
     if (!review_note.empty()) {
         // The review note rides the transient prefix, never the transcript:
@@ -336,6 +352,9 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         const agentloop::RunResult result =
             agentloop::run(harness, session.messages, loop_options, reporter);
         ++session.turns;
+        if (recall != nullptr) {
+            recall->after_turn();
+        }
         if (attached != nullptr) {
             attached->after_turn(result.inline_dropped);
         }
@@ -522,6 +541,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_option("--think", flags->think,
                     "Whether a reasoning model thinks first: on, off, or auto (per question)")
         ->check(CLI::IsMember({"on", "off", "auto"}));
+    cmd->add_flag("--no-recall", flags->no_recall, "Recall no earlier chats in this run");
     flags->think_budget_option =
         cmd->add_option("--think-budget", flags->think_budget,
                         "The most tokens a reasoning model may think for before it answers")
@@ -660,6 +680,12 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         // Saved again after the turn that reads a compacted history: the
         // state from before no longer matches it.
         int saved_compactions = session.compactions;
+        // Recall across chats (26l): on unless the config or the flag says
+        // not; a chat a process that died left due is summarised now.
+        ChatRecall recall{harness, config, session, config.memory.recall && !flags->no_recall};
+        for (const std::string& line : recall.catch_up({})) {
+            reporter.status().print_line(style.dim("[memory] " + line));
+        }
 
         // Retrieval settings follow the same precedence as every other saved
         // parameter: an explicit flag wins, else what the session last had.
@@ -864,14 +890,14 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 // The driver reads structured input, so there IS someone to
                 // answer a question -- the loop's "nil AskFn <=> never
                 // advertised" rule is satisfied rather than sidestepped.
-                run_chat_turn(
-                    harness, session, message.text, flags->tools ? &registry : nullptr,
-                    selection.get(), driver_ask,
-                    ToolGate{permission, flags->tools
-                                             ? make_driver_confirm_fn(machine_reporter, std::cin,
+                run_chat_turn(harness, session, message.text, flags->tools ? &registry : nullptr,
+                              selection.get(), driver_ask,
+                              ToolGate{permission, flags->tools ? make_driver_confirm_fn(
+                                                                      machine_reporter, std::cin,
                                                                       config_path, approvals)
-                                             : agent::ConfirmFn{}},
-                    machine_reporter, machine_notice, rag_settings, review_note, &attached);
+                                                                : agent::ConfirmFn{}},
+                              machine_reporter, machine_notice, rag_settings, review_note,
+                              &attached, &recall);
                 title.start_if_due(session);
                 if (session.compactions != saved_compactions) {
                     saved_compactions = session.compactions;
@@ -890,6 +916,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             // by the per-turn save, so exiting is clean by construction.
             title.settle(session);
             logger::save(session);
+            if (const std::string said = recall.finish({}); !said.empty()) {
+                machine_notice(said);
+            }
             harness.save_conversation(session.backend, session.chat_id,
                                       progress_sink(machine_reporter));
             return;
@@ -1057,6 +1086,30 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 switch (spec->id) {
                     case ChatVerb::Exit:
                         running = false;
+                        break;
+                    case ChatVerb::Recall:
+                        if (argument.empty()) {
+                            std::string state = "off";
+                            if (recall.active()) {
+                                state = "on";
+                            } else if (config.memory.recall && !flags->no_recall) {
+                                state = "off for this chat";
+                            }
+                            reporter.status().print_line(style.tag(ansi::Role::Apogee) +
+                                                         " recall: " + state);
+                        } else if (argument == "on" || argument == "off") {
+                            recall.set_session(argument == "on");
+                        } else {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " not on or off: '" + argument + "'");
+                        }
+                        break;
+                    case ChatVerb::Private:
+                        recall.make_private();
+                        logger::save(session);
+                        reporter.status().print_line(
+                            style.tag(ansi::Role::Apogee) +
+                            " this chat is private: it will never be summarised for recall");
                         break;
                     case ChatVerb::Help:
                         for (const std::string& row : chat_help_lines(
@@ -1299,7 +1352,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 [&reporter, &style](const std::string& message) {
                     reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
-                rag_settings, review_note, &attached);
+                rag_settings, review_note, &attached, &recall);
             title.start_if_due(session);
             if (session.compactions != saved_compactions) {
                 saved_compactions = session.compactions;
@@ -1322,6 +1375,10 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         // The model's state too, on a clean exit only (26j): an interrupt
         // asked for nothing more, and the transcript is saved either way.
         if (!reader->interrupted()) {
+            // The chat's summary for recall too (26l): only a clean exit.
+            if (const std::string said = recall.finish({}); !said.empty()) {
+                reporter.status().print_line(style.dim("[memory] " + said));
+            }
             harness.save_conversation(session.backend, session.chat_id, progress_sink(reporter));
         }
         // Opt-in auto-capture on a CLEAN exit -- /exit, /quit, the end of the

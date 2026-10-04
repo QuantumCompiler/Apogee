@@ -91,6 +91,8 @@ public:
     void on_thinking_token(std::string_view chunk) override;
     /// A `thinking` event carrying `budget_reached: true` (26i).
     void on_thinking_budget_reached() override;
+    /// A `memory` event: the past chats and decisions a turn was handed (26l).
+    void on_recall(int chats, int decisions) override;
     void on_tool_status(std::string_view detail) override;
     /// A `notice` event: `{"type":"notice","text":...}`.
     void on_notice(std::string_view text) override;

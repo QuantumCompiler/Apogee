@@ -1135,6 +1135,13 @@ Config parse_config(std::string_view content, std::string_view origin) {
         }
     }
 
+    if (const YAML::Node memory = root["memory"]; memory.IsDefined() && !memory.IsNull()) {
+        if (!memory.IsMap()) {
+            fail(origin, "memory: expected a mapping");
+        }
+        config.memory.recall = boolean(memory["recall"], origin, "memory.recall", true);
+    }
+
     if (const YAML::Node training = root["training"]; training.IsDefined() && !training.IsNull()) {
         if (!training.IsMap()) {
             fail(origin, "training: expected a mapping");

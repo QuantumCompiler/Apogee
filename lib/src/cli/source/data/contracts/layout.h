@@ -63,6 +63,12 @@ struct LayoutEntry {
 /// `<APOGEE_HOME>/attachments` -- each chat's attachment index,
 /// `<chat id>.db`, deleted with the chat (26d). Private, like the sessions.
 [[nodiscard]] std::filesystem::path attachments_dir();
+/// `<APOGEE_HOME>/memory` -- recall's summaries of past chats (26l), and
+/// `pending/`, one marker per chat due a summary, naming the process that
+/// has it open. Private, like the sessions.
+[[nodiscard]] std::filesystem::path memory_dir();
+/// `memory/chats.db` -- the summaries' index, one source per chat id.
+[[nodiscard]] std::filesystem::path recall_index_path();
 [[nodiscard]] std::filesystem::path logs_dir();
 [[nodiscard]] std::filesystem::path models_dir();
 [[nodiscard]] std::filesystem::path embeddings_dir();

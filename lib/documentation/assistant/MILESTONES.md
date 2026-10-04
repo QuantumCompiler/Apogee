@@ -821,6 +821,58 @@ The two lines in `llama_real.cpp` (WAV decoding and mergeable frames) and the he
 - **HEIC and TIFF** are converted to JPEG through ffmpeg, but no real file of either was tried.
 - **Uploads over `serve`** are out of scope. A served request's `input_audio` part now parses as audio, though, and a local backend that hears would read it.
 
+### 2026-10-04 — `recall-across-chats` (backlog item 26l): what earlier chats established, recalled
+
+**Why.** A small model has no memory beyond its window: whatever a user established last week -- the database, the conventions, a decision -- they had to say again. The knowledge layer keeps what is captured on purpose; recall covers everything else, the way `auto_rag` covers a document collection.
+
+**What was built**
+
+- [x] **A summary per finished chat** (`agentloop/recall`). A chat of two turns or more is summarised once at a clean exit: what was asked, what was decided, the facts and preferences stated, the files involved, in at most 120 words. The request is greedy, a side request, with thinking off. The summary goes into a private index under `memory/`, one source per chat id: `0600`, its folder `0700`, a layout row of its own.
+- [x] **Never billed.** The utility model summarises when one is named; else the chat's own backend, only when it costs nothing per call; else the exit says why not. Summaries get vectors only from a free embedder.
+- [x] **Recalled per turn, transient and said.** After a chat's attachments and `auto_rag`, a turn recalls at most three items within what the retrieval share has left:
+  - past chats' summaries, through `retrieve_for_turn`, introduced as notes on earlier conversations and never the asking chat's own;
+  - then decisions from the knowledge collection, unless `auto_rag` searched it.
+
+  The terminal says `[memory] 1 past chat`; machine mode sends a `memory` event (`Reporter::on_recall`). Nothing recalled ever enters the transcript.
+- [x] **Controllable**:
+  - `--no-recall` for a run, `/recall off` for a session;
+  - `/private`, which keeps a chat from ever being summarised and takes back a summary already kept;
+  - `memory.recall: false` for everything.
+
+  `chats delete` forgets the chat's summary.
+- [x] **An open chat is never summarised.** A chat that becomes due is marked under `memory/pending/` with the process that has it open. A process that died leaves its marker, and the next `chat` start catches up on at most three. A chat whose process still runs is left alone. A resumed chat is summarised again only when this run added to it.
+- [x] **Never on `serve`, by construction.** The layering check refuses any include of the recall code from `httpserver/` or `operations/`. Recall is off in `complete` and agents too: one-shots stay reproducible from their inputs.
+- [x] **`check`** counts the summaries and fails when others can read the index.
+
+**On real weights** (the families, each summarising its own chat -- no utility model set -- with the local Embedding-Gemma for search; separate processes, as a chat ending and a new one starting are):
+
+| | Qwen3-VL-8B | Gemma 4 12B | gpt-oss-20b | Llama 3.1 8B |
+|---|---|---|---|---|
+| "Our project uses Postgres 16…", two turns | summarised by itself | summarised | summarised | summarised |
+| a new chat: "Which database version should this migration target?" | `[memory] 1 past chat`; **PostgreSQL 16** | `[memory] 1 past chat`; **"you are currently using PostgreSQL 16"** | `[memory] 1 past chat`; knew the project is on 16, and advised moving to 17 | `[memory] 1 past chat`; "based on the earlier conversation about Postgres 16 … a suitable target" |
+| `/recall off` | asked for context | asked for context | answered in general | asked for context |
+| `serve` | asked for context, as with recall off | asked for context | asked which database | asked for context |
+| after `chats delete` | asked for context | asked for context | answered in general | asked for context |
+
+**Tests**: 20 new cases -- the recall module (the request, the summary, the chunk, the counts, the index, retrieval with its header and exclusion); recall end to end in `chat` over two mock backends (summarised, recalled transient, stopped three ways, private, single-turn, `complete`, catch-up and an open chat, self-recall, continued and unchanged resumes, a recorded decision, the billed summariser); the config, the session, the completer, both reporters and `check`.
+
+**Guardrails, each mutation-tested (29 mutants, all caught -- one only once a test wrote a `memory:` section without `recall`), in a separate git worktree:** the summariser's request (side request, thinking, budget, roles), a blank summary, the chunk's date, the counts' wording, a billed embedder, the index's privacy and removal, what is due (private, turns), a billed summariser, self-recall, decisions, an unchanged chat, an open chat, `/private`, the marker, the `[memory]` line, `/recall`, `--no-recall`, the exit summary, `chats delete`, `check`, the machine event, the config default, the session's flag.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where recall runs | `chat` only *(confirmed by the user)* | One-shots and agent runs stay reproducible from their inputs; `serve` never, by construction. |
+| What is summarised | Chats of two turns or more *(confirmed by the user)* | A single question rarely establishes anything. |
+| How much a turn recalls | At most 3 items, inside the retrieval share *(confirmed by the user)* | Recall supports the question, never crowds it. |
+| A continued chat | Summarised again *(confirmed by the user)*, and only then | The summary describes the chat as it stands. |
+| The summariser | The utility model, else the chat's own only when unbilled *(for veto)* | A summary is Apogee's idea, never billed for it. |
+| When | At a clean exit, on a line of its own; catch-up at the next start, three at most *(for veto)* | A thread the exiting process would kill loses the summary. Old chats are never summarised wholesale. |
+| The controls | `--no-recall` and `/recall off` stop recalling; `/private` stops summarising *(for veto)* | Each does what its name says. |
+| Decisions | From the knowledge collection after past chats, not twice with `auto_rag` *(for veto)* | The deliberate record beside the automatic one. |
+| Reporting | `Reporter::on_recall`: a `[memory]` line, a `memory` event | One event every surface adapts; the server's adapter never sees it. |
+| The acceptance models | The families *(the standing rule)* | |
+
 ## Milestone I — The full cloud set
 
 **Goal.** Widen cloud coverage from one vendor to three, and in doing so settle the question the `LLMProvider` seam was built to answer: is a backend really just a translator? The answer is a cross-provider conformance table in which the loop, the tools, and the assertions are shared and only the wire fixture differs.

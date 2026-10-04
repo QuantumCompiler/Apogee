@@ -418,6 +418,34 @@ if(NOT VIOLATIONS STREQUAL "")
                         "machine/, agentloop/, agent/, contracts/ only.")
 endif()
 
+# `serve` never recalls (26l): one client's history must never reach another's
+# turn, so nothing that recalls is reachable from the server -- a rule of the
+# build, not a setting someone can flip. Neither the server nor `operations/`,
+# which it shares with the command line, includes recall.
+foreach(package httpserver operations)
+    file(GLOB_RECURSE module_sources "${PACKAGE_DIR_${package}}/*.h"
+                                     "${PACKAGE_DIR_${package}}/*.cpp")
+    if(module_sources STREQUAL "")
+        message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_${package}} — "
+                            "this check would pass vacuously")
+    endif()
+    foreach(source IN LISTS module_sources)
+        file(STRINGS "${source}" recalling
+             REGEX "^[ \t]*#[ \t]*include[ \t]*\"(agentloop/recall|cli/chat_recall)\\.h\"")
+        if(NOT recalling STREQUAL "")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  ${package}/${name} reaches recall: ${recalling}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the server reaches recall:\n${pretty}\n"
+                        "serve never recalls one client's history into another's turn: "
+                        "httpserver/ and operations/ never include agentloop/recall.h or "
+                        "cli/chat_recall.h.")
+endif()
+
 list(LENGTH ALL_SOURCES count)
 string(REPLACE ";" ", " guarded "${GUARDED_PACKAGES}")
 message(STATUS "layering: ${layered_sources} sources, every include of another module one of "

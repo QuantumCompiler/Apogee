@@ -115,6 +115,10 @@ struct RagTurn {
     const harness::Config* config = nullptr;
     harness::CancellationToken cancellation;
 
+    /// How the excerpts are introduced to the model; empty for the user's
+    /// documents. Recall's are notes on earlier conversations (26l).
+    std::string header;
+
     /// The collection's name, for the graph section's header.
     std::string collection;
     /// The graph the turn expands through (`graph_context::resolve_turn_graph`
@@ -163,5 +167,11 @@ struct RagTurn {
 /// it ran.
 [[nodiscard]] std::string render_rag_context(const std::vector<std::string>& chunks,
                                              std::string_view graph_section);
+
+/// The same, introduced by `header` rather than as the user's documents --
+/// recall's notes on earlier conversations (26l). Empty with no chunks.
+[[nodiscard]] std::string render_rag_context(const std::vector<std::string>& chunks,
+                                             std::string_view graph_section,
+                                             std::string_view header);
 
 }  // namespace apogee::agentloop
