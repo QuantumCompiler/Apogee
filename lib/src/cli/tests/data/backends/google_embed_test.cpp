@@ -10,7 +10,6 @@
 
 #include "backends/google.h"
 #include "contracts/errors.h"
-#include "harness/harness.h"
 #include "support/embedding_fixtures.h"
 #include "support/fake_transport.h"
 
@@ -164,13 +163,4 @@ TEST_CASE("the Gemini embedding model is the entry's, else the vendor default",
 
     Fixture d = make_provider({FakeTransport::Reply{.status = 200, .body = body_for(1)}});
     CHECK(d.provider->embedding_dimensions() == fixtures::kGoogleDefaultWidth);
-}
-
-TEST_CASE("a Google entry answers can_embed through the harness",
-          "[backends][google][embed][capability]") {
-    Fixture f = make_provider({FakeTransport::Reply{.status = 200, .body = body_for(1)}});
-    apogee::harness::Harness harness{apogee::harness::Config{}};
-    harness.register_provider("gemini", std::shared_ptr<GoogleProvider>(std::move(f.provider)));
-    harness.use_default_router();
-    CHECK(harness.can_embed("gemini"));
 }

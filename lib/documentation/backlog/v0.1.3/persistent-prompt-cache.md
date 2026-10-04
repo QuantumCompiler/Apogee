@@ -26,11 +26,9 @@ Two caches:
 **Decisions made:**
 - 2026-09-25 — Asked for by the user ("Speed and memory").
 - 2026-09-25 — After [25c](../../assistant/MILESTONES.md#milestone-j--local-inference), whose hybrid-state handling a restore must respect, and [26a](../../assistant/MILESTONES.md#milestone-j--local-inference), whose cache type sets the file sizes.
-
-**Open calls:**
-- [default: the prefix cache on, the chat cache on for chats over 2,000 tokens] Short chats re-read in a second or two and are not worth the disk.
-- [default: a 4 GiB cap for all state files] Covers a handful of long chats; evicted oldest-first.
-- [default: saved at a clean exit and after compaction, not after every turn] A state file is hundreds of megabytes, and the per-turn save guarantees the transcript, which is what a crash must not lose.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): prefix cache on; the per-chat cache on for chats over 2,000 tokens — short chats re-read in a second or two and are not worth the disk.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): 4 GiB cap across all state files, evicted oldest-first.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): state saved at clean exit and after compaction, never per turn — the per-turn save already guarantees the transcript, which is what a crash must not lose.
 
 **Guardrail(s).**
 - A restore yields identical greedy output.

@@ -8,10 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "cli/datasets.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "httpserver/handler.h"
+#include "operations/dataset_core.h"
 #include "training/datasets.h"
 #include "training/kit.h"
 #include "training/synth.h"

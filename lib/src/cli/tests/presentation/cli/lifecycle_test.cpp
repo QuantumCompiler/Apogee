@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -15,6 +16,7 @@
 #include "cli/uninstall.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
+#include "support/env_guard.h"
 
 /// The lifecycle surfaces: shell completion, and what uninstall plans to remove.
 namespace {
@@ -134,6 +136,18 @@ struct TempDir {
     TempDir& operator=(const TempDir&) = delete;
     TempDir(TempDir&&) = delete;
     TempDir& operator=(TempDir&&) = delete;
+};
+
+/// A user home of the test's own, for every uninstall case. `plan_uninstall`
+/// looks for the shell completions under the home directory and
+/// `execute_uninstall` deletes what it finds -- so planned against the real
+/// home, running the suite uninstalled the developer's own completions, and
+/// "plans nothing" failed whenever `make install` had just put them back
+/// (found in A4, 2026-10-03).
+struct UserHome {
+    apogee::testing::TempDir dir{"lifecycle-user-home-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard home{"HOME", dir.path().string()};
+    apogee::testing::EnvGuard profile{"USERPROFILE", dir.path().string()};
 };
 
 }  // namespace
@@ -264,6 +278,7 @@ TEST_CASE("a prefix filter is a prefix, not a substring", "[commands][completion
 }
 
 TEST_CASE("uninstall names the user data it would destroy", "[commands][uninstall]") {
+    const UserHome user_home;
     // The prompt's whole job. "Remove ~/.apogee?" does not convey that fifty
     // conversations are inside it, and this is not an undoable action.
     TempDir home;
@@ -286,6 +301,7 @@ TEST_CASE("uninstall names the user data it would destroy", "[commands][uninstal
 }
 
 TEST_CASE("an empty install raises no user-data warning", "[commands][uninstall]") {
+    const UserHome user_home;
     TempDir home;
     REQUIRE(apogee::harness::seed_data_directory(home.path).ok());
 
@@ -296,6 +312,7 @@ TEST_CASE("an empty install raises no user-data warning", "[commands][uninstall]
 }
 
 TEST_CASE("uninstall removes the tree and reports what it removed", "[commands][uninstall]") {
+    const UserHome user_home;
     TempDir home;
     REQUIRE(apogee::harness::seed_data_directory(home.path).ok());
     std::ofstream{home.path / "sessions" / "chat.json"} << "{}";
@@ -311,6 +328,7 @@ TEST_CASE("uninstall removes the tree and reports what it removed", "[commands][
 }
 
 TEST_CASE("uninstall --keep-data leaves the data directory alone", "[commands][uninstall]") {
+    const UserHome user_home;
     // The flag exists for reinstalling without losing conversations, so the
     // one thing it must never do is take them with it.
     TempDir home;
@@ -328,6 +346,7 @@ TEST_CASE("uninstall --keep-data leaves the data directory alone", "[commands][u
 }
 
 TEST_CASE("an already-removed install plans nothing and says so", "[commands][uninstall]") {
+    const UserHome user_home;
     const apogee::commands::UninstallPlan plan =
         apogee::commands::plan_uninstall("/nonexistent/apogee-home", {});
 
@@ -336,8 +355,28 @@ TEST_CASE("an already-removed install plans nothing and says so", "[commands][un
     CHECK(apogee::commands::describe_plan(plan).find("already removed") != std::string::npos);
 }
 
+TEST_CASE("uninstall finds the completions under the home directory, and only there",
+          "[commands][uninstall]") {
+    // What makes the guard above necessary, pinned: the completions are found
+    // through the home directory, so a test that plans an uninstall against
+    // the real one plans to delete the developer's own.
+    const UserHome user_home;
+    const std::filesystem::path zsh =
+        user_home.dir.path() / ".local" / "share" / "zsh" / "site-functions" / "_apogee";
+    std::filesystem::create_directories(zsh.parent_path());
+    std::ofstream{zsh} << "#compdef apogee\n";
+
+    const apogee::commands::UninstallPlan plan =
+        apogee::commands::plan_uninstall("/nonexistent/apogee-home", {});
+
+    REQUIRE(plan.completions.size() == 1);
+    CHECK(plan.completions.front() == zsh);
+    CHECK(apogee::commands::describe_plan(plan).find("already removed") == std::string::npos);
+}
+
 TEST_CASE("every user-data directory in the contract is one uninstall warns about",
           "[commands][uninstall]") {
+    const UserHome user_home;
     // Enumerated from harness/layout.h rather than restated, so a new
     // user-owned directory is covered by the prompt automatically. A second
     // list here is the drift this whole area exists to prevent.

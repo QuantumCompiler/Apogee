@@ -22,12 +22,10 @@
 **Decisions made** (dated):
 - 2026-09-30 — Asked for by the user: the other model calls (embedder, extractor, and the rest) folded into the thinking block; **end of v0.1.3**, lettered **26n** per the release-prefix rule.
 - 2026-09-30 — One new Reporter event mapped per adapter, rather than reusing `on_tool_status` at the source: the CLI needs to tell side calls from tool runs to place them in the block, while machine mode deliberately collapses both into its existing display-prose event — the distinction exists exactly where it is needed and nowhere else.
-
-**Open calls:**
-- [default: line shape `· <role> — <what it is doing>`, completed in place with `· <elapsed>` and `· <N> tokens` when reported; label truncated against the live width] The format — taste, veto freely.
-- [default: when the chat model emits no reasoning (a non-reasoning model, or thinking off once [26i](thinking-control.md) lands), the block still appears when there are side calls to narrate, and collapses the same way] An all-narration block.
-- [default: first-cut emission set as listed in the seam — embed, retrieval, rewrite, summarise, rerank, in-turn vision/transcription, the `/capture` clerk; compaction announces itself the same way when it runs mid-turn] Coverage.
-- [default: the status line keeps announcing `auto_rag` collection selection as today — a one-shot state notice, not a side call] What stays on the status line.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): line shape `· <role> — <what it is doing>`, completed in place with `· <elapsed>` and `· <N> tokens` when reported; label truncated against the live width.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): with no model reasoning, the block still appears when there are side calls to narrate — an all-narration block, collapsing the same way.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the first-cut set is embed, retrieval, rewrite, summarise, rerank, in-turn vision/transcription and the `/capture` clerk; mid-turn compaction announces itself the same way.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `auto_rag` collection selection stays a status-line notice — one-shot state, not a side call.
 
 **Guardrail(s).**
 - Reporter goldens: the scripted turn's block interleaves reasoning and side-call lines in arrival order; collapse leaves the same residue the thinking view leaves today (none).

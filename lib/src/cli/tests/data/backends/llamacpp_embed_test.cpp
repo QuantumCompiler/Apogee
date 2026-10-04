@@ -9,7 +9,6 @@
 
 #include "backends/llamacpp.h"
 #include "contracts/errors.h"
-#include "harness/harness.h"
 #include "support/fake_llama.h"
 
 /// In-process embeddings, through the provider and the scripted runtime. The
@@ -94,15 +93,6 @@ TEST_CASE("a runtime failure surfaces as a provider error with its message",
     } catch (const ProviderError& e) {
         CHECK(std::string{e.what()}.find("no pooled embedding") != std::string::npos);
     }
-}
-
-TEST_CASE("a local entry answers can_embed through the harness",
-          "[backends][llamacpp][embed][capability]") {
-    Fixture f;
-    apogee::harness::Harness harness{apogee::harness::Config{}};
-    harness.register_provider("local", std::shared_ptr<LlamaCppProvider>(std::move(f.provider)));
-    harness.use_default_router();
-    CHECK(harness.can_embed("local"));
 }
 
 TEST_CASE("two models of different width are distinguishable by their dimensions",

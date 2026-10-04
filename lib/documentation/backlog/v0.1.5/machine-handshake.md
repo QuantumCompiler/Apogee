@@ -20,11 +20,9 @@
 **Decisions made** (dated):
 - 2026-09-25 — Split from the integration spike (item 27): wall W1, with the compatibility mechanism verified live (unknown inbound lines ignored by v0.1.2).
 - 2026-09-25 — **The push channel is parked, the user's call**, with the spike's evidence: v1's "events arrive in response to turns" held comfortably for an embedding host. If ever wanted, `capabilities` is where a host and binary would negotiate it — nothing in this item's design forecloses that.
-
-**Open calls:**
-- [default: `capabilities` carries `events` (outbound types), `accepts` (inbound types), `tools` (bool), `ask` (bool), `schema` (the schema version [28g](machine-schema-artifact.md) will publish)] The field's shape.
-- [default: `hello` carries `client` `{name, version}` and optional `wants` (inbound types the host intends to use); the binary logs it to the session for diagnostics and does not change behaviour on it in the first cut] What `hello` does beyond declaring.
-- [default: a `hello` sent mid-conversation is ignored with a dim stderr note, not an error] Misuse handling.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `capabilities` = events, accepts, tools, ask, schema (28g's version string).
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `hello` carries client {name, version} and optional `wants`; logged for diagnostics, no behavior change in the first cut.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): a mid-conversation `hello` is ignored with a dim stderr note — never a session-ending error.
 
 **Guardrail(s).**
 - The e2e drives one child with `hello` and one without; identical turn behaviour, `capabilities` present in both.

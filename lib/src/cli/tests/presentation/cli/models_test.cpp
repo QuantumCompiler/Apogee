@@ -48,9 +48,12 @@ struct RealModel {
     /// A directory of its own per instance. A shared path let one test's
     /// sidecar leak into another's: the destructor removed the .gguf but not
     /// the .json beside it, so the result depended on test order. An
-    /// order-dependent test is worse than no test.
+    /// order-dependent test is worse than no test. A random draw beside the
+    /// counter, since ctest runs cases as parallel processes and a counter
+    /// alone names the same directory in several of them at once.
     std::filesystem::path dir = std::filesystem::temp_directory_path() /
-                                ("apogee-models-test-" + std::to_string(counter()));
+                                ("apogee-models-test-" + std::to_string(std::random_device{}()) +
+                                 "-" + std::to_string(counter()));
     /// Where the model store keeps a GGUF: `<model>/gguf/<id>/<file>`.
     std::filesystem::path path = dir / "m" / "gguf" / "111111111111" / "real.gguf";
     /// What `models list` calls it: the handle the other verbs take.

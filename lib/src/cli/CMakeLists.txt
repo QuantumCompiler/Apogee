@@ -77,12 +77,14 @@ option(APOGEE_ENABLE_LLAMA "Configure and build the pinned llama.cpp target" ON)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Apogee links everything statically; the executable ships alone" FORCE)
 
 # Standard bin/lib/share destinations for the install rule in source/. This one
-# ships with CMake; the three below it are ours.
+# ships with CMake; the four below it are ours -- the last, the module map
+# (Architecture A4), is every module's layer and links.
 include(GNUInstallDirs)
 
 include(ApogeeWarnings)
 include(ApogeeDependencies)
 include(ApogeeLinkPolicy)
+include(modules)
 
 add_subdirectory(third_party)
 add_subdirectory(source)

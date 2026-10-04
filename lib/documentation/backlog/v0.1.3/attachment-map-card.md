@@ -21,10 +21,8 @@
 **Decisions made** (dated):
 - 2026-10-03 — Split from the attachment-representation spike as the no-dependency half of "give the model a map": the card needs no graph, no new vendored code, and would have prevented the stress test's invented paths on its own. Placed at the v0.1.3 tail because it is small, self-contained, and sharpens a shipped v0.1.3 feature (26d).
 - 2026-10-03 — The card is persisted history, not a transient prefix: structure is a stable fact of the attachment, and re-injecting it per turn would spend the retrieval share on something that never changes.
-
-**Open calls:**
-- [default: depth 2 and 30 tree lines, each a named constant; directories beyond the caps folded into counted lines] The caps.
-- [default: the language mix is by extension count (`.cpp 214 · .h 198 · .md 12`), no content sniffing] The mix line.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): depth 2 and 30 tree lines, named constants; overflow folds into counted lines.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the mix line is extension counts, no content sniffing — instant and deterministic.
 
 **Guardrail(s).**
 - Golden card for a committed fixture tree, byte-exact, including the overflow folds.

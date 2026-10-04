@@ -1,6 +1,6 @@
 # The CLI application's tests. Directory layout mirrors source/'s packages.
 #
-# Note what this target links: apogee_core and Catch2 -- NOT the `apogee`
+# Note what these targets link: the modules and Catch2 -- NOT the `apogee`
 # executable. That is the library-first split doing its job, and
 # apogee_assert_link_policy() in the top-level CMakeLists fails the configure
 # step if it ever stops being true.
@@ -10,20 +10,40 @@
 
 include(Catch)
 
-add_executable(apogee_tests
-    smoke_test.cpp
-    packages_test.cpp
+# The suites, one OBJECT library per layer (Architecture A4, ADR 0004): a
+# layer's tests link that layer's modules and the layers below, so a test that
+# includes a header from above its layer does not compile -- a behavior that
+# spans layers is tested in the highest layer it touches. The support files
+# each sit with the lowest layer whose headers they include.
+#
+# One executable still runs them all, under its old name and with every test
+# name unchanged: the libraries are how the suites COMPILE, not how they run.
+
+add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/platform_test.cpp
     infrastructure/platform/child_process_test.cpp
     infrastructure/platform/ffmpeg_test.cpp
-    presentation/cli/registry_test.cpp
-    presentation/cli/root_test.cpp
+    infrastructure/ansi/ansi_test.cpp
+    infrastructure/events/bus_test.cpp
+    support/env_guard.h
+    support/env_guard.cpp
+    support/file_time.h
+    support/file_time.cpp
+    support/fake_child.h
+    support/fake_ffmpeg.h
+    support/gguf_builder.h
+    support/terminal_model.h
+    support/terminal_model.cpp
+    support/embedding_fixtures.h
+)
+target_link_libraries(apogee_tests_infrastructure PRIVATE apogee_infrastructure Catch2::Catch2)
+
+add_library(apogee_tests_data OBJECT
     data/contracts/config_test.cpp
     data/contracts/config_edit_test.cpp
     data/contracts/host_test.cpp
     data/contracts/paths_test.cpp
     data/contracts/types_test.cpp
-    business/harness/harness_test.cpp
     data/backends/mock_test.cpp
     data/transport/sse_parser_test.cpp
     data/transport/http_client_test.cpp
@@ -41,27 +61,11 @@ add_executable(apogee_tests
     data/backends/ollama_cli_test.cpp
     data/backends/codex_cli_test.cpp
     data/backends/gemini_cli_test.cpp
-    business/harness/roles_test.cpp
     data/modelstore/gguf_inspect_test.cpp
     data/modelstore/kv_cache_test.cpp
-    business/models/lineage_test.cpp
     data/contracts/sha256_test.cpp
-    business/models/acquire_test.cpp
-    business/models/convert_test.cpp
     data/modelstore/store_test.cpp
-    business/models/migrate_test.cpp
-    business/models/quantize_test.cpp
     data/modelstore/sidecar_test.cpp
-    business/models/source_ollama_test.cpp
-    business/models/source_hf_test.cpp
-    presentation/cli/models_pull_test.cpp
-    presentation/cli/models_migrate_test.cpp
-    presentation/cli/models_convert_test.cpp
-    presentation/cli/model_chain_test.cpp
-    presentation/cli/complete_sources_test.cpp
-    presentation/cli/models_test.cpp
-    presentation/cli/config_cmd_test.cpp
-    presentation/cli/attachment_guard_test.cpp
     data/transport/jsonl_framer_test.cpp
     data/backends/think_filter_test.cpp
     data/backends/markup_filter_test.cpp
@@ -69,36 +73,47 @@ add_executable(apogee_tests
     data/backends/model_profile_test.cpp
     data/backends/chat_template_test.cpp
     data/embedstore/store_test.cpp
+    data/embedstore/vector_test.cpp
+    data/embedstore/fts_query_test.cpp
+    data/embedstore/chunk_test.cpp
+    data/embedstore/ingest_test.cpp
+    data/logger/session_test.cpp
+    data/secrets/store_test.cpp
+    data/secrets/resolve_test.cpp
+    data/contracts/assets_test.cpp
+    data/embedstore/metadata_test.cpp
+    data/embedstore/graph_test.cpp
+    data/embedstore/graph_search_test.cpp
+    data/embedstore/graph_communities_test.cpp
+    data/embedstore/graph_dedupe_test.cpp
+    data/embedstore/graph_multi_test.cpp
+    support/fake_transport.h
+    support/fake_llama.h
+    support/fake_transport.cpp
+    support/media_fakes.h
+)
+target_link_libraries(apogee_tests_data PRIVATE apogee_data apogee_infrastructure Catch2::Catch2)
+
+add_library(apogee_tests_business OBJECT
+    business/harness/harness_test.cpp
+    business/harness/factory_harness_test.cpp
+    business/harness/provider_capability_test.cpp
+    business/harness/llamacpp_harness_test.cpp
+    business/harness/roles_test.cpp
+    business/models/lineage_test.cpp
+    business/models/acquire_test.cpp
+    business/models/convert_test.cpp
+    business/models/migrate_test.cpp
+    business/models/quantize_test.cpp
+    business/models/source_ollama_test.cpp
+    business/models/source_hf_test.cpp
     business/agentloop/rag_test.cpp
     business/agentloop/retrieval_test.cpp
     business/agentloop/rerank_test.cpp
     business/agentloop/query_rewrite_test.cpp
     business/agentloop/tool_selection_test.cpp
     business/agentloop/tool_summary_test.cpp
-    data/embedstore/vector_test.cpp
-    data/embedstore/fts_query_test.cpp
-    data/embedstore/chunk_test.cpp
-    data/embedstore/ingest_test.cpp
     business/agentloop/conformance_test.cpp
-    presentation/cli/helpers_test.cpp
-    presentation/cli/tool_vectors_test.cpp
-    presentation/views/thinking_view_test.cpp
-    presentation/views/status_line_test.cpp
-    presentation/views/download_progress_test.cpp
-    presentation/views/cli_reporter_test.cpp
-    presentation/views/answer_view_test.cpp
-    presentation/markdown/inline_test.cpp
-    presentation/markdown/stream_renderer_test.cpp
-    presentation/markdown/corpus_test.cpp
-    infrastructure/ansi/ansi_test.cpp
-    presentation/cli/chat_test.cpp
-    presentation/cli/check_test.cpp
-    presentation/cli/lifecycle_test.cpp
-    presentation/machine/machine_mode_test.cpp
-    presentation/views/line_reader_test.cpp
-    presentation/cli/chat_attachments_test.cpp
-    presentation/cli/chat_completer_test.cpp
-    data/logger/session_test.cpp
     business/agent/tool_test.cpp
     business/agent/fetch_url_test.cpp
     business/agent/web_search_test.cpp
@@ -110,20 +125,6 @@ add_executable(apogee_tests
     business/agentloop/attachments_test.cpp
     business/agentloop/media_test.cpp
     business/agentloop/question_test.cpp
-    presentation/httpserver/handler_test.cpp
-    presentation/httpserver/sse_test.cpp
-    presentation/httpserver/session_test.cpp
-    presentation/httpserver/serve_test.cpp
-    presentation/httpserver/admin_auth_test.cpp
-    presentation/httpserver/admin_config_test.cpp
-    presentation/httpserver/admin_events_test.cpp
-    presentation/httpserver/jobs_test.cpp
-    presentation/httpserver/parity_test.cpp
-    infrastructure/events/bus_test.cpp
-    data/secrets/store_test.cpp
-    data/secrets/resolve_test.cpp
-    data/secrets/leak_test.cpp
-    presentation/httpserver/admin_auth_routes_test.cpp
     business/tools/fs_test.cpp
     business/tools/shell_test.cpp
     business/tools/notes_test.cpp
@@ -131,7 +132,6 @@ add_executable(apogee_tests
     business/tools/rag_query_test.cpp
     business/tools/gate_test.cpp
     business/tools/environment_test.cpp
-    presentation/cli/permissions_test.cpp
     business/mcp/types_test.cpp
     business/mcp/transport_test.cpp
     business/mcp/client_test.cpp
@@ -141,45 +141,25 @@ add_executable(apogee_tests
     business/scaffold/agent_test.cpp
     business/agentloop/structured_test.cpp
     business/agentloop/review_context_test.cpp
-    presentation/render/json_report_test.cpp
-    data/contracts/assets_test.cpp
-    bundled_agents_test.cpp
-    presentation/cli/analyze_test.cpp
-    presentation/cli/agents_test.cpp
-    presentation/httpserver/admin_agents_test.cpp
     business/knowledge/record_test.cpp
     business/knowledge/clerk_test.cpp
     business/knowledge/store_test.cpp
     business/knowledge/query_test.cpp
     business/knowledge/refine_test.cpp
     business/knowledge/export_test.cpp
-    data/embedstore/metadata_test.cpp
-    presentation/cli/knowledge_test.cpp
-    presentation/httpserver/admin_knowledge_test.cpp
-    data/embedstore/graph_test.cpp
-    data/embedstore/graph_search_test.cpp
     business/graph/extract_test.cpp
     business/graph/build_test.cpp
     business/graph/records_test.cpp
     business/agentloop/graph_context_test.cpp
-    presentation/cli/graph_test.cpp
-    presentation/httpserver/admin_graph_test.cpp
-    data/embedstore/graph_communities_test.cpp
-    data/embedstore/graph_dedupe_test.cpp
-    data/embedstore/graph_multi_test.cpp
     business/graph/communities_test.cpp
     business/graph/graph_multi_test.cpp
     business/agentloop/graph_named_test.cpp
-    presentation/httpserver/admin_graphs_test.cpp
     business/training/script_runner_test.cpp
     business/training/python_env_test.cpp
     business/training/kit_test.cpp
     business/training/synth_test.cpp
     business/training/datasets_test.cpp
     business/training/prepare_script_test.cpp
-    presentation/cli/datasets_test.cpp
-    presentation/cli/train_test.cpp
-    presentation/httpserver/admin_datasets_test.cpp
     business/training/trainer_test.cpp
     business/training/progress_contract_test.cpp
     business/training/manifest_test.cpp
@@ -187,55 +167,118 @@ add_executable(apogee_tests
     business/training/eval_test.cpp
     business/training/promote_test.cpp
     business/training/convert_test.cpp
-    presentation/httpserver/admin_training_test.cpp
     business/training/pipeline_test.cpp
     business/training/regime_test.cpp
     business/training/cycle_test.cpp
+    support/fake_mcp_server.cpp
+    support/fake_mcp_server.h
+)
+target_link_libraries(apogee_tests_business PRIVATE apogee_business apogee_data
+                      apogee_infrastructure Catch2::Catch2)
+
+add_library(apogee_tests_presentation OBJECT
+    presentation/cli/registry_test.cpp
+    presentation/cli/root_test.cpp
+    presentation/cli/models_pull_test.cpp
+    presentation/cli/models_migrate_test.cpp
+    presentation/cli/models_convert_test.cpp
+    presentation/cli/model_chain_test.cpp
+    presentation/cli/complete_sources_test.cpp
+    presentation/cli/models_test.cpp
+    presentation/cli/config_cmd_test.cpp
+    presentation/cli/attachment_guard_test.cpp
+    presentation/operations/retrieval_test.cpp
+    presentation/cli/helpers_test.cpp
+    presentation/cli/tool_vectors_test.cpp
+    presentation/views/thinking_view_test.cpp
+    presentation/views/status_line_test.cpp
+    presentation/views/download_progress_test.cpp
+    presentation/views/cli_reporter_test.cpp
+    presentation/views/answer_view_test.cpp
+    presentation/markdown/inline_test.cpp
+    presentation/markdown/stream_renderer_test.cpp
+    presentation/markdown/corpus_test.cpp
+    presentation/cli/chat_test.cpp
+    presentation/cli/check_test.cpp
+    presentation/cli/lifecycle_test.cpp
+    presentation/machine/machine_mode_test.cpp
+    presentation/views/line_reader_test.cpp
+    presentation/cli/chat_attachments_test.cpp
+    presentation/cli/chat_completer_test.cpp
+    presentation/httpserver/handler_test.cpp
+    presentation/httpserver/sse_test.cpp
+    presentation/httpserver/session_test.cpp
+    presentation/httpserver/serve_test.cpp
+    presentation/httpserver/admin_auth_test.cpp
+    presentation/httpserver/admin_config_test.cpp
+    presentation/httpserver/admin_events_test.cpp
+    presentation/httpserver/jobs_test.cpp
+    presentation/httpserver/parity_test.cpp
+    presentation/cli/leak_test.cpp
+    presentation/httpserver/admin_auth_routes_test.cpp
+    presentation/cli/permissions_test.cpp
+    presentation/render/json_report_test.cpp
+    presentation/cli/analyze_test.cpp
+    presentation/cli/agents_test.cpp
+    presentation/httpserver/admin_agents_test.cpp
+    presentation/cli/knowledge_test.cpp
+    presentation/httpserver/admin_knowledge_test.cpp
+    presentation/cli/graph_test.cpp
+    presentation/httpserver/admin_graph_test.cpp
+    presentation/httpserver/admin_graphs_test.cpp
+    presentation/cli/datasets_test.cpp
+    presentation/cli/train_test.cpp
+    presentation/httpserver/admin_datasets_test.cpp
+    presentation/httpserver/admin_training_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/cli_home.h
     support/cli_home.cpp
-    support/env_guard.h
-    support/env_guard.cpp
-    support/file_time.h
-    support/file_time.cpp
-    support/fake_mcp_server.cpp
-    support/fake_transport.h
-    support/fake_llama.h
-    support/fake_child.h
-    support/gguf_builder.h
-    support/fake_transport.cpp
-    support/terminal_model.h
-    support/terminal_model.cpp
+)
+target_link_libraries(apogee_tests_presentation PRIVATE apogee_presentation apogee_business
+                      apogee_data apogee_infrastructure Catch2::Catch2)
+
+# The cross-cutting suites -- the package headers, the smoke test, the bundled
+# agents -- read the whole product, so they compile against all of it.
+add_executable(apogee_tests
+    smoke_test.cpp
+    packages_test.cpp
+    bundled_agents_test.cpp
 )
 
-# The template-drift test reads the checked-in sample and compares it byte for
-# byte with the template compiled into the binary. It needs to find the asset
-# without depending on the working directory ctest happens to use.
-target_compile_definitions(apogee_tests PRIVATE
-    APOGEE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../assets"
-    # Recorded vendor-CLI JSONL, replayed by the framing suite. Same reason as
-    # above: found by absolute path, not by whatever directory ctest ran in.
-    APOGEE_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
-    # The cross-surface guard scan reads the command sources themselves: the
-    # assertion that survives is "every surface calls it", which needs the tree.
-    APOGEE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../source"
-    # The training protocol's golden fixture and the stub Python modules the
-    # shipped drivers are run under.
-    APOGEE_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-    # The vendored converter, byte-matched to its compiled-in copy.
-    APOGEE_THIRD_PARTY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../third_party"
-)
+set(APOGEE_TEST_TARGETS apogee_tests_infrastructure apogee_tests_data apogee_tests_business
+                        apogee_tests_presentation apogee_tests)
+foreach(target IN LISTS APOGEE_TEST_TARGETS)
+    # The template-drift test reads the checked-in sample and compares it byte
+    # for byte with the template compiled into the binary. It needs to find the
+    # asset without depending on the working directory ctest happens to use.
+    target_compile_definitions(${target} PRIVATE
+        APOGEE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../assets"
+        # Recorded vendor-CLI JSONL, replayed by the framing suite. Same reason
+        # as above: found by absolute path, not by whatever directory ctest ran in.
+        APOGEE_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+        # The cross-surface guard scan reads the command sources themselves: the
+        # assertion that survives is "every surface calls it", which needs the tree.
+        APOGEE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../source"
+        # The training protocol's golden fixture and the stub Python modules the
+        # shipped drivers are run under.
+        APOGEE_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+        # The vendored converter, byte-matched to its compiled-in copy.
+        APOGEE_THIRD_PARTY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../third_party"
+    )
 
-# So tests can `#include "support/fake_command.h"` the same way source files
-# include across packages.
-target_include_directories(apogee_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    # So tests can `#include "support/fake_command.h"` the same way source files
+    # include across packages.
+    target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    apogee_set_target_options(${target})
+endforeach()
 
 # The migration test builds a schema-v2 database by hand, through SQLite
 # itself, so the v3 migration runs against a real predecessor. Same
 # amalgamation the store uses, nothing else.
-target_link_libraries(apogee_tests PRIVATE apogee_core Catch2::Catch2WithMain apogee_sqlite3)
-apogee_set_target_options(apogee_tests)
+target_link_libraries(apogee_tests PRIVATE
+    apogee_tests_infrastructure apogee_tests_data apogee_tests_business apogee_tests_presentation
+    apogee_core Catch2::Catch2WithMain apogee_sqlite3)
 
 catch_discover_tests(apogee_tests)
 
@@ -264,11 +307,12 @@ set_tests_properties(cli.unknown_subcommand_fails PROPERTIES WILL_FAIL TRUE)
 add_test(NAME cli.help_lists_config COMMAND apogee --help)
 set_tests_properties(cli.help_lists_config PROPERTIES PASS_REGULAR_EXPRESSION "config")
 
-# The layering constraint: harness must never include backends. C++ cannot
-# enforce this the way Go's import cycles do, so it is checked mechanically.
+# The layering scan: the module map held to the includes in both directions,
+# and the named rules finer than a layer (harness never includes backends).
 add_test(NAME harness.layering
     COMMAND "${CMAKE_COMMAND}"
         -DAPOGEE_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -DAPOGEE_MODULE_MAP=${CMAKE_SOURCE_DIR}/cmake/modules.cmake
         -P "${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake"
 )
 

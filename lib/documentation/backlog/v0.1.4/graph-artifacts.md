@@ -20,12 +20,10 @@
 **Decisions made** (dated):
 - 2026-09-30 — Split from the v0.1.7 code-graph work, third in build order: the artifacts are designed against [27l](graph-navigation.md)'s payloads and shine brightest once [27k](code-graph-extraction.md)'s code nodes and origin tags exist.
 - 2026-09-30 — Self-contained HTML as a hard rule, not a preference: an artifact that phones a CDN is a privacy leak and a future 404; one that needs a server contradicts the invariant that only `serve` owns a port.
-
-**Open calls:**
-- [default: the HTML's force layout is a small hand-rolled simulation or a vendored single-file MIT library pinned under `third_party/` — decided at build by what stays under ~200KB inline; no CDN either way] The layout engine.
-- [default: hub rank = degree with per-relation weighting left out of the first cut; the report labels the metric it used] What makes a god node.
-- [default: HTML node cap 2,000 by degree rank, cap printed in the artifact; report top-10 hubs, top-10 orphans sampled] The bounds.
-- [default: `--out` defaults to `graph.html` / `graph-report.md` / `graph.graphml` / `graph.mmd` in the working directory; nothing is written into the data directory] Where artifacts land.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the layout is hand-rolled or a pinned single-file MIT library — whichever stays under ~200KB inline; never a CDN.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): hub rank is plain degree in the first cut; the report labels its metric.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): HTML caps at 2,000 nodes by degree rank, the cap printed; report shows top-10 hubs and sampled top-10 orphans.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): artifacts land in the working directory under the default names; nothing writes into the data directory.
 
 **Guardrail(s).**
 - The HTML artifact: zero external references (mechanically grepped), renders its embedded data block, and carries its cap note — asserted on the fixture graph and on an over-cap synthetic graph.

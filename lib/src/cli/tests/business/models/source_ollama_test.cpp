@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
 #include <system_error>
 
@@ -28,8 +29,9 @@ using apogee::models::parse_manifest;
 using apogee::models::split_ref;
 
 struct Store {
-    std::filesystem::path root =
-        std::filesystem::temp_directory_path() / ("apogee-ollama-" + std::to_string(counter()));
+    std::filesystem::path root = std::filesystem::temp_directory_path() /
+                                 ("apogee-ollama-" + std::to_string(std::random_device{}()) + "-" +
+                                  std::to_string(counter()));
 
     Store() {
         std::error_code code;

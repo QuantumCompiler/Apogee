@@ -12,12 +12,12 @@
 #include "agent/tool.h"
 #include "agentloop/reporter.h"
 #include "agentloop/tool_selection.h"
-#include "cli/helpers.h"
 #include "contracts/cancellation.h"
 #include "contracts/config.h"
 #include "harness/harness.h"
 #include "httpserver/http_types.h"
 #include "httpserver/session.h"
+#include "operations/retrieval.h"
 
 /// The OpenAI-compatible inference plane, one handler per route.
 ///

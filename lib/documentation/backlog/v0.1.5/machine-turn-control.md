@@ -21,11 +21,9 @@
 **Decisions made** (dated):
 - 2026-09-25 — Split from the integration spike (item 27), walls W3 and W4.
 - 2026-09-25 — Cancel targets **the in-flight turn**, not a turn id: turns serialize in v1, so `cancel` carrying an id would imply pipelining the protocol does not have. The `turn` field is for *attribution* (logs, races, accounting), and leaves room for an id-addressed cancel if turns ever pipeline.
-
-**Open calls:**
-- [default: `finish_reason: "cancelled"` on the closing `result`, with `text` carrying whatever answer streamed before the abort] What the cancelled `result` says.
-- [default: `turn` starts at 1 and also appears on `session` as the *next* turn's number, so a resuming host knows where the count stands] Numbering.
-- [default: a `cancel` that lands while a `question` is outstanding fails that turn exactly as closing stdin does today — the documented semantics, reached without ending the session] Cancel versus a blocking question.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the cancelled turn's `result` carries `finish_reason: "cancelled"` with the partial text streamed before the abort.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): turns are 1-based; `session` carries the next turn's number for resuming hosts.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): cancel during an outstanding question fails the turn exactly as closing stdin does — the documented semantics, without ending the session.
 
 **Guardrail(s).**
 - E2e: a slow scripted turn (`delay_ms`) is cancelled mid-stream — one `result` with the cancellation reason, the half-turn absent from the persisted session, the *next* turn answered by the same child.

@@ -15,7 +15,7 @@
 - `graph/build.h/.cpp` (27k's) — a build entry over an injected file list (the source-root build parameterized by explicit files), shared verbatim with `graph build --source`.
 - `agentloop/attachments.h/.cpp` — the supported-language test over `FoundFiles` (by extension against 27k's grammar set), pure and table-tested.
 - Tests: `tests/presentation/commands/` chat-attachment tests over the fixture mini-repo 27k commits; the byte-equivalence check against a direct build; the cancel case.
-- Consumes: [27k](code-graph-extraction.md) (the extractor, the language set — its `[user]` call is **not reopened here**: whatever grammars 27k vendors are what attachments parse); 26d (shipped: the walk, the worker, the store).
+- Consumes: [27k](code-graph-extraction.md) (the extractor, and the language set — answered 2026-10-03, the broad set from day one: whatever grammars 27k vendors are what attachments parse); 26d (shipped: the walk, the worker, the store).
 
 **Reference (Ommi).** No analog: Ommi has neither chat attachments nor code-AST extraction (both recorded already — 26d and [27k](code-graph-extraction.md)). External prior art is Graphify's, inherited through 27k.
 
@@ -24,10 +24,8 @@
 - 2026-10-03 — **Default on, with a notice** (the user delegated the spike's call; recorded as the default, vetoable): a folder attach with supported languages builds its graph automatically — it is seconds, free and model-free; [27p](attachment-options.md) adds the off switch and the config default.
 - 2026-10-03 — **Per-chat, no cross-chat graph copying** (the delegated lifetime call): the chunk hash-cache copies embeddings across chats because embedding costs a model; the graph costs seconds of deterministic parse, so rebuilding beats a copy mechanism's complexity. The graph lives and dies with the chat's index.
 - 2026-10-03 — `complete`'s one-shot temporary store skips the graph build by default: a one-shot turn has no follow-ups to walk the graph in; 27p's flag can force it.
-
-**Open calls:**
-- [default: a re-attach of the same folder into the same chat runs 27k's incremental update over the content hashes — only changed files re-parse] Re-attach behavior.
-- [default: the notice is one line through the existing hook — `graph: N nodes, M edges (supported: cpp, py; skipped: 3 files)` — and `/attachments` repeats it] Surfacing.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): re-attach runs the incremental update over content hashes — only changed files re-parse.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the notice is one hook line — `graph: N nodes, M edges (supported: …; skipped: …)` — repeated by `/attachments`.
 
 **Guardrail(s).**
 - Byte-equivalence: the attachment-built graph over the fixture tree matches `graph build --source` over the same file list exactly (nodes, edges, mentions).

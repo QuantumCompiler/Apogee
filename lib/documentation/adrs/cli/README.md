@@ -18,3 +18,4 @@ The standing rules of the CLI's architecture, each written once, dated, and kept
 | [0004](tests-mirror-architecture.md) | Tests live in the layer of what they test |
 | [0005](install-mode-stability.md) | Changes never alter how Apogee installs or updates |
 | [0006](backwards-compatibility.md) | Older versions keep working |
+| [0007](tab-completion.md) | Tab completion is answered by the binary, from live state |

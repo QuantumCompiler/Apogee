@@ -11,7 +11,6 @@
 
 #include "cli/config_cmd.h"
 #include "cli/embed.h"
-#include "cli/knowledge_core.h"
 #include "contracts/assets.h"
 #include "contracts/cancellation.h"
 #include "contracts/layout.h"
@@ -20,6 +19,7 @@
 #include "logger/session.h"
 #include "models/source_ollama.h"
 #include "modelstore/store.h"
+#include "operations/knowledge_core.h"
 #include "platform/child_process.h"
 #include "tools/toolsets.h"
 #include "training/datasets.h"

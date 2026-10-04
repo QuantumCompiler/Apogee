@@ -21,11 +21,9 @@
 **Decisions made** (dated):
 - 2026-10-03 — Split from the provider-detection spike as the surfacing half; gated on 28a only, parallel to [provider-registration.md](provider-registration.md) — the doctor should tell the truth even for hand-registered backends on a machine that never runs a scan.
 - 2026-10-03 — Verification is passive (the spike's recommendation, the user not objecting): the record is written when the user's own turn succeeds, and no `--verify` probe-turn exists in this item; if one is ever wanted it is a new, explicitly opt-in flag.
-
-**Open calls:**
-- [default: the verified record keeps one entry per provider — last success date and the backend name that earned it; no history] Record shape.
-- [default: `check`'s Providers section appears only when at least one provider backend is configured or detected; a pure-local install sees no new section] Visibility.
-- [default: llamacpp/mock rows are untouched — their STATE/VERIFIED semantics already exist and this item adds no second meaning to them] Scope of the cells.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): one verified entry per provider — last success date and the earning backend; no history.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the Providers section appears only with a provider configured or detected; pure-local installs see nothing new.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): llamacpp/mock rows keep their existing STATE/VERIFIED semantics — no second meaning added.
 
 **Guardrail(s).**
 - The inverted spike probe as a pinned test: a configured `claude-cli` backend with no binary on PATH makes `check` **warn** with the remediation text — never `ok`.

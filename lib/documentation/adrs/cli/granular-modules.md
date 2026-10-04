@@ -13,7 +13,7 @@ The architecture spike's six violating edge-types traced to concerns sharing a p
 - A package owns a single responsibility, nameable in a phrase; the directory name is that phrase.
 - A package that accretes a second concern **splits** — the split is ordinary maintenance, not an architecture event, because renames are cheap and reviewable (A2's 433-rename precedent: include lines unchanged, pure moves).
 - New capability generally means a **new module**, not a bigger one; extending a module is for extending *its* concern.
-- Module boundaries are link-visible: one static library per module ([A4](../../backlog/architecture/arch-build-enforcement.md)), so a dependency is a declared edge, never an accident of a shared target.
+- Module boundaries are link-visible: one static library per module ([A4](../../assistant/MILESTONES.md#milestone-aa--the-four-layers)), so a dependency is a declared edge, never an accident of a shared target.
 
 ## Consequences
 

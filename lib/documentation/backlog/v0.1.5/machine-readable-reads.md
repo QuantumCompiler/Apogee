@@ -20,16 +20,14 @@
 **Decisions made** (dated):
 - 2026-09-25 — Split from the integration spike (item 27), wall W7.
 - 2026-09-25 — Scope chosen by what a host UI needs to *render*, not every command: models, chats, agents, mcp, check. Others join by the same pattern when a host demonstrates the need.
-
-**Open calls:**
-- [default: `--output-format json` (matching machine mode's flag vocabulary) rather than a bare `--json`] Flag spelling.
-- [default: `check` emits `{rows:[{name,status,detail}...], ok:bool}` with `skipped` a first-class status — a lie-shaped pass stays impossible in JSON too] The doctor's document.
-- [default: one JSON document per invocation, not JSONL — these are reads, not streams] Framing.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the flag is `--output-format json`, matching machine mode's vocabulary.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `check` emits {rows:[{name,status,detail}…], ok} with `skipped` first-class — no lie-shaped pass in JSON either.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): one JSON document per invocation — reads, not streams; JSONL stays machine mode's.
 
 **Guardrail(s).**
 - Golden documents per command over a seeded sandbox install; mutation-tested where the repo's convention applies.
 - The row-parity assertion: human and JSON renderings of one listing disagree → the test names the command.
-- The secrets leak test extended over every new document (the distinctive-key sweep already in `tests/data/secrets/leak_test.cpp`'s pattern).
+- The secrets leak test extended over every new document (the distinctive-key sweep already in `tests/presentation/cli/leak_test.cpp`'s pattern).
 - `check --output-format json` exit code matches the human run's on the same install, healthy and broken.
 
 **Acceptance criteria:**

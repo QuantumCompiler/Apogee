@@ -22,12 +22,10 @@
 **Decisions made** (dated):
 - 2026-09-30 — Split from the v0.1.7 code-graph work: navigation is useful over the *existing* prose graphs on its own, so it does not gate on [27k](code-graph-extraction.md) — it only gets better when code nodes arrive.
 - 2026-09-30 — The toolset route to MCP rather than new server code: `__mcp-tools` already serves read-only toolsets to any client; building a second graph-specific server would duplicate a shipped mechanism.
-
-**Open calls:**
-- [default: `path` is undirected with direction shown per hop (callers and callees both connect things); `--directed` for the strict case] Path semantics.
-- [default: caps — 8 hops, 12 neighbors per relation in `explain`, the existing expansion budget for `query`; each overridable by flag, never unbounded] The bounds.
-- [default: node naming accepts `name`, `kind:name`, and for code nodes `path:line` — the mention table already holds what's needed to resolve all three] Addressing.
-- [default: `query`'s entity matching resolves lexically (exact, then FTS over names) when no embedder is configured, so the track's model-free guarantee ([27k](code-graph-extraction.md)) holds through navigation; an embedder, when present, only improves recall] The no-model path through `query`.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `path` is undirected with per-hop direction shown; `--directed` for the strict case.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): caps — 8 hops, 12 neighbors per relation, the existing expansion budget for `query`; flag-overridable, never unbounded.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): addressing accepts `name`, `kind:name`, and `path:line` for code nodes — all resolvable from the mention table.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): with no embedder, `query` matches lexically (exact, then FTS over names) — the model-free guarantee holds through navigation.
 
 **Guardrail(s).**
 - The traversal table tests: disconnected nodes, self-paths, cap enforcement, ambiguous names listing candidates — all against a committed fixture graph, no model, no network.

@@ -22,12 +22,10 @@
 - 2026-09-25 — Asked for by the user, targeted **v0.1.6**: the user states the goal; the application composes and drives every turn after it.
 - 2026-09-25 — In-binary, with a ledger (the spike's two findings above); the CLI is the contract, and [27j](task-surfaces.md) carries it to the other surfaces.
 - 2026-09-25 — **Plan-first as an ordinary turn**, not a mode: the plan is the first application-composed turn's answer, recorded in the ledger and quoted into later turns — so the whole task is readable in its session transcript afterwards.
-
-**Open calls:**
-- [default: first-cut acceptance = checks stated on the command line — `--require "<text>"` (answer must contain) and `--require-file <path>` (must exist), repeatable — plus the model's own done/not-done self-report; a judge-model check joins later under the never-fail contract] What "done" means mechanically.
-- [default: 8 rounds; token spend recorded per round but not enforced in the first cut; no wall-clock cap] Budget defaults.
-- [default: the breaker trips after two consecutive rounds with no check newly passing and no new tool activity — the "spinning" signature] When no-progress ends a task.
-- [default: `task cancel` on a live task = the lock holder finishes its in-flight turn via the loop's cancellation and records `cancelled`; `resume` on a cancelled task is allowed] Cancel semantics.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): first-cut acceptance is `--require`/`--require-file` (repeatable) plus the model's done/not-done self-report; a judge-model check joins later under the never-fail contract.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): 8 rounds; tokens recorded per round, unenforced in the first cut; no wall-clock cap.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the breaker trips after two consecutive rounds with no newly-passing check and no new tool activity.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `task cancel` lets the lock holder finish its in-flight turn via the loop's cancellation and records `cancelled`; `resume` on a cancelled task is allowed.
 
 **Guardrail(s).**
 - The scripted-mock e2e asserts the full cycle and the ledger's transition sequence, including the corrective round.

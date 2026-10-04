@@ -24,11 +24,9 @@
 - 2026-10-03 — Split from the provider-detection spike; gated on 28a because offers without detection are guesses.
 - 2026-10-03 — Both surfaces, explicit command and one-time offer (the spike's recommendation, the user not objecting): the command is the contract, the offer is the first-run courtesy — and the offer is interactive-only because a pipe cannot consent.
 - 2026-10-03 — One entry per provider, not a model catalog: no CLI can enumerate its models offline, and a catalog would be a guess with a shelf life. The entry omits `model:` where the provider CLI supplies its own default; richer model setup stays the user's `config` work.
-
-**Open calls:**
-- [default: entry names are the provider's short name (`claude`, `codex`, `gemini`, `ollama`, `anthropic`, `openai`, `google`); a taken name is skipped and said, never suffixed] Naming.
-- [default: API-type providers are offered only when their key already resolves (tier ≥ credentials-present); CLI types when installed — a CLI present but without credential evidence is offered with its tier said, since its own first run handles login] What qualifies.
-- [default: the asked-once marker lives in `cache/providers.json`; deleting the cache forgets the decline, which is acceptable for disposable state] The marker.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): entries take the provider's short name; a taken name is skipped and said, never suffixed.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): API types offered only at tier ≥ credentials-present; CLI types when installed, their tier said — a CLI's own first run handles login.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the asked-once marker lives in the provider cache; deleting it forgets the decline — acceptable for disposable state.
 
 **Guardrail(s).**
 - Config byte-identity on every no path: scan without `--register`, offer declined, pipe/machine/serve/quiet, nothing detected.

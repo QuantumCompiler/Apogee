@@ -11,8 +11,6 @@
 #include "agentloop/embed_func.h"
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
-#include "cli/embed.h"
-#include "cli/knowledge_core.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "httpserver/handler.h"
@@ -22,6 +20,8 @@
 #include "knowledge/record.h"
 #include "knowledge/refine.h"
 #include "knowledge/store.h"
+#include "operations/collections.h"
+#include "operations/knowledge_core.h"
 
 namespace apogee::httpserver {
 namespace {

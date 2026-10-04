@@ -9,7 +9,6 @@
 
 #include "backends/anthropic_wire.h"
 #include "contracts/errors.h"
-#include "harness/harness.h"
 #include "support/fake_transport.h"
 
 using apogee::backends::AnthropicProvider;
@@ -667,24 +666,6 @@ TEST_CASE("stop reasons map onto the IR", "[backends][anthropic][wire]") {
     CHECK(finish_reason_from_stop_reason("tool_use") == FinishReason::ToolCalls);
     CHECK(finish_reason_from_stop_reason("refusal") == FinishReason::ContentFilter);
     CHECK(finish_reason_from_stop_reason("something_new") == FinishReason::Other);
-}
-
-TEST_CASE("the provider satisfies the LLMProvider interface via the harness",
-          "[backends][anthropic]") {
-    // It must be routable and usable through the Harness like any other
-    // provider -- that is the whole point of the interface.
-    Fixture f = make_provider({FakeTransport::Reply{
-        200, R"({"model":"m","stop_reason":"end_turn","content":[{"type":"text","text":"hi"}]})", 0,
-        false, "", std::nullopt, std::nullopt}});
-    apogee::harness::Harness registry{apogee::harness::Config{}};
-    registry.register_provider("claude", std::move(f.provider));
-    registry.use_default_router();
-
-    ChatRequest routed = chat_request();
-    routed.model = "claude";
-    const auto response = registry.chat(routed);
-    CHECK_FALSE(response.message.content.plain_text().empty());
-    CHECK_FALSE(registry.can_embed("claude"));
 }
 
 // ---------------------------------------------------------------------------

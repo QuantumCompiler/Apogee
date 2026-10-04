@@ -1349,7 +1349,7 @@ Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the
   - [DEVELOPER.md → Changing the pipeline](DEVELOPER.md#changing-the-pipeline) has the full list: the required checks re-applied before the merge, `pr-ci.sh` mirrored, the two matrices kept as one list, the job and artifact names `release-from-pr.sh` reads, no job-level `if:` on a required matrix job, `changed.sh` for new CLI inputs, and when `required-checks.py` itself must change.
   - The short version is at the top of `ci.yml`.
   - A checklist item is in CLAUDE.md → Implementing a Feature.
-  - The `apogee-backlog-execute-item` (then `apogee-backlog-item`), `apogee-maintenance-update-documents` (then `apogee-document-update`) and `apogee-maintenance-summarize-pull-request` (then `apogee-pull-request`) skills each carry it. The docs pass runs the dry run; the PR description gains a **Before merging** section.
+  - The `apogee-cli-backlog-execute-item` (then `apogee-backlog-item`), `apogee-cli-maintenance-update-documents` (then `apogee-document-update`) and `apogee-cli-maintenance-summarize-pull-request` (then `apogee-pull-request`) skills each carry it. The docs pass runs the dry run; the PR description gains a **Before merging** section.
   - The script's header lists its own assumptions.
   - `--apply` is always the user's to run: it changes repository settings.
 
@@ -3902,3 +3902,110 @@ The prefill, which lives only in the llama build, was checked on real weights in
 - `--help` output for 25 commands is byte-identical to a binary built before the split (the installed one, from A1's commit).
 - The diff is 116 renames: 11 exact, 105 differing only in include lines and comments.
 - `make format-check` passes over the whole tree.
+
+### 2026-10-03 — `arch-build-enforcement` (architecture item A4): the build holds the layers
+
+**Why.** After A1–A3 every package sat in its layer, but the law was a test's: `harness.layering` grepped the includes after the fact, and `apogee_core` -- one static library of everything -- let any file include any other and still link. In Go the reverse edge is an import cycle and the build fails; this item buys that back with the linker. The user's calls: **dual enforcement** (the link graph for the coarse law, the scan for the rules finer than a layer), and **the build in the ADRs' layer order**, expecting it to build faster -- an expectation measured below, not assumed.
+
+**What was built**
+
+- [x] **The module map, `cmake/modules.cmake`** -- every module's layer and the modules it links, 28 modules and 109 links, read by the build and the layering test alike. Plain `set()` data, so `cmake -P` reads it exactly as the configure does.
+- [x] **One static library per module**, `apogee_<layer>_<module>`, made by `apogee_add_module` (`source/CMakeLists.txt`) from its layer's `CMakeLists.txt`, which names only its sources and third-party code. Its links are the map's row, never the caller's.
+  - A module's PUBLIC include root is its own layer directory, so it sees its layer and what its links bring up from below. **An include that reaches up a layer does not compile.**
+  - Third-party code sits on the module that uses it: CLI11 on `cli/`, curl on `transport/`, httplib on `httpserver/`, replxx on `views/`, the schema validator on `agentloop/`, yaml-cpp on `contracts/` and `training/`, SQLite on `embedstore/`, llama.cpp on `backends/` and `models/` (with `apogee_llama_chat`, linked PRIVATE into `backends/`).
+  - **The version stamp sits on `version/` alone**, and `APOGEE_ENABLE_LLAMA` on the two modules that test it. Both used to sit on all of `apogee_core`.
+- [x] **The build in layer order.** `source/CMakeLists.txt` adds `infrastructure/`, `data/`, `business/`, `presentation/` in that order, ADR 0001's. Each layer is an INTERFACE target, `apogee_<layer>`, buildable alone: its one source, the layer's `CMakeLists.txt`, is never compiled; it is what makes CMake build an INTERFACE target. `apogee_core` is an INTERFACE over the four, the one name the executable and the cross-cutting suites link.
+- [x] **The link policy walks the graph** (`cmake/ApogeeLinkPolicy.cmake`), failing the configure step by name on:
+  - a module linking anything its row does not name, or missing a link it names (a `target_link_libraries` added by hand fails);
+  - a link up a layer;
+  - a cycle, even inside a layer (CMake itself allows cycles between static libraries);
+  - a module compiling a source outside its own directory;
+  - a layer's test library linking above its layer.
+  - "Nothing links `apogee`" stands as before.
+- [x] **`harness.layering` rescoped** (`tests/layering.cmake`), reading the map from `cmake/modules.cmake`:
+  - The directory ↔ map checks stand.
+  - **The coarse upward scan retired** in favor of **the map's mutation check**: the includes held to the map in both directions. An include of another module the row does not link fails, and so does a declared link nothing includes. The build sees a layer, not a module -- one include root per layer -- so an undeclared edge *inside* a layer, or downward, compiles; this is where it is caught.
+  - **The named rules stand verbatim**: the guarded packages never include `backends/`; `events/` a leaf; the floors of `contracts/`, `modelstore/`, `transport/` and `secrets/`; `markdown/` only `ansi/`; the `knowledge/`, `graph/` and `training/` allow-lists, the framer by name; `views/` and `machine/`. Each still fails with the map loosened to allow its violation.
+- [x] **`operations/`, a new Presentation module** -- the refactor the graph needed, on the user's word mid-build. The measured graph had a cycle: `cli/serve_cmd` includes `httpserver/`, and `httpserver/` included `cli/` for seven helpers both surfaces run. Moved there verbatim:
+  - `run_settings` -- the temperature, token cap and system prompt a run resolves;
+  - `retrieval` -- the one retrieval choice, its status-line sentences, `retrieve_for_collection`;
+  - `backend_names` -- the helper and utility backends, and an explicit model mapped to its entry;
+  - `collections` -- a collection's path and the names on disk;
+  - `knowledge_core` -- the capture core, `git mv`'d;
+  - `graph_members` -- a named graph's members and their validation;
+  - `dataset_core` -- session loading, `create_dataset`, the teacher.
+
+  `cli/`'s headers include them, so no command changed a line. The graph is acyclic: 28 modules, 109 edges.
+- [x] **Tests compile per layer, run as one** (ADR 0004).
+  - Four OBJECT libraries, `apogee_tests_<layer>`, each link their layer's aggregate and those below, so **a test that includes a header from above its layer does not compile**. All four link into the one `apogee_tests`, so test names, `catch_discover_tests` and `cicd.sh --unit-tests` are untouched.
+  - The three root suites (smoke, packages, bundled agents) compile in the executable against `apogee_core`. A support file sits with the lowest layer whose headers it includes.
+  - Eight test files reached up a layer and were re-homed to the highest layer they touch:
+    - the Harness-driven provider cases into `tests/business/harness/` (`provider_capability_test`, `factory_harness_test`, `llamacpp_harness_test`, 14 cases, moved verbatim);
+    - the `auto_rag` choice case into `tests/presentation/operations/retrieval_test.cpp`;
+    - `leak_test` into `tests/presentation/cli/`;
+    - the `ffmpeg` fakes split out of `support/media_fakes.h` into `support/fake_ffmpeg.h`, for the platform suite.
+
+    Every test name kept; the 2,009 cases all still run.
+- [x] **Two test hazards, fixed in passing.**
+  - **Shared scratch directories.** Seven suites (`embedstore/` ×4, `business/models/` ×2, `presentation/cli/models_test`) named their scratch directories by a per-process counter, so parallel ctest processes shared them. The re-homed tests reshuffled the schedule enough to show it: 27 failures under `-j8`, every one green alone. Each now draws a random name beside the counter, the fix `rag_test` already carried.
+  - **A test that deleted the developer's completions.** `plan_uninstall` finds the shell completions under the real home directory, and `lifecycle_test`'s uninstall cases planned against it. One of them ran `execute_uninstall`, deleting whatever `make install` had put there, and "an already-removed install plans nothing" failed whenever they were present. Each uninstall case now plans against a home of its own (`HOME`/`USERPROFILE` guarded), and a new case pins the lookup. The suite is 2,010.
+
+**The timings** -- measured on the dev host (Apple silicon, Ninja, `-j8`, RelWithDebInfo), the pre-A4 tree (`e11efcc`) against this one, each in a fresh worktree and build directory, with no other build running. Llama-on with ccache off: llama.cpp turns ccache on for the whole build, ours included, so a `touch` there is a cache hit -- those runs used real content edits instead, cold, and llama.cpp itself was built first, untimed.
+
+| Change | Llama off: before → after | Llama on: before → after |
+|---|---|---|
+| Clean build | 118.0 s → 113.3 s (553 → 563 units) | 113.9 s → 118.4 s (Apogee's own code) |
+| One `.cpp`, Infrastructure (`ansi/text_width.cpp`) | 1.9 s → 1.3 s | 2.0 s → 1.5 s |
+| One `.cpp`, Data (`backends/anthropic.cpp`) | 4.0 s → 3.5 s | 4.1 s → 3.6 s |
+| One `.cpp`, Business (`agentloop/loop.cpp`) | 3.8 s → 3.2 s | 4.0 s → 3.4 s |
+| One `.cpp`, Presentation (`views/status_line.cpp`) | 2.2 s → 1.6 s | 2.3 s → 1.8 s |
+| A Data floor header (`contracts/types.h`) | 62 s, 183 units → 62 s, 190 units | 62.5 s → 65 s |
+| A new commit (the configure-time stamp changes) | **55.3 s, 211 units → 1.5 s, 1 unit** | **57.6 s, 214 units → 2.8 s, 4 units** |
+
+What the numbers say, plainly:
+- **The user's expectation holds for the edit loop.** Every one-file edit, in every layer, is 0.5-0.6 s faster: the step that shrank is the archive -- one module's, not all of `apogee_core`'s 200-odd objects.
+- **Every `make` after a commit is the largest win.** It reconfigures, and the version stamp used to sit on all of `apogee_core`, so a new commit recompiled the whole core. It now recompiles `version.cpp`.
+- **A view edit recompiles one file and relinks** (1 unit, 3 links), with `backends/` untouched. That was already true: what recompiles follows the includes, and no library layout changes it -- which is also why a `contracts/types.h` edit costs the same, the Data floor being included nearly everywhere.
+- **Clean builds are a wash**, within the run-to-run noise: -4% with llama off, +4% with it on, for 27 more archives.
+- The layer order shows in the build's structure -- each layer buildable alone (below) -- more than in a parallel build's clock, as the item predicted.
+
+**Proving it bites** -- twenty planted violations in a scratch worktree, twenty caught, each naming the target or file and the rule; each restored, and the unplanted tree passing.
+- **Compile time:** an include up a layer at each boundary fails with the header not found -- Data→Business (`logger/session.cpp` → `harness/`), Business→Presentation (`harness/harness.cpp` → `cli/`), Infrastructure→Data (`ansi/ansi.cpp` → `contracts/`) -- and so does a Data test including the Harness.
+- **Configure time:** the link policy names each of these:
+  - a link up a layer in the map (`contracts → harness`);
+  - a cycle (`agentloop ↔ knowledge`, named as exactly those two);
+  - a `target_link_libraries` added by hand;
+  - a source compiled into the wrong module;
+  - a Data test library linking Business;
+  - a mapped module that no layer builds.
+- **The scan:**
+  - a declared link deleted inside a layer (`knowledge` without `harness`, which still compiles);
+  - a link nothing includes;
+  - a package with no row;
+  - a row disagreeing with its directory;
+  - **each named rule with the map loosened to permit its violation**: the harness including a backend, `markdown/` including a view, `events/` including the platform, a view including `cli/`.
+- **The symbol scan:** a `listen()` planted in `transport/` fails `cli.no_listen_symbols`, attributed to `libapogee_data_transport.a(http_client.cpp.o)`. The scan's walk now covers all 28 module archives.
+- **Each layer builds alone, from nothing:**
+  - `--target apogee_infrastructure` builds the four Infrastructure modules;
+  - `apogee_data` builds the seven Data modules plus `platform` and `events` -- not `ansi`, not `version`;
+  - `apogee_business` builds the ten Business modules plus the five Data modules they link -- not `backends`, not `secrets` -- and `platform`, `events`.
+
+**Verified.**
+- **The suite:** `cicd.sh --test` on the llama build (`macos-arm64`) passes all 2,010, the usual one skip; the no-llama build passes too, twice in a row under `-j8`.
+- **Test names:** listed from both binaries, every pre-A4 test name is unchanged; the one difference is the added uninstall case.
+- **A fresh build:** a new worktree holding exactly this tree, with a brand-new build directory, configured (`module graph OK (28 modules, 109 declared links, layered, acyclic)`), built and passed the suite. Its first run surfaced the two test hazards above, both fixed before the rest; the planted violations ran in it.
+- **Checks:** `make format-check` passes, and clang-tidy over every new and changed source shows 0 errors (its warnings are the moved code's, as before the move).
+
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Library kind | STATIC *(default taken)* | Ordinary link semantics; the symbol scan attributes by archive member as before. |
+| Where the map lives | One table, `cmake/modules.cmake`; the per-layer `CMakeLists.txt` name sources only *(default taken)* | Every link greppable in one place, read by both enforcers. |
+| Proving it bites | Planted violations, one per boundary and rule, then removed *(default taken)* | The house pattern. |
+| The frozen graph | Refactored: `operations/` and the re-homed tests -- **the user's call**, mid-build | A module cycle and upward test includes cannot be a link graph. |
+| Include grain | The layer, by construction; the edge inside a layer is the scan's | Per-module include roots would need symlinked shim directories, moving every header out of `source/`, out from under clang-tidy's header filter and the IDE, on Windows too. |
+| Layer aggregates | INTERFACE, with the layer's `CMakeLists.txt` as a never-compiled source | CMake builds an INTERFACE target only when it has sources. |
+| Tests | Per-layer OBJECT libraries in one executable | Compile-time layering for tests, with every name and entry point unchanged. |
+| Compile definitions | Scoped to the module that reads them | The version stamp on all of `apogee_core` recompiled the whole core at the first configure after every commit. |

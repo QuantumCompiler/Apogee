@@ -11,7 +11,7 @@
 
 #include "platform/child_process.h"
 #include "support/env_guard.h"
-#include "support/media_fakes.h"
+#include "support/fake_ffmpeg.h"
 
 using apogee::platform::decode_audio_wav;
 using apogee::platform::extract_frames;

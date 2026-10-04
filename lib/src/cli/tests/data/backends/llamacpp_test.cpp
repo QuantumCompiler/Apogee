@@ -11,10 +11,8 @@
 #include <string>
 #include <vector>
 
-#include "agentloop/content.h"
 #include "backends/llamacpp_tokens.h"
 #include "contracts/errors.h"
-#include "harness/harness.h"
 #include "support/fake_llama.h"
 #include "support/gguf_builder.h"
 
@@ -312,26 +310,6 @@ TEST_CASE("the counting API answers exactly once the model is warm",
     CHECK(fixture.provider->count_prompt_tokens(request) == exact);
 }
 
-TEST_CASE("the harness routes an exact count through its probe",
-          "[backends][llamacpp][usage][harness]") {
-    // No `dynamic_cast` at the call site: the surface asks the Harness a plain
-    // typed question, which is what keeps this from becoming a type switch.
-    Fixture fixture;
-    const ChatRequest request = turn({ChatMessage::user("alpha beta")});
-    (void)fixture.provider->chat(request, {});
-
-    apogee::harness::Harness harness{apogee::harness::Config{}};
-    harness.register_provider("local", std::move(fixture.provider));
-    harness.use_default_router();
-
-    const auto counted = harness.count_prompt_tokens("local", request);
-    REQUIRE(counted.has_value());
-    CHECK(*counted > 0);
-
-    // An unroutable model falls back to the estimate rather than throwing.
-    CHECK_FALSE(harness.count_prompt_tokens("nope", request).has_value());
-}
-
 TEST_CASE("a load failure names the file and does not crash", "[backends][llamacpp][errors]") {
     // "A load failure yields a clear error naming the file, never a crash" --
     // stated in the acceptance criteria because a bad path is the single most
@@ -413,18 +391,6 @@ TEST_CASE("the configured projector reaches the runtime", "[backends][llamacpp][
     (void)provider.chat(turn({ChatMessage::user("hello")}), {});
 
     CHECK(runtime->last_mmproj_path == "/models/mmproj.gguf");
-}
-
-TEST_CASE("an unknown backend is assumed capable", "[backends][llamacpp][capability]") {
-    Fixture fixture;
-    apogee::harness::Harness harness{apogee::harness::Config{}};
-    harness.register_provider("local", std::move(fixture.provider));
-    harness.use_default_router();
-
-    CHECK_FALSE(harness.accepts_images("local"));
-    // Pre-refusing on a backend we cannot ask is the expensive direction of a
-    // wrong guess: it blocks a capability that probably works.
-    CHECK(harness.accepts_images("some-cloud-model"));
 }
 
 TEST_CASE("an idle model unloads and reloads on the next request", "[backends][llamacpp][idle]") {
@@ -1870,37 +1836,6 @@ TEST_CASE("before a load, the window comes from the model file's header",
     std::filesystem::remove(small_file, code);
 }
 
-TEST_CASE("the chat measures against the window the backend allocated",
-          "[backends][llamacpp][window][harness]") {
-    // Context monitoring warns at 80% and compacts at 90% of this number; for
-    // a local model the fallback table has no row, so without the backend's
-    // answer a long chat was never warned or compacted at all.
-    apogee::harness::Config config;
-    apogee::harness::BackendConfig entry;
-    entry.type = apogee::harness::BackendType::LlamaCpp;
-    entry.model_path = "/models/test.gguf";
-    config.backends["local"] = entry;
-    entry.context_size = 4096;
-    config.backends["pinned"] = entry;
-
-    Sized local{262144};
-    // Pinned in the config alone: the entry's context_size is the harness's
-    // to honour, whatever the provider would say.
-    Sized pinned{262144};
-    LlamaCppProvider& loaded = *local.provider;
-    LlamaCppProvider& pinned_provider = *pinned.provider;
-    apogee::harness::Harness harness{config};
-    harness.register_provider("local", std::move(local.provider));
-    harness.register_provider("pinned", std::move(pinned.provider));
-    harness.use_default_router();
-
-    CHECK(harness.context_window_for_model("local") == 0);  // no header, not loaded
-    (void)loaded.chat(turn({ChatMessage::user("alpha")}), {});
-    (void)pinned_provider.chat(turn({ChatMessage::user("alpha")}), {});
-    CHECK(harness.context_window_for_model("local") == 32768);
-    CHECK(harness.context_window_for_model("pinned") == 4096);
-}
-
 TEST_CASE("the verbose cache line states the window and how the cache is kept",
           "[backends][llamacpp][window]") {
     Sized large{262144};
@@ -1952,40 +1887,6 @@ TEST_CASE("an image turn's context is the session's window, not the trained one"
     CHECK_THROWS(large.provider->chat(image, {}));
     REQUIRE_FALSE(large.runtime->model->context_sizes.empty());
     CHECK(large.runtime->model->context_sizes.back() == 32768);
-}
-
-TEST_CASE("a local chat past 90% of its default window is compacted, not run into the wall",
-          "[backends][llamacpp][window][harness]") {
-    // Before 26a a backend with no context_size had no window the chat knew
-    // of -- the table has no local rows -- so it was never warned or
-    // compacted, and a long chat ran into the wall instead.
-    apogee::harness::Config config;
-    apogee::harness::BackendConfig entry;
-    entry.type = apogee::harness::BackendType::LlamaCpp;
-    entry.model_path = "/models/test.gguf";
-    config.backends["local"] = entry;
-
-    Sized small{4096};
-    LlamaCppProvider& provider = *small.provider;
-    apogee::harness::Harness harness{config};
-    harness.register_provider("local", std::move(small.provider));
-    harness.use_default_router();
-    (void)provider.chat(turn({ChatMessage::user("alpha")}), {});
-
-    std::string words;
-    for (int i = 0; i < 3800; ++i) {
-        words += "word ";
-    }
-    const std::vector<ChatMessage> history{ChatMessage::user(words)};
-    const apogee::agentloop::ContextUsage usage =
-        apogee::agentloop::measure_context(harness, history, "local");
-    CHECK(usage.window == 4096);
-    CHECK(usage.exact);
-    CHECK(usage.should_warn());
-    CHECK(usage.should_compact());
-
-    const std::vector<ChatMessage> short_history{ChatMessage::user("alpha beta")};
-    CHECK_FALSE(apogee::agentloop::measure_context(harness, short_history, "local").should_warn());
 }
 
 // --- A model file with no chat template ----------------------------------------
@@ -2143,47 +2044,6 @@ TEST_CASE("a model file with no chat template is said to be a base model, once a
 
 // --- Audio, for the transcription role (26b) -------------------------------
 
-TEST_CASE("a projector with an audio encoder is audio-capable, asked of the harness",
-          "[backends][llamacpp][capability][helpers]") {
-    // From the projector's own header, without a load; and only where this
-    // build can run a local model at all -- as `accepts_images` answers.
-    const auto projector = [](bool vision, bool audio, const std::string& name) {
-        const std::filesystem::path path =
-            std::filesystem::temp_directory_path() / ("apogee-projector-" + name + ".gguf");
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        const std::string bytes = apogee::testing::projector_gguf(vision, audio);
-        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        return path;
-    };
-    const std::filesystem::path hears = projector(false, true, "hears");
-    const std::filesystem::path sees = projector(true, false, "sees");
-
-    const auto provider_with = [](const std::string& mmproj) {
-        LlamaCppProvider::Options options;
-        options.backend_name = "local";
-        options.model_path = "/models/test.gguf";
-        options.mmproj_path = mmproj;
-        return std::make_shared<LlamaCppProvider>(std::move(options),
-                                                  std::make_unique<FakeLlamaRuntime>());
-    };
-
-    apogee::harness::Harness harness{apogee::harness::Config{}};
-    harness.register_provider("ears", provider_with(hears.string()));
-    harness.register_provider("eyes", provider_with(sees.string()));
-    harness.register_provider("plain", provider_with(""));
-    harness.use_default_router();
-
-    CHECK(harness.accepts_audio("ears") == apogee::backends::llama_available());
-    CHECK_FALSE(harness.accepts_audio("eyes"));
-    CHECK_FALSE(harness.accepts_audio("plain"));
-    // Unknown is no -- nothing is sent audio that has not said it reads it.
-    CHECK_FALSE(harness.accepts_audio("nowhere"));
-
-    std::error_code code;
-    std::filesystem::remove(hears, code);
-    std::filesystem::remove(sees, code);
-}
-
 // --- Images, audio and video (26e) ----------------------------------------
 
 namespace {
@@ -2308,44 +2168,4 @@ TEST_CASE("the projector's rate is the model's own, once it is loaded",
     CHECK(fixture.provider->audio_sample_rate() == 0);
     (void)fixture.provider->chat(turn({ChatMessage::user("hello")}), {});
     CHECK(fixture.provider->audio_sample_rate() == 24000);
-}
-
-TEST_CASE("a projector that sees reads a clip as its frames, asked of the harness",
-          "[backends][llamacpp][capability][media]") {
-    const auto projector = [](bool vision, bool audio, const std::string& name) {
-        const std::filesystem::path path =
-            std::filesystem::temp_directory_path() / ("apogee-projector-video-" + name + ".gguf");
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        const std::string bytes = apogee::testing::projector_gguf(vision, audio);
-        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        return path;
-    };
-    const std::filesystem::path sees = projector(true, false, "sees");
-    const std::filesystem::path hears = projector(false, true, "hears");
-    const auto provider_with = [](const std::string& mmproj) {
-        LlamaCppProvider::Options options;
-        options.backend_name = "local";
-        options.model_path = "/models/test.gguf";
-        options.mmproj_path = mmproj;
-        return std::make_shared<LlamaCppProvider>(std::move(options),
-                                                  std::make_unique<FakeLlamaRuntime>());
-    };
-    apogee::harness::Harness harness{apogee::harness::Config{}};
-    harness.register_provider("eyes", provider_with(sees.string()));
-    harness.register_provider("ears", provider_with(hears.string()));
-    harness.register_provider("plain", provider_with(""));
-    harness.use_default_router();
-
-    CHECK(harness.accepts_video("eyes") == apogee::backends::llama_available());
-    CHECK(harness.can_read("eyes", apogee::harness::Medium::Video) ==
-          apogee::backends::llama_available());
-    CHECK_FALSE(harness.accepts_video("ears"));
-    CHECK_FALSE(harness.accepts_video("plain"));
-    CHECK_FALSE(harness.accepts_video("nowhere"));
-    CHECK(harness.can_read("ears", apogee::harness::Medium::Audio) ==
-          apogee::backends::llama_available());
-
-    std::error_code code;
-    std::filesystem::remove(sees, code);
-    std::filesystem::remove(hears, code);
 }

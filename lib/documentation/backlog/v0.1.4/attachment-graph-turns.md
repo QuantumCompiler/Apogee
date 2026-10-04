@@ -24,10 +24,8 @@
 **Decisions made** (dated):
 - 2026-10-03 — Split from the attachment-representation spike as the payoff item: the spike's central design judgment — the stress test failed on *passive injection*, so the graph's value must arrive through tools the model calls — is this item's shape. Expansion rides along because the plumbing is one seam away, but the toolset is the point.
 - 2026-10-03 — Scoping is per-chat state, not config, so the one-decision rule (`resolve_turn_graph`) stays about collections and named graphs with no third precedence case.
-
-**Open calls:**
-- [default: when a chat has both an attachment graph and a collection graph on the same turn, the attachment turn's expansion uses the attachment graph and the `auto_rag` collection turn keeps its own — two sections at most, each under its own budget, never merged] Coexistence.
-- [default: the scoped tools carry the attachment root in their descriptions ("the user's attached folder `<name>`"), so selection (26g) can rank them against the question] Tool descriptions.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): attachment turns expand through the attachment graph, `auto_rag` turns through their own — two sections at most, own budgets, never merged.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): scoped tool descriptions carry the attachment root so 26g ranks them against the question.
 
 **Guardrail(s).**
 - The attachment-turn expansion tables: seeded from excerpt hits, budget enforcement, lexical-only traversal, empty-graph turns identical to today's.

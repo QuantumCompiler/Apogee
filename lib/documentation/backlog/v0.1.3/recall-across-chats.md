@@ -26,12 +26,10 @@ A small model has no memory beyond its window. This gives it the user's history 
 **Decisions made:**
 - 2026-09-25 — Asked for by the user ("Memory across chats").
 - 2026-09-25 — After [26b](../../assistant/MILESTONES.md#milestone-n--model-operations) (the summariser) and [26c](../../assistant/MILESTONES.md#milestone-f--the-shared-agent-loop) (the share it injects within).
-
-**Open calls:**
-- [default: on in `chat`, off in `complete` and in agents] A one-shot or an agent's run should be reproducible from its inputs; a conversation benefits from memory.
-- [default: summaries of chats with at least two turns] A single question rarely establishes anything worth recalling.
-- [default: at most 3 recalled items per turn, within the budget's retrieval share] Recall supports the question; it must not crowd it.
-- [default: summaries are regenerated when a chat is resumed and continued] The summary describes the chat as it now stands.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): recall is on in `chat`, off in `complete` and agents — one-shots and agent runs stay reproducible from their inputs.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): only chats with at least two turns are summarised — a single question rarely establishes anything worth recalling.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): at most 3 recalled items per turn, inside the retrieval share — recall supports the question, never crowds it.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): a resumed-and-continued chat's summary regenerates — it describes the chat as it now stands.
 
 **Guardrail(s).**
 - `serve` never recalls (a structural test, not a config test).

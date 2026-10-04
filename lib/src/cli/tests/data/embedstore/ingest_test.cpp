@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <random>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -22,8 +23,12 @@ using apogee::embedstore::looks_binary;
 using apogee::embedstore::Store;
 
 struct Tree {
-    std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / ("apogee-ingest-" + std::to_string(counter()));
+    // A random draw beside the counter: ctest runs cases as parallel
+    // processes, and a per-process counter alone names the same directory in
+    // several of them at once.
+    std::filesystem::path dir = std::filesystem::temp_directory_path() /
+                                ("apogee-ingest-" + std::to_string(std::random_device{}()) + "-" +
+                                 std::to_string(counter()));
 
     Tree() {
         std::error_code code;

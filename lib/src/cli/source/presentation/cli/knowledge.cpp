@@ -18,7 +18,6 @@
 #include "backends/factory.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
-#include "cli/knowledge_core.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
@@ -31,6 +30,7 @@
 #include "knowledge/record.h"
 #include "knowledge/store.h"
 #include "logger/session.h"
+#include "operations/knowledge_core.h"
 
 namespace apogee::commands {
 namespace {

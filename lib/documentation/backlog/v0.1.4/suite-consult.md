@@ -22,11 +22,9 @@
 **Decisions made** (dated):
 - 2026-10-03 — Split from the suites spike; the spike's inventory (nineteen tools, none model-reaching) is the wall this closes. Placed in v0.1.8 with its track, gated on the suite unit only — not on MLX.
 - 2026-10-03 — Delegation is a *tool*, not a protocol: it rides the shipped tool loop, selection, permissions model and machine-mode surface, so every backend that can use tools can consult, and nothing new crosses the wire.
-
-**Open calls:**
-- [default: caps — 4 consults per turn, 1,024-token briefs, 512-token answers; named constants, veto by config] The budget.
-- [default: the answer returns as plain text; a structured-output consult (26f grammars on the member) is a natural follow-up, not this item] Answer shape.
-- [default: `complete` and machine mode get the tool under the same registration rule; the task runner (27h) inherits it like any tool when that lands] Surfaces.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): caps are 4 consults/turn, 1,024-token briefs, 512-token answers — named constants, config-adjustable.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): consult answers are plain text; grammar-held structured consults are a follow-up item.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `complete` and machine mode register the tool by the same rule; the task runner inherits it like any tool.
 
 **Guardrail(s).**
 - The isolation pin: the member's wire-recorded request equals the brief — no history, no system creep — mutation-tested.

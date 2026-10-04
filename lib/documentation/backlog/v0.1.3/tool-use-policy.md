@@ -21,11 +21,9 @@
 - 2026-10-03 — Asked for by the user from the live transcript; **end of v0.1.3**, lettered **26p** per the release-prefix rule.
 - 2026-10-03 — **Prompt-side policy over behavioral heuristics:** no refusal-detection, no automatic re-prompting, no second model call judging the first — those treat the symptom per conversation at inference cost; the note and descriptions treat the cause once. The deep fix for local models remains the tool-use training kits (the re-authoring noted on 25b), unchanged by this item.
 - 2026-10-03 — **The per-family nudge is named but not built:** Milestone P's profile registry is where a family-specific line would go if some family ignores the generic paragraph — deferred until a family demonstrates the need, so the item ships no speculative plumbing.
-
-**Open calls:**
-- [default: the policy wording above, refined against live runs during the build — taste, veto freely; the goldens pin whatever lands] The paragraph's final text.
-- [default: first-pass description rewrites are `web_search` and `fetch_url` only; fs/shell/git descriptions join only if live runs show missed reaches for them] The description set.
-- [default: the policy names categories (current events, weather, prices) rather than enumerating tools by name, so MCP tools and future toolsets benefit without edits] Categories versus tool names.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the drafted policy wording stands, refined against live runs during the build; the goldens pin what lands.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): first-pass rewrites are `web_search` and `fetch_url` only; fs/shell/git join only if live runs show missed reaches.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the paragraph names capability categories, not tool names — MCP tools and future toolsets benefit without edits.
 
 **Guardrail(s).**
 - Note goldens per registry composition, including the no-network-tools case where the policy paragraph is absent and the date/OS/folder note stands alone.

@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "agentloop/graph_context.h"
-#include "cli/graph.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "operations/graph_members.h"
 
 namespace apogee::httpserver {
 namespace {

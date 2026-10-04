@@ -35,10 +35,8 @@ The GPU was shared with a terminal and a monitor drawing on it (55–83% busy wi
 **Decisions made:**
 - 2026-09-25 — Proposed in the small-models review under "Speed and memory", which the user selected, with measurement first.
 - 2026-09-25 — The first measurement is the table above: indicative, and not enough to build on.
-
-**Open calls:**
-- [default: the threshold is 1.3× on one acceptance model across all three task types] Less than that does not repay the complexity it adds to the generation loop.
-- [default: measure MTP, a Qwen3-0.6B draft for Qwen3-VL-8B, and `ngram-mod`] The three families of method the pin supports that need nothing new downloaded beyond a small draft.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the ship bar is a clean 1.3× on one acceptance model across all three task types — below that, the complexity is not repaid.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the measured methods are MTP, a Qwen3-0.6B draft for Qwen3-VL-8B, and `ngram-mod` — the pin's three families needing nothing new beyond a small draft.
 
 **Guardrail(s)** *(if built)*.
 - Greedy output identical with and without speculation on a fixed prompt set.

@@ -21,12 +21,10 @@
 - 2026-10-03 — Asked for by the user from the live transcript ("very poor performance"), placed in **Maintenance** at their direction.
 - 2026-10-03 — Moved back into the **v0.1.3** tail as **26r** (the user's call, later the same day), re-numbering Maintenance's remaining M5/M6 to **M4**/**M5**.
 - 2026-10-03 — **Framing, not gating:** a refusal or a confirm-to-continue would contradict the recorded open-models principle; the fixes are clean output, honest tool advertisement, and a visible state.
-
-**Open calls:**
-- [default: the session-long indicator is the chat banner line plus the status line's resting state carrying `base model`; answers themselves are never decorated] How the state stays visible.
-- [default: the stop-marker families for template-less replies are the ones the profile registry already knows (ChatML `<|im_*|>`, `<|end|>`-style, `<|eot_*|>`-style); new ones join the registry, not the filter] The marker set's home.
-- [default: machine mode gains nothing here — a driver reading a base model sees today's bytes; the `session` event's existing fields stand] Wire behavior.
-- [default: the warning text gains the one missing sentence — that answers from a base model are continuations and may be confidently wrong] Wording.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the indicator is the banner line plus the status line's resting state carrying `base model`; answers are never decorated.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the marker families live in the profile registry (ChatML `<|im_*|>`, `<|end|>`-style, `<|eot_*|>`-style); new ones join the registry, not the filter.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): machine mode is untouched — a driver sees today's bytes; the `session` event's fields stand.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the warning gains the missing sentence — a base model's answers are continuations and may be confidently wrong.
 
 **Guardrail(s).**
 - The replay fixtures: no `<|` fragment ever reaches the painted screen from a template-less stream, across every chunk split, plain and Markdown-rendered — mutation-tested.

@@ -20,6 +20,8 @@
 #include "httpserver/sse_reporter.h"
 #include "httpserver/sse_writer.h"
 #include "logger/operational.h"
+#include "operations/backend_names.h"
+#include "operations/run_settings.h"
 
 namespace apogee::httpserver {
 namespace {

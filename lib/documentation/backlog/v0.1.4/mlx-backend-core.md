@@ -23,11 +23,9 @@
 - 2026-10-03 — **Child over pipes, not mlx-c in-process:** the C API gives arrays, not a model zoo; reimplementing per-architecture inference in C++ means chasing `mlx-lm`'s zoo forever. The pattern that keeps the invariants is already proven twice in-repo.
 - 2026-10-03 — **llama.cpp stays the default local runtime on every platform.** MLX is additive, opt-in, macos-arm64 only; no existing config changes meaning.
 - 2026-10-03 — **The SPEC amendment is made** (the user's call, same day): the skeleton's "no runtime interpreter dependency on core inference paths" rule revised in [SPEC.md](../../assistant/SPEC.md) → Background with the recommended wording. The track is unblocked; this item builds to that wording.
-
-**Open calls:**
-- [default: the training venv is the one environment — `mlx-lm` joins it, installed by the existing setup path, so there is one Python environment with one owner] Where the runtime lives.
-- [default: one driver process per chat session, spawned on the first turn against that backend; `complete` spawns per run] Child lifetime.
-- [default: sampling fields mirror the llamacpp entry's; 26h's resolved semantics apply to both local types when it lands] Sampling surface.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `mlx-lm` joins the training venv by the existing setup path — one Python environment, one owner.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): one driver child per chat session, spawned on first use; `complete` spawns per run.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): sampling fields mirror llamacpp's; 26h's resolved semantics apply to both local types when it lands.
 
 **Guardrail(s).**
 - Golden JSONL both directions against the scripted fake driver, chunk-boundary cases through the one framer.

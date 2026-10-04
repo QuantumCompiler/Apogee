@@ -25,4 +25,4 @@ The CLI is four layers, lowest to highest:
 
 ## Enforcement
 
-The `harness.layering` test holds the four-layer map and fails on an undeclared or upward edge (shipped with A1). [A4](../../backlog/architecture/arch-build-enforcement.md) makes the law compile-time: one static library per module, the link graph as the dependency declaration, the grep test rescoped to its named scalpel allowances. The summary card at each layer root restates this rule in brief and links here.
+The `harness.layering` test holds the four-layer map and fails on an undeclared or upward edge (shipped with A1). [A4](../../assistant/MILESTONES.md#milestone-aa--the-four-layers) makes the law compile-time: one static library per module, the link graph as the dependency declaration, the grep test rescoped to its named scalpel allowances. The summary card at each layer root restates this rule in brief and links here.

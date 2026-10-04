@@ -23,11 +23,9 @@
 **Decisions made** (dated):
 - 2026-10-03 — Asked for by the user ("Suites"); placed in **v0.1.8** beside the MLX track at their direction ("Add this v0.1.8"), taking 27d–27g per the release-prefix rule. Independence from MLX is explicit: members are backends, llama.cpp today.
 - 2026-10-03 — The spike's finding that shaped the shape: the role system *is* a suite without a name, so this item is a config unit and a resolver rung, not a new execution path.
-
-**Open calls:**
-- [default: the suite rung sits between the per-feature backend and the global role pointer — a feature that pins a backend (a collection's `backend:`) keeps winning, since it pinned for a reason] Rung position.
-- [default: `/suite off` returns to the global pointers mid-chat; the session's suite is session state, saved with the chat like `/model`'s choice] Session semantics.
-- [default: per-member knobs start at exactly two — `context_size` and `toolset` — and grow only when an item needs a third] Member schema.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the suite rung sits between the per-feature backend and the global role pointer — a feature's pinned backend keeps winning.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `/suite off` restores the global pointers; the active suite is session state, saved and resumed like `/model`'s choice.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): per-member knobs start at exactly `context_size` and `toolset`, growing only on demonstrated need.
 
 **Guardrail(s).**
 - The chain tables: every rung × suite present/absent, including the no-suite collapse to today's behavior (golden against the pre-change tables).

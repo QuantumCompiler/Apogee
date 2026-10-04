@@ -10,7 +10,6 @@
 
 #include "backends/openai.h"
 #include "contracts/errors.h"
-#include "harness/harness.h"
 #include "support/embedding_fixtures.h"
 #include "support/fake_transport.h"
 
@@ -193,16 +192,4 @@ TEST_CASE("an unknown model's width is 0 until the first vector arrives",
     CHECK(f.provider->embedding_dimensions() == 0);
     (void)f.provider->embed({"alpha"}, {});
     CHECK(f.provider->embedding_dimensions() == 4);
-}
-
-TEST_CASE("an OpenAI entry answers can_embed through the harness",
-          "[backends][openai][embed][capability]") {
-    // The per-provider capability, asked the only way callers may ask it.
-    Fixture f = make_provider({FakeTransport::Reply{.status = 200, .body = body_for(1)}});
-    apogee::harness::Harness harness{apogee::harness::Config{}};
-    harness.register_provider("gpt", std::shared_ptr<OpenAIProvider>(std::move(f.provider)));
-    harness.use_default_router();
-    CHECK(harness.can_embed("gpt"));
-    REQUIRE(harness.embedder_for("gpt") != nullptr);
-    CHECK(harness.embedder_for("gpt")->embedding_dimensions() == fixtures::kOpenAiDefaultWidth);
 }

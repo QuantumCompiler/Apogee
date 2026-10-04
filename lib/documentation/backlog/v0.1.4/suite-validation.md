@@ -24,11 +24,9 @@
 - 2026-10-03 — Split from the suites spike as the policy layer over 27f's mechanics; one model-calling path (consult), two uses (delegation, validation).
 - 2026-10-03 — **Opt-in per seam** is the recorded default from the spike's question 3 (the user may veto toward default-on for destructive tool arguments once latency is measured on real suites).
 - 2026-10-03 — Cheap-first is a rule, not a preference: the 26f measurement (grammar alone fixing 17/20 → 20/20) is the evidence that structure eats most of the error class before a verifier is worth waking.
-
-**Open calls:**
-- [default: answer-on-request surfaces as `/check` on the just-given answer in chat — explicit, free of per-turn latency; a `validate: answers: always` config value exists for suites that want it standing] The answer seam's trigger.
-- [default: extraction validation checks semantic sanity the grammar cannot (counts against source, required-field truthiness) with a fixed rubric brief — not free-form critique] The extraction rubric.
-- [default: a verifier objection to a *tool argument* is returned to the producer as the tool result of round one; the tool itself runs only after a clean pass or the round limit with the user shown the dispute] Disposition.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): answer validation triggers via `/check` on the just-given answer; `validate: answers: always` exists for standing checks.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): extraction checks use a fixed rubric brief (counts against source, required-field truthiness) — never free-form critique.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): an argument objection returns as round one's tool result; the tool runs after a clean pass or the round limit with the dispute shown — permission gates untouched.
 
 **Guardrail(s).**
 - Call-count pins: a structurally-caught error wakes no model (asserted); a clean structural pass with the seam off wakes none either.

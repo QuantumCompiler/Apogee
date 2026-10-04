@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <random>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -24,8 +25,12 @@ using apogee::embedstore::fts_match_query;
 using apogee::embedstore::Store;
 
 struct Scratch {
+    // A random draw beside the counter: ctest runs cases as parallel
+    // processes, and a per-process counter alone names the same directory in
+    // several of them at once.
     std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / ("apogee-fts-" + std::to_string(counter()));
+        std::filesystem::temp_directory_path() /
+        ("apogee-fts-" + std::to_string(std::random_device{}()) + "-" + std::to_string(counter()));
 
     Scratch() {
         std::error_code code;

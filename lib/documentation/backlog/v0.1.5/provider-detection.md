@@ -24,11 +24,9 @@
 - 2026-10-03 — Asked for by the user, targeted **v0.1.4**, slotted ahead of the queued releases (the 27–30 → 28–31 renumber). The spike's measurements (probe costs, evidence heterogeneity, the blind doctor) are this document's What/why.
 - 2026-10-03 — Cache over launch probing is forced by measurement: 2.6 s cold for one provider is not a startup cost, it is a startup multiple.
 - 2026-10-03 — Three tiers instead of a boolean: the spike showed "authenticated" is not cheaply knowable for two of three CLIs, and claiming it from file existence would be a lie the UI repeats.
-
-**Open calls:**
-- [default: first-cut provider rows — the four CLI types (`claude`, `codex`, `gemini`, `ollama`) and the three API types (anthropic, openai, google via the key resolver); grow by row] Breadth.
-- [default: cheap checks re-run on every scan; version/status probes only on fingerprint change or `--refresh`; nothing expires by clock alone] Staleness.
-- [default: one JSON file `cache/providers.json` with a `schema` field; unknown fields ignored on read] Cache shape.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): first-cut rows are the four CLI types (claude, codex, gemini, ollama) and three API types (anthropic, openai, google via the resolver); grow by row.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): cheap checks per scan; expensive probes only on fingerprint change or `--refresh`; no clock expiry.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): one `cache/providers.json` with a `schema` field; unknown fields ignored on read.
 
 **Guardrail(s).**
 - State-matrix table tests per provider row, including the hung-probe deadline and the corrupt-cache rebuild.

@@ -23,11 +23,9 @@
 - 2026-10-03 — Found by the attachment-representation spike: no floor at the injection site (a 0.000-score excerpt injected), RRF's 0.033 ceiling misread as percent by user and assistant alike, lexical saturating at 0.950 for an irrelevant question. A Maintenance item because it is release-agnostic polish on a shipped pipeline.
 - 2026-10-03 — Floors are per-retriever by measurement, not preference: the probe shows a shared threshold cannot exist (0.000 must floor, 0.023 RRF must not, 0.950 lexical proves nothing).
 - 2026-10-03 — Moved into the **v0.1.3** tail as **26s** (the user's call, later the same day), leaving Maintenance's lineage item (M4) as the standing queue's one row.
-
-**Open calls:**
-- [default: strength displayed as a word band — `strong / fair / weak match` — computed per retriever (RRF: score ÷ its ceiling for the lists fused; cosine: fixed bands; lexical: question-term coverage), with the raw score and retriever tag kept in parentheses] The display shape.
-- [default: floors — RRF below 25% of its ceiling; cosine below 0.25; lexical below one content-word of coverage; each a named constant beside the mapping, tuned freely by tests] The initial floor values.
-- [default: the floor applies to attachment turns and `auto_rag` collection turns alike; an explicit `--retriever` request still honors it (the line explains), since the user asked for a method, not for noise] Where the floor applies.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): strength displays as a word band — strong/fair/weak — per retriever (RRF: score ÷ ceiling; cosine: fixed bands; lexical: term coverage), raw score and retriever tag kept in parentheses.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): initial floors — RRF under 25% of ceiling, cosine under 0.25, lexical under one content-word of coverage — named constants, tuned by tests.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the floor covers attachment and `auto_rag` turns alike; an explicit `--retriever` request still honors it, with the line explaining.
 
 **Guardrail(s).**
 - Table tests per retriever at the floor boundary: just-below injects nothing and says so; just-above injects.

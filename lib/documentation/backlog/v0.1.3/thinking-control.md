@@ -28,11 +28,9 @@ Switching thinking off goes through the template's own `enable_thinking` now tha
 **Decisions made:**
 - 2026-09-25 — Asked for by the user ("Reliability").
 - 2026-09-25 — After 25b (the template's switch) and [26h](sampling-profiles.md) (the chain the budget joins).
-
-**Open calls:**
-- [default: `on` unless configured] Today's behaviour; `auto` is opt-in until measured.
-- [default: `auto` without a utility model thinks for questions over 200 characters or containing code, maths or "why/how", and not otherwise] Measured against the six-task battery and a set of chat questions before it ships.
-- [default: no budget unless configured; `--think-budget N` and `thinking_budget:` set one] A budget changes answers, so it should be chosen.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): thinking defaults to `on` unless configured — today's behaviour; `auto` stays opt-in until measured.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): judge-less `auto` thinks for questions over 200 characters or containing code, maths or "why/how", and not otherwise — measured against the six-task battery and a chat-question set before ship.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): no thinking budget unless configured; `--think-budget N` and `thinking_budget:` set one — a budget changes answers, so it is chosen, never implied.
 
 **Guardrail(s).**
 - `off` renders the template's switch.

@@ -1,11 +1,14 @@
-# Layering check: neither the harness nor the agent loop may include backends.
+# Layering check: the module map's mutation check, and the named rules only a
+# scan can express (Architecture A4 rescoped it; the coarse four-layer law is
+# the build's now -- cmake/modules.cmake and cmake/ApogeeLinkPolicy.cmake).
 #
-# A Core constraint of harness-core, extended to agentloop when the loop landed
-# (CLAUDE.md said it would). The dependency runs one way — backends include
-# harness — and `harness::ModelBehavior` exists as plain data precisely so the
-# loop can ask about a model family without reaching back. Ommi has the same
-# seam for the same reason: in Go the compiler enforces it, because the reverse
-# edge is an import cycle and the build simply fails.
+# The first named rule is the oldest: neither the harness nor the agent loop
+# may include backends. A Core constraint of harness-core, extended to agentloop
+# when the loop landed (CLAUDE.md said it would). The dependency runs one way
+# — backends include harness — and `harness::ModelBehavior` exists as plain
+# data precisely so the loop can ask about a model family without reaching
+# back. Ommi has the same seam for the same reason: in Go the compiler enforces
+# it, because the reverse edge is an import cycle and the build simply fails.
 #
 # The loop matters as much as the harness here. A loop that includes a backend
 # starts special-casing one vendor's tool dialect, and "one shared loop for all
@@ -15,114 +18,129 @@
 # assembling providers is its job (`views/` and `machine/`, the other two
 # modules `commands/` split into in A3, are held below).
 #
-# C++ has no such enforcement — a `#include "backends/anthropic.h"` in the
-# harness compiles perfectly and the layering is gone, silently. So the check is
-# mechanical and runs in CI: grep the harness sources for the edge that must not
-# exist.
+# The link graph cannot hold this one: `backends/` sits in Data, below the
+# harness, so the include would compile and link. The named rules are the
+# seams finer than a layer -- a module's narrower floor, a single header
+# allowed by name -- and a row in the map that loosens one still fails here.
 #
 # Driven with `cmake -P` so it runs on all five targets, Windows included.
 
 if(NOT DEFINED APOGEE_SOURCE_DIR)
     message(FATAL_ERROR "APOGEE_SOURCE_DIR must be set")
 endif()
+if(NOT DEFINED APOGEE_MODULE_MAP)
+    message(FATAL_ERROR "APOGEE_MODULE_MAP must be set")
+endif()
 
-# ---- The four layers (Architecture A1) ----------------------------------------
+# ---- The map, and the tree it describes (Architecture A1, A2, A4) -----------
 #
-# Every package sits in one layer, and a package includes only its own layer
-# and the ones below: Presentation -> Business -> Data -> Infrastructure. The
-# map is the spike's (2026-10-03), as A1 built it -- `transport` and `mcp` where
-# their includes put them. A package with no row fails here: a new package
-# declares its layer the day it exists. Same-layer includes are allowed; the
-# per-package rules below narrow them where it matters.
-set(LAYER_presentation cli views machine httpserver markdown render)
-set(LAYER_business harness agentloop agent tools knowledge graph training scaffold models mcp)
-set(LAYER_data contracts backends embedstore logger secrets modelstore transport)
-set(LAYER_infrastructure platform ansi events version)
-set(LAYERS presentation business data infrastructure)
+# Every package is a module of one layer, and the layers are ADR 0001's:
+# Infrastructure -> Data -> Business -> Presentation, dependencies pointing
+# down. Since A4 the map lives in cmake/modules.cmake -- each module's layer
+# and the modules it links -- and the build enforces the coarse law from it:
+# a module is a library linked to exactly its row, the link policy fails the
+# configure step on a link up a layer or a cycle, and an include that reaches
+# up a layer does not compile. What stays here is what only a scan can see.
+include("${APOGEE_MODULE_MAP}")
 
-set(layer_index 0)
-foreach(layer IN LISTS LAYERS)
-    foreach(package IN LISTS LAYER_${layer})
-        set(LAYER_OF_${package} ${layer_index})
-        set(LAYER_NAME_${package} ${layer})
-    endforeach()
-    math(EXPR layer_index "${layer_index} + 1")
-endforeach()
-
-# Since A2 the tree says the layers too: every package sits in
-# source/<layer>/<package>/, and the directory must agree with the map -- a
-# package moved without its row, or a row changed without the move, fails.
+# The tree says the layers too: every module sits in source/<layer>/<module>/,
+# and the directory must agree with the map -- a module moved without its row,
+# or a row changed without the move, fails.
 set(PACKAGES "")
 file(GLOB top_level LIST_DIRECTORIES true "${APOGEE_SOURCE_DIR}/*")
 foreach(dir IN LISTS top_level)
     if(IS_DIRECTORY "${dir}")
         get_filename_component(name "${dir}" NAME)
-        if(NOT name IN_LIST LAYERS)
+        if(NOT name IN_LIST APOGEE_LAYERS)
             message(FATAL_ERROR "'${name}' sits directly under ${APOGEE_SOURCE_DIR} -- a package "
                                 "lives in its layer's directory (presentation, business, data or "
                                 "infrastructure)")
         endif()
     endif()
 endforeach()
-foreach(layer IN LISTS LAYERS)
+foreach(layer IN LISTS APOGEE_LAYERS)
     file(GLOB layer_dirs LIST_DIRECTORIES true "${APOGEE_SOURCE_DIR}/${layer}/*")
     foreach(dir IN LISTS layer_dirs)
         if(IS_DIRECTORY "${dir}")
             get_filename_component(package "${dir}" NAME)
-            if(NOT DEFINED LAYER_OF_${package})
-                message(FATAL_ERROR "the package '${package}' is in no layer -- give it a row in "
-                                    "tests/layering.cmake's layer map (Presentation, Business, "
-                                    "Data or Infrastructure)")
+            if(NOT DEFINED APOGEE_MODULE_LAYER_${package})
+                message(FATAL_ERROR "the package '${package}' is in no layer -- give it a row, "
+                                    "with its links, in cmake/modules.cmake")
             endif()
-            if(NOT LAYER_NAME_${package} STREQUAL layer)
-                message(FATAL_ERROR "the package '${package}' sits in ${layer}/ but the layer map "
-                                    "puts it in ${LAYER_NAME_${package}} -- move one to match "
+            if(NOT APOGEE_MODULE_LAYER_${package} STREQUAL layer)
+                message(FATAL_ERROR "the package '${package}' sits in ${layer}/ but "
+                                    "cmake/modules.cmake puts it in "
+                                    "${APOGEE_MODULE_LAYER_${package}} -- move one to match "
                                     "the other")
             endif()
             list(APPEND PACKAGES ${package})
         endif()
     endforeach()
 endforeach()
-foreach(layer IN LISTS LAYERS)
-    foreach(package IN LISTS LAYER_${layer})
-        if(NOT package IN_LIST PACKAGES)
-            message(FATAL_ERROR "the layer map names '${package}', which is not a package under "
-                                "${APOGEE_SOURCE_DIR}/${layer} -- a package that moved must move "
-                                "here too")
-        endif()
-        set(PACKAGE_DIR_${package} "${APOGEE_SOURCE_DIR}/${layer}/${package}")
-    endforeach()
+foreach(package IN LISTS APOGEE_MODULES)
+    if(NOT package IN_LIST PACKAGES)
+        message(FATAL_ERROR "cmake/modules.cmake names '${package}', which is not a package "
+                            "under ${APOGEE_SOURCE_DIR}/${APOGEE_MODULE_LAYER_${package}} -- a "
+                            "package that moved must move there too")
+    endif()
+    set(PACKAGE_DIR_${package} "${APOGEE_SOURCE_DIR}/${APOGEE_MODULE_LAYER_${package}}/${package}")
 endforeach()
 
-set(UPWARD "")
+# ---- The map's mutation check: includes and links agree ----------------------
+#
+# The build sees a layer, not a module: within its own layer and below, an
+# include of a module the row does not link still compiles, because the layer
+# root is one include directory. So the scan holds the map to the code in both
+# directions -- an include of another module the row does not declare fails,
+# and so does a declared link nothing includes. Deleting a link from the map,
+# or adding one nobody uses, fails here by name.
+set(MISMATCHES "")
 set(layered_sources 0)
+set(edges 0)
 foreach(package IN LISTS PACKAGES)
     file(GLOB_RECURSE package_sources "${PACKAGE_DIR_${package}}/*.h"
                                       "${PACKAGE_DIR_${package}}/*.cpp")
+    set(included "")
     foreach(source IN LISTS package_sources)
         math(EXPR layered_sources "${layered_sources} + 1")
         file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"[a-z_]+/")
         foreach(line IN LISTS project_includes)
             string(REGEX REPLACE "^[ \t]*#[ \t]*include[ \t]*\"([a-z_]+)/.*" "\\1" target "${line}")
-            if(DEFINED LAYER_OF_${target} AND LAYER_OF_${target} LESS LAYER_OF_${package})
+            if(NOT DEFINED APOGEE_MODULE_LAYER_${target} OR target STREQUAL package)
+                continue()
+            endif()
+            if(NOT target IN_LIST included)
+                list(APPEND included ${target})
+            endif()
+            if(NOT target IN_LIST APOGEE_LINKS_${package})
                 file(RELATIVE_PATH relative "${APOGEE_SOURCE_DIR}" "${source}")
-                list(APPEND UPWARD
-                     "  ${relative} (${LAYER_NAME_${package}}) includes ${target}/ (${LAYER_NAME_${target}})")
+                string(CONCAT mismatch "  ${relative} includes ${target}/, which "
+                                       "cmake/modules.cmake does not link to ${package}")
+                list(APPEND MISMATCHES "${mismatch}")
             endif()
         endforeach()
+    endforeach()
+    foreach(target IN LISTS APOGEE_LINKS_${package})
+        math(EXPR edges "${edges} + 1")
+        if(NOT target IN_LIST included)
+            string(CONCAT mismatch "  cmake/modules.cmake links ${package} to ${target}, but "
+                                   "nothing in ${package}/ includes ${target}/")
+            list(APPEND MISMATCHES "${mismatch}")
+        endif()
     endforeach()
 endforeach()
 if(layered_sources EQUAL 0)
     message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR} -- this check would pass "
                         "vacuously")
 endif()
-if(NOT UPWARD STREQUAL "")
-    string(REPLACE ";" "\n" pretty "${UPWARD}")
-    message(FATAL_ERROR "an include reaches up a layer:\n${pretty}\n"
-                        "A package includes its own layer and those below: Presentation -> "
-                        "Business -> Data -> Infrastructure. What a lower layer needs from a "
-                        "higher one crosses as an interface declared below and implemented "
-                        "above (contracts/provider.h's ProviderRegistry), or as plain data.")
+if(NOT MISMATCHES STREQUAL "")
+    list(JOIN MISMATCHES "\n" pretty)
+    message(FATAL_ERROR "the module map and the includes disagree:\n${pretty}\n"
+                        "cmake/modules.cmake declares what each module links; an include of "
+                        "another module is a declared link, and a declared link is used. What "
+                        "a lower layer needs from a higher one crosses as an interface declared "
+                        "below and implemented above (contracts/provider.h's ProviderRegistry), "
+                        "or as plain data -- never as a link up.")
 endif()
 
 # ---- The named rules ------------------------------------------------------------
@@ -401,5 +419,7 @@ if(NOT VIOLATIONS STREQUAL "")
 endif()
 
 list(LENGTH ALL_SOURCES count)
-message(STATUS "layering: ${layered_sources} sources in four layers with no upward include; "
-               "${count} across ${GUARDED_PACKAGES} with no backends include - OK")
+string(REPLACE ";" ", " guarded "${GUARDED_PACKAGES}")
+message(STATUS "layering: ${layered_sources} sources, every include of another module one of "
+               "the map's ${edges} links; ${count} across ${guarded} with no backends "
+               "include - OK")

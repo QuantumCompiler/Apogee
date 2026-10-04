@@ -21,11 +21,9 @@
 **Decisions made** (dated):
 - 2026-10-03 — Split from the MLX track as its closer: each piece needs 27a's child protocol and 27b's store row to exist first.
 - 2026-10-03 — **Serve may route MLX** (the policy half of this item, decided at spec time): the serve exclusion list is about credentials, and extending it to a local runtime would misstate the rule it encodes. The conformance test makes the decision structural.
-
-**Open calls:**
-- [default: the promote MLX target registers the *fused* model; running an unfused adapter over its base directly is a later convenience if `mlx-lm` keeps it stable] Fused-first.
-- [default: `mlx-vlm` joins the venv on demand (the setup path installs it with `mlx-lm`); absent, vision answers "no" and `check` says why] The vision dependency.
-- [default: videos and audio stay on the 26e text path (timeline/transcript) for MLX models in this cut — only still images go native] Media scope.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): promote registers the fused model; unfused adapter-over-base is a later convenience if `mlx-lm` keeps it stable.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `mlx-vlm` installs on demand via the setup path; absent, vision answers "no" and `check` says why.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): only still images go native for MLX in this cut; video/audio stay on the 26e timeline/transcript path.
 
 **Guardrail(s).**
 - The image round-trip against the fake driver, plus the capability answer flipping with the model directory's markers.

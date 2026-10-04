@@ -29,11 +29,9 @@ Proposed order of precedence:
 **Decisions made:**
 - 2026-09-25 — Asked for by the user ("Reliability"). The ignored temperature was found while specifying it.
 - 2026-09-25 — After 25b, which links `common`'s sampler and puts a grammar into the chain.
-
-**Open calls:**
-- [default: the GGUF's `general.sampling.*` outranks the profile default] The file's own recommendation is more specific than a family's.
-- [default: tests pin temperature 0] So every scripted and recorded-output test stays deterministic.
-- [default: the spike's six tasks are re-run with the family defaults before they ship] A default that loses tasks is not a default.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): a GGUF's own `general.sampling.*` metadata outranks the family profile's default — the file's recommendation is more specific; explicit flags still beat both.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): scripted and recorded-output tests pin temperature 0, keeping every golden deterministic.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the spike's six-task battery re-runs with the family defaults before ship — a default that loses tasks is not a default.
 
 **Guardrail(s).**
 - The precedence ladder table-tested rung by rung.

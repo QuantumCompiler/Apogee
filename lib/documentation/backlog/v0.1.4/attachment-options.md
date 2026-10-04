@@ -25,10 +25,8 @@
 - 2026-10-03 — Split from the attachment-representation spike; gated on 27n because an option with nothing to select is dead weight, and kept apart from it so the build/wiring items stay single-session sized.
 - 2026-10-03 — **Flags live on `/attach` and `--attach` only; `@` stays bare** (the user delegated the call; recorded as the decision): the mention contract's "message never changed" promise outranks the convenience, and `/attach` already completes.
 - 2026-10-03 — The value set is `code|off`, deliberately small: `code` is 27n's model-free build; richer methods (prose enrichment of attachments) are out of scope until something ships to name.
-
-**Open calls:**
-- [default: the flag spelling is `--graph=<value>` with `--graph code` also accepted, matching the repo's existing flag conventions] Spelling.
-- [default: `config set attachments.graph off` works through the existing `config set` path if dotted keys already reach blocks this way; otherwise the editor gains the block without new CLI surface this item] Config ergonomics.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `--graph=<value>`, with `--graph code` also accepted — the repo's flag conventions.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the default rides `config set attachments.graph …` if dotted keys reach blocks; otherwise the editor gains the block, no new CLI surface here.
 
 **Guardrail(s).**
 - Precedence table: built-in < config < flag, each combination asserted, the notice line checked where the method is non-default.

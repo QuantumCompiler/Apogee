@@ -20,11 +20,9 @@
 **Decisions made** (dated):
 - 2026-09-25 — Split from the integration spike (item 27), wall W2.
 - 2026-09-25 — JSON Schema as the format (validator ubiquity), emitted by the binary (`__machine-schema`) so the artifact can never describe a build other than the one that printed it; the copy in the archive is a convenience, the command is the truth.
-
-**Open calls:**
-- [default: one document with a definition per event type, discriminated on `type`; draft 2020-12] Schema dialect and layout.
-- [default: the schema version is a date (`2026-09-25`-style), bumped whenever the vocabulary grows; `capabilities.schema` and the artifact carry the same string] Versioning of the artifact itself.
-- [default: inbound types documented in the same file under a second discriminator, since a host validates both directions] One artifact or two.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): one draft-2020-12 document, a definition per event type discriminated on `type`.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the schema version is a date string, bumped when the vocabulary grows; `capabilities.schema` and the artifact carry the same string.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): one artifact for both directions — inbound types under a second discriminator.
 
 **Guardrail(s).**
 - The conformance test's third direction: schema ↔ code ↔ doc, any one drifting fails the build naming the missing type or field.

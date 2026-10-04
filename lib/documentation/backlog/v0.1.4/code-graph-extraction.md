@@ -28,13 +28,11 @@
 - 2026-09-30 — Asked for by the user, targeted **v0.1.7**: a knowledge-graph system in Graphify's shape. Specced as a delta onto Milestone Y's layer: the genuinely new capabilities are deterministic code extraction (this item), navigation verbs ([27l](graph-navigation.md)), and the artifacts ([27m](graph-artifacts.md)); communities, dedupe, named graphs and retrieval expansion already exist and are reused.
 - 2026-09-30 — tree-sitter as the parser (the Graphify-proven choice: ~40 languages, C library, local, deterministic), pinned like llama.cpp rather than reimplementing per-language parsing.
 - 2026-09-30 — **Model-free graph creation is a first-class capability** (the user's call): the keyless, offline, end-to-end pass is an acceptance criterion and a standing guardrail across the track, not a happy accident of the code path — and cross-file resolution is deterministic so the guarantee covers a *connected* graph, not per-file islands.
-
-**Open calls:**
-- **[user]** The first-cut language set — each grammar is its own pinned vendored dependency, so this is a dependency-weight call: (a) C++ and Python (Apogee's own stack — *recommendation*, grow on demand); (b) add TypeScript/JavaScript and Go now; (c) the broad set from day one. Blocks the build (it decides what gets vendored).
-- [default: node kinds `file`, `module`, `class`, `function`; edge relations `calls`, `imports`, `inherits`, `references`, `defined_in` — the Graphify core minus what the closed-set discipline defers] The type-set extension.
-- [default: `extracted` edges carry confidence 1.0; `inferred` keeps whatever the model path records today] Confidence semantics.
-- [default: a source build and a collection build may share one named graph (code beside the docs that describe it) — that is the point of named graphs] Mixing sources.
-- [default: `graph dedupe` over code nodes merges on exact qualified-name identity only; prose entities keep the vector mechanism, skipped with a report when no embedder is configured] Dedupe without a model.
+- 2026-10-03 — **The first-cut language set (the user's call, answered this day, overriding the grow-on-demand recommendation): the broad set from day one.** The common-ecosystem grammars are vendored up front — the C++/Python core plus TypeScript/JavaScript, Go and their peers — each grammar its own pin under `third_party/`, the exact roster fixed and recorded with its pins at vendoring time. The guardrails' per-language golden fixtures cover every vendored grammar.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): nodes `file`/`module`/`class`/`function`, edges `calls`/`imports`/`inherits`/`references`/`defined_in` — the Graphify core under the closed-set discipline.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `extracted` edges carry confidence 1.0; `inferred` keeps the model path's recorded value.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): a source build and a collection build may share one named graph — code beside its docs is the point.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): code-node dedupe is exact qualified-name identity only; prose keeps the vector mechanism, skipped with a report absent an embedder.
 
 **Guardrail(s).**
 - Golden extraction over the fixture mini-repo per language: exact node/edge/mention sets, `file:line` provenance included.

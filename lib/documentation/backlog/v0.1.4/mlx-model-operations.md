@@ -22,11 +22,9 @@
 **Decisions made** (dated):
 - 2026-10-03 — Split from the MLX track: model operations after the backend core, so the format serves a runtime that exists.
 - 2026-10-03 — **Pre-quantized community models are the primary path** (pull `mlx-community/...` and run); `convert --mlx` is for full-weight snapshots the user already holds — mirroring how GGUF acquisition actually gets used.
-
-**Open calls:**
-- [default: an `mlx` entry's `model_path` points at the model *directory*; a bare model name resolves through the store like GGUF paths do] Addressing.
-- [default: `models delete`/retention treat the directory atomically — a shard is never removed alone] Deletion granularity.
-- [default: no MLX-side embedding support claimed; the entry answers "no" to the embed capability until someone builds it] Capability honesty.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `model_path` points at the model directory; bare names resolve through the store like GGUF paths.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): delete and retention treat the shard directory atomically — a shard is never removed alone.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): no embed capability claimed until built — the entry answers "no" honestly.
 
 **Guardrail(s).**
 - Store goldens: an MLX directory lands under `mlx/<hash>/`, lists with format and quant, deletes atomically; the flat-layout refusal naming `models migrate` covers the new row.

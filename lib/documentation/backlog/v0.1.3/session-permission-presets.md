@@ -24,12 +24,10 @@
 - 2026-09-30 — Asked for by the user: permissions preset at launch like the claude CLI, and adjustable mid-chat by slash command with today's completability; **end of v0.1.3**, lettered **26o** per the release-prefix rule.
 - 2026-09-30 — **The equivalence principle** (a preset = the `session` answer given early) over a new grant vocabulary: it reuses the shipped structure, inherits the ladder's config-first safety, and sidesteps the grant-ceiling question entirely — which stays where it belongs, on [27i](../v0.1.4/task-autonomy-policy.md)'s **[user]** calls for *unattended* tasks. This item is the attended sibling: a human typed the grant.
 - 2026-09-30 — Single-argument verbs, so completion needs nothing the table doesn't have. The user's chained-command wish (`/permissions set <tool> <level>`, two completable positions) is recorded as the extension path: the table would grow per-position completers — deferred, not refused.
-
-**Open calls:**
-- [default: `/allow` with no argument behaves as `/permissions` — listing beats erroring] Bare-verb behavior.
-- [default: `--deny` and `/deny` also take hosts (one vocabulary for both ask dimensions), matched like `tools.allowed_hosts`] Host denies.
-- [default: `/revoke` removes session entries only and says so when asked about a config-level answer — pointing at `config set-permission` rather than touching config itself] Revoke's reach.
-- [default: an unknown tool name in a flag or verb is refused naming the gated set — a typo must not silently grant nothing] Validation.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): bare `/allow` behaves as `/permissions` — listing beats erroring.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `--deny`/`/deny` take hosts too — one vocabulary for both ask dimensions, matched like `tools.allowed_hosts`.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `/revoke` reaches session entries only, pointing at `config set-permission` for config-level answers — chat never mutates config permissions.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): an unknown tool name is refused naming the gated set — a typo must not silently grant nothing.
 
 **Guardrail(s).**
 - The equivalence table, exhaustively and mutation-tested: for every (config level × preset × prompt answer) combination, a flag-seeded session and an `s`-answered session resolve identically; config `deny` unloosened in all of them.

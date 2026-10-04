@@ -22,11 +22,9 @@
 
 **Decisions made** (dated):
 - 2026-10-03 — Split from the suites spike as its own item: residency is policy over shipped machinery (the spike found every input already existing), and bundling it into 27d would make the config item balloon.
-
-**Open calls:**
-- [default: the admission budget is the machine RAM share 26a already computes for context sizing, reused — one notion of "what fits", not two] The budget.
-- [default: warmup is opt-in (`--warm`); default behavior loads on first use per member, as today] Warmup default.
-- [default: the hold covers members *used this session*; a suite member never touched stays evictable — warm what works, not what's listed] Hold scope.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): admission reuses the 26a machine RAM share — one notion of what fits.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): load on first use; `--warm` opts into up-front loading on the busy line.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the idle-unload hold covers members used this session; untouched members stay evictable.
 
 **Guardrail(s).**
 - Admission tables: fits / over-budget / unknown-size, each with the exact stated arithmetic golden-tested; `--force` honored and recorded in the session banner.

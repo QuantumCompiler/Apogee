@@ -21,11 +21,9 @@
 **Decisions made** (dated):
 - 2026-09-25 — Split from the v0.1.6 task work: 27h stays deny-by-default with fail-on-question so autonomy widening is a deliberate, reviewable step — this document — never an accident of the runner shipping.
 - 2026-09-25 — Grants scoped to the task, composed to be no wider than config × agent policy, recorded per use (the design that survived the spike's rubber-stamp concern).
-
-**Open calls:**
-- **[user]** May a task pre-grant destructive tools from the command line at all, and with what ceiling? (a) `--allow <tool>` per tool as specced, each use recorded — *recommendation*; (b) command-line grants refused: only the config's `permissions:` and an agent's policy may widen a task; (c) named task profiles in config carrying grant sets. This is the safety ceiling of the whole feature and blocks the build.
-- **[user]** The question-policy vocabulary: is a single declared answer enough (`--on-question answer:"…"`), or should a task carry per-question defaults (match on the question's header)? *Recommendation: the single answer — a task whose questions need routing is a task that should run attended.*
-- [default: `--on-question fail` remains the default even when grants are present — granting tools says nothing about answering questions] Orthogonality of the two policies.
+- 2026-10-03 — **The grant ceiling (the user's call, answered this day): per-tool `--allow <tool>` at launch**, exactly as specced — each tool named explicitly on the command line, every use recorded in the ledger, composed no wider than config × agent policy. Command-line grants are legitimate; the explicitness of the typed command is the audit trail's first line.
+- 2026-10-03 — **The question-policy vocabulary (the user's call, answered this day): one declared answer** — `--on-question answer:"…"` serves any question the run asks; no per-question routing. A task whose questions need routing is a task that should run attended.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `--on-question fail` stays the default with grants present — granting tools says nothing about answering questions.
 
 **Guardrail(s).**
 - The composition table is exhaustive and mutation-tested: no combination lets a task exceed config × agent policy.

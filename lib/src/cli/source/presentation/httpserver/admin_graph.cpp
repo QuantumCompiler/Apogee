@@ -12,8 +12,6 @@
 #include <vector>
 
 #include "agentloop/graph_context.h"
-#include "cli/embed.h"
-#include "cli/graph.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "embedstore/store.h"
@@ -22,6 +20,8 @@
 #include "graph/extract.h"
 #include "harness/roles.h"
 #include "httpserver/handler.h"
+#include "operations/collections.h"
+#include "operations/graph_members.h"
 
 namespace apogee::httpserver {
 namespace {

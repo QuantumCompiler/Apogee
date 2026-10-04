@@ -20,11 +20,9 @@
 **Decisions made** (dated):
 - 2026-09-25 — Split from the v0.1.6 task work: surfaces after the runner, so the event vocabulary describes a ledger that exists rather than one being designed underneath it.
 - 2026-09-25 — Task events ride `task run`'s own stdout, not the chat protocol: a front-end that wants live task progress spawns the task in machine mode, which keeps "events arrive in response to what you invoked" true without touching the parked push question.
-
-**Open calls:**
-- [default: event types named `task_started`, `task_plan`, `task_round`, `task_grant`, `task_finished`, each carrying the ledger's fields for that transition] The vocabulary — settled against the ledger's actual shape at build time.
-- [default: `task list` JSON is bounded to the most recent 50 with a `--all` escape; the admin list mirrors it] Listing bounds.
-- [default: a resumed task's stream re-emits `task_started` with `resumed: true` and the current ledger state first, so a reconnecting front-end needs no other source] Resume over the stream.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): the event vocabulary is `task_started`/`task_plan`/`task_round`/`task_grant`/`task_finished`, each carrying its transition's ledger fields, settled against the ledger's shape at build.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): `task list` returns the most recent 50 with `--all` as the escape; the admin list mirrors it.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): a resumed task re-emits `task_started` with `resumed: true` and current ledger state first — a reconnecting front-end needs no other source.
 
 **Guardrail(s).**
 - The event sequence ↔ ledger transition sequence equality, asserted on the e2e's real run.
