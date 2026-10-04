@@ -1,6 +1,6 @@
 # ADR 0001 — Four layers, dependencies point down
 
-**Status:** Accepted · **Date:** 2026-10-03
+**Status:** Accepted; its package list superseded by [0008](module-map.md) · **Date:** 2026-10-03
 
 ## Context
 

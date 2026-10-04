@@ -63,7 +63,7 @@ Apogee/
     ├── documentation/       — Project documentation
     │   ├── adrs/cli/        — Architecture Decision Records: the CLI's standing rules, dated and
     │   │                      append-only (layer law, mode parity, granular modules, mirrored tests,
-    │   │                      install stability, backwards compat, tab completion); per-app directories as apps arrive
+    │   │                      install stability, backwards compat, tab completion, the module map); per-app directories as apps arrive
     │   ├── assistant/       — Contributor docs (CLAUDE, SPEC, ROADMAP, MILESTONES, this file)
     │   └── backlog/         — The work queue: pending work, one document per item, in one
     │                          subdirectory per index table (architecture/, maintenance/,
@@ -121,8 +121,9 @@ Apogee/
         │   ├── build/           — Build output, one dir per preset (git-ignored)
         │   ├── source/          — main.cpp + presentation/ business/ data/ infrastructure/, a package dir per
         │   │                      concern inside each (the four layers, A2), and a CMakeLists.txt per layer
-        │   │                      naming each module's sources (A4)
-        │   └── tests/           — tests/<layer>/<package>/ mirroring source/, cross-cutting checks at the root
+        │   │                      naming each module's sources (A4) and a CLAUDE.md card stating its law (A5)
+        │   └── tests/           — tests/<layer>/<package>/ mirroring source/, a CLAUDE.md card per layer root (A5),
+        │                          cross-cutting checks at the root
         └── <darwin|linux|windows>/ — GUI applications, one per platform (future — down the road)
 ```
 
@@ -685,6 +686,8 @@ Beyond those, `tests/CMakeLists.txt` registers `cli.*` ctest cases that run the 
 `cli.machine_schema_conformance` (`tests/schema_conformance.py`) pins [`machine-mode.md`](../reference/machine-mode.md) to `json_reporter.cpp` in both directions: an event the emitter produces but the document never describes, or one the document promises but nothing emits, fails the build. A protocol document that drifts is worse than none — a front-end author trusts it, builds against it, and debugs Apogee for a fault that is in the prose.
 
 `harness.layering` is a `cmake -P` check. Since A4 it reads the module map from `cmake/modules.cmake` and holds the includes to it in both directions -- an include of another module its row does not link fails, and so does a declared link nothing includes -- while the build itself refuses an include up a layer and the link policy a link up, a cycle or an undeclared link. The rest are the named rules, finer than a layer: no file under `source/business/harness/`, `source/business/agentloop/`, `source/business/agent/`, `source/data/secrets/`, `source/business/tools/`, `source/business/mcp/` or `source/business/knowledge/` includes `backends/` (with one named allowance for `mcp/`: the JSONL framer; and, since Milestone Y, an allow-list for `knowledge/` — `embedstore/`, `agentloop/`, `agent/`, `harness/`, `platform/` and itself, never a surface) — and, since Milestone U, that `source/infrastructure/events/` includes nothing from the project at all, because a bus anything can publish to must be a leaf. The credential store added a third shape: `source/data/secrets/` may include `harness/` (for the backend types) and itself, and nothing else — the one place that returns a key must not depend on a surface that renders. Since 2026-09-25, `source/presentation/markdown/` may include only `ansi/` and itself, so the renderer's decisions stay testable as operations with no terminal and never merge with the painter's bytes. The link graph cannot hold these -- `backends/` sits below the harness, so the include would compile and link -- so they are checked mechanically, each still failing with the map loosened to permit its violation (A4),, and it refuses to run against an empty source list so it cannot pass vacuously.
+
+`harness.layer_context` (`tests/layer_context.cmake`, A5) keeps the law next to the code true. Each layer root, in `source/` and in `tests/`, carries a short `CLAUDE.md` card -- position, modules, include law, the rules that bind a change, links to the ADRs -- and the check holds them to the module map: all eight present, each at most 30 lines and 3,000 bytes (a card that restates this file does not fit), each linking [ADR 0001](../adrs/cli/layer-enforcement.md) with every relative link resolving, and a source card's **Modules:** line naming exactly its layer's modules. It holds the test tree to the mirror ADR 0004 states -- every `tests/<layer>/<dir>` a module of that layer, every module with its test directory (`version` excepted by name, the root smoke test covering it) -- the [ADR index](../adrs/cli/README.md) whole in both directions, and the law's statement to the map: ADR 0001's numbered layers and its rule sentence, [ADR 0008](../adrs/cli/module-map.md)'s table of each layer's modules and what it may depend on. A module added or moved therefore lands with its card and its table row in the same change.
 
 `cli.complete_lifecycle` ([`tests/complete_e2e.cmake`](../../src/cli/tests/complete_e2e.cmake)) runs the walking skeleton end to end against the mock backend — prompts, stdin, flags, images, `--all-backends`, and every exit code — fully offline. **Every invocation gets an explicit stdin**: without one the child inherits ctest's, which may be a pipe that never delivers EOF, and a command falling through to reading stdin hangs the whole suite instead of failing. Since Milestone V it also runs `check --fix` and reads the `Tools` section, round-trips `config set-permission` through `config get`, refuses a level that is not one of the three, and runs `--tools` with the native set registered.
 

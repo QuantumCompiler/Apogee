@@ -316,6 +316,17 @@ add_test(NAME harness.layering
         -P "${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake"
 )
 
+# The law next to the code, held true (A5): the eight layer cards present and
+# within budget, the test tree mirroring the modules, the ADR index whole, and
+# ADR 0001's and ADR 0008's statement of the law equal to the module map.
+add_test(NAME harness.layer_context
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE_CLI_DIR=${CMAKE_SOURCE_DIR}
+        -DAPOGEE_ADR_DIR=${CMAKE_SOURCE_DIR}/../../documentation/adrs/cli
+        -DAPOGEE_MODULE_MAP=${CMAKE_SOURCE_DIR}/cmake/modules.cmake
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/layer_context.cmake"
+)
+
 # `apogee complete` end to end -- the walking skeleton, fully offline against
 # the mock backend. The pattern every later CLI test reuses.
 add_test(NAME cli.complete_lifecycle

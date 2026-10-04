@@ -23,4 +23,4 @@ A2 mirrored the test tree with the source tree — 194 test files into `tests/<l
 
 ## Enforcement
 
-The mirrored-tree shape is checked structurally (the presence test [A5](../../backlog/architecture/arch-adrs-layer-context.md) adds, beside the layering test); the include law applies to `tests/` exactly as to `source/` under the layering map and A4's link graph — test targets link their layer's libraries and below, nothing else.
+The mirrored-tree shape is checked structurally (`harness.layer_context`, which [A5](../../assistant/MILESTONES.md#milestone-aa--the-four-layers) added beside the layering test); the include law applies to `tests/` exactly as to `source/` under the layering map and A4's link graph — test targets link their layer's libraries and below, nothing else.

@@ -3766,7 +3766,7 @@ The prefill, which lives only in the llama build, was checked on real weights in
 
 ## Milestone AA — The four layers
 
-**Goal.** Make the CLI's source say what it is: four layers -- **Presentation → Business → Data → Infrastructure** -- each package in one, each including only its own layer and those below, the law enforced by the build itself. Asked for by the user on 2026-10-03 and specced from a spike that measured the real include graph into the standing **Architecture** queue (A1–A4). In C++ nothing makes this free; Go's import cycles made it free for Ommi, which is why the layering here has always been a guarded convention, and this milestone turns it into structure.
+**Goal.** Make the CLI's source say what it is: four layers -- **Presentation → Business → Data → Infrastructure** -- each package in one, each including only its own layer and those below, the law enforced by the build itself. Asked for by the user on 2026-10-03 and specced from a spike that measured the real include graph into the standing **Architecture** queue (A1–A4, A5 joining the same day). In C++ nothing makes this free; Go's import cycles made it free for Ommi, which is why the layering here has always been a guarded convention, and this milestone turns it into structure.
 
 ### 2026-10-03 — `arch-contracts-carve` (architecture item A1): the contracts carved to the Data floor
 
@@ -4009,3 +4009,44 @@ What the numbers say, plainly:
 | Layer aggregates | INTERFACE, with the layer's `CMakeLists.txt` as a never-compiled source | CMake builds an INTERFACE target only when it has sources. |
 | Tests | Per-layer OBJECT libraries in one executable | Compile-time layering for tests, with every name and entry point unchanged. |
 | Compile definitions | Scoped to the module that reads them | The version stamp on all of `apogee_core` recompiled the whole core at the first configure after every commit. |
+
+### 2026-10-03 — `arch-adrs-layer-context` (architecture item A5): the law next to the code
+
+**Why.** The layers were built and enforced (A1–A4), and their reasons were written down as ADRs the same day (`lib/documentation/adrs/cli/`, at the user's direction). But a model or a person opening a file in `source/business/` still had nothing in reach saying what the layer may include, which rules bind a change there, or where the law is enforced. The user asked that "each file … must know the correct context for its layer". This item puts a card at every layer root and gives the ADRs teeth.
+
+**What was built**
+
+- [x] **Eight layer cards**, a `CLAUDE.md` at each layer root -- `lib/src/cli/source/<layer>/` and `lib/src/cli/tests/<layer>/` -- which the context system reads for any file opened beneath them.
+  - **A source card** gives the layer's position, its **Modules:** line, what it may include, how the law is enforced, the rules finer than a layer that bind it, and what a change there owes. Its ADR links: ADR 0001 always, 0002 where behavior and modes meet, 0003/0004 for a new module, 0005/0006/0007 where they bind.
+  - **A test card** gives the mirror, the per-layer test library and what it may link, where a behavior spanning layers is tested, the support files at its floor, and the hermetic conventions.
+  - **Summaries that point**, 11 to 17 lines each: the rationale stays in the ADRs and DEVELOPER.md.
+- [x] **ADR 0008, the module map** -- the gap a card surfaced. ADR 0001's prose package list predated the settled module set: `transport` in Infrastructure, `commands` named, `agent`, `mcp` and `scaffold` missing. 0001 is append-only, so a new record states the map as a table, each layer's modules and what it may depend on, and 0001's Status names the supersession of its list alone. The rule itself, "its own layer or any layer below", stands in 0001.
+- [x] **`harness.layer_context`** (`tests/layer_context.cmake`), a `cmake -P` ctest case beside the layering test, reading the same map:
+  - **the cards:** all eight present, each at most 30 lines and 3,000 bytes, each linking ADR 0001, every relative link resolving, a source card's modules exactly its layer's;
+  - **the mirror** (ADR 0004's structural check): every test directory a module of its layer, every module with its test directory, `version` excepted by name (the root smoke test covers it);
+  - **the index:** every listed ADR present, numbered in order, titled and dated, every ADR file listed;
+  - **the law, golden:** ADR 0001's numbered layers in the map's order and its rule sentence verbatim, ADR 0008's table equal to the map -- membership per layer and the may-depend-on column. The prose law and the mechanical law are provably one.
+- [x] **The docs flow carries it:**
+  - CLAUDE.md's Documentation and Status step 4 adds the card and ADR 0008 for a module added or moved;
+  - the docs skill's mechanical validation names the cards' links and the check;
+  - DEVELOPER.md's tree and checks section describe both.
+
+**Proving it bites** -- sixteen planted violations in a scratch copy, sixteen caught by name, the unplanted and restored trees passing:
+- **The cards:** a card deleted; a card padded past its budget; a card's module list short one; a card's link broken; a card no longer linking ADR 0001.
+- **The mirror:** a test directory in the wrong layer; a module losing its test directory; `version`'s named cover gone.
+- **The index:** an indexed ADR missing; an ADR file the index does not list; an ADR titled with another number.
+- **The law:** ADR 0001's layers reordered; its rule sentence changed; ADR 0008 short a module; ADR 0008 letting Business depend up; the map moving a module with the documents unchanged.
+
+**Verified.** `cicd.sh --test` on the llama build -- all 2,011 pass, the usual one skip; `harness.layer_context` and `harness.layering` pass on the real tree; every relative link in the documentation and the cards resolves.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The law's form | "Its own layer and **any** below" *(default taken)* | The shipped graph: Presentation reads `contracts/` directly. The user's phrasing "the layer below it" is recorded; tightening would be a new ADR. |
+| Card placement | Four source, four tests; no ninth at `tests/`'s root *(default taken)* | The test cards mirror the source ones, as the trees do. |
+| Enforcement vehicle | A ctest case beside the layering test *(default taken)* | It rides the existing suite. |
+| ADR 0001's stale list | **A new record, ADR 0008**, superseding the list alone | ADRs are append-only; the item's seam says a gap becomes a new numbered record. |
+| Card budget | 30 lines, 3,000 bytes | Room to grow; no room to restate DEVELOPER.md. |
+| `version` without a test directory | Excepted by name, its cover checked | The root smoke test is its suite. |
+| The pipeline | Unchanged -- `changed.sh` does not list the ADRs | `cli.http_api_conformance`'s precedent with the HTTP reference; widening the CLI's inputs is a pipeline change of its own (ADR 0005), flagged for the user. |

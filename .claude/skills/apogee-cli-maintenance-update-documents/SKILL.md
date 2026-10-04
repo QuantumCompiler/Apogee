@@ -39,7 +39,7 @@ Work through the system in this order (read [`CLAUDE.md`](../../../lib/documenta
 
 After the edits, verify the whole system (script it — don't eyeball):
 
-- every relative `.md` link in `lib/documentation/` and `.claude/skills/` resolves;
+- every relative `.md` link in `lib/documentation/`, `.claude/skills/` and the eight layer cards (`lib/src/cli/{source,tests}/<layer>/CLAUDE.md`) resolves, and `harness.layer_context` passes -- the cards, the ADR index and ADRs 0001/0008 agree with `cmake/modules.cmake`;
 - the backlog index rows exactly match the documents on disk, numbering is sequential, and every gate names an existing item earlier in the order;
 - every open call in every item is tagged `[user]` / `[default: …]` / `(consumed decision)`;
 - no template markers or `_TODO:_` placeholders were newly introduced without being deliberate.

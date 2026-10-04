@@ -206,7 +206,7 @@ The Code Style rule below is lint-enforced, not aspirational: `make -C lib/src/c
 
 | File / package | Contents |
 |------|----------|
-| `lib/documentation/adrs/cli/` | Architecture Decision Records — the CLI's standing rules (layer enforcement, mode parity, granular modules, mirrored tests, install-mode stability, backwards compatibility, tab completion), each dated and append-only, with its rationale and its enforcement named; a changed decision is a new record superseding the old. The per-layer `CLAUDE.md` summary cards (A5) point here for depth. Sibling apps get their own directory beside `cli/`. |
+| `lib/documentation/adrs/cli/` | Architecture Decision Records — the CLI's standing rules (layer enforcement, mode parity, granular modules, mirrored tests, install-mode stability, backwards compatibility, tab completion, the module map), each dated and append-only, with its rationale and its enforcement named; a changed decision is a new record superseding the old. **Each layer root -- `lib/src/cli/source/<layer>/` and `lib/src/cli/tests/<layer>/` -- carries a short `CLAUDE.md` card** (A5): the layer's position, modules, include law and the rules that bind a change there, summarized and linked here for depth, so a file opened in a layer arrives with its context. `harness.layer_context` holds the cards, the index and ADRs 0001/0008 to `cmake/modules.cmake`. Sibling apps get their own directory beside `cli/`. |
 | `lib/documentation/assistant/` | These contributor docs (CLAUDE, SPEC, ROADMAP, MILESTONES, DEVELOPER) — **this file is the entry point**; there is no repo-root pointer. |
 | `lib/documentation/backlog/` | The work queue — one document per pending item, filed in **one subdirectory per index table** (`architecture/`, `maintenance/`, `v0.1.<x>/` — the tree mirrors the tables); priority-ordered index in its README. |
 | `lib/documentation/reference/` | **User-facing** reference docs, as opposed to the contributor docs above. `machine-mode.md` — the JSONL protocol a GUI drives the CLI over, written for front-end authors. `cli.machine_schema_conformance` pins it to `json_reporter.cpp`, so an undocumented event or a documented-but-unimplemented one fails the build. `http-api.md` — the HTTP contract a **remote** client builds against (`apogee serve`: routes, extensions, meta-frames, sessions, errors, the bind policy); `cli.http_api_conformance` pins its route headings to the table in `httpserver/mux.cpp` in both directions. `tools.md` — setting up the tools that need something outside Apogee: web search through the user's own SearXNG (25e), end to end. |
@@ -287,7 +287,7 @@ When a work item ships, in the same change:
 1. **Extend [MILESTONES.md](MILESTONES.md)** — fold the work into the matching milestone (or start a new one for a genuinely new area): goal, what was built, trade-offs.
 2. **Delete the backlog document** and its index row — the backlog holds pending work only.
 3. **Update [ROADMAP.md](ROADMAP.md)** — check the box / move the line to shipped.
-4. **Update the [Codebase Map](#codebase-map) and [DEVELOPER.md](DEVELOPER.md)** for any new/moved/deleted files.
+4. **Update the [Codebase Map](#codebase-map) and [DEVELOPER.md](DEVELOPER.md)** for any new/moved/deleted files -- and for a module added, moved or retired, its layer's `CLAUDE.md` card and [ADR 0008](../adrs/cli/module-map.md)'s table with the map (`harness.layer_context` fails on any one alone).
 5. **Update [SPEC.md](SPEC.md)** only if scope, non-goals, or principles actually changed.
 
 ---
