@@ -144,6 +144,23 @@
 
 name: CI
 
+# The run's title in the Actions list (user decision, 2026-10-04). GitHub's
+# default is the pull request's title, under which the run that built a
+# release and the run its merge started read alike. The version is the
+# branch's name -- a release branch is named for its release (ROADMAP.md,
+# Version scheme); lib/release/VERSION cannot be read when a run is named,
+# only the event can. A rehearsal knows only its pull request's number.
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && inputs.release_rehearsal_pr
+  && format('PR #{0} Release Rehearsal', inputs.release_rehearsal_pr)
+  || github.event_name == 'workflow_dispatch'
+  && format('{0} Manual Checks', github.ref_name)
+  || github.event.pull_request.merged
+  && format('{0} PR Release', github.head_ref)
+  || github.event.action == 'closed'
+  && format('{0} Pull Request Closed', github.head_ref)
+  || format('{0} Pull Request Checks', github.head_ref) }}
+
 # Trigger policy (user decisions, 2026-08-31 and 2026-09-25): a run starts on
 # a PROPOSED merge or ON REQUEST, and after a COMPLETED merge only to release
 # it -- never on an ordinary push, so work-in-progress commits on a branch

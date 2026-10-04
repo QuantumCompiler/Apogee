@@ -53,6 +53,14 @@
 
 name: Release
 
+# The run's title in the Actions list (user decision, 2026-10-04): the tag
+# pushed, whose name the gate holds to lib/release/VERSION. A dispatch has
+# no tag, so it is named for the branch it ran on, and a dry run says so.
+run-name: >-
+  ${{ github.event_name == 'push' && format('{0} Release', github.ref_name)
+  || inputs.dry_run && format('{0} Release Dry Run', github.ref_name)
+  || format('{0} Release', github.ref_name) }}
+
 on:
   push:
     # The manual path, kept as the escape hatch: `make release` pushes a tag,

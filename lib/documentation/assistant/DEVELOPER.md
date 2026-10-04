@@ -922,6 +922,8 @@ Every CI build packages its target ([`.github/actions/package`](../../../.github
 
 The run page's summary lists each of those as it passes.
 
+In the Actions list that run is titled `v<VERSION> PR Release`, and the pull request's own runs `v<VERSION> Pull Request Checks` (user decision, 2026-10-04) -- the version there is the branch's name, since a run is named before any file of it can be read, which is one more reason a release branch is named for its release. A rehearsal is `PR #<N> Release Rehearsal`, and a run of the manual path `v<VERSION> Release`.
+
 **One consequence, recorded:** built binaries come from the test merge, so `apogee version` names *its* commit — the same source tree as the merge commit on `stable`, a different hash, and one no branch points at. The tree check is what makes that safe; the release notes do not mention it.
 
 ### What you actually do
