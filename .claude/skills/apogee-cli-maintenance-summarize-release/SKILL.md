@@ -140,7 +140,7 @@ Script what can be scripted:
   (should print nothing);
 - Install and Platforms are identical to the previous release's, unless a change was deliberate — diff the two sections with `diff --strip-trailing-cr`: a body edited on GitHub's web page comes back with CRLF line endings, so every line differs otherwise;
 - every path under **Reference** exists at the range end (`git cat-file -e <end>:<path>`);
-- every command and flag a highlight names exists — ask the built binary (`apogee <command> --help </dev/null`) or grep `lib/src/cli/source/presentation/commands/`;
+- every command and flag a highlight names exists — ask the built binary (`apogee <command> --help </dev/null`) or grep `lib/src/cli/source/presentation/cli/`;
 - every highlight maps to a piece of evidence from step 3 — list the mapping for yourself, not in the notes.
 
 ## 6. Deliver
