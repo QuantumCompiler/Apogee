@@ -1380,6 +1380,45 @@ The defaults lost no task: Llama 3.1 8B failed the URL task greedily too (26g's 
 | Sliding-window models | No cache on disk, said once *(for veto)* | Their restore is not exact; the item puts correctness first. |
 | The mock | Takes part as a test vehicle | So `chat`'s naming and saving are tested end to end. |
 
+### 2026-10-04 — `speculative-decoding` (backlog item 26k): measured, and not built
+
+**Why.** Generation is the slowest part of a local answer, and llama.cpp at the pin drafts several tokens cheaply and verifies them in one pass of the large model: a model's own multi-token-prediction head (MTP), a small draft model of the same family, or n-grams from the text already in context. The first look (2026-09-25) showed no win, so this item was a measurement first, built only on a clean 1.3× on one acceptance model across prose, code and editing.
+
+**What was done.** `tests/scripts/py/speculative_bench.py` -- run by hand, never by the suite -- drives a `llama-server` built from the pinned llama.cpp:
+- each method on its own server, the same three tasks: prose, code, and a copy-heavy edit;
+- greedy, thinking off, one short warm-up request first;
+- one run per task -- a second would let an n-gram drafter copy the first run's answer, which a first version of the script did, and measured the repeat instead of the method;
+- generation tokens per second, the share of drafted tokens accepted, and whether the text matched the run with no speculation.
+
+**The measurement** (2026-10-04, M3 Max; the GPU was not idle -- the desktop's own apps drew on it -- so each method was run against its own fresh baseline, minutes apart):
+
+| Model | Method | Prose | Code | Edit |
+|---|---|---|---|---|
+| Qwen3-VL-8B Q4_K_M | n-gram | 0.84× | 0.85× | 1.84× (91% accepted) |
+| Llama 3.1 8B Q4_K_M | n-gram | 0.94× | 0.90× | 1.87× (91%) |
+| | draft: Llama 3.2 1B | 0.45×, **output differs** | 0.61× | 0.64× |
+| Gemma 4 12B Q4_K_M | n-gram | 1.00× | 1.09× | 2.23× (88%) |
+| | draft: Gemma 4 E4B | 0.30×, **output differs** | 0.63× | 0.73× |
+| gpt-oss-20b F16 | n-gram | 1.07× | 1.00× | 2.17× (93%) |
+| Qwen3.8-27B Q4_K_M | MTP | 0.80×, **output differs** | 1.08× (88%) | 1.14× (99%) |
+| | n-gram | 0.88× | 0.78× | 1.73× (91%) |
+
+- **No method clears 1.3× on all three tasks on any model**, so the build half is not done: no `speculative:` setting, no draft-verify loop. The item is closed as measured.
+- **Copying is the one win.** N-gram drafting nearly doubles an edit's speed on every family -- 1.7× to 2.2× -- and costs prose and code 0 to 22%. A small draft model costs everywhere: on Apple silicon the draft's own passes are not cheap enough.
+- **MTP held its 2026-09-25 shape**: 99% accepted on the edit and still only 1.14×. A hybrid model rolls back its recurrent state for every rejected draft.
+- **Greedy output was not always unchanged.** Three methods changed a prose answer under greedy sampling: the verifier checks drafts in a batch, and a batch's arithmetic is not one token's. The item required unchanged output, so a build would have had a second problem besides speed.
+- The draft models were the families' installed small models: no Qwen3 small enough is installed, and none was downloaded (the standing rule). Qwen3.8-27B ran once, for its MTP head -- "only where nothing else works" (the user's call).
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The ship bar | A clean 1.3× on one acceptance model across all three tasks *(confirmed by the user)* | Below that the complexity is not repaid. |
+| The methods | MTP, a small same-family draft, `ngram-mod` *(confirmed by the user)* | The pin's three that need nothing new. The draft is the family's installed small model -- Llama 3.2 1B, Gemma 4 E4B -- since no Qwen3-0.6B is installed and none is downloaded. |
+| The models | The families, and Qwen3.8-27B for MTP alone *(the user's calls)* | The 27B is the only installed model with an MTP head. |
+| The GPU | Not idle; each method against its own baseline, minutes apart | Nothing here controls the desktop's apps. No method came near the bar, so the noise does not change the answer. |
+| The outcome | Closed as measured, not built; the script kept for the next pin | A later llama.cpp, or an edit-only mode, may change this. |
+
 ## Milestone K — The install contract
 
 **Goal.** Make v0.1.0 shippable, and do it by closing Ommi's dominant early bug class rather than by documenting it. Ommi lost real time to *silent install drift*: `make install` seeded one tree, `install.sh` another, the updater a third, and `check` validated a fourth — each list correct when written, diverging one commit at a time, and never failing loudly. The fix adopted here is structural: one layout declaration, and every install path reads it.
