@@ -1,6 +1,6 @@
 # One key-resolution chain, and only one.
 #
-# The sibling of tests/one_role_resolver.cmake, for the same reason: a
+# The sibling of tests/scripts/cmake/one_role_resolver.cmake, for the same reason: a
 # precedence chain written inline where a backend is built gets copied the day
 # a second surface builds one, and the copies drift. A CLI and a server using
 # different keys for the same entry is a bug nobody notices until a bill

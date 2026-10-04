@@ -17,7 +17,7 @@
 ///
 /// **A leaf package.** It includes nothing else from the project, so any
 /// subsystem -- the session store, a backend loading a model, the job
-/// registry -- can publish without an include cycle, and `tests/layering.cmake`
+/// registry -- can publish without an include cycle, and `tests/scripts/cmake/layering.cmake`
 /// holds it to that. The HTTP control plane subscribes and streams what it
 /// hears to remote clients over `GET /v1/admin/events`; in a process with no
 /// subscriber -- a one-shot `complete` -- publishing is a mutex and an empty

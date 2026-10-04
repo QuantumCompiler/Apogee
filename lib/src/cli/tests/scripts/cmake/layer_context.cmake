@@ -14,7 +14,7 @@
 #                   **Modules:** line naming exactly its layer's modules;
 #   the mirror   -- every tests/<layer>/<dir> is a module of that layer, and
 #                   every module has its test directory (ADR 0004), `version`
-#                   excepted by name: the root smoke test covers it;
+#                   excepted by name: the cross-cutting smoke test covers it;
 #   the index    -- every ADR the index lists exists, numbered in order, with
 #                   its title, status and date; every ADR file is indexed;
 #   the law      -- ADR 0001's numbered layers are the map's, lowest first, and
@@ -32,10 +32,10 @@ include("${APOGEE_MODULE_MAP}")
 
 set(CARD_MAX_LINES 30)
 set(CARD_MAX_BYTES 3000)
-# A module whose tests live elsewhere, by name: `version` is the root smoke
-# test's subject (the stamp, the linked dependencies).
+# A module whose tests live elsewhere, by name: `version` -- the stamp, the
+# linked dependencies -- is the cross-cutting smoke test's subject.
 set(UNMIRRORED_MODULES version)
-set(UNMIRRORED_COVER_version "${APOGEE_CLI_DIR}/tests/smoke_test.cpp")
+set(UNMIRRORED_COVER_version "${APOGEE_CLI_DIR}/tests/crosscutting/smoke_test.cpp")
 
 set(VIOLATIONS "")
 # One violation, its arguments concatenated one by one -- `${ARGN}` would split

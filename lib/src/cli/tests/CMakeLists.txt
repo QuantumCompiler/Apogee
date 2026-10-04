@@ -238,12 +238,13 @@ add_library(apogee_tests_presentation OBJECT
 target_link_libraries(apogee_tests_presentation PRIVATE apogee_presentation apogee_business
                       apogee_data apogee_infrastructure Catch2::Catch2)
 
-# The cross-cutting suites -- the package headers, the smoke test, the bundled
-# agents -- read the whole product, so they compile against all of it.
+# The cross-cutting suites in crosscutting/ -- the package headers, the smoke
+# test, the bundled agents -- read the whole product, so they compile against
+# all of it.
 add_executable(apogee_tests
-    smoke_test.cpp
-    packages_test.cpp
-    bundled_agents_test.cpp
+    crosscutting/smoke_test.cpp
+    crosscutting/packages_test.cpp
+    crosscutting/bundled_agents_test.cpp
 )
 
 set(APOGEE_TEST_TARGETS apogee_tests_infrastructure apogee_tests_data apogee_tests_business
@@ -313,7 +314,7 @@ add_test(NAME harness.layering
     COMMAND "${CMAKE_COMMAND}"
         -DAPOGEE_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
         -DAPOGEE_MODULE_MAP=${CMAKE_SOURCE_DIR}/cmake/modules.cmake
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/layering.cmake"
 )
 
 # The law next to the code, held true (A5): the eight layer cards present and
@@ -324,7 +325,7 @@ add_test(NAME harness.layer_context
         -DAPOGEE_CLI_DIR=${CMAKE_SOURCE_DIR}
         -DAPOGEE_ADR_DIR=${CMAKE_SOURCE_DIR}/../../documentation/adrs/cli
         -DAPOGEE_MODULE_MAP=${CMAKE_SOURCE_DIR}/cmake/modules.cmake
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/layer_context.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/layer_context.cmake"
 )
 
 # `apogee complete` end to end -- the walking skeleton, fully offline against
@@ -333,7 +334,7 @@ add_test(NAME cli.complete_lifecycle
     COMMAND "${CMAKE_COMMAND}"
         -DAPOGEE_BIN=$<TARGET_FILE:apogee>
         -DAPOGEE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/complete-e2e-home
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/complete_e2e.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/complete_e2e.cmake"
 )
 
 # The interactive-never-listens invariant (SPEC.md -> Principles), test-locked
@@ -412,7 +413,7 @@ add_test(NAME cli.no_listen_symbols
     COMMAND "${CMAKE_COMMAND}"
         "-DAPOGEE_ARCHIVES=${APOGEE_LINKED_ARCHIVE_LIST}"
         -DAPOGEE_LISTENER_OBJECT=serve.cpp${CMAKE_CXX_OUTPUT_EXTENSION}
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_symbols.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/no_listen_symbols.cmake"
 )
 
 # `apogee serve` exists, and its help must say what a server deployment needs
@@ -425,7 +426,7 @@ add_test(NAME cli.http_api_conformance
     COMMAND "${CMAKE_COMMAND}"
         -DMUX_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/httpserver/mux.cpp
         -DAPI_DOC=${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/http-api.md
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/http_api_conformance.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/http_api_conformance.cmake"
 )
 
 add_test(NAME cli.install_is_ours_only
@@ -434,40 +435,40 @@ add_test(NAME cli.install_is_ours_only
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/install-only
         -DMAKEFILE=${CMAKE_CURRENT_SOURCE_DIR}/../Makefile
         -DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/install_is_ours_only.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/install_is_ours_only.cmake"
 )
 
 add_test(NAME cli.no_vendor_credentials
     COMMAND "${CMAKE_COMMAND}"
         -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/no_vendor_credentials.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/no_vendor_credentials.cmake"
 )
 
 # One role-resolution chain, and only one. See the file for the Ommi bug class.
 add_test(NAME cli.one_role_resolver
     COMMAND "${CMAKE_COMMAND}"
         -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/one_role_resolver.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/one_role_resolver.cmake"
 )
 
 # One key-resolution chain, and only one: the same bug class, for secrets.
 add_test(NAME cli.one_key_resolver
     COMMAND "${CMAKE_COMMAND}"
         -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/one_key_resolver.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/one_key_resolver.cmake"
 )
 
 add_test(NAME cli.test_names
     COMMAND "${CMAKE_COMMAND}"
         -DTEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/test_names.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/test_names.cmake"
 )
 
 if(UNIX)
-    # The install-parity gate. See tests/install_parity.sh for why an exception
+    # The install-parity gate. See tests/scripts/sh/install_parity.sh for why an exception
     # here is where the next drift hides.
     add_test(NAME cli.install_parity
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/install_parity.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/install_parity.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/install-parity
     )
@@ -478,14 +479,14 @@ if(UNIX)
     # the protocol's own tests cannot see. See the script for the two zsh bugs
     # that hid nested verbs there.
     add_test(NAME cli.shell_completion
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/shell_completion_check.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/shell_completion_check.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/shell-completion
     )
     set_tests_properties(cli.shell_completion PROPERTIES TIMEOUT 60)
 
     add_test(NAME cli.machine_mode
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/machine_mode_e2e.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/machine_mode_e2e.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/machine-mode
     )
@@ -495,14 +496,14 @@ if(UNIX)
     # execute_process cannot pass an EMPTY argument at all), and the key being
     # re-read at turn build rather than at startup.
     add_test(NAME cli.auto_rag
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/auto_rag_e2e.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/auto_rag_e2e.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/auto-rag
     )
     set_tests_properties(cli.auto_rag PROPERTIES TIMEOUT 60)
 
     add_test(NAME cli.complete_opens_no_listening_socket
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/no_listen_check.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_listen_check.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/no-listen-home
     )
@@ -512,7 +513,7 @@ if(UNIX)
     # non-loopback bind, streams to a real client, mints sessions the terminal
     # can resume, and stops on SIGTERM. Properties of the process, not a class.
     add_test(NAME cli.serve_lifecycle
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/serve_e2e.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/serve_e2e.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/serve-e2e-home
     )
@@ -523,7 +524,7 @@ if(UNIX)
     # one skipped with its stderr tail, and the in-binary server as one more
     # server. Needs python3 for the scaffold (skips itself without one).
     add_test(NAME cli.mcp_lifecycle
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/mcp_e2e.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/mcp_e2e.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/mcp-e2e-home
     )
@@ -534,7 +535,7 @@ if(UNIX)
     # the refs decided by flags, the report rendered and saved, the validator's
     # retry and its honest flag, a vendor CLI refused, and chat's --branch.
     add_test(NAME cli.analyze_lifecycle
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/analyze_e2e.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/analyze_e2e.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/analyze-e2e
     )
@@ -545,7 +546,7 @@ if(UNIX)
     # present and the index text free of the attribution, the doctor's rows,
     # a vendor CLI refused, and chat's /capture through the same core.
     add_test(NAME cli.knowledge_lifecycle
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/knowledge_e2e.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/knowledge_e2e.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/knowledge-e2e
     )
@@ -558,7 +559,7 @@ if(UNIX)
     # entity of a chunk the query never matched, a captured record as a
     # decision node, `knowledge query --graph`, and delete.
     add_test(NAME cli.graph_lifecycle
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/graph_e2e.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/graph_e2e.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/graph-e2e
     )
@@ -570,7 +571,7 @@ if(UNIX)
     # script under the environment's interpreter), list, info, delete. Skips
     # (77) where the host has no python3.
     add_test(NAME cli.datasets_lifecycle
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/datasets_e2e.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/datasets_e2e.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/datasets-e2e
     )
@@ -585,7 +586,7 @@ if(UNIX)
     # `versions`, `status`, `check` green throughout, and no training route
     # on the served admin plane beyond the reads.
     add_test(NAME cli.train_lifecycle
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/train_e2e.sh"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/train_e2e.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/train-e2e
     )
@@ -603,7 +604,7 @@ if(UNIX)
     if(Python3_Interpreter_FOUND)
         add_test(NAME cli.startup_speaks_on_one_line
             COMMAND "${Python3_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/pty_startup_check.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_startup_check.py"
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.startup_speaks_on_one_line PROPERTIES TIMEOUT 60)
@@ -617,7 +618,7 @@ if(UNIX)
         # out the connect timeout. Ommi's Milestone P postmortem, locked.
         add_test(NAME cli.mcp_server_stderr_stays_off_the_terminal
             COMMAND "${Python3_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/pty_mcp_check.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_mcp_check.py"
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.mcp_server_stderr_stays_off_the_terminal PROPERTIES TIMEOUT 120)
@@ -626,7 +627,7 @@ if(UNIX)
         # whose banner, mapping and progress never reach the terminal.
         add_test(NAME cli.ffmpeg_stays_off_the_terminal
             COMMAND "${Python3_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/pty_ffmpeg_check.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_ffmpeg_check.py"
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.ffmpeg_stays_off_the_terminal PROPERTIES TIMEOUT 120)
@@ -636,14 +637,14 @@ if(UNIX)
         # gone before the results, and stdout stays the answer on a pipe.
         add_test(NAME cli.busy_line
             COMMAND "${Python3_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/pty_busy_check.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_busy_check.py"
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.busy_line PROPERTIES TIMEOUT 120)
 
         add_test(NAME cli.chat_typeahead_and_crash_safety
             COMMAND "${Python3_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/pty_chat_check.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_chat_check.py"
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.chat_typeahead_and_crash_safety PROPERTIES TIMEOUT 120)
@@ -656,7 +657,7 @@ if(UNIX)
         # behind -- and a pipe given none of it.
         add_test(NAME cli.chat_line_editing
             COMMAND "${Python3_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/pty_lineedit_check.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_lineedit_check.py"
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.chat_line_editing PROPERTIES TIMEOUT 120)
@@ -667,7 +668,7 @@ if(UNIX)
         # surfaces cannot drift apart unnoticed.
         add_test(NAME cli.reference_driver
             COMMAND "${Python3_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/reference_driver.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/reference_driver.py"
                 $<TARGET_FILE:apogee>
                 ${CMAKE_CURRENT_BINARY_DIR}/reference-driver-home
         )
@@ -678,7 +679,7 @@ if(UNIX)
         # actually in the prose, so it is not allowed to drift.
         add_test(NAME cli.machine_schema_conformance
             COMMAND "${Python3_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/schema_conformance.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/schema_conformance.py"
                 "${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/machine/json_reporter.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/machine-mode.md"
         )
@@ -692,5 +693,5 @@ add_test(NAME cli.config_lifecycle
     COMMAND "${CMAKE_COMMAND}"
         -DAPOGEE_BIN=$<TARGET_FILE:apogee>
         -DAPOGEE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/config-e2e-home
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/config_e2e.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/config_e2e.cmake"
 )

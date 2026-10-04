@@ -9,7 +9,7 @@
 #                     A module sees its own layer's include root and the roots
 #                     its links bring, so an include that reaches up a layer
 #                     does not compile.
-#   the test       -- tests/layering.cmake holds the includes to this map in
+#   the test       -- tests/scripts/cmake/layering.cmake holds the includes to this map in
 #                     both directions: an include of another module with no
 #                     link here fails, and so does a link nothing includes.
 #

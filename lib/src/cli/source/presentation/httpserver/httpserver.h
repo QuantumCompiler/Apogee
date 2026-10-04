@@ -16,7 +16,7 @@
 /// serving = server"). Nothing in this package may become load-bearing for a
 /// local `chat` or `complete`.
 ///
-/// This umbrella header is what `tests/packages_test.cpp` includes; it names
+/// This umbrella header is what `tests/crosscutting/packages_test.cpp` includes; it names
 /// the package's own headers so a broken include path fails the day it breaks.
 
 #include "httpserver/admin.h"

@@ -73,7 +73,7 @@ apogee_add_module(logger
 target_link_libraries(apogee_data_logger PRIVATE nlohmann_json::nlohmann_json)
 
 # The credential store and the one key resolver, on the contracts alone
-# (tests/layering.cmake).
+# (tests/scripts/cmake/layering.cmake).
 apogee_add_module(secrets
     secrets/secrets.h
     secrets/store.h

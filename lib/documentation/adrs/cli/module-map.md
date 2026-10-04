@@ -27,4 +27,4 @@ Which modules a module links, within those bounds, is the map's business: each r
 
 ## Enforcement
 
-`harness.layer_context` (`lib/src/cli/tests/layer_context.cmake`) holds this table equal to `cmake/modules.cmake` -- each layer's modules, the layer order and the may-depend-on column -- and holds ADR 0001's numbered layers and its rule sentence to the same map. The map itself is enforced by the build (one library per module, an include up a layer does not compile, `cmake/ApogeeLinkPolicy.cmake` at configure) and by `harness.layering` (the includes held to the map in both directions).
+`harness.layer_context` (`lib/src/cli/tests/scripts/cmake/layer_context.cmake`) holds this table equal to `cmake/modules.cmake` -- each layer's modules, the layer order and the may-depend-on column -- and holds ADR 0001's numbered layers and its rule sentence to the same map. The map itself is enforced by the build (one library per module, an include up a layer does not compile, `cmake/ApogeeLinkPolicy.cmake` at configure) and by `harness.layering` (the includes held to the map in both directions).

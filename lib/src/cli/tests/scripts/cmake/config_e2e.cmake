@@ -252,7 +252,7 @@ endif()
 # reason is worth keeping: execute_process drops an empty list element, so
 # there is no way to hand the binary an empty argument from this script, and
 # `--rag=` reaches CLI11 as a flag still waiting for its value (it then
-# swallows the prompt and blocks on stdin). tests/auto_rag_e2e.sh covers it
+# swallows the prompt and blocks on stdin). tests/scripts/sh/auto_rag_e2e.sh covers it
 # from a real shell; the precedence itself is table-tested in helpers_test.
 
 # A named flag beats the key.

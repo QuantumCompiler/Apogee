@@ -67,7 +67,7 @@ target_link_libraries(apogee_business_agentloop PUBLIC nlohmann_json::nlohmann_j
                       PRIVATE nlohmann_json_schema_validator::validator)
 
 # The knowledge layer: records, the capture clerk, and the store over the
-# chunk store. Never a surface: its own rule is in tests/layering.cmake.
+# chunk store. Never a surface: its own rule is in tests/scripts/cmake/layering.cmake.
 apogee_add_module(knowledge
     knowledge/record.h
     knowledge/record.cpp
@@ -87,7 +87,7 @@ target_link_libraries(apogee_business_knowledge PUBLIC nlohmann_json::nlohmann_j
 # The knowledge-graph layer over collections: the extraction contract
 # (prompt and schema compiled in, validation in host code) and the
 # resumable build with the record pass. Model-free: generation and
-# embedding arrive as closures (tests/layering.cmake holds it to that).
+# embedding arrive as closures (tests/scripts/cmake/layering.cmake holds it to that).
 apogee_add_module(graph
     graph/extract.h
     graph/extract.cpp

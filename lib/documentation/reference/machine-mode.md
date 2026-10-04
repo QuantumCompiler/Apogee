@@ -6,7 +6,7 @@ the surface for genuine server deployments, where a remote client makes REST
 calls to Apogee running on a host; a local front-end uses this instead.
 
 This document is the reference for that protocol. The worked example is
-[`reference_driver.py`](../../src/cli/tests/reference_driver.py), which is also
+[`reference_driver.py`](../../src/cli/tests/scripts/py/reference_driver.py), which is also
 the test that keeps this document true.
 
 ## The two flags

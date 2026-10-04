@@ -11,7 +11,7 @@
 - **Never a daemon, never a socket.** A task is a user- or scheduler-invoked process that exits when it stops — the training cycle's rule, adopted whole.
 
 **Seam + files.**
-- `tasks/` (new guarded package — may include `agentloop/`, `agent/`, `harness/`, `logger/`, `platform/` and itself; never a backend or `commands/`; joins `tests/layering.cmake`): `tasks/task.h/.cpp` (the record: goal, acceptance checks, budgets, plan, per-round outcomes, status, session id — and its transitions), `tasks/runner.h/.cpp` (the outer loop: plan turn → execute turn → check → corrective turn; generation arrives through the loop's existing seams), `tasks/ledger.h/.cpp` (manifest-per-transition, the lock).
+- `tasks/` (new guarded package — may include `agentloop/`, `agent/`, `harness/`, `logger/`, `platform/` and itself; never a backend or `commands/`; joins `tests/scripts/cmake/layering.cmake`): `tasks/task.h/.cpp` (the record: goal, acceptance checks, budgets, plan, per-round outcomes, status, session id — and its transitions), `tasks/runner.h/.cpp` (the outer loop: plan turn → execute turn → check → corrective turn; generation arrives through the loop's existing seams), `tasks/ledger.h/.cpp` (manifest-per-transition, the lock).
 - `commands/task_cmd.h/.cpp`: `apogee task run|status|list|resume|halt|cancel`; `run` takes the goal plus repeatable acceptance flags; progress on the status line through the existing Reporter.
 - `contracts/layout.h`: the `tasks/` row. `logger/`: the session linkage.
 - Tests: `tests/tasks/` mirroring the package (transitions table-tested against a scripted mock); an e2e over the real binary — goal → plan → incomplete round → corrective round → done — plus a kill-and-resume check.

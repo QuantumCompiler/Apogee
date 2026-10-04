@@ -6,7 +6,7 @@
 
 **May include:** this layer, Data and Infrastructure.
 
-**Enforced by:** the build -- a module sees its own layer's include root and those its links bring up, so an include up a layer does not compile, and the link policy refuses a link up, a cycle or an undeclared link at configure -- and [`harness.layering`](../../tests/layering.cmake), which holds every include of another module to the map and keeps the named rules. The rules here, finer than a layer: `harness/`, `agentloop/`, `agent/`, `tools/`, `mcp/`, `knowledge/`, `graph/` and `training/` never include `backends/` -- what a backend knows crosses as plain data (`ModelBehavior`) or a capability interface; `knowledge/`, `graph/` and `training/` are domain cores held to allow-lists, never a surface, with model calls arriving as closures.
+**Enforced by:** the build -- a module sees its own layer's include root and those its links bring up, so an include up a layer does not compile, and the link policy refuses a link up, a cycle or an undeclared link at configure -- and [`harness.layering`](../../tests/scripts/cmake/layering.cmake), which holds every include of another module to the map and keeps the named rules. The rules here, finer than a layer: `harness/`, `agentloop/`, `agent/`, `tools/`, `mcp/`, `knowledge/`, `graph/` and `training/` never include `backends/` -- what a backend knows crosses as plain data (`ModelBehavior`) or a capability interface; `knowledge/`, `graph/` and `training/` are domain cores held to allow-lists, never a surface, with model calls arriving as closures.
 
 **Changing this layer:**
 - One implementation per decision chain; a second copy of one for another mode is the defect ([ADR 0002](../../../../documentation/adrs/cli/mode-parity.md)).

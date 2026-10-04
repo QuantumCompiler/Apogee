@@ -6,7 +6,7 @@
 
 **May include:** this layer only; nothing sits below it.
 
-**Enforced by:** the build -- a module sees its own layer's include root and those its links bring up, so an include up a layer does not compile, and the link policy refuses a link up, a cycle or an undeclared link at configure -- and [`harness.layering`](../../tests/layering.cmake), which holds every include of another module to the map and keeps the named rules. The rule here: `events/` is a leaf, including nothing from the project, so anything may publish to it.
+**Enforced by:** the build -- a module sees its own layer's include root and those its links bring up, so an include up a layer does not compile, and the link policy refuses a link up, a cycle or an undeclared link at configure -- and [`harness.layering`](../../tests/scripts/cmake/layering.cmake), which holds every include of another module to the map and keeps the named rules. The rule here: `events/` is a leaf, including nothing from the project, so anything may publish to it.
 
 **Changing this layer:**
 - A new module: its directory here, a row in the map, its sources in this layer's `CMakeLists.txt`, its tests in `tests/infrastructure/<module>/` ([ADR 0003](../../../../documentation/adrs/cli/granular-modules.md), [ADR 0004](../../../../documentation/adrs/cli/tests-mirror-architecture.md)).

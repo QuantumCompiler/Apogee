@@ -20,7 +20,7 @@ set -euo pipefail
 
 binary="$1"
 work="$2"
-stubs="$(cd "$(dirname "$0")/../completions" && pwd)"
+stubs="$(cd "$(dirname "$0")/../../../completions" && pwd)"
 
 rm -rf "$work"
 mkdir -p "$work/bin" "$work/home"

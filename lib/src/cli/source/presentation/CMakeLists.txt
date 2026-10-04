@@ -111,7 +111,7 @@ apogee_add_module(httpserver
 
     # The ONE translation unit that may reference listen()/accept(). The
     # no-listen symbol check allow-lists exactly this object and requires it to
-    # be the only one -- see tests/no_listen_symbols.cmake.
+    # be the only one -- see tests/scripts/cmake/no_listen_symbols.cmake.
     httpserver/serve.h
     httpserver/serve.cpp
 )

@@ -14,7 +14,7 @@
 ///
 /// **This is the one translation unit in the whole library that may reference
 /// `listen()` and `accept()`.** The no-listen symbol check
-/// (`tests/no_listen_symbols.cmake`) allow-lists this file's object by name
+/// (`tests/scripts/cmake/no_listen_symbols.cmake`) allow-lists this file's object by name
 /// and fails the build if any other object -- ours or a third party's -- ever
 /// references either. Only `apogee serve` owns a port; that rule is enforced,
 /// and this file is its single, reviewed exception.

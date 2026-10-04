@@ -11,9 +11,9 @@
 
 **Seam + files.**
 - `commands/` (the hidden command) + `render/json_report.h/.cpp`: the event declaration becomes data one place can render as schema — whatever form the conformance test reads today is the source of truth to extend, not duplicate.
-- `tests/schema_conformance.py`: grows the third direction — the emitted schema must name exactly the vocabulary the code emits and the doc documents; a fixture stream (the machine-mode e2e's own output) must validate against it.
+- `tests/scripts/py/schema_conformance.py`: grows the third direction — the emitted schema must name exactly the vocabulary the code emits and the doc documents; a fixture stream (the machine-mode e2e's own output) must validate against it.
 - Release packaging (`cicd.sh` staging / the archive list): `machine-schema.json` beside the binary and stubs.
-- [machine-mode.md](../../reference/machine-mode.md): a "Validating and generating" section; `tests/naive_host_driver.py` swaps its hand-written vocabulary for a schema check — W2 closes in the probe itself.
+- [machine-mode.md](../../reference/machine-mode.md): a "Validating and generating" section; `tests/scripts/py/naive_host_driver.py` swaps its hand-written vocabulary for a schema check — W2 closes in the probe itself.
 
 **Reference (Ommi).** No analog. Prior art: LSP's published metaModel and MCP's TypeScript-source schema — both prove integrators build clients from the artifact, not the prose; JSON Schema chosen here because validators exist in every language a host will be written in.
 

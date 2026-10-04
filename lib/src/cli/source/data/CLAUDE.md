@@ -6,7 +6,7 @@
 
 **May include:** this layer and Infrastructure.
 
-**Enforced by:** the build -- a module sees its own layer's include root and those its links bring up, so an include up a layer does not compile, and the link policy refuses a link up, a cycle or an undeclared link at configure -- and [`harness.layering`](../../tests/layering.cmake), which holds every include of another module to the map and keeps the named rules. The rules here: `contracts/` is the floor and includes only `platform/`; `modelstore/` and `transport/` stand on `contracts/` and `platform/` alone; `secrets/` on `contracts/` alone.
+**Enforced by:** the build -- a module sees its own layer's include root and those its links bring up, so an include up a layer does not compile, and the link policy refuses a link up, a cycle or an undeclared link at configure -- and [`harness.layering`](../../tests/scripts/cmake/layering.cmake), which holds every include of another module to the map and keeps the named rules. The rules here: `contracts/` is the floor and includes only `platform/`; `modelstore/` and `transport/` stand on `contracts/` and `platform/` alone; `secrets/` on `contracts/` alone.
 
 **Changing this layer:**
 - What two layers both need sinks to `contracts/`; what a lower layer needs from a higher one crosses as an interface declared here and implemented above (`ProviderRegistry`), never an include up.

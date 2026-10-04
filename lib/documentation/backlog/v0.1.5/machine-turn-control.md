@@ -14,7 +14,7 @@
 - `cli/chat.cpp`: the stdin reader accepts `cancel` and trips the same cancellation the interrupt handler trips; a queued `user` line after a `cancel` starts the next turn normally.
 - `agentloop/loop.cpp`: no new mechanism — the existing `cancellation` seam and half-turn rollback are the implementation; this item only gives machine mode a way to reach them.
 - [machine-mode.md](../../reference/machine-mode.md): both additions, plus the turn-accounting rule stated for drivers.
-- Tests: `tests/schema_conformance.py`, the machine-mode e2e (a cancelled long turn: `result` arrives, session survives, next turn works), `tests/naive_host_driver.py` re-run — W3 and W4 close.
+- Tests: `tests/scripts/py/schema_conformance.py`, the machine-mode e2e (a cancelled long turn: `result` arrives, session survives, next turn works), `tests/scripts/py/naive_host_driver.py` re-run — W3 and W4 close.
 
 **Reference (Ommi).** No analog (Ommi had no machine mode). Prior art: JSON-RPC's `id` (what correlation buys) and LSP's `$/cancelRequest` (cancel as a notification against an id) — adopted here in the JSONL idiom the spike recommended over reframing: the id is a field, the cancel is a typed line, and both arrive without breaking a v1 driver.
 

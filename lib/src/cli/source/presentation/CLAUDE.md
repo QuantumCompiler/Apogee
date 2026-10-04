@@ -6,7 +6,7 @@
 
 **May include:** every layer.
 
-**Enforced by:** the build -- a module sees its own layer's include root and those its links bring up, so an include up a layer does not compile, and the link policy refuses a link up, a cycle or an undeclared link at configure -- and [`harness.layering`](../../tests/layering.cmake), which holds every include of another module to the map and keeps the named rules. The rules here: `markdown/` includes only `ansi/`; `views/` paints and never parses argv (no `cli/`, `machine/` or CLI11); `machine/` never paints; `cli/` is the composition root; `operations/` holds what the command line and the HTTP server both run, so neither includes the other.
+**Enforced by:** the build -- a module sees its own layer's include root and those its links bring up, so an include up a layer does not compile, and the link policy refuses a link up, a cycle or an undeclared link at configure -- and [`harness.layering`](../../tests/scripts/cmake/layering.cmake), which holds every include of another module to the map and keeps the named rules. The rules here: `markdown/` includes only `ansi/`; `views/` paints and never parses argv (no `cli/`, `machine/` or CLI11); `machine/` never paints; `cli/` is the composition root; `operations/` holds what the command line and the HTTP server both run, so neither includes the other.
 
 **Changing this layer:**
 - A change reaches every mode it applies to -- the command line, HTTP, machine -- in the same change, or the skipped mode is named ([ADR 0002](../../../../documentation/adrs/cli/mode-parity.md)).

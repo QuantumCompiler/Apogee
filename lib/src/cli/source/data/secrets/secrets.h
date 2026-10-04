@@ -12,7 +12,7 @@
 /// for the backend types and nothing from `backends/`, `commands/` or
 /// `httpserver/`, and `harness.layering` holds it to that.
 ///
-/// This umbrella header is what `tests/packages_test.cpp` includes; it names
+/// This umbrella header is what `tests/crosscutting/packages_test.cpp` includes; it names
 /// the package's own headers so a broken include path fails the day it breaks.
 
 #include "secrets/resolve.h"

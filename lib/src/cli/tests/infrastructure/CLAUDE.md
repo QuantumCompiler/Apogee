@@ -1,6 +1,6 @@
 # The Infrastructure tests
 
-**Mirror.** `tests/infrastructure/<module>/` tests `source/infrastructure/<module>/` ([ADR 0004](../../../../documentation/adrs/cli/tests-mirror-architecture.md)); a new module brings its test directory in the same change. `version/` has no directory: the root `smoke_test.cpp` covers it.
+**Mirror.** `tests/infrastructure/<module>/` tests `source/infrastructure/<module>/` ([ADR 0004](../../../../documentation/adrs/cli/tests-mirror-architecture.md)); a new module brings its test directory in the same change. `version/` has no directory: `tests/crosscutting/smoke_test.cpp` covers it.
 
 **Compiles as** `apogee_tests_infrastructure`, an OBJECT library linking the Infrastructure modules only: a test that includes a header from above this layer does not compile, and the link policy refuses the library a link above it. A behavior spanning layers is tested in the highest layer it touches -- nothing here drives a contract, a backend or the Harness.
 

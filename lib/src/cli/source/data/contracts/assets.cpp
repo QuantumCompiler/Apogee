@@ -16,7 +16,7 @@
 
 // GENERATED from lib/src/cli/assets/prompts/*.txt and assets/schemas/*.json by
 // the script recorded in MILESTONES.md (Milestone X). The shipped files and
-// these literals are byte-identical, and tests/bundled_agents_test.cpp fails
+// these literals are byte-identical, and tests/crosscutting/bundled_agents_test.cpp fails
 // the build the moment they drift -- the same contract the config template
 // keeps. Edit the FILES, then regenerate; never edit a literal here.
 
