@@ -51,6 +51,11 @@ struct CompleteFlags {
     /// Whether the model thinks first, and for how long (26i).
     std::string think;
     std::int64_t think_budget = 0;
+    /// The run's answers, given at invocation (26o): with nobody to ask, the
+    /// only way a one-shot uses a destructive tool on purpose.
+    std::vector<std::string> allow;
+    std::vector<std::string> deny;
+    std::vector<std::string> allow_hosts;
     bool quiet = false;
     bool verbose = false;
     bool all_backends = false;
@@ -78,6 +83,23 @@ struct CompleteFlags {
 [[noreturn]] void fail_user(const std::string& message) {
     std::cerr << "apogee complete: " << message << "\n";
     throw CLI::RuntimeError(kUserError);
+}
+
+/// The run's answers, given at invocation (26o), checked against the tools
+/// that ask. A name that is neither a gated tool nor a website fails the run:
+/// a typo must not quietly grant nothing.
+std::shared_ptr<SessionApprovals> seeded_approvals(const CompleteFlags& flags,
+                                                   const agent::ToolRegistry& registry) {
+    auto approvals = std::make_shared<SessionApprovals>();
+    if (const std::string refused = seed_approvals(
+            *approvals,
+            PermissionPresets{
+                .allow = flags.allow, .deny = flags.deny, .allow_hosts = flags.allow_hosts},
+            gated_tools(registry));
+        !refused.empty()) {
+        fail_user(refused);
+    }
+    return approvals;
 }
 
 [[noreturn]] void fail_backend(const std::string& message) {
@@ -202,6 +224,12 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                                              : resolve_max_tokens(std::nullopt, config, model);
     request.temperature = temperature;
     request.max_tokens = max_tokens;
+    if (!flags.tools &&
+        !PermissionPresets{
+            .allow = flags.allow, .deny = flags.deny, .allow_hosts = flags.allow_hosts}
+             .empty()) {
+        fail_user("--allow, --deny and --allow-host need --tools: without tools, nothing is asked");
+    }
     // Whether the model thinks first (26i): the flags, else the backend's.
     const harness::Thinking thinking = resolve_thinking(
         flags.think.empty() ? std::nullopt : harness::thinking_mode_from_string(flags.think),
@@ -260,9 +288,11 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             machine_selection =
                 make_tool_selection(harness, config, machine_registry, config_path, ranked_by);
             machine_options.tool_selection = machine_selection.get();
-            // The config's levels only: a one-shot driver cannot be asked, so
-            // ask resolves to deny, exactly as on a pipe.
-            machine_options.permission = make_permission_checker(config, nullptr);
+            // The config's levels and the run's own answers (26o): a one-shot
+            // driver cannot be asked, so anything else that asks is a deny,
+            // exactly as on a pipe.
+            machine_options.permission =
+                make_permission_checker(config, seeded_approvals(flags, machine_registry));
             // No AskFn: a one-shot driver has no way to answer a question
             // mid-turn. The loop's rule then applies unchanged -- ask_user is
             // never advertised, rather than advertised and unanswerable.
@@ -424,7 +454,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         // means the tool never appears in the request at all -- and a null
         // ConfirmFn, on a pipe, means a destructive tool's `ask` is a deny.
         loop_options.ask = terminal_ask_fn(reporter.status(), reporter_options.style);
-        const auto approvals = std::make_shared<SessionApprovals>();
+        const std::shared_ptr<SessionApprovals> approvals = seeded_approvals(flags, registry);
         loop_options.permission = make_permission_checker(config, approvals);
         loop_options.confirm =
             terminal_confirm_fn(reporter.status(), reporter_options.style, config_path, approvals);
@@ -523,6 +553,20 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                   "Run the prompt against every configured backend");
     cmd->add_flag("--tools", flags->tools,
                   "Let the model call tools (fetch_url; ask_user on a terminal)");
+    cmd->add_option("--allow", flags->allow,
+                    "Allow a tool for this run without asking (repeatable, with --tools)")
+        ->type_name(kToolValue)
+        ->expected(1)
+        ->allow_extra_args(false);
+    cmd->add_option("--deny", flags->deny,
+                    "Refuse a tool or website for this run without asking (repeatable)")
+        ->type_name(kToolValue)
+        ->expected(1)
+        ->allow_extra_args(false);
+    cmd->add_option("--allow-host", flags->allow_hosts,
+                    "Allow fetching from a website for this run without asking (repeatable)")
+        ->expected(1)
+        ->allow_extra_args(false);
     cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
     cmd->add_flag("--raw", flags->raw,
                   "Show the answer's Markdown as written instead of rendering it on the terminal");

@@ -128,6 +128,10 @@ agent::PermissionChecker make_permission_checker(const harness::Config& config,
                 if (!host.has_value()) {
                     return agent::Permission::Deny;
                 }
+                // A session's no comes first: it only ever tightens (26o).
+                if (approvals != nullptr && approvals->denied_hosts.contains(*host)) {
+                    return agent::Permission::Deny;
+                }
                 if (harness::host_listed(hosts, *host)) {
                     return agent::Permission::Allow;
                 }
@@ -137,13 +141,17 @@ agent::PermissionChecker make_permission_checker(const harness::Config& config,
                 return agent::Permission::Ask;
             }
             const std::string_view tool = request.tool;
-            switch (levels.level(tool)) {
-                case harness::PermissionLevel::Allow:
-                    return agent::Permission::Allow;
-                case harness::PermissionLevel::Deny:
-                    return agent::Permission::Deny;
-                case harness::PermissionLevel::Ask:
-                    break;
+            const harness::PermissionLevel level = levels.level(tool);
+            // The config's no, then the session's no -- which tightens even
+            // the config's allow -- then the allows (26o).
+            if (level == harness::PermissionLevel::Deny) {
+                return agent::Permission::Deny;
+            }
+            if (approvals != nullptr && approvals->denied_tools.contains(tool)) {
+                return agent::Permission::Deny;
+            }
+            if (level == harness::PermissionLevel::Allow) {
+                return agent::Permission::Allow;
             }
             if (approvals != nullptr && approvals->tools.contains(tool)) {
                 return agent::Permission::Allow;
@@ -214,6 +222,140 @@ agent::ConfirmFn make_driver_confirm_fn(JsonReporter& reporter, std::istream& in
         }
         throw std::runtime_error("the driver closed stdin with a permission prompt unanswered");
     };
+}
+
+std::vector<std::string> gated_tools(const agent::ToolRegistry& registry) {
+    std::vector<std::string> out;
+    for (const std::string& name : registry.names()) {
+        if (const agent::Tool* tool = registry.find(name); tool != nullptr && tool->writes) {
+            out.push_back(name);
+        }
+    }
+    std::ranges::sort(out);
+    return out;
+}
+
+GatedName name_gated(std::string_view name, const std::vector<std::string>& gated, bool websites) {
+    GatedName out;
+    if (std::ranges::find(gated, name) != gated.end()) {
+        out.key = std::string{name};
+        return out;
+    }
+    // A website, by the host it names -- as a session's own answer keeps it.
+    if (websites && name.find('.') != std::string_view::npos) {
+        if (const std::optional<std::string> host = harness::canonical_host(name);
+            host.has_value()) {
+            out.key = *host;
+            out.host = true;
+            return out;
+        }
+    }
+    std::string listed;
+    for (const std::string& tool : gated) {
+        listed += (listed.empty() ? "" : ", ") + tool;
+    }
+    out.error = "'" + std::string{name} + "' is not a tool this chat asks about" +
+                (gated.empty() ? std::string{" -- it has none (--tools)"}
+                               : " -- the ones it asks about: " + listed) +
+                (websites ? "; or name a website, like docs.python.org" : "");
+    return out;
+}
+
+void allow_for_session(SessionApprovals& approvals, const GatedName& name) {
+    if (name.host) {
+        approvals.denied_hosts.erase(name.key);
+        approvals.hosts.insert(name.key);
+    } else {
+        approvals.denied_tools.erase(name.key);
+        approvals.tools.insert(name.key);
+    }
+}
+
+void deny_for_session(SessionApprovals& approvals, const GatedName& name) {
+    if (name.host) {
+        approvals.hosts.erase(name.key);
+        approvals.denied_hosts.insert(name.key);
+    } else {
+        approvals.tools.erase(name.key);
+        approvals.denied_tools.insert(name.key);
+    }
+}
+
+bool revoke_for_session(SessionApprovals& approvals, const GatedName& name) {
+    if (name.host) {
+        return (approvals.hosts.erase(name.key) + approvals.denied_hosts.erase(name.key)) > 0;
+    }
+    return (approvals.tools.erase(name.key) + approvals.denied_tools.erase(name.key)) > 0;
+}
+
+std::string seed_approvals(SessionApprovals& approvals, const PermissionPresets& presets,
+                           const std::vector<std::string>& gated) {
+    for (const std::string& tool : presets.allow) {
+        // `--allow` is for tools; a website has `--allow-host`.
+        const GatedName name = name_gated(tool, gated, false);
+        if (!name.error.empty()) {
+            return "--allow: " + name.error + " (a website takes --allow-host)";
+        }
+        allow_for_session(approvals, name);
+    }
+    for (const std::string& host : presets.allow_hosts) {
+        const std::optional<std::string> canonical = harness::canonical_host(host);
+        if (!canonical.has_value()) {
+            return "--allow-host: '" + host + "' is not a website's name";
+        }
+        allow_for_session(approvals, GatedName{.key = *canonical, .host = true});
+    }
+    // Denials last: when a run says both, no wins.
+    for (const std::string& entry : presets.deny) {
+        const GatedName name = name_gated(entry, gated);
+        if (!name.error.empty()) {
+            return "--deny: " + name.error;
+        }
+        deny_for_session(approvals, name);
+    }
+    return {};
+}
+
+std::vector<std::string> describe_permissions(const harness::Config& config,
+                                              const SessionApprovals& approvals,
+                                              const std::vector<std::string>& gated) {
+    std::vector<std::string> lines;
+    std::size_t width = 0;
+    for (const std::string& tool : gated) {
+        width = std::max(width, tool.size());
+    }
+    for (const std::string& tool : gated) {
+        const harness::PermissionLevel level = config.permissions.level(tool);
+        const bool configured = config.permissions.levels.contains(tool);
+        std::string answer;
+        if (level == harness::PermissionLevel::Deny) {
+            answer = "deny   (config)";
+        } else if (approvals.denied_tools.contains(tool)) {
+            answer = "deny   (this session)";
+        } else if (level == harness::PermissionLevel::Allow) {
+            answer = "allow  (config)";
+        } else if (approvals.tools.contains(tool)) {
+            answer = "allow  (this session)";
+        } else {
+            answer = std::string{"ask    "} + (configured ? "(config)" : "(default)");
+        }
+        std::string line = tool;
+        line.append(width - tool.size() + 2, ' ');
+        lines.push_back(line + answer);
+    }
+    for (const std::string& host : approvals.hosts) {
+        lines.push_back("website " + host + ": allow (this session)");
+    }
+    for (const std::string& host : approvals.denied_hosts) {
+        lines.push_back("website " + host + ": deny (this session)");
+    }
+    for (const std::string& host : config.tools.allowed_hosts) {
+        lines.push_back("website " + host + ": allow (config)");
+    }
+    if (lines.empty()) {
+        lines.emplace_back("no tool in this chat asks permission (--tools)");
+    }
+    return lines;
 }
 
 }  // namespace apogee::commands

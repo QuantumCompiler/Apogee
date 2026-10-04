@@ -1192,3 +1192,81 @@ TEST_CASE("machine mode hears the rerank judge as a tool_status line",
                          "\n") == 0);
     CHECK(chat.out.find("rerank — judging") != std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// Session permission presets (26o)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A chat model that writes a file, then says what the tool answered.
+[[nodiscard]] nlohmann::json writes_a_file() {
+    return nlohmann::json::array(
+        {{{"tool_calls",
+           {{{"name", "write_file"}, {"arguments", {{"path", "out.txt"}, {"content", "hello"}}}}}}},
+         {{"text", "{{last_tool_result}}"}}});
+}
+
+void sandboxed(HelperChat& chat) {
+    std::filesystem::create_directories(chat.home.path() / "work");
+    std::ofstream{chat.config_path, std::ios::binary | std::ios::app}
+        << "tools:\n  fs_root: " << (chat.home.path() / "work").string() << "\n";
+}
+
+}  // namespace
+
+TEST_CASE("complete --allow is the user answering at invocation; without it, denied as ever",
+          "[chat][cli][permissions][presets]") {
+    HelperChat chat{writes_a_file(), {"unused"}};
+    sandboxed(chat);
+    const std::filesystem::path written = chat.home.path() / "work" / "out.txt";
+    REQUIRE(chat.run({"complete", "--tools", "write it"}) == 0);
+    CHECK_FALSE(std::filesystem::exists(written));
+    CHECK(chat.out.find("denied") != std::string::npos);
+
+    REQUIRE(chat.run({"complete", "--tools", "--allow", "write_file", "write it"}) == 0);
+    CHECK(std::filesystem::exists(written));
+
+    // A typo grants nothing, and says what would have.
+    CHECK(chat.run({"complete", "--tools", "--allow", "wrte_file", "write it"}) != 0);
+    CHECK(chat.err.find("write_file") != std::string::npos);
+    // Without tools there is nothing to answer for.
+    CHECK(chat.run({"complete", "--allow", "write_file", "write it"}) != 0);
+}
+
+TEST_CASE("chat --allow writes without asking, and a fresh chat asks again",
+          "[chat][cli][permissions][presets]") {
+    HelperChat chat{writes_a_file(), {"Title"}};
+    sandboxed(chat);
+    const std::filesystem::path written = chat.home.path() / "work" / "out.txt";
+    REQUIRE(chat.run({"chat", "--tools", "--allow", "write_file"}, "write it\n") == 0);
+    CHECK(std::filesystem::exists(written));
+    std::filesystem::remove(written);
+    // Grants die with the process: on a pipe nobody can be asked, so denied.
+    REQUIRE(chat.run({"chat", "--tools"}, "write it\n") == 0);
+    CHECK_FALSE(std::filesystem::exists(written));
+}
+
+TEST_CASE("the slash verbs answer for the chat, and /permissions says from where",
+          "[chat][cli][permissions][presets]") {
+    HelperChat chat{texts({"fine"}), {"Title"}, "", "permissions:\n  delete_file: allow\n"};
+    REQUIRE(chat.run({"chat", "--tools", "--deny", "example.org"},
+                     "/allow write_file\n/deny run_command\n/permissions\n/revoke run_command\n"
+                     "/revoke delete_file\n/allow wrte_file\n/permissions\n") == 0);
+    const std::string said = chat.out + chat.err;
+    CHECK(said.find("write_file allowed for this chat") != std::string::npos);
+    CHECK(said.find("run_command denied for this chat") != std::string::npos);
+    CHECK(said.find("run_command  deny   (this session)") != std::string::npos);
+    CHECK(said.find("delete_file  allow  (config)") != std::string::npos);
+    CHECK(said.find("website example.org: deny (this session)") != std::string::npos);
+    CHECK(said.find("run_command: asked again from now on") != std::string::npos);
+    CHECK(said.find("delete_file is the config's answer") != std::string::npos);
+    CHECK(said.find("'wrte_file' is not a tool this chat asks about") != std::string::npos);
+    CHECK(said.find("run_command  ask    (default)") != std::string::npos);
+
+    // Resumed, it starts clean: nothing a session answered survives it.
+    const std::string id = HelperChat::only_session().chat_id;
+    REQUIRE(chat.run({"chat", "--tools", "--resume", id}, "/permissions\n") == 0);
+    CHECK((chat.out + chat.err).find("write_file   ask    (default)") != std::string::npos);
+    CHECK((chat.out + chat.err).find("this session") == std::string::npos);
+}

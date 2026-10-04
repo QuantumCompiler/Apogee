@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Chat behaviours that only reproduce against a real terminal, or a real kill.
 
-Eight checks:
+Nine checks:
 
   typeahead   Text typed BEFORE the first prompt is discarded once; text typed
               after it is honoured.  Only reproducible on a PTY -- `tcflush`
@@ -23,6 +23,9 @@ Eight checks:
   typeahead-hidden
               Words typed while a reply streams are not echoed into it; the
               next prompt shows them, once.
+
+  presets     `--allow write_file` writes with no prompt, and the same session
+              still asks before `run_command` (26o).
 
   side-calls  A follow-up's rewrite by the utility model is narrated inside
               the thinking block on a terminal, which collapses as reasoning
@@ -219,12 +222,12 @@ def scripted(binary, env, home, turns):
 class Pty:
     """A chat on a pseudo-terminal, its output collected as it runs."""
 
-    def __init__(self, binary, env, extra=()):
+    def __init__(self, binary, env, extra=(), cwd=None):
         self.primary, self.secondary = pty.openpty()
         self.process = subprocess.Popen(
-            [binary, "chat", *extra],
+            [os.path.abspath(binary), "chat", *extra],
             stdin=self.secondary, stdout=self.secondary, stderr=self.secondary,
-            env=env, close_fds=True,
+            env=env, close_fds=True, cwd=cwd,
         )
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.primary, selectors.EVENT_READ)
@@ -323,6 +326,40 @@ def check_side_calls(binary, home, env):
     for session in sessions(home):
         if "rewriting the follow-up" in json.dumps(session):
             failures.append("the narration reached the saved chat")
+    return failures
+
+
+def check_presets(binary, home, env):
+    """`chat --allow write_file` writes with no prompt and still asks for
+    `run_command`; `/allow run_command` stops that ask (26o)."""
+    work = os.path.join(home, "work")
+    os.makedirs(work)
+    scripted(binary, env, home, [
+        {"tool_calls": [{"name": "write_file",
+                         "arguments": {"path": "out.txt", "content": "hello"}}]},
+        {"tool_calls": [{"name": "run_command", "arguments": {"command": "echo hi"}}]},
+        {"text": "done"},
+    ])
+    # The tools work in the folder the chat starts in.
+    term = Pty(binary, env, ("--tools", "--allow", "write_file"), cwd=work)
+    term.drain(2.0)
+    term.send(b"go\r")
+    term.drain(3.0)
+    term.send(b"n\r")
+    term.drain(3.0)
+    term.send(b"/exit\r")
+    term.drain(2.0)
+    term.close()
+    text = term.text()
+    failures = []
+    if not os.path.exists(os.path.join(work, "out.txt")):
+        failures.append("the preset write did not happen")
+    asks = text.count(b"Allow? [y]es")
+    if asks != 1:
+        failures.append(f"expected one prompt -- for run_command -- saw {asks}: {text!r}")
+    elif b"run_command" not in text.split(b"Allow? [y]es")[0].splitlines()[-2] + \
+            text.split(b"Allow? [y]es")[0].splitlines()[-1]:
+        failures.append(f"the prompt was not run_command's: {text!r}")
     return failures
 
 
@@ -442,6 +479,7 @@ def main():
                         ("markdown", check_markdown),
                         ("typeahead-hidden", check_typeahead_hidden),
                         ("side-calls", check_side_calls),
+                        ("presets", check_presets),
                         ("interrupt", check_interrupt)):
         home = tempfile.mkdtemp(prefix=f"apogee-chat-{name}-")
         try:
@@ -460,7 +498,7 @@ def main():
 
     print("typeahead discarded once; completed turns survive a kill -9; "
           "the banner and each question stand apart; answers render, raw with --raw; "
-          "typing mid-reply waits for the prompt; side calls are narrated in the block; "
+          "typing mid-reply waits for the prompt; side calls are narrated in the block; a preset is the session answer given early; "
           "Ctrl-C restores echo - OK")
     return 0
 

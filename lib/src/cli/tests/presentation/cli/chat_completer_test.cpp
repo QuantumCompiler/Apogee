@@ -144,7 +144,7 @@ TEST_CASE("a partial command narrows, and a command taking an argument gains a s
     CHECK(labels(mo) == std::vector<std::string>{"/model", "/models"});
 
     CHECK(texts(suggest_chat_input("/re", project())) ==
-          std::vector<std::string>{"/retriever ", "/rerank ", "/recall "});
+          std::vector<std::string>{"/retriever ", "/rerank ", "/recall ", "/revoke "});
     CHECK(suggest_chat_input("/zzz", project()).candidates.empty());
 }
 
@@ -181,6 +181,15 @@ TEST_CASE("a command's own values follow it", "[chat][completer]") {
           std::vector<std::string>{"on", "off"});
     CHECK(texts(suggest_chat_input("/recall ", project())) ==
           std::vector<std::string>{"on", "off"});
+    // The gated tools for /allow and /deny, the session's answers for /revoke
+    // (26o), from the live chat.
+    apogee::commands::ChatCompletionSources gated = project();
+    gated.gated_tools = [] { return std::vector<std::string>{"run_command", "write_file"}; };
+    gated.session_permissions = [] { return std::vector<std::string>{"write_file"}; };
+    CHECK(texts(suggest_chat_input("/allow ", gated)) ==
+          std::vector<std::string>{"run_command", "write_file"});
+    CHECK(texts(suggest_chat_input("/deny w", gated)) == std::vector<std::string>{"write_file"});
+    CHECK(texts(suggest_chat_input("/revoke ", gated)) == std::vector<std::string>{"write_file"});
 
     std::vector<std::string> statuses;
     for (const std::string_view status : apogee::knowledge::valid_statuses()) {

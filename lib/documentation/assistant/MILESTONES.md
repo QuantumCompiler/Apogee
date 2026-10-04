@@ -3680,6 +3680,64 @@ Also checked:
 - **An offset past the end** is an error that says to start again.
 - **What a real news site or GitHub looks like today** was not recorded; those fixtures copy their structure by hand.
 
+### 2026-10-04 — `session-permission-presets` (backlog item 26o): the `session` answer, given early
+
+**Why.** The prompt's `[s]ession` answer already granted a tool for the rest of a run, but only once the first prompt had asked, so a user who already knew what they wanted still had to wait to be asked. The user named the claude CLI's launch-time flags as the reference (2026-09-30). The gate itself needed no change. `SessionApprovals` was already the set the checker and the prompt share, so a preset only has to fill it before the first turn.
+
+**What was built**
+
+- [x] **Launch flags on `chat` and `complete`, the same on both** (`--allow`, `--deny` and `--allow-host`, each repeatable).
+  - `--allow write_file` names a gated tool, and `--allow-host docs.python.org` names a website.
+  - `--deny` takes either kind.
+  - They need `--tools`, because without tools nothing is ever asked.
+  - A machine-mode child takes them on its argv, so a front-end presets its session the same way. The `question` event is unchanged.
+- [x] **`complete --allow` is the one new reach, and it is deliberate.** `complete` has nobody to ask, so `ask` resolves to deny; with `--allow write_file`, a one-shot script uses a destructive tool on purpose. Without the flag the denial is the same tool result as before, byte for byte.
+- [x] **Slash verbs mid-chat** (`/allow`, `/deny`, `/revoke`, `/permissions`), four rows in the one command table:
+  - `/allow ` and `/deny ` complete the gated tools (the registry's `writes` tools, MCP tools without a read-only hint included).
+  - `/revoke ` completes the session's own answers.
+  - Bare `/allow` lists, as `/permissions` does.
+  - `/permissions` says each gated tool's answer and where it comes from, then the websites: `write_file   allow  (this session)`, `delete_file  allow  (config)`, `website example.org: deny (this session)`.
+  - `/revoke` reaches only the session's answers. For a config answer, it names `apogee config set-permission <tool> ask`, because chat never mutates config permissions.
+- [x] **The session's no** (`SessionApprovals::denied_tools`, `denied_hosts`).
+  - For a tool, the checker reads, in order: the config's `deny`, the session's no, the config's `allow`, the session's yes, then ask.
+  - For a website, the session's no comes before everything else.
+  - A no therefore wins over a config `allow`, and a yes never reaches past a config `deny`.
+  - `/allow` on a tool the config denies says the tool stays denied.
+  - `seed_approvals` applies denials last, so `--allow X --deny X` is a no.
+- [x] **A typo grants nothing** (`name_gated`). A name that is neither a gated tool nor a website is refused, naming the gated set. Websites are canonicalised by the one host rule (`harness::canonical_host`) and match exactly, the way the `s` answer remembers one.
+- [x] **Grants die with the process.** Nothing a preset or a verb does writes config, and a resumed chat starts with no session answers, asserted.
+- [x] **Tests**:
+  - **The equivalence table** (`[presets]`): every config level × preset × prompt answer, a flag-seeded session against an `s`-answered one, with a config `deny` never loosened in any of them.
+  - **Cases**: a no tightening a config allow, `--allow-host` answering one website and no other, typos, revoke, and the `/permissions` golden.
+  - **`chat_test`**: the `complete` pair; `chat --allow` writing without a prompt while a fresh chat asks; the slash verbs end to end with a clean resume.
+  - **Completion goldens.**
+  - **The PTY check's new presets case** (its ninth): `--allow write_file` writes with no prompt on a real terminal, `run_command` still asks, and `/permissions` says both.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The model | **A preset is the `session` answer, given early** *(recorded 2026-09-30)* | It reuses the shipped structure, so there is no second permission path, and the ladder stays config-first. |
+| Bare `/allow` | Lists *(default, confirmed by the user)* | Listing beats an error. |
+| Hosts on `--deny`/`/deny` | Yes *(default, confirmed)* | One vocabulary for both kinds of ask. |
+| `/revoke` of a config answer | Points at `config set-permission` *(default, confirmed)* | Chat never mutates config permissions. |
+| An unknown name | Refused, naming the set *(default, confirmed)* | A typo must not grant nothing silently. |
+| `--allow` and websites | **Tools only; websites take `--allow-host`** *(group run, flagged for veto)* | A typo'd tool name that parses as a host would otherwise become a website grant. A `--deny` that lands on a host by mistake only tightens. |
+| How a session host matches | **Exactly, by canonical host** *(group run)* | That is what the `s` answer already does. `tools.allowed_hosts` is unchanged. |
+| Allow and deny together | **Deny wins** *(group run)* | Tightening always wins. |
+| What is gated | **The registry's `writes` tools** *(group run)* | Outbound read-only tools are asked per website, so they are named by host. |
+| Presets without `--tools` | **Refused** *(group run)* | Without tools nothing is asked, so a preset there is a mistake, not a no-op. |
+
+**Guardrails, each mutation-tested (16 mutants, all caught).**
+- **The checker:** the session's no ignored, for a tool and for a website; the config's `allow` read before the session's no; a session yes read before a config `deny`.
+- **Seeding and names:** `--allow` winning over `--deny`; `--allow` taking a website; a typo accepted.
+- **The verbs:** an allow keeping a denial; a deny keeping an allowance; revoke keeping a website's answer; `/deny` not applied; `/revoke` of a config answer not naming `config set-permission`; `/permissions` calling a session answer the config's.
+- **The surfaces:** `chat`'s flags not seeded; `complete`'s not seeded; `complete` accepting presets without `--tools`.
+
+**Not verified.**
+- **Machine mode's argv path** is the same code as `complete`'s pipe path, not separately driven by a front-end.
+- **`--allow-host` on a real website** is covered by unit tests, not by a live fetch.
+
 ## Milestone W — The MCP client
 
 **Goal.** The model picking up anyone else's tools: a from-scratch client for stdio MCP servers whose tools join the shared loop as first-class registry entries, with the subprocess discipline Ommi earned the hard way, `apogee mcp` and its admin twins over one scaffold core, and Apogee hosting a server of its own.

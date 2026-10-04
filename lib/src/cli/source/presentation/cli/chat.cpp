@@ -84,6 +84,10 @@ struct ChatFlags {
     std::string think;
     /// Recall no earlier chats in this run (26l).
     bool no_recall = false;
+    /// The session's answers, given at launch (26o).
+    std::vector<std::string> allow;
+    std::vector<std::string> deny;
+    std::vector<std::string> allow_hosts;
     std::int64_t think_budget = 0;
     bool tools = false;
     bool search = false;
@@ -562,6 +566,20 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                     "Whether a reasoning model thinks first: on, off, or auto (per question)")
         ->check(CLI::IsMember({"on", "off", "auto"}));
     cmd->add_flag("--no-recall", flags->no_recall, "Recall no earlier chats in this run");
+    cmd->add_option("--allow", flags->allow,
+                    "Allow a tool for this chat without asking (repeatable, with --tools)")
+        ->type_name(kToolValue)
+        ->expected(1)
+        ->allow_extra_args(false);
+    cmd->add_option("--deny", flags->deny,
+                    "Refuse a tool or website for this chat without asking (repeatable)")
+        ->type_name(kToolValue)
+        ->expected(1)
+        ->allow_extra_args(false);
+    cmd->add_option("--allow-host", flags->allow_hosts,
+                    "Allow fetching from a website for this chat without asking (repeatable)")
+        ->expected(1)
+        ->allow_extra_args(false);
     flags->think_budget_option =
         cmd->add_option("--think-budget", flags->think_budget,
                         "The most tokens a reasoning model may think for before it answers")
@@ -796,6 +814,23 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         // session. The prompt half is chosen per surface below.
         const auto approvals = std::make_shared<SessionApprovals>();
         const agent::PermissionChecker permission = make_permission_checker(config, approvals);
+        // The session's answers, given at launch (26o): exactly the `session`
+        // answer, given before the prompt would ask.
+        const std::vector<std::string> gated =
+            flags->tools ? gated_tools(registry) : std::vector<std::string>{};
+        if (const PermissionPresets presets{
+                .allow = flags->allow, .deny = flags->deny, .allow_hosts = flags->allow_hosts};
+            !presets.empty()) {
+            if (!flags->tools) {
+                fail_user(
+                    "--allow, --deny and --allow-host need --tools: without tools, nothing "
+                    "is asked");
+            }
+            if (const std::string refused = seed_approvals(*approvals, presets, gated);
+                !refused.empty()) {
+                fail_user(refused);
+            }
+        }
 
         if (decorate) {
             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + model +
@@ -999,6 +1034,15 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         // A folder deleted under the process lists as nothing, never a throw.
         ChatCompletionSources completion = chat_completion_sources(config, working_directory);
         completion.attachment_names = [&attached] { return attached.names(); };
+        completion.gated_tools = [&gated] { return gated; };
+        completion.session_permissions = [approvals] {
+            std::vector<std::string> names;
+            for (const auto* set : {&approvals->tools, &approvals->denied_tools, &approvals->hosts,
+                                    &approvals->denied_hosts}) {
+                names.insert(names.end(), set->begin(), set->end());
+            }
+            return names;
+        };
         reader_options.suggest = [sources = std::move(completion)](std::string_view before_cursor) {
             return suggest_chat_input(before_cursor, sources);
         };
@@ -1131,6 +1175,60 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                                          " not on or off: '" + argument + "'");
                         }
                         break;
+                    case ChatVerb::Permissions:
+                        for (const std::string& line :
+                             describe_permissions(config, *approvals, gated)) {
+                            reporter.status().print_line("  " + line);
+                        }
+                        break;
+                    case ChatVerb::Allow:
+                    case ChatVerb::Deny:
+                    case ChatVerb::Revoke: {
+                        if (argument.empty()) {
+                            // Alone, `/allow` lists: listing beats an error.
+                            for (const std::string& line :
+                                 describe_permissions(config, *approvals, gated)) {
+                                reporter.status().print_line("  " + line);
+                            }
+                            break;
+                        }
+                        const GatedName name = name_gated(argument, gated);
+                        if (!name.error.empty()) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) + " " +
+                                                         name.error);
+                            break;
+                        }
+                        const std::string what = name.host ? "website " + name.key : name.key;
+                        if (spec->id == ChatVerb::Allow) {
+                            allow_for_session(*approvals, name);
+                            const bool config_denies =
+                                !name.host && config.permissions.level(name.key) ==
+                                                  harness::PermissionLevel::Deny;
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Apogee) + " " + what +
+                                (config_denies
+                                     ? " stays denied: the config says deny, and a chat never "
+                                       "loosens that"
+                                     : " allowed for this chat"));
+                        } else if (spec->id == ChatVerb::Deny) {
+                            deny_for_session(*approvals, name);
+                            reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " +
+                                                         what + " denied for this chat");
+                        } else if (revoke_for_session(*approvals, name)) {
+                            reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " +
+                                                         what + ": asked again from now on");
+                        } else if (!name.host && config.permissions.levels.contains(name.key)) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Apogee) + " " + what +
+                                " is the config's answer -- change it with 'apogee config "
+                                "set-permission " +
+                                name.key + " ask'");
+                        } else {
+                            reporter.status().print_line(style.tag(ansi::Role::Apogee) +
+                                                         " this chat has no answer for " + what);
+                        }
+                        break;
+                    }
                     case ChatVerb::Private:
                         recall.make_private();
                         logger::save(session);

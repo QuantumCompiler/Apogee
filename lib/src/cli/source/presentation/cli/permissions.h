@@ -5,6 +5,8 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "agent/tool.h"
 #include "ansi/ansi.h"
@@ -31,7 +33,59 @@ struct SessionApprovals {
     /// Canonical hosts (`harness/host.h`), for the ones that reach out:
     /// allowing one website is not allowing the next.
     std::set<std::string, std::less<>> hosts;
+    /// Said no to for the session, ahead of the prompt (26o): never asked and
+    /// never allowed -- over the config's own allow too, since the person at
+    /// the keyboard saying no in advance is the safest answer the gate gets.
+    std::set<std::string, std::less<>> denied_tools;
+    std::set<std::string, std::less<>> denied_hosts;
 };
+
+/// What a run was started with (26o): `--allow` and `--deny` take a gated
+/// tool's name -- `--deny` a website's too -- and `--allow-host` a website.
+/// Each is the `session` answer, given before the prompt would ask.
+struct PermissionPresets {
+    std::vector<std::string> allow;
+    std::vector<std::string> deny;
+    std::vector<std::string> allow_hosts;
+
+    [[nodiscard]] bool empty() const noexcept {
+        return allow.empty() && deny.empty() && allow_hosts.empty();
+    }
+};
+
+/// The tools a session can be asked about: those in `registry` that write.
+[[nodiscard]] std::vector<std::string> gated_tools(const agent::ToolRegistry& registry);
+
+/// A name a preset or a slash verb was given: a gated tool, or a website by
+/// its canonical host. `error` names the gated set when it is neither -- a
+/// typo must not quietly grant nothing.
+struct GatedName {
+    std::string key;
+    bool host = false;
+    std::string error;
+};
+
+[[nodiscard]] GatedName name_gated(std::string_view name, const std::vector<std::string>& gated,
+                                   bool websites = true);
+
+/// `--allow`, `--allow-host` and `/allow`: allowed for the session, a
+/// denial of it lifted. `--deny` and `/deny`: denied, an allowance lifted.
+void allow_for_session(SessionApprovals& approvals, const GatedName& name);
+void deny_for_session(SessionApprovals& approvals, const GatedName& name);
+/// `/revoke`: the session's own answer forgotten; false when it had none.
+bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
+
+/// Seeds a run's answers from its flags. The first refusal, or empty.
+[[nodiscard]] std::string seed_approvals(SessionApprovals& approvals,
+                                         const PermissionPresets& presets,
+                                         const std::vector<std::string>& gated);
+
+/// `/permissions`: each gated tool's effective answer and where it comes
+/// from -- the config, this session, or the default -- then the websites
+/// the session answered and the ones the config lists.
+[[nodiscard]] std::vector<std::string> describe_permissions(const harness::Config& config,
+                                                            const SessionApprovals& approvals,
+                                                            const std::vector<std::string>& gated);
 
 /// The checker. For a tool that writes: the config's level for the tool, then
 /// the session's answers, then `Ask`. For an outbound one: the host in

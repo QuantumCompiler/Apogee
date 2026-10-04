@@ -25,6 +25,7 @@
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): caps are 4 consults/turn, 1,024-token briefs, 512-token answers — named constants, config-adjustable.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): consult answers are plain text; grammar-held structured consults are a follow-up item.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): `complete` and machine mode register the tool by the same rule; the task runner inherits it like any tool.
+- 2026-10-04 — The bounded brief-only call core gains a second, harness-driven consumer: **symphony stages** ([symphonies.md](symphonies.md), the user's vision). One model-calling path, three uses — delegation (this item), validation ([27g](suite-validation.md)), stages (27q) — so the core is built as a shared seam from day one, consult the tool wrapped around it.
 
 **Guardrail(s).**
 - The isolation pin: the member's wire-recorded request equals the brief — no history, no system creep — mutation-tested.
@@ -38,4 +39,4 @@
 - [ ] The per-turn cap and token caps enforce with said refusals; a metered backend named `consultable:` is refused by the config editor with the reason.
 - [ ] Machine mode shows the consult as an ordinary tool-call/result pair — no new event types.
 
-**Scope note.** Item **27f**, earmarked for **v0.1.4**; **gated on [27d](model-suites.md)** — not on the MLX items. Out of scope: concurrent consults; member-to-member consults (the root delegates; helpers do not sub-delegate); structured consult answers (noted default); using consult for validation — that policy is [27g](suite-validation.md)'s.
+**Scope note.** Item **27f**, earmarked for **v0.1.4**; **gated on [27d](model-suites.md)** — not on the MLX items. Out of scope: concurrent consults; member-to-member consults (the root delegates; helpers do not sub-delegate); structured consult answers (noted default); using consult for validation — that policy is [27g](suite-validation.md)'s; harness-driven stage calls — [27q](symphonies.md) consumes the call core, not the tool.

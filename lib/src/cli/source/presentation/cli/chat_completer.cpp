@@ -50,6 +50,17 @@ constexpr std::array kCommands{
     ChatCommandSpec{"recall", ChatVerb::Recall, "[on|off]",
                     "Show or set whether turns recall earlier chats", ArgumentValues::OnOff},
     ChatCommandSpec{"private", ChatVerb::Private, "", "Never summarise this chat for recall"},
+    ChatCommandSpec{"allow", ChatVerb::Allow, "[tool|website]",
+                    "Allow a tool or website for this chat; alone, list each answer",
+                    ArgumentValues::GatedTools},
+    ChatCommandSpec{"deny", ChatVerb::Deny, "<tool|website>",
+                    "Refuse a tool or website for this chat, without asking",
+                    ArgumentValues::GatedTools},
+    ChatCommandSpec{"revoke", ChatVerb::Revoke, "<tool|website>",
+                    "Forget this chat's answer for a tool or website",
+                    ArgumentValues::SessionPermissions},
+    ChatCommandSpec{"permissions", ChatVerb::Permissions, "",
+                    "List each tool's answer and where it comes from"},
     ChatCommandSpec{"exit", ChatVerb::Exit, "", "Save and leave"},
     ChatCommandSpec{"quit", ChatVerb::Exit, "", "Save and leave"},
 };
@@ -248,6 +259,20 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
         case ArgumentValues::AttachmentNames:
             if (sources.attachment_names) {
                 for (std::string& name : sources.attachment_names()) {
+                    choices.push_back({std::move(name), {}});
+                }
+            }
+            break;
+        case ArgumentValues::GatedTools:
+            if (sources.gated_tools) {
+                for (std::string& name : sources.gated_tools()) {
+                    choices.push_back({std::move(name), {}});
+                }
+            }
+            break;
+        case ArgumentValues::SessionPermissions:
+            if (sources.session_permissions) {
+                for (std::string& name : sources.session_permissions()) {
                     choices.push_back({std::move(name), {}});
                 }
             }

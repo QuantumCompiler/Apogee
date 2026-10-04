@@ -47,6 +47,10 @@ enum class ChatVerb : std::uint8_t {
     Detach,
     Recall,
     Private,
+    Allow,
+    Deny,
+    Revoke,
+    Permissions,
     Exit,
 };
 
@@ -66,6 +70,10 @@ enum class ArgumentValues : std::uint8_t {
     ThinkingModes,
     /// `on`, `off` (26l).
     OnOff,
+    /// The tools this chat asks permission for (26o).
+    GatedTools,
+    /// The tools and websites this chat has answered for itself (26o).
+    SessionPermissions,
 };
 
 /// One row of the table.
@@ -118,6 +126,10 @@ struct ChatCompletionSources {
     std::filesystem::path working_directory;
     /// What is attached to the chat, for `/detach` (26d). Empty offers none.
     std::function<std::vector<std::string>()> attachment_names;
+    /// The tools the chat asks permission for, and the ones it has answered
+    /// for itself, for `/allow`, `/deny` and `/revoke` (26o).
+    std::function<std::vector<std::string>()> gated_tools;
+    std::function<std::vector<std::string>()> session_permissions;
     DirectoryLister list;
 };
 

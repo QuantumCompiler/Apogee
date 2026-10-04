@@ -26,6 +26,7 @@
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): the suite rung sits between the per-feature backend and the global role pointer — a feature's pinned backend keeps winning.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): `/suite off` restores the global pointers; the active suite is session state, saved and resumed like `/model`'s choice.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): per-member knobs start at exactly `context_size` and `toolset`, growing only on demonstrated need.
+- 2026-10-04 — The long-term direction recorded (the user's call): suites are the unit the **execute surface** ([execute-mode.md](execute-mode.md)) opens with and the bundle **symphonies** ([symphonies.md](symphonies.md)) draw members from. This item is unchanged by the vision — it stays the foundation layer; the vision adds consumers (27q–27t), not reshaping.
 
 **Guardrail(s).**
 - The chain tables: every rung × suite present/absent, including the no-suite collapse to today's behavior (golden against the pre-change tables).
@@ -39,4 +40,4 @@
 - [ ] With no suite configured or selected, the resolution tables are byte-identical to today's.
 - [ ] A suite member with `context_size: 4096` runs its calls at that window (wire-recorded), independent of the backend's own default.
 
-**Scope note.** Item **27d**, earmarked for **v0.1.4**; gated on nothing pending — **not** on the MLX items it shares the table with. Out of scope: residency management ([27e](suite-residency.md)); model-initiated delegation ([27f](suite-consult.md)); validation policy ([27g](suite-validation.md)); any new execution path (suites choose backends; they do not call them differently).
+**Scope note.** Item **27d**, earmarked for **v0.1.4**; gated on nothing pending — **not** on the MLX items it shares the table with. Out of scope: residency management ([27e](suite-residency.md)); model-initiated delegation ([27f](suite-consult.md)); validation policy ([27g](suite-validation.md)); any new execution path (suites choose backends; they do not call them differently) — including the vision's consumers, symphonies and the execute surface ([27q](symphonies.md)–[27t](orchestrator.md)).

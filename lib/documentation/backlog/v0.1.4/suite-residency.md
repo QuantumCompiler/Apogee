@@ -38,4 +38,4 @@
 - [ ] `apogee chat --suite research --warm` loads the members up front on the busy line; `models status` then shows each resident with the set's total.
 - [ ] A member with no recorded size yields an admission line that says unknown — and still runs.
 
-**Scope note.** Item **27e**, earmarked for **v0.1.4**; **gated on [27d](model-suites.md)**. Out of scope: cross-process residency or any daemon; GPU-vs-CPU placement (llama.cpp's own affair); eviction-policy redesign; MLX members' footprints (27b's `config.json` windows slot into the same math when that track lands — interplay, not a gate).
+**Scope note.** Item **27e**, earmarked for **v0.1.4**; **gated on [27d](model-suites.md)**. Out of scope: cross-process residency or any daemon; GPU-vs-CPU placement (llama.cpp's own affair); eviction-policy redesign; MLX members' footprints (27b's `config.json` windows slot into the same math when that track lands — interplay, not a gate). Symphony plays ([27q](symphonies.md)) hop members serially and are covered by this item's session hold as-is — interplay, not a gate.
