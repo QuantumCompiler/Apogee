@@ -284,6 +284,30 @@ bool Harness::accepts_images(std::string_view model) const noexcept {
     }
 }
 
+void Harness::resume_conversation(std::string_view model,
+                                  std::string_view conversation_id) const noexcept {
+    try {
+        if (auto* caching = dynamic_cast<ConversationCaching*>(&route(model)); caching != nullptr) {
+            caching->resume_conversation(conversation_id);
+        }
+    } catch (const std::exception&) {
+        // A conversation not restored is read again: never worth a failure.
+        return;
+    }
+}
+
+void Harness::save_conversation(std::string_view model, std::string_view conversation_id,
+                                const StatusSink& on_status) const noexcept {
+    try {
+        if (auto* caching = dynamic_cast<ConversationCaching*>(&route(model)); caching != nullptr) {
+            caching->save_conversation(conversation_id, on_status);
+        }
+    } catch (const std::exception&) {
+        // The same: a state not saved is read again next time.
+        return;
+    }
+}
+
 bool Harness::accepts_audio(std::string_view model) const noexcept {
     try {
         const auto* audio = dynamic_cast<const AudioCapable*>(&route(model));

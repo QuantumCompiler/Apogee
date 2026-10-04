@@ -162,6 +162,16 @@ struct RagSettings {
     std::filesystem::path config_path;
 };
 
+/// A backend's word on its saved state (26j), as a progress note: shown
+/// under `--verbose`, like the prompt cache's own line.
+[[nodiscard]] harness::StatusSink progress_sink(agentloop::Reporter& reporter) {
+    return [&reporter](const harness::StatusEvent& event) {
+        if (!event.detail.empty()) {
+            reporter.on_progress(event.detail);
+        }
+    };
+}
+
 void run_chat_turn(const harness::Harness& harness, logger::Session& session,
                    const std::string& input, agent::ToolRegistry* tools,
                    agentloop::ToolSelection* selection, const agentloop::AskFn& ask,
@@ -644,6 +654,12 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                          .override = flags->model,
                                          .entry_backend = session.backend});
         session.backend = model;
+        // A resumed chat starts from its saved state when its backend kept
+        // one (26j); a new one is named so it can be saved.
+        harness.resume_conversation(session.backend, session.chat_id);
+        // Saved again after the turn that reads a compacted history: the
+        // state from before no longer matches it.
+        int saved_compactions = session.compactions;
 
         // Retrieval settings follow the same precedence as every other saved
         // parameter: an explicit flag wins, else what the session last had.
@@ -857,6 +873,11 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                              : agent::ConfirmFn{}},
                     machine_reporter, machine_notice, rag_settings, review_note, &attached);
                 title.start_if_due(session);
+                if (session.compactions != saved_compactions) {
+                    saved_compactions = session.compactions;
+                    harness.save_conversation(session.backend, session.chat_id,
+                                              progress_sink(machine_reporter));
+                }
 
                 harness::ChatResponse response;
                 response.message = session.messages.empty() ? harness::ChatMessage::assistant("")
@@ -869,6 +890,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             // by the per-turn save, so exiting is clean by construction.
             title.settle(session);
             logger::save(session);
+            harness.save_conversation(session.backend, session.chat_id,
+                                      progress_sink(machine_reporter));
             return;
         }
 
@@ -1059,6 +1082,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                             // Instant, and history carries over: every backend
                             // was constructed up front and history is neutral IR.
                             session.backend = argument;
+                            harness.resume_conversation(session.backend, session.chat_id);
                             reporter.status().print_line(style.tag(ansi::Role::Apogee) +
                                                          " switched to " + argument);
                         }
@@ -1277,6 +1301,11 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 },
                 rag_settings, review_note, &attached);
             title.start_if_due(session);
+            if (session.compactions != saved_compactions) {
+                saved_compactions = session.compactions;
+                harness.save_conversation(session.backend, session.chat_id,
+                                          progress_sink(reporter));
+            }
             typeahead.reset();
             if (decorate) {
                 // One blank line between an answer and the next prompt, so
@@ -1290,6 +1319,11 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         }
         title.settle(session);
         logger::save(session);
+        // The model's state too, on a clean exit only (26j): an interrupt
+        // asked for nothing more, and the transcript is saved either way.
+        if (!reader->interrupted()) {
+            harness.save_conversation(session.backend, session.chat_id, progress_sink(reporter));
+        }
         // Opt-in auto-capture on a CLEAN exit -- /exit, /quit, the end of the
         // input -- with the still-loaded model as the clerk. Never on an
         // interrupt: a user who hit Ctrl-C did not ask for a model call, and

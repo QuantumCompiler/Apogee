@@ -20,7 +20,7 @@ The GPU was shared with a terminal and a monitor drawing on it (55–83% busy wi
 **Core constraint(s).**
 - **Build only on a clean win.** The build half of this item proceeds only if a measurement on an idle GPU shows at least 1.3× on one of the acceptance models (Qwen3-VL-8B, Qwen3.8-27B), for at least one method, across prose, code and editing. Otherwise the measurement is recorded in MILESTONES, and the item is closed as measured and not worth building.
 - **Output is unchanged.** Under greedy sampling, speculative output must equal plain output token for token; the sampled case must keep the target distribution, which upstream's verifier guarantees.
-- **Composes with [checkpoints](../../assistant/MILESTONES.md#milestone-j--local-inference) and the [prompt cache](persistent-prompt-cache.md).** Rejected drafts roll back through the same state machinery, never a second copy of it.
+- **Composes with [checkpoints](../../assistant/MILESTONES.md#milestone-j--local-inference) and the [prompt cache](../../assistant/MILESTONES.md#milestone-j--local-inference) (26j, shipped 2026-10-04).** Rejected drafts roll back through the same state machinery, never a second copy of it.
 - **Off unless it wins, per backend.** A `speculative:` setting on a llamacpp backend (`mtp`, `draft:<backend>`, `ngram`) defaults to off. `models info` shows whether a GGUF carries an MTP head.
 
 **Seam + files.**

@@ -71,7 +71,9 @@ struct MockTurn {
 [[nodiscard]] std::string expand_mock_text(std::string_view text,
                                            const harness::ChatRequest& request);
 
-class MockProvider final : public harness::LLMProvider, public harness::ModelBehaviorReporting {
+class MockProvider final : public harness::LLMProvider,
+                           public harness::ModelBehaviorReporting,
+                           public harness::ConversationCaching {
 public:
     struct Options {
         std::string backend_name = "mock";
@@ -129,6 +131,16 @@ public:
         return requests_;
     }
 
+    /// Keeps no state, but remembers the conversation it was named for:
+    /// `{{conversation}}` in a turn's text expands to it, so a script can
+    /// prove which chat a surface named (26j).
+    void resume_conversation(std::string_view conversation_id) override;
+
+    /// Saves nothing, and says so as a `PromptCache` status naming the
+    /// conversation -- what lets a surface's save be seen end to end.
+    void save_conversation(std::string_view conversation_id,
+                           const harness::StatusSink& on_status) override;
+
     /// How many turns have been served.
     [[nodiscard]] std::size_t turn_count() const noexcept {
         return turn_index_;
@@ -143,6 +155,7 @@ private:
     Options options_;
     std::vector<harness::ChatRequest> requests_;
     std::size_t turn_index_ = 0;
+    std::string conversation_id_;
 };
 
 /// A mock that can also embed, for the RAG items and the capability probe.

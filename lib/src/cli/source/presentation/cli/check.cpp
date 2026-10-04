@@ -21,6 +21,7 @@
 #include "agentloop/retriever.h"
 #include "agentloop/structured.h"
 #include "ansi/ansi.h"
+#include "backends/prompt_cache.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/models_pull.h"
@@ -455,6 +456,18 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
                 " staging folder(s) an interrupted pull, convert or quantize left behind, " +
                 format_progress_size(static_cast<std::int64_t>(bytes)),
             "apogee check --fix");
+    }
+
+    // The prompt cache (26j): what the saved states take, against the cap
+    // that keeps them from growing without end.
+    const backends::PromptCacheUsage cached =
+        backends::PromptCache{inputs.home / "cache" / "prompt"}.usage();
+    if (cached.files > 0) {
+        add(report, Status::Ok, "Models", "prompt cache",
+            std::to_string(cached.files) + " saved state(s), " +
+                format_progress_size(static_cast<std::int64_t>(cached.bytes)) + " of " +
+                format_progress_size(static_cast<std::int64_t>(backends::kPromptCacheCapBytes)) +
+                " -- cache/prompt/, safe to delete");
     }
 
     if (found == 0 && legacy.empty()) {

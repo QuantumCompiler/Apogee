@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -268,4 +269,85 @@ TEST_CASE("a projector that sees reads a clip as its frames, asked of the harnes
     std::error_code code;
     std::filesystem::remove(sees, code);
     std::filesystem::remove(hears, code);
+}
+
+namespace {
+
+/// A backend with no conversation state of its own.
+class Stateless final : public apogee::harness::LLMProvider {
+public:
+    [[nodiscard]] std::string_view backend_name() const noexcept override {
+        return "plain";
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse chat(
+        const ChatRequest& /*request*/,
+        const apogee::harness::CancellationToken& /*cancel*/) override {
+        return {};
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse stream_chat(
+        const ChatRequest& /*request*/,
+        const apogee::harness::StreamOptions& /*options*/) override {
+        return {};
+    }
+
+    [[nodiscard]] std::vector<apogee::harness::ModelInfo> list_models(
+        const apogee::harness::CancellationToken& /*cancel*/) override {
+        return {};
+    }
+};
+
+}  // namespace
+
+TEST_CASE("the harness names and saves a conversation only where a backend keeps one",
+          "[harness][prompt-cache]") {
+    // 26j: discovered as a capability, never asked of a backend by type.
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        ("apogee-harness-prompt-cache-" + std::to_string(std::random_device{}()));
+    std::filesystem::create_directories(root);
+    std::ofstream{root / "model.gguf", std::ios::binary} << "weights";
+
+    auto owned = std::make_unique<FakeLlamaRuntime>();
+    owned->eog_token = -1;
+    owned->script_text = {"answered"};
+    LlamaCppProvider::Options options;
+    options.backend_name = "local";
+    options.model = "test-model";
+    options.model_path = (root / "model.gguf").string();
+    options.prompt_cache_dir = root / "cache";
+    apogee::harness::Harness harness{apogee::harness::Config{}};
+    harness.register_provider(
+        "local", std::make_shared<LlamaCppProvider>(std::move(options), std::move(owned)));
+    harness.register_provider("plain", std::make_shared<Stateless>());
+    harness.use_default_router();
+
+    std::string words;
+    for (int index = 0; index < 2100; ++index) {
+        words += " said" + std::to_string(index);
+    }
+    ChatRequest request = turn({ChatMessage::user(words)});
+    request.model = "local";
+    harness.resume_conversation("local", "chat-7");
+    (void)harness.chat(request);
+    std::vector<std::string> said;
+    harness.save_conversation(
+        "local", "chat-7",
+        [&said](const apogee::harness::StatusEvent& event) { said.push_back(event.detail); });
+    REQUIRE(said.size() == 1);
+    CHECK(said.front().find("saved this chat's state") != std::string::npos);
+    CHECK(std::filesystem::exists(root / "cache" / "chats" / "chat-7.state"));
+
+    // A backend that keeps none, and one nobody configured: nothing happens.
+    said.clear();
+    harness.resume_conversation("plain", "chat-7");
+    harness.save_conversation("plain", "chat-7",
+                              [&said](const auto& event) { said.push_back(event.detail); });
+    harness.save_conversation("nowhere", "chat-7",
+                              [&said](const auto& event) { said.push_back(event.detail); });
+    CHECK(said.empty());
+
+    std::error_code code;
+    std::filesystem::remove_all(root, code);
 }

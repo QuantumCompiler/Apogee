@@ -192,7 +192,9 @@ harness::ChatResponse MockProvider::chat(const harness::ChatRequest& request,
     cancellation.throw_if_cancelled();
     record(request);
     const MockTurn& turn = next_turn();
-    return build_response(turn, expand_mock_text(turn.text, request));
+    std::string text = expand_mock_text(turn.text, request);
+    replace_all(text, "{{conversation}}", conversation_id_);
+    return build_response(turn, text);
 }
 
 harness::ChatResponse MockProvider::stream_chat(const harness::ChatRequest& request,
@@ -212,7 +214,8 @@ harness::ChatResponse MockProvider::stream_chat(const harness::ChatRequest& requ
     // Chunked deliberately, and checked for cancellation between chunks: this
     // is the contract every real provider must honour, so the mock has to hold
     // itself to it or tests of cancellation prove nothing.
-    const std::string text = expand_mock_text(turn.text, request);
+    std::string text = expand_mock_text(turn.text, request);
+    replace_all(text, "{{conversation}}", conversation_id_);
     for (std::size_t offset = 0; offset < text.size(); offset += options_.chunk_size) {
         options.cancellation.throw_if_cancelled();
         if (turn.delay.count() > 0) {
@@ -306,6 +309,24 @@ std::vector<std::vector<float>> MockEmbeddingProvider::embed(
 
 std::size_t MockEmbeddingProvider::embedding_dimensions() const noexcept {
     return dimensions_;
+}
+
+void MockProvider::resume_conversation(std::string_view conversation_id) {
+    conversation_id_ = std::string{conversation_id};
+}
+
+void MockProvider::save_conversation(std::string_view conversation_id,
+                                     const harness::StatusSink& on_status) {
+    if (!on_status) {
+        return;
+    }
+    harness::StatusEvent event;
+    event.type = harness::StatusEvent::Type::PromptCache;
+    event.phase = harness::StatusEvent::Phase::Done;
+    event.name = options_.model;
+    event.detail =
+        "nothing saved for " + std::string{conversation_id} + ": the mock keeps no state";
+    on_status(event);
 }
 
 }  // namespace apogee::backends

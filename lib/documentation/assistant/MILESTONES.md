@@ -1316,6 +1316,70 @@ The defaults lost no task: Llama 3.1 8B failed the URL task greedily too (26g's 
 | `serve`, `analyze`, legacy completions | The backend's setting; no per-request override | Mode parity. An override is named, not built. |
 | The session's keys | `think`, `think_budget` | A setting, not reasoning: the cleanliness check still finds no `thinking` in a saved file. |
 
+### 2026-10-04 — `persistent-prompt-cache` (backlog item 26j): a prompt cache that survives the process
+
+**Why.** The KV cache lived only as long as the process. `chat --resume` on a long conversation read the whole transcript before its first token -- 10,000 tokens was about 100 s on the reference machine's 27B -- and every new `--tools` chat read the same system prompt and tool definitions again. llama.cpp can save a sequence's state to a file and restore it, hybrid running state included.
+
+**What was built**
+
+- [x] **Two caches under `cache/prompt/`** (`backends/prompt_cache.h/.cpp`, `contracts/layout`'s `prompt_cache_dir()`):
+  - **the prefix cache**, per model: the state after everything before the first user message -- the system prompt, the environment note and the tools offered -- named by those tokens, the cache type and the window, kept from 512 tokens;
+  - **the chat cache**, per chat: the state a chat reached, saved at a clean exit (terminal and machine mode, never Ctrl-C) and after the turn that reads a compacted history, from 2,000 tokens.
+- [x] **The seam** (`LlamaContext::save_state`/`load_state`, over `llama_state_seq_save_file`/`load_file`). A load clears the context first, and is kept only when the sequence ends where its tokens do with its window whole.
+- [x] **A fresh session context starts from disk** (`LlamaCppProvider::restore_session`): the resumed chat's state, else the prefix; an unsaved prefix is read on its own and kept. The `--verbose` cache line says where the kept tokens came from: `11482 from the saved chat, 27 read`.
+- [x] **A chat is saved where its next prompt will agree with it**: `kCheckpointTail` tokens short of its last prompt's end -- a thinking model's next prompt re-renders the answer, and a restored state has no checkpoints to go back to.
+- [x] **A cache that cannot be used is discarded, never trusted**, each with one line:
+  - one made with another model file -- its path, size and modification time;
+  - one made with another cache type or window;
+  - one llama.cpp refuses;
+  - a saved chat that matches only in part, after what matched is used.
+
+  A model file that changed clears its whole prefix directory.
+- [x] **Bounded and private**: one 4 GiB cap across both, the least recently used evicted first and never the file just kept; every file `0600`, every directory `0700`. `check` reports the total against the cap.
+- [x] **Only where a restore is exact** (`LlamaContext::restores_exactly`): not a sliding-window model, said once.
+- [x] **Through the Harness as a capability** (`ConversationCaching`): `chat` names its conversation at the start and on `/model`, and saves it. Side requests never read or write the cache. The mock takes part as a test vehicle: `{{conversation}}`, and a save that says it kept nothing.
+
+**On real weights** (separate `apogee` processes, one family at a time -- surviving the process is the point; the mutation build ran beside the last checks):
+
+| | Qwen3-VL-8B (Q4_K_M) | Llama 3.1 8B (Q4_K_M) | Gemma 4 12B (Q4_K_M) | gpt-oss-20b (F16) |
+|---|---|---|---|---|
+| a new `--tools` chat, its second launch | 1,615 of 1,628 tokens from disk; first byte 0.9 s, was 4.2 s | no prefix file: the template writes the tools into the first user message | 1,408 of 1,425; 1.3 s, was 4.4 s | 1,097 of 1,108; 1.5 s, was 2.5 s |
+| greedy answer, restored against read | identical | identical | identical | identical |
+| an 11,500-token chat resumed | **0.8 s to the first byte, was 28.5 s** | **0.8 s, was 103.5 s** | 1.2 s, was 39.6 s | 2.6 s, was 26.8 s |
+| greedy answer after the resume | identical | identical | identical | **"Nonsense" against "Nonsense."** |
+| logits after a restore (llama.cpp's own API) | identical to the last bit | identical | up to 0.16 apart | up to 0.06 apart |
+| now | both caches | the chat cache | **none, said** | **none, said** |
+
+- **The rule that came of it.** A restored hybrid -- Qwen3.8-27B, the only hybrid installed, run once for this ("only where nothing else works") -- is bit-exact like a pure-attention model. A sliding-window cache is written as its window alone and laid out afresh, so its sums run in another order: deterministic on each side, never equal. Correctness first, so Gemma 4 and gpt-oss keep no cache on disk; the Gemma and gpt-oss times above were measured before that rule, and lifting it is one line.
+- **Replacing the model file** (an APFS clone of Qwen3-VL-8B, retouched): the next resume said both lines, once each -- the saved chat discarded and the prompt cache cleared -- read the conversation again, and saved it anew.
+- **With tool selection (26g)** the tools offered depend on the question, so a prefix is shared by questions that rank the same tools.
+
+**Tests**: 27 new cases:
+- the cache's files: fingerprints, a changed model's directory, names, ids that cannot escape, records, privacy, eviction order;
+- the provider across "processes": the prefix read once and restored; a short prefix not kept; a replaced file, a refused file and one holding other tokens each discarded with its line, a refused one gone even when it cannot be written again; side requests untouched; a resumed chat restored privately, a short one not saved, and one from another file or window, or no longer matching, discarded; the save point; the cap; sliding windows; the config mapping;
+- the Harness reaching the capability, and nothing where there is none;
+- `chat` naming, resuming and saving at exit and after compaction, end to end through the mock;
+- `check`'s row.
+
+**Guardrails, each mutation-tested (29 mutants, all caught -- three only once tests were added for them: the eviction order, a saved chat's window, a refused prefix that cannot be written again), in a separate git worktree:** the model check and its directory, names by cache type, ids, eviction order and the kept file, a chat's record, privacy, the modification time; the chat's model, window and restore, the prefix floor, its tokens, a refused file, a partial chat, the prefix save, the chat floor and save point, both sliding-window rules, the config mapping; `chat`'s naming and both saves; the Harness both ways; `check`'s row; the mock's placeholder.
+
+**Found on the way.** A restored sliding-window state was refused by our own window check: llama.cpp keeps exactly the window behind the last position, and llama-server's threshold, which `window_intact` follows, is one position stricter. A restore is now judged as of its last position, and a trim that cuts nothing returns at once.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The two caches | Prefix on; the chat cache from 2,000 tokens *(confirmed by the user)* | Short chats re-read in a second or two. |
+| The cap | 4 GiB across both, oldest first *(confirmed by the user)* | |
+| When a chat is saved | Clean exit and after compaction, never per turn *(confirmed by the user)* | The per-turn save already keeps the transcript. |
+| The acceptance models | The families, not Qwen3.8-27B *(the user's call)* | The 27B ran once, as the only hybrid, for the exactness probe. |
+| The model file's identity | Path, size and modification time | Hashing gigabytes per load would cost more than the cache saves. |
+| The prefix | Everything before the first user message, from 512 tokens | Shorter reads in under a second. |
+| The save point | `kCheckpointTail` short of the last prompt's end | Where the next prompt is sure to agree. |
+| A partial match | Used for what matched, then discarded with a line | The file no longer describes the chat. |
+| Sliding-window models | No cache on disk, said once *(for veto)* | Their restore is not exact; the item puts correctness first. |
+| The mock | Takes part as a test vehicle | So `chat`'s naming and saving are tested end to end. |
+
 ## Milestone K — The install contract
 
 **Goal.** Make v0.1.0 shippable, and do it by closing Ommi's dominant early bug class rather than by documenting it. Ommi lost real time to *silent install drift*: `make install` seeded one tree, `install.sh` another, the updater a third, and `check` validated a fourth — each list correct when written, diverging one commit at a time, and never failing loudly. The fix adopted here is structural: one layout declaration, and every install path reads it.

@@ -1498,6 +1498,27 @@ TEST_CASE("models in the flat layout are a warning naming the migration, never a
     CHECK(std::filesystem::exists(install.root / "models" / "old.gguf"));
 }
 
+TEST_CASE("the prompt cache's saved states are reported against their cap",
+          "[commands][check][models][prompt-cache]") {
+    // 26j: what `cache/prompt/` takes, said where the models are.
+    Install install;
+    install.seed();
+    install.write("models/m/gguf/111111111111/m.gguf", apogee::testing::minimal_gguf("qwen3"));
+    {
+        const CheckReport report = run_checks(inputs_for(install));
+        CHECK(row_with(report, "prompt cache") == nullptr);
+    }
+    install.write("cache/prompt/models/abc/prefix-q8_0-4096-x.state", std::string(1024, 's'));
+    install.write("cache/prompt/chats/chat.state", std::string(1024, 's'));
+    install.write("cache/prompt/chats/chat.json", "{}");
+    const CheckReport report = run_checks(inputs_for(install));
+    const apogee::commands::CheckRow* cached = row_with(report, "prompt cache");
+    REQUIRE(cached != nullptr);
+    CHECK(cached->status == Status::Ok);
+    CHECK(cached->detail.find("2 saved state(s)") != std::string::npos);
+    CHECK(cached->detail.find("2 KiB of 4.0 GiB") != std::string::npos);
+}
+
 TEST_CASE("staging an interrupted run left is reported and removed; a live run's is not",
           "[commands][check][models]") {
     // Two 52 GB copies of one model sat in the store after a Ctrl-C during a

@@ -850,8 +850,9 @@ TEST_CASE("/think shows and sets the chat's thinking, and the session keeps it",
     CHECK(session.title == "Thinking Title");
 }
 
-TEST_CASE("chat --think auto asks the utility model per question, and --verbose says what it decided",
-          "[chat][cli][thinking][helpers]") {
+TEST_CASE(
+    "chat --think auto asks the utility model per question, and --verbose says what it decided",
+    "[chat][cli][thinking][helpers]") {
     HelperChat chat{texts({"Rayleigh scattering."}), {"no", "Sky Title"}};
     REQUIRE(chat.run({"chat", "--think", "auto", "--think-budget", "256", "--verbose"},
                      "Why is the sky blue?\n") == 0);
@@ -890,4 +891,47 @@ TEST_CASE("complete takes the same thinking flags, and refuses a bad one",
     CHECK(chat.run({"complete", "--think", "sometimes", "Hello"}) != 0);
     CHECK(chat.run({"complete", "--think-budget", "-1", "Hello"}) != 0);
     CHECK(chat.run({"chat", "--think", "sometimes"}, "") != 0);
+}
+
+// ---------------------------------------------------------------------------
+// The conversation's saved state (26j)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+[[nodiscard]] std::size_t occurrences(std::string_view text, std::string_view needle) {
+    std::size_t count = 0;
+    for (std::size_t at = text.find(needle); at != std::string_view::npos;
+         at = text.find(needle, at + needle.size())) {
+        ++count;
+    }
+    return count;
+}
+
+}  // namespace
+
+TEST_CASE("a chat names its conversation to its backend, and saves it at a clean exit",
+          "[chat][cli][prompt-cache]") {
+    // The mock's `{{conversation}}` says which chat it was named for, and its
+    // save says it was asked.
+    HelperChat chat{texts({"{{conversation}}"}), {"Title"}};
+    REQUIRE(chat.run({"chat", "--verbose"}, "hello\n") == 0);
+    const apogee::logger::Session first = HelperChat::only_session();
+    CHECK(replies(first) == std::vector<std::string>{first.chat_id});
+    CHECK(occurrences(chat.err, "nothing saved for " + first.chat_id) == 1);
+
+    // Resumed, the same conversation is named again.
+    REQUIRE(chat.run({"chat", "--resume", first.chat_id}, "again\n") == 0);
+    CHECK(replies(HelperChat::only_session()) ==
+          std::vector<std::string>{first.chat_id, first.chat_id});
+}
+
+TEST_CASE("a compacted chat's state is saved after the turn that reads it",
+          "[chat][cli][prompt-cache][helpers]") {
+    HelperChat chat{texts({"one", "two", "three"}), {"Title", "what was said"}};
+    REQUIRE(chat.run({"chat", "--verbose"}, "first\nsecond\n/compact\nthird\n") == 0);
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(session.compactions == 1);
+    // Once after the third turn, once at the exit.
+    CHECK(occurrences(chat.err, "nothing saved for " + session.chat_id) == 2);
 }

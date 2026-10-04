@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -306,6 +307,40 @@ public:
     /// of finding where to take them when it would be thrown away.
     [[nodiscard]] virtual bool needs_checkpoints() const noexcept {
         return false;
+    }
+
+    /// Whether a state saved from this context restores exactly as decoding
+    /// left it (26j). A sliding-window cache does not: llama.cpp writes its
+    /// window alone and lays it out afresh, and the logits after a restore
+    /// differ by up to 0.16 (Gemma 4 12B, 2026-10-04) -- enough to move a
+    /// greedy answer. A pure-attention or hybrid model's restore is
+    /// bit-exact.
+    [[nodiscard]] virtual bool restores_exactly() const noexcept {
+        return true;
+    }
+
+    /// Writes this context's state -- every position it holds -- to `path`
+    /// with `tokens`, the tokens those positions came from (26j). False with
+    /// `error` when it cannot; the default cannot.
+    [[nodiscard]] virtual bool save_state(const std::filesystem::path& path,
+                                          const std::vector<std::int32_t>& tokens,
+                                          std::string& error) {
+        (void)path;
+        (void)tokens;
+        error = "this runtime cannot save its state";
+        return false;
+    }
+
+    /// Replaces everything this context holds with the state saved at
+    /// `path`, and returns the tokens it covers: the context then holds
+    /// exactly positions `[0, tokens.size())`, as decoding them would have
+    /// left it. Nullopt with `error` -- and an empty context -- when the
+    /// file is refused: another model's, another llama.cpp's, damaged.
+    [[nodiscard]] virtual std::optional<std::vector<std::int32_t>> load_state(
+        const std::filesystem::path& path, std::string& error) {
+        (void)path;
+        error = "this runtime cannot restore a saved state";
+        return std::nullopt;
     }
 
     /// How many checkpoints are held, and the host memory they take.

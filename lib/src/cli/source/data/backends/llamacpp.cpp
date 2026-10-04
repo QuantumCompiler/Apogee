@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <filesystem>
 #include <functional>
@@ -15,6 +16,7 @@
 #include "backends/markup_filter.h"
 #include "backends/native_tool_calls.h"
 #include "contracts/errors.h"
+#include "contracts/layout.h"
 #include "events/bus.h"
 #include "logger/operational.h"
 #include "modelstore/gguf_inspect.h"
@@ -178,6 +180,10 @@ void decode_in_batches(LlamaContext& context, const std::vector<std::int32_t>& t
 /// end would lie past the divergence and never be usable. llama-server's
 /// offset (`checkpoint_offsets`, tools/server/server-context.cpp).
 constexpr std::int64_t kCheckpointTail = 4;
+
+/// Where a fresh context's state came from, for the cache line (26j).
+constexpr std::string_view kFromSavedChat = "the saved chat";
+constexpr std::string_view kFromPromptCache = "the prompt cache on disk";
 
 /// Decodes base64, skipping whitespace; stops at padding.
 [[nodiscard]] std::string decode_base64(std::string_view encoded) {
@@ -522,6 +528,8 @@ LlamaCppProvider::Options LlamaCppProvider::options_from(const std::string& back
     options.backend_name = backend_name;
     options.model = config.model.empty() ? config.model_path : config.model;
     options.model_path = config.model_path;
+    // The prompt cache under `cache/prompt/` (26j).
+    options.prompt_cache_dir = harness::prompt_cache_dir();
     options.mmproj_path = harness::expand_env(config.mmproj_path);
     if (config.context_size.has_value()) {
         options.context_size = *config.context_size;
@@ -658,6 +666,220 @@ void LlamaCppProvider::unload() {
     session_.reset();
     session_tokens_.clear();
     model_.reset();
+    // A file replaced while unloaded is noticed at the next load (26j).
+    fingerprint_read_ = false;
+    fingerprint_.reset();
+}
+
+PromptCache* LlamaCppProvider::prompt_cache() {
+    if (options_.prompt_cache_dir.empty()) {
+        return nullptr;
+    }
+    if (!fingerprint_read_) {
+        fingerprint_read_ = true;
+        fingerprint_ = fingerprint_of(std::filesystem::path{options_.model_path});
+    }
+    if (!fingerprint_.has_value()) {
+        return nullptr;
+    }
+    if (!prompt_cache_.has_value()) {
+        prompt_cache_.emplace(options_.prompt_cache_dir, options_.prompt_cache_cap);
+    }
+    return &*prompt_cache_;
+}
+
+std::string LlamaCppProvider::restore_session(const harness::ChatRequest& request,
+                                              const RenderedRequest& rendered,
+                                              const std::vector<std::int32_t>& prompt,
+                                              LlamaContext& context,
+                                              const harness::StreamOptions& options,
+                                              std::optional<std::size_t>& save_prefix_at) {
+    PromptCache* cache = prompt_cache();
+    if (cache == nullptr) {
+        return {};
+    }
+    // Only where a restore is exact: correctness first, the item's own rule.
+    // Said once, among the cache lines `--verbose` prints.
+    if (!context.restores_exactly()) {
+        if (!inexact_said_ && options.on_status) {
+            inexact_said_ = true;
+            harness::StatusEvent event;
+            event.type = harness::StatusEvent::Type::PromptCache;
+            event.phase = harness::StatusEvent::Phase::Done;
+            event.name = options_.model;
+            event.detail = "the prompt cache on disk is off for " + options_.model +
+                           ": its sliding-window cache does not restore exactly";
+            options.on_status(event);
+        }
+        return {};
+    }
+    // The resumed chat's own state first: it covers the system prompt and
+    // the conversation both.
+    if (restore_chat(*cache, context, options)) {
+        return std::string{kFromSavedChat};
+    }
+
+    // The prefix every conversation opening this way shares: the system
+    // prompt and the tools, worth a file only when long.
+    const std::optional<std::size_t> boundary =
+        rendered_length_before(request, rendered, prompt, false);
+    if (!boundary.has_value() || *boundary < kMinPrefixCacheTokens) {
+        return {};
+    }
+    if (const std::optional<std::string> cleared =
+            cache->claim_model(fingerprint_.value(), options_.model);
+        cleared.has_value()) {
+        notice(options, *cleared);
+    }
+    const std::vector<std::int32_t> head{prompt.begin(),
+                                         prompt.begin() + static_cast<std::ptrdiff_t>(*boundary)};
+    const std::filesystem::path file =
+        cache->prefix_path(fingerprint_.value(), context.cache_type(), context.capacity(), head);
+    std::error_code code;
+    if (!std::filesystem::exists(file, code)) {
+        save_prefix_at = boundary;
+        return {};
+    }
+    std::string error;
+    std::optional<std::vector<std::int32_t>> tokens = context.load_state(file, error);
+    if (tokens.has_value() && *tokens == head) {
+        session_tokens_ = std::move(*tokens);
+        PromptCache::touch(file);
+        return std::string{kFromPromptCache};
+    }
+    // Refused, or not the prefix it was named for: removed, and read again.
+    (void)context.trim_to(0);
+    std::filesystem::remove(file, code);
+    notice(options, "a cached prompt prefix for " + options_.model + " was discarded -- " +
+                        (tokens.has_value() ? std::string{"it held other tokens"} : error) +
+                        "; read again");
+    save_prefix_at = boundary;
+    return {};
+}
+
+bool LlamaCppProvider::restore_chat(PromptCache& cache, LlamaContext& context,
+                                    const harness::StreamOptions& options) {
+    const std::filesystem::path file =
+        conversation_id_.empty() ? std::filesystem::path{} : cache.chat_path(conversation_id_);
+    std::error_code code;
+    if (file.empty() || !std::filesystem::exists(file, code)) {
+        return false;
+    }
+    // Anything about it that does not fit -- another model file, another
+    // cache type or window, a file llama.cpp refuses -- and it goes, said
+    // once, and the prompt is read as before.
+    const std::optional<ChatCacheRecord> record = cache.read_chat_record(conversation_id_);
+    std::string why;
+    if (!record.has_value()) {
+        why = "its record is missing";
+    } else if (record->model != fingerprint_.value()) {
+        why = "it was made with a different model file";
+    } else if (record->cache_type != context.cache_type() || record->window != context.capacity()) {
+        why = "it was made with another cache type or window";
+    } else {
+        std::string error;
+        if (std::optional<std::vector<std::int32_t>> tokens = context.load_state(file, error);
+            tokens.has_value()) {
+            session_tokens_ = std::move(*tokens);
+            PromptCache::touch(file);
+            return true;
+        }
+        why = "it could not be restored: " + error;
+    }
+    cache.remove_chat(conversation_id_);
+    notice(options, "the saved state of this chat was discarded -- " + why +
+                        "; the conversation is read again");
+    return false;
+}
+
+void LlamaCppProvider::save_prefix(LlamaContext& context, const std::vector<std::int32_t>& head) {
+    const PromptCache* cache = prompt_cache();
+    if (cache == nullptr) {
+        return;
+    }
+    const std::filesystem::path file =
+        cache->prefix_path(fingerprint_.value(), context.cache_type(), context.capacity(), head);
+    std::filesystem::path written = file;
+    written += ".tmp";
+    std::string error;
+    if (context.save_state(written, head, error) && PromptCache::settle(written, file)) {
+        (void)cache->evict(file);
+        return;
+    }
+    // Not kept is read again next time: worth a log line, not a notice.
+    std::error_code code;
+    std::filesystem::remove(written, code);
+    logger::log(logger::Level::Warn, "llamacpp", "prompt prefix not cached: " + error);
+}
+
+void LlamaCppProvider::resume_conversation(std::string_view conversation_id) {
+    conversation_id_ = std::string{conversation_id};
+}
+
+void LlamaCppProvider::save_conversation(std::string_view conversation_id,
+                                         const harness::StatusSink& on_status) {
+    const auto say = [&on_status, this](std::string detail) {
+        if (on_status) {
+            harness::StatusEvent event;
+            event.type = harness::StatusEvent::Type::PromptCache;
+            event.phase = harness::StatusEvent::Phase::Done;
+            event.name = options_.model;
+            event.detail = std::move(detail);
+            on_status(event);
+        }
+    };
+    const PromptCache* cache = session_ == nullptr ? nullptr : prompt_cache();
+    const std::filesystem::path file =
+        cache == nullptr ? std::filesystem::path{} : cache->chat_path(conversation_id);
+    if (file.empty()) {
+        return;
+    }
+    if (!session_->restores_exactly()) {
+        say("this chat's state was not saved: a sliding-window cache does not restore exactly");
+        return;
+    }
+    // A few tokens short of the last prompt's end: a thinking model's next
+    // prompt re-renders the answer and diverges inside the generation
+    // prompt, and a restored state has no checkpoints to go back to.
+    const std::int64_t target =
+        std::max<std::int64_t>(0, static_cast<std::int64_t>(last_prompt_tokens_) - kCheckpointTail);
+    if (std::cmp_less(target, kMinChatCacheTokens)) {
+        say("this chat's state was not saved: " + std::to_string(target) + " tokens, under the " +
+            std::to_string(kMinChatCacheTokens) + " worth keeping");
+        return;
+    }
+    const std::int64_t kept = session_->trim_to(target);
+    session_tokens_.resize(static_cast<std::size_t>(kept));
+    if (std::cmp_less(kept, kMinChatCacheTokens)) {
+        say("this chat's state was not saved: it could not be cut where the next turn starts");
+        return;
+    }
+    std::error_code code;
+    std::filesystem::create_directories(file.parent_path(), code);
+    std::filesystem::permissions(file.parent_path(), std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::replace, code);
+    std::filesystem::path written = file;
+    written += ".tmp";
+    std::string error;
+    if (!session_->save_state(written, session_tokens_, error) ||
+        !PromptCache::settle(written, file) ||
+        !cache->write_chat_record(conversation_id,
+                                  ChatCacheRecord{.model = fingerprint_.value(),
+                                                  .cache_type = session_->cache_type(),
+                                                  .window = session_->capacity(),
+                                                  .tokens = kept})) {
+        std::filesystem::remove(written, code);
+        cache->remove_chat(conversation_id);
+        say("this chat's state was not saved: " +
+            (error.empty() ? "it could not be written" : error));
+        return;
+    }
+    (void)cache->evict(file);
+    const double mib =
+        static_cast<double>(std::filesystem::file_size(file, code)) / (1024.0 * 1024.0);
+    std::array<char, 32> size{};
+    std::snprintf(size.data(), size.size(), "%.1f", mib);
+    say("saved this chat's state: " + std::to_string(kept) + " tokens, " + size.data() + " MiB");
 }
 
 std::vector<std::vector<float>> LlamaCppProvider::embed(
@@ -835,30 +1057,52 @@ std::vector<std::int64_t> LlamaCppProvider::checkpoint_marks(
     if (size > kCheckpointTail) {
         marks.push_back(size - kCheckpointTail);
     }
-
     // The last user message's start: where a template that restyles the
-    // final user turn diverges. Found by rendering the conversation before
-    // it, alone, and keeping its length only if it really is a token prefix
-    // of the prompt -- a template that renders earlier messages differently
-    // once they are not last gives no usable boundary, and none is taken.
+    // final user turn diverges.
+    if (const std::optional<std::size_t> head =
+            rendered_length_before(request, rendered, prompt, true);
+        head.has_value()) {
+        marks.push_back(static_cast<std::int64_t>(*head));
+    }
+    return marks;
+}
+
+std::optional<std::size_t> LlamaCppProvider::rendered_length_before(
+    const harness::ChatRequest& request, const RenderedRequest& rendered,
+    const std::vector<std::int32_t>& prompt, bool before_last_user) const {
+    // Found by rendering the conversation before that user message, alone,
+    // and keeping its length only if it really is a token prefix of the
+    // prompt -- a template that renders earlier messages differently once
+    // they are not last gives no usable boundary, and none is taken. The
+    // first user message's start ends the system prompt and the tools: what
+    // every conversation that opens the same way shares (26j).
     const bool held = rendered.chat != nullptr && rendered.chat->holds_schema;
     const std::vector<harness::ChatMessage> messages = prompt_messages(request, !held);
-    std::size_t last_user = messages.size();
-    for (std::size_t i = messages.size(); i-- > 0;) {
-        if (messages[i].role == harness::Role::User) {
-            last_user = i;
-            break;
+    std::size_t user = messages.size();
+    if (before_last_user) {
+        for (std::size_t i = messages.size(); i-- > 0;) {
+            if (messages[i].role == harness::Role::User) {
+                user = i;
+                break;
+            }
+        }
+    } else {
+        for (std::size_t i = 0; i < messages.size(); ++i) {
+            if (messages[i].role == harness::Role::User) {
+                user = i;
+                break;
+            }
         }
     }
-    if (last_user == 0 || last_user == messages.size()) {
-        return marks;
+    if (user == 0 || user == messages.size()) {
+        return std::nullopt;
     }
     const std::vector<harness::ChatMessage> before{
-        messages.begin(), messages.begin() + static_cast<std::ptrdiff_t>(last_user)};
+        messages.begin(), messages.begin() + static_cast<std::ptrdiff_t>(user)};
     std::string text;
     if (rendered.chat != nullptr) {
         // The same inputs as the full prompt, schema included, so the two
-        // agree on every token before the last user message.
+        // agree on every token before that user message.
         ChatRenderOptions render;
         render.enable_thinking = !request.thinking.off();
         render.reasoning_effort = thinking_effort(request.thinking);
@@ -869,7 +1113,7 @@ std::vector<std::int64_t> LlamaCppProvider::checkpoint_marks(
         ChatRendering prefix;
         std::string ignored;
         if (!model_->render_chat(before, request.tools, render, prefix, ignored)) {
-            return marks;
+            return std::nullopt;
         }
         text = std::move(prefix.prompt);
     } else {
@@ -878,14 +1122,15 @@ std::vector<std::int64_t> LlamaCppProvider::checkpoint_marks(
     const std::vector<std::int32_t> head = model_->tokenize(text, true);
     if (!head.empty() && head.size() < prompt.size() &&
         std::equal(head.begin(), head.end(), prompt.begin())) {
-        marks.push_back(static_cast<std::int64_t>(head.size()));
+        return head.size();
     }
-    return marks;
+    return std::nullopt;
 }
 
 void LlamaCppProvider::report_cache(const harness::StreamOptions& options,
                                     std::size_t prompt_tokens, std::int64_t kept,
-                                    const LlamaContext& context) const {
+                                    const LlamaContext& context,
+                                    std::string_view restored_from) const {
     if (!options.on_status) {
         return;
     }
@@ -896,8 +1141,11 @@ void LlamaCppProvider::report_cache(const harness::StreamOptions& options,
     event.tokens = static_cast<std::int64_t>(prompt_tokens);
     event.used_tokens = kept;
     const std::int64_t decoded = static_cast<std::int64_t>(prompt_tokens) - kept;
+    // Where the kept part came from when it was not this process (26j).
     event.detail = "prompt " + std::to_string(prompt_tokens) + " tokens: " + std::to_string(kept) +
-                   " from the cache, " + std::to_string(decoded) + " read";
+                   " from " +
+                   (restored_from.empty() ? std::string{"the cache"} : std::string{restored_from}) +
+                   ", " + std::to_string(decoded) + " read";
     if (context.needs_checkpoints()) {
         // The memory the user never asked for, where it exists at all.
         const double mib = static_cast<double>(context.checkpoint_bytes()) / (1024.0 * 1024.0);
@@ -1349,6 +1597,17 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
         context = session_.get();
         reject_if_too_long(*context, prompt.size(), options_.backend_name);
 
+        // A context with nothing in it yet may start from disk (26j): the
+        // resumed chat's own state, or the prefix its system prompt and tools
+        // open with.
+        std::string restored_from;
+        std::optional<std::size_t> save_prefix_at;
+        if (session_tokens_.empty()) {
+            restored_from =
+                restore_session(request, rendered, prompt, *context, options, save_prefix_at);
+        }
+        const std::size_t restored = session_tokens_.size();
+
         const std::size_t shared = reusable_prefix(
             llama_tokens::common_prefix_length(session_tokens_, prompt), prompt.size());
 
@@ -1357,16 +1616,43 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
         // memory cannot be cut there is cleared instead, and the whole prompt
         // decodes again from wherever the cache really ends.
         const std::int64_t kept = context->trim_to(static_cast<std::int64_t>(shared));
+        if (restored_from == kFromSavedChat && std::cmp_less(kept, restored) &&
+            prompt_cache_.has_value()) {
+            // A saved chat this conversation no longer opens with in full:
+            // what still matched was used, and the file goes, said once.
+            prompt_cache_->remove_chat(conversation_id_);
+            notice(options, kept == 0
+                                ? std::string{"the saved state of this chat did not match its "
+                                              "conversation; read again"}
+                                : "the saved state of this chat matched only " +
+                                      std::to_string(kept) + " of its " + std::to_string(restored) +
+                                      " tokens; the rest was read again");
+        }
+        if (kept == 0) {
+            restored_from.clear();
+        }
 
-        const std::vector<std::int32_t> suffix{prompt.begin() + static_cast<std::ptrdiff_t>(kept),
-                                               prompt.end()};
         // Checkpoints only where the memory cannot be rewound (25c): a
         // pure-attention model's trim already works, and it pays nothing.
-        decode_in_batches(*context, suffix, kept,
-                          context->needs_checkpoints() ? checkpoint_marks(request, rendered, prompt)
-                                                       : std::vector<std::int64_t>{});
+        const std::vector<std::int64_t> marks = context->needs_checkpoints()
+                                                    ? checkpoint_marks(request, rendered, prompt)
+                                                    : std::vector<std::int64_t>{};
+        if (save_prefix_at.has_value() && kept == 0) {
+            // Read the shared opening on its own, keep it, then the rest.
+            const auto at = static_cast<std::ptrdiff_t>(*save_prefix_at);
+            const std::vector<std::int32_t> head{prompt.begin(), prompt.begin() + at};
+            decode_in_batches(*context, head, 0, marks);
+            save_prefix(*context, head);
+            decode_in_batches(*context, {prompt.begin() + at, prompt.end()},
+                              static_cast<std::int64_t>(*save_prefix_at), marks);
+        } else {
+            const std::vector<std::int32_t> suffix{
+                prompt.begin() + static_cast<std::ptrdiff_t>(kept), prompt.end()};
+            decode_in_batches(*context, suffix, kept, marks);
+        }
         session_tokens_ = prompt;
-        report_cache(options, prompt.size(), kept, *context);
+        last_prompt_tokens_ = prompt.size();
+        report_cache(options, prompt.size(), kept, *context, restored_from);
     }
 
     // Either path leaves the KV holding exactly positions [0, prompt.size()),

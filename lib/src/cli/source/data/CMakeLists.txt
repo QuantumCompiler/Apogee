@@ -153,6 +153,8 @@ apogee_add_module(backends
     backends/model_profile.cpp
     backends/sampling.h
     backends/sampling.cpp
+    backends/prompt_cache.h
+    backends/prompt_cache.cpp
     backends/chat_template.h
     backends/chat_template.cpp
     backends/llamacpp_tokens.h

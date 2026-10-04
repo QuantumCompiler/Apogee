@@ -2,15 +2,18 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "backends/llama_runtime.h"
 #include "backends/model_profile.h"
+#include "backends/prompt_cache.h"
 #include "backends/sampling.h"
 #include "contracts/config.h"
 #include "contracts/provider.h"
@@ -52,7 +55,8 @@ class LlamaCppProvider final : public harness::LLMProvider,
                                public harness::StatusReporting,
                                public harness::ContextWindowReporting,
                                public harness::AudioCapable,
-                               public harness::VideoCapable {
+                               public harness::VideoCapable,
+                               public harness::ConversationCaching {
 public:
     /// Reads the wall clock. Injected so the idle-unload policy is testable
     /// without a test that sleeps.
@@ -102,6 +106,13 @@ public:
         /// process holds, so a long-lived `apogee chat` that has moved to a
         /// cloud backend should be able to give it back.
         std::chrono::seconds idle_unload{0};
+
+        /// Where the prompt cache keeps its files (26j): `cache/prompt/` as
+        /// `options_from` maps it. Empty keeps none -- every turn reads its
+        /// prompt as before.
+        std::filesystem::path prompt_cache_dir;
+        /// The most the prompt cache keeps on disk.
+        std::uint64_t prompt_cache_cap = kPromptCacheCapBytes;
 
         Clock clock;
     };
@@ -173,6 +184,17 @@ public:
     /// `mtmd_helper_support_video` says only whether mtmd's own ffmpeg
     /// decoding was built, which Apogee does not use.
     [[nodiscard]] bool accepts_video() const noexcept override;
+
+    /// The conversation the turns that follow belong to (26j): the first
+    /// turn on a fresh context restores its saved state, when there is one.
+    void resume_conversation(std::string_view conversation_id) override;
+
+    /// Saves the conversation's state under `conversation_id` (26j), as far
+    /// as its next prompt is sure to share it -- a few tokens short of the
+    /// last prompt's end, the context trimmed there -- when that is at least
+    /// `kMinChatCacheTokens`. Says what it did as a `PromptCache` status.
+    void save_conversation(std::string_view conversation_id,
+                           const harness::StatusSink& on_status) override;
 
     // --- ContextWindowReporting ----------------------------------------------
 
@@ -367,7 +389,39 @@ private:
     /// A `PromptCache` status: what the cache kept of this prompt and what
     /// was read again, with the checkpoints held (`--verbose` prints it).
     void report_cache(const harness::StreamOptions& options, std::size_t prompt_tokens,
-                      std::int64_t kept, const LlamaContext& context) const;
+                      std::int64_t kept, const LlamaContext& context,
+                      std::string_view restored_from = {}) const;
+
+    /// The length of the prompt `messages[0, index)` renders to, when it is a
+    /// real token prefix of `prompt` -- the boundary a checkpoint or a cached
+    /// prefix can sit on. Nullopt when the template renders it otherwise.
+    [[nodiscard]] std::optional<std::size_t> rendered_length_before(
+        const harness::ChatRequest& request, const RenderedRequest& rendered,
+        const std::vector<std::int32_t>& prompt, bool before_last_user) const;
+
+    /// The prompt cache, or nullptr when there is none: no directory, or a
+    /// model file that cannot be identified (26j).
+    [[nodiscard]] PromptCache* prompt_cache();
+
+    /// Restores a fresh session context from disk (26j): the resumed chat's
+    /// own state, else the prefix its system prompt and tools open with.
+    /// Returns what it restored from, for the cache line, or empty -- with
+    /// `save_prefix_at` set when there is a prefix worth saving once read.
+    [[nodiscard]] std::string restore_session(const harness::ChatRequest& request,
+                                              const RenderedRequest& rendered,
+                                              const std::vector<std::int32_t>& prompt,
+                                              LlamaContext& context,
+                                              const harness::StreamOptions& options,
+                                              std::optional<std::size_t>& save_prefix_at);
+
+    /// Restores the resumed chat's saved state into `context`, true when it
+    /// did; a file that does not fit is discarded, said once (26j).
+    [[nodiscard]] bool restore_chat(PromptCache& cache, LlamaContext& context,
+                                    const harness::StreamOptions& options);
+
+    /// Writes the context's state, which holds exactly `head`, as the prefix
+    /// file for it (26j).
+    void save_prefix(LlamaContext& context, const std::vector<std::int32_t>& head);
 
     /// Says, once per turn, that a request carrying tools is answered without
     /// them -- the fallback path cannot put them in the prompt. A model file
@@ -419,6 +473,19 @@ private:
 
     std::chrono::steady_clock::time_point last_use_{};
     bool used_ = false;
+
+    /// The prompt cache on disk (26j), made on first use; the model file it
+    /// is keyed to, read once a load; the conversation named by
+    /// `resume_conversation`; and the length of the session's last prompt,
+    /// where a saved chat ends.
+    std::optional<PromptCache> prompt_cache_;
+    std::optional<ModelFingerprint> fingerprint_;
+    bool fingerprint_read_ = false;
+    std::string conversation_id_;
+    std::size_t last_prompt_tokens_ = 0;
+    /// Whether this conversation has been told the cache is off for a model
+    /// whose state does not restore exactly.
+    bool inexact_said_ = false;
 };
 
 }  // namespace apogee::backends

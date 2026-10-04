@@ -56,6 +56,8 @@ add_library(apogee_tests_data OBJECT
     data/backends/embedding_batch_test.cpp
     data/backends/llamacpp_embed_test.cpp
     data/backends/llamacpp_test.cpp
+    data/backends/llamacpp_prompt_cache_test.cpp
+    data/backends/prompt_cache_test.cpp
     data/backends/sampling_test.cpp
     data/backends/claude_cli_events_test.cpp
     data/backends/claude_cli_test.cpp

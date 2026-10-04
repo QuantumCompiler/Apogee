@@ -244,6 +244,32 @@ public:
     [[nodiscard]] virtual std::int64_t context_window() const = 0;
 };
 
+/// Implemented by a provider whose conversation can outlive the process
+/// (26j): a local model's attention cache, saved to a file and restored, so
+/// a resumed chat reads only what follows what it had read.
+///
+/// A provider without it simply reads a resumed conversation again -- every
+/// cloud backend does, the vendor keeping whatever cache it keeps.
+class ConversationCaching {
+public:
+    ConversationCaching() = default;
+    virtual ~ConversationCaching() = default;
+    ConversationCaching(const ConversationCaching&) = delete;
+    ConversationCaching& operator=(const ConversationCaching&) = delete;
+    ConversationCaching(ConversationCaching&&) = delete;
+    ConversationCaching& operator=(ConversationCaching&&) = delete;
+
+    /// Names the conversation the turns that follow belong to -- a chat's
+    /// id -- so the first of them can restore the state it was saved with.
+    virtual void resume_conversation(std::string_view conversation_id) = 0;
+
+    /// Saves the conversation's state under `conversation_id`, as far as
+    /// its next prompt is sure to share it, saying what it did through
+    /// `on_status`. Never throws: a state not saved is read again next time.
+    virtual void save_conversation(std::string_view conversation_id,
+                                   const StatusSink& on_status) = 0;
+};
+
 /// Implemented by a provider that can accept image content parts.
 ///
 /// Exists so no surface has to ask "what type is this backend?" before

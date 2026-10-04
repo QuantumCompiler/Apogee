@@ -83,6 +83,10 @@ std::filesystem::path cache_dir() {
     return apogee_home() / "cache";
 }
 
+std::filesystem::path prompt_cache_dir() {
+    return cache_dir() / "prompt";
+}
+
 std::filesystem::path training_dir() {
     return apogee_home() / "training";
 }

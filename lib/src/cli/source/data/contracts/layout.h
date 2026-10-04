@@ -130,6 +130,13 @@ struct LayoutEntry {
 /// `train cycle run`.
 [[nodiscard]] std::filesystem::path training_cycle_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
+/// `cache/prompt` -- a local model's attention cache kept between processes
+/// (26j): `models/<model>/` holds each model's prefix files (the state after
+/// a system prompt and tools) with the model file they were made with, and
+/// `chats/` one private file per saved chat. Capped, the least recently used
+/// evicted; safe to delete like the rest of `cache/`. Created by the first
+/// cached prompt.
+[[nodiscard]] std::filesystem::path prompt_cache_dir();
 
 /// What `seed_data_directory()` did.
 struct SeedResult {

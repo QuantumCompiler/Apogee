@@ -445,8 +445,14 @@ public:
     }
 
     [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
-        // p1 < 0 means "to infinity": drop everything from `position` on.
         llama_memory_t memory = llama_get_memory(context_.get());
+        // Nothing to cut: the cache stays exactly as decoding left it, its
+        // window with it -- a state restored from disk holds no more than
+        // that window, which the check below would refuse (26j).
+        if (const std::int64_t end = llama_memory_seq_pos_max(memory, 0) + 1; position >= end) {
+            return end;
+        }
+        // p1 < 0 means "to infinity": drop everything from `position` on.
         if (llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(position), -1) &&
             window_intact(llama_memory_seq_pos_min(memory, 0), position, sliding_window_)) {
             forget_checkpoints_after(checkpoints_, position);
@@ -507,6 +513,61 @@ public:
 
     [[nodiscard]] bool needs_checkpoints() const noexcept override {
         return checkpoints_needed_;
+    }
+
+    [[nodiscard]] bool restores_exactly() const noexcept override {
+        return sliding_window_ == 0;
+    }
+
+    [[nodiscard]] bool save_state(const std::filesystem::path& path,
+                                  const std::vector<std::int32_t>& tokens,
+                                  std::string& error) override {
+        // The whole sequence -- the attention cache and any running state --
+        // with the tokens it came from, in llama.cpp's own format (26j).
+        llama_log().forget();
+        const std::size_t written = llama_state_seq_save_file(context_.get(), path.string().c_str(),
+                                                              0, tokens.data(), tokens.size());
+        if (written == 0) {
+            error = with_llama_reason("llama.cpp could not save the state");
+            return false;
+        }
+        return true;
+    }
+
+    [[nodiscard]] std::optional<std::vector<std::int32_t>> load_state(
+        const std::filesystem::path& path, std::string& error) override {
+        // Whatever was here goes first: a state laid over other positions
+        // would answer from both. The checkpoints were of that state too.
+        llama_memory_t memory = llama_get_memory(context_.get());
+        llama_memory_clear(memory, true);
+        checkpoints_.clear();
+        std::vector<llama_token> tokens(static_cast<std::size_t>(llama_n_ctx(context_.get())));
+        std::size_t count = 0;
+        llama_log().forget();
+        const std::size_t read = llama_state_seq_load_file(context_.get(), path.string().c_str(), 0,
+                                                           tokens.data(), tokens.size(), &count);
+        // Restored means the sequence ends where the tokens do, its window
+        // whole: anything else is not the state decoding them leaves.
+        const auto end = static_cast<std::int64_t>(count);
+        if (read == 0 || count == 0) {
+            llama_memory_clear(memory, true);
+            error = with_llama_reason("llama.cpp refused the saved state");
+            return std::nullopt;
+        }
+        const std::int64_t last = llama_memory_seq_pos_max(memory, 0);
+        const std::int64_t first = llama_memory_seq_pos_min(memory, 0);
+        // llama.cpp keeps exactly the window behind the last position, all
+        // the next token -- at `end` -- looks back over; the server's
+        // threshold, one stricter, would refuse every state it saves. So the
+        // window is judged as of the last position held.
+        if (last + 1 != end || !window_intact(first, end + 1, sliding_window_)) {
+            llama_memory_clear(memory, true);
+            error = "the restored state holds positions " + std::to_string(first) + " to " +
+                    std::to_string(last) + ", not the " + std::to_string(end) + " its tokens need";
+            return std::nullopt;
+        }
+        tokens.resize(count);
+        return tokens;
     }
 
     [[nodiscard]] std::size_t checkpoint_count() const noexcept override {

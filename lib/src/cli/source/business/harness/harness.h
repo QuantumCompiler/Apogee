@@ -188,6 +188,14 @@ public:
     /// give a better error than we can invent.
     [[nodiscard]] bool accepts_images(std::string_view model) const noexcept;
 
+    /// Tells the backend serving `model` which conversation follows, and
+    /// asks it to save that conversation's state (26j) -- each a no-op on a
+    /// backend that keeps none (`ConversationCaching`), and never a failure.
+    void resume_conversation(std::string_view model,
+                             std::string_view conversation_id) const noexcept;
+    void save_conversation(std::string_view model, std::string_view conversation_id,
+                           const StatusSink& on_status) const noexcept;
+
     /// Whether the backend serving `model` accepts audio (26b).
     ///
     /// **False for an unknown or unroutable model** -- the opposite of images,

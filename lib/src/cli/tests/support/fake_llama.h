@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
@@ -152,6 +154,69 @@ public:
     [[nodiscard]] bool reasoning_budget_spent() const override {
         return budget_spent_after.has_value() && !samplings.empty() &&
                samplings.back().reasoning_budget.has_value() && sampled >= *budget_spent_after;
+    }
+
+    /// Every state saved and every load asked for, by path (26j); a load
+    /// refused while `refuse_load` is set, as llama.cpp refuses a file of
+    /// another version.
+    std::vector<std::filesystem::path> saved_states;
+    std::vector<std::filesystem::path> loaded_states;
+    bool refuse_load = false;
+    /// A save refused, as a full disk would refuse it.
+    bool refuse_save = false;
+
+    /// As the real context: a sliding window does not restore exactly.
+    [[nodiscard]] bool restores_exactly() const noexcept override {
+        return sliding_window == 0;
+    }
+
+    /// Writes the tokens, one per line: all a word-level cache holds.
+    [[nodiscard]] bool save_state(const std::filesystem::path& path,
+                                  const std::vector<std::int32_t>& tokens,
+                                  std::string& error) override {
+        REQUIRE(static_cast<std::int64_t>(tokens.size()) == resident);
+        if (refuse_save) {
+            error = "no space left";
+            return false;
+        }
+        std::ofstream out{path, std::ios::binary};
+        for (const std::int32_t token : tokens) {
+            out << token << "\n";
+        }
+        if (!out) {
+            error = "could not write";
+            return false;
+        }
+        saved_states.push_back(path);
+        return true;
+    }
+
+    [[nodiscard]] std::optional<std::vector<std::int32_t>> load_state(
+        const std::filesystem::path& path, std::string& error) override {
+        loaded_states.push_back(path);
+        resident = 0;
+        oldest = 0;
+        held.clear();
+        std::ifstream in{path, std::ios::binary};
+        std::vector<std::int32_t> tokens;
+        std::string line;
+        while (std::getline(in, line)) {
+            try {
+                tokens.push_back(std::stoi(line));
+            } catch (const std::exception&) {
+                error = "not a state file";
+                return std::nullopt;
+            }
+        }
+        if (refuse_load || tokens.empty()) {
+            error = refuse_load ? "unknown (magic, version)" : "empty";
+            return std::nullopt;
+        }
+        resident = static_cast<std::int64_t>(tokens.size());
+        if (sliding_window > 0) {
+            oldest = std::max<std::int64_t>(0, resident - sliding_keep);
+        }
+        return tokens;
     }
 
     /// Whether this context decodes media (its model has a projector); the
@@ -367,6 +432,21 @@ public:
         return state_->checkpoint(position);
     }
 
+    [[nodiscard]] bool restores_exactly() const noexcept override {
+        return state_->restores_exactly();
+    }
+
+    [[nodiscard]] bool save_state(const std::filesystem::path& path,
+                                  const std::vector<std::int32_t>& tokens,
+                                  std::string& error) override {
+        return state_->save_state(path, tokens, error);
+    }
+
+    [[nodiscard]] std::optional<std::vector<std::int32_t>> load_state(
+        const std::filesystem::path& path, std::string& error) override {
+        return state_->load_state(path, error);
+    }
+
     [[nodiscard]] bool needs_checkpoints() const noexcept override {
         return state_->needs_checkpoints();
     }
@@ -431,6 +511,9 @@ public:
     /// Passed to every context: a budget reported spent from this many
     /// samples on.
     std::optional<std::size_t> budget_spent_after;
+    /// Contexts refuse every saved state (26j).
+    bool refuse_load = false;
+    bool refuse_save = false;
     /// When set, `render_chat` fails with it: a template that cannot render.
     std::string chat_template_error;
     /// A template that renders a conversation-so-far differently from the
@@ -708,6 +791,8 @@ public:
         state->sliding_keep = sliding_keep;
         state->grammar_error = grammar_error;
         state->budget_spent_after = budget_spent_after;
+        state->refuse_load = refuse_load;
+        state->refuse_save = refuse_save;
         state->multimodal = decodes_media;
         contexts.push_back(state);
         // The provider owns its contexts and destroys a side request's the
@@ -760,6 +845,12 @@ public:
     bool chat_template = false;
     bool thinking_tags = false;
     std::optional<std::size_t> budget_spent_after;
+    /// Contexts refuse every saved state (26j).
+    bool refuse_load = false;
+    bool refuse_save = false;
+    /// When set, every context holds this many positions; 0 follows the
+    /// window asked for (26j).
+    std::optional<std::int64_t> context_capacity;
     std::string chat_template_error;
     bool unstable_prefix = false;
     bool system_first_only = false;
@@ -808,6 +899,11 @@ public:
         loaded->grammar_error = grammar_error;
         loaded->thinking_tags = thinking_tags;
         loaded->budget_spent_after = budget_spent_after;
+        loaded->refuse_load = refuse_load;
+        loaded->refuse_save = refuse_save;
+        if (context_capacity.has_value()) {
+            loaded->context_capacity = *context_capacity;
+        }
         loaded->schema_error = schema_error;
         loaded->trained_length = trained_length;
         loaded->fitted = request.fit_window ? fitted : 0;
