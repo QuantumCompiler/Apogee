@@ -1,11 +1,18 @@
 #pragma once
 
+#include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,6 +20,69 @@
 #include "backends/llama_runtime.h"
 
 namespace apogee::testing {
+
+/// A word-level stand-in for llama.cpp's template reader: `<think>...</think>`
+/// is reasoning, `<tool_call>{"name":...,"arguments":{...}}</tool_call>` is a
+/// call, everything else is content. Streaming (`partial`), an unclosed span
+/// is held back; finished, one is a format mismatch -- the two answers the
+/// real reader gives.
+class FakeReplyReader final : public backends::ReplyReader {
+public:
+    [[nodiscard]] bool read(std::string_view text, bool partial, backends::ParsedReply& out,
+                            std::string& error) const override {
+        out = {};
+        constexpr std::string_view kThink = "<think>";
+        constexpr std::string_view kThinkEnd = "</think>";
+        constexpr std::string_view kCall = "<tool_call>";
+        constexpr std::string_view kCallEnd = "</tool_call>";
+        std::string_view rest = text;
+        while (!rest.empty()) {
+            const std::size_t think = rest.find(kThink);
+            const std::size_t call = rest.find(kCall);
+            const std::size_t next = std::min(think, call);
+            out.content += std::string{rest.substr(0, next)};
+            if (next == std::string_view::npos) {
+                break;
+            }
+            if (next == think) {
+                rest.remove_prefix(think + kThink.size());
+                const std::size_t close = rest.find(kThinkEnd);
+                if (close == std::string_view::npos) {
+                    if (!partial) {
+                        error = "an unclosed think block";
+                        return false;
+                    }
+                    out.reasoning += std::string{rest};
+                    break;
+                }
+                out.reasoning += std::string{rest.substr(0, close)};
+                rest.remove_prefix(close + kThinkEnd.size());
+                continue;
+            }
+            rest.remove_prefix(call + kCall.size());
+            const std::size_t close = rest.find(kCallEnd);
+            if (close == std::string_view::npos) {
+                if (!partial) {
+                    error = "an unclosed tool call";
+                    return false;
+                }
+                break;  // held: nothing of it is content
+            }
+            const nlohmann::json body =
+                nlohmann::json::parse(rest.substr(0, close), nullptr, false);
+            if (body.is_discarded() || !body.is_object() || !body.contains("name")) {
+                error = "a malformed tool call";
+                return false;
+            }
+            harness::ToolCall parsed;
+            parsed.name = body.value("name", std::string{});
+            parsed.arguments = body.contains("arguments") ? body["arguments"].dump() : "{}";
+            out.tool_calls.push_back(std::move(parsed));
+            rest.remove_prefix(close + kCallEnd.size());
+        }
+        return true;
+    }
+};
 
 /// A scripted llama.cpp — the seam that makes the local backend testable on a
 /// build with no llama.cpp in it.
@@ -42,12 +112,31 @@ public:
     std::size_t sampled = 0;
     std::int32_t eog_token = -1;
 
+    /// Non-zero plays a sliding-window model (26m): the cache keeps only its
+    /// last `sliding_keep` positions (the window and a batch), so `oldest`
+    /// moves up as it decodes, and a cut that leaves the window short is
+    /// refused as a recurrent model's is.
+    std::int64_t sliding_window = 0;
+    std::int64_t sliding_keep = 0;
+    /// The smallest position still held.
+    std::int64_t oldest = 0;
+
     void decode(const std::vector<std::int32_t>& tokens, std::int64_t position) override {
         if (tokens.empty()) {
             return;
         }
+        // The property this whole item exists for: never decode on from a
+        // cache whose window before `position` is gone. Every test with a
+        // sliding model asserts it on every decode.
+        REQUIRE(backends::window_intact(oldest, position, sliding_window));
+        // And never past the cache's end: a position skipped is a token the
+        // model is told it has seen and never did.
+        REQUIRE(position <= resident);
         decodes.push_back({position, static_cast<std::int64_t>(tokens.size())});
         resident = position + static_cast<std::int64_t>(tokens.size());
+        if (sliding_window > 0) {
+            oldest = std::max(oldest, resident - sliding_keep);
+        }
         evaluated_ += static_cast<std::int64_t>(tokens.size());
     }
 
@@ -58,18 +147,205 @@ public:
         return script[sampled++];
     }
 
+    /// When set, a generation with a thinking budget reports it spent from
+    /// this many samples on (26i).
+    std::optional<std::size_t> budget_spent_after;
+
+    [[nodiscard]] bool reasoning_budget_spent() const override {
+        return budget_spent_after.has_value() && !samplings.empty() &&
+               samplings.back().reasoning_budget.has_value() && sampled >= *budget_spent_after;
+    }
+
+    /// Every state saved and every load asked for, by path (26j); a load
+    /// refused while `refuse_load` is set, as llama.cpp refuses a file of
+    /// another version.
+    std::vector<std::filesystem::path> saved_states;
+    std::vector<std::filesystem::path> loaded_states;
+    bool refuse_load = false;
+    /// A save refused, as a full disk would refuse it.
+    bool refuse_save = false;
+
+    /// As the real context: a sliding window does not restore exactly.
+    [[nodiscard]] bool restores_exactly() const noexcept override {
+        return sliding_window == 0;
+    }
+
+    /// Writes the tokens, one per line: all a word-level cache holds.
+    [[nodiscard]] bool save_state(const std::filesystem::path& path,
+                                  const std::vector<std::int32_t>& tokens,
+                                  std::string& error) override {
+        REQUIRE(static_cast<std::int64_t>(tokens.size()) == resident);
+        if (refuse_save) {
+            error = "no space left";
+            return false;
+        }
+        std::ofstream out{path, std::ios::binary};
+        for (const std::int32_t token : tokens) {
+            out << token << "\n";
+        }
+        if (!out) {
+            error = "could not write";
+            return false;
+        }
+        saved_states.push_back(path);
+        return true;
+    }
+
+    [[nodiscard]] std::optional<std::vector<std::int32_t>> load_state(
+        const std::filesystem::path& path, std::string& error) override {
+        loaded_states.push_back(path);
+        resident = 0;
+        oldest = 0;
+        held.clear();
+        std::ifstream in{path, std::ios::binary};
+        std::vector<std::int32_t> tokens;
+        std::string line;
+        while (std::getline(in, line)) {
+            try {
+                tokens.push_back(std::stoi(line));
+            } catch (const std::exception&) {
+                error = "not a state file";
+                return std::nullopt;
+            }
+        }
+        if (refuse_load || tokens.empty()) {
+            error = refuse_load ? "unknown (magic, version)" : "empty";
+            return std::nullopt;
+        }
+        resident = static_cast<std::int64_t>(tokens.size());
+        if (sliding_window > 0) {
+            oldest = std::max<std::int64_t>(0, resident - sliding_keep);
+        }
+        return tokens;
+    }
+
+    /// Whether this context decodes media (its model has a projector); the
+    /// base refuses otherwise.
+    bool multimodal = false;
+    /// Every multimodal decode: the media, and the text with its markers, in
+    /// order (26e).
+    std::vector<std::vector<backends::MediaInput>> media_decodes;
+    std::vector<std::string> media_texts;
+    /// Positions one item of media takes.
+    static constexpr std::int64_t kMediaPositions = 16;
+
+    [[nodiscard]] std::int64_t decode_multimodal(const std::vector<backends::MediaInput>& media,
+                                                 std::string_view text, std::int64_t position,
+                                                 std::string& error) override {
+        if (!multimodal) {
+            return LlamaContext::decode_multimodal(media, text, position, error);
+        }
+        media_decodes.push_back(media);
+        media_texts.emplace_back(text);
+        // A word a position, as `tokenize` counts, and each item its own.
+        std::int64_t words = 0;
+        bool in_word = false;
+        for (const char c : text) {
+            const bool space = c == ' ' || c == '\n' || c == '\t';
+            words += !space && !in_word ? 1 : 0;
+            in_word = !space;
+        }
+        const std::int64_t count =
+            words + kMediaPositions * static_cast<std::int64_t>(media.size());
+        decodes.push_back({position, count});
+        resident = position + count;
+        evaluated_ += count;
+        return resident;
+    }
+
+    /// Every grammar set, in order -- including the empty ones that clear it.
+    std::vector<backends::SamplingGrammar> grammars;
+    /// Every sampling setting handed over with them, in the same order (26h).
+    std::vector<backends::SamplingSettings> samplings;
+    /// When set, a non-empty grammar is refused with this.
+    std::string grammar_error;
+
+    [[nodiscard]] bool set_sampling(const backends::SamplingGrammar& grammar,
+                                    const backends::SamplingSettings& settings,
+                                    std::string& error) override {
+        grammars.push_back(grammar);
+        samplings.push_back(settings);
+        if (!grammar.gbnf.empty() && !grammar_error.empty()) {
+            error = grammar_error;
+            return false;
+        }
+        return true;
+    }
+
     /// False plays a recurrent or hybrid model: a trim that would cut cached
-    /// positions is refused and the cache cleared, as the real context does.
+    /// positions is refused, and the newest checkpoint at or before it is
+    /// restored -- or, with none, the cache cleared -- as the real context
+    /// does.
     bool rewindable = true;
+
+    /// A checkpoint: its position, and the oldest position a sliding cache
+    /// still held there -- all a word-level cache has.
+    struct Checkpoint {
+        std::int64_t position = 0;
+        std::int64_t oldest = 0;
+    };
+
+    /// Checkpoints held, oldest first, under the runtimes' shared policy
+    /// (`keep_checkpoint`); and each restore, in order.
+    std::vector<Checkpoint> held;
+    std::vector<std::int64_t> restores;
+
+    [[nodiscard]] std::vector<std::int64_t> checkpoints() const {
+        std::vector<std::int64_t> positions;
+        for (const Checkpoint& checkpoint : held) {
+            positions.push_back(checkpoint.position);
+        }
+        return positions;
+    }
 
     [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
         trims.push_back(position);
-        if (!rewindable && position < resident) {
+        const bool cuts = position < resident;
+        const bool refused =
+            cuts && (!rewindable || !backends::window_intact(oldest, position, sliding_window));
+        if (refused) {
+            if (const auto it = backends::checkpoint_for(held, position);
+                it != held.end() &&
+                backends::window_intact(it->oldest, it->position, sliding_window)) {
+                const std::int64_t restored = it->position;
+                resident = restored;
+                oldest = it->oldest;
+                backends::forget_checkpoints_after(held, restored);
+                restores.push_back(restored);
+                return restored;
+            }
             resident = 0;
+            oldest = 0;
+            held.clear();
             return 0;
         }
         resident = std::min(resident, position);
+        backends::forget_checkpoints_after(held, position);
         return position;
+    }
+
+    [[nodiscard]] bool checkpoint(std::int64_t position) override {
+        if (!needs_checkpoints() || position <= 0) {
+            return false;
+        }
+        // Taken where the cache really ends -- anything else is a checkpoint
+        // of a state that was never there.
+        REQUIRE(position == resident);
+        backends::keep_checkpoint(held, Checkpoint{.position = position, .oldest = oldest});
+        return true;
+    }
+
+    [[nodiscard]] bool needs_checkpoints() const noexcept override {
+        return !rewindable || sliding_window > 0;
+    }
+
+    [[nodiscard]] std::size_t checkpoint_count() const noexcept override {
+        return held.size();
+    }
+
+    /// A kilobyte each: enough for a report to have something to say.
+    [[nodiscard]] std::size_t checkpoint_bytes() const noexcept override {
+        return held.size() * 1024;
     }
 
     [[nodiscard]] std::int64_t eval_count() const noexcept override {
@@ -90,6 +366,13 @@ public:
 
     [[nodiscard]] std::int64_t capacity() const noexcept override {
         return context_capacity;
+    }
+
+    /// The cache type the model made this context with.
+    harness::KvCacheType kept_as = harness::KvCacheType::F16;
+
+    [[nodiscard]] harness::KvCacheType cache_type() const noexcept override {
+        return kept_as;
     }
 
     /// Every trim position, in order.
@@ -125,8 +408,55 @@ public:
         return state_->sample();
     }
 
+    [[nodiscard]] bool reasoning_budget_spent() const override {
+        return state_->reasoning_budget_spent();
+    }
+
+    [[nodiscard]] std::int64_t decode_multimodal(const std::vector<backends::MediaInput>& media,
+                                                 std::string_view text, std::int64_t position,
+                                                 std::string& error) override {
+        return state_->decode_multimodal(media, text, position, error);
+    }
+
+    [[nodiscard]] bool set_sampling(const backends::SamplingGrammar& grammar,
+                                    const backends::SamplingSettings& settings,
+                                    std::string& error) override {
+        return state_->set_sampling(grammar, settings, error);
+    }
+
     [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
         return state_->trim_to(position);
+    }
+
+    [[nodiscard]] bool checkpoint(std::int64_t position) override {
+        return state_->checkpoint(position);
+    }
+
+    [[nodiscard]] bool restores_exactly() const noexcept override {
+        return state_->restores_exactly();
+    }
+
+    [[nodiscard]] bool save_state(const std::filesystem::path& path,
+                                  const std::vector<std::int32_t>& tokens,
+                                  std::string& error) override {
+        return state_->save_state(path, tokens, error);
+    }
+
+    [[nodiscard]] std::optional<std::vector<std::int32_t>> load_state(
+        const std::filesystem::path& path, std::string& error) override {
+        return state_->load_state(path, error);
+    }
+
+    [[nodiscard]] bool needs_checkpoints() const noexcept override {
+        return state_->needs_checkpoints();
+    }
+
+    [[nodiscard]] std::size_t checkpoint_count() const noexcept override {
+        return state_->checkpoint_count();
+    }
+
+    [[nodiscard]] std::size_t checkpoint_bytes() const noexcept override {
+        return state_->checkpoint_bytes();
     }
 
     [[nodiscard]] std::int64_t eval_count() const noexcept override {
@@ -139,6 +469,10 @@ public:
 
     [[nodiscard]] std::int64_t capacity() const noexcept override {
         return state_->capacity();
+    }
+
+    [[nodiscard]] harness::KvCacheType cache_type() const noexcept override {
+        return state_->cache_type();
     }
 
 private:
@@ -157,6 +491,9 @@ public:
     std::int64_t batch_limit = 1000000;
     std::int64_t context_capacity = 1000000;
     bool rewindable = true;
+    /// Applied to every context: see FakeLlamaContext.
+    std::int64_t sliding_window = 0;
+    std::int64_t sliding_keep = 0;
 
     /// What each new context should sample. Applied at creation.
     std::vector<std::int32_t> script;
@@ -165,6 +502,51 @@ public:
     /// When non-empty, `apply_builtin_template` returns this with the message
     /// texts appended — the "model ships its own template" path.
     std::string builtin_template_prefix;
+
+    /// Whether `render_chat` renders -- the model ships a template llama.cpp's
+    /// chat layer can read. Off, it answers as a GGUF with no template does.
+    bool chat_template = false;
+    /// Whether its format names reasoning tags (26i): a thinking model's.
+    bool thinking_tags = false;
+    /// Passed to every context: a budget reported spent from this many
+    /// samples on.
+    std::optional<std::size_t> budget_spent_after;
+    /// Contexts refuse every saved state (26j).
+    bool refuse_load = false;
+    bool refuse_save = false;
+    /// When set, `render_chat` fails with it: a template that cannot render.
+    std::string chat_template_error;
+    /// A template that renders a conversation-so-far differently from the
+    /// same messages inside a full prompt -- its render without the
+    /// generation prompt is not a token prefix of the full one.
+    bool unstable_prefix = false;
+    /// A template that refuses a system message anywhere but first, as
+    /// Qwen3.5 and 3.8's raise "System message must be at the beginning".
+    bool system_first_only = false;
+    /// Words `token_text` renders as nothing, the way a special token is --
+    /// `special_token_text` still renders them.
+    std::set<std::string> special_words;
+    /// The stop strings a rendering carries.
+    std::vector<std::string> stops;
+    /// A grammar rendering fails to compile with this, on every context --
+    /// and a schema's, compiled as it is rendered, at `render_chat`.
+    std::string grammar_error;
+    /// When set, `render_chat` cannot hold a schema, with this reason: a
+    /// format with no place for one, or a schema the converter cannot
+    /// express (26f).
+    std::string schema_error;
+
+    /// What each `render_chat` call was given, in order.
+    struct ChatRender {
+        std::vector<harness::ChatMessage> messages;
+        std::vector<harness::Tool> tools;
+        bool enable_thinking = true;
+        bool add_generation_prompt = true;
+        std::string response_schema;
+        std::string reasoning_effort;
+    };
+
+    mutable std::vector<ChatRender> chat_renders;
 
     /// Every text tokenized, in order: what the provider actually sent.
     mutable std::vector<std::string> tokenized;
@@ -196,7 +578,101 @@ public:
 
     [[nodiscard]] std::string token_text(std::int32_t token) const override {
         const auto it = text_.find(token);
+        if (it == text_.end() || special_words.contains(it->second)) {
+            return {};
+        }
+        return it->second;
+    }
+
+    [[nodiscard]] std::string special_token_text(std::int32_t token) const override {
+        const auto it = text_.find(token);
         return it == text_.end() ? std::string{} : it->second;
+    }
+
+    /// The word-level stand-in for the model's own template: every role, call
+    /// and result on the prompt as words, the tools named, and the thinking
+    /// switch visible -- so a test can read what the model was shown. A
+    /// schema is held the way a real format holds it: a grammar that is not
+    /// lazy, advanced past the reply's opening, and nothing in the prompt.
+    [[nodiscard]] bool render_chat(const std::vector<harness::ChatMessage>& messages,
+                                   const std::vector<harness::Tool>& tools,
+                                   const backends::ChatRenderOptions& options,
+                                   backends::ChatRendering& out,
+                                   std::string& error) const override {
+        chat_renders.push_back({messages, tools, options.enable_thinking,
+                                options.add_generation_prompt, options.response_schema,
+                                options.reasoning_effort});
+        if (!chat_template) {
+            error = "the model ships no chat template";
+            return false;
+        }
+        if (!chat_template_error.empty()) {
+            error = chat_template_error;
+            return false;
+        }
+        const bool schema = !options.response_schema.empty();
+        if (schema && !schema_error.empty()) {
+            error = schema_error;
+            return false;
+        }
+        if (schema && !grammar_error.empty()) {
+            error = grammar_error;
+            return false;
+        }
+        for (std::size_t i = 1; system_first_only && i < messages.size(); ++i) {
+            if (messages[i].role == harness::Role::System) {
+                error = "System message must be at the beginning.";
+                return false;
+            }
+        }
+        // Tools first, as a real template puts them in its system block: a
+        // render of the messages before the last user one is then a prefix.
+        std::string prompt = "[template]";
+        if (!tools.empty()) {
+            prompt += " tools:";
+            for (const harness::Tool& tool : tools) {
+                prompt += " " + tool.name;
+            }
+            out.grammar.gbnf = "root ::= fake-call";
+            out.grammar.lazy = true;
+            out.grammar.trigger_patterns = {"<tool_call>"};
+        }
+        for (const harness::ChatMessage& message : messages) {
+            prompt += " " + std::string{harness::to_string(message.role)} + ": ";
+            prompt += message.content.plain_text();
+            for (const harness::ToolCall& call : message.tool_calls) {
+                prompt += " call:" + call.name + "#" + call.id;
+            }
+            if (!message.tool_call_id.empty()) {
+                prompt += " answers:" + message.tool_call_id;
+            }
+        }
+        std::string opening;
+        if (options.add_generation_prompt) {
+            opening = options.enable_thinking ? " assistant:" : " assistant(no-think):";
+            prompt += opening;
+        } else if (unstable_prefix) {
+            prompt += " [partial]";
+        }
+        if (schema) {
+            out.grammar = backends::SamplingGrammar{};
+            out.grammar.gbnf = "root ::= fake-answer " + options.response_schema;
+            out.grammar.prefill = opening;
+            out.holds_schema = true;
+        }
+        out.prompt = std::move(prompt);
+        if (thinking_tags) {
+            // A thinking model's format names where reasoning opens and
+            // closes, what a budget counts between (26i).
+            out.thinking_start = "<think>";
+            out.thinking_ends = {"</think>"};
+            out.generation_prompt = opening;
+        }
+        out.preserved_tokens = {id_for("<tool_call>"), id_for("</tool_call>")};
+        out.stops = stops;
+        out.format = "fake";
+        out.reader = std::make_unique<FakeReplyReader>();
+        return true;
     }
 
     [[nodiscard]] bool is_eog(std::int32_t token) const noexcept override {
@@ -220,8 +696,46 @@ public:
         return out;
     }
 
+    /// The window the model was trained for.
+    std::int64_t trained_length = 4096;
+    /// What the load found free memory holds; 0 when it fits.
+    std::int64_t fitted = 0;
+    /// The cache the load asked for, given to every context.
+    harness::KvCacheType cache_type = harness::KvCacheType::Q8_0;
+
     [[nodiscard]] std::int64_t context_length() const noexcept override {
-        return 4096;
+        return trained_length;
+    }
+
+    [[nodiscard]] std::int64_t fitted_window() const noexcept override {
+        return fitted;
+    }
+
+    /// Whether the model claims a projector that does images. Its contexts
+    /// still refuse to decode one unless `decodes_media`, so an image turn
+    /// fails after its context is made -- enough to see what window that
+    /// context got.
+    bool vision = false;
+    /// Whether the projector hears audio, and at what rate (26e).
+    bool audio = false;
+    int sample_rate = 0;
+    /// Whether contexts decode media rather than refusing it.
+    bool decodes_media = false;
+
+    [[nodiscard]] bool supports_vision() const noexcept override {
+        return vision;
+    }
+
+    [[nodiscard]] bool supports_audio() const noexcept override {
+        return audio;
+    }
+
+    [[nodiscard]] int audio_sample_rate() const noexcept override {
+        return audio ? sample_rate : 0;
+    }
+
+    [[nodiscard]] std::string image_marker() const override {
+        return vision || audio ? "<image>" : std::string{};
     }
 
     /// Width of the vectors the fake produces. Settable so a test can stage a
@@ -269,8 +783,17 @@ public:
         state->script = script;
         state->eog_token = eog_token;
         state->batch_limit = batch_limit;
-        state->context_capacity = context_capacity;
+        // A window the test did not pin is the one asked for.
+        state->context_capacity = context_capacity > 0 ? context_capacity : context_size;
+        state->kept_as = cache_type;
         state->rewindable = rewindable;
+        state->sliding_window = sliding_window;
+        state->sliding_keep = sliding_keep;
+        state->grammar_error = grammar_error;
+        state->budget_spent_after = budget_spent_after;
+        state->refuse_load = refuse_load;
+        state->refuse_save = refuse_save;
+        state->multimodal = decodes_media;
         contexts.push_back(state);
         // The provider owns its contexts and destroys a side request's the
         // moment the call returns -- so the model keeps them ALIVE and hands
@@ -312,9 +835,29 @@ public:
     std::int64_t batch_limit = 1000000;
     /// False plays a recurrent or hybrid model (see FakeLlamaContext).
     bool rewindable = true;
+    /// Non-zero plays a sliding-window model (see FakeLlamaContext).
+    std::int64_t sliding_window = 0;
+    std::int64_t sliding_keep = 0;
     std::vector<std::int32_t> script;
     std::int32_t eog_token = -1;
     std::string builtin_template_prefix;
+    /// Applied to every model: see FakeLlamaModel.
+    bool chat_template = false;
+    bool thinking_tags = false;
+    std::optional<std::size_t> budget_spent_after;
+    /// Contexts refuse every saved state (26j).
+    bool refuse_load = false;
+    bool refuse_save = false;
+    /// When set, every context holds this many positions; 0 follows the
+    /// window asked for (26j).
+    std::optional<std::int64_t> context_capacity;
+    std::string chat_template_error;
+    bool unstable_prefix = false;
+    bool system_first_only = false;
+    std::set<std::string> special_words;
+    std::vector<std::string> stops;
+    std::string grammar_error;
+    std::string schema_error;
 
     /// Generation scripted as the exact PIECES a model emits, rather than as
     /// token ids.
@@ -326,13 +869,11 @@ public:
     /// Each string becomes one token, so the split is the test's to choose.
     std::vector<std::string> script_text;
 
-    [[nodiscard]] std::unique_ptr<backends::LlamaModel> load(const std::string& path,
-                                                             std::int64_t gpu_layers,
-                                                             const std::string& mmproj_path,
+    [[nodiscard]] std::unique_ptr<backends::LlamaModel> load(const backends::ModelLoad& request,
                                                              std::string& error) override {
-        last_mmproj_path = mmproj_path;
-        (void)gpu_layers;
-        last_path = path;
+        last_mmproj_path = request.mmproj_path;
+        last_path = request.path;
+        last_load = request;
         if (!load_error.empty()) {
             error = load_error;
             return nullptr;
@@ -341,17 +882,53 @@ public:
         auto loaded = std::make_unique<FakeLlamaModel>();
         loaded->batch_limit = batch_limit;
         loaded->rewindable = rewindable;
+        loaded->sliding_window = sliding_window;
+        loaded->sliding_keep = sliding_keep;
         loaded->script = script;
         for (const std::string& piece : script_text) {
             loaded->script.push_back(loaded->id_for(piece));
         }
         loaded->eog_token = eog_token;
         loaded->builtin_template_prefix = builtin_template_prefix;
+        loaded->chat_template = chat_template;
+        loaded->chat_template_error = chat_template_error;
+        loaded->unstable_prefix = unstable_prefix;
+        loaded->system_first_only = system_first_only;
+        loaded->special_words = special_words;
+        loaded->stops = stops;
+        loaded->grammar_error = grammar_error;
+        loaded->thinking_tags = thinking_tags;
+        loaded->budget_spent_after = budget_spent_after;
+        loaded->refuse_load = refuse_load;
+        loaded->refuse_save = refuse_save;
+        if (context_capacity.has_value()) {
+            loaded->context_capacity = *context_capacity;
+        }
+        loaded->schema_error = schema_error;
+        loaded->trained_length = trained_length;
+        loaded->fitted = request.fit_window ? fitted : 0;
+        loaded->cache_type = request.cache_type;
+        loaded->vision = vision;
+        loaded->audio = audio;
+        loaded->sample_rate = sample_rate;
+        loaded->decodes_media = decodes_media;
         model = loaded.get();
         return loaded;
     }
 
+    /// Applied to every model: the window it was trained for, and what a
+    /// load asked to fit finds free memory holds (0: the default fits).
+    std::int64_t trained_length = 4096;
+    std::int64_t fitted = 0;
+    bool vision = false;
+    bool audio = false;
+    int sample_rate = 0;
+    bool decodes_media = false;
+
     std::string last_path;
+
+    /// Everything the last load was asked for.
+    backends::ModelLoad last_load;
 
     /// The projector the provider asked for, so a test can assert the config
     /// field reaches the runtime rather than being dropped on the way.

@@ -32,7 +32,7 @@ endif()
 # is stamped into version.h via configure_file. Bump it here when cutting a
 # release (see CLAUDE.md -> Versioning).
 project(Apogee
-    VERSION 0.1.2
+    VERSION 0.1.3
     DESCRIPTION "A self-contained C++ AI harness for local and cloud LLMs"
     # C is enabled for one reason: SQLite ships as a C amalgamation, and the
     # chunk store compiles it. No Apogee source is C -- "primarily C++" is
@@ -77,12 +77,14 @@ option(APOGEE_ENABLE_LLAMA "Configure and build the pinned llama.cpp target" ON)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Apogee links everything statically; the executable ships alone" FORCE)
 
 # Standard bin/lib/share destinations for the install rule in source/. This one
-# ships with CMake; the three below it are ours.
+# ships with CMake; the four below it are ours -- the last, the module map
+# (Architecture A4), is every module's layer and links.
 include(GNUInstallDirs)
 
 include(ApogeeWarnings)
 include(ApogeeDependencies)
 include(ApogeeLinkPolicy)
+include(modules)
 
 add_subdirectory(third_party)
 add_subdirectory(source)

@@ -1,0 +1,303 @@
+/// The one translation unit that sees llama.cpp's `common` headers. See the
+/// header for why nothing Apogee-shaped is included here.
+///
+/// One `#if` around the whole file, as in `llama_real.cpp`: it is compiled only
+/// into `apogee_llama_chat`, which exists only with llama.cpp -- and a build
+/// without it (the lint build among them) must still be able to read it.
+
+#include "backends/llama_chat.h"
+
+#if defined(APOGEE_ENABLE_LLAMA)
+
+#include <chat.h>
+#include <common.h>
+#include <fit.h>
+#include <llama.h>
+#include <log.h>
+#include <reasoning-budget.h>
+
+#include <algorithm>
+#include <exception>
+#include <mutex>
+#include <utility>
+
+namespace apogee::backends::llama_chat {
+
+struct ReplyParser::Impl {
+    common_chat_parser_params params;
+};
+
+struct Templates::Impl {
+    const llama_model* model = nullptr;
+    common_chat_templates_ptr templates;
+};
+
+namespace {
+
+/// `common` logs through a logger of its own, straight to stderr -- "Template
+/// supports tool calls but does not natively describe tools", "unparsed
+/// output" -- and inside a chat turn that lands on top of the status line, the
+/// same wall of output `llama_real.cpp` keeps llama.cpp's own log off. A
+/// threshold below every level means nothing is ever formatted, and the
+/// logger's worker thread is never started.
+void silence_common_log() {
+    static std::once_flag once;
+    std::call_once(once, [] { common_log_set_verbosity_thold(-1); });
+}
+
+/// The single token `text` is, or -1 when it is more than one.
+std::int32_t single_token(const llama_vocab* vocab, const std::string& text) {
+    const std::vector<llama_token> ids = common_tokenize(vocab, text, false, true);
+    return ids.size() == 1 ? ids.front() : -1;
+}
+
+}  // namespace
+
+ReplyParser::ReplyParser(std::unique_ptr<Impl> impl) : impl_{std::move(impl)} {}
+
+ReplyParser::~ReplyParser() = default;
+
+bool ReplyParser::parse(const std::string& text, bool partial, Reply& out,
+                        std::string& error) const {
+    try {
+        const common_chat_msg message = common_chat_parse(text, partial, impl_->params);
+        out.content = message.content;
+        out.reasoning = message.reasoning_content;
+        out.tool_calls.clear();
+        for (const common_chat_tool_call& call : message.tool_calls) {
+            out.tool_calls.push_back(ToolCall{call.id, call.name, call.arguments});
+        }
+        return true;
+    } catch (const std::exception& e) {
+        error = e.what();
+        return false;
+    }
+}
+
+Templates::Templates(std::unique_ptr<Impl> impl) : impl_{std::move(impl)} {}
+
+Templates::~Templates() = default;
+
+std::unique_ptr<Templates> Templates::load(const llama_model* model, std::string& error) {
+    silence_common_log();
+    if (model == nullptr) {
+        error = "no model";
+        return nullptr;
+    }
+    if (llama_model_chat_template(model, nullptr) == nullptr &&
+        llama_model_chat_template(model, "tool_use") == nullptr) {
+        error = "the model ships no chat template";
+        return nullptr;
+    }
+    auto impl = std::make_unique<Impl>();
+    impl->model = model;
+    try {
+        impl->templates = common_chat_templates_init(model, "");
+    } catch (const std::exception& e) {
+        error = std::string{"its chat template could not be parsed: "} + e.what();
+        return nullptr;
+    }
+    if (impl->templates == nullptr) {
+        error = "its chat template could not be parsed";
+        return nullptr;
+    }
+    return std::make_unique<Templates>(std::move(impl));
+}
+
+bool Templates::render(const Inputs& inputs, Rendered& out, std::string& error) const {
+    common_chat_templates_inputs request;
+    request.use_jinja = true;
+    request.add_generation_prompt = inputs.add_generation_prompt;
+    request.enable_thinking = inputs.enable_thinking;
+    if (!inputs.reasoning_effort.empty()) {
+        // Template variables travel as JSON text, as llama-server passes them.
+        request.chat_template_kwargs["reasoning_effort"] = "\"" + inputs.reasoning_effort + "\"";
+    }
+    // Reasoning separated into its own field, set on the inputs as well as
+    // the parser: the template's rendering and the parser's reading both key
+    // on it (found by the spike, 2026-09-25).
+    request.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
+    request.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
+    // One call per step: easier to gate and to show (25b, default taken).
+    request.parallel_tool_calls = false;
+    // Parsed by `common` itself; a schema it cannot read or express throws,
+    // and the caller falls back to stating it in the prompt (26f).
+    request.json_schema = inputs.json_schema;
+
+    request.messages.reserve(inputs.messages.size());
+    for (const Message& message : inputs.messages) {
+        common_chat_msg converted;
+        converted.role = message.role;
+        converted.content = message.content;
+        converted.tool_call_id = message.tool_call_id;
+        converted.tool_name = message.tool_name;
+        for (const ToolCall& call : message.tool_calls) {
+            converted.tool_calls.push_back(
+                common_chat_tool_call{call.name, call.arguments, call.id});
+        }
+        request.messages.push_back(std::move(converted));
+    }
+    request.tools.reserve(inputs.tools.size());
+    for (const ToolSpec& tool : inputs.tools) {
+        request.tools.push_back(common_chat_tool{tool.name, tool.description, tool.parameters});
+    }
+
+    common_chat_params params;
+    try {
+        params = common_chat_templates_apply(impl_->templates.get(), request);
+    } catch (const std::exception& e) {
+        error = e.what();
+        return false;
+    }
+
+    const llama_vocab* vocab = llama_model_get_vocab(impl_->model);
+
+    out.prompt = std::move(params.prompt);
+    out.grammar = params.grammar;
+    out.grammar_lazy = params.grammar_lazy;
+    out.supports_thinking = params.supports_thinking;
+    out.stops = params.additional_stops;
+    out.generation_prompt = params.generation_prompt;
+    out.thinking_start_tag = params.thinking_start_tag;
+    out.thinking_end_tags = params.thinking_end_tags;
+    out.format = common_chat_format_name(params.format);
+
+    out.preserved_tokens.clear();
+    for (const std::string& text : params.preserved_tokens) {
+        if (const std::int32_t token = single_token(vocab, text); token >= 0) {
+            out.preserved_tokens.push_back(token);
+        }
+    }
+
+    // llama-server's conversion (tools/server/server-schema.cpp, then
+    // common/sampling.cpp): a trigger word that is one preserved token fires
+    // on the token; any other word fires on its escaped text; patterns pass
+    // through, a full-match pattern anchored at both ends.
+    out.trigger_patterns.clear();
+    out.trigger_tokens.clear();
+    for (const common_grammar_trigger& trigger : params.grammar_triggers) {
+        switch (trigger.type) {
+            case COMMON_GRAMMAR_TRIGGER_TYPE_WORD: {
+                const std::int32_t token = single_token(vocab, trigger.value);
+                if (token >= 0 &&
+                    std::find(out.preserved_tokens.begin(), out.preserved_tokens.end(), token) !=
+                        out.preserved_tokens.end()) {
+                    out.trigger_tokens.push_back(token);
+                } else {
+                    out.trigger_patterns.push_back(regex_escape(trigger.value));
+                }
+                break;
+            }
+            case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
+                out.trigger_patterns.push_back(trigger.value);
+                break;
+            case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL: {
+                const std::string& pattern = trigger.value;
+                std::string anchored = "^$";
+                if (!pattern.empty()) {
+                    anchored = (pattern.front() != '^' ? "^" : "") + pattern +
+                               (pattern.back() != '$' ? "$" : "");
+                }
+                out.trigger_patterns.push_back(std::move(anchored));
+                break;
+            }
+            case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
+                out.trigger_tokens.push_back(trigger.token);
+                break;
+        }
+    }
+    if (out.grammar_lazy && out.trigger_patterns.empty() && out.trigger_tokens.empty()) {
+        // A lazy grammar with nothing to wake it constrains nothing and
+        // llama.cpp refuses it; unconstrained is the honest reading.
+        out.grammar.clear();
+        out.grammar_lazy = false;
+    }
+
+    auto parser = std::make_unique<ReplyParser::Impl>();
+    parser->params = common_chat_parser_params{params};
+    parser->params.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
+    if (!params.parser.empty()) {
+        try {
+            parser->params.parser.load(params.parser);
+        } catch (const std::exception& e) {
+            error = std::string{"the reply parser could not be built: "} + e.what();
+            return false;
+        }
+    }
+    out.parser = std::make_unique<ReplyParser>(std::move(parser));
+    return true;
+}
+
+llama_sampler* reasoning_budget(const llama_vocab* vocab, const std::string& start,
+                                const std::vector<std::string>& ends, std::int32_t budget,
+                                const std::string& prefill) {
+    // As llama-server builds it (`common/sampling.cpp`): the tags tokenized
+    // with their special tokens, the first end the one forced.
+    const llama_tokens opening = common_tokenize(vocab, start, false, true);
+    std::vector<llama_tokens> closings;
+    for (const std::string& end : ends) {
+        if (llama_tokens tokens = common_tokenize(vocab, end, false, true); !tokens.empty()) {
+            closings.push_back(std::move(tokens));
+        }
+    }
+    if (opening.empty() || closings.empty()) {
+        return nullptr;
+    }
+    llama_sampler* sampler =
+        common_reasoning_budget_init(vocab, {opening}, closings, closings.front(), budget);
+    if (sampler == nullptr) {
+        return nullptr;
+    }
+    // The reply's opening, already in the prompt: a template that opens the
+    // reasoning there starts the count before the first sample.
+    for (const llama_token token : common_tokenize(vocab, prefill, false, true)) {
+        llama_sampler_accept(sampler, token);
+    }
+    return sampler;
+}
+
+bool reasoning_budget_spent(const llama_sampler* sampler) {
+    const common_reasoning_budget_state state = common_reasoning_budget_get_state(sampler);
+    return state == REASONING_BUDGET_FORCING || state == REASONING_BUDGET_WAITING_UTF8;
+}
+
+std::int64_t fit_window(const std::string& path, std::int32_t gpu_layers, std::int32_t cache_type,
+                        std::uint32_t minimum) {
+    silence_common_log();
+    llama_model_params model = llama_model_default_params();
+    model.n_gpu_layers = gpu_layers;
+    llama_context_params context = llama_context_default_params();
+    // 0 asks the fitter to choose the window; anything else it leaves alone.
+    context.n_ctx = 0;
+    context.type_k = static_cast<ggml_type>(cache_type);
+    context.type_v = static_cast<ggml_type>(cache_type);
+    context.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    // Sliding layers at their window, as every generation context keeps them
+    // (26m).
+    context.swa_full = false;
+
+    // Writable space the fitter may fill in for a split across devices; the
+    // split itself is not used -- the model loads with its own settings.
+    std::vector<float> split(llama_max_devices(), 0.0F);
+    std::vector<llama_model_tensor_buft_override> overrides(llama_max_tensor_buft_overrides());
+    // What to leave free on each device: llama-server's default, 1 GiB.
+    std::vector<std::size_t> margins(llama_max_devices(), std::size_t{1024} * 1024 * 1024);
+
+    const common_params_fit_status status =
+        common_fit_params(path.c_str(), &model, &context, split.data(), overrides.data(),
+                          margins.data(), minimum, /*extra=*/nullptr, GGML_LOG_LEVEL_ERROR);
+    if (status == COMMON_PARAMS_FIT_STATUS_ERROR) {
+        return -1;
+    }
+    if (status == COMMON_PARAMS_FIT_STATUS_FAILURE && context.n_ctx == 0) {
+        // Nothing fits, not even the weights at the smallest window: the
+        // smallest window is still the least there is to ask for.
+        return minimum;
+    }
+    // A failure to fit lowers the window as far as it will go first.
+    return static_cast<std::int64_t>(context.n_ctx);
+}
+
+}  // namespace apogee::backends::llama_chat
+
+#endif  // APOGEE_ENABLE_LLAMA

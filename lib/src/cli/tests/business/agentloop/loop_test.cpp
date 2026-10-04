@@ -1,0 +1,1033 @@
+#include "agentloop/loop.h"
+
+#include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "agent/tool.h"
+#include "backends/mock.h"
+#include "contracts/config.h"
+#include "contracts/errors.h"
+
+using apogee::agent::Permission;
+using apogee::agent::Tool;
+using apogee::agent::ToolOutcome;
+using apogee::agent::ToolRegistry;
+using apogee::agentloop::Answers;
+using apogee::agentloop::Options;
+using apogee::agentloop::QuestionRequest;
+using apogee::agentloop::Reporter;
+using apogee::agentloop::RunResult;
+using apogee::backends::MockProvider;
+using apogee::backends::MockTurn;
+using apogee::harness::ChatMessage;
+using apogee::harness::Config;
+using apogee::harness::Harness;
+using apogee::harness::Role;
+using apogee::harness::ToolCall;
+
+namespace {
+
+/// The scripted-provider harness the whole conformance suite runs on. Every
+/// later provider must pass these same cases.
+struct Fixture {
+    std::shared_ptr<MockProvider> provider;
+    std::unique_ptr<Harness> harness;
+    std::vector<ChatMessage> history;
+};
+
+Fixture make_fixture(std::vector<MockTurn> turns) {
+    MockProvider::Options options;
+    options.backend_name = "mock";
+    options.turns = std::move(turns);
+
+    Fixture fixture;
+    fixture.provider = std::make_shared<MockProvider>(std::move(options));
+    fixture.harness = std::make_unique<Harness>(Config{});
+    fixture.harness->register_provider("mock", fixture.provider);
+    fixture.harness->use_default_router();
+    fixture.history = {ChatMessage::user("do the thing")};
+    return fixture;
+}
+
+MockTurn text_turn(std::string text) {
+    return MockTurn{std::move(text), {}, apogee::harness::FinishReason::Stop, {}};
+}
+
+MockTurn tool_turn(std::vector<ToolCall> calls) {
+    return MockTurn{"", std::move(calls), apogee::harness::FinishReason::ToolCalls, {}};
+}
+
+Options options_with(const ToolRegistry& registry) {
+    Options options;
+    options.model = "mock";
+    options.tools = &registry;
+    return options;
+}
+
+/// Records every Reporter call, in order — the surface contract, observable.
+class RecordingReporter final : public Reporter {
+public:
+    std::vector<std::string> events;
+    std::string answer;
+    std::string thinking;
+
+    void on_thinking() override {
+        events.emplace_back("thinking");
+    }
+
+    void on_thinking_token(std::string_view chunk) override {
+        events.emplace_back("thinking_token");
+        thinking += chunk;
+    }
+
+    void on_tool_status(std::string_view detail) override {
+        events.emplace_back("tool_status:" + std::string{detail});
+    }
+
+    void on_clear_status() override {
+        events.emplace_back("clear");
+    }
+
+    void on_answer_start() override {
+        events.emplace_back("answer_start");
+    }
+
+    void on_answer_token(std::string_view chunk) override {
+        events.emplace_back("answer_token");
+        answer += chunk;
+    }
+
+    void on_answer_end() override {
+        events.emplace_back("answer_end");
+    }
+
+    [[nodiscard]] bool saw(std::string_view name) const {
+        for (const std::string& event : events) {
+            if (event == name) {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+Tool echo_tool(std::string name = "echo") {
+    Tool tool;
+    tool.name = std::move(name);
+    tool.description = "Echoes its input";
+    tool.run = [](std::string_view arguments) {
+        return ToolOutcome{"echoed: " + std::string{arguments}, false};
+    };
+    return tool;
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// The core cycle
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a scripted provider drives a multi-iteration loop to an answer",
+          "[agentloop][conformance]") {
+    // The headline criterion: model → tool → model → answer, fully offline.
+    ToolRegistry registry;
+    registry.add(echo_tool());
+
+    Fixture f = make_fixture({
+        tool_turn({ToolCall{"c1", "echo", R"({"v":1})"}}),
+        tool_turn({ToolCall{"c2", "echo", R"({"v":2})"}}),
+        text_turn("all done"),
+    });
+
+    RecordingReporter reporter;
+    const RunResult result =
+        apogee::agentloop::run(*f.harness, f.history, options_with(registry), reporter);
+
+    CHECK(result.answer == "all done");
+    CHECK(result.iterations == 3);
+    CHECK_FALSE(result.hit_iteration_limit);
+
+    // History carries the full exchange: user, assistant+call, tool result,
+    // assistant+call, tool result, assistant answer.
+    REQUIRE(f.history.size() == 6);
+    CHECK(f.history[1].role == Role::Assistant);
+    CHECK(f.history[1].tool_calls.size() == 1);
+    CHECK(f.history[2].role == Role::Tool);
+    CHECK(f.history[2].tool_call_id == "c1");
+    CHECK(f.history[2].content.plain_text() == R"(echoed: {"v":1})");
+    CHECK(f.history[5].content.plain_text() == "all done");
+}
+
+TEST_CASE("several tool calls in one turn run in order", "[agentloop][conformance]") {
+    // Result order must match call order, or a model that numbered its calls
+    // reads the answers against the wrong questions.
+    ToolRegistry registry;
+    registry.add(echo_tool("a"));
+    registry.add(echo_tool("b"));
+
+    Fixture f = make_fixture({
+        tool_turn({ToolCall{"c1", "a", "{}"}, ToolCall{"c2", "b", "{}"}}),
+        text_turn("done"),
+    });
+
+    (void)apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+
+    REQUIRE(f.history.size() == 5);
+    CHECK(f.history[1].tool_calls.size() == 2);
+    CHECK(f.history[2].tool_call_id == "c1");
+    CHECK(f.history[3].tool_call_id == "c2");
+}
+
+TEST_CASE("a tool error is a result the model can read, not an exception",
+          "[agentloop][conformance]") {
+    // Aborting the turn would throw away the conversation over a bad argument.
+    // The model gets told, and gets to react.
+    ToolRegistry registry;
+    Tool failing;
+    failing.name = "boom";
+    failing.description = "always fails";
+    failing.run = [](std::string_view) { return ToolOutcome{"Error: disk on fire", true}; };
+    registry.add(std::move(failing));
+
+    Fixture f = make_fixture({tool_turn({ToolCall{"c1", "boom", "{}"}}), text_turn("recovered")});
+
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+
+    CHECK(result.answer == "recovered");
+    CHECK(f.history[2].content.plain_text() == "Error: disk on fire");
+}
+
+TEST_CASE("a tool that throws does not take the turn down", "[agentloop][conformance]") {
+    ToolRegistry registry;
+    Tool thrower;
+    thrower.name = "throws";
+    thrower.description = "throws";
+    thrower.run = [](std::string_view) -> ToolOutcome { throw std::runtime_error("unexpected"); };
+    registry.add(std::move(thrower));
+
+    Fixture f = make_fixture({tool_turn({ToolCall{"c1", "throws", "{}"}}), text_turn("ok")});
+
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+    CHECK(result.answer == "ok");
+    CHECK(f.history[2].content.plain_text().find("unexpected") != std::string::npos);
+}
+
+TEST_CASE("an unknown tool falls through as an error naming what exists",
+          "[agentloop][conformance]") {
+    // A model hallucinating a tool name must recover, not crash the run.
+    ToolRegistry registry;
+    registry.add(echo_tool("real_tool"));
+
+    Fixture f = make_fixture({tool_turn({ToolCall{"c1", "imaginary", "{}"}}), text_turn("ok")});
+
+    (void)apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+
+    const std::string result = f.history[2].content.plain_text();
+    CHECK(result.find("no tool named 'imaginary'") != std::string::npos);
+    CHECK(result.find("real_tool") != std::string::npos);
+}
+
+TEST_CASE("a tool call with no registry at all still answers", "[agentloop][conformance]") {
+    Fixture f = make_fixture({tool_turn({ToolCall{"c1", "anything", "{}"}}), text_turn("ok")});
+
+    Options options;
+    options.model = "mock";
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options);
+
+    CHECK(result.answer == "ok");
+    CHECK(f.history[2].content.plain_text().find("No tools are available") != std::string::npos);
+}
+
+TEST_CASE("the iteration limit forces an answer instead of looping forever",
+          "[agentloop][conformance]") {
+    // A model can call the same tool indefinitely. Without a bound the only
+    // symptom is a request that never returns while spending money.
+    ToolRegistry registry;
+    registry.add(echo_tool());
+
+    // Every turn asks for a tool -- it would never stop on its own.
+    Fixture f = make_fixture({tool_turn({ToolCall{"c", "echo", "{}"}})});
+
+    Options options = options_with(registry);
+    options.max_iterations = 3;
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options);
+
+    CHECK(result.hit_iteration_limit);
+    CHECK(result.iterations == 4);  // three tool passes, then the forced answer
+    // The final call withdrew the tools, which is what forces a text answer.
+    const auto& final_request = f.provider->requests().back();
+    CHECK(final_request.tools.empty());
+}
+
+// ---------------------------------------------------------------------------
+// ask_user
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a null AskFn means ask_user is never advertised", "[agentloop][ask]") {
+    // Not advertised-and-refused: absent. A model told it may ask questions on
+    // a surface with nobody attached will ask one, then hang or invent an
+    // answer.
+    ToolRegistry registry;
+    registry.add(echo_tool());
+
+    Options options = options_with(registry);
+    REQUIRE_FALSE(options.ask);
+
+    const auto tools = apogee::agentloop::advertised_tools(options);
+    for (const auto& tool : tools) {
+        CHECK(tool.name != apogee::agentloop::kQuestionToolName);
+    }
+
+    Fixture f = make_fixture({text_turn("done")});
+    (void)apogee::agentloop::run(*f.harness, f.history, options);
+
+    for (const auto& tool : f.provider->requests().front().tools) {
+        CHECK(tool.name != apogee::agentloop::kQuestionToolName);
+    }
+}
+
+TEST_CASE("a non-null AskFn advertises ask_user", "[agentloop][ask]") {
+    Options options;
+    options.model = "mock";
+    options.ask = [](const QuestionRequest&) { return Answers{}; };
+
+    const auto tools = apogee::agentloop::advertised_tools(options);
+    REQUIRE(tools.size() == 1);
+    CHECK(tools[0].name == apogee::agentloop::kQuestionToolName);
+}
+
+TEST_CASE("a call to an unadvertised ask_user falls through as unknown-tool", "[agentloop][ask]") {
+    // Never a crash, never a silent drop.
+    ToolRegistry registry;
+    registry.add(echo_tool());
+
+    Fixture f = make_fixture(
+        {tool_turn({ToolCall{"c1", std::string{apogee::agentloop::kQuestionToolName}, "{}"}}),
+         text_turn("ok")});
+
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+
+    CHECK(result.answer == "ok");
+    CHECK(f.history[2].content.plain_text().find("no tool named") != std::string::npos);
+}
+
+TEST_CASE("an answered ask_user round-trips into the tool result", "[agentloop][ask]") {
+    const std::string arguments = R"({"questions":[{"question":"Which database?",
+        "options":[{"label":"Postgres"},{"label":"SQLite"}]}]})";
+
+    QuestionRequest seen;
+    Options options;
+    options.model = "mock";
+    options.ask = [&seen](const QuestionRequest& request) {
+        seen = request;
+        return Answers{{"Postgres"}};
+    };
+
+    Fixture f = make_fixture(
+        {tool_turn({ToolCall{"c1", std::string{apogee::agentloop::kQuestionToolName}, arguments}}),
+         text_turn("using Postgres")});
+
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options);
+
+    REQUIRE(seen.questions.size() == 1);
+    CHECK(seen.questions[0].question == "Which database?");
+    // The result pairs question with answer -- a bare "Postgres" would leave the
+    // model guessing which of several questions it answers.
+    const std::string encoded = f.history[2].content.plain_text();
+    CHECK(encoded.find("Which database?") != std::string::npos);
+    CHECK(encoded.find("Postgres") != std::string::npos);
+    CHECK(result.answer == "using Postgres");
+}
+
+TEST_CASE("a malformed ask_user call is a fixable error, not an aborted turn", "[agentloop][ask]") {
+    Options options;
+    options.model = "mock";
+    options.ask = [](const QuestionRequest&) { return Answers{}; };
+
+    Fixture f =
+        make_fixture({tool_turn({ToolCall{"c1", std::string{apogee::agentloop::kQuestionToolName},
+                                          R"({"questions":[]})"}}),
+                      text_turn("recovered")});
+
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options);
+
+    CHECK(result.answer == "recovered");
+    const std::string encoded = f.history[2].content.plain_text();
+    CHECK(encoded.find("Error: invalid ask_user call") != std::string::npos);
+    CHECK(encoded.find("call ask_user again") != std::string::npos);
+}
+
+TEST_CASE("an aborted ask_user rolls the half-turn out of history", "[agentloop][ask][rollback]") {
+    // An assistant message whose tool calls were never answered is rejected
+    // outright by several providers -- so an interrupted prompt must leave
+    // nothing dangling.
+    const std::string arguments = R"({"questions":[{"question":"Go on?",
+        "options":[{"label":"Yes"},{"label":"No"}]}]})";
+
+    Options options;
+    options.model = "mock";
+    options.ask = [](const QuestionRequest&) -> Answers {
+        throw apogee::harness::CancelledError();
+    };
+
+    Fixture f = make_fixture(
+        {tool_turn({ToolCall{"c1", std::string{apogee::agentloop::kQuestionToolName}, arguments}}),
+         text_turn("never reached")});
+
+    const std::size_t before = f.history.size();
+    CHECK_THROWS_AS(apogee::agentloop::run(*f.harness, f.history, options),
+                    apogee::harness::CancelledError);
+
+    // Exactly as it was: no assistant message, no partial tool results.
+    CHECK(f.history.size() == before);
+    CHECK(f.history.back().role == Role::User);
+}
+
+// ---------------------------------------------------------------------------
+// The permission gate
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a write tool is gated; a read tool is not", "[agentloop][permission]") {
+    // Prompting for every read trains the user to approve without looking,
+    // which makes the prompt worthless where it matters.
+    ToolRegistry registry;
+    registry.add(echo_tool("read_thing"));
+
+    Tool writer;
+    writer.name = "write_thing";
+    writer.description = "writes";
+    writer.writes = true;
+    writer.run = [](std::string_view) { return ToolOutcome{"wrote it", false}; };
+    registry.add(std::move(writer));
+
+    SECTION("allow lets it through") {
+        Fixture f =
+            make_fixture({tool_turn({ToolCall{"c1", "write_thing", "{}"}}), text_turn("done")});
+        Options options = options_with(registry);
+        options.permission = [](const apogee::agent::GateRequest&) { return Permission::Allow; };
+
+        (void)apogee::agentloop::run(*f.harness, f.history, options);
+        CHECK(f.history[2].content.plain_text() == "wrote it");
+    }
+
+    SECTION("deny is honoured and tells the model not to retry") {
+        Fixture f = make_fixture(
+            {tool_turn({ToolCall{"c1", "write_thing", "{}"}}), text_turn("understood")});
+        Options options = options_with(registry);
+        options.permission = [](const apogee::agent::GateRequest&) { return Permission::Deny; };
+
+        (void)apogee::agentloop::run(*f.harness, f.history, options);
+        const std::string result = f.history[2].content.plain_text();
+        CHECK(result.find("denied permission") != std::string::npos);
+        CHECK(result.find("Do not retry") != std::string::npos);
+    }
+
+    SECTION("ask consults the confirm function") {
+        Fixture f =
+            make_fixture({tool_turn({ToolCall{"c1", "write_thing", "{}"}}), text_turn("done")});
+        bool asked = false;
+        Options options = options_with(registry);
+        options.permission = [](const apogee::agent::GateRequest&) { return Permission::Ask; };
+        options.confirm = [&asked](const apogee::agent::GateRequest&) {
+            asked = true;
+            return true;
+        };
+
+        (void)apogee::agentloop::run(*f.harness, f.history, options);
+        CHECK(asked);
+        CHECK(f.history[2].content.plain_text() == "wrote it");
+    }
+
+    SECTION("a read tool never consults the gate") {
+        Fixture f =
+            make_fixture({tool_turn({ToolCall{"c1", "read_thing", "{}"}}), text_turn("done")});
+        bool consulted = false;
+        Options options = options_with(registry);
+        options.permission = [&consulted](const apogee::agent::GateRequest&) {
+            consulted = true;
+            return Permission::Deny;
+        };
+
+        (void)apogee::agentloop::run(*f.harness, f.history, options);
+        CHECK_FALSE(consulted);
+        CHECK(f.history[2].content.plain_text().find("echoed") != std::string::npos);
+    }
+}
+
+TEST_CASE("non-interactive ask resolves to deny", "[agentloop][permission]") {
+    // A pipe, a cron job, or `serve` has nobody to ask. Allowing a destructive
+    // operation because no one was around to object is the wrong direction to
+    // fail.
+    ToolRegistry registry;
+    Tool writer;
+    writer.name = "write_thing";
+    writer.description = "writes";
+    writer.writes = true;
+    writer.run = [](std::string_view) { return ToolOutcome{"wrote it", false}; };
+    registry.add(std::move(writer));
+
+    Fixture f = make_fixture({tool_turn({ToolCall{"c1", "write_thing", "{}"}}), text_turn("ok")});
+
+    Options options = options_with(registry);
+    options.permission = [](const apogee::agent::GateRequest&) { return Permission::Ask; };
+    // No confirm function -- nobody to ask.
+    REQUIRE_FALSE(options.confirm);
+
+    (void)apogee::agentloop::run(*f.harness, f.history, options);
+    CHECK(f.history[2].content.plain_text().find("denied permission") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Transient content and the Reporter contract
+// ---------------------------------------------------------------------------
+
+TEST_CASE("transient content reaches the request but never history", "[agentloop][transient]") {
+    // If injected context landed in history it would be re-sent on every later
+    // turn, growing the prompt without bound and feeding the model material it
+    // was told applied to one question.
+    Fixture f = make_fixture({text_turn("answered")});
+
+    Options options;
+    options.model = "mock";
+    options.transient_prefix = {ChatMessage::system("INJECTED RAG CONTEXT")};
+    options.transient_at = 0;
+
+    (void)apogee::agentloop::run(*f.harness, f.history, options);
+
+    // It reached the provider...
+    const auto& request = f.provider->requests().front();
+    REQUIRE(request.messages.size() == 2);
+    CHECK(request.messages[0].content.plain_text() == "INJECTED RAG CONTEXT");
+    // ...with the markers a prompt-caching provider reads...
+    CHECK(request.transient.start == 0);
+    CHECK(request.transient.length == 1);
+    CHECK(request.is_transient(0));
+    // ...and it is absent from persisted history.
+    for (const ChatMessage& message : f.history) {
+        CHECK(message.content.plain_text().find("INJECTED") == std::string::npos);
+    }
+}
+
+TEST_CASE("the Reporter sees a coherent event sequence", "[agentloop][reporter]") {
+    ToolRegistry registry;
+    registry.add(echo_tool());
+
+    Fixture f = make_fixture({tool_turn({ToolCall{"c1", "echo", "{}"}}), text_turn("final")});
+
+    RecordingReporter reporter;
+    (void)apogee::agentloop::run(*f.harness, f.history, options_with(registry), reporter);
+
+    CHECK(reporter.saw("thinking"));
+    CHECK(reporter.saw("tool_status:[tool] echo"));
+    CHECK(reporter.saw("answer_start"));
+    CHECK(reporter.saw("answer_end"));
+    CHECK(reporter.answer == "final");
+
+    // answer_start precedes its tokens and answer_end closes them.
+    const auto start = std::find(reporter.events.begin(), reporter.events.end(), "answer_start");
+    const auto end = std::find(reporter.events.begin(), reporter.events.end(), "answer_end");
+    REQUIRE(start != reporter.events.end());
+    REQUIRE(end != reporter.events.end());
+    CHECK(start < end);
+}
+
+TEST_CASE("stream_answer false still reports status but emits no answer tokens",
+          "[agentloop][reporter]") {
+    // A caller that only wants the returned text -- a background clerk -- gets
+    // progress without the answer being pushed at it twice.
+    Fixture f = make_fixture({text_turn("quiet answer")});
+
+    RecordingReporter reporter;
+    Options options;
+    options.model = "mock";
+    options.stream_answer = false;
+
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options, reporter);
+
+    CHECK(result.answer == "quiet answer");
+    CHECK(reporter.saw("thinking"));
+    CHECK_FALSE(reporter.saw("answer_token"));
+    CHECK(reporter.answer.empty());
+}
+
+TEST_CASE("a run with no reporter still works", "[agentloop][reporter]") {
+    Fixture f = make_fixture({text_turn("fine")});
+    Options options;
+    options.model = "mock";
+    CHECK(apogee::agentloop::run(*f.harness, f.history, options).answer == "fine");
+}
+
+TEST_CASE("a cancelled token aborts the loop", "[agentloop]") {
+    Fixture f = make_fixture({text_turn("never")});
+    Options options;
+    options.model = "mock";
+    options.cancellation = apogee::harness::CancellationToken::create();
+    options.cancellation.cancel();
+
+    CHECK_THROWS_AS(apogee::agentloop::run(*f.harness, f.history, options),
+                    apogee::harness::CancelledError);
+}
+
+TEST_CASE("a provider error clears the status before propagating", "[agentloop]") {
+    Harness harness{Config{}};
+    harness.use_default_router();  // no providers registered
+
+    std::vector<ChatMessage> history{ChatMessage::user("x")};
+    RecordingReporter reporter;
+    Options options;
+    options.model = "ghost";
+
+    CHECK_THROWS_AS(apogee::agentloop::run(harness, history, options, reporter),
+                    apogee::harness::NoAvailableBackendError);
+    CHECK(reporter.saw("clear"));
+}
+
+TEST_CASE("the final call's finish reason rides the result", "[agentloop][finish]") {
+    // A served response passes it to the client, where `length` means "cut
+    // short" -- the difference between an empty answer that is a bug and one
+    // that is a budget.
+    Fixture f = make_fixture({MockTurn{"partial", {}, apogee::harness::FinishReason::Length, {}}});
+    Options options;
+    options.model = "mock";
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options);
+    CHECK(result.finish_reason == apogee::harness::FinishReason::Length);
+    CHECK(result.answer == "partial");
+}
+
+// ---------------------------------------------------------------------------
+// The repeated-call guard (25b)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the third identical call in a turn is answered without running", "[agentloop][repeat]") {
+    // The spike's 3B model read one file three times and ran the shell
+    // eight: the answer it needed was already in its history.
+    ToolRegistry registry;
+    int runs = 0;
+    Tool counted;
+    counted.name = "read_thing";
+    counted.description = "reads";
+    counted.run = [&runs](std::string_view) {
+        ++runs;
+        return ToolOutcome{"contents", false};
+    };
+    registry.add(std::move(counted));
+
+    // The same arguments three times -- the third with its keys spelled in
+    // another order, which is the same call -- then a different one.
+    Fixture f = make_fixture({
+        tool_turn({ToolCall{"c1", "read_thing", R"({"path":"a","lines":2})"}}),
+        tool_turn({ToolCall{"c2", "read_thing", R"({"path":"a","lines":2})"}}),
+        tool_turn({ToolCall{"c3", "read_thing", R"({"lines":2, "path":"a"})"}}),
+        tool_turn({ToolCall{"c4", "read_thing", R"({"path":"b","lines":2})"}}),
+        text_turn("done"),
+    });
+    (void)apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+
+    CHECK(runs == 3);  // c1, c2 and c4; never c3
+    std::string third;
+    for (const ChatMessage& message : f.history) {
+        if (message.role == Role::Tool && message.tool_call_id == "c3") {
+            third = message.content.plain_text();
+        }
+    }
+    CHECK(third.find("already called read_thing") != std::string::npos);
+    CHECK(apogee::agentloop::kRepeatedCallLimit == 3);
+}
+
+TEST_CASE("the repeated-call guard counts one turn, not the conversation", "[agentloop][repeat]") {
+    ToolRegistry registry;
+    int runs = 0;
+    Tool counted;
+    counted.name = "read_thing";
+    counted.description = "reads";
+    counted.run = [&runs](std::string_view) {
+        ++runs;
+        return ToolOutcome{"contents", false};
+    };
+    registry.add(std::move(counted));
+
+    Fixture f = make_fixture({
+        tool_turn({ToolCall{"c1", "read_thing", "{}"}}),
+        tool_turn({ToolCall{"c2", "read_thing", "{}"}}),
+        text_turn("first"),
+        tool_turn({ToolCall{"c3", "read_thing", "{}"}}),
+        text_turn("second"),
+    });
+    (void)apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+    f.history.push_back(ChatMessage::user("again"));
+    (void)apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+    CHECK(runs == 3);
+}
+
+// ---------------------------------------------------------------------------
+// Provider notices (25b)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A provider that says one thing through its status channel, then answers.
+class NoticingProvider final : public apogee::harness::LLMProvider {
+public:
+    [[nodiscard]] std::string_view backend_name() const noexcept override {
+        return "noticing";
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse chat(
+        const apogee::harness::ChatRequest&, const apogee::harness::CancellationToken&) override {
+        return answer();
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse stream_chat(
+        const apogee::harness::ChatRequest&,
+        const apogee::harness::StreamOptions& options) override {
+        apogee::harness::StatusEvent loading;
+        loading.type = apogee::harness::StatusEvent::Type::ModelLoading;
+        loading.detail = "not a notice";
+        options.on_status(loading);
+        apogee::harness::StatusEvent notice;
+        notice.type = apogee::harness::StatusEvent::Type::Notice;
+        notice.detail = "tiny-model is answering without tools: no template";
+        options.on_status(notice);
+        apogee::harness::StatusEvent cache;
+        cache.type = apogee::harness::StatusEvent::Type::PromptCache;
+        cache.detail = "prompt 120 tokens: 100 from the cache, 20 read";
+        options.on_status(cache);
+        return answer();
+    }
+
+    [[nodiscard]] std::vector<apogee::harness::ModelInfo> list_models(
+        const apogee::harness::CancellationToken&) override {
+        return {};
+    }
+
+private:
+    static apogee::harness::ChatResponse answer() {
+        apogee::harness::ChatResponse response;
+        response.message = ChatMessage::assistant("fine");
+        return response;
+    }
+};
+
+class NoticeReporter final : public Reporter {
+public:
+    std::vector<std::string> notices;
+    std::vector<std::string> progress;
+
+    void on_notice(std::string_view text) override {
+        notices.emplace_back(text);
+    }
+
+    void on_progress(std::string_view text) override {
+        progress.emplace_back(text);
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a provider's notice reaches the reporter; its other status does not",
+          "[agentloop][notice]") {
+    Harness harness{Config{}};
+    harness.register_provider("noticing", std::make_shared<NoticingProvider>());
+    harness.use_default_router();
+    std::vector<ChatMessage> history{ChatMessage::user("hi")};
+    Options options;
+    options.model = "noticing";
+    NoticeReporter reporter;
+    const RunResult result = apogee::agentloop::run(harness, history, options, reporter);
+    CHECK(result.answer == "fine");
+    CHECK(reporter.notices ==
+          std::vector<std::string>{"tiny-model is answering without tools: no template"});
+    // A cache report is progress, not a notice (25c).
+    CHECK(reporter.progress ==
+          std::vector<std::string>{"prompt 120 tokens: 100 from the cache, 20 read"});
+}
+
+// ---------------------------------------------------------------------------
+// A tool that cannot work this turn (25e)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a tool that says it cannot work is withdrawn for the rest of the turn",
+          "[agentloop][unavailable]") {
+    // A misconfigured search refuses every query, and a small model told so in
+    // words rephrases until the step limit. Withdrawn, it cannot be asked.
+    int runs = 0;
+    Tool broken;
+    broken.name = "search";
+    broken.description = "Searches";
+    broken.run = [&runs](std::string_view) {
+        ++runs;
+        return ToolOutcome{"Error: the instance refused", true, /*unavailable=*/true};
+    };
+    ToolRegistry registry;
+    registry.add(broken);
+    registry.add(echo_tool());
+
+    Fixture f = make_fixture({
+        // The same step names it twice: the second is answered, not run.
+        tool_turn(
+            {ToolCall{"c1", "search", R"({"q":"a"})"}, ToolCall{"c2", "search", R"({"q":"b"})"}}),
+        // A model that calls it anyway, with new words.
+        tool_turn({ToolCall{"c3", "search", R"({"q":"c"})"}, ToolCall{"c4", "echo", "{}"}}),
+        text_turn("answered without it"),
+    });
+    const auto result = apogee::agentloop::run(*f.harness, f.history, options_with(registry));
+    CHECK(result.answer == "answered without it");
+    CHECK(runs == 1);
+
+    const auto& requests = f.provider->requests();
+    REQUIRE(requests.size() == 3);
+    const auto offered = [](const apogee::harness::ChatRequest& request, std::string_view name) {
+        return std::any_of(request.tools.begin(), request.tools.end(),
+                           [name](const apogee::harness::Tool& tool) { return tool.name == name; });
+    };
+    CHECK(offered(requests[0], "search"));
+    CHECK_FALSE(offered(requests[1], "search"));  // withdrawn from the next step on
+    CHECK_FALSE(offered(requests[2], "search"));
+    CHECK(offered(requests[2], "echo"));  // and nothing else with it
+
+    std::vector<std::string> results;
+    for (const ChatMessage& message : f.history) {
+        if (message.role == apogee::harness::Role::Tool) {
+            results.push_back(message.content.plain_text());
+        }
+    }
+    REQUIRE(results.size() == 4);
+    CHECK(results[0] == "Error: the instance refused");
+    CHECK(results[1].find("unavailable for the rest of this turn") != std::string::npos);
+    CHECK(results[2].find("unavailable for the rest of this turn") != std::string::npos);
+    CHECK(results[3].starts_with("echoed:"));
+
+    // The next turn offers it again: the user may have fixed it meanwhile.
+    Fixture next = make_fixture({text_turn("fine")});
+    (void)apogee::agentloop::run(*next.harness, next.history, options_with(registry));
+    CHECK(offered(next.provider->requests().front(), "search"));
+}
+
+// ---------------------------------------------------------------------------
+// The context budget (26c)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("an earlier turn's tool result is sent as a stub, and the transcript keeps it whole",
+          "[agentloop][budget]") {
+    Fixture f = make_fixture({text_turn("the second answer")});
+    ChatMessage calling = ChatMessage::assistant("");
+    calling.tool_calls = {ToolCall{"c1", "read_file", R"({"path":"big.log"})"}};
+    apogee::harness::ToolResult read;
+    read.tool_call_id = "c1";
+    read.name = "read_file";
+    read.content = std::string(4000, 'l');
+    f.history = {ChatMessage::user("what is in big.log?"), calling,
+                 ChatMessage::from_tool_result(read), ChatMessage::assistant("lines of l"),
+                 ChatMessage::user("and now?")};
+    Options options;
+    options.model = "mock";
+    NoticeReporter reporter;
+    (void)apogee::agentloop::run(*f.harness, f.history, options, reporter);
+
+    const auto& sent = f.provider->requests().front().messages;
+    REQUIRE(sent.size() == 5);
+    CHECK(sent[2].content.plain_text() ==
+          R"([read_file({"path":"big.log"}) returned 4 KB; not kept after its turn -- call it )"
+          "again if you need it.]");
+    CHECK(sent[2].tool_call_id == "c1");
+    CHECK(f.history[2].content.plain_text() == std::string(4000, 'l'));
+    CHECK(
+        reporter.progress ==
+        std::vector<std::string>{"earlier turns' tool results sent as 1 stub (4 KB not re-sent)"});
+    CHECK(reporter.notices.empty());
+}
+
+TEST_CASE("a request over its window is trimmed, oldest exchanges first, and says so",
+          "[agentloop][budget]") {
+    const Config config = apogee::harness::parse_config(R"(
+backends:
+  small:
+    type: mock
+    context_size: 1000
+    max_tokens: 100
+)",
+                                                        "<test>");
+    MockProvider::Options mock;
+    mock.backend_name = "small";
+    mock.turns = {text_turn("fits now")};
+    const auto provider = std::make_shared<MockProvider>(std::move(mock));
+    Harness harness{config};
+    harness.register_provider("small", provider);
+    harness.use_default_router();
+
+    // Three earlier exchanges of ~400 estimated tokens each, about 1,200 in
+    // all, against 900 after the reserve: the oldest must go.
+    std::vector<ChatMessage> history{ChatMessage::system("be brief")};
+    for (const char fill : {'1', '2', '3'}) {
+        history.push_back(ChatMessage::user(std::string(800, fill)));
+        history.push_back(ChatMessage::assistant(std::string(800, fill)));
+    }
+    history.push_back(ChatMessage::user("the question"));
+    const std::vector<ChatMessage> saved = history;
+    Options options;
+    options.model = "small";
+    NoticeReporter reporter;
+    (void)apogee::agentloop::run(harness, history, options, reporter);
+
+    const auto& sent = provider->requests().front().messages;
+    REQUIRE(sent.size() == 6);
+    CHECK(sent.front().content.plain_text() == "be brief");
+    CHECK(sent[1].content.plain_text() == std::string(800, '2'));
+    CHECK(sent.back().content.plain_text() == "the question");
+    CHECK(reporter.notices ==
+          std::vector<std::string>{"context budget: 1 earlier exchange not sent"});
+    // What was sent changed; what was said did not.
+    REQUIRE(history.size() == saved.size() + 1);
+    CHECK(history[1].content.plain_text() == std::string(800, '1'));
+}
+
+TEST_CASE("on a large window a short conversation is sent exactly as it was before the budget",
+          "[agentloop][budget]") {
+    const Config config = apogee::harness::parse_config(R"(
+backends:
+  cloud:
+    type: mock
+    context_size: 200000
+)",
+                                                        "<test>");
+    MockProvider::Options mock;
+    mock.backend_name = "cloud";
+    mock.turns = {text_turn("the answer")};
+    const auto provider = std::make_shared<MockProvider>(std::move(mock));
+    Harness harness{config};
+    harness.register_provider("cloud", provider);
+    harness.use_default_router();
+
+    std::vector<ChatMessage> history{ChatMessage::system("be brief"), ChatMessage::user("hello"),
+                                     ChatMessage::assistant("hi"), ChatMessage::user("and?")};
+    const std::vector<ChatMessage> before = history;
+    Options options;
+    options.model = "cloud";
+    options.transient_prefix = {ChatMessage::system("retrieved: four excerpts")};
+    NoticeReporter reporter;
+    (void)apogee::agentloop::run(harness, history, options, reporter);
+
+    const apogee::harness::ChatRequest& sent = provider->requests().front();
+    const std::vector<ChatMessage> expected =
+        apogee::agentloop::splice_transient(before, options.transient_prefix, 0);
+    REQUIRE(sent.messages.size() == expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        CHECK(sent.messages[index].content.plain_text() == expected[index].content.plain_text());
+    }
+    CHECK(sent.transient.start == 0);
+    CHECK(sent.transient.length == 1);
+    CHECK(reporter.notices.empty());
+    CHECK(reporter.progress.empty());
+}
+
+namespace {
+
+/// A mock on a 1,000-token window, and three earlier exchanges of ~400
+/// estimated tokens each before `question`.
+struct Crowded {
+    std::shared_ptr<MockProvider> provider;
+    std::unique_ptr<Harness> harness;
+    std::vector<ChatMessage> history{ChatMessage::system("be brief")};
+
+    Crowded(std::string_view extra, std::vector<MockTurn> turns) {
+        const Config config = apogee::harness::parse_config(
+            "backends:\n  small:\n    type: mock\n    context_size: 1000\n" + std::string{extra},
+            "<test>");
+        MockProvider::Options mock;
+        mock.backend_name = "small";
+        mock.turns = std::move(turns);
+        provider = std::make_shared<MockProvider>(std::move(mock));
+        harness = std::make_unique<Harness>(config);
+        harness->register_provider("small", provider);
+        harness->use_default_router();
+        for (const char fill : {'1', '2', '3'}) {
+            history.push_back(ChatMessage::user(std::string(800, fill)));
+            history.push_back(ChatMessage::assistant(std::string(800, fill)));
+        }
+        history.push_back(ChatMessage::user("the question"));
+    }
+};
+
+}  // namespace
+
+TEST_CASE("the request's own max_tokens is the reserve the budget holds back",
+          "[agentloop][budget]") {
+    // No max_tokens on the backend: the default reserve would leave 500, and
+    // cost two exchanges; the request's 100 leaves 900, and costs one.
+    Crowded crowded{"", {text_turn("fits now")}};
+    Options options;
+    options.model = "small";
+    options.max_tokens = 100;
+    NoticeReporter reporter;
+    (void)apogee::agentloop::run(*crowded.harness, crowded.history, options, reporter);
+    CHECK(reporter.notices ==
+          std::vector<std::string>{"context budget: 1 earlier exchange not sent"});
+}
+
+TEST_CASE("a trim that holds across a turn's steps is said once", "[agentloop][budget]") {
+    // Step one drops the oldest exchange; so does step two, after a small
+    // tool result. Said at every step, the same line would print twice.
+    Crowded crowded{"    max_tokens: 100\n",
+                    {tool_turn({ToolCall{"c1", "echo", "{}"}}), text_turn("done")}};
+    ToolRegistry registry;
+    registry.add(echo_tool());
+    Options options = options_with(registry);
+    options.model = "small";
+    NoticeReporter reporter;
+    (void)apogee::agentloop::run(*crowded.harness, crowded.history, options, reporter);
+    REQUIRE(crowded.provider->requests().size() == 2);
+    CHECK(reporter.notices ==
+          std::vector<std::string>{"context budget: 1 earlier exchange not sent"});
+}
+
+TEST_CASE("the loop sends an inlined attachment on its message, and names one it could not",
+          "[agentloop][budget][attachments]") {
+    Fixture f = make_fixture({text_turn("the code is 7731")});
+    f.history = {ChatMessage::user("what is the code?")};
+    Options options;
+    options.model = "mock";
+    options.inline_attachments = {
+        {.message = 0, .name = "notes.md", .text = "--- attached file: notes.md ---\n7731\n"},
+        {.message = 5, .name = "gone.md", .text = "never sent"}};
+    const RunResult result = apogee::agentloop::run(*f.harness, f.history, options);
+    const auto& sent = f.provider->requests().front().messages;
+    REQUIRE(sent.size() == 1);
+    CHECK(sent[0].content.plain_text().starts_with("--- attached file: notes.md ---\n7731\n"));
+    CHECK(sent[0].content.plain_text().ends_with("what is the code?"));
+    CHECK(f.history[0].content.plain_text() == "what is the code?");
+    CHECK(result.inline_dropped == std::vector<std::string>{"gone.md"});
+}
+
+TEST_CASE("a base model is offered no tools and no ask_user, and its turn still runs",
+          "[agentloop][tools][base]") {
+    // No chat template, no tool format (26r): offered tools, a base model
+    // only imitates calling them. Withheld for every surface, here.
+    ToolRegistry registry;
+    registry.add(echo_tool());
+    const auto with_base = [&](bool base) {
+        MockProvider::Options mock;
+        mock.backend_name = "mock";
+        mock.turns = {text_turn("it continues the text")};
+        mock.behavior.base_model = base;
+        auto provider = std::make_shared<MockProvider>(std::move(mock));
+        Harness harness{Config{}};
+        harness.register_provider("mock", provider);
+        harness.use_default_router();
+        std::vector<ChatMessage> history{ChatMessage::user("hello")};
+        Options options = options_with(registry);
+        options.ask = [](const QuestionRequest&) { return Answers{}; };
+        RecordingReporter reporter;
+        const RunResult result = apogee::agentloop::run(harness, history, options, reporter);
+        CHECK(result.answer == "it continues the text");
+        REQUIRE(provider->requests().size() == 1);
+        return provider->requests().front().tools.size();
+    };
+    CHECK(with_base(true) == 0);
+    // An instruct model keeps its tool and ask_user.
+    CHECK(with_base(false) == 2);
+}

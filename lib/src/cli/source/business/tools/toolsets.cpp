@@ -1,0 +1,116 @@
+#include "tools/toolsets.h"
+
+#include <array>
+#include <chrono>
+#include <system_error>
+
+#include "contracts/layout.h"
+#include "platform/platform.h"
+#include "tools/environment.h"
+#include "tools/fs.h"
+#include "tools/notes.h"
+#include "tools/rag_query.h"
+#include "tools/shell.h"
+
+namespace apogee::tools {
+namespace {
+
+constexpr std::array<std::string_view, 5> kToolsetNames{"fs", "shell", "git", "notes", "rag"};
+constexpr std::array<std::string_view, 6> kDestructiveTools{
+    "write_file", "edit_file", "delete_file", "run_command", "write_note", "delete_note"};
+
+bool disabled(const ToolsetOptions& options, std::string_view toolset) {
+    for (const std::string& name : options.disabled) {
+        if (name == toolset) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::filesystem::path effective_cwd(const ToolsetOptions& options) {
+    if (!options.working_directory.empty()) {
+        return options.working_directory;
+    }
+    std::error_code code;
+    return std::filesystem::current_path(code);
+}
+
+}  // namespace
+
+FsRoot effective_fs_root(const std::filesystem::path& configured) {
+    if (!configured.empty()) {
+        return FsRoot{configured, true};
+    }
+    // The folder Apogee was started in (2026-09-25; it was the home
+    // directory): a chat started in a project works in that project, and a
+    // model cannot read the rest of the home directory without being given
+    // it. Nothing in Apogee changes the working directory after startup, so
+    // the current one is the launch folder -- and a resumed chat works where
+    // it was resumed: the folder is the process's, not the transcript's.
+    std::error_code code;
+    return FsRoot{std::filesystem::current_path(code), false};
+}
+
+std::span<const std::string_view> toolset_names() noexcept {
+    return kToolsetNames;
+}
+
+std::span<const std::string_view> destructive_tool_names() noexcept {
+    return kDestructiveTools;
+}
+
+void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOptions& options) {
+    if (!disabled(options, "fs")) {
+        register_fs_tools(registry, effective_fs_root(options.fs_root).path, options.read_limit);
+    }
+    if (!disabled(options, "shell")) {
+        register_shell_tool(registry, effective_cwd(options), options.shell_timeout);
+    }
+    if (!disabled(options, "git")) {
+        GitOptions git;
+        git.timeout = options.git_timeout;
+        git.working_directory = effective_cwd(options);
+        git.review = options.review;
+        git.live_review = options.live_review;
+        register_git_tools(registry, git);
+    }
+    if (!disabled(options, "notes")) {
+        register_notes_tools(registry,
+                             options.notes_dir.empty() ? harness::notes_dir() : options.notes_dir);
+    }
+    if (!disabled(options, "rag")) {
+        register_rag_tools(registry, options.harness, options.config);
+    }
+
+    // Set whatever is switched off: fetch_url and MCP tools ride the same
+    // registry, and a model with any tool needs the date as much as one
+    // with all of them.
+    Environment environment;
+    environment.working_directory = effective_cwd(options);
+    if (!disabled(options, "shell")) {
+        environment.shell = std::string{shell_program()};
+    }
+    if (!disabled(options, "fs")) {
+        environment.fs_root = effective_fs_root(options.fs_root).path;
+    }
+    // The policy is read off the registry asking (26p), so it names only
+    // what that registry holds: fetch_url and web_search are registered
+    // beside these, and a read-only agent's copy keeps them.
+    registry.set_environment([environment](const agent::ToolRegistry& tools) {
+        std::string note = render_environment_note(
+            environment, platform::local_date(std::chrono::system_clock::now()));
+        if (const std::string policy = render_tool_use_policy(tool_reach(tools)); !policy.empty()) {
+            note += "\n\n" + policy;
+        }
+        return note;
+    });
+}
+
+std::vector<std::string> native_tool_names(const ToolsetOptions& options) {
+    agent::ToolRegistry registry;
+    register_native_toolsets(registry, options);
+    return registry.names();
+}
+
+}  // namespace apogee::tools

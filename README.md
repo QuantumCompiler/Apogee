@@ -80,4 +80,4 @@ That builds every application for the host's native target and runs its suite â€
 
 ## Status
 
-Young and moving fast: [v0.1.0](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.0) (the harness) and [v0.1.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.1) (the release pipeline) are out, and `v0.1.2` is in development on its branch. The running board of what's shipped, in flight, and next is [ROADMAP.md](lib/documentation/assistant/ROADMAP.md).
+Young and moving fast: [v0.1.0](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.0) (the harness), [v0.1.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.1) (the release pipeline) and [v0.1.2](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.2) (the terminal and the model directory) are out, and `v0.1.3` is in development on its branch. The running board of what's shipped, in flight, and next is [ROADMAP.md](lib/documentation/assistant/ROADMAP.md).

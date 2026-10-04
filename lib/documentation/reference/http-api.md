@@ -24,7 +24,7 @@ apogee serve --all-backends --rag notes        # every servable backend, retriev
 | `--bind HOST` / `--port N` | Where to listen. Loopback by default; `--port 0` picks a free port and prints it. |
 | `--allow-remote` | Permits a non-loopback `--bind`. **Without it the server refuses to start** — the inference plane is unauthenticated (for OpenAI-client compatibility), so exposing it is a decision the operator makes explicitly. Put it behind your own access control. |
 | `-m BACKEND` / `--all-backends` | Which backends a request may name. The default (or `-m`) alone unless `--all-backends`: adding an entry to the config never silently exposes it. Vendor-CLI backends (`claude-cli`, `codex-cli`, `gemini-cli`, `ollama-cli`) are **never served** — they run on a personal subscription. |
-| `--tools` | Run the tool loop server-side (`fetch_url`). Clients see only the final answer. |
+| `--tools` | Run the tool loop server-side (`fetch_url`, and `web_search` when `tools.search` names a SearXNG — see [tools.md](tools.md)). Clients see only the final answer. Nobody can answer a permission prompt on a served request, so `fetch_url` reaches **only the hosts in `tools.allowed_hosts`** — anything else, including a redirect to an unlisted host, comes back to the model as a refusal (since 2026-09-25; before that a served fetch reached any website). |
 | `--rag NAME`, `--rag-limit N`, `--retriever`, `--rerank` | Retrieval, fixed for the server's lifetime (`--rag ""` switches off the config's `auto_rag`). `?retriever=` and `?rerank=` override per request. |
 | `--preload` | Load every served local model now rather than on the first request. |
 | `--ignore-timeout` | Keep local models resident: ignore `idle_unload_seconds`. |
@@ -87,9 +87,10 @@ The standard request, plus Apogee's extensions:
 | `apogee_events` | With `stream`, interleave status meta-frames (below). |
 | `session_id` | `"new"` to mint a server-side session, a known id to continue one, absent to stay stateless. See **Sessions**. |
 
-Query parameters: `?retriever=lexical|vector|hybrid|auto` and `?rerank=BACKEND|off`
+Query parameters: `?retriever=lexical|vector|hybrid|auto` and `?rerank=BACKEND|on|off`
 override the server's retrieval settings for one request, through the same
-validator and resolver the CLI flags use.
+validator and resolver the CLI flags use. `on` is the utility model
+(`models.default_utility`), else the backend answering the request.
 
 **The non-streamed response:**
 
@@ -151,7 +152,9 @@ indicator. The vocabulary is the same one the terminal status line shows.
 | `rag_search` | `start` / `done` | `name` = collection | Retrieval is running / has returned. |
 | `rag_result` | `done` | `collection`, `chunks_found`, `top_score`, `retriever`, `reranked`, `graph_entities` (when the collection's knowledge graph expanded the chunks), `detail` (notes) | What was injected. `retriever` sets `top_score`'s scale — lexical and vector scores are not comparable. |
 | `model_loading` / `model_ready` | `start` / `done` | `name` = backend | A local model is loading; loading finished. |
+| `notice` | `done` | `detail` = the line | Something the user should read that is neither progress nor an error: a local model whose chat template cannot take tools, so it is answering without them; a reply that did not match its template's format, kept as text with no tool call run; a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`). |
 | `thinking` | `start` | — | The model is working: the top of each loop iteration. |
+| `thinking_budget` | `done` | — | The model's reasoning reached its thinking budget and was ended there; the answer that follows had no more thought than that. |
 | `tool_call` | `start` / `done` | `name` = tool | A server-side tool call. |
 | `token_count` | `done` | `tokens`, `tokens_per_second`, `detail: "estimated"` when estimated | After the answer. |
 
@@ -269,16 +272,23 @@ with `-m` or `--all-backends` to serve it).
 Every backend entry as a **view that has no `api_key` field** — `api_key_set`
 says whether one is configured — plus `roles`, each named by the backend that
 *resolves* for it and which rung answered (`default`, `role_pointer`, …), and
-`restart_required`.
+`restart_required`. The roles are `default`, `default_embedding`,
+`default_extraction`, and the helpers `default_vision`,
+`default_transcription` and `default_utility`; with no conversation to fall
+back to here, an unset helper resolves as `models.default` does.
 
 ### `POST /v1/admin/backends`
 
 The twin of `apogee config add-backend`. Body: `name` and `type` (required),
 then any of `model`, `model_path`, `api_key`, `embedding_model`,
-`system_prompt`, `context_size`, `max_tokens`, `temperature`, and `force`
-(the `--force` twin: replace an existing entry). `201` with the view; `409`
-(`type: conflict`) on a name collision without `force`; `400` on a bad type or
-body.
+`system_prompt`, `context_size`, `cache_type` (a local model's attention
+cache: `f16`, `q8_0` or `q4_0`), `max_tokens`, `temperature`, a local model's
+sampling beyond it -- `top_p`, `top_k`, `min_p`, `repeat_penalty`,
+`presence_penalty`, `seed` (each checked by the config's own rules) -- whether
+its model reasons first, `thinking` (`on`, `off` or `auto`) and `thinking_budget`
+(tokens) -- and `force` (the `--force` twin: replace an existing entry). `201` with the view; `409`
+(`type: conflict`) on a name collision without `force`; `400` on a bad type,
+cache type or body.
 
 A **literal** `api_key` is accepted from loopback peers only (`403` otherwise),
 judged from the connection's own peer address and never from a forwarded
@@ -307,6 +317,22 @@ The twin of `apogee config set-default-embedding`. Same body and rules.
 ### `POST /v1/admin/backends/default-extraction`
 
 The twin of `apogee config set-default-extraction`. Same body and rules.
+
+### `POST /v1/admin/backends/default-vision`
+
+The twin of `apogee config set-default-vision`: the backend that describes an
+image for a chat model with no projector. Same body and rules.
+
+### `POST /v1/admin/backends/default-transcription`
+
+The twin of `apogee config set-default-transcription`: the backend that turns
+audio into text. Same body and rules.
+
+### `POST /v1/admin/backends/default-utility`
+
+The twin of `apogee config set-default-utility`: the backend for chores --
+titles, compaction summaries, search-query rewriting, and summaries of tool
+results over 8 KiB. Same body and rules.
 
 ### `POST /v1/admin/config/format`
 
@@ -491,7 +517,7 @@ and `discipline` (filters; **no default branch over HTTP** -- the CLI's
 `anonymize=true` (attribution and the local `raw_ref` stripped, the
 provenance chain kept -- the shareable shape), and, for a query, `q` (the
 question), `retriever` (`lexical` | `vector` | `hybrid` | `auto`), `rerank`
-(a backend, or `off`), and `limit` (default 20).
+(a backend, `on` for the utility model, or `off`), and `limit` (default 20).
 
 A missing collection is `200` with an empty list -- never an error, and never
 a created file. Without `q`: `{"object": "list", "data": [record…]}`. With
@@ -883,10 +909,10 @@ have no route.
 
 What the permission gate does for each destructive native tool — `ask`,
 `allow`, or `deny` — as `{"object":"list","data":[{tool, level}]}`: every tool
-that declares itself destructive (`write_file`, `delete_file`, `run_command`,
-`write_note`, `delete_note`) at its effective level, `ask` when the config does
-not list it, plus any other key the config carries (a namespaced MCP tool, once
-the MCP client lands).
+that declares itself destructive (`write_file`, `edit_file`, `delete_file`,
+`run_command`, `write_note`, `delete_note`) at its effective level, `ask` when
+the config does not list it, plus any other key the config carries (a
+namespaced MCP tool, once the MCP client lands).
 
 ### `PUT /v1/admin/permissions/{id}`
 
@@ -900,6 +926,30 @@ key.
 
 On a served request nobody can answer a prompt, so `ask` means deny there:
 `allow` in the config is the only way a destructive tool runs under `serve`.
+
+### `GET /v1/admin/allowed-hosts`
+
+The websites `fetch_url` reaches without asking — `tools.allowed_hosts`, as
+written — as `{"object":"list","data":[{host, valid}]}`. `valid` is `false` for
+an entry that is not a bare host name (a pasted URL, a pattern): it allows
+nothing, and `apogee check` names it. Hosts are compared exactly:
+`docs.python.org` admits neither `python.org` nor any other subdomain.
+
+### `PUT /v1/admin/allowed-hosts/{id}`
+
+The twin of `apogee config add-allowed-host <host>`, and the same edit the
+permission prompt's `always` answer makes for a website — one transform behind
+all three, so the bytes are identical. `{id}` is the host alone; no body.
+Idempotent: a host already listed, in any spelling, changes nothing. `200
+{host, allowed: true, restart_required}` with the host in its canonical form;
+`400` for anything that is not a bare host name. A served run reads the list
+once at startup, so `restart_required` is `true` when this server did not start
+with the host listed.
+
+### `DELETE /v1/admin/allowed-hosts/{id}`
+
+The twin of `apogee config delete-allowed-host <host>`. `200 {deleted,
+restart_required}`; `404` when the host is not listed.
 
 ### `GET /v1/admin/auth`
 

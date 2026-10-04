@@ -1,5 +1,10 @@
 # Apogee releases -- the MANUAL path.
 #
+# When you change this file, keep its matrix the same list as ci.yml's, and
+# read DEVELOPER.md -> Changing the pipeline. Its jobs are not required checks
+# (it never runs on a pull request), so lib/scripts/required-checks.py does
+# not need re-running for a change here alone.
+#
 # Distribution host and pipeline shape are a user decision (2026-09-01): GitHub
 # Releases, built by GitHub Actions. `install.sh` and `install.ps1` fetch the
 # archive for the host from there.
@@ -12,6 +17,14 @@
 # hand-pushed `v*` tag (`make -C lib/src/cli release`) builds every target
 # from that tag and publishes, for a re-cut or for when the merged pull
 # request's archives cannot be used; and the dry-run dispatch.
+#
+# One deliberate difference from the merge path: this path always REBUILDS the
+# CLI from the tag, even when it is unchanged since the latest release, where
+# the merge path would copy that release's archives (user decision,
+# 2026-09-25). It is the escape hatch -- a re-cut, or a merge whose archives
+# could not be used -- and "build it again from source" is what an escape
+# hatch is for. The release it names is still `lib/release/VERSION`, never the CLI's own
+# version.
 #
 # The tag that `tag and release` creates does NOT start this workflow: a tag
 # made with a run's GITHUB_TOKEN triggers no workflow, which is what keeps a
@@ -39,6 +52,14 @@
 # `xattr -d` command. Notarization joins when there is a Developer ID.
 
 name: Release
+
+# The run's title in the Actions list (user decision, 2026-10-04): the tag
+# pushed, whose name the gate holds to lib/release/VERSION. A dispatch has
+# no tag, so it is named for the branch it ran on, and a dry run says so.
+run-name: >-
+  ${{ github.event_name == 'push' && format('{0} Release', github.ref_name)
+  || inputs.dry_run && format('{0} Release Dry Run', github.ref_name)
+  || format('{0} Release', github.ref_name) }}
 
 on:
   push:
@@ -79,10 +100,10 @@ jobs:
     # the release does not.
     #
     # On the tag path this also enforces the guard the pipeline never had: a
-    # tag whose name disagrees with CMakeLists.txt fails HERE, before five
-    # runners spend ~82 minutes building a binary that would misreport its own
-    # version. `make release` checks the same thing locally; this is the copy
-    # that a hand-pushed tag cannot skip.
+    # tag whose name disagrees with lib/release/VERSION -- the release, since 2026-09-25;
+    # the CLI keeps its own version in its CMakeLists -- fails HERE, before
+    # five runners spend ~82 minutes building. `make release` checks the same
+    # thing locally; this is the copy that a hand-pushed tag cannot skip.
     name: gate
     runs-on: ubuntu-24.04
     outputs:
@@ -99,21 +120,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The one source of the version, read the same way make release reads it.
-          cmake_version="$(sed -n 's/^[[:space:]]*VERSION[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' lib/src/cli/CMakeLists.txt | head -1)"
-          [ -n "$cmake_version" ] || { echo "::error::could not read VERSION from lib/src/cli/CMakeLists.txt"; exit 1; }
+          # The release, as lib/release/VERSION names it -- read the same way make release,
+          # version-check.sh and release-from-pr.sh read it.
+          release_version="$(tr -d ' \r\n' < lib/release/VERSION)"
+          echo "$release_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
+            { echo "::error file=lib/release/VERSION::lib/release/VERSION must hold the release as x.y.z (got '$release_version')"; exit 1; }
 
           case "${GITHUB_REF}" in
             refs/tags/v*)
               version="${GITHUB_REF_NAME}"
-              if [ "$version" != "v${cmake_version}" ]; then
-                echo "::error::tag ${version} disagrees with CMakeLists.txt VERSION ${cmake_version}; the release would ship a binary reporting ${cmake_version}"
+              if [ "$version" != "v${release_version}" ]; then
+                echo "::error::tag ${version} disagrees with lib/release/VERSION ${release_version}; bump it, or tag v${release_version}"
                 exit 1
               fi
               proceed=pending
               ;;
             *)
-              version="v${cmake_version}"
+              version="v${release_version}"
               proceed=pending
               ;;
           esac
@@ -141,12 +164,12 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| | |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| version | \`$version\` (CMakeLists.txt: $cmake_version) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| version | \`$version\` (lib/release/VERSION: $release_version) |" >> "$GITHUB_STEP_SUMMARY"
           echo "| already released | $exists |" >> "$GITHUB_STEP_SUMMARY"
           echo "| building | $proceed |" >> "$GITHUB_STEP_SUMMARY"
           if [ "$proceed" != "true" ]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Nothing to do: \`$version\` is already published. Bump \`project(... VERSION x.y.z)\` in \`lib/src/cli/CMakeLists.txt\` to cut the next one." >> "$GITHUB_STEP_SUMMARY"
+            echo "Nothing to do: \`$version\` is already published. Bump \`lib/release/VERSION\` to cut the next one." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   unit-tests:

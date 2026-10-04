@@ -19,15 +19,16 @@ Apogee is a from-scratch re-implementation of **Ommi** (the sibling project at `
 3. **In-process llama.cpp** — C++ can link llama.cpp directly instead of Ommi's per-turn subprocess spawns, keeping the same zero-listening-socket guarantee without process churn. *(Confirmed 2026-08-31, and with no spawn-isolation mode: the accepted cost is that a fatal error inside llama.cpp takes the process down, bounded to one in-flight turn because a chat session is saved after every completed turn. Shipped — see [MILESTONES.md](MILESTONES.md) → Milestone J.)*
 4. **Open local models** *(decided 2026-08-24)* — no forbidden or curated local models: any model the user supplies runs. Ommi's sha256-pinned approved-model allowlist and its refusal semantics are deliberately not ported. Models, datasets, and tensors download directly from Hugging Face or pull through Ollama.
 
-Parts that are Python in Ommi (training drivers, MCP servers) may stay Python in Apogee — "primarily C++" governs the harness, not every satellite script.
+Parts that are Python in Ommi (training drivers, MCP servers) may stay Python in Apogee — "primarily C++" governs the harness, not every satellite script. *Revised 2026-10-03 (the user's call, opening the MLX track):* the skeleton's "no runtime interpreter dependency on core inference paths" rule is amended — **llama.cpp remains the zero-dependency default local runtime on every platform; the binary still ships and runs alone** — and an **explicitly opt-in, interpreter-backed backend type** is permitted beside that default (the `mlx` type: a persistent Python child over pipes, in the environment Apogee owns, never the system Python), refusing loudly at construction when its runtime is absent. No inference path requires an interpreter unless the user configures one.
 
 ## Core surfaces
 
-Apogee presents the same harness through three front-ends, in rough order of interactivity *(shape adopted from Ommi 2026-08-24; Ommi's removed TUI is deliberately not cloned)*:
+Apogee presents the same harness through four front-ends, in rough order of interactivity *(shape adopted from Ommi 2026-08-24 as three; Ommi's removed TUI is deliberately not cloned; `execute` added 2026-10-04 — the suites vision, no Ommi analog)*:
 
 1. **`apogee complete`** — one-shot prompt → answer; scriptable and pipeable.
 2. **`apogee chat`** — interactive multi-turn session: persistent, resumable, mid-session model switching, context-window monitoring.
-3. **`apogee serve`** — OpenAI-compatible HTTP server (`/v1/chat/completions`, `/v1/completions`, …), later joined by a bearer-gated `/v1/admin` control plane. **Server deployments only** *(decided 2026-08-24)*: serve applies when the executable runs on a server and a client — a mobile or desktop app — makes REST calls (POST/GET) to it over the network. A local front-end never talks to a localhost port.
+3. **`apogee execute`** *(added 2026-10-04; targeted v0.1.4)* — chat's sibling opened with a **suite** instead of a model: the same session core, symphonies playable (`/play`), the Orchestrator over them opt-in. A CLI surface like chat — the no-TUI lesson is untouched.
+4. **`apogee serve`** — OpenAI-compatible HTTP server (`/v1/chat/completions`, `/v1/completions`, …), later joined by a bearer-gated `/v1/admin` control plane. **Server deployments only** *(decided 2026-08-24)*: serve applies when the executable runs on a server and a client — a mobile or desktop app — makes REST calls (POST/GET) to it over the network. A local front-end never talks to a localhost port.
 
 Around those sit capability and lifecycle commands (models, config, check, …) as the capability areas land — the full map is the [`backlog/`](../backlog/README.md).
 
@@ -35,10 +36,12 @@ A **GUI ships as a sibling application** *(committed direction 2026-08-24; plann
 
 ## Scope (in)
 
-- **Backends:** cloud — Anthropic, OpenAI, Google, and Ollama, each via its official CLI (subscription plan; a persistent child with token-level streaming where that CLI supports it, per-turn spawning where it does not; the harness never reads a CLI's credentials or session files, and never causes a vendor's server to start) and, where offered, its direct HTTPS API (API billing plan), selected per backend entry; local — llama.cpp linked in-process.
+- **Backends:** cloud — Anthropic, OpenAI, Google, and Ollama, each via its official CLI (subscription plan; a persistent child with token-level streaming where that CLI supports it, per-turn spawning where it does not; the harness never reads a CLI's credentials or session files, and never causes a vendor's server to start) and, where offered, its direct HTTPS API (API billing plan), selected per backend entry; local — llama.cpp linked in-process, and *(added 2026-10-03, opt-in)* MLX on Apple silicon through a persistent Python child over pipes.
 - **Open local models:** no forbidden or curated models — any user-supplied model runs; verification protects integrity (digests, loadability), never gates choice; unknown models are handled permissively through behavior profiles.
 - **Model & data sources:** direct Hugging Face downloads (models, GGUFs, SafeTensors, datasets) and pulls through the user's Ollama store.
 - **Agentic tool loop:** one shared model→tool→model loop behind all surfaces; MCP client and agent management in a later ring.
+- **Autonomous tasks** *(direction set 2026-09-25; targeted v0.1.4 — the release 2026-10-03's merges and migration assembled)*: `apogee task` — a goal in; the application plans, drives successive turns of the one shared agent loop, checks acceptance stated up front, and stops on done or budget. User- or scheduler-invoked, never a daemon; unattended runs keep deny-by-default until a per-task, recorded policy explicitly widens them.
+- **Suites & symphonies** *(direction set 2026-10-03/04; targeted v0.1.4)*: designated sets of local models as a named config unit resolved through the one role chain; **symphonies** — named, staged multi-model prompt processes, chainable, pre-shipped as assets and user-defined through the agents-style lifecycle; `apogee execute` as the suite-first surface, with an opt-in **Orchestrator** (symphonies projected as tools into the ordinary agent loop). Model initiative never spends; serial generation is the stated cost.
 - **Sessions & context:** persistent resumable chats; Apogee-owned context monitoring and compaction on every backend.
 - **RAG & knowledge** *(gated ring)*: lexical-floor-first retrieval (BM25, then vector, then hybrid), and the knowledge/graph layers after it.
 - **Local-model depth** *(gated ring)*: model management and per-family behavior profiles.

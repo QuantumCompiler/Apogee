@@ -12,10 +12,10 @@
 
 # Role pointers. Each names an entry under `backends:` below.
 models:
-  # Role pointers. Each names an entry under `backends:` below, and all three
-  # resolve through one shared chain:
+  # Role pointers. Each names an entry under `backends:` below, and every one
+  # resolves through one shared chain:
   #     -m on the command line  >  a per-feature pin  >  the role pointer here
-  #                             >  models.default
+  #       >  (a helper role) the backend the chat is on  >  models.default
   # `apogee models status` prints which rung answered for each role.
 
   # The backend used when nothing else is specified.
@@ -31,6 +31,21 @@ models:
 
   # Used for structured-extraction work. Unset means models.default.
   # default_extraction: extractor
+
+  # Helper models: smaller ones doing what the chat model cannot, or should
+  # not spend its time on. Each unset role falls back to the backend the chat
+  # is on, so nothing changes until you name one.
+  #   default_vision        describes an image for a chat model that cannot
+  #                         see (a llamacpp entry needs an mmproj_path)
+  #   default_transcription turns audio into text (a llamacpp entry whose
+  #                         projector has an audio encoder)
+  #   default_utility       the chores: chat titles, compaction summaries,
+  #                         rewriting a follow-up into a search query, and
+  #                         summarising a tool result over 8 KiB -- which only
+  #                         happens when this is set
+  # default_vision: vision
+  # default_transcription: listener
+  # default_utility: helper
 
 # Optional search roots that pre-fill path prompts. Each is optional; an empty
 # value simply means "no default". ${ENV_VAR} references are expanded.
@@ -48,17 +63,33 @@ paths:
 #   deny    never run
 # The prompt's [a]lways answer rewrites the tool's line here to `allow`.
 # Read-only tools (read_file, git_diff, search_documents, ...) never prompt.
+# fetch_url is asked about per website instead: see allowed_hosts below.
 permissions:
   write_file: ask
+  edit_file: ask
   delete_file: ask
   run_command: ask
   write_note: ask
   delete_note: ask
 
-# Where the native toolsets operate.
-# tools:
-#   fs_root: ~            # the filesystem tools cannot leave this directory
-#   disabled: [shell]     # switch a whole toolset off: fs, shell, git, notes, rag
+# Where the native toolsets operate, and which websites they may reach.
+tools:
+  # fs_root: ~            # the filesystem tools cannot leave this directory;
+  #                       # unset, it is the folder Apogee was started in
+  # disabled: [shell]     # switch a whole toolset off: fs, shell, git, notes, rag
+  # The websites fetch_url reaches without asking, by exact host name:
+  # docs.python.org admits neither python.org nor any other subdomain. Any
+  # other website asks first, and where nobody can answer (a pipe, `serve`)
+  # it is refused. The prompt's [a]lways answer adds the website here.
+  allowed_hosts: []
+  # Web search for the model (web_search), answered by a SearXNG instance you
+  # run. Its JSON output is off by default: add json under search.formats in
+  # its settings.yml. The instance's host is reached without asking; the
+  # pages a search finds are asked about like any other website.
+  # search:
+  #   provider: searxng
+  #   url: http://127.0.0.1:8888
+  #   results: 5          # 1 to 20
 
 # MCP servers: external tool servers spoken to over stdio (the Model Context
 # Protocol). Each one's tools appear to the model as mcp__<name>__<tool> and
@@ -186,15 +217,38 @@ backends:
   # model_path is any GGUF you supply -- Apogee ships none and curates none, so
   # any model you point it at will run.
   #
-  # context_size unset means "whatever this model was trained for", which is
-  # usually what you want; set it to trade memory against conversation length.
+  # context_size unset means 32768 tokens, or the model's trained window when
+  # that is smaller, or less when free memory cannot hold it. Set it to trade
+  # memory against conversation length: the cache is allocated up front, and a
+  # model's whole trained window can cost gigabytes -- 16 GiB on Qwen3.8-27B.
+  # cache_type is how that cache is kept: q8_0 (the default) takes about half
+  # of f16's memory, q4_0 about a quarter. A model that cannot take q8_0 falls
+  # back to f16; a type you name is used as written. `apogee models info
+  # <backend>` shows the window and what its cache costs.
   # idle_unload_seconds releases the weights after a quiet spell -- worth
   # setting if you switch between a local and a cloud backend in one session,
   # since the model is the largest thing the process holds.
+  # A local model samples the way its file recommends (the general.sampling.*
+  # keys a conversion writes), else as its family's model card advises, else
+  # greedily. -t and a temperature here outrank both; top_p, top_k, min_p,
+  # repeat_penalty and presence_penalty sit beside it, and a seed makes sampled
+  # answers repeat. Temperature 0 is greedy. `apogee models info <backend>`
+  # shows what is in force and where each value came from.
+  # thinking -- on (the default), off or auto -- is whether a reasoning model
+  # thinks before it answers; auto decides per question, through the utility
+  # model when one is set. thinking_budget caps the tokens it may think for.
+  # Both work on cloud backends too, mapped to each vendor's own control;
+  # --think and --think-budget, and /think in a chat, outrank them.
   # local:
   #   type: llamacpp
   #   model_path: "${HOME}/.cache/llms/my-model.gguf"
-  #   # context_size: 8192
+  #   # context_size: 65536
+  #   # cache_type: q8_0
+  #   # temperature: 0.7
+  #   # top_p: 0.8
+  #   # seed: 42
+  #   # thinking: auto
+  #   # thinking_budget: 2048
   #   # idle_unload_seconds: 900
 
   # ── Local vision ────────────────────────────────────────────────────────────
@@ -279,7 +333,7 @@ backends:
 #     description: "Meeting notes"
 #     # backend: embedder    # which entry embeds this collection (default: models.default_embedding)
 #     # retriever: auto      # lexical | vector | hybrid | auto -- checked by `apogee check`
-#     # rerank: off          # a backend name, or off
+#     # rerank: off          # a backend name, on (the utility model), or off
 #     # graph:               # the knowledge graph over this collection (apogee graph)
 #     #   enabled: true        # set by the first successful `apogee graph build`
 #     #   extract_backend: local # the backend `graph build` extracts with
@@ -327,6 +381,18 @@ backends:
 # knowledge:
 #   auto_capture: false
 #   db: knowledge          # the collection records go into
+
+# ── Memory (recall across chats) ─────────────────────────────────────────────
+# A finished chat of two turns or more is summarised once -- what was asked,
+# decided and stated -- by the utility model (or the chat's own model when it
+# is local), and its summary kept privately under memory/. A new chat's turns
+# then recall the few past chats, and recorded decisions, that bear on the
+# question, reported as `[memory] 2 past chats, 1 decision`. Only `chat`
+# recalls -- never `complete`, agents or `serve`. `--no-recall` turns it off
+# for a run, `/recall off` for a session, and `/private` keeps a chat from
+# ever being summarised.
+# memory:
+#   recall: true
 
 # ── Training (fine-tuning local models) ──────────────────────────────────────
 # The training track runs its Python drivers -- dataset preparation and the

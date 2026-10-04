@@ -5,6 +5,7 @@
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 /// Builds GGUF bytes a piece at a time, for tests.
 ///
@@ -56,6 +57,71 @@ public:
         return *this;
     }
 
+    /// One metadata pair whose value is an array of i32 -- a per-layer key.
+    GgufBuilder& i32_array_kv(std::string_view key, const std::vector<std::int32_t>& values) {
+        text(key);
+        u32(9);  // Array
+        u32(5);  // of Int32
+        u64(values.size());
+        for (const std::int32_t value : values) {
+            bytes_.append(std::string_view{reinterpret_cast<const char*>(&value), sizeof(value)});
+        }
+        return *this;
+    }
+
+    /// One metadata pair whose value is an array of strings -- the shape of a
+    /// tokenizer's vocabulary.
+    GgufBuilder& string_array_kv(std::string_view key, const std::vector<std::string>& values) {
+        text(key);
+        u32(9);  // Array
+        u32(8);  // of String
+        u64(values.size());
+        for (const std::string& value : values) {
+            text(value);
+        }
+        return *this;
+    }
+
+    /// One metadata pair whose value is `count` f32 zeros -- the shape of a
+    /// tokenizer's scores.
+    GgufBuilder& f32_array_kv(std::string_view key, std::size_t count) {
+        text(key);
+        u32(9);  // Array
+        u32(6);  // of Float32
+        u64(count);
+        bytes_.append(count * sizeof(float), '\0');
+        return *this;
+    }
+
+    /// One metadata pair whose value is an array of bools -- a per-layer flag.
+    GgufBuilder& bool_array_kv(std::string_view key, const std::vector<bool>& flags) {
+        text(key);
+        u32(9);  // Array
+        u32(7);  // of Bool
+        u64(flags.size());
+        for (const bool flag : flags) {
+            bytes_.push_back(flag ? '\x01' : '\x00');
+        }
+        return *this;
+    }
+
+    /// One metadata pair whose value is a bool -- a projector's encoder flags.
+    GgufBuilder& bool_kv(std::string_view key, bool value) {
+        text(key);
+        u32(7);  // Bool
+        bytes_.push_back(value ? '\x01' : '\x00');
+        return *this;
+    }
+
+    /// One metadata pair whose value is a float32 -- a key that is not an
+    /// integer, which the attention read must step over.
+    GgufBuilder& f32_kv(std::string_view key, float value) {
+        text(key);
+        u32(6);  // Float32
+        bytes_.append(std::string_view{reinterpret_cast<const char*>(&value), sizeof(value)});
+        return *this;
+    }
+
     /// One tensor descriptor: name, dim count, dims, ggml type, offset.
     GgufBuilder& tensor(std::string_view name, std::uint32_t dimensions = 2) {
         text(name);
@@ -91,6 +157,90 @@ private:
     GgufBuilder builder;
     builder.magic().u32(3).u64(1).u64(1);
     builder.string_kv("general.architecture", architecture);
+    builder.tensor("token_embd.weight");
+    return builder.bytes();
+}
+
+/// The smallest GGUF llama.cpp will really quantize (M3): a llama with the
+/// hyperparameters its loader asks for, and one 256x4 F16 tensor of zeros,
+/// laid out at GGUF's 32-byte alignment. About 2 KiB -- a real quantization
+/// in a test, no model downloaded. Without `with_context`, llama.cpp reads
+/// its metadata and then refuses it, for want of `llama.context_length`.
+[[nodiscard]] inline std::string quantizable_gguf(bool with_context = true) {
+    GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(with_context ? 8 : 7);
+    builder.string_kv("general.architecture", "llama");
+    builder.u32_kv("general.file_type", 1);  // F16
+    builder.u32_kv("llama.block_count", 1);
+    if (with_context) {
+        builder.u32_kv("llama.context_length", 128);
+    }
+    builder.u32_kv("llama.embedding_length", 256);
+    builder.u32_kv("llama.feed_forward_length", 512);
+    builder.u32_kv("llama.attention.head_count", 1);
+    builder.f32_kv("llama.attention.layer_norm_rms_epsilon", 1e-5F);
+    builder.text("token_embd.weight").u32(2).u64(256).u64(4).u32(1).u64(0);  // F16, offset 0
+    std::string bytes = builder.bytes();
+    bytes.append((32 - (bytes.size() % 32)) % 32, '\0');
+    bytes.append(std::size_t{256} * 4 * 2, '\0');
+    return bytes;
+}
+
+/// A multimodal projector's header (26b): its vision and audio encoder
+/// flags, and one vision tensor.
+[[nodiscard]] inline std::string projector_gguf(bool vision, bool audio) {
+    GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(3);
+    builder.string_kv("general.architecture", "clip");
+    builder.bool_kv("clip.has_vision_encoder", vision);
+    builder.bool_kv("clip.has_audio_encoder", audio);
+    builder.tensor("v.patch_embd.weight");
+    return builder.bytes();
+}
+
+/// A header with Qwen3.8-27B's attention geometry (26a): trained for 262,144
+/// positions, full attention every 4th of 64 blocks plus a prediction layer,
+/// 4 key-value heads of 256. Its cache is 1,088 MiB at 32K and q8_0.
+[[nodiscard]] inline std::string qwen38_like_gguf() {
+    GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(9);
+    builder.string_kv("general.architecture", "qwen35");
+    builder.u32_kv("qwen35.context_length", 262144);
+    builder.u32_kv("qwen35.block_count", 65);
+    builder.u32_kv("qwen35.attention.head_count", 24);
+    builder.u32_kv("qwen35.attention.head_count_kv", 4);
+    builder.u32_kv("qwen35.attention.key_length", 256);
+    builder.u32_kv("qwen35.attention.value_length", 256);
+    builder.u32_kv("qwen35.full_attention_interval", 4);
+    builder.u32_kv("qwen35.nextn_predict_layers", 1);
+    builder.tensor("token_embd.weight");
+    return builder.bytes();
+}
+
+/// A header with Gemma 4 12B's attention geometry (26m): 48 blocks, five
+/// sliding layers (a 1,024-token window, 8 heads of 256) to one full (1 head
+/// of 512). Its cache is 527 MiB at 32K and q8_0.
+[[nodiscard]] inline std::string gemma4_like_gguf() {
+    std::vector<std::int32_t> heads;
+    std::vector<bool> slides;
+    for (int layer = 0; layer < 48; ++layer) {
+        const bool full = layer % 6 == 5;
+        heads.push_back(full ? 1 : 8);
+        slides.push_back(!full);
+    }
+    GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(11);
+    builder.string_kv("general.architecture", "gemma4");
+    builder.u32_kv("gemma4.context_length", 262144);
+    builder.u32_kv("gemma4.block_count", 48);
+    builder.u32_kv("gemma4.attention.head_count", 16);
+    builder.i32_array_kv("gemma4.attention.head_count_kv", heads);
+    builder.u32_kv("gemma4.attention.key_length", 512);
+    builder.u32_kv("gemma4.attention.value_length", 512);
+    builder.u32_kv("gemma4.attention.key_length_swa", 256);
+    builder.u32_kv("gemma4.attention.value_length_swa", 256);
+    builder.u32_kv("gemma4.attention.sliding_window", 1024);
+    builder.bool_array_kv("gemma4.attention.sliding_window_pattern", slides);
     builder.tensor("token_embd.weight");
     return builder.bytes();
 }

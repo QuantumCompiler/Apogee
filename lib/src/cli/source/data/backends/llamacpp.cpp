@@ -1,0 +1,1728 @@
+#include "backends/llamacpp.h"
+
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <filesystem>
+#include <functional>
+#include <optional>
+#include <random>
+#include <utility>
+
+#include "backends/llamacpp_embed.h"
+#include "backends/llamacpp_tokens.h"
+#include "backends/markup_filter.h"
+#include "backends/native_tool_calls.h"
+#include "contracts/errors.h"
+#include "contracts/layout.h"
+#include "events/bus.h"
+#include "logger/operational.h"
+#include "modelstore/gguf_inspect.h"
+
+namespace apogee::backends {
+namespace {
+
+/// The prompt-level form of structured output, now the fallback (26f): a
+/// grammar holds a local answer to its schema wherever the model's template
+/// can take one, and only where it cannot -- no template, a format with no
+/// place for a schema, a schema the converter cannot express, a turn with
+/// tools -- is the schema stated in the system block, the caller validating
+/// either way. Skipped when a system message already carries the schema
+/// text -- every structured caller states it once itself -- so the model
+/// never reads it twice.
+std::vector<harness::ChatMessage> messages_with_schema(const harness::ChatRequest& request) {
+    const std::string& schema = request.transient.response_schema;
+    if (schema.empty()) {
+        return request.messages;
+    }
+    const nlohmann::json parsed = nlohmann::json::parse(schema, nullptr, false);
+    const std::string text = parsed.is_discarded() ? schema : parsed.dump(2);
+    for (const harness::ChatMessage& message : request.messages) {
+        if (message.role == harness::Role::System &&
+            message.content.plain_text().find("OUTPUT FORMAT") != std::string::npos) {
+            return request.messages;
+        }
+    }
+    std::vector<harness::ChatMessage> out = request.messages;
+    const std::string instruction =
+        "OUTPUT FORMAT\nYour response MUST be valid JSON conforming to the following JSON "
+        "Schema. Output only the JSON object -- no surrounding text or markdown code "
+        "blocks.\n\n" +
+        text;
+    // Beside an existing system message when there is one, else first.
+    std::size_t at = 0;
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        if (out[i].role == harness::Role::System) {
+            at = i + 1;
+        }
+    }
+    out.insert(out.begin() + static_cast<std::ptrdiff_t>(at),
+               harness::ChatMessage::system(instruction));
+    return out;
+}
+
+/// The messages a local prompt is rendered from: the schema instruction
+/// where one is asked for and `state_schema` -- false when a grammar holds
+/// the answer, so the schema is not stated twice -- and the system messages
+/// that open the conversation joined into one, a blank line apart.
+///
+/// A template may take one system message, and only first: Qwen3.5 and
+/// 3.8's raise "System message must be at the beginning" on a second, and
+/// the render failing drops the model to the fallback template -- and its
+/// tools with it. A second is the ordinary case: the environment note
+/// (25d), a retrieval block or a review note ahead of a chat's own system
+/// prompt. The Anthropic and Google wires join theirs the same way.
+std::vector<harness::ChatMessage> prompt_messages(const harness::ChatRequest& request,
+                                                  bool state_schema) {
+    std::vector<harness::ChatMessage> messages =
+        state_schema ? messages_with_schema(request) : request.messages;
+    std::size_t leading = 0;
+    while (leading < messages.size() && messages[leading].role == harness::Role::System) {
+        ++leading;
+    }
+    if (leading < 2) {
+        return messages;
+    }
+    std::string joined;
+    for (std::size_t i = 0; i < leading; ++i) {
+        const std::string text = messages[i].content.plain_text();
+        if (text.empty()) {
+            continue;
+        }
+        joined += (joined.empty() ? "" : "\n\n") + text;
+    }
+    messages.erase(messages.begin() + 1, messages.begin() + static_cast<std::ptrdiff_t>(leading));
+    messages.front() = harness::ChatMessage::system(joined);
+    return messages;
+}
+
+/// A context has to hold at least one token whose logits we can sample from.
+///
+/// The edge case this exists for: a request whose token sequence is an exact
+/// prefix match for what is already decoded (resending an identical prompt).
+/// Reusing all of it would leave nothing to decode, and llama.cpp has no logits
+/// to sample -- so one token is always re-decoded.
+[[nodiscard]] std::size_t reusable_prefix(std::size_t shared, std::size_t total) {
+    if (total == 0) {
+        return 0;
+    }
+    return std::min(shared, total - 1);
+}
+
+/// Feeds `tokens` to `context` in batches it will accept.
+///
+/// llama.cpp caps one decode call, and a prompt longer than that cap is
+/// rejected rather than split for us. Without this, the backend works on short
+/// prompts and fails the first time someone pastes a file.
+/// Refuses a prompt the context cannot hold, in our words rather than
+/// llama.cpp's.
+///
+/// Its own failure is `decode: failed to find a memory slot`, which names
+/// neither the prompt nor the setting that governs it. The fix is always the
+/// same -- raise `context_size` or send less -- so the message should say so.
+void reject_if_too_long(const LlamaContext& context, std::size_t prompt_tokens,
+                        const std::string& backend_name) {
+    const std::int64_t capacity = context.capacity();
+    if (capacity > 0 && static_cast<std::int64_t>(prompt_tokens) >= capacity) {
+        throw harness::ProviderError(
+            backend_name, "the prompt is " + std::to_string(prompt_tokens) +
+                              " tokens but this backend's context holds " +
+                              std::to_string(capacity) +
+                              ". Raise context_size on the backend, or start a new conversation");
+    }
+}
+
+///
+/// `checkpoints` are absolute positions at which to take a checkpoint (25c):
+/// a batch ends exactly there, and the context saves the state after
+/// `[0, mark)` before the next begins. Positions outside what this call
+/// decodes are skipped -- one at `position` itself is taken first, since the
+/// cache already ends there.
+void decode_in_batches(LlamaContext& context, const std::vector<std::int32_t>& tokens,
+                       std::int64_t position, std::vector<std::int64_t> checkpoints = {}) {
+    const auto limit =
+        static_cast<std::size_t>(std::max<std::int64_t>(context.max_batch_tokens(), 1));
+    const std::int64_t end = position + static_cast<std::int64_t>(tokens.size());
+    std::sort(checkpoints.begin(), checkpoints.end());
+    std::erase_if(checkpoints,
+                  [position, end](std::int64_t mark) { return mark < position || mark >= end; });
+    auto next_mark = checkpoints.begin();
+    if (next_mark != checkpoints.end() && *next_mark == position) {
+        (void)context.checkpoint(position);
+        ++next_mark;
+    }
+    std::size_t offset = 0;
+    while (offset < tokens.size()) {
+        std::size_t count = std::min(limit, tokens.size() - offset);
+        const std::int64_t at = position + static_cast<std::int64_t>(offset);
+        if (next_mark != checkpoints.end() && *next_mark < at + static_cast<std::int64_t>(count)) {
+            count = static_cast<std::size_t>(*next_mark - at);
+        }
+        const std::vector<std::int32_t> slice{
+            tokens.begin() + static_cast<std::ptrdiff_t>(offset),
+            tokens.begin() + static_cast<std::ptrdiff_t>(offset + count)};
+        context.decode(slice, at);
+        offset += count;
+        if (next_mark != checkpoints.end() &&
+            *next_mark == position + static_cast<std::int64_t>(offset)) {
+            (void)context.checkpoint(*next_mark);
+            ++next_mark;
+        }
+    }
+}
+
+/// How far short of a prompt's end its checkpoint is taken. A thinking
+/// model's next prompt re-renders this turn's answer without its reasoning,
+/// so it diverges inside the generation prompt that opens the answer
+/// (`<|im_start|>assistant\n<think>\n` on Qwen) -- a checkpoint at the very
+/// end would lie past the divergence and never be usable. llama-server's
+/// offset (`checkpoint_offsets`, tools/server/server-context.cpp).
+constexpr std::int64_t kCheckpointTail = 4;
+
+/// Where a fresh context's state came from, for the cache line (26j).
+constexpr std::string_view kFromSavedChat = "the saved chat";
+constexpr std::string_view kFromPromptCache = "the prompt cache on disk";
+
+/// Decodes base64, skipping whitespace; stops at padding.
+[[nodiscard]] std::string decode_base64(std::string_view encoded) {
+    static constexpr std::string_view alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(encoded.size() / 4 * 3);
+
+    std::uint32_t accumulator = 0;
+    int bits = 0;
+    for (const char c : encoded) {
+        if (c == '=') {
+            break;
+        }
+        const std::size_t value = alphabet.find(c);
+        if (value == std::string_view::npos) {
+            continue;  // whitespace and newlines are legal in a data URI
+        }
+        accumulator = (accumulator << 6U) | static_cast<std::uint32_t>(value);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back(static_cast<char>((accumulator >> static_cast<unsigned>(bits)) & 0xFFU));
+        }
+    }
+    return out;
+}
+
+/// Decodes the base64 payload of a `data:` URI. Empty for anything else.
+///
+/// The IR carries images as data URIs because that is what the cloud vendors
+/// take; mtmd wants the raw bytes, so this is where the two meet. A remote
+/// `https://` image is NOT fetched here -- a local backend silently reaching
+/// out to the network to answer a prompt is a surprise nobody asked for, and
+/// the caller reports it as unsupported instead.
+[[nodiscard]] std::string decode_data_uri(std::string_view url) {
+    constexpr std::string_view marker_text = ";base64,";
+    if (!url.starts_with("data:")) {
+        return {};
+    }
+    const std::size_t marker = url.find(marker_text);
+    if (marker == std::string_view::npos) {
+        return {};
+    }
+    return decode_base64(url.substr(marker + marker_text.size()));
+}
+
+/// A request's pictures and sounds, in prompt order, and the request with
+/// each one replaced by the projector's marker where it sits in its message.
+struct MediaPrompt {
+    harness::ChatRequest request;
+    std::vector<MediaInput> media;
+    bool images = false;
+    bool audio = false;
+};
+
+/// Whether `request` carries a picture or a sound this backend can read: an
+/// image as a `data:` URI, or audio. A remote image is never fetched (see
+/// `decode_data_uri`), so it leaves a turn on the text path.
+[[nodiscard]] bool carries_media(const harness::ChatRequest& request) {
+    return std::ranges::any_of(request.messages, [](const harness::ChatMessage& message) {
+        return std::ranges::any_of(message.content.parts(), [](const harness::ContentPart& part) {
+            return (part.kind == harness::ContentPart::Kind::ImageUrl &&
+                    part.image_url.starts_with("data:")) ||
+                   (part.kind == harness::ContentPart::Kind::InputAudio &&
+                    !part.audio_data.empty());
+        });
+    });
+}
+
+/// `request` with its media taken out as `MediaInput`s, each leaving its
+/// marker in place (26e). The template then renders every marker inside the
+/// message that carried it -- llama-server's way -- so a clip's frames keep
+/// their timestamps between them and a sound attached to the third message is
+/// heard there, not at the top of the prompt.
+[[nodiscard]] MediaPrompt with_markers(const harness::ChatRequest& request,
+                                       const std::string& marker) {
+    MediaPrompt out;
+    out.request = request;
+    for (harness::ChatMessage& message : out.request.messages) {
+        if (!message.content.is_rich()) {
+            continue;
+        }
+        std::vector<harness::ContentPart> parts;
+        for (const harness::ContentPart& part : message.content.parts()) {
+            std::string bytes;
+            if (part.kind == harness::ContentPart::Kind::ImageUrl) {
+                bytes = decode_data_uri(part.image_url);
+                out.images = out.images || !bytes.empty();
+            } else if (part.kind == harness::ContentPart::Kind::InputAudio) {
+                bytes = decode_base64(part.audio_data);
+                out.audio = out.audio || !bytes.empty();
+            } else {
+                parts.push_back(part);
+                continue;
+            }
+            if (bytes.empty()) {
+                continue;
+            }
+            out.media.push_back(MediaInput{.bytes = std::move(bytes), .frame = part.video_frame});
+            // A frame sits against its neighbours, so a video model can
+            // merge them; anything else stands on its own line.
+            parts.push_back(
+                harness::ContentPart::from_text(part.video_frame ? marker : marker + "\n"));
+        }
+        message.content = harness::MessageContent::from_parts(std::move(parts));
+    }
+    return out;
+}
+
+/// Sends `text` as a notice, when anyone is listening.
+void notice(const harness::StreamOptions& options, std::string text) {
+    if (!options.on_status) {
+        return;
+    }
+    harness::StatusEvent event;
+    event.type = harness::StatusEvent::Type::Notice;
+    event.phase = harness::StatusEvent::Phase::Done;
+    event.detail = std::move(text);
+    options.on_status(event);
+}
+
+/// The template variable gpt-oss switches its reasoning with (26i): it has
+/// no off, only `low`, which is what off asks for. Other templates ignore it.
+[[nodiscard]] std::string thinking_effort(const harness::Thinking& thinking) {
+    return thinking.off() ? "low" : std::string{};
+}
+
+/// Tells the turn its reasoning hit the budget (26i), while the reasoning is
+/// still on screen to be summarised.
+void budget_reached(const harness::StreamOptions& options, std::int64_t budget) {
+    if (!options.on_status) {
+        return;
+    }
+    harness::StatusEvent event;
+    event.type = harness::StatusEvent::Type::ThinkingBudget;
+    event.phase = harness::StatusEvent::Phase::Done;
+    event.tokens = budget;
+    event.detail = "the thinking budget of " + std::to_string(budget) + " tokens was reached";
+    options.on_status(event);
+}
+
+/// An id for a call the model's format left without one: nine letters and
+/// digits, the shape the strictest template in use (Mistral's) insists on, so
+/// the call and its result can be matched when the transcript renders again.
+[[nodiscard]] std::string make_call_id() {
+    static constexpr std::string_view kAlphabet =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    thread_local std::mt19937 generator{std::random_device{}()};
+    std::uniform_int_distribution<std::size_t> pick{0, kAlphabet.size() - 1};
+    std::string id(9, '0');
+    for (char& c : id) {
+        c = kAlphabet[pick(generator)];
+    }
+    return id;
+}
+
+/// Ends a reply where it writes one of `stops` -- a guessed framing's turn
+/// markers, which a model that does not know them writes out as text before
+/// going on to invent the rest of the transcript.
+///
+/// Text that could still become a marker is held back until it cannot, so a
+/// marker never reaches the screen in part; what is held when the reply ends
+/// otherwise comes out through `flush`.
+class StopWatch {
+public:
+    explicit StopWatch(const std::vector<std::string>& stops) : stops_{stops} {}
+
+    /// The text now safe to pass on. Sets `stopped` when a marker ended the
+    /// reply; the marker and anything after it are dropped.
+    [[nodiscard]] std::string write(std::string_view piece, bool& stopped) {
+        held_ += piece;
+        if (stops_.empty()) {
+            return std::exchange(held_, {});
+        }
+        std::size_t first = std::string::npos;
+        for (const std::string& stop : stops_) {
+            if (!stop.empty()) {
+                first = std::min(first, held_.find(stop));
+            }
+        }
+        if (first != std::string::npos) {
+            stopped = true;
+            std::string out = held_.substr(0, first);
+            held_.clear();
+            return out;
+        }
+        // The longest tail that is the start of a marker waits.
+        std::size_t keep = 0;
+        for (const std::string& stop : stops_) {
+            if (stop.empty()) {
+                continue;
+            }
+            for (std::size_t length = std::min(stop.size() - 1, held_.size()); length > keep;
+                 --length) {
+                if (held_.compare(held_.size() - length, length, stop, 0, length) == 0) {
+                    keep = length;
+                    break;
+                }
+            }
+        }
+        std::string out = held_.substr(0, held_.size() - keep);
+        held_.erase(0, held_.size() - keep);
+        return out;
+    }
+
+    [[nodiscard]] std::string flush() {
+        return std::exchange(held_, {});
+    }
+
+private:
+    const std::vector<std::string>& stops_;
+    std::string held_;
+};
+
+/// A reply read through the model's own template format as it streams.
+///
+/// llama-server's method: the whole reply so far is re-read after every
+/// token and only the difference is emitted -- reasoning to the thinking
+/// sink, content to the answer, and a tool call held back entirely, so its
+/// markup never reaches a screen or a transcript. Quadratic in the reply's
+/// length, which is nothing at chat lengths (25b, default taken).
+class TemplateReply {
+public:
+    TemplateReply(const ChatRendering& chat, const harness::StreamOptions& options)
+        : chat_{chat}, options_{options} {}
+
+    /// Takes the next piece. True when a stop string ended the reply; the
+    /// stop string itself is not part of it.
+    [[nodiscard]] bool write(std::string_view piece) {
+        raw_ += piece;
+        bool stopped = false;
+        for (const std::string& stop : chat_.stops) {
+            if (!stop.empty() && raw_.size() >= stop.size() &&
+                raw_.compare(raw_.size() - stop.size(), stop.size(), stop) == 0) {
+                raw_.resize(raw_.size() - stop.size());
+                stopped = true;
+                break;
+            }
+        }
+        ParsedReply now;
+        std::string ignored;
+        if (chat_.reader->read(raw_, true, now, ignored)) {
+            show(now);
+        }
+        return stopped;
+    }
+
+    /// Reads the finished reply. False, with `error`, when it does not match
+    /// the format: what was already shown stands as the answer, and no call
+    /// is taken from it -- a malformed call is never run on a guess.
+    [[nodiscard]] bool finish(std::string& error) {
+        ParsedReply parsed;
+        if (!chat_.reader->read(raw_, false, parsed, error)) {
+            final_.content = shown_content_;
+            final_.tool_calls.clear();
+            // Nothing shown at all: the reply comes out as the text it was,
+            // rather than a turn with no answer, no tool and only a notice --
+            // the same safety net the fallback's gate keeps (found on
+            // Llama 3.2 3B, 2026-09-25). Not when the model was still
+            // thinking: reasoning never becomes the answer.
+            if (shown_content_.empty() && shown_reasoning_.empty() && !raw_.empty()) {
+                final_.content = raw_;
+                if (options_.on_token) {
+                    options_.on_token(raw_);
+                }
+            }
+            return false;
+        }
+        show(parsed);
+        final_ = std::move(parsed);
+        return true;
+    }
+
+    [[nodiscard]] const std::string& content() const noexcept {
+        return final_.content;
+    }
+
+    [[nodiscard]] std::vector<harness::ToolCall> calls() const {
+        return final_.tool_calls;
+    }
+
+private:
+    /// Emits what `now` adds to what was already shown. A re-read that
+    /// revises earlier text cannot take back what a screen already has, so
+    /// only a strict extension is emitted.
+    void show(const ParsedReply& now) {
+        const auto extend = [](std::string& shown, const std::string& next,
+                               const std::function<void(std::string_view)>& sink) {
+            if (next.size() <= shown.size() || next.compare(0, shown.size(), shown) != 0) {
+                return;
+            }
+            if (sink) {
+                sink(std::string_view{next}.substr(shown.size()));
+            }
+            shown = next;
+        };
+        // Reasoning never reaches the answer: it goes to its own sink, and
+        // the IR has no field to keep it in.
+        extend(shown_reasoning_, now.reasoning, options_.on_thinking);
+        extend(shown_content_, now.content, options_.on_token);
+    }
+
+    const ChatRendering& chat_;
+    const harness::StreamOptions& options_;
+    std::string raw_;
+    std::string shown_reasoning_;
+    std::string shown_content_;
+    ParsedReply final_;
+};
+
+}  // namespace
+
+LlamaCppProvider::LlamaCppProvider(Options options, std::unique_ptr<LlamaRuntime> runtime)
+    : options_{std::move(options)}, runtime_{std::move(runtime)} {
+    if (!options_.clock) {
+        options_.clock = [] { return std::chrono::steady_clock::now(); };
+    }
+}
+
+std::unique_ptr<LlamaCppProvider> LlamaCppProvider::from_config(
+    const std::string& backend_name, const harness::BackendConfig& config) {
+    if (config.model_path.empty()) {
+        throw harness::ProviderError(
+            backend_name,
+            "no model_path configured. Set model_path on this backend to the GGUF file "
+            "you want to run locally");
+    }
+
+    std::string reason;
+    std::unique_ptr<LlamaRuntime> runtime = make_llama_runtime(reason);
+    if (runtime == nullptr) {
+        throw harness::ProviderError(backend_name, reason);
+    }
+    return std::make_unique<LlamaCppProvider>(options_from(backend_name, config),
+                                              std::move(runtime));
+}
+
+LlamaCppProvider::Options LlamaCppProvider::options_from(const std::string& backend_name,
+                                                         const harness::BackendConfig& config) {
+    Options options;
+    options.backend_name = backend_name;
+    options.model = config.model.empty() ? config.model_path : config.model;
+    options.model_path = config.model_path;
+    // The prompt cache under `cache/prompt/` (26j).
+    options.prompt_cache_dir = harness::prompt_cache_dir();
+    options.mmproj_path = harness::expand_env(config.mmproj_path);
+    if (config.context_size.has_value()) {
+        options.context_size = *config.context_size;
+    }
+    if (config.cache_type.has_value()) {
+        options.cache_type = *config.cache_type;
+        options.cache_type_named = true;
+    }
+    if (config.max_tokens.has_value()) {
+        options.max_tokens = *config.max_tokens;
+    }
+    if (config.idle_unload_seconds.has_value() && *config.idle_unload_seconds > 0) {
+        options.idle_unload = std::chrono::seconds{*config.idle_unload_seconds};
+    }
+    options.sampling = config_rung(config);
+    options.seed = config_seed(config);
+    return options;
+}
+
+std::string_view LlamaCppProvider::backend_name() const noexcept {
+    return options_.backend_name;
+}
+
+ResolvedSampling LlamaCppProvider::sampling_for(const harness::ChatRequest& request) const {
+    const ModelProfile* family = profile();
+    return resolve_sampling(
+        SamplingLadder{.request = SamplingRung{.temperature = request.temperature},
+                       .config = options_.sampling,
+                       .model_file = model_file_rung(header().sampling),
+                       // A request that skips the reasoning is the family's no-thinking case.
+                       .family = family_rung(family, !request.thinking.off()),
+                       .family_source = family == nullptr ? std::string{} : family->sampling_source,
+                       .seed = options_.seed});
+}
+
+const ModelProfile* LlamaCppProvider::profile() const {
+    if (profile_resolved_) {
+        return profile_;
+    }
+    // The architecture comes from the GGUF's own header -- a fact recorded in
+    // the file, which is why the ladder ranks it above guessing from a name.
+    // Read here rather than through the runtime seam because it is a few
+    // kilobytes and needs no model load: `model_behavior()` is asked before a
+    // turn, and loading weights to answer it would be absurd.
+    architecture_ = header().architecture;
+    profile_ = resolve_profile({}, architecture_, options_.model);
+    profile_resolved_ = true;
+    return profile_;
+}
+
+const models::GgufInfo& LlamaCppProvider::header() const {
+    if (!header_.has_value()) {
+        header_ = options_.model_path.empty()
+                      ? models::GgufInfo{}
+                      : models::inspect_gguf(std::filesystem::path{options_.model_path});
+    }
+    return *header_;
+}
+
+std::int64_t LlamaCppProvider::context_window() const {
+    if (options_.context_size > 0) {
+        return options_.context_size;
+    }
+    if (model_ != nullptr) {
+        return session_window();
+    }
+    // Before a load, the header's trained window is all there is; free
+    // memory can only lower it, and the first turn's measurement is exact.
+    const models::GgufInfo& info = header();
+    return info.parsed ? models::default_local_window(info.attention.context_length, 0) : 0;
+}
+
+std::int64_t LlamaCppProvider::session_window() const {
+    if (options_.context_size > 0) {
+        return options_.context_size;
+    }
+    return models::default_local_window(model_->context_length(), model_->fitted_window());
+}
+
+harness::ModelBehavior LlamaCppProvider::model_behavior() const {
+    harness::ModelBehavior behavior = behavior_for(profile());
+    // From the header alone, so asking needs no model load (26r).
+    const models::GgufInfo& info = header();
+    behavior.base_model = info.parsed && !info.has_chat_template;
+    return behavior;
+}
+
+bool LlamaCppProvider::accepts_images() const noexcept {
+    // Answers from CONFIGURED state, not from a loaded model: this is asked
+    // before a turn begins, and loading 16GB of weights to answer a yes/no
+    // question would make every `--image` check cost a model load.
+    //
+    // Both conditions are necessary. Without llama.cpp there is no mtmd at all;
+    // without an mmproj_path there is no projector to use. Whether the
+    // projector actually does images (rather than audio) is checked when it
+    // loads, and a mismatch surfaces there with a message naming the file.
+    return llama_available() && !options_.mmproj_path.empty();
+}
+
+bool LlamaCppProvider::accepts_audio() const noexcept {
+    if (!llama_available() || options_.mmproj_path.empty()) {
+        return false;
+    }
+    try {
+        if (!projector_header_.has_value()) {
+            projector_header_ = models::inspect_gguf(std::filesystem::path{options_.mmproj_path});
+        }
+        return projector_header_->parsed && projector_header_->projector_audio;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+int LlamaCppProvider::audio_sample_rate() const noexcept {
+    return model_ != nullptr ? model_->audio_sample_rate() : 0;
+}
+
+bool LlamaCppProvider::accepts_video() const noexcept {
+    if (!llama_available() || options_.mmproj_path.empty()) {
+        return false;
+    }
+    try {
+        if (!projector_header_.has_value()) {
+            projector_header_ = models::inspect_gguf(std::filesystem::path{options_.mmproj_path});
+        }
+        return projector_header_->parsed && projector_header_->projector_vision;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool LlamaCppProvider::model_loaded() const noexcept {
+    return model_ != nullptr;
+}
+
+void LlamaCppProvider::unload() {
+    // Order matters: a context borrows its model, so it must go first.
+    session_.reset();
+    session_tokens_.clear();
+    model_.reset();
+    // A file replaced while unloaded is noticed at the next load (26j).
+    fingerprint_read_ = false;
+    fingerprint_.reset();
+}
+
+PromptCache* LlamaCppProvider::prompt_cache() {
+    if (options_.prompt_cache_dir.empty()) {
+        return nullptr;
+    }
+    if (!fingerprint_read_) {
+        fingerprint_read_ = true;
+        fingerprint_ = fingerprint_of(std::filesystem::path{options_.model_path});
+    }
+    if (!fingerprint_.has_value()) {
+        return nullptr;
+    }
+    if (!prompt_cache_.has_value()) {
+        prompt_cache_.emplace(options_.prompt_cache_dir, options_.prompt_cache_cap);
+    }
+    return &*prompt_cache_;
+}
+
+std::string LlamaCppProvider::restore_session(const harness::ChatRequest& request,
+                                              const RenderedRequest& rendered,
+                                              const std::vector<std::int32_t>& prompt,
+                                              LlamaContext& context,
+                                              const harness::StreamOptions& options,
+                                              std::optional<std::size_t>& save_prefix_at) {
+    PromptCache* cache = prompt_cache();
+    if (cache == nullptr) {
+        return {};
+    }
+    // Only where a restore is exact: correctness first, the item's own rule.
+    // Said once, among the cache lines `--verbose` prints.
+    if (!context.restores_exactly()) {
+        if (!inexact_said_ && options.on_status) {
+            inexact_said_ = true;
+            harness::StatusEvent event;
+            event.type = harness::StatusEvent::Type::PromptCache;
+            event.phase = harness::StatusEvent::Phase::Done;
+            event.name = options_.model;
+            event.detail = "the prompt cache on disk is off for " + options_.model +
+                           ": its sliding-window cache does not restore exactly";
+            options.on_status(event);
+        }
+        return {};
+    }
+    // The resumed chat's own state first: it covers the system prompt and
+    // the conversation both.
+    if (restore_chat(*cache, context, options)) {
+        return std::string{kFromSavedChat};
+    }
+
+    // The prefix every conversation opening this way shares: the system
+    // prompt and the tools, worth a file only when long.
+    const std::optional<std::size_t> boundary =
+        rendered_length_before(request, rendered, prompt, false);
+    if (!boundary.has_value() || *boundary < kMinPrefixCacheTokens) {
+        return {};
+    }
+    if (const std::optional<std::string> cleared =
+            cache->claim_model(fingerprint_.value(), options_.model);
+        cleared.has_value()) {
+        notice(options, *cleared);
+    }
+    const std::vector<std::int32_t> head{prompt.begin(),
+                                         prompt.begin() + static_cast<std::ptrdiff_t>(*boundary)};
+    const std::filesystem::path file =
+        cache->prefix_path(fingerprint_.value(), context.cache_type(), context.capacity(), head);
+    std::error_code code;
+    if (!std::filesystem::exists(file, code)) {
+        save_prefix_at = boundary;
+        return {};
+    }
+    std::string error;
+    std::optional<std::vector<std::int32_t>> tokens = context.load_state(file, error);
+    if (tokens.has_value() && *tokens == head) {
+        session_tokens_ = std::move(*tokens);
+        PromptCache::touch(file);
+        return std::string{kFromPromptCache};
+    }
+    // Refused, or not the prefix it was named for: removed, and read again.
+    (void)context.trim_to(0);
+    std::filesystem::remove(file, code);
+    notice(options, "a cached prompt prefix for " + options_.model + " was discarded -- " +
+                        (tokens.has_value() ? std::string{"it held other tokens"} : error) +
+                        "; read again");
+    save_prefix_at = boundary;
+    return {};
+}
+
+bool LlamaCppProvider::restore_chat(PromptCache& cache, LlamaContext& context,
+                                    const harness::StreamOptions& options) {
+    const std::filesystem::path file =
+        conversation_id_.empty() ? std::filesystem::path{} : cache.chat_path(conversation_id_);
+    std::error_code code;
+    if (file.empty() || !std::filesystem::exists(file, code)) {
+        return false;
+    }
+    // Anything about it that does not fit -- another model file, another
+    // cache type or window, a file llama.cpp refuses -- and it goes, said
+    // once, and the prompt is read as before.
+    const std::optional<ChatCacheRecord> record = cache.read_chat_record(conversation_id_);
+    std::string why;
+    if (!record.has_value()) {
+        why = "its record is missing";
+    } else if (record->model != fingerprint_.value()) {
+        why = "it was made with a different model file";
+    } else if (record->cache_type != context.cache_type() || record->window != context.capacity()) {
+        why = "it was made with another cache type or window";
+    } else {
+        std::string error;
+        if (std::optional<std::vector<std::int32_t>> tokens = context.load_state(file, error);
+            tokens.has_value()) {
+            session_tokens_ = std::move(*tokens);
+            PromptCache::touch(file);
+            return true;
+        }
+        why = "it could not be restored: " + error;
+    }
+    cache.remove_chat(conversation_id_);
+    notice(options, "the saved state of this chat was discarded -- " + why +
+                        "; the conversation is read again");
+    return false;
+}
+
+void LlamaCppProvider::save_prefix(LlamaContext& context, const std::vector<std::int32_t>& head) {
+    const PromptCache* cache = prompt_cache();
+    if (cache == nullptr) {
+        return;
+    }
+    const std::filesystem::path file =
+        cache->prefix_path(fingerprint_.value(), context.cache_type(), context.capacity(), head);
+    std::filesystem::path written = file;
+    written += ".tmp";
+    std::string error;
+    if (context.save_state(written, head, error) && PromptCache::settle(written, file)) {
+        (void)cache->evict(file);
+        return;
+    }
+    // Not kept is read again next time: worth a log line, not a notice.
+    std::error_code code;
+    std::filesystem::remove(written, code);
+    logger::log(logger::Level::Warn, "llamacpp", "prompt prefix not cached: " + error);
+}
+
+void LlamaCppProvider::resume_conversation(std::string_view conversation_id) {
+    conversation_id_ = std::string{conversation_id};
+}
+
+void LlamaCppProvider::save_conversation(std::string_view conversation_id,
+                                         const harness::StatusSink& on_status) {
+    const auto say = [&on_status, this](std::string detail) {
+        if (on_status) {
+            harness::StatusEvent event;
+            event.type = harness::StatusEvent::Type::PromptCache;
+            event.phase = harness::StatusEvent::Phase::Done;
+            event.name = options_.model;
+            event.detail = std::move(detail);
+            on_status(event);
+        }
+    };
+    const PromptCache* cache = session_ == nullptr ? nullptr : prompt_cache();
+    const std::filesystem::path file =
+        cache == nullptr ? std::filesystem::path{} : cache->chat_path(conversation_id);
+    if (file.empty()) {
+        return;
+    }
+    if (!session_->restores_exactly()) {
+        say("this chat's state was not saved: a sliding-window cache does not restore exactly");
+        return;
+    }
+    // A few tokens short of the last prompt's end: a thinking model's next
+    // prompt re-renders the answer and diverges inside the generation
+    // prompt, and a restored state has no checkpoints to go back to.
+    const std::int64_t target =
+        std::max<std::int64_t>(0, static_cast<std::int64_t>(last_prompt_tokens_) - kCheckpointTail);
+    if (std::cmp_less(target, kMinChatCacheTokens)) {
+        say("this chat's state was not saved: " + std::to_string(target) + " tokens, under the " +
+            std::to_string(kMinChatCacheTokens) + " worth keeping");
+        return;
+    }
+    const std::int64_t kept = session_->trim_to(target);
+    session_tokens_.resize(static_cast<std::size_t>(kept));
+    if (std::cmp_less(kept, kMinChatCacheTokens)) {
+        say("this chat's state was not saved: it could not be cut where the next turn starts");
+        return;
+    }
+    std::error_code code;
+    std::filesystem::create_directories(file.parent_path(), code);
+    std::filesystem::permissions(file.parent_path(), std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::replace, code);
+    std::filesystem::path written = file;
+    written += ".tmp";
+    std::string error;
+    if (!session_->save_state(written, session_tokens_, error) ||
+        !PromptCache::settle(written, file) ||
+        !cache->write_chat_record(conversation_id,
+                                  ChatCacheRecord{.model = fingerprint_.value(),
+                                                  .cache_type = session_->cache_type(),
+                                                  .window = session_->capacity(),
+                                                  .tokens = kept})) {
+        std::filesystem::remove(written, code);
+        cache->remove_chat(conversation_id);
+        say("this chat's state was not saved: " +
+            (error.empty() ? "it could not be written" : error));
+        return;
+    }
+    (void)cache->evict(file);
+    const double mib =
+        static_cast<double>(std::filesystem::file_size(file, code)) / (1024.0 * 1024.0);
+    std::array<char, 32> size{};
+    std::snprintf(size.data(), size.size(), "%.1f", mib);
+    say("saved this chat's state: " + std::to_string(kept) + " tokens, " + size.data() + " MiB");
+}
+
+std::vector<std::vector<float>> LlamaCppProvider::embed(
+    const std::vector<std::string>& inputs, const harness::CancellationToken& cancellation) {
+    cancellation.throw_if_cancelled();
+    // The same idle policy as a chat turn, on the way in as well as the way
+    // out: a model left resident by an embed-only workload is the 16GB this
+    // setting exists to give back. The test for this found it missing.
+    expire_if_idle();
+    ensure_model({});
+    try {
+        std::vector<std::vector<float>> vectors = embed_with_llama(*model_, inputs, cancellation);
+        // An embedding is a use of the model like any other, so the idle
+        // timer restarts from here -- otherwise a long ingest could unload the
+        // weights under itself.
+        last_use_ = options_.clock();
+        used_ = true;
+        return vectors;
+    } catch (const std::runtime_error& e) {
+        throw harness::ProviderError(options_.backend_name, e.what());
+    }
+}
+
+std::string LlamaCppProvider::embedding_model_name() const {
+    if (!options_.model.empty()) {
+        return options_.model;
+    }
+    return std::filesystem::path{options_.model_path}.filename().string();
+}
+
+std::size_t LlamaCppProvider::embedding_dimensions() const noexcept {
+    return model_ == nullptr ? 0 : model_->embedding_dimensions();
+}
+
+bool LlamaCppProvider::uses_in_text_tool_calls() const noexcept {
+    return model_behavior().native_tool_calls;
+}
+
+harness::StatusEvent LlamaCppProvider::model_status() const {
+    harness::StatusEvent event;
+    event.type = model_ == nullptr ? harness::StatusEvent::Type::ModelLoading
+                                   : harness::StatusEvent::Type::ModelReady;
+    event.phase = harness::StatusEvent::Phase::Done;
+    event.name = options_.model;
+    return event;
+}
+
+void LlamaCppProvider::preload(const harness::StatusSink& on_status) {
+    ensure_model(on_status);
+}
+
+void LlamaCppProvider::expire_if_idle() {
+    if (options_.idle_unload.count() <= 0 || model_ == nullptr || !used_) {
+        return;
+    }
+    if (options_.clock() - last_use_ >= options_.idle_unload) {
+        unload();
+    }
+}
+
+void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
+    if (model_ != nullptr) {
+        return;
+    }
+    // The lifecycle bus hears about a load whether or not anyone streams
+    // status: a served client subscribed to /v1/admin/events sees the model
+    // come up.
+    events::emit(events::kModelLoadStarted,
+                 nlohmann::json{{"backend", options_.backend_name}, {"model", options_.model}});
+
+    if (on_status) {
+        harness::StatusEvent event;
+        event.type = harness::StatusEvent::Type::ModelLoading;
+        event.phase = harness::StatusEvent::Phase::Start;
+        event.name = options_.model;
+        on_status(event);
+    }
+
+    ModelLoad load;
+    load.path = options_.model_path;
+    load.gpu_layers = options_.gpu_layers;
+    load.mmproj_path = options_.mmproj_path;
+    load.cache_type = options_.cache_type;
+    load.cache_type_named = options_.cache_type_named;
+    // Only the default window is fitted to memory: a context_size the user
+    // wrote is used as written.
+    load.fit_window = options_.context_size <= 0;
+    std::string error;
+    model_ = runtime_->load(load, error);
+    if (model_ == nullptr) {
+        if (on_status) {
+            harness::StatusEvent failed;
+            failed.type = harness::StatusEvent::Type::ModelLoading;
+            failed.phase = harness::StatusEvent::Phase::Error;
+            failed.name = options_.model;
+            failed.detail = error;
+            on_status(failed);
+        }
+        // A clear message naming the file, never a crash -- the acceptance
+        // criterion for this path.
+        throw harness::ProviderError(options_.backend_name, error);
+    }
+
+    if (on_status) {
+        harness::StatusEvent ready;
+        ready.type = harness::StatusEvent::Type::ModelReady;
+        ready.phase = harness::StatusEvent::Phase::Done;
+        ready.name = options_.model;
+        on_status(ready);
+    }
+    events::emit(events::kModelLoadCompleted,
+                 nlohmann::json{{"backend", options_.backend_name}, {"model", options_.model}});
+}
+
+std::int64_t LlamaCppProvider::count_prompt_tokens(const harness::ChatRequest& request) {
+    if (model_ == nullptr) {
+        return -1;  // see the header: never load a model to answer a measurement
+    }
+    // The prompt a turn would actually send, tool definitions included -- on
+    // a local window they are not a rounding error.
+    return static_cast<std::int64_t>(model_->tokenize(render_request(request).text, true).size());
+}
+
+LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
+    const harness::ChatRequest& request) const {
+    RenderedRequest rendered;
+    ChatRenderOptions render;
+    // The template's own switch, where it has one; a family without one
+    // ignores it (Qwen's closed think block is exactly this switch). Kept
+    // under a schema too: the grammar admits the reasoning before the
+    // answer, so a thinking model still thinks (26f).
+    render.enable_thinking = !request.thinking.off();
+    render.reasoning_effort = thinking_effort(request.thinking);
+
+    // A schema is held by a grammar on the tools-less pass, the loop's rule
+    // for every provider whose JSON mode cannot share a turn with tools: a
+    // grammar over the whole answer leaves no room for a call (26f).
+    if (!request.transient.response_schema.empty() && request.tools.empty()) {
+        ChatRenderOptions held = render;
+        held.response_schema = request.transient.response_schema;
+        auto chat = std::make_unique<ChatRendering>();
+        if (model_->render_chat(prompt_messages(request, false), request.tools, held, *chat,
+                                rendered.schema_fallback)) {
+            rendered.text = chat->prompt;
+            rendered.chat = std::move(chat);
+            return rendered;
+        }
+    }
+
+    const std::vector<harness::ChatMessage> messages = prompt_messages(request, true);
+    auto chat = std::make_unique<ChatRendering>();
+    if (model_->render_chat(messages, request.tools, render, *chat, rendered.fallback_reason)) {
+        rendered.text = chat->prompt;
+        rendered.chat = std::move(chat);
+        return rendered;
+    }
+    // The fallback, as it was before 25b: llama.cpp's fixed template set or
+    // the name-matched registry, and the profile's filters on the reply.
+    RenderedPrompt fallback = llama_tokens::render_prompt(*model_, options_.model, messages, true);
+    rendered.text = std::move(fallback.text);
+    rendered.stops = std::move(fallback.stops);
+    if (request.thinking.off()) {
+        // After the generation prompt, so the model's first token is already
+        // the answer's.
+        rendered.text += reasoning_skip_for(profile());
+    }
+    return rendered;
+}
+
+std::vector<std::int64_t> LlamaCppProvider::checkpoint_marks(
+    const harness::ChatRequest& request, const RenderedRequest& rendered,
+    const std::vector<std::int32_t>& prompt) const {
+    std::vector<std::int64_t> marks;
+    const auto size = static_cast<std::int64_t>(prompt.size());
+    if (size > kCheckpointTail) {
+        marks.push_back(size - kCheckpointTail);
+    }
+    // The last user message's start: where a template that restyles the
+    // final user turn diverges.
+    if (const std::optional<std::size_t> head =
+            rendered_length_before(request, rendered, prompt, true);
+        head.has_value()) {
+        marks.push_back(static_cast<std::int64_t>(*head));
+    }
+    return marks;
+}
+
+std::optional<std::size_t> LlamaCppProvider::rendered_length_before(
+    const harness::ChatRequest& request, const RenderedRequest& rendered,
+    const std::vector<std::int32_t>& prompt, bool before_last_user) const {
+    // Found by rendering the conversation before that user message, alone,
+    // and keeping its length only if it really is a token prefix of the
+    // prompt -- a template that renders earlier messages differently once
+    // they are not last gives no usable boundary, and none is taken. The
+    // first user message's start ends the system prompt and the tools: what
+    // every conversation that opens the same way shares (26j).
+    const bool held = rendered.chat != nullptr && rendered.chat->holds_schema;
+    const std::vector<harness::ChatMessage> messages = prompt_messages(request, !held);
+    std::size_t user = messages.size();
+    if (before_last_user) {
+        for (std::size_t i = messages.size(); i-- > 0;) {
+            if (messages[i].role == harness::Role::User) {
+                user = i;
+                break;
+            }
+        }
+    } else {
+        for (std::size_t i = 0; i < messages.size(); ++i) {
+            if (messages[i].role == harness::Role::User) {
+                user = i;
+                break;
+            }
+        }
+    }
+    if (user == 0 || user == messages.size()) {
+        return std::nullopt;
+    }
+    const std::vector<harness::ChatMessage> before{
+        messages.begin(), messages.begin() + static_cast<std::ptrdiff_t>(user)};
+    std::string text;
+    if (rendered.chat != nullptr) {
+        // The same inputs as the full prompt, schema included, so the two
+        // agree on every token before that user message.
+        ChatRenderOptions render;
+        render.enable_thinking = !request.thinking.off();
+        render.reasoning_effort = thinking_effort(request.thinking);
+        render.add_generation_prompt = false;
+        if (held) {
+            render.response_schema = request.transient.response_schema;
+        }
+        ChatRendering prefix;
+        std::string ignored;
+        if (!model_->render_chat(before, request.tools, render, prefix, ignored)) {
+            return std::nullopt;
+        }
+        text = std::move(prefix.prompt);
+    } else {
+        text = llama_tokens::render_prompt(*model_, options_.model, before, false).text;
+    }
+    const std::vector<std::int32_t> head = model_->tokenize(text, true);
+    if (!head.empty() && head.size() < prompt.size() &&
+        std::equal(head.begin(), head.end(), prompt.begin())) {
+        return head.size();
+    }
+    return std::nullopt;
+}
+
+void LlamaCppProvider::report_cache(const harness::StreamOptions& options,
+                                    std::size_t prompt_tokens, std::int64_t kept,
+                                    const LlamaContext& context,
+                                    std::string_view restored_from) const {
+    if (!options.on_status) {
+        return;
+    }
+    harness::StatusEvent event;
+    event.type = harness::StatusEvent::Type::PromptCache;
+    event.phase = harness::StatusEvent::Phase::Done;
+    event.name = options_.model;
+    event.tokens = static_cast<std::int64_t>(prompt_tokens);
+    event.used_tokens = kept;
+    const std::int64_t decoded = static_cast<std::int64_t>(prompt_tokens) - kept;
+    // Where the kept part came from when it was not this process (26j).
+    event.detail = "prompt " + std::to_string(prompt_tokens) + " tokens: " + std::to_string(kept) +
+                   " from " +
+                   (restored_from.empty() ? std::string{"the cache"} : std::string{restored_from}) +
+                   ", " + std::to_string(decoded) + " read";
+    if (context.needs_checkpoints()) {
+        // The memory the user never asked for, where it exists at all.
+        const double mib = static_cast<double>(context.checkpoint_bytes()) / (1024.0 * 1024.0);
+        char size[32];
+        std::snprintf(size, sizeof size, "%.1f", mib);
+        event.detail += " · " + std::to_string(context.checkpoint_count()) + " of " +
+                        std::to_string(kMaxCheckpoints) + " checkpoints, " + size + " MiB";
+    }
+    // The window this conversation has and how its cache is kept (26a): the
+    // memory behind the numbers above.
+    event.detail += " · window " + std::to_string(context.capacity()) + ", " +
+                    std::string{harness::to_string(context.cache_type())} + " cache";
+    options.on_status(event);
+}
+
+void LlamaCppProvider::report_media(const harness::StreamOptions& options,
+                                    const std::vector<MediaInput>& media, std::int64_t positions,
+                                    double seconds, const LlamaContext& context) const {
+    if (!options.on_status) {
+        return;
+    }
+    // The pictures and sounds a turn encoded, and what it cost: the line that
+    // shows a later turn reading their text instead (26e).
+    std::size_t frames = 0;
+    std::size_t sounds = 0;
+    for (const MediaInput& item : media) {
+        frames += item.frame ? 1 : 0;
+        sounds += item.bytes.starts_with("RIFF") ? 1 : 0;
+    }
+    const std::size_t images = media.size() - frames - sounds;
+    std::string what;
+    const auto add = [&what](std::size_t count, std::string_view one, std::string_view many) {
+        if (count > 0) {
+            what += (what.empty() ? "" : ", ") + std::to_string(count) + " " +
+                    std::string{count == 1 ? one : many};
+        }
+    };
+    add(images, "image", "images");
+    add(frames, "frame", "frames");
+    add(sounds, "sound", "sounds");
+    char took[32];
+    std::snprintf(took, sizeof took, "%.1f", seconds);
+    harness::StatusEvent event;
+    event.type = harness::StatusEvent::Type::PromptCache;
+    event.phase = harness::StatusEvent::Phase::Done;
+    event.name = options_.model;
+    event.tokens = positions;
+    event.detail = "prompt " + std::to_string(positions) + " positions with " + what +
+                   " encoded: read whole on a fresh context in " + took + " s · window " +
+                   std::to_string(context.capacity()) + ", " +
+                   std::string{harness::to_string(context.cache_type())} + " cache";
+    options.on_status(event);
+}
+
+void LlamaCppProvider::notice_if_toolless(const harness::ChatRequest& request,
+                                          const RenderedRequest& rendered,
+                                          const harness::StreamOptions& options) const {
+    if (rendered.chat != nullptr) {
+        return;
+    }
+    if (const models::GgufInfo& info = header(); info.parsed && !info.has_chat_template) {
+        // No template at all is almost always a base model, and that is what
+        // the user needs to hear -- once a conversation, tools or not -- rather
+        // than a note about tools that reads like a bug in Apogee. Its answer
+        // runs in a guessed framing, which it ends at the framing's markers.
+        if (!template_noticed_) {
+            template_noticed_ = true;
+            const std::string file = std::filesystem::path{options_.model}.filename().string();
+            notice(options, (file.empty() ? options_.model : file) +
+                                " ships no chat template, so it is " + models::base_model_note());
+        }
+        return;
+    }
+    if (request.tools.empty()) {
+        return;
+    }
+    // Unknown is permissive, and nothing is dropped silently: the turn still
+    // runs, and the user is told why the model cannot see its tools.
+    notice(options,
+           options_.model + " is answering without tools: " +
+               (rendered.fallback_reason.empty() ? std::string{"its template cannot take them"}
+                                                 : rendered.fallback_reason));
+}
+
+void LlamaCppProvider::notice_schema_fallback(const RenderedRequest& rendered,
+                                              const harness::StreamOptions& options) const {
+    if (rendered.schema_fallback.empty() || schema_noticed_.contains(rendered.schema_fallback)) {
+        return;
+    }
+    schema_noticed_.insert(rendered.schema_fallback);
+    const std::string text = "no grammar holds " + options_.model + "'s answer to its schema (" +
+                             rendered.schema_fallback +
+                             "), so the schema is stated in the prompt and the answer checked";
+    notice(options, text);
+    logger::log(logger::Level::Warn, "llamacpp", text);
+}
+
+harness::ChatResponse LlamaCppProvider::chat(const harness::ChatRequest& request,
+                                             const harness::CancellationToken& cancellation) {
+    harness::StreamOptions options;
+    options.cancellation = cancellation;
+    return run(request, options);
+}
+
+harness::ChatResponse LlamaCppProvider::stream_chat(const harness::ChatRequest& request,
+                                                    const harness::StreamOptions& options) {
+    return run(request, options);
+}
+
+std::int64_t LlamaCppProvider::generation_limit(const harness::ChatRequest& request) const {
+    const std::int64_t own = request.max_tokens.value_or(0);
+    return own > 0 ? own : options_.max_tokens;
+}
+
+std::int64_t LlamaCppProvider::side_context_size(const harness::ChatRequest& request,
+                                                 std::size_t prompt_tokens) const {
+    // Floored so llama.cpp's default batch (2048) stays below the window
+    // rather than equal to it -- the edge the session context's sizing found
+    // (llama_real.cpp, make_context) -- and a small window costs nothing.
+    constexpr std::int64_t kFloor = 4096;
+    constexpr std::int64_t kSlack = 256;
+    const std::int64_t window = session_window();
+    const std::int64_t needed =
+        static_cast<std::int64_t>(prompt_tokens) + generation_limit(request) + kSlack;
+    return std::min(window, std::max(needed, kFloor));
+}
+
+LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
+                                                        std::int64_t prompt_end,
+                                                        const harness::ChatRequest& request,
+                                                        const harness::StreamOptions& options,
+                                                        const ChatRendering* chat,
+                                                        const std::vector<std::string>& stops) {
+    options.cancellation.throw_if_cancelled();
+
+    const std::int64_t limit = generation_limit(request);
+
+    // The sampler is set every generation -- the session's context outlives
+    // any one request, and a call's grammar from the last turn must not
+    // constrain this one, nor its temperature draw this one's tokens. No
+    // grammar on the fallback path.
+    SamplingSettings sampling = sampling_for(request).settings();
+    // A thinking budget (26i), counted between the format's own reasoning
+    // tags; a format that names none has nothing to count, and is said so.
+    const std::optional<std::int64_t> budget =
+        request.thinking.off() ? std::nullopt : request.thinking.budget;
+    if (budget.has_value()) {
+        if (chat != nullptr && !chat->thinking_start.empty() && !chat->thinking_ends.empty()) {
+            sampling.reasoning_budget =
+                SamplingSettings::ReasoningBudget{.tokens = *budget,
+                                                  .start = chat->thinking_start,
+                                                  .ends = chat->thinking_ends,
+                                                  .prefill = chat->generation_prompt};
+        } else if (!request.transient.side_request && !budget_noticed_) {
+            // Once a conversation: every step of every turn would say it.
+            budget_noticed_ = true;
+            notice(options, "the thinking budget is not applied on " + options_.model +
+                                ": its chat format names no reasoning to count");
+        }
+    }
+    if (std::string error; !context.set_sampling(
+            chat != nullptr ? chat->grammar : SamplingGrammar{}, sampling, error)) {
+        // The reader still parses a call without it; unconstrained is the
+        // permissive reading, and the user is told. A schema's grammar was
+        // compiled when the prompt was rendered, so this is the rare case of
+        // one that compiled there and not here -- its answer is validated.
+        (void)context.set_sampling(SamplingGrammar{}, sampling, error);
+        const bool held = chat != nullptr && chat->holds_schema;
+        notice(options,
+               (held ? "the answer on " + options_.model + " runs without its schema's grammar: "
+                     : "tool calls on " + options_.model + " run without their grammar: ") +
+                   error);
+    }
+    std::optional<TemplateReply> reply;
+    if (chat != nullptr) {
+        reply.emplace(*chat, options);
+    }
+    // On the fallback, the guessed framing's own turn markers end the reply
+    // -- and with no template at all, any known family's, whole or cut short
+    // (26r): a base model imitating a transcript writes them all.
+    StopWatch watch{stops};
+    TurnMarkerFilter spill{chat == nullptr && model_behavior().base_model
+                               ? base_turn_markers()
+                               : std::vector<std::string>{}};
+    bool stopped = false;
+
+    std::string answer;
+    std::vector<std::int32_t> generated;
+    harness::FinishReason finish = harness::FinishReason::Stop;
+
+    // Reasoning is separated HERE, at the source, so display, the returned
+    // text, persisted history, and any later tool parsing all see the same
+    // thing. Filtering at one surface and not another is how a <think> block
+    // ends up in a saved transcript after being hidden on screen.
+    //
+    // A KNOWN profile's empty pair list is honoured as "this family emits
+    // none"; an unprofiled model gets the permissive default set.
+    ThinkFilter think{reasoning_pairs_for(profile())};
+    if (options.on_thinking) {
+        think.on_thinking(options.on_thinking);
+    }
+
+    // Three filters, in this order, and the order is load-bearing.
+    //
+    // ThinkFilter first, because for gpt-oss the reasoning block's OPENER is
+    // itself a header (`<|channel|>analysis<|message|>`). Strip headers first
+    // and the block loses its boundary, so the model's working lands in the
+    // answer -- the exact bug Milestone P fixed for Qwen, reintroduced by a
+    // different route.
+    //
+    // The gate second, because it keys on `<|channel|>commentary to=` and the
+    // markup filter would have eaten the `<|channel|>` half of that.
+    //
+    // The markup filter last, on what is left: the pure framing between the
+    // channels.
+    ToolCallGate gate{model_behavior().native_tool_calls};
+    MarkupFilter markup{header_markers_for(profile())};
+
+    // One funnel, so every path -- token callback, returned text, saved history
+    // -- sees the same bytes. A filter applied on one and not another is how a
+    // hidden marker reappears in a transcript.
+    const auto pump = [&](std::string_view piece) { return markup.write(gate.write(piece)); };
+
+    // Where generation must stop even if the model would keep going. Found on
+    // real hardware, not by the scripted runtime: `apogee chat`'s background
+    // title request has no max_tokens of its own, so it ran to the provider
+    // default -- and a model that never emits end-of-generation filled the KV
+    // cache and threw, taking the whole turn down with it. A truncated title is
+    // a non-event; an exception mid-conversation is not.
+    const std::int64_t wall = context.capacity();
+
+    bool budget_said = false;
+    std::int64_t produced = 0;
+    for (; produced < limit; ++produced) {
+        if (wall > 0 && prompt_end + produced >= wall) {
+            finish = harness::FinishReason::Length;
+            break;
+        }
+
+        // Between tokens, not merely at entry: a local model generating into a
+        // long answer is exactly when a user reaches for Ctrl-C.
+        options.cancellation.throw_if_cancelled();
+
+        const std::int32_t token = context.sample();
+        if (!budget_said && sampling.reasoning_budget.has_value() &&
+            context.reasoning_budget_spent()) {
+            budget_said = true;
+            budget_reached(options, sampling.reasoning_budget->tokens);
+        }
+        if (model_->is_eog(token)) {
+            break;
+        }
+        generated.push_back(token);
+
+        if (reply.has_value()) {
+            // A preserved token is rendered as its text -- the call's opener
+            // among them -- or the reader would see a call as bare JSON.
+            const bool preserved =
+                std::find(chat->preserved_tokens.begin(), chat->preserved_tokens.end(), token) !=
+                chat->preserved_tokens.end();
+            const std::string piece =
+                preserved ? model_->special_token_text(token) : model_->token_text(token);
+            if (reply->write(piece)) {
+                stopped = true;
+                break;  // a stop string: not fed back, the reply is over
+            }
+        } else {
+            const std::string visible = pump(
+                think.write(spill.write(watch.write(model_->token_text(token), stopped), stopped)));
+            answer += visible;
+            if (options.on_token && !visible.empty()) {
+                options.on_token(visible);
+            }
+            if (stopped) {
+                break;  // a turn marker: not fed back, the reply is over
+            }
+        }
+
+        // Feed the token back so the next sample sees it. Its position is the
+        // end of the prompt plus however many we have already produced.
+        context.decode({token}, prompt_end + produced);
+    }
+    // Whatever the filter still holds: a partial marker at end of stream was
+    // never a marker, and an unterminated reasoning block's residue goes to the
+    // thinking sink rather than into the answer.
+    // Flushed in the same order they are written through. `gate.flush()` is
+    // where the safety net lives: a span that opened like a tool call and
+    // parsed as nothing comes back out as text here, rather than leaving a turn
+    // with no answer, no tool, and no error -- the least debuggable outcome
+    // there is, and exactly how an unrecognised grammar variant presents.
+    std::vector<harness::ToolCall> calls;
+    if (reply.has_value()) {
+        if (std::string error; !reply->finish(error)) {
+            notice(options, options_.model + "'s reply did not match its template's format (" +
+                                chat->format + "): it is kept as text, and no tool call in it ran");
+        }
+        answer = reply->content();
+        calls = reply->calls();
+        for (harness::ToolCall& call : calls) {
+            if (call.id.empty()) {
+                call.id = make_call_id();
+            }
+        }
+    } else {
+        // What the watch still held could have become a marker and did not;
+        // a turn marker's fragment still open is dropped (26r).
+        bool ended = false;
+        std::string tail = spill.write(watch.flush(), ended);
+        tail = pump(think.write(tail + spill.flush()));
+        answer += tail;
+        if (options.on_token && !tail.empty()) {
+            options.on_token(tail);
+        }
+        tail = markup.write(gate.write(think.flush()));
+        tail += markup.write(gate.flush());
+        tail += markup.flush();
+        if (!tail.empty()) {
+            answer += tail;
+            if (options.on_token) {
+                options.on_token(tail);
+            }
+        }
+        calls = gate.calls();
+    }
+
+    // Reaching the cap without an end-of-generation token is a truncated
+    // answer, and a surface that shows it as complete is lying to the user.
+    if (produced >= limit) {
+        finish = harness::FinishReason::Length;
+    }
+
+    Generation result;
+    result.text = std::move(answer);
+    result.tokens = std::move(generated);
+    result.tool_calls = std::move(calls);
+    result.finish = finish;
+    result.last_unfed = stopped && !result.tokens.empty();
+    if (!result.tool_calls.empty()) {
+        // A native call ends the turn on the model's side (`<|call|>` is
+        // end-of-generation), so the honest finish reason is the tool call,
+        // not the stop token that carried it.
+        result.finish = harness::FinishReason::ToolCalls;
+    }
+    return result;
+}
+
+harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatRequest& request,
+                                                       const harness::StreamOptions& options) {
+    const MediaPrompt media = with_markers(request, model_->image_marker());
+    if (media.images && !model_->supports_vision()) {
+        // Reached when a model loaded but its projector does not do images --
+        // an audio-only mmproj, say. The capability probe answered from config,
+        // which cannot know that; this is where the truth arrives.
+        throw harness::ProviderError(
+            options_.backend_name,
+            "this model has no usable image support. Check that mmproj_path points at the "
+            "projector matching this model");
+    }
+    if (media.audio && !model_->supports_audio()) {
+        throw harness::ProviderError(options_.backend_name,
+                                     "this model's projector has no audio encoder, so it cannot "
+                                     "hear the audio it was sent");
+    }
+
+    // The prompt is rendered as text with one marker per item where each sat
+    // in its message -- the contract mtmd's tokenizer expects -- through the
+    // same renderer as a text turn, tools included: a model asked about a
+    // picture can act on it (the Milestone O rule, 25b default). An attached
+    // file's parts come first in its message, so the picture is still read
+    // before the question about it.
+    const RenderedRequest rendered = render_request(media.request);
+    notice_if_toolless(media.request, rendered, options);
+    notice_schema_fallback(rendered, options);
+    const std::string& prompt = rendered.text;
+
+    // A fresh context every time. There is no prefix to reuse -- an image
+    // occupies embedding positions that no token comparison can match -- so
+    // pretending otherwise would corrupt the cache rather than save work.
+    std::unique_ptr<LlamaContext> scratch = model_->make_context(session_window());
+    LlamaContext& context = *scratch;
+
+    std::string error;
+    const auto began = std::chrono::steady_clock::now();
+    const std::int64_t prompt_end = context.decode_multimodal(media.media, prompt, 0, error);
+    if (prompt_end < 0) {
+        throw harness::ProviderError(options_.backend_name, error);
+    }
+    report_media(options, media.media, prompt_end,
+                 std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count(),
+                 context);
+
+    const Generation generation =
+        generate(context, prompt_end, request, options, rendered.chat.get(), rendered.stops);
+
+    // The session's own KV is deliberately untouched: this turn ran on a
+    // throwaway context, so `session_tokens_` still describes what the text
+    // path cached and the next text turn can still reuse it.
+    last_use_ = options_.clock();
+    used_ = true;
+
+    harness::ChatResponse response;
+    response.message = harness::ChatMessage::assistant(generation.text);
+    // The image path shares `generate()`, so it gets tool calls for free. A
+    // model asked to look at a picture and then act on it is the ordinary case,
+    // not an exotic one -- and forgetting this here is how a capability comes
+    // out working on one surface and silently missing on another.
+    response.message.tool_calls = generation.tool_calls;
+    response.model = options_.model;
+    response.finish_reason = generation.finish;
+    response.usage.completion_tokens = static_cast<std::int64_t>(generation.tokens.size());
+    return response;
+}
+
+harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
+                                            const harness::StreamOptions& options) {
+    expire_if_idle();
+    ensure_model(options.on_status);
+
+    // Images take a different route entirely. mtmd turns text-with-markers plus
+    // decoded pictures into interleaved text and embedding chunks, so there is
+    // no flat token vector to prefix-match against -- which is why the image
+    // path below decodes from scratch and skips the KV reuse the text path
+    // depends on. Paying that on a turn with a picture in it is the honest
+    // trade; pretending an image is a token sequence is not.
+    if (carries_media(request)) {
+        return run_multimodal(request, options);
+    }
+
+    const RenderedRequest rendered = render_request(request);
+    notice_if_toolless(request, rendered, options);
+    notice_schema_fallback(rendered, options);
+    // add_special: see llama_tokens::tokenize_prompt.
+    const std::vector<std::int32_t> prompt = model_->tokenize(rendered.text, true);
+
+    // A side request -- a background title summary, a one-off clerk call -- is
+    // not a turn of this conversation. It runs on its own throwaway context so
+    // the session's KV is untouched: Ommi's SideRequest lesson, where an async
+    // titler's cache write clobbered the session it was titling.
+    const bool side_request = request.transient.side_request;
+
+    LlamaContext* context = nullptr;
+    std::unique_ptr<LlamaContext> scratch;
+
+    if (side_request) {
+        scratch = model_->make_context(side_context_size(request, prompt.size()));
+        context = scratch.get();
+        reject_if_too_long(*context, prompt.size(), options_.backend_name);
+        decode_in_batches(*context, prompt, 0);
+    } else {
+        if (session_ == nullptr) {
+            session_ = model_->make_context(session_window());
+            session_tokens_.clear();
+        }
+        context = session_.get();
+        reject_if_too_long(*context, prompt.size(), options_.backend_name);
+
+        // A context with nothing in it yet may start from disk (26j): the
+        // resumed chat's own state, or the prefix its system prompt and tools
+        // open with.
+        std::string restored_from;
+        std::optional<std::size_t> save_prefix_at;
+        if (session_tokens_.empty()) {
+            restored_from =
+                restore_session(request, rendered, prompt, *context, options, save_prefix_at);
+        }
+        const std::size_t restored = session_tokens_.size();
+
+        const std::size_t shared = reusable_prefix(
+            llama_tokens::common_prefix_length(session_tokens_, prompt), prompt.size());
+
+        // Everything past the shared prefix is stale -- drop it from the KV so
+        // the new suffix decodes into the right positions. A model whose
+        // memory cannot be cut there is cleared instead, and the whole prompt
+        // decodes again from wherever the cache really ends.
+        const std::int64_t kept = context->trim_to(static_cast<std::int64_t>(shared));
+        if (restored_from == kFromSavedChat && std::cmp_less(kept, restored) &&
+            prompt_cache_.has_value()) {
+            // A saved chat this conversation no longer opens with in full:
+            // what still matched was used, and the file goes, said once.
+            prompt_cache_->remove_chat(conversation_id_);
+            notice(options, kept == 0
+                                ? std::string{"the saved state of this chat did not match its "
+                                              "conversation; read again"}
+                                : "the saved state of this chat matched only " +
+                                      std::to_string(kept) + " of its " + std::to_string(restored) +
+                                      " tokens; the rest was read again");
+        }
+        if (kept == 0) {
+            restored_from.clear();
+        }
+
+        // Checkpoints only where the memory cannot be rewound (25c): a
+        // pure-attention model's trim already works, and it pays nothing.
+        const std::vector<std::int64_t> marks = context->needs_checkpoints()
+                                                    ? checkpoint_marks(request, rendered, prompt)
+                                                    : std::vector<std::int64_t>{};
+        if (save_prefix_at.has_value() && kept == 0) {
+            // Read the shared opening on its own, keep it, then the rest.
+            const auto at = static_cast<std::ptrdiff_t>(*save_prefix_at);
+            const std::vector<std::int32_t> head{prompt.begin(), prompt.begin() + at};
+            decode_in_batches(*context, head, 0, marks);
+            save_prefix(*context, head);
+            decode_in_batches(*context, {prompt.begin() + at, prompt.end()},
+                              static_cast<std::int64_t>(*save_prefix_at), marks);
+        } else {
+            const std::vector<std::int32_t> suffix{
+                prompt.begin() + static_cast<std::ptrdiff_t>(kept), prompt.end()};
+            decode_in_batches(*context, suffix, kept, marks);
+        }
+        session_tokens_ = prompt;
+        last_prompt_tokens_ = prompt.size();
+        report_cache(options, prompt.size(), kept, *context, restored_from);
+    }
+
+    // Either path leaves the KV holding exactly positions [0, prompt.size()),
+    // so generation continues from there regardless of how much was reused.
+    const std::int64_t prompt_end = static_cast<std::int64_t>(prompt.size());
+
+    // The sampling loop is shared with the image path: extracted when vision
+    // landed, because the alternative was a second copy that would drift the
+    // first time a stop condition changed.
+    const Generation generation =
+        generate(*context, prompt_end, request, options, rendered.chat.get(), rendered.stops);
+    const std::string& answer = generation.text;
+
+    if (!side_request) {
+        // What the KV now holds is the prompt plus everything generated, and
+        // that is what the next turn's prefix match must be made against.
+        //
+        // **Transient (RAG) content needs no special handling here**, which is
+        // worth stating because the constraint is explicit on this item. The
+        // match is token-for-token, so a turn can only reuse a cached token
+        // that its own prompt actually contains: the moment the next request
+        // stops carrying the injected block, the prefix ends there and every
+        // transient token is trimmed. An extra "forget the transient region"
+        // step was written first and then removed -- it could only ever make
+        // the remembered prefix SHORTER than the truth, never protect
+        // correctness, and it could not be made to fail a test.
+        //
+        // Not a token that completed a stop string: it was never fed back, so
+        // claiming it would have the next turn decode on past a position that
+        // was never filled.
+        const auto fed =
+            generation.tokens.end() - static_cast<std::ptrdiff_t>(generation.last_unfed ? 1 : 0);
+        session_tokens_.insert(session_tokens_.end(), generation.tokens.begin(), fed);
+    }
+
+    last_use_ = options_.clock();
+    used_ = true;
+
+    harness::ChatResponse response;
+    response.message = harness::ChatMessage::assistant(answer);
+    response.message.tool_calls = generation.tool_calls;
+    response.finish_reason = generation.finish;
+    response.model = options_.model;
+    // Exact on both sides: this is our own tokenizer, not an estimate and not a
+    // vendor's report.
+    response.usage.prompt_tokens = static_cast<std::int64_t>(prompt.size());
+    response.usage.completion_tokens = static_cast<std::int64_t>(generation.tokens.size());
+    return response;
+}
+
+std::vector<harness::ModelInfo> LlamaCppProvider::list_models(
+    const harness::CancellationToken& cancellation) {
+    cancellation.throw_if_cancelled();
+    // A local backend serves exactly the one GGUF it was pointed at. Listing
+    // what is on disk is model management -- a different item's concern.
+    harness::ModelInfo info;
+    info.id = options_.model;
+    info.name = options_.model;
+    info.provider = "llamacpp";
+    info.backend = options_.backend_name;
+    return {info};
+}
+
+}  // namespace apogee::backends

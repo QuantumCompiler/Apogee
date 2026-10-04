@@ -154,4 +154,36 @@ else()
         "unavailable. Check whether upstream moved it.")
 endif()
 
+# The chat layer (`common/chat.h`): each model's own template rendered with
+# tools, its tool-call parser, and the lazy grammar -- local tool calling (25b).
+# Built by upstream as `llama-common` (LLAMA_BUILD_COMMON above) and linked only
+# into `apogee_llama_chat` (source/CMakeLists.txt), never copied.
+#
+# Its one network dependency is cut here. `llama-common` links llama.cpp's
+# vendored cpp-httplib PRIVATE, for its model downloader (`download.cpp`,
+# `hf-cache.cpp`) -- a static library's private dependency still lands on the
+# final link line, and it would bring a whole HTTP server library into the
+# executable's link graph. Nothing Apogee calls reaches those two files; the
+# spike's link map showed only the chat, parser, Jinja, grammar and sampling
+# objects pulled in. With httplib off the link line that is structural: if a
+# repin ever made the chat code need it, the link fails naming the symbol,
+# rather than a listener quietly arriving in-process (CLAUDE.md -> Interactive
+# turns never open a listening socket). It also keeps upstream's httplib away
+# from Apogee's own, a different version.
+if(NOT TARGET llama-common)
+    message(FATAL_ERROR
+        "Apogee: llama.cpp built no `llama-common` target -- local tool calling needs its "
+        "chat layer. Check LLAMA_BUILD_COMMON, or whether upstream renamed it.")
+endif()
+get_target_property(_apogee_common_links llama-common INTERFACE_LINK_LIBRARIES)
+list(FILTER _apogee_common_links EXCLUDE REGEX "cpp-httplib")
+set_property(TARGET llama-common PROPERTY INTERFACE_LINK_LIBRARIES "${_apogee_common_links}")
+# Its headers, and the vendored JSON library they pull in, are upstream's:
+# consumers see them as system headers, like every other dependency's.
+foreach(_apogee_target llama-common llama-common-base nlohmann sheredom)
+    if(TARGET ${_apogee_target})
+        set_property(TARGET ${_apogee_target} PROPERTY SYSTEM TRUE)
+    endif()
+endforeach()
+
 message(STATUS "Apogee: llama.cpp enabled")

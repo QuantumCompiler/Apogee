@@ -6,7 +6,7 @@ the surface for genuine server deployments, where a remote client makes REST
 calls to Apogee running on a host; a local front-end uses this instead.
 
 This document is the reference for that protocol. The worked example is
-[`reference_driver.py`](../../src/cli/tests/reference_driver.py), which is also
+[`reference_driver.py`](../../src/cli/tests/scripts/py/reference_driver.py), which is also
 the test that keeps this document true.
 
 ## The two flags
@@ -33,6 +33,7 @@ One JSON object per line on stdout. Every object has a `type`.
 {"type":"session","protocol_version":1,"model":"claude-sonnet-5"}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
+{"type":"memory","chats":2,"decisions":1}
 {"type":"tool_status","text":"fetch_url https://…"}
 {"type":"answer_start"}
 {"type":"answer_delta","text":"…"}
@@ -46,9 +47,11 @@ One JSON object per line on stdout. Every object has a `type`.
 | Event | Meaning |
 |---|---|
 | `session` | Once, first. Names the protocol version and the model. |
-| `thinking` | The model began reasoning. No text. |
+| `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, or the backend's `thinking_budget`). |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
-| `tool_status` | A tool is running, described in `text` for display. |
+| `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. |
+| `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk), as `<role> — <what it is doing>` (26n). |
+| `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`). Show it and keep it; it never ends the turn. |
 | `answer_start` / `answer_end` | Bracket one answer's deltas. |
 | `answer_delta` | A chunk of answer text. Concatenate in order. |
 | `result` | Ends a turn. Carries the whole answer, so a driver that dropped every delta still has it. `usage` is **absent** when the provider reported none — absent is not zero. |
@@ -82,10 +85,33 @@ One JSON object per line on stdin.
 ```jsonl
 {"type":"user","text":"what is 2+2?"}
 {"type":"answer","text":"Yes"}
+{"type":"attach","path":"report.pdf"}
 ```
 
 An unrecognised line is ignored rather than fatal — the tolerance this protocol
 asks of drivers, honoured in the other direction.
+
+### Attaching files
+
+`attach` attaches a file, a folder or a glob to the chat, as `/attach` does at a
+terminal: `path` is relative to the child's working directory. It is indexed in
+the background and settles before the next `user` message is answered. Each
+outcome arrives as a `notice`: what was attached, and how it will reach the model
+(inlined whole, or its excerpts retrieved each turn); a file skipped, and why. A
+folder over 500 files or 50 MB is refused, since there is no terminal to ask on;
+attach a narrower folder or a glob. A `user` message that mentions `@path` attaches
+that path the same way, and is answered as typed.
+
+An image, a recording or a video is attached the same way. A chat model that can
+read it is sent it as it is with the next `user` message; from the turn after, it
+reaches the model as text: an image's description, a recording's transcript, or
+a video's timeline of what was on screen and what was said, by the time. The
+`vision` and `transcription` helper roles write that text, or the chat model when
+no helper is set and it can. Audio and video need `ffmpeg` on the child's `PATH`.
+Something nothing configured can read is refused in a `notice` that names the
+role to set. More than twelve descriptions by a model billed per call are refused
+too, since there is no terminal to ask on. A `notice` also reports what could not
+be read, such as a video's sound with no model to hear it.
 
 Closing stdin ends the session: the child drains its queued output, persists the
 conversation, and exits cleanly.
@@ -112,10 +138,10 @@ to answer it.
 ### Answering a permission prompt
 
 The same event carries the permission gate's question. When the model calls a
-destructive tool — `write_file`, `delete_file`, `run_command`, `write_note`,
-`delete_note` — whose level in `permissions:` is `ask`, the child emits a
-`question` with `"kind": "permission"`, the `tool` and its `target` (the path,
-the command), and **blocks until answered**:
+destructive tool — `write_file`, `edit_file`, `delete_file`, `run_command`,
+`write_note`, `delete_note` — whose level in `permissions:` is `ask`, the child
+emits a `question` with `"kind": "permission"`, the `tool` and its `target`
+(the path, the command), and **blocks until answered**:
 
 ```jsonl
 {"type":"question","kind":"permission","tool":"write_file","target":"notes/todo.md","questions":[{"header":"Permission","question":"Allow write_file on notes/todo.md?","multi_select":false,"options":[{"label":"yes","description":"Allow this once"},{"label":"no","description":"Deny"},{"label":"always","description":"Allow, and remember it in the config"},{"label":"session","description":"Allow for the rest of this session"}]}]}
@@ -131,6 +157,21 @@ prompt outstanding fails the turn, exactly as with an unanswered question.
 Where there is no driver — `complete --output-format stream-json` is one-shot
 and cannot be asked — `ask` resolves to deny, and only `allow` in the config
 lets a destructive tool run.
+
+`fetch_url` is asked about **per website** rather than per tool, because a URL
+can carry out anything the model has read. The first time a run reaches a host
+not in `tools.allowed_hosts`, the event's `target` is that host, `outbound` is
+`true`, and `detail` is the whole URL — show it, since what would leave the
+machine is in it. A redirect to a new host asks again, before anything is
+fetched from it:
+
+```jsonl
+{"type":"question","kind":"permission","tool":"fetch_url","target":"docs.python.org","outbound":true,"detail":"https://docs.python.org/3/library/os.html","questions":[{"header":"Permission","question":"Allow fetch_url to reach docs.python.org?","multi_select":false,"options":[{"label":"yes","description":"Allow this once"},{"label":"no","description":"Deny"},{"label":"always","description":"Allow, and add the website to tools.allowed_hosts"},{"label":"session","description":"Allow this website for the rest of this session"}]}]}
+```
+
+The answers are the same words: `session` allows that host for the rest of the
+run, and `always` adds it to `tools.allowed_hosts`. With no driver, only the
+listed hosts are reached.
 
 ## Everything else is a CLI command
 

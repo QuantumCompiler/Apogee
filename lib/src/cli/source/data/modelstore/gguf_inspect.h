@@ -1,0 +1,236 @@
+#pragma once
+
+#include <cstdint>
+#include <filesystem>
+#include <istream>
+#include <optional>
+#include <string>
+#include <vector>
+
+/// Reading a GGUF file's header — architecture, tensor counts, and whether it
+/// parses at all.
+///
+/// **Header only.** Nothing here touches tensor data, so the whole inspection
+/// costs a few kilobytes of reads however large the file is. That is what lets
+/// `apogee check` and `apogee models info` run it on every invocation instead
+/// of hiding it behind a flag nobody passes.
+///
+/// ## Why this is not llama.cpp's `gguf.h`
+///
+/// The item this was built from recorded the opposite decision: use llama.cpp's
+/// reader, so that "the header parses" and "llama.cpp can read it" are one
+/// claim rather than two. That rationale is sound and it does not survive
+/// contact with the build.
+///
+/// **llama.cpp is off by default** (`-DAPOGEE_ENABLE_LLAMA=ON` opts in), and
+/// `macos-arm64` — the only merge-blocking CI target — builds without it. A
+/// reader behind that flag would mean `check` and `models info` report
+/// *nothing* in the default build, and, decisively, that this item's own
+/// guardrail ("GGUF header inspection run in CI against a fixture") would not
+/// run in the job that gates merges. A check that cannot run where it matters
+/// is not a check.
+///
+/// So the header read is ours and always compiles, and it is the only claim
+/// this file makes: **the header is well formed**. It deliberately does not
+/// claim the model loads — that is a stronger statement, it needs llama.cpp,
+/// and a build without llama.cpp must say "not checked" rather than imply it.
+/// Two claims honestly distinguished beats one claim that is usually
+/// unavailable, and the stronger one belongs with whatever links the runtime.
+///
+/// ## Why a header read and not a full load
+///
+/// Ommi's recorded lesson, and the reason this reads structure rather than
+/// calling `exists()`: **a model can be present, the right size, and match a
+/// recorded digest while still being unloadable** — a truncated download, or a
+/// Git LFS pointer file committed instead of the model. Checking presence
+/// alone reports healthy, and the failure surfaces much later inside
+/// llama.cpp, where it looks like a different bug.
+///
+/// Checking the four magic bytes is barely better, and was what `apogee check`
+/// did until this landed: a half-finished download has perfectly valid magic,
+/// so the row said "model loads" for precisely the file that cannot. Parsing
+/// the whole header — every key, every tensor descriptor — is what actually
+/// distinguishes the two, and it still costs kilobytes.
+///
+/// A full load would be stronger still and is deliberately not done: it costs
+/// gigabytes of I/O per model, and `check` is something a user runs when
+/// something is already wrong.
+///
+/// ## Robustness is the point
+///
+/// Every length in a GGUF comes from the file itself, so a corrupt or hostile
+/// file can claim a 2^64-byte string. Every read here is bounds-checked against
+/// the real file size and every count is capped, because the first thing this
+/// code will meet in the wild is a half-downloaded model — which is exactly
+/// the case `models repair` exists for and must be able to *diagnose*.
+namespace apogee::models {
+
+/// `general.file_type` was absent from the header.
+inline constexpr std::uint32_t kUnknownFileType = 0xFFFFFFFFU;
+
+/// What the header says about the model's attention -- what a context's
+/// cache is made of (26a). Each field is the architecture's own key
+/// (`<arch>.attention.head_count_kv`, ...), read as llama.cpp reads it; an
+/// absent key is 0 or empty. `models/kv_cache.h` turns it into bytes.
+struct AttentionHeader {
+    /// `<arch>.context_length` -- the window the model was trained for.
+    std::int64_t context_length = 0;
+    std::int64_t block_count = 0;
+    std::int64_t embedding_length = 0;
+    /// One value for every layer, or one per layer.
+    std::vector<std::int64_t> head_count;
+    std::vector<std::int64_t> head_count_kv;
+    std::int64_t key_length = 0;
+    std::int64_t value_length = 0;
+    /// The key and value widths of a sliding-window layer, where they differ.
+    std::int64_t key_length_swa = 0;
+    std::int64_t value_length_swa = 0;
+    /// Which layers slide: one flag per layer, or one value -- a period, in
+    /// which every layer but the last slides.
+    std::vector<std::int64_t> sliding_window_pattern;
+    /// `attention.sliding_window`: how far back a sliding layer looks. Many
+    /// converters write it for every model whose config has one, and
+    /// llama.cpp ignores it for most; `models/kv_cache.h` knows which (26m).
+    std::int64_t sliding_window = 0;
+    /// Every this-many layers is full attention and the rest recurrent
+    /// (Qwen3.5 and 3.8, Qwen3-Next).
+    std::int64_t full_attention_interval = 0;
+    /// Multi-token prediction layers after the main stack.
+    std::int64_t nextn_predict_layers = 0;
+    /// The last this-many layers reuse an earlier layer's cache (Gemma 3n, 4).
+    std::int64_t shared_kv_layers = 0;
+    /// `attention.kv_lora_rank` is present: latent attention (DeepSeek's),
+    /// whose cache is not the heads-times-widths this reads.
+    bool latent_attention = false;
+};
+
+/// A model file's own sampling recommendation (26h): the `general.sampling.*`
+/// keys a conversion writes from the model's `generation_config.json`. Each is
+/// unset when the file does not say -- most files say some and not others.
+struct GgufSampling {
+    std::optional<double> temperature;     ///< `general.sampling.temp`
+    std::optional<double> top_p;           ///< `general.sampling.top_p`
+    std::optional<std::int64_t> top_k;     ///< `general.sampling.top_k`
+    std::optional<double> min_p;           ///< `general.sampling.min_p`
+    std::optional<double> repeat_penalty;  ///< `general.sampling.penalty_repeat`
+};
+
+/// What a header read found. `parsed == false` always carries a `parse_error`.
+struct GgufInfo {
+    /// The header was understood end to end.
+    bool parsed = false;
+
+    /// Why not, when `parsed` is false. Never empty in that case — an empty
+    /// field where a reason belongs is the reporting failure this struct is
+    /// shaped to prevent.
+    std::string parse_error;
+
+    /// GGUF container version (3 at time of writing).
+    std::uint32_t version = 0;
+
+    /// `general.architecture` — "llama", "qwen35", "gemma3", …. Empty when the
+    /// key is absent, which is itself worth reporting.
+    std::string architecture;
+
+    /// `general.name`, when present. Often a content hash rather than a
+    /// human-readable name, so it is reported and never relied on.
+    std::string name;
+
+    /// Total tensors declared in the header.
+    std::int64_t tensors = 0;
+
+    /// Tensors belonging to the text model — total minus the vision and
+    /// projector tensors a combined multimodal blob carries.
+    ///
+    /// The difference is the signal: when it is non-zero the file is a combined
+    /// text+vision blob, which is the shape Ollama distributes and which older
+    /// llama.cpp could not load. `tensors - text_tensors` is what
+    /// `models repair` would strip.
+    std::int64_t text_tensors = 0;
+
+    /// The file's size on disk, in bytes.
+    std::int64_t file_size = 0;
+
+    /// `general.file_type` — llama.cpp's `llama_ftype`, recording how the
+    /// tensors are stored. 0 is all-F32, 1 is mostly-F16, 32 is BF16;
+    /// everything else is a quantized model. `kUnknownFileType` when absent.
+    std::uint32_t file_type = kUnknownFileType;
+
+    /// The attention geometry, when `parsed`.
+    AttentionHeader attention;
+
+    /// Whether the header carries `tokenizer.chat_template`: the model's own
+    /// statement of how a conversation is framed. A file without one is
+    /// almost always a base (pretrained) model, which continues text rather
+    /// than answering.
+    bool has_chat_template = false;
+
+    /// What the chat template says about reasoning (26i), read from its text.
+    struct TemplateThinking {
+        /// The template takes a switch that turns reasoning off or down --
+        /// `enable_thinking` (Qwen3, Gemma 4) or `reasoning_effort` (gpt-oss).
+        bool switchable = false;
+        /// The template names reasoning at all: a switch, a `<think>` block,
+        /// or a `reasoning_content` field.
+        bool reasons = false;
+    };
+
+    TemplateThinking template_thinking;
+
+    /// A projector's own statement of what it reads: `clip.has_vision_encoder`
+    /// and `clip.has_audio_encoder` (26b). False on a file that is not one.
+    bool projector_vision = false;
+    bool projector_audio = false;
+
+    /// How the model's authors ask for it to be sampled, where the file says.
+    GgufSampling sampling;
+
+    /// Whether the weights are already quantized.
+    ///
+    /// Load-bearing for `models quantize`: llama.cpp **refuses to requantize**,
+    /// and its own message ("requantizing from type q8_0 is disabled") arrives
+    /// buried in a couple of hundred per-tensor log lines. Knowing up front
+    /// turns that into one sentence before anything starts.
+    [[nodiscard]] bool is_quantized() const noexcept {
+        return parsed && file_type != kUnknownFileType && file_type != 0 && file_type != 1 &&
+               file_type != 32;
+    }
+
+    /// Whether this file is a standalone multimodal projector (an "mmproj"):
+    /// every tensor is a vision tensor and there is no text model at all.
+    ///
+    /// Distinguished from a combined blob because the two need opposite
+    /// messages. A projector is a normal, expected file — it is exactly what
+    /// `mmproj_path` wants — and reporting it as a "combined text+vision blob"
+    /// (which the first version did) tells a user something is wrong with a
+    /// file that is perfectly correct.
+    [[nodiscard]] bool is_projector() const noexcept {
+        return parsed && tensors > 0 && text_tensors == 0;
+    }
+
+    /// Whether this file carries vision tensors **alongside** a text model —
+    /// the shape Ollama distributes some models in.
+    [[nodiscard]] bool has_vision_tensors() const noexcept {
+        return parsed && tensors > text_tensors && text_tensors > 0;
+    }
+};
+
+/// Reads `path`'s header.
+///
+/// Never throws and never reports a partial success: any problem — missing
+/// file, wrong magic, a length that runs past the end — comes back as
+/// `parsed == false` with a reason a user can act on.
+[[nodiscard]] GgufInfo inspect_gguf(const std::filesystem::path& path);
+
+/// What a model file with no chat template is, in the one wording the
+/// conversation's warning and `models info` share (26r): "most likely a base
+/// (pretrained) model: it continues text rather than answering, so …".
+[[nodiscard]] std::string base_model_note();
+
+/// Reads a header from `in`, a stream of `size` bytes positioned at its start:
+/// what the path overload does once the file is open, with the same
+/// guarantees. Exposed so a test can hand it a stream that counts what a read
+/// costs -- the regression this reader once had was cost, not correctness.
+[[nodiscard]] GgufInfo inspect_gguf(std::istream& in, std::uint64_t size);
+
+}  // namespace apogee::models

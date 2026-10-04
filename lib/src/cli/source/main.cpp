@@ -9,7 +9,7 @@
 #include <exception>
 #include <iostream>
 
-#include "commands/root.h"
+#include "cli/root.h"
 
 int main(int argc, char** argv) {
     try {

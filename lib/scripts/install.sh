@@ -17,7 +17,7 @@
 #
 # **The parity rule.** This script does not know what `~/.apogee/` contains --
 # it runs `apogee check --fix`, and the binary creates the layout from the one
-# declaration in `source/harness/layout.h`. `make install` finishes with the
+# declaration in `source/data/contracts/layout.h`. `make install` finishes with the
 # same call. That is why the two paths cannot drift: neither of them holds a
 # list that could go stale. Ommi's dominant early bug class was exactly that
 # drift, with each install path seeding a slightly different tree.

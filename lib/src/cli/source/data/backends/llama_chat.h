@@ -1,0 +1,189 @@
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+struct llama_model;
+struct llama_sampler;
+struct llama_vocab;
+
+/// llama.cpp's own chat layer (`common/chat.h`, the one llama-server runs),
+/// behind an interface of standard types.
+///
+/// It renders a model's embedded Jinja template with the tool list, builds a
+/// parser for that template's tool-call format, and returns a lazy grammar
+/// that constrains a call once the model starts one -- or, given a JSON
+/// Schema, a grammar holding the whole answer to it (26f). Every family's trained
+/// format, maintained upstream with the pin -- where Ommi injected a prose
+/// protocol that a model trained on tool tokens ignores (25b).
+///
+/// **Why a library of its own** (`apogee_llama_chat`, compiled only with
+/// `APOGEE_ENABLE_LLAMA`): `common` carries its own copy of nlohmann/json, at
+/// a different version from Apogee's. The two share an include guard, so a
+/// translation unit that saw both would silently compile against whichever
+/// came first. This file and its `.cpp` are the only code that sees `common`'s
+/// headers, and nothing here names a JSON type or includes an Apogee header
+/// that does -- the interface is strings and vectors, and `llama_real.cpp`
+/// converts to the IR on its side.
+namespace apogee::backends::llama_chat {
+
+struct ToolCall {
+    std::string id;
+    std::string name;
+    /// JSON text, as the IR keeps it.
+    std::string arguments;
+};
+
+struct Message {
+    /// `system`, `user`, `assistant` or `tool`.
+    std::string role;
+    std::string content;
+    std::vector<ToolCall> tool_calls;
+    std::string tool_call_id;
+    std::string tool_name;
+};
+
+struct ToolSpec {
+    std::string name;
+    std::string description;
+    /// The JSON Schema, as text.
+    std::string parameters;
+};
+
+struct Inputs {
+    std::vector<Message> messages;
+    std::vector<ToolSpec> tools;
+    /// The template's own switch. Off asks a thinking model to answer
+    /// without reasoning first, where its template has that switch.
+    bool enable_thinking = true;
+    /// A template's `reasoning_effort` -- gpt-oss's switch, which has no
+    /// off, only `low` (26i). Empty passes none; a template without the
+    /// variable ignores it.
+    std::string reasoning_effort;
+    /// Off renders the messages alone, without the assistant's opening:
+    /// a prefix of the full prompt (25c measures where a message starts).
+    bool add_generation_prompt = true;
+    /// A JSON Schema, as text, the whole reply must follow (26f): the
+    /// rendering's grammar then holds the answer to it after any reasoning
+    /// -- llama-server's `response_format`. Empty for none.
+    std::string json_schema;
+};
+
+/// A reply, read back through the template's format.
+struct Reply {
+    std::string content;
+    std::string reasoning;
+    std::vector<ToolCall> tool_calls;
+};
+
+/// Reads replies to one rendered request.
+class ReplyParser {
+public:
+    ~ReplyParser();
+    ReplyParser(const ReplyParser&) = delete;
+    ReplyParser& operator=(const ReplyParser&) = delete;
+    ReplyParser(ReplyParser&&) = delete;
+    ReplyParser& operator=(ReplyParser&&) = delete;
+
+    /// Parses `text` -- everything generated so far. `partial` while the
+    /// reply is still streaming, so an unfinished call is held rather than
+    /// refused. False with `error` when a finished reply does not match the
+    /// format (llama.cpp throws; this never does).
+    [[nodiscard]] bool parse(const std::string& text, bool partial, Reply& out,
+                             std::string& error) const;
+
+    struct Impl;
+    explicit ReplyParser(std::unique_ptr<Impl> impl);
+
+private:
+    std::unique_ptr<Impl> impl_;
+};
+
+/// One request, rendered.
+struct Rendered {
+    std::string prompt;
+    /// GBNF constraining a tool call; empty when nothing is constrained.
+    std::string grammar;
+    /// Applied only once a trigger fires, so prose stays free.
+    bool grammar_lazy = false;
+    /// Regular expressions and single tokens that start a call -- llama.cpp's
+    /// own conversion (`common/sampling.cpp`), done here where `common` is.
+    std::vector<std::string> trigger_patterns;
+    std::vector<std::int32_t> trigger_tokens;
+    /// Special tokens the parser must see as text (`<tool_call>` on Qwen):
+    /// rendered, where a special token is otherwise dropped from the reply.
+    std::vector<std::int32_t> preserved_tokens;
+    /// Extra strings that end generation.
+    std::vector<std::string> stops;
+    /// The assistant's opening, which the prompt already ends with
+    /// (`<|im_start|>assistant\n`, a thinking model's `<think>`). A grammar
+    /// over the whole reply starts there, so it is advanced past it before
+    /// the first sample.
+    std::string generation_prompt;
+    bool supports_thinking = false;
+    /// Where the format's reasoning opens and the ways it may close
+    /// (`<think>`, `</think>`) -- what a thinking budget counts between
+    /// (26i). Empty where the format has none.
+    std::string thinking_start_tag;
+    std::vector<std::string> thinking_end_tags;
+    /// The format's name, for a diagnostic.
+    std::string format;
+    std::unique_ptr<ReplyParser> parser;
+};
+
+/// A model's chat templates, parsed once per model load.
+class Templates {
+public:
+    /// Nullptr with `error` when the GGUF ships no template -- then the
+    /// name-matched registry renders the prompt, as it always has, rather
+    /// than `common`'s ChatML default -- or when its template does not parse.
+    [[nodiscard]] static std::unique_ptr<Templates> load(const llama_model* model,
+                                                         std::string& error);
+
+    ~Templates();
+    Templates(const Templates&) = delete;
+    Templates& operator=(const Templates&) = delete;
+    Templates(Templates&&) = delete;
+    Templates& operator=(Templates&&) = delete;
+
+    /// Renders `inputs`. False with `error` when the template cannot render
+    /// them; the caller falls back and says so.
+    [[nodiscard]] bool render(const Inputs& inputs, Rendered& out, std::string& error) const;
+
+    struct Impl;
+    explicit Templates(std::unique_ptr<Impl> impl);
+
+private:
+    std::unique_ptr<Impl> impl_;
+};
+
+/// The reasoning budget llama-server runs (`common/reasoning-budget.h`, 26i):
+/// a sampler that counts the tokens between `start` and any of `ends`, and
+/// past `budget` forces the first end -- the model must then answer. It is fed
+/// `prefill`, the reply's opening the prompt already holds, so a prompt that
+/// opens the reasoning itself starts it counting. Null when `start` or `ends`
+/// tokenizes to nothing. The caller owns it until it joins a chain.
+[[nodiscard]] llama_sampler* reasoning_budget(const llama_vocab* vocab, const std::string& start,
+                                              const std::vector<std::string>& ends,
+                                              std::int32_t budget, const std::string& prefill);
+
+/// Whether a sampler `reasoning_budget` made has run out and is ending the
+/// reasoning -- true from the moment it starts forcing the close.
+[[nodiscard]] bool reasoning_budget_spent(const llama_sampler* sampler);
+
+/// What free memory holds of the model at `path` (26a): llama.cpp's own
+/// fitter (`common/fit.h`, `common_fit_params`, the one llama-server runs),
+/// which projects the weights, the cache and the compute buffers onto each
+/// device's free memory without loading anything. `cache_type` is the ggml
+/// type the keys and values are kept in, with flash attention on.
+///
+/// The most positions that fit, up to the trained window and never below
+/// `minimum`; -1 when it cannot say. It reads the model once or twice over --
+/// 0.13 to 0.72 s on the models measured -- so a caller asks only when it has
+/// reason to think the answer is not "it fits".
+[[nodiscard]] std::int64_t fit_window(const std::string& path, std::int32_t gpu_layers,
+                                      std::int32_t cache_type, std::uint32_t minimum);
+
+}  // namespace apogee::backends::llama_chat

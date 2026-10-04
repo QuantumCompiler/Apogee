@@ -1,0 +1,1425 @@
+#include "contracts/config_edit.h"
+
+#include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <random>
+#include <sstream>
+#include <system_error>
+#include <utility>
+
+#include "contracts/host.h"
+#include "contracts/layout.h"
+
+namespace apogee::harness {
+namespace {
+
+/// Entries under a map section sit at exactly this indent.
+constexpr std::size_t kEntryIndent = 2;
+/// Their fields sit at this one.
+constexpr std::size_t kFieldIndent = 4;
+
+/// A source line, terminator included.
+///
+/// Keeping "\n" (or "\r\n", or nothing on a final unterminated line) attached
+/// to each line is what makes splicing byte-exact: untouched lines are copied
+/// verbatim, so a CRLF file stays CRLF and a file with no trailing newline
+/// keeps not having one. Normalising terminators would rewrite every line of a
+/// Windows user's config on the first edit.
+using Lines = std::vector<std::string>;
+
+Lines split_lines(std::string_view content) {
+    Lines lines;
+    std::size_t start = 0;
+    while (start < content.size()) {
+        const std::size_t newline = content.find('\n', start);
+        if (newline == std::string_view::npos) {
+            lines.emplace_back(content.substr(start));
+            break;
+        }
+        lines.emplace_back(content.substr(start, newline - start + 1));
+        start = newline + 1;
+    }
+    return lines;
+}
+
+std::string join_lines(const Lines& lines) {
+    std::string out;
+    std::size_t total = 0;
+    for (const std::string& line : lines) {
+        total += line.size();
+    }
+    out.reserve(total);
+    for (const std::string& line : lines) {
+        out += line;
+    }
+    return out;
+}
+
+/// The line without its terminator or trailing horizontal whitespace.
+std::string_view body(std::string_view line) {
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r' || line.back() == ' ' ||
+                             line.back() == '\t')) {
+        line.remove_suffix(1);
+    }
+    return line;
+}
+
+/// The terminator this file uses, taken from the first terminated line so an
+/// inserted line matches its neighbours. Defaults to "\n" for a single-line or
+/// empty file.
+std::string dominant_terminator(const Lines& lines) {
+    for (const std::string& line : lines) {
+        if (line.size() >= 2 && line[line.size() - 2] == '\r' && line.back() == '\n') {
+            return "\r\n";
+        }
+        if (!line.empty() && line.back() == '\n') {
+            return "\n";
+        }
+    }
+    return "\n";
+}
+
+std::size_t indent_of(std::string_view line_body) {
+    std::size_t count = 0;
+    while (count < line_body.size() && line_body[count] == ' ') {
+        ++count;
+    }
+    return count;
+}
+
+bool is_blank(std::string_view line_body) {
+    return line_body.empty();
+}
+
+bool is_comment(std::string_view line_body) {
+    const std::size_t indent = indent_of(line_body);
+    return indent < line_body.size() && line_body[indent] == '#';
+}
+
+/// A line that begins a new top-level key: column 0, not blank, not a comment.
+bool is_top_level(std::string_view line_body) {
+    return !is_blank(line_body) && !is_comment(line_body) && line_body[0] != ' ' &&
+           line_body[0] != '\t';
+}
+
+/// `<section>:` at column 0.
+bool is_section_header(std::string_view line_body, std::string_view section) {
+    if (!is_top_level(line_body)) {
+        return false;
+    }
+    return line_body.size() == section.size() + 1 &&
+           line_body.substr(0, section.size()) == section && line_body.back() == ':';
+}
+
+/// The name in a `  <name>:` entry line, or nullopt.
+std::optional<std::string_view> entry_name(std::string_view line_body) {
+    if (is_blank(line_body) || is_comment(line_body)) {
+        return std::nullopt;
+    }
+    if (indent_of(line_body) != kEntryIndent || line_body.back() != ':') {
+        return std::nullopt;
+    }
+    std::string_view name = line_body.substr(kEntryIndent, line_body.size() - kEntryIndent - 1);
+    if (name.empty()) {
+        return std::nullopt;
+    }
+    // A `  key: value` line is a field of a parent, not an entry.
+    if (name.find_first_of(" \t:") != std::string_view::npos) {
+        return std::nullopt;
+    }
+    return name;
+}
+
+bool equals_folded(std::string_view lhs, std::string_view rhs) {
+    return lhs.size() == rhs.size() &&
+           std::equal(lhs.begin(), lhs.end(), rhs.begin(), [](char a, char b) {
+               return std::tolower(static_cast<unsigned char>(a)) ==
+                      std::tolower(static_cast<unsigned char>(b));
+           });
+}
+
+/// Half-open line range of a section's body, excluding its header.
+struct SectionRange {
+    bool found = false;
+    std::size_t header = 0;  ///< index of the `<section>:` line
+    std::size_t begin = 0;   ///< first body line
+    std::size_t end = 0;     ///< one past the last body line
+};
+
+SectionRange find_section(const Lines& lines, std::string_view section) {
+    SectionRange range;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        if (!is_section_header(body(lines[i]), section)) {
+            continue;
+        }
+        range.found = true;
+        range.header = i;
+        range.begin = i + 1;
+        range.end = lines.size();
+        for (std::size_t j = range.begin; j < lines.size(); ++j) {
+            if (is_top_level(body(lines[j]))) {
+                range.end = j;
+                break;
+            }
+        }
+        return range;
+    }
+    return range;
+}
+
+}  // namespace
+
+// Public (declared in config_edit.h) so a test pinning the written bytes goes
+// through the same rule: a Windows model_path carries a drive colon and is
+// written quoted, and an expectation built from the raw path is wrong there.
+std::string yaml_scalar(std::string_view value) {
+    const bool needs_quotes =
+        value.empty() || value.front() == ' ' || value.back() == ' ' ||
+        value.find_first_of(":#{}[]&*!|>'\"%@`,\n\r\t") != std::string_view::npos ||
+        equals_folded(value, "true") || equals_folded(value, "false") ||
+        equals_folded(value, "null") || equals_folded(value, "yes") || equals_folded(value, "no");
+
+    if (!needs_quotes) {
+        return std::string{value};
+    }
+    std::string out = "\"";
+    for (const char c : value) {
+        if (c == '"' || c == '\\') {
+            out.push_back('\\');
+        }
+        out.push_back(c);
+    }
+    out.push_back('"');
+    return out;
+}
+
+namespace {
+
+std::string number_scalar(double value) {
+    std::ostringstream out;
+    out << value;
+    return out.str();
+}
+
+/// Renders one backend entry's lines (key line first), each terminated.
+///
+/// Field order is fixed rather than alphabetical: `type` first because it
+/// determines which of the rest even apply, then identity, then tuning. A
+/// hand-written entry keeps whatever order its author chose -- this order
+/// applies only to entries Apogee writes.
+Lines format_backend_entry(std::string_view name, const BackendConfig& backend,
+                           std::string_view terminator) {
+    Lines out;
+    const std::string indent(kFieldIndent, ' ');
+
+    auto field = [&](std::string_view key, const std::string& value) {
+        out.push_back(indent + std::string{key} + ": " + value + std::string{terminator});
+    };
+
+    out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
+                  std::string{terminator});
+    field("type", std::string{to_string(backend.type)});
+
+    if (!backend.api_key.empty()) {
+        field("api_key", yaml_scalar(backend.api_key));
+    }
+    if (!backend.model.empty()) {
+        field("model", yaml_scalar(backend.model));
+    }
+    if (!backend.model_path.empty()) {
+        field("model_path", yaml_scalar(backend.model_path));
+    }
+    if (!backend.mmproj_path.empty()) {
+        field("mmproj_path", yaml_scalar(backend.mmproj_path));
+    }
+    if (!backend.embedding_model.empty()) {
+        field("embedding_model", yaml_scalar(backend.embedding_model));
+    }
+    if (backend.context_size.has_value()) {
+        field("context_size", std::to_string(*backend.context_size));
+    }
+    if (backend.cache_type.has_value()) {
+        field("cache_type", std::string{to_string(*backend.cache_type)});
+    }
+    if (backend.max_tokens.has_value()) {
+        field("max_tokens", std::to_string(*backend.max_tokens));
+    }
+    if (backend.temperature.has_value()) {
+        field("temperature", number_scalar(*backend.temperature));
+    }
+    if (backend.top_p.has_value()) {
+        field("top_p", number_scalar(*backend.top_p));
+    }
+    if (backend.top_k.has_value()) {
+        field("top_k", std::to_string(*backend.top_k));
+    }
+    if (backend.min_p.has_value()) {
+        field("min_p", number_scalar(*backend.min_p));
+    }
+    if (backend.repeat_penalty.has_value()) {
+        field("repeat_penalty", number_scalar(*backend.repeat_penalty));
+    }
+    if (backend.presence_penalty.has_value()) {
+        field("presence_penalty", number_scalar(*backend.presence_penalty));
+    }
+    if (backend.seed.has_value()) {
+        field("seed", std::to_string(*backend.seed));
+    }
+    if (backend.thinking.has_value()) {
+        field("thinking", std::string{to_string(*backend.thinking)});
+    }
+    if (backend.thinking_budget.has_value()) {
+        field("thinking_budget", std::to_string(*backend.thinking_budget));
+    }
+    if (!backend.system_prompt.empty()) {
+        field("system_prompt", yaml_scalar(backend.system_prompt));
+    }
+    return out;
+}
+
+/// Renders one collection entry's lines (key line first), each terminated.
+Lines format_embedding_entry(std::string_view name, const EmbeddingConfig& collection,
+                             std::string_view terminator) {
+    Lines out;
+    const std::string indent(kFieldIndent, ' ');
+
+    auto field = [&](std::string_view key, const std::string& value) {
+        out.push_back(indent + std::string{key} + ": " + value + std::string{terminator});
+    };
+
+    out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
+                  std::string{terminator});
+    if (collection.chunk_size.has_value()) {
+        field("chunk_size", std::to_string(*collection.chunk_size));
+    }
+    if (collection.chunk_overlap.has_value()) {
+        field("chunk_overlap", std::to_string(*collection.chunk_overlap));
+    }
+    if (!collection.description.empty()) {
+        field("description", yaml_scalar(collection.description));
+    }
+    if (!collection.backend.empty()) {
+        field("backend", yaml_scalar(collection.backend));
+    }
+    if (!collection.retriever.empty()) {
+        field("retriever", yaml_scalar(collection.retriever));
+    }
+    if (!collection.rerank.empty()) {
+        field("rerank", yaml_scalar(collection.rerank));
+    }
+    return out;
+}
+
+/// The line range one entry occupies, given its key line.
+///
+/// Blank and comment lines are TENTATIVE: they extend the entry only when a
+/// deeper-indented field follows before the next sibling key. That is what
+/// keeps a comment block written above the *next* entry from being swallowed
+/// when this one is deleted -- the flaw in doing this the obvious way.
+std::pair<std::size_t, std::size_t> entry_extent(const Lines& lines, std::size_t key_index,
+                                                 std::size_t section_end) {
+    std::size_t last_content = key_index;
+    for (std::size_t i = key_index + 1; i < section_end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;  // tentative -- only kept if a field follows
+        }
+        if (indent_of(line) >= kFieldIndent) {
+            last_content = i;
+            continue;
+        }
+        break;  // a sibling `  key:` line
+    }
+    return {key_index, last_content + 1};
+}
+
+std::optional<std::size_t> find_entry_line(const Lines& lines, const SectionRange& section,
+                                           std::string_view name) {
+    for (std::size_t i = section.begin; i < section.end; ++i) {
+        const std::optional<std::string_view> candidate = entry_name(body(lines[i]));
+        if (candidate.has_value() && equals_folded(*candidate, name)) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
+std::vector<std::string> section_entry_names(std::string_view content, std::string_view section) {
+    const Lines lines = split_lines(content);
+    const SectionRange range = find_section(lines, section);
+    std::vector<std::string> names;
+    if (!range.found) {
+        return names;
+    }
+    for (std::size_t i = range.begin; i < range.end; ++i) {
+        if (const std::optional<std::string_view> name = entry_name(body(lines[i]));
+            name.has_value()) {
+            names.emplace_back(*name);
+        }
+    }
+    return names;
+}
+
+std::optional<std::string> fold_collision(const std::vector<std::string>& existing,
+                                          std::string_view candidate) {
+    for (const std::string& name : existing) {
+        if (name != candidate && equals_folded(name, candidate)) {
+            return name;
+        }
+    }
+    return std::nullopt;
+}
+
+namespace {
+
+/// Appends `entry` (key line first, every line terminated) under `section:`,
+/// creating the section at the end of the file when absent.
+///
+/// Shared by every "add an entry" helper. `noun` is what the entry is called
+/// in error messages -- "backend", "collection" -- so the message a user reads
+/// names the thing they typed rather than the mechanism underneath.
+std::string append_entry(std::string_view content, std::string_view section, std::string_view noun,
+                         std::string_view name, Lines entry, bool force) {
+    if (name.empty()) {
+        throw ConfigEditError(std::string{noun} + " name cannot be empty");
+    }
+    if (name.find_first_of(" \t:#") != std::string_view::npos) {
+        throw ConfigEditError(std::string{noun} + " name '" + std::string{name} +
+                              "' cannot contain spaces, tabs, colons, or '#'");
+    }
+
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+
+    const std::vector<std::string> existing = section_entry_names(content, section);
+    if (!force) {
+        if (const std::optional<std::string> clash = fold_collision(existing, name);
+            clash.has_value()) {
+            throw ConfigEditError(std::string{noun} + " '" + std::string{name} +
+                                  "' collides with existing '" + *clash + "' -- " +
+                                  std::string{noun} +
+                                  " names are compared case-insensitively, so the two would be "
+                                  "the same " +
+                                  std::string{noun} + "; choose a distinct name");
+        }
+    }
+
+    SectionRange range = find_section(lines, section);
+
+    if (range.found) {
+        if (const std::optional<std::size_t> existing_line = find_entry_line(lines, range, name);
+            existing_line.has_value()) {
+            if (!force) {
+                throw ConfigEditError(std::string{noun} + " '" + std::string{name} +
+                                      "' already exists; pass --force to replace it");
+            }
+            // Replace in place, so the entry keeps its position and whatever
+            // comment block sits above it.
+            const auto [begin, end] = entry_extent(lines, *existing_line, range.end);
+            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
+                        lines.begin() + static_cast<std::ptrdiff_t>(end));
+            lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(begin), entry.begin(),
+                         entry.end());
+            return join_lines(lines);
+        }
+
+        // Insert after the section's last CONTENT line, skipping back over any
+        // trailing blank and comment lines.
+        //
+        // Skipping comments matters more than it looks. A section commonly
+        // ends with a block of commented-out examples (the shipped template's
+        // `backends:` is nothing but those), and a section is only terminated
+        // by the next TOP-LEVEL line -- which a comment is not. Appending at
+        // range.end would drop the entry below every trailing comment in the
+        // file, so the new entry would appear to sit under commentary about
+        // something else entirely. It would still parse; it would just read as
+        // though the file had been vandalised.
+        std::size_t insert_at = range.begin;
+        for (std::size_t i = range.begin; i < range.end; ++i) {
+            const std::string_view line = body(lines[i]);
+            if (!is_blank(line) && !is_comment(line)) {
+                insert_at = i + 1;
+            }
+        }
+
+        // A file whose final line has no terminator needs one before anything
+        // can follow it -- that line is about to stop being last. This is the
+        // single case where appending modifies a line other than its own.
+        if (insert_at > 0 && insert_at == lines.size()) {
+            std::string& previous = lines.back();
+            if (!previous.empty() && previous.back() != '\n') {
+                previous += terminator;
+            }
+        }
+
+        // One blank separator, but only when there is real content above to
+        // separate from -- an entry going in directly under the section header
+        // needs none. The delete helper removes this line again, which is what
+        // makes add-then-delete byte-identical.
+        if (insert_at > range.begin) {
+            entry.insert(entry.begin(), terminator);
+        }
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insert_at), entry.begin(),
+                     entry.end());
+        return join_lines(lines);
+    }
+
+    // No such section yet -- create one at the end of the file.
+    if (!lines.empty()) {
+        std::string& last = lines.back();
+        if (!last.empty() && last.back() != '\n') {
+            last += terminator;
+        }
+        if (!is_blank(body(lines.back()))) {
+            lines.push_back(terminator);
+        }
+    }
+    lines.push_back(std::string{section} + ":" + terminator);
+    lines.insert(lines.end(), entry.begin(), entry.end());
+    return join_lines(lines);
+}
+
+/// Removes the entry `name` from `section:` -- its key line, its field lines,
+/// and the single blank separator above it. The inverse of append_entry.
+std::string delete_entry(std::string_view content, std::string_view section, std::string_view noun,
+                         std::string_view name) {
+    Lines lines = split_lines(content);
+    const SectionRange range = find_section(lines, section);
+    if (!range.found) {
+        throw ConfigEditError("no '" + std::string{section} + ":' section in this config");
+    }
+
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
+    if (!key_line.has_value()) {
+        throw ConfigEditError(std::string{noun} + " '" + std::string{name} +
+                              "' not found in config");
+    }
+
+    auto [begin, end] = entry_extent(lines, *key_line, range.end);
+
+    // Take the blank separator above the entry with it -- the exact inverse of
+    // what append_entry inserted. A COMMENT above the entry is left alone: it
+    // may belong to the section rather than this entry, and an orphaned
+    // comment is recoverable where a deleted one is not.
+    if (begin > range.begin && is_blank(body(lines[begin - 1]))) {
+        --begin;
+    }
+
+    lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
+                lines.begin() + static_cast<std::ptrdiff_t>(end));
+    return join_lines(lines);
+}
+
+}  // namespace
+
+std::string append_backend(std::string_view content, std::string_view name,
+                           const BackendConfig& backend, bool force) {
+    const Lines lines = split_lines(content);
+    return append_entry(content, "backends", "backend", name,
+                        format_backend_entry(name, backend, dominant_terminator(lines)), force);
+}
+
+std::string delete_backend(std::string_view content, std::string_view name) {
+    return delete_entry(content, "backends", "backend", name);
+}
+
+namespace {
+
+Lines format_mcp_server_entry(std::string_view name, const McpServerConfig& server,
+                              std::string_view terminator) {
+    Lines out;
+    const std::string indent(kFieldIndent, ' ');
+    auto field = [&](std::string_view key, const std::string& value) {
+        out.push_back(indent + std::string{key} + ": " + value + std::string{terminator});
+    };
+    // Inside a flow list a comma or a bracket ends the item; yaml_scalar
+    // already quotes both (and every other character YAML could misread),
+    // so the items go through it unchanged. A mutation test found a second
+    // check here to be dead code, and it was removed.
+    auto list = [&](std::string_view key, const std::vector<std::string>& values) {
+        std::string rendered = "[";
+        for (const std::string& value : values) {
+            rendered += rendered.size() > 1 ? ", " : "";
+            rendered += yaml_scalar(value);
+        }
+        rendered += "]";
+        out.push_back(indent + std::string{key} + ": " + rendered + std::string{terminator});
+    };
+    out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
+                  std::string{terminator});
+    // Alphabetical after the name, as Ommi's formatter was, so two entries
+    // written by two surfaces read alike.
+    if (!server.args.empty()) {
+        list("args", server.args);
+    }
+    field("command", yaml_scalar(server.command));
+    field("enabled", server.enabled ? "true" : "false");
+    if (!server.env.empty()) {
+        list("env", server.env);
+    }
+    return out;
+}
+
+}  // namespace
+
+std::string append_mcp_server(std::string_view content, std::string_view name,
+                              const McpServerConfig& server, bool force) {
+    const Lines lines = split_lines(content);
+    return append_entry(content, "mcp_servers", "MCP server", name,
+                        format_mcp_server_entry(name, server, dominant_terminator(lines)), force);
+}
+
+std::string delete_mcp_server(std::string_view content, std::string_view name) {
+    return delete_entry(content, "mcp_servers", "MCP server", name);
+}
+
+std::string set_mcp_server_enabled(std::string_view content, std::string_view name, bool enabled) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange range = find_section(lines, "mcp_servers");
+    if (!range.found) {
+        throw ConfigEditError("no 'mcp_servers:' section in this config");
+    }
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
+    if (!key_line.has_value()) {
+        throw ConfigEditError("MCP server '" + std::string{name} + "' not found in config");
+    }
+    const auto [begin, end] = entry_extent(lines, *key_line, range.end);
+    const std::string value = enabled ? "true" : "false";
+    for (std::size_t i = begin + 1; i < end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line) || indent_of(line) != kFieldIndent) {
+            continue;
+        }
+        const std::string_view rest = line.substr(kFieldIndent);
+        if (!rest.starts_with("enabled:")) {
+            continue;
+        }
+        // Replace only the value token, keeping any trailing comment.
+        const std::string& original = lines[i];
+        const std::size_t key_colon = original.find(':', kFieldIndent);
+        const std::size_t hash = original.find('#', key_colon);
+        const std::size_t limit = hash == std::string::npos ? original.size() : hash;
+        std::size_t value_start = key_colon + 1;
+        while (value_start < limit &&
+               (original[value_start] == ' ' || original[value_start] == '\t')) {
+            ++value_start;
+        }
+        std::size_t value_end = limit;
+        while (value_end > value_start &&
+               (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
+                original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
+            --value_end;
+        }
+        std::string replacement = original.substr(0, value_start);
+        if (value_start == key_colon + 1) {
+            replacement += ' ';
+        }
+        replacement += value;
+        replacement += original.substr(value_end);
+        if (replacement.empty() || replacement.back() != '\n') {
+            replacement += terminator;
+        }
+        lines[i] = replacement;
+        return join_lines(lines);
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(*key_line + 1),
+                 std::string(kFieldIndent, ' ') + "enabled: " + value + terminator);
+    return join_lines(lines);
+}
+
+namespace {
+
+Lines format_agent_entry(std::string_view name, const AgentConfig& agent,
+                         std::string_view terminator) {
+    Lines out;
+    const std::string indent(kFieldIndent, ' ');
+    auto field = [&](std::string_view key, const std::string& value) {
+        out.push_back(indent + std::string{key} + ": " + value + std::string{terminator});
+    };
+    auto list = [&](std::string_view key, const std::vector<std::string>& values) {
+        std::string rendered = "[";
+        for (const std::string& value : values) {
+            rendered += rendered.size() > 1 ? ", " : "";
+            rendered += yaml_scalar(value);
+        }
+        rendered += "]";
+        out.push_back(indent + std::string{key} + ": " + rendered + std::string{terminator});
+    };
+    out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
+                  std::string{terminator});
+    // Alphabetical after the name; a value is written only when it says
+    // something, so a defaulted entry is a bare name plus its policy.
+    if (!agent.collection.empty()) {
+        field("collection", yaml_scalar(agent.collection));
+    }
+    if (!agent.description.empty()) {
+        field("description", yaml_scalar(agent.description));
+    }
+    if (!agent.mcp.empty()) {
+        list("mcp", agent.mcp);
+    }
+    if (!agent.model.empty()) {
+        field("model", yaml_scalar(agent.model));
+    }
+    if (agent.output_format != AgentOutputFormat::Auto) {
+        field("output_format", std::string{to_string(agent.output_format)});
+    }
+    if (!agent.prompts.empty()) {
+        list("prompts", agent.prompts);
+    }
+    if (agent.questions) {
+        field("questions", "true");
+    }
+    if (!agent.save_dir.empty()) {
+        field("save_dir", yaml_scalar(agent.save_dir));
+    }
+    if (!agent.save_filename.empty()) {
+        field("save_filename", yaml_scalar(agent.save_filename));
+    }
+    if (!agent.save_subdir.empty()) {
+        field("save_subdir", yaml_scalar(agent.save_subdir));
+    }
+    if (!agent.schemas.empty()) {
+        list("schemas", agent.schemas);
+    }
+    field("tools", std::string{to_string(agent.tools)});
+    return out;
+}
+
+}  // namespace
+
+std::string append_agent(std::string_view content, std::string_view name, const AgentConfig& agent,
+                         bool force) {
+    const Lines lines = split_lines(content);
+    return append_entry(content, "agents", "agent", name,
+                        format_agent_entry(name, agent, dominant_terminator(lines)), force);
+}
+
+std::string delete_agent(std::string_view content, std::string_view name) {
+    return delete_entry(content, "agents", "agent", name);
+}
+
+namespace {
+
+Lines format_graph_entry(std::string_view name, const NamedGraphConfig& graph,
+                         std::string_view terminator) {
+    Lines out;
+    const std::string indent(kFieldIndent, ' ');
+    auto field = [&](std::string_view key, const std::string& value) {
+        out.push_back(indent + std::string{key} + ": " + value + std::string{terminator});
+    };
+    out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
+                  std::string{terminator});
+    std::string members = "[";
+    for (const std::string& collection : graph.collections) {
+        members += members.size() > 1 ? ", " : "";
+        members += yaml_scalar(collection);
+    }
+    members += "]";
+    field("collections", members);
+    if (!graph.extract_backend.empty()) {
+        field("extract_backend", yaml_scalar(graph.extract_backend));
+    }
+    if (graph.hops != NamedGraphConfig{}.hops) {
+        field("hops", std::to_string(graph.hops));
+    }
+    if (graph.max_entities != NamedGraphConfig{}.max_entities) {
+        field("max_entities", std::to_string(graph.max_entities));
+    }
+    return out;
+}
+
+}  // namespace
+
+std::string append_graph(std::string_view content, std::string_view name,
+                         const NamedGraphConfig& graph, bool force) {
+    const Lines lines = split_lines(content);
+    return append_entry(content, "graphs", "graph", name,
+                        format_graph_entry(name, graph, dominant_terminator(lines)), force);
+}
+
+std::string delete_graph(std::string_view content, std::string_view name) {
+    return delete_entry(content, "graphs", "graph", name);
+}
+
+std::string append_embedding(std::string_view content, std::string_view name,
+                             const EmbeddingConfig& collection, bool force) {
+    const Lines lines = split_lines(content);
+    return append_entry(content, "embeddings", "collection", name,
+                        format_embedding_entry(name, collection, dominant_terminator(lines)),
+                        force);
+}
+
+std::string delete_embedding(std::string_view content, std::string_view name) {
+    return delete_entry(content, "embeddings", "collection", name);
+}
+
+std::vector<std::string_view> models_role_fields() {
+    return {"default",        "default_embedding",     "default_extraction",
+            "default_vision", "default_transcription", "default_utility"};
+}
+
+namespace {
+
+/// Sets one path field of a backend entry in place, keeping any trailing
+/// comment; when the entry has none, it goes right after `after_field` (else
+/// after `type:`, else first) -- where a reader looks for it.
+std::string set_backend_path_field(std::string_view content, std::string_view name,
+                                   std::string_view key, std::string_view after_field,
+                                   std::string_view path) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange range = find_section(lines, "backends");
+    if (!range.found) {
+        throw ConfigEditError("no 'backends:' section in this config");
+    }
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
+    if (!key_line.has_value()) {
+        throw ConfigEditError("backend '" + std::string{name} + "' not found in config");
+    }
+    const auto [begin, end] = entry_extent(lines, *key_line, range.end);
+    const std::string value = yaml_scalar(std::string{path});
+
+    const std::string prefix = std::string{key} + ":";
+    const std::string after_prefix = std::string{after_field} + ":";
+    std::optional<std::size_t> type_line;
+    std::optional<std::size_t> after_line;
+    for (std::size_t i = begin + 1; i < end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line) || indent_of(line) != kFieldIndent) {
+            continue;
+        }
+        const std::string_view field = line.substr(kFieldIndent);
+        if (field.starts_with("type:")) {
+            type_line = i;
+        }
+        if (!after_field.empty() && field.starts_with(after_prefix)) {
+            after_line = i;
+        }
+        if (!field.starts_with(prefix)) {
+            continue;
+        }
+        // Replace only the value token, keeping any trailing comment.
+        const std::string& original = lines[i];
+        const std::size_t key_colon = original.find(':', kFieldIndent);
+        const std::size_t hash = original.find(" #", key_colon);
+        const std::size_t limit = hash == std::string::npos ? original.size() : hash;
+        std::size_t value_start = key_colon + 1;
+        while (value_start < limit &&
+               (original[value_start] == ' ' || original[value_start] == '\t')) {
+            ++value_start;
+        }
+        std::size_t value_end = limit;
+        while (value_end > value_start &&
+               (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
+                original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
+            --value_end;
+        }
+        std::string replacement = original.substr(0, value_start);
+        if (value_start == key_colon + 1) {
+            replacement += ' ';
+        }
+        replacement += value;
+        replacement += original.substr(value_end);
+        if (replacement.empty() || replacement.back() != '\n') {
+            replacement += terminator;
+        }
+        lines[i] = replacement;
+        return join_lines(lines);
+    }
+    const std::size_t at = after_line.has_value()  ? *after_line + 1
+                           : type_line.has_value() ? *type_line + 1
+                                                   : begin + 1;
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(at),
+                 std::string(kFieldIndent, ' ') + prefix + " " + value + terminator);
+    return join_lines(lines);
+}
+
+}  // namespace
+
+std::string set_backend_model_path(std::string_view content, std::string_view name,
+                                   std::string_view path) {
+    return set_backend_path_field(content, name, "model_path", "", path);
+}
+
+std::string set_backend_mmproj_path(std::string_view content, std::string_view name,
+                                    std::string_view path) {
+    return set_backend_path_field(content, name, "mmproj_path", "model_path", path);
+}
+
+std::string set_embedding_graph_enabled(std::string_view content, std::string_view collection,
+                                        bool enabled) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange range = find_section(lines, "embeddings");
+    if (!range.found) {
+        throw ConfigEditError("no 'embeddings:' section in this config");
+    }
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, collection);
+    if (!key_line.has_value()) {
+        throw ConfigEditError("collection '" + std::string{collection} + "' not found in config");
+    }
+    const auto [begin, end] = entry_extent(lines, *key_line, range.end);
+    const std::string value = enabled ? "true" : "false";
+    constexpr std::size_t kGraphFieldIndent = kFieldIndent + 2;
+
+    // The entry's `graph:` block, then its `enabled:` line inside it.
+    std::optional<std::size_t> graph_line;
+    std::size_t graph_end = end;
+    for (std::size_t i = begin + 1; i < end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        if (graph_line.has_value()) {
+            if (indent_of(line) <= kFieldIndent) {
+                graph_end = i;  // the next sibling field ends the block
+                break;
+            }
+            continue;
+        }
+        if (indent_of(line) == kFieldIndent && line.substr(kFieldIndent).starts_with("graph:")) {
+            graph_line = i;
+        }
+    }
+    if (graph_line.has_value()) {
+        for (std::size_t i = *graph_line + 1; i < graph_end; ++i) {
+            const std::string_view line = body(lines[i]);
+            if (is_blank(line) || is_comment(line) || indent_of(line) != kGraphFieldIndent ||
+                !line.substr(kGraphFieldIndent).starts_with("enabled:")) {
+                continue;
+            }
+            // Replace only the value token, keeping any trailing comment.
+            const std::string& original = lines[i];
+            const std::size_t key_colon = original.find(':', kGraphFieldIndent);
+            const std::size_t hash = original.find('#', key_colon);
+            const std::size_t limit = hash == std::string::npos ? original.size() : hash;
+            std::size_t value_start = key_colon + 1;
+            while (value_start < limit &&
+                   (original[value_start] == ' ' || original[value_start] == '\t')) {
+                ++value_start;
+            }
+            std::size_t value_end = limit;
+            while (value_end > value_start &&
+                   (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
+                    original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
+                --value_end;
+            }
+            std::string replacement = original.substr(0, value_start);
+            if (value_start == key_colon + 1) {
+                replacement += ' ';
+            }
+            replacement += value;
+            replacement += original.substr(value_end);
+            if (replacement.empty() || replacement.back() != '\n') {
+                replacement += terminator;
+            }
+            lines[i] = replacement;
+            return join_lines(lines);
+        }
+        // A `graph:` block with no `enabled:` line: the field goes first in it.
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(*graph_line + 1),
+                     std::string(kGraphFieldIndent, ' ') + "enabled: " + value + terminator);
+        return join_lines(lines);
+    }
+    // No block: one is appended after the entry's last field.
+    if (!lines[end - 1].empty() && lines[end - 1].back() != '\n') {
+        lines[end - 1] += terminator;
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(end),
+                 std::string(kFieldIndent, ' ') + "graph:" + terminator);
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(end + 1),
+                 std::string(kGraphFieldIndent, ' ') + "enabled: " + value + terminator);
+    return join_lines(lines);
+}
+
+namespace {
+
+/// Sets `<section>.<field>` to `value` -- the shared body of every "one
+/// scalar under a top-level section" edit: replace the line in place keeping
+/// its trailing comment, else insert it at the end of the section, else
+/// append the section.
+std::string set_section_scalar(std::string_view content, std::string_view section_name,
+                               std::string_view field, std::string_view value) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const std::string new_line =
+        std::string(kEntryIndent, ' ') + std::string{field} + ": " + yaml_scalar(value);
+
+    SectionRange section = find_section(lines, section_name);
+
+    if (section.found) {
+        std::size_t insert_at = section.begin;
+        for (std::size_t i = section.begin; i < section.end; ++i) {
+            const std::string_view line = body(lines[i]);
+            if (is_blank(line) || is_comment(line)) {
+                continue;
+            }
+            const std::size_t indent = indent_of(line);
+            if (indent != kEntryIndent) {
+                continue;
+            }
+            const std::string_view rest = line.substr(kEntryIndent);
+            const std::size_t colon = rest.find(':');
+            if (colon == std::string_view::npos || rest.substr(0, colon) != field) {
+                insert_at = i + 1;
+                continue;
+            }
+            // Found it. Replace ONLY the value token, splicing it between the
+            // original prefix and the original suffix.
+            //
+            // Done this way rather than by rebuilding the line so that the
+            // trailing comment AND the exact whitespace before it survive: a
+            // config whose comments are column-aligned stays aligned, and the
+            // diff for setting a role is one token wide.
+            const std::string& original = lines[i];
+            const std::size_t key_colon = original.find(':', kEntryIndent);
+            const std::size_t hash = original.find('#', key_colon);
+            const std::size_t limit = (hash == std::string::npos) ? original.size() : hash;
+
+            std::size_t value_start = key_colon + 1;
+            while (value_start < limit &&
+                   (original[value_start] == ' ' || original[value_start] == '\t')) {
+                ++value_start;
+            }
+            std::size_t value_end = limit;
+            while (value_end > value_start &&
+                   (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
+                    original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
+                --value_end;
+            }
+
+            std::string replacement = original.substr(0, value_start);
+            if (value_start == key_colon + 1) {
+                replacement += ' ';  // `key:value` had no space; give it one
+            }
+            replacement += yaml_scalar(value);
+            replacement += original.substr(value_end);
+            if (replacement.empty() || replacement.back() != '\n') {
+                replacement += terminator;
+            }
+            lines[i] = replacement;
+            return join_lines(lines);
+        }
+
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insert_at), new_line + terminator);
+        return join_lines(lines);
+    }
+
+    if (!lines.empty()) {
+        std::string& last = lines.back();
+        if (!last.empty() && last.back() != '\n') {
+            last += terminator;
+        }
+        if (!is_blank(body(lines.back()))) {
+            lines.push_back(terminator);
+        }
+    }
+    lines.push_back(std::string{section_name} + ":" + terminator);
+    lines.push_back(new_line + terminator);
+    return join_lines(lines);
+}
+
+}  // namespace
+
+std::string set_models_role(std::string_view content, std::string_view field,
+                            std::string_view value) {
+    const std::vector<std::string_view> allowed = models_role_fields();
+    if (std::find(allowed.begin(), allowed.end(), field) == allowed.end()) {
+        std::string accepted;
+        for (const std::string_view name : allowed) {
+            accepted += (accepted.empty() ? "" : ", ") + std::string{name};
+        }
+        throw ConfigEditError("unknown models field '" + std::string{field} +
+                              "' (accepted: " + accepted + ")");
+    }
+    return set_section_scalar(content, "models", field, value);
+}
+
+std::string set_permission(std::string_view content, std::string_view tool,
+                           std::string_view level) {
+    if (tool.empty()) {
+        throw ConfigEditError("a permission needs a tool name");
+    }
+    for (const char c : tool) {
+        const bool ok =
+            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+        if (!ok) {
+            throw ConfigEditError("'" + std::string{tool} +
+                                  "' is not a tool name (letters, digits and underscores)");
+        }
+    }
+    if (level != "ask" && level != "allow" && level != "deny") {
+        throw ConfigEditError("'" + std::string{level} +
+                              "' is not a permission level (accepted: ask, allow, deny)");
+    }
+    return set_section_scalar(content, "permissions", tool, level);
+}
+
+namespace {
+
+constexpr std::string_view kAllowedHostsKey = "allowed_hosts";
+
+std::string checked_host(std::string_view host) {
+    const std::optional<std::string> canonical = canonical_host(host);
+    if (!canonical.has_value()) {
+        throw ConfigEditError("'" + std::string{host} +
+                              "' is not a host name: write the host alone, e.g. docs.python.org");
+    }
+    return *canonical;
+}
+
+/// A YAML scalar as written -- plain, `"double"` or `'single'` quoted --
+/// read back to its value. Only as much YAML as a host name can need.
+std::string unquote(std::string_view token) {
+    if (token.size() >= 2 && token.front() == '"' && token.back() == '"') {
+        std::string out;
+        for (std::size_t i = 1; i + 1 < token.size(); ++i) {
+            if (token[i] == '\\' && i + 2 < token.size()) {
+                ++i;
+            }
+            out.push_back(token[i]);
+        }
+        return out;
+    }
+    if (token.size() >= 2 && token.front() == '\'' && token.back() == '\'') {
+        std::string out;
+        for (std::size_t i = 1; i + 1 < token.size(); ++i) {
+            out.push_back(token[i]);
+            if (token[i] == '\'' && i + 2 < token.size() && token[i + 1] == '\'') {
+                ++i;
+            }
+        }
+        return out;
+    }
+    return std::string{token};
+}
+
+/// One item of a list, located in the file.
+struct ListItem {
+    std::string value;      ///< unquoted
+    std::size_t line = 0;   ///< the item's line (the key's line for a flow list)
+    std::size_t begin = 0;  ///< flow: the item's first byte in that line
+    std::size_t end = 0;    ///< flow: one past its last byte
+};
+
+/// `tools.allowed_hosts`, as the file spells it.
+struct HostList {
+    bool key_found = false;
+    std::size_t key_line = 0;
+    /// `[a, b]` on the key's line. Otherwise a block list (`- a` lines), or
+    /// nothing at all (`allowed_hosts:` alone, which YAML reads as null).
+    bool flow = false;
+    std::size_t open = 0;   ///< flow: the `[`
+    std::size_t close = 0;  ///< flow: the `]`
+    std::vector<ListItem> items;
+    /// Where a new `  allowed_hosts:` line goes when the key is absent: after
+    /// the section's last content line, nested lists included.
+    std::size_t insert_at = 0;
+};
+
+/// The byte where `line`'s YAML value ends: before a ` #` comment and any
+/// trailing whitespace or terminator.
+std::size_t value_end(std::string_view line, std::size_t from) {
+    std::size_t limit = line.size();
+    for (std::size_t i = from; i < line.size(); ++i) {
+        if (line[i] == '#' && (i == from || line[i - 1] == ' ' || line[i - 1] == '\t')) {
+            limit = i;
+            break;
+        }
+    }
+    while (limit > from && (line[limit - 1] == ' ' || line[limit - 1] == '\t' ||
+                            line[limit - 1] == '\r' || line[limit - 1] == '\n')) {
+        --limit;
+    }
+    return limit;
+}
+
+/// Splits `[a, "b", 'c']` into items. Throws when the list does not close on
+/// its own line: a flow list spread over lines is legal YAML, and rare enough
+/// that refusing it beats a splice that misreads it.
+void read_flow_items(HostList& list, std::string_view line) {
+    std::size_t i = list.open + 1;
+    while (true) {
+        while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) {
+            ++i;
+        }
+        if (i >= line.size() || line[i] == '\n' || line[i] == '\r' || line[i] == '#') {
+            throw ConfigEditError(
+                "tools.allowed_hosts is a list that does not close on its own line; "
+                "edit it by hand");
+        }
+        if (line[i] == ']') {
+            list.close = i;
+            return;
+        }
+        const std::size_t begin = i;
+        if (line[i] == '"' || line[i] == '\'') {
+            const char quote = line[i];
+            ++i;
+            while (i < line.size() && line[i] != quote) {
+                i += (quote == '"' && line[i] == '\\') ? 2 : 1;
+            }
+            ++i;
+        } else {
+            while (i < line.size() && line[i] != ',' && line[i] != ']' && line[i] != '\n') {
+                ++i;
+            }
+        }
+        std::size_t end = std::min(i, line.size());
+        while (end > begin && (line[end - 1] == ' ' || line[end - 1] == '\t')) {
+            --end;
+        }
+        list.items.push_back(
+            ListItem{unquote(line.substr(begin, end - begin)), list.key_line, begin, end});
+        while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) {
+            ++i;
+        }
+        if (i < line.size() && line[i] == ',') {
+            ++i;
+        }
+    }
+}
+
+HostList find_host_list(const Lines& lines, const SectionRange& section) {
+    HostList list;
+    list.insert_at = section.begin;
+    for (std::size_t i = section.begin; i < section.end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        list.insert_at = i + 1;
+        if (list.key_found || indent_of(line) != kEntryIndent) {
+            continue;
+        }
+        const std::string_view rest = line.substr(kEntryIndent);
+        if (!rest.starts_with(kAllowedHostsKey) || rest.size() <= kAllowedHostsKey.size() ||
+            rest[kAllowedHostsKey.size()] != ':') {
+            continue;
+        }
+        list.key_found = true;
+        list.key_line = i;
+        const std::string& original = lines[i];
+        const std::size_t colon = original.find(':', kEntryIndent);
+        std::size_t value = colon + 1;
+        while (value < original.size() && (original[value] == ' ' || original[value] == '\t')) {
+            ++value;
+        }
+        if (value < original.size() && original[value] == '[') {
+            list.flow = true;
+            list.open = value;
+            read_flow_items(list, original);
+            continue;
+        }
+        if (value_end(original, value) > value) {
+            throw ConfigEditError("tools.allowed_hosts is not a list; edit it by hand");
+        }
+        // A block list: the `- item` lines nested under the key.
+        for (std::size_t j = i + 1; j < section.end; ++j) {
+            const std::string_view item_line = body(lines[j]);
+            if (is_blank(item_line) || is_comment(item_line)) {
+                continue;
+            }
+            const std::size_t indent = indent_of(item_line);
+            if (indent <= kEntryIndent || item_line.substr(indent, 1) != "-") {
+                break;
+            }
+            const std::size_t start = indent + 1;
+            std::size_t token = start;
+            while (token < lines[j].size() && (lines[j][token] == ' ' || lines[j][token] == '\t')) {
+                ++token;
+            }
+            const std::size_t end = value_end(lines[j], token);
+            list.items.push_back(
+                ListItem{unquote(std::string_view{lines[j]}.substr(token, end - token)), j, 0, 0});
+        }
+    }
+    return list;
+}
+
+}  // namespace
+
+std::string add_allowed_host(std::string_view content, std::string_view host) {
+    const std::string canonical = checked_host(host);
+    const std::string written = yaml_scalar(canonical);
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange section = find_section(lines, "tools");
+
+    if (!section.found) {
+        if (!lines.empty()) {
+            std::string& last = lines.back();
+            if (!last.empty() && last.back() != '\n') {
+                last += terminator;
+            }
+            if (!is_blank(body(lines.back()))) {
+                lines.push_back(terminator);
+            }
+        }
+        lines.push_back("tools:" + terminator);
+        lines.push_back("  allowed_hosts: [" + written + "]" + terminator);
+        return join_lines(lines);
+    }
+
+    const HostList list = find_host_list(lines, section);
+    for (const ListItem& item : list.items) {
+        if (canonical_host(item.value) == canonical) {
+            return std::string{content};  // already there: nothing to write
+        }
+    }
+    if (!list.key_found) {
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(list.insert_at),
+                     "  allowed_hosts: [" + written + "]" + terminator);
+        return join_lines(lines);
+    }
+    std::string& line = lines[list.key_line];
+    if (list.flow) {
+        if (list.items.empty()) {
+            line.replace(list.open + 1, list.close - list.open - 1, written);
+        } else {
+            line.insert(list.items.back().end, ", " + written);
+        }
+        return join_lines(lines);
+    }
+    if (list.items.empty()) {
+        // `allowed_hosts:` alone reads as null; give it the one-line form.
+        const std::size_t colon = line.find(':', kEntryIndent);
+        line.replace(colon + 1, value_end(line, colon + 1) - colon - 1, " [" + written + "]");
+        if (line.back() != '\n') {
+            line += terminator;
+        }
+        return join_lines(lines);
+    }
+    const std::string& last = lines[list.items.back().line];
+    const std::string indent(indent_of(last), ' ');
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(list.items.back().line + 1),
+                 indent + "- " + written + terminator);
+    return join_lines(lines);
+}
+
+std::string remove_allowed_host(std::string_view content, std::string_view host) {
+    const std::string canonical = checked_host(host);
+    Lines lines = split_lines(content);
+    const SectionRange section = find_section(lines, "tools");
+    const HostList list = section.found ? find_host_list(lines, section) : HostList{};
+
+    for (std::size_t index = 0; index < list.items.size(); ++index) {
+        const ListItem& item = list.items[index];
+        if (canonical_host(item.value) != canonical) {
+            continue;
+        }
+        if (!list.flow) {
+            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(item.line));
+            return join_lines(lines);
+        }
+        // The exact inverse of the add: the first item takes the separator
+        // after it, any other the separator before it.
+        std::string& line = lines[list.key_line];
+        if (list.items.size() == 1) {
+            line.erase(list.open + 1, list.close - list.open - 1);
+        } else if (index == 0) {
+            line.erase(item.begin, list.items[1].begin - item.begin);
+        } else {
+            line.erase(list.items[index - 1].end, item.end - list.items[index - 1].end);
+        }
+        return join_lines(lines);
+    }
+    throw ConfigEditError("'" + canonical + "' is not in tools.allowed_hosts");
+}
+
+std::string format_config(std::string_view content) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+
+    Lines out;
+    out.reserve(lines.size());
+    bool previous_blank = false;
+    for (const std::string& line : lines) {
+        const std::string_view trimmed = body(line);
+        const bool blank = is_blank(trimmed);
+        if (blank && previous_blank) {
+            continue;  // fold runs of blank lines down to one
+        }
+        previous_blank = blank;
+        out.push_back(blank ? terminator : std::string{trimmed} + terminator);
+    }
+
+    // Exactly one trailing newline: drop trailing blank lines, and the last
+    // real line already carries its terminator.
+    while (!out.empty() && is_blank(body(out.back()))) {
+        out.pop_back();
+    }
+    return join_lines(out);
+}
+
+std::string read_config_file(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw ConfigError(path.string() +
+                          ": cannot open config file (run 'apogee config init' to create one)");
+    }
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    if (in.bad()) {
+        throw ConfigError(path.string() + ": error reading config file");
+    }
+    return buffer.str();
+}
+
+void write_file_atomically(const std::filesystem::path& path, std::string_view content,
+                           bool private_mode) {
+    const std::filesystem::path directory =
+        path.has_parent_path() ? path.parent_path() : std::filesystem::path{"."};
+
+    std::error_code ec;
+    std::filesystem::create_directories(directory, ec);
+    if (ec) {
+        throw ConfigEditError(directory.string() + ": cannot create directory: " + ec.message());
+    }
+
+    // A unique sibling name, so two concurrent writers cannot collide on it.
+    std::random_device entropy;
+    const std::filesystem::path temp_path =
+        directory / (path.filename().string() + ".tmp." + std::to_string(entropy()));
+
+    {
+        std::ofstream out(temp_path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            throw ConfigEditError(temp_path.string() + ": cannot create temporary file");
+        }
+        out.write(content.data(), static_cast<std::streamsize>(content.size()));
+        out.flush();
+        if (!out) {
+            std::filesystem::remove(temp_path, ec);
+            throw ConfigEditError(temp_path.string() + ": error writing temporary file");
+        }
+    }
+
+    if (private_mode && supports_private_modes()) {
+        // On the temporary file, BEFORE the rename: the secret is never on
+        // disk under the umask's mode, not even between two syscalls.
+        std::filesystem::permissions(
+            temp_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+            std::filesystem::perm_options::replace, ec);
+        if (ec) {
+            std::error_code cleanup;
+            std::filesystem::remove(temp_path, cleanup);
+            throw ConfigEditError(temp_path.string() +
+                                  ": cannot set private mode: " + ec.message());
+        }
+    }
+
+    std::filesystem::rename(temp_path, path, ec);
+    if (ec) {
+        std::error_code cleanup;
+        std::filesystem::remove(temp_path, cleanup);
+        throw ConfigEditError(path.string() + ": cannot replace file: " + ec.message());
+    }
+}
+
+}  // namespace apogee::harness

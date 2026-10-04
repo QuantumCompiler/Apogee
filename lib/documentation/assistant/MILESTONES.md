@@ -204,7 +204,7 @@ Both were verified against a build that deliberately calls `listen()`. The symbo
 
 ## Milestone F — The shared agent loop
 
-**Goal.** Extract the model→tool→model loop behind an observer **before** the surfaces multiply, not after. That ordering is Ommi's most load-bearing sequencing lesson: it is what kept its four front-ends consistent, and what made deleting an entire front-end a local change rather than a rewrite. `apogee complete --tools` is the first consumer; chat and serve become thin adapters over the same `run()`.
+**Goal.** Extract the model→tool→model loop behind an observer **before** the surfaces multiply, not after. That ordering is Ommi's most load-bearing sequencing lesson: it is what kept its four front-ends consistent, and what made deleting an entire front-end a local change rather than a rewrite. `apogee complete --tools` is the first consumer; chat and serve become thin adapters over the same `run()`. From 2026-09-28 (26c), every request `run()` sends is assembled against the model's window. From 2026-10-03 (26g), past 16 registered tools a turn offers the tools its question needs, not every one.
 
 ### 2026-08-26 — `agentloop::run`, the tool registry, and `ask_user`
 
@@ -223,7 +223,7 @@ Both were verified against a build that deliberately calls `listen()`. The symbo
 
 | Decision | Choice | Why |
 |---|---|---|
-| Web search | **Provider server-side tools only** | User decision. Ommi's local search meant scraping DuckDuckGo's HTML results page with regexes; the markup changes and the tool returns *nothing* rather than erroring. `fetch_url` — the durable half — is ported; searching is the vendors' job. Local models get `fetch_url` but no search in v0.1.0, and the registry seam stays open for a pluggable one. |
+| Web search | **Provider server-side tools only** | User decision. Ommi's local search meant scraping DuckDuckGo's HTML results page with regexes; the markup changes and the tool returns *nothing* rather than erroring. `fetch_url` — the durable half — is ported; searching is the vendors' job. Local models get `fetch_url` but no search in v0.1.0, and the registry seam stays open for a pluggable one. **Revised 2026-09-28** (25e): `web_search` over a SearXNG the user runs, a JSON API rather than a page — see [Milestone V](#milestone-v--the-native-toolsets). |
 | GBNF grammar sampling | Deferred | The stated default. Cloud tool calls arrive structured, so nothing here depends on it; `model-profiles` decides. |
 | `agent/` as its own package | Split from `agentloop/` | The loop needs a registry; a registry needs no loop. MCP and native toolsets land in a third package and register into the same place. |
 | Iteration bound | 12, then answer with tools withdrawn | A model can call the same tool forever, and the only symptom is a request that never returns while spending money. Withdrawing the tools forces a text answer, so the user gets something usable rather than an error. |
@@ -241,6 +241,136 @@ The layering check was **extended to cover `agentloop/` and `agent/`**, which CL
 **Not done: the live-API half** of the Anthropic acceptance criterion. The fixture-automated half is covered by `agentloop/anthropic_loop_test.cpp`, which drives the real provider through the real loop on recorded SSE. Running it against the live API needs a key and a human — worth doing once before the release closes.
 
 ---
+
+### 2026-09-28 — `context-budget` (backlog item 26c): what is sent, sized to the window
+
+**Why.** Every source that added to a request picked its own size. Retrieval injected `--rag-limit` chunks. The tools capped their own output (64 KiB, 16 KiB, 8 KiB). A tool result stayed in history, whole, for the rest of the chat. The history was measured only to warn at 80% and compact at 90%. On a cloud model that is waste. On a local one it is time -- every token is read at about a hundred a second on a 27B -- and crowding, because a small model's attention degrades as unrelated text piles up. The attachments and recall this track adds would make fixed caps untenable.
+
+**What was built**
+
+- [x] **`agentloop/budget.h/.cpp`**, used by every surface through the one loop.
+  - `ContextBudget` is the model's window and the answer's reserve: the request's `max_tokens`, else the backend's, else 4,096, and never more than half the window.
+  - It divides what is left into shares: attachments 30%, retrieval and recall 20%, tool results 25%, history the rest.
+  - `TurnBudget` adds the counting. It is exact where the provider can count (a loaded local model renders and tokenizes the whole request, tool definitions included). Elsewhere it estimates messages, tool calls and tool definitions at four characters a token, and says it did.
+- [x] **A finished turn's tool results are sent as stubs** (`stub_tool_results`). Each is one line: `[read_file({"path":"big.txt"}) returned 57 KB; not kept after its turn -- call it again if you need it.]`
+  - It keeps the link to its call, so the request stays well formed.
+  - Only what is **sent** changes: the saved transcript keeps every result whole.
+  - A result of 512 bytes or less is kept whole, since a stub would be no smaller. So is every `ask_user` answer, since those are the user's own words.
+  - It needs no window, so it applies to every backend. Said once a turn under `--verbose`: `earlier turns' tool results sent as 1 stub (57 KB not re-sent)`.
+- [x] **Retrieval asks for its share.** `RagTurn::budget`, passed by chat, `complete`, `analyze` and `serve` through `retrieve_for_collection`, injects the leading chunks that fit `share(Retrieval)`. `fitting_prefix` finds how many by bisection, counting exactly where it can. The retrieval line says what was left out: `5 of 12 chunks fit the context budget`. A graph section that cannot fit even alone is dropped, and said.
+- [x] **An overflow is trimmed in reverse priority** (`assemble_request`), only when the whole request would not fit the window after the reserve. Each source goes first down to its share, then below it:
+  1. earlier exchanges, oldest first, to none, each with its calls and their results;
+  2. this turn's tool results, oldest first, to their share, then to the newest alone;
+  3. the injected context, from its end.
+
+  The system prompt, the tools' environment note, the question and the newest result are never trimmed. Every trim is said as a notice, once while it holds: `context budget: 2 earlier exchanges not sent; 1 of this turn's tool results sent as a stub`. That is `[warn]` on the terminal, and a `notice` event in machine mode and on `serve`. A request that still cannot fit is sent, and said to be over.
+- [x] **An unknown window never reads as room.** Nothing is sized or trimmed by it, and the fixed caps stand. `share()` is 0 there, so a caller must ask `known()` rather than read 0 as "nothing fits".
+- [x] **A request whose bytes fit is never counted.** A token covers at least a byte, so this shortcut cannot be mistaken, where an estimate could be, several times over, on text that tokenizes densely. Only a request near its window is rendered and tokenized.
+- [x] **Measured and compacted as sent.** `measure_context` counts the conversation with its stubs, so a chat that read a big file is not compacted for what it no longer sends. Compaction shows the summariser the stubs, so tool output is condensed before conversation.
+
+**On real weights** (greedy, `--verbose` lines, against a build of `ea75dea` -- the installed binary, which predates this item and sends the same requests otherwise):
+
+- **A five-turn chat on Qwen3.8-27B** (Q4_K_M, a 32K window) that reads a 58 KB file on its first turn. The answers were word for word the same on both builds.
+
+  | | before | with the budget |
+  |---|---|---|
+  | turn 1, after the read | 18,833 | 18,833 |
+  | turn 2 | 18,907 | 4,137 |
+  | turn 3 | 18,935 | 4,165 |
+  | turn 4 | 18,961 | 4,191 |
+  | turn 5 | 19,005 | **4,235** |
+
+  Prompt tokens per request. Turn five is 78% smaller, and the window 13% used instead of 58%. Turn two read just 150 new tokens: the stub changes the prompt inside turn one, and 25c's checkpoint at turn one's question covers exactly that.
+- **Time was not a clean measure.** Other work on the machine moved an identical first turn between 186 and 282 seconds. Turns two to five took about 44 seconds on both builds, since this hybrid model's generation barely depends on its context length. The gain here is room and attention, not seconds.
+- **`--rag-limit 12` against a small window.** Qwen3-VL-8B on a 4,096-token window with `max_tokens: 512`, over the backlog's 18 documents (258 chunks). The new build said `5 of 12 chunks fit the context budget` and sent a 607-token prompt; the old one injected all 12 in 1,571. Both answers were right.
+- **A large cloud window** was not called. That behaviour is pinned instead by a test: a short conversation with retrieval on a 200,000-token window is sent exactly as before.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The shares | Attachments 30%, retrieval and recall 20%, tool results 25%, history the rest *(default taken)* | Each a field of `BudgetShares`, not a constant in the loop; tuning them is a one-line change. |
+| Finished turns' tool results | Sent as stubs, on every backend *(defaults taken)* | The answer that used a result carries what mattered, and the model can call the tool again. A cloud window gains the same discipline; it only trims less. |
+| How the shares act | Retrieval capped when it asks; everything else only on overflow, in reverse priority, each to its share and then below | On a window with room nothing changes, so the loop's conformance suite passes untouched. |
+| The reserve | The request's `max_tokens`, else the backend's, else 4,096, at most half the window | 4,096 is the larger of the providers' own defaults; past half the window, the question would have no room. |
+| Kept whole | A result of 512 bytes or less, and every `ask_user` answer | A stub would be no smaller; the answers are the user's own words. |
+| Counting | Exact where the provider counts, else four characters a token; a request whose bytes fit is not counted | Exact where possible, never mistaken: the byte ceiling cannot be exceeded, where an estimate on dense text can be several times off. |
+| Reporting | Stubs under `--verbose`, every trim as a notice once while it holds | Stubs happen every turn after tools, and would be noise; a trim changes what the model sees, and is never silent. |
+
+**Guardrails, each mutation-tested (56 mutants, all caught), run in separate git worktrees against the whole unit suite.** 48 of the first 55 were caught on the first pass. The seven that survived were caught once tests were added for what they exposed, and a 56th, for an oversized graph section, was caught by the test written for it.
+- **The arithmetic:** the reserve not held back, uncapped, or taken from neither the request nor the backend; an unknown window read as room; a share of the window instead of what is left, or another source's share; the estimate missing tool calls or definitions; the exact count never asked, or marked estimated.
+- **The stubs:** the turn's start taken from its first user message; this turn's results, the small ones or `ask_user`'s answers stubbed (the answer recognised by its call only); none sent, or none counted; the call unnamed, its arguments unclipped or clipped inside a character; the size in bytes.
+- **The assembly:** no stubs sent; the byte shortcut taken always; exchanges never dropped, the system prompt dropped with them, or only an exchange's question dropped, leaving its answer; this turn's results never stubbed, or the newest too; the injected context never dropped, or dropped before this turn's results; each trim unsaid, a request over its window said nowhere, or an unknown window trimmed anyway.
+- **Retrieval:** never fitted, fitted but unsaid, the count not cut, another source's share, `fitting_prefix` fitting all, one too many or, on an unknown window, none; a graph section too big even alone kept.
+- **The loop and its surfaces:** the assembly unused, its markers not the request's, the stubs or a trim unsaid, a trim said at every step, the request's own `max_tokens` ignored; `measure_context` measuring the transcript whole; compaction shown whole tool output; the budget not passed on by `retrieve_for_collection`, or not built by chat, `complete` or `serve`.
+
+**Not verified, and found on the way.**
+- **Nothing used the attachments share yet.** [26d](#milestone-h--apogee-chat) did, the next day. An attachment is inlined only while it fits the share, so trimming to it takes nothing; past the injected context, an inlined attachment is stripped last.
+- **One turn's tool results are not capped by their share** unless the whole request overflows. A single 60 KB read on a 32K window still goes in whole on its own turn, and becomes a stub on the next. Cutting what a model has just asked for, while it fits, was judged worse than the crowding.
+- **A retrieval turn still re-reads a local model's whole prompt.** The injected block opens the request, so it changes every turn. 26c sizes that block and leaves where it goes alone; moving it is its own change.
+- **A cloud model's overflow is judged on the estimate**, four characters a token. On text that tokenizes densely it can be under by several times. A cloud window is large, so trimming there needs the request to be near a window that big.
+
+---
+
+### 2026-10-03 — `tool-selection` (backlog item 26g): the tools a question needs, and a server's tools together
+
+**Why.** Every request with tools listed every tool registered. The native toolsets alone are about twenty, and each MCP server adds its own: with two servers of a dozen tools each, a local model's prompt was 3,200 to 6,700 tokens before the conversation started, depending on how its template writes tools, and most of it the definitions. That costs reading time on a cold prompt and room in the window on every one. A small model also chooses from the whole menu, and connecting another server made every request bigger. Ommi had no answer for this beyond advising a stronger backend for tool-heavy work.
+
+**What was built**
+
+- [x] **`agentloop/tool_selection.h/.cpp`**, used by every surface through the one loop.
+  - **Selection starts above 16 registered tools.** At or below that, every tool is offered and the request is byte for byte what it was.
+  - **A turn offers** the core (`read_file`, `list_directory`, `run_command`, those the registry has), the eight tools its question ranks highest, and `find_tools`.
+  - **An MCP tool comes with the rest of its server**, whether it was ranked, found or named (the user's call). Native tools are ranked one by one.
+  - **The ranking is by meaning** when the `embedding` role resolves to a model that costs nothing to call: each tool's split name and description is embedded once, and the vectors are cached in `cache/tool-vectors.json` under the model and a hash of the definition (`agent::definition_hash`), so a changed definition is embedded again and the file is safe to delete. A metered embedder is never called for this (the spend rule); with none, or one that fails, **BM25** over the same words ranks instead, and stays the ranking for that conversation rather than retrying the embedder every turn.
+  - **A question is ranked whole and by each of its clauses** (`ranking_queries`), each tool taking its best score. "APG-42's fix needs Sam's eyes: add Sam to Tuesday's design review" blended into one vector ranked only the tracker; ranked by its clauses it finds the calendar too.
+  - **`find_tools`** searches what was not offered and returns up to five definitions, name, description and arguments, which are offered from the next step. Its own description names the tools not shown yet (up to 100), as Claude Code lists its deferred tools.
+- [x] **The loop** (`agentloop/loop.cpp`) ranks once per turn and keeps the offered set for the turn's steps, in the registry's order. **A new turn keeps the last turn's set** while it already offers the new question's top three, because a different tool list is a different prompt prefix and a model with a prompt cache reads the whole conversation again. `find_tools` is answered in the loop. A registered tool called without being offered is dispatched and gated exactly as before, and offered from the next step. The final pass still withdraws every tool.
+- [x] **Every surface.** Chat, `complete`, `analyze` and `serve` build the selection after the agent's tool policy has filtered the registry, so selection only narrows what the policy allows. A follow-up in chat is ranked by the utility model's standalone restatement: the retrieval rewrite when there is one, else its own (`tools ranked for, by <utility>: ...`). `serve` shares one ranker across requests and gives each request its own selection.
+- [x] **Said.** `--verbose` prints once `[tools] 45 registered: each turn offers the ones its question needs, ranked by meaning, by <backend>`, and per turn `tools: 21 of 45 offered, and find_tools, ranked by meaning -- for this question: list_notes, read_note, ...`, with `(the last turn's tools kept)` when kept, a line for each `find_tools` call, and one for a tool called without being offered. Machine mode's events are unchanged.
+
+**On real weights** (the model families, DEVELOPER.md → On real weights; greedy). Each family ran its Q4_K_M build, except gpt-oss, whose only installed build is F16. The four families ran side by side, each loading its model again for each of its four runs, so the times are not comparisons. That was before the user's rule later the same day: one family at a time, its model loaded once. The registry held the 21 native tools and two MCP servers written for this, an issue tracker and a calendar of 12 tools each: 45 tools. The calendar refuses an event id that does not exist, as a real one would. Ranked by Embedding-Gemma-300M.
+
+- **The battery**, eight tasks, each its own conversation: read a file, write one, count lines with the shell, find a file in a folder, read a link and fetch it, arithmetic, open a ticket, and add someone to a meeting found through the calendar. A task passes when its tools were called and worked, or, for the arithmetic, when the answer is right.
+
+  | Family (model) | Every tool | Selected | Prompt per step, every tool → selected |
+  |---|---|---|---|
+  | OpenAI (gpt-oss-20b, F16) | 8/8 | 8/8 | 3,253 → 1,597 |
+  | Google (Gemma 4 12B, Q4_K_M) | 8/8 | 8/8 | 4,698 → 2,257 |
+  | Qwen (Qwen3-VL-8B, Q4_K_M) | 8/8 | 8/8 | 5,306 → 2,549 |
+  | Meta (Llama 3.1 8B, Q4_K_M) | 6/8 | 6/8 | 6,660 → 3,199 |
+
+  The first acceptance criterion holds on every family: the battery passes as it did with every tool, at about half the prompt. Llama 3.1 8B failed the same two tasks both ways: it fetched an address it made up instead of reading the file, and linked tickets instead of using the calendar. A turn offered 8 to 30 of the 45.
+- **A four-turn chat** (read a file; count lines; read the budget file; open a ticket). Every tool: 4/4 on every family. Selected: 4/4 on gpt-oss, Gemma and Qwen; Llama 3.1 8B 2/4, answering two turns by describing the call it had made ("This is the response from the `run_command` function...") rather than giving its result.
+- **What a prompt cache changes.** With every tool, the tools are the same prefix on every request, and a local model's cache reads them once: after the first turn, a step read 20 to 100 new tokens. A selection that changes reads its prompt again, about 1,500 to 4,000 tokens. Over the four-turn chat the selected runs read more new tokens in all: gpt-oss 5,473 against 3,635, Qwen 7,271 against 5,598, Gemma 7,237 against 5,186, Llama 9,051 against 6,896. Keeping the set saved one read in each chat (the ticket turn, after the budget turn had offered both servers). What selection buys is a prompt half the size on every step, and a cold start half as long (a new chat, a `complete`, a request a server has not seen); not fewer tokens read in one long chat.
+- **`find_tools`, the second criterion, met on gpt-oss-20b only.** It was measured before servers were offered whole, when "add Sam to Tuesday's design review" was offered the tracker and not the calendar's `list_events`. gpt-oss searched in all three runs of it (`find_tools "list calendar events"`) and was offered `list_events`. It finished twice: once after two searches and no refused call, once after six refused invites and one search. The third time it searched after five, then broke off with a malformed call. Qwen3-VL-8B, Gemma 4 12B and Llama 3.1 8B never called `find_tools` in any run, with or without the hidden tools named in its description: they used the wrong tool, or invented the event id and were refused, some until the loop's bound. With servers whole, no task in the battery or the chat needed a search, and none was made.
+- **The third criterion** (12 tools: byte-identical requests) is a test, not a run.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Threshold and size | Above 16 registered tools; the top 8 plus the core *(default taken)* | The native toolsets are about twenty, so a chat with tools selects even before any server is connected. Eight covered every battery task's tools on every family. |
+| The core | `read_file`, `list_directory`, `run_command`, `find_tools` *(default taken)* | The tools almost every task begins with; ranked out, a model cannot even look around. |
+| `find_tools` | Returns definitions, offered from the next step *(default taken)* | A tool dispatched unseen would be called with arguments the model guessed. |
+| MCP servers | **Offered whole** — the user's call | A server's tools need each other: an invite needs the event id `list_events` finds. On a local model a tool not offered cannot be called at all, because its name is outside the grammar, and small models do not search. In the last run with single tools the cross-server task failed on every family; whole, it passed on three of four, as with every tool. |
+| Families | One Meta, Qwen, Google and OpenAI model each, optional, never DeepSeek; Qwen3.8-27B excluded until 26i; later the same day, each on its Q4_K_M build when one is installed, one family at a time with its model loaded once — the user's calls | Replaces the document's two acceptance models; recorded in DEVELOPER.md → On real weights for every later item. |
+| The ranking | Embedding role when free, else BM25; best of the question and its clauses | The spend rule; one vector for a two-part question goes to the stronger part. |
+| Kept sets | A turn keeps the last set while it offers the new top three | A changed tool list re-reads the whole prompt on a cached model. |
+| Unoffered calls | Dispatched and gated, then offered | Models remember tools from earlier turns; failing the call would punish that. |
+
+**Guardrails, each mutation-tested (37 mutants, all caught), run in separate git worktrees against the whole unit suite.** 34 were caught on the first pass. The three that survived were caught once tests were added for what they exposed. Vectors remade on every ranking went unseen because the remake read them back from the cache: a second ranking now must not read the cache, and an embedder that failed must not be asked again. The restated question ignored, by the loop or by chat, went unseen because the tests checked a tool the server rule offered anyway, and a progress line printed before the restatement was used: the tests now check what the turn was ranked for.
+- **The selection:** the threshold off by one, the core dropped or offered without being registered, the top count, the set never or always kept, a server split or its prefix wrong, a question's clauses or its best clause ignored.
+- **`find_tools`:** returning tools already offered, or ones sharing no word of the query; offering nothing it found; more than five; the hidden names uncapped.
+- **The vectors:** remade on every ranking, the cache key without the model, the cache never written; the definition hash without the description, or without separators between fields; the cache file not merged with another writer's, its version ignored, or kept outside `cache/`.
+- **The loop and its surfaces:** the selection unused, `find_tools` not offered, the hidden tools unnamed, `ask_user` dropped, a named tool not offered next, `find_tools` not answered, the restated question ignored, the offer unsaid; a metered embedder called; the surface's threshold off by one; selection not passed by chat, `complete` or `serve`, or the chat's restatement unused.
+
+**Not verified, and found on the way.**
+- **A selection reads more in a long local chat than offering everything** (above). The prompt is half the size on every step; the re-reads are the price, and the keep rule only limits them. A persistent prompt cache (26j) would make every tool's prefix cheaper still across processes; whether selection should then stay on for a local model with few servers is worth measuring there.
+- **A question that needs no tool still pulls in servers.** For "What is 17 * 23?" the top eight are whatever ranks least badly, MCP tools among them, so both servers came with them: 28 of 45 offered. A floor on the score before a server is pulled in whole would stop that.
+- **Embedding-Gemma is used without its task prefixes** (`task: search result | query:` and `title: none | text:`), as retrieval uses it too. "The budget file in the docs folder" ranked the tracker's sprint tools above `read_file`. The prefixes belong in the embedding clients, for retrieval and here alike.
+- **Small models do not search.** `find_tools` helps a model that reasons about what it lacks (gpt-oss); for the others, offering a server whole is what works.
+- **A cloud model** was not run. Its requests go through the same loop and the same tests; a cloud prompt cache is keyed on the prompt's start too, so the same trade-off should hold there.
 
 ## Milestone G — The terminal UX layer
 
@@ -329,7 +459,116 @@ Asked for directly (Taylor, 2026-09-23, with a Qwen3.5 transcript): "the formatt
 - `cli.chat_typeahead_and_crash_safety` gains three PTY checks: `markdown` (no `**` around rendered bold, and `**bold**` with `--raw`), `typeahead-hidden` (words typed mid-reply absent from the reply, present at the prompt) and `interrupt` (echo off mid-turn, on after SIGINT). A build without the guard fails the second and third, and one whose signal handler does not restore echo fails the third.
 - On the real binary under a 100-column PTY, the Qwen3.8 fixture rendered with its table wrapped in columns.
 
+
+### 2026-10-03 — `cli-busy-line` (maintenance item M1): every slow command speaks on one line
+
+**Why.** `apogee models list` went silent for seconds (the user's report, 2026-09-30). On this machine's store it made 31 reads in about 15 seconds, and `check`, which reads most of them twice, took about 30, with nothing on screen. Chat solved this in the 2026-08-26 entry above: the status line, one repainted line with a spinner, active only on a terminal. But only a conversation ever made one, so an ordinary command had no line to speak on. This item carries the same painter across the application.
+
+**What was built**
+
+- [x] **The general frame** (`spinner_frame`, a second overload beside chat's), for example `✻ reading model headers: gemma-4-31B-it-F16.gguf (6/31 · 7s)`:
+  - the spinner, the label, then `(done/total)` when the sweep knows its total;
+  - the elapsed time from two seconds;
+  - never the last column: the frame is cut to the width less one, the label giving way first, and the count and time never cut.
+- [x] **`StatusLine` grew a busy mode** (`start_busy`), rather than a second painter being written:
+  - its first frame comes only after a delay, so a fast command paints nothing;
+  - the label and count change from any thread (`set_spinner_label`);
+  - stderr's width is asked at every repaint;
+  - `print_above` writes output meant to stay with the line out of its way, and the line repaints below it.
+  - Stopping now wakes a waiting spinner instead of sleeping out its interval, chat's spinner included, so a command that finishes early is never kept waiting.
+- [x] **`BusyLine`**, the scope a command opens around slow work:
+  - constructing it means the line may appear; destroying it (or `finish`) clears it, so what the command prints next starts on a clean row;
+  - `report(label, done, total)` and `set(label)`, and `sink()`, the same as a `BusyProgress` callback for a sweep to report through;
+  - `above(write)` for a line that stays.
+  - `busy_options(quiet)` makes it active only when stderr is a terminal and nothing asked for silence. Otherwise it writes no byte and starts no thread.
+- [x] **`platform::terminal_width(StandardStream)`.** The line paints on stderr, so it is measured on stderr. Under `apogee models list | grep x`, stdout is the pipe and stderr the terminal.
+- [x] **The first consumers**, each reporting through a plain callback from the layer doing the work. `models/` is untouched: the header reads are in `commands/`.
+  - `models list` counts its reads across the whole sweep before the first: configured local files, stored GGUFs no backend points at, and SafeTensors snapshots. `models info` and `models status` name the header they read, without a count, since neither knows a total worth claiming.
+  - `check` says each section as it starts, and counts the headers in Config and in Models.
+  - `graph build` and `graph communities` move their per-chunk and per-community lines onto the busy line on a terminal. On a pipe those lines stay as they were, one per step, a log a script can read. A failed chunk and a dry run's extraction print above the line.
+  - `embed ingest` counts its files: the walk is counted before the first is read (`embedstore::IngestProgress`, an optional parameter with an empty default).
+  - There is no `graph update` yet; it adopts the line when it is written.
+- [x] **`-q, --quiet`** on every one of them: no busy line, and for the graph commands no per-step line on a pipe either. Results, warnings and failures still print. `embed ingest --graph --quiet` carries it into the build it chains. `models list --output-format stream-json` is silent the same way.
+
+**On the real store** (this machine's, read only: 31 stored models and 20 local backends, a 100-column pseudo-terminal, built without llama.cpp, with three mutation builds running beside it, so the times are long):
+- `models list` showed 178 frames over 22 seconds, from `(1/31)` to `(31/31)`, then the table on a clean first row.
+- `check` showed 353 frames over 44 seconds, counting Config's reads to 20 and then Models' to 31.
+- No frame reached the last column (the widest was 78 of 100), and no residue was left.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The frame | Spinner · label · `(done/total)` when known · elapsed from 2 s; the label cut to the live width *(default taken)* | The count and the time are what tell a stalled sweep from a working one, so they are never cut. |
+| The gate | 150 ms before the first frame *(default taken)* | A fast command never flickers. Elapsed still counts from the start of the work. |
+| The consumers | `models list/info/status`, `check`, `graph build` (and `communities`), `embed ingest` *(default taken)* | The known slow spots; a later slow command adopts the same scope as it is touched. |
+| Quiet | `--quiet` silences the busy line, and on a pipe the graph commands' progress lines too *(default taken)* | One verbosity model: what silences the status line silences this. |
+| One painter | `StatusLine` extended, never a second | Decided when the item was specced (2026-09-30): a second transient line is the erase-arithmetic bug class the thinking view closed once. |
+| Pipes | Graph progress kept a line per step; the other consumers print nothing | The line is for terminals; a log needs lines it can read, and the commands that printed none print none. |
+
+**Guardrails, each mutation-tested (38 mutants, all caught)**, run in separate git worktrees against the whole unit suite, the PTY check and the graph end-to-end on the mutated binary. 37 were caught on the first pass, 14 of them only by the binary-level checks. The survivor, a stop that never woke the spinner, went unseen because the test stopped the spinner before its thread had reached its wait; the test now waits for the first frame first.
+- **The frame:** the time from one second, the count dropped, the last column used, the label or a narrow frame not cut, the ellipsis not counted, a count shown with no total.
+- **The line:** no delay, a stop not woken, the width measured once, stderr's width asked of stdout (in `status_line` and in `platform`), the line painting on a pipe or ignoring `--quiet`, output above it not erased first, `finish` leaving the line, a label change never shown.
+- **The consumers:** each sweep's report unsaid or uncounted (configured reads, snapshots, `info`, `status`, Config's and Models' reads, an ingest's files), the sink never passed by `models list` or `check`, JSON output painting, the graph's and the ingest's lines unused, and every `--quiet` ignored, the one `embed ingest --graph` carries included.
+
+**Tests.**
+- `status_line_test`: the frame as goldens, including the shapes with no total and under two seconds; every width from 1 to 80, wide characters included; an inactive line writes nothing; a delay outlasted by the work paints nothing and is not waited out; the line repaints in place and clears; output above it; the width asked at every repaint; a stop that wakes the spinner.
+- `models_test`, `check_test`, `ingest_test`: what each sweep reports, and that reporting changes nothing printed. `graph_test`: `embed ingest --graph --quiet` is quiet in the build it chains.
+- **`cli.busy_line`** (`tests/pty_busy_check.py`), on the real binary. A model's sidecar and an agent's schema are named pipes, so the sweep is held, with no test seam in the product, until the script has seen the line on the terminal; the graph extractor and summariser are the mock, slowed by `delay_ms`; an ingest of 8,000 files is slow by being big. For `models list`, `check`, `graph build`, `graph communities` and `embed ingest` it checks that:
+  - the line repaints naming its phase and count, and no frame reaches the last column;
+  - the final screen holds only the results;
+  - piped, `models list` writes nothing to stderr, and its stdout is byte-identical whether stderr is a terminal or a pipe;
+  - `--quiet` and `stream-json` paint nothing, and a sweep under 150 ms paints nothing.
+
+  Run against the installed build from before this item, it fails on every frame it never painted.
+- `graph_e2e.sh`: on a pipe, the build keeps a line per chunk and writes no escape byte, and `--quiet` keeps only the summary.
+
+**Not verified, and found on the way.**
+- **Why `models list` is slow.** Sampling it showed nearly all the time inside `inspect_gguf`'s `skip_value`. Each string of a tokenizer's vocabulary is skipped with its own `seekg`, which discards the stream's buffer, so a 150,000-token vocabulary costs some 300,000 system calls per file: about 10 of the 15 seconds were system time. That is the read itself, outside this item. Reading the vocabulary in buffered blocks could make the header cache (M2) unnecessary, and is worth trying first. It did: M2 shipped that fix instead of the cache, the same day ([Milestone N](#milestone-n--model-operations)).
+- **A failed chunk printed above the line** is covered by the code path, not a test: no fixture makes a chunk fail on a terminal.
+- **Windows** builds the stream-aware width but runs no PTY check, the recorded per-item skip.
+
 ---
+
+### 2026-10-04 — `thinking-side-calls` (backlog item 26n): a turn's other model calls, in the thinking block
+
+**Why.** A turn is no longer one model call. Around the chat model a question can run the embedder, the utility model -- restating a follow-up, summarising a tool result, compacting -- the rerank judge, and on `/capture` the clerk. That work was invisible, or a status-line blip, while the chat model's own reasoning had a home. The user asked for one story in one place.
+
+**What was built**
+
+- [x] **One Reporter event** (`agentloop/side_call`, `Reporter::on_side_call`): a side call's role and what it is doing, said when it starts and again when it is over, with its elapsed time. `SideCallScope` says both; a null sink says nothing; no number is ever estimated.
+- [x] **Said where the calls are made**:
+  - retrieval: the question's embedding and the rerank judge (`RagTurn::on_side_call`), so `auto_rag`, a chat's attachments and recall all narrate them;
+  - the loop: a tool result's summary;
+  - `chat`: the follow-up rewrite (only when there is an earlier turn), mid-turn compaction, and the `/capture` clerk, whose block then collapses instead of printing a bare status line -- the clerk is named in a failed capture's line instead (`capture by prose failed: …`), which a pipe still shows.
+- [x] **Drawn inside the thinking block** (`ThinkingView::side_call`, `side_call_done`):
+  - `· <role> — <what it is doing>`, dim, each on a line of its own;
+  - cut to the width, interleaved with the reasoning in arrival order;
+  - completed in place with ` · 0.6 s`.
+
+  A block of side calls alone stays open when the step begins, so its reasoning joins it; one with no reasoning collapses to `✻ Worked for Ns`.
+- [x] **Everywhere else, nothing new.** Machine mode says a side call as the existing `tool_status` event at its start, and `cli.machine_schema_conformance` passes unchanged. `serve` gets no frame, a pipe draws nothing, and no transcript, `result` or answer carries any of it.
+- [x] **Lines said during a turn land above the block** (`ThinkingView::print_above`, `CliReporter::keep_line`) -- found on a real terminal, where a retrieval line printed into a block of side calls and the block's next erase missed by a row.
+
+**On a real terminal** (Gemma 4 12B, a `notes` collection embedded by Embedding-Gemma, `--rerank on`):
+- the block read `· embedding — the question → Embedding-Gemma-300M · 0.4 s`, then `· rerank — judging 2 results with Gemma4-12B-Q4KM · 8.7 s`, then Gemma's own reasoning, in one block that collapsed to `✻ Thought for`;
+- the PTY chat check drives the same story with mock models on every run: a follow-up's rewrite narrated, `✻ Worked for`, and a clean saved chat.
+
+**Tests**: 14 new cases -- the scope and the suffix; the view (arrival order, own lines, completion in place, `Worked for`, the cut, an inactive view); the reporter (one block across the step, a pipe, lines above the block against the terminal model); machine mode's `tool_status`; retrieval's embedding and judge; the loop's summary; and in `chat`, machine mode hearing the tool summary, compaction, the rewrite once and the judge, while a pipe and the saved chat hear nothing. The PTY chat check gained an eighth case.
+
+**Guardrails, each mutation-tested (20 mutants, all caught -- three only once their tests were sharpened: the cut, the judge, `retrieve_for_collection`'s sink), in a separate git worktree:** the scope's end, time and tokens; the view's opening, own line, completion, wording, reasoning flag and cut; the reporter's open block, both draws and lines above the block; machine mode's single line; each emission site.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The line | `· <role> — <what it is doing>`, completed with the time *(confirmed by the user)* | |
+| A block with no reasoning | Still appears, and collapses *(confirmed by the user)*, to `Worked for` *(for veto)* | `Thought for` would say it thought. |
+| The first-cut set | Embedding, rerank, rewrite, summary, compaction, the clerk *(confirmed by the user)*; vision and transcription stay with their attachment lines *(for veto)* | Those run in the indexer's background worker, which the item keeps off the block. |
+| `auto_rag`'s choice | A status-line notice *(confirmed by the user)*, now above an open block | One-shot state, not a side call. |
+| Machine mode | `tool_status`, at a call's start | The existing display-prose event; no vocabulary change. |
+| `serve` | No frame *(for veto)* | Its retrieval has `rag_search`/`rag_result`; progress on `notice` would change that frame's meaning. |
+| Tokens | Not yet reported by any call site | Shown only when truly known. |
 
 ## Milestone H — `apogee chat`
 
@@ -389,7 +628,7 @@ Verified against a build forced to always use the plain reader: the check failed
 
 ### 2026-09-25 — Chat input completion (backlog item 24)
 
-Asked for directly (Taylor, 2026-09-25): Claude Code's `/` command list and `@` file mentions, in `apogee chat`. Specced and pulled to the top of v0.1.2 the same day, and built that day after the user's one call: until the attachments item ([26d](../backlog/attachments-documents.md)) lands, a sent `@file` mention stays plain text, with no stopgap that pastes the file's contents.
+Asked for directly (Taylor, 2026-09-25): Claude Code's `/` command list and `@` file mentions, in `apogee chat`. Specced and pulled to the top of v0.1.2 the same day, and built that day after the user's one call: until the attachments item ([26d](#milestone-h--apogee-chat), shipped 2026-09-29) lands, a sent `@file` mention stays plain text, with no stopgap that pastes the file's contents.
 
 **What was built**
 
@@ -425,6 +664,319 @@ Asked for directly (Taylor, 2026-09-25): Claude Code's `/` command list and `@` 
   - a burst over visible rows leaves none behind, and `/exit` sent in one burst keeps no suggestion on its line;
   - a piped chat writes no escape sequence and no prompt, and its `/help` lists `/retriever`, described.
   - **Mutation-checked:** without the clear below the line, the burst check fails; without the finishing flag, the `/exit` check fails; with rows allowed to reach the full width, the edge check and 910 unit assertions fail.
+
+### 2026-09-29 — `attachments-documents` (backlog item 26d): documents, code and folders, attached to a chat
+
+**Why.** Until now a chat could take an image on its first message and nothing else. A small local model with a 32K window cannot read a 300-page PDF or a repository by having it pasted in. It can when the document is indexed and the parts that bear on each question are handed to it, cited by page or line. Ommi's `chat --file` pasted one file's text into the first message, whole, with no index and no size handling; this replaces that design rather than porting it. Asked for by the user on 2026-09-25, with three calls of theirs: attachments kept with their chat and cached by file hash, helper models used automatically, and external converters on `PATH`.
+
+**What was built**
+
+- [x] **Attaching.**
+  - `chat --attach <path>` (repeatable), and mid-chat `/attach <path|folder|glob>`, `/attachments` and `/detach <name>`, in chat's command table, so `/help`, completion and dispatch have them.
+  - `/attach` completes paths as `@` does, and `/detach` completes what is attached.
+  - `complete --attach`, and a machine-mode `{"type":"attach","path":…}` line whose outcome arrives as `notice` events.
+  - A sent message's `@path` or `@"path with spaces"` attaches that path exactly as `/attach` would, the message kept as typed. A mention naming nothing stays text, with a dim note.
+- [x] **Reading** (`agentloop/attachments`, one core for every surface).
+  - Text and code are read as they are, a binary one refused. A PDF goes through `pdftotext` with its page breaks kept, and HTML through `fetch_url`'s reader, its links resolved against the file's own `file://` address.
+  - Word, Excel and PowerPoint files are refused by name, and so are images, audio and video, each with its reason.
+  - A folder is walked recursively, hidden entries left out and, inside a git repository, what git ignores (`git ls-files`).
+  - A glob matches `*` and `?` within a name and `**` across folders.
+  - Over 500 files or 50 MB asks on a terminal and is refused on a pipe.
+- [x] **Indexed, always, into the chat's own store**, `attachments/<chat id>.db`, under a new private layout row, and deleted with the chat by `chats delete`.
+  - A file's chunks are stored under its content, `sha256:<hex>`, each with its name, byte offsets, and line or page range in its metadata. `chunk_spans` gives the chunker's spans, and `PositionIndex` numbers them.
+  - Embedded by the embedding model **only when one is named** and not billed per call; otherwise searched by its words, and said so. The chat model is never drafted in through the role's fallback.
+  - Indexing runs on a worker thread while the user types, and settles before the next turn, as the title does. A turn that needs it waits with its progress on the status line, and Ctrl-C keeps what is ready.
+- [x] **The hash cache.** Before anything is read or embedded, the other chats' indexes are searched for the same content under the same embedding model (or lexical beside lexical). A match is copied, vectors and all, and cited by this chat's name for it.
+- [x] **Inlined when it fits.** An attachment whose text fits the budget's attachment share (26c), beside the ones already inlined, rides the user message it was attached with, whole. That is in what is **sent** only.
+  - The transcript keeps the message as typed, and the session records the attachment by reference: path, sha256, reader, size, and the message it rides. That is the session's schema version 2.
+  - The text is rebuilt exactly from the chunks' byte offsets.
+  - The budget trims an inlined attachment last, or with the exchange it rode. Either way it is named, and retrieved from then on. So is every one when compaction folds the messages they rode.
+- [x] **Retrieved every turn** from the chat's index, through the one retriever resolver, with inlined attachments left out.
+  - Excerpts are labelled `ledger.pdf p. 187` or `budget.cpp:477–487`, adjacent chunks of one file merged without their overlap, and the model asked to cite the label.
+  - A question naming code -- `fitting_prefix`, `parseConfig`, `Store::search`, `run()` -- is searched by its words for those names alone. Any other is searched by words and meaning together (a `hybrid` pin) when the index has vectors. `/retriever` overrides both.
+  - The attachments go first; an `auto_rag` or `--rag` collection gets what they leave of the retrieval share (`share_used`), each reported on its own line.
+  - The follow-up is restated once, by 26b's rewrite, for both.
+- [x] **`check`** has an Attachments section: whether `pdftotext` and `git` are found (optional, so never a fault), and how many chat indexes there are and their size. The folder's mode is the filesystem check's, as a layout row.
+
+**On real weights** (Qwen3.8-27B Q4_K_M at its 32K default, greedy; embeddinggemma-300M as the embedding model; `--verbose` lines):
+
+- **A 300-page PDF** (generated, with real cross-references, one detail on page 187), attached with `/attach`. It was read and 612 chunks embedded in 5 seconds. Asked how many crates were in the Tromso warehouse, the 27B answered "4,812 crates of cloudberry jam (ledger.pdf p. 187)" from a 750-token prompt.
+- **`summarize @ledger.pdf` in a second chat** attached it as `/attach` would, and copied it from the first chat's index in 0.7 seconds instead of embedding it again. The summary cited merged ranges (`pp. 82–83`).
+- **Resumed**, the first chat attached and embedded nothing. It restated "which page mentions the cloudberry jam?" as a standalone query and answered "Page 187." `chats delete` removed its chat's index.
+- **A 6 KB source file** was inlined whole. Both questions about it were answered right with no retrieval, the second reading 54 new tokens with 1,633 from the cache.
+- **A folder of 30 source files** inside the repository: asked where `fitting_prefix` is defined, the 27B named `budget.cpp` from line 483, the definition, and `budget.h:181–187`, the declaration. Re-attached after two of its files changed, it copied 28 and read and embedded just those two.
+
+**Found on the way, and settled.**
+- **Meaning missed a name.** The folder question first went to vector search, which did not find the definition: an embedding captures meaning, and an exact name carries little. Hybrid search, tried next, dropped it too. Its rank fusion rewards a chunk middling in both lists over one strong in only one, and the definition was first by its name and nowhere by meaning. Searching the name alone, by its words, put the declaration first and the definition fourth. Hence the code-name rule above.
+- **One run answered nothing.** The 27B spent its default 2,048-token budget reasoning and returned an empty answer. With `-n 8192` it answered. That is the older empty-answer problem, flagged separately during 26b, not this item's.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| `complete --attach` | A temporary store of its own, removed at exit, the hash cache still searched *(default taken)* | A one-shot has no chat to keep it with. |
+| A large folder | Over 500 files or 50 MB asks on a terminal, refused on a pipe *(default taken)* | Attaching a home directory by accident. |
+| `.gitignore` | Honoured inside a repository, through `git ls-files` *(default taken)* | The same `git` the git toolset uses. |
+| Office files | Refused by name *(default taken)* | Each needs a converter decision of its own. |
+| Retrieval | Up to the budget's retrieval share, labelled, adjacent chunks merged *(default taken)* | Contiguous text reads better than fragments. |
+| How it is keyed | By content, `sha256:<hex>`, with name and range per chunk | The hash cache is one lookup per other chat, and a file attached twice is indexed once. |
+| How an inlined one reaches the model | On the message it was attached with, in what is sent only; saved by reference, rebuilt from the index | The message stays as typed, and the text is never saved twice. |
+| The embedder | Only the one named, never a billed one | The chat model standing in through the fallback would embed hundreds of chunks with a 27B; and nothing is vectorised through a metered embedder on Apogee's initiative. |
+| Retrieval's order | The attachments first, then `auto_rag` with what they leave | The user's own documents come first. |
+| A local HTML file's links | Resolved against its own `file://` address | The reader resolves against a web address only. |
+| A question naming code | Searched by its words for those names; anything else, words and meaning together | Found on real weights, above. |
+
+**Guardrails, each mutation-tested (68 mutants, all caught), run in three git worktrees against the whole unit suite.** 59 were caught on the first pass. The nine that survived were caught once tests were added for what they exposed: a `?` that matched a folder separator; cancellation ignored while embedding; the retrieval share not handed on to `auto_rag`; `complete --attach` inlining nothing; inlined attachments searched as well; the cost of those already inlined ignored; a dropped exchange or a compaction left unsaid; and a code name searched along with the rest of its question.
+- **Finding and reading:** hidden entries kept, or kept from git's list; git's list never used; names cited absolute; `*` across folders, `**` needing a folder, `?` matching `/`; the size guard at its limit rather than past it; Office files or images read; a local HTML file's links left as they were; a PDF read as text.
+- **Chunks and excerpts:** a span a byte short; line or page numbers counting the separator, or from zero; page breaks kept in the stored text; the last line past the end; excerpts never merged, their overlap repeated, unlabelled, or not best first.
+- **The index and the hash cache:** content already held indexed again; a copy cited by the other chat's name; a copy across embedding models, or from a vector index into a lexical one; an embedding failure unsaid; another model's vectors mixed in; cancellation ignored.
+- **Inlining and the budget:** an attachment exactly at the share refused; the inlined text never sent, never stripped, kept when its exchange is dropped, or its missing message unsaid; the loop not passing it on, or not collecting what was dropped; the cost of those already inlined ignored; a dropped or compacted one kept inline, or not said.
+- **Retrieval:** inlined attachments searched too; the share not passed on to a collection, or not split; excerpts unlabelled; code names not recognised (snake case, camel case, calls), searched by meaning, or with the rest of the question; no hybrid pin when the index has vectors.
+- **The embedder:** the chat model drafted in through the role's fallback; a billed embedder used.
+- **The surfaces:** a large folder attached without asking; an attachment never anchored to its message, or never inlined; content another attachment still holds removed by `/detach`; an email address read as a mention, or a mention's trailing punctuation kept; a mention already attached, attached again; machine mode's `attach` line unknown; the session's `inline_at` not saved or not read; the index not removed with its chat; the layout row not private; `check` counting an index's side files as indexes.
+
+**Not verified.**
+- **Office files have no item.** Word, Excel and PowerPoint are refused by name, and nothing in the backlog converts them yet. Images, audio and video were [26e](#milestone-h--apogee-chat)'s, shipped the next day.
+- **A PDF without `pdftotext`.** It is skipped with its reason, and the test for that runs only where `pdftotext` is missing. This machine has it, so that test skipped.
+- **macOS only.** `git ls-files`, `pdftotext` and the private folder were not tried on the Linux or Windows builds.
+- **A billed embedder** is refused by the provider's own flag. That was tested on a mock; no hosted embedder was tried.
+
+### 2026-09-30 — `attachments-media` (backlog item 26e): images, audio and video, attached to a chat
+
+**Why.** 26d let a chat hold documents. A picture could still reach a model only through `--image` on a chat's first message, and only a vision model could read it. Audio had no way in at all. Video was refused, although the pinned llama.cpp decodes it. Yet the common case on a laptop is a small text-only model, beside a helper that can see or hear and could turn either into text it reads. Asked for by the user on 2026-09-25, with two calls of theirs: helper models used automatically, and `ffmpeg` on `PATH`.
+
+**What was built**
+
+- [x] **The same `/attach`.** `--attach`, `/attach`, `@path`, `complete --attach` and a machine-mode `attach` line take an image, a recording or a video, and so does `--image` on `chat` and `complete`.
+  - Anything nothing configured can read is refused by the one guard, `attachment_refusal`. Its message names the role to set, or that role's own model when it is set and cannot read the medium either.
+  - `complete --image` still fails a one-shot whose picture is missing, is not an image, or that nothing can read.
+- [x] **As it is, once.** A chat model that can read the medium is sent it with the next message, ahead of the text, in what is sent only:
+  - an image, on a vision model;
+  - a sound up to a minute, on a model whose projector hears;
+  - a clip up to a minute, as its frames (one a second, at 640 pixels, with the time every five frames), on a local model with a vision projector, plus its sound for one that hears.
+- [x] **As text, from then on.** Every medium is also read into text and indexed with the chat's documents, inlined when it fits and retrieved when not. That text stands in for the pixels and samples on every later turn, so a vision chat stops re-encoding its images every turn.
+  - An image is described by the `vision` role: what it shows, then its text copied as written.
+  - Audio is transcribed by the `transcription` role in 30-second windows, each line stamped `[m:ss–m:ss]`.
+  - A video becomes a **timeline**: a frame every five seconds and at each scene change, at most 240, each one described, merged in time order with what was said. A frame identical to one already described keeps its line but is not described again.
+  - With no helper set, the chat model reads its own media when it can *(default taken)*. A helper is used automatically, and the status line names the model reading each file and how long it has been at it.
+- [x] **Found by moment.** A transcript's or timeline's chunks carry the times their lines cover, and are cited by them (`standup.mp4 6:30–7:05`). When a question names a moment (`at 4:30`), the chunks covering it are looked up by time and go first, whatever the search found.
+- [x] **ffmpeg, run by Apogee.** `platform/ffmpeg` runs `ffprobe` and `ffmpeg` as Apogee's own children, with a deadline, an output cap and Ctrl-C.
+  - Their stderr is a pipe Apogee drains, never the terminal.
+  - Frames go to a private folder beside the chat's index, removed after each file.
+  - mtmd's own video helper is not used: it spawns ffmpeg from code whose output Apogee does not control.
+  - Without ffmpeg, audio and video are refused by name.
+- [x] **The local backend reads it.** A multimodal request carries images, WAV audio and frames to mtmd (`MediaInput`).
+  - Each marker sits where its part sat in its message. They had all been stacked at the top of the prompt.
+  - Frames are marked mergeable, for Qwen-VL's temporal merge.
+  - Audio on a projector without an audio encoder is refused.
+  - `accepts_video` answers from the projector header, `audio_sample_rate` once the model is loaded, and `--verbose` says what a turn encoded and how long it took.
+- [x] **Capabilities, asked.** `Harness::can_read(model, medium)` answers over `accepts_images`, `accepts_audio` and the new `VideoCapable`. The IR gains an `InputAudio` part (OpenAI's `input_audio` shape) and a `video_frame` flag on image parts.
+- [x] **The budget sizes it.** An image is allowed 1,024 tokens, a frame 256, a second of audio 25. The allowance is added to the estimate, the byte ceiling and the exact count, all of which see only words.
+- [x] **`check`** says whether `ffmpeg` is installed, and which models read images, audio and video for the default chat.
+
+**On real weights** (Q4_K_M weights; `--verbose` lines; Qwen3-VL-8B as the `vision` role, and Gemma 4 12B, whose projector has an audio encoder, as the `transcription` role):
+
+- **A text-only Llama 3.1 8B**, given an invoice image with `complete --image`: Qwen3-VL-8B described it, and the 8B named the customer, the total and the due date. Ten seconds in all.
+- **A vision chat on Qwen3-VL-8B** with `--image`: the first turn read the image as it is; the second read 159 tokens of text, its description included, with no image encoded.
+- **A 16-second voice note** (recorded with `say`), attached to the 8B, was transcribed by Gemma 4 12B word for word. Asked when the delivery now was and what had to be paid first, the 8B answered both. Attached to a chat on Gemma 4 12B itself, it was heard as it is: 439 positions with 1 sound encoded, in 1.2 s.
+- **A 25-second clip of four slides** on Qwen3-VL-8B was read as its frames (25 frames, 405 positions, 8.8 s), and the steps and their times came back right. The next turn read its timeline.
+- **A 10-minute screen recording with narration**: nine screens, the deadline spoken at 6:30 over a calendar. Attached to a chat on Qwen3.8-27B, its timeline was built in the background into 131 chunks: 121 frames described by Qwen3-VL-8B (about 9 s each) and 20 windows transcribed by Gemma 4 12B (about 4 s each). That took 23 minutes, two answers included.
+  - Asked what was on screen when they mentioned the deadline, the 27B answered "At 6:30, the screen showed a November calendar view", with the Friday 14 November proposal due at 17:00.
+  - Asked what was typed into the terminal, it quoted the command and its output, at 5:30–5:55.
+  - **Re-run with identical frames reused**, only 20 of the 121 frames needed describing: nine screens, plus the frames where the encoder's output differed. The frames took 2 minutes instead of 18, the whole run 5.5 minutes, and the answer was the same, now also listing the dry-dock inspection the day before.
+
+**Found on the way, and settled.**
+- **Gemma 4 answers nothing about audio with its thinking off.** Transcription with the reasoning skipped, as every helper chore runs, came back empty, and the note was indexed as "nothing was said". With its reasoning on, the model transcribed it word for word. A media request now asks again with the reasoning on when a reply comes back empty, and keeps it on for the rest of that file.
+- **That empty transcript was copied to the next chat** by the hash cache, as if it were true. A recording none of whose windows could be transcribed is now refused, not indexed as silence.
+- **Frame descriptions lost their colours.** With "This is one frame of a video, at 0:10" on its own line after the prompt, Qwen3-VL-8B copied only the text, and a question about a slide's colour was answered wrong. With that line opening the prompt instead, it described the screen.
+- **"No vision model is set" was said when one was.** The configured vision model's Q4 entry has no `mmproj_path`. The refusal now names the role's model when it is set and cannot read the medium either.
+- **A `.jpg` slipped past the refusal.** Read on its own as a file name, `.jpg` is a hidden file with no extension. The test that pinned the refusal found it.
+- **The image path stacked every marker at the top of the prompt**, before the whole rendered conversation. A clip's frames with their times between them, or a sound on the third message, need each marker where its part sits, which is llama-server's way.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| A clip read natively | Up to 60 s; longer, its timeline *(default taken)* | A minute of frames at mtmd's default rate is already thousands of tokens for an 8B model. |
+| A timeline's frames | One every 5 s and at each scene change, at most 240, thinned evenly *(default taken)* | Enough for a screen recording; the cap bounds the helper's time. At most 960 are extracted before thinning. |
+| An image attached again | Read again as it is, by a chat model that can see *(default taken)* | The way back to the pixels when the description missed something. A model that cannot see reads the same description, stored once. |
+| No helper set | The chat model reads its own media when it can *(default taken)* | One model's view is better than none, and it is already loaded. |
+| Audio read natively | Up to a minute too, as video | The same bound, for the same reason. |
+| A native clip | 1 frame a second at 640 px, the time every five frames, its sound for a model that hears | 60 frames of Qwen3-VL fit a 32K window; mtmd's own default is 4 a second. |
+| `accepts_video` | From the projector header (a vision encoder), not `mtmd_helper_support_video` | A clip reaches mtmd as frames Apogee's own runner extracted. The helper's flag says only whether mtmd's own ffmpeg decoding was built, which Apogee does not use. |
+| Audio's sample rate | The model's own once it is loaded; 16 kHz before, which mtmd converts | The rate is fixed per projector inside mtmd and known only after a load. |
+| When media goes as it is | Once, with the message it was attached with; its text from then on | The point of the item: a vision chat stops re-encoding its images every turn. |
+| `--image` | An attachment, on `chat` and `complete` alike | Otherwise `--attach` would be described for a text-only model while `--image` was refused, which is a parity bug. |
+| Many billed descriptions | More than 12 ask on a terminal, refused on a pipe | The spend rule's spirit: nothing is spent at scale on Apogee's initiative. One image is one call. |
+| A frame identical to one described | Keeps its line, is not described again | A slide left up costs one description, and a moment there is still found. |
+| A moment a question names | Looked up by the chunks' times, first | Searching "4:30" by its digits finds every line with a 4 or a 30. |
+
+**Guardrails, each mutation-tested (77 mutants, all caught), run in three git worktrees against the whole unit suite.** 74 were caught on the first pass. The three that survived were caught once their tests were fixed:
+- A native clip left uncapped: the test found the sound's `-t 60` rather than the frames'.
+- Twelve billed descriptions asked about: the test changed its hooks after they had been copied.
+- `check` never falling back to the chat model: only a role set to a model that cannot read reaches that fallback.
+
+What the mutants covered:
+- **The ffmpeg runner:**
+  - a span's start not added back to its frames' times, or a span read from the start;
+  - the output cap, the stop or the deadline ignored, and a failure left unsaid;
+  - `-fps_mode` not asked for, and a progress line's `pts_time` taken for a frame's;
+  - a WAV's rate field wrong, or an odd byte kept;
+  - an audio stream missed, and audio decoded at a fixed rate.
+- **Who reads what:**
+  - the role's model passed over, no fallback to the chat model, nothing read natively, and a video's sound or frames never read;
+  - in the harness: video assumed of a provider that declares nothing, video read as images, and a rate asked of a model that cannot hear.
+- **Reading media:**
+  - no retry with the reasoning on, or a retry that still skips it;
+  - transcription at a fixed rate, and a recording never transcribed indexed as silence;
+  - what was said sorted after the screen at the same moment;
+  - 240 frames not thinned, an identical frame described again, frames sparser, or no scene changes;
+  - the frame's context put after the prompt;
+  - hours dropped from a clock, a time read inside a longer number, and a span dated from its first byte rather than its line;
+  - the scratch folder kept.
+- **What is read as it is:**
+  - a clip's frames unmarked, without their times, without its sound, or uncapped;
+  - never built, or built for a recording over a minute;
+  - sent every turn, the text sent beside the image on its first turn, or not kept for the next message;
+  - a dropped one left unsaid.
+- **The index and retrieval:**
+  - chunks without times, labels without them, every chunk taken for a moment, and an excluded one kept;
+  - media read as text, a reader's notes dropped, and `.jpg` read as a file name;
+  - moments ignored, and a moment's score shown in place of the search's.
+- **The budget:** media left out of the estimate, a frame sized as an image, audio counted as free, and native parts dropped.
+- **The local backend:** frames set apart, the frame flag lost, audio unread, audio sent to a projector that cannot hear, a remote image decoded, the media left unreported, and a rate claimed before the load.
+- **The surfaces:**
+  - the refusal skipped, helpers ignored by it, and the role's model unnamed;
+  - billed descriptions not asked about, or asked about at twelve;
+  - `check` saying any chat model reads clips, ffmpeg always found, and no fallback to the chat model;
+  - `complete --image` unchecked, and `chat --image` ignored;
+  - the IR's frame flag unread or unwritten, and audio parsed as text.
+
+The two lines in `llama_real.cpp` (WAV decoding and mergeable frames) and the header-based `accepts_video` are not in the count: the worktrees build without llama.cpp, where neither can run. They were verified on real weights above.
+
+**Not verified.**
+- **macOS only.** On Windows, child processes are not supported yet, so audio and video fail there with the reason. Linux was not tried.
+- **Cloud helpers.** Only local models described and transcribed. A cloud vision role should work, since cloud models read images, but none was tried. No cloud backend is sent audio, and none is sent a clip as frames.
+- **A real screen recording.** The recording above was generated: static slides and a synthetic voice. A real one has a moving cursor and changing content, so fewer of its frames are identical and fewer descriptions are saved.
+- **HEIC and TIFF** are converted to JPEG through ffmpeg, but no real file of either was tried.
+- **Uploads over `serve`** are out of scope. A served request's `input_audio` part now parses as audio, though, and a local backend that hears would read it.
+
+### 2026-10-04 — `recall-across-chats` (backlog item 26l): what earlier chats established, recalled
+
+**Why.** A small model has no memory beyond its window: whatever a user established last week -- the database, the conventions, a decision -- they had to say again. The knowledge layer keeps what is captured on purpose; recall covers everything else, the way `auto_rag` covers a document collection.
+
+**What was built**
+
+- [x] **A summary per finished chat** (`agentloop/recall`). A chat of two turns or more is summarised once at a clean exit: what was asked, what was decided, the facts and preferences stated, the files involved, in at most 120 words. The request is greedy, a side request, with thinking off. The summary goes into a private index under `memory/`, one source per chat id: `0600`, its folder `0700`, a layout row of its own.
+- [x] **Never billed.** The utility model summarises when one is named; else the chat's own backend, only when it costs nothing per call; else the exit says why not. Summaries get vectors only from a free embedder.
+- [x] **Recalled per turn, transient and said.** After a chat's attachments and `auto_rag`, a turn recalls at most three items within what the retrieval share has left:
+  - past chats' summaries, through `retrieve_for_turn`, introduced as notes on earlier conversations and never the asking chat's own;
+  - then decisions from the knowledge collection, unless `auto_rag` searched it.
+
+  The terminal says `[memory] 1 past chat`; machine mode sends a `memory` event (`Reporter::on_recall`). Nothing recalled ever enters the transcript.
+- [x] **Controllable**:
+  - `--no-recall` for a run, `/recall off` for a session;
+  - `/private`, which keeps a chat from ever being summarised and takes back a summary already kept;
+  - `memory.recall: false` for everything.
+
+  `chats delete` forgets the chat's summary.
+- [x] **An open chat is never summarised.** A chat that becomes due is marked under `memory/pending/` with the process that has it open. A process that died leaves its marker, and the next `chat` start catches up on at most three. A chat whose process still runs is left alone. A resumed chat is summarised again only when this run added to it.
+- [x] **Never on `serve`, by construction.** The layering check refuses any include of the recall code from `httpserver/` or `operations/`. Recall is off in `complete` and agents too: one-shots stay reproducible from their inputs.
+- [x] **`check`** counts the summaries and fails when others can read the index.
+
+**On real weights** (the families, each summarising its own chat -- no utility model set -- with the local Embedding-Gemma for search; separate processes, as a chat ending and a new one starting are):
+
+| | Qwen3-VL-8B | Gemma 4 12B | gpt-oss-20b | Llama 3.1 8B |
+|---|---|---|---|---|
+| "Our project uses Postgres 16…", two turns | summarised by itself | summarised | summarised | summarised |
+| a new chat: "Which database version should this migration target?" | `[memory] 1 past chat`; **PostgreSQL 16** | `[memory] 1 past chat`; **"you are currently using PostgreSQL 16"** | `[memory] 1 past chat`; knew the project is on 16, and advised moving to 17 | `[memory] 1 past chat`; "based on the earlier conversation about Postgres 16 … a suitable target" |
+| `/recall off` | asked for context | asked for context | answered in general | asked for context |
+| `serve` | asked for context, as with recall off | asked for context | asked which database | asked for context |
+| after `chats delete` | asked for context | asked for context | answered in general | asked for context |
+
+**Tests**: 20 new cases -- the recall module (the request, the summary, the chunk, the counts, the index, retrieval with its header and exclusion); recall end to end in `chat` over two mock backends (summarised, recalled transient, stopped three ways, private, single-turn, `complete`, catch-up and an open chat, self-recall, continued and unchanged resumes, a recorded decision, the billed summariser); the config, the session, the completer, both reporters and `check`.
+
+**Guardrails, each mutation-tested (29 mutants, all caught -- one only once a test wrote a `memory:` section without `recall`), in a separate git worktree:** the summariser's request (side request, thinking, budget, roles), a blank summary, the chunk's date, the counts' wording, a billed embedder, the index's privacy and removal, what is due (private, turns), a billed summariser, self-recall, decisions, an unchanged chat, an open chat, `/private`, the marker, the `[memory]` line, `/recall`, `--no-recall`, the exit summary, `chats delete`, `check`, the machine event, the config default, the session's flag.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where recall runs | `chat` only *(confirmed by the user)* | One-shots and agent runs stay reproducible from their inputs; `serve` never, by construction. |
+| What is summarised | Chats of two turns or more *(confirmed by the user)* | A single question rarely establishes anything. |
+| How much a turn recalls | At most 3 items, inside the retrieval share *(confirmed by the user)* | Recall supports the question, never crowds it. |
+| A continued chat | Summarised again *(confirmed by the user)*, and only then | The summary describes the chat as it stands. |
+| The summariser | The utility model, else the chat's own only when unbilled *(for veto)* | A summary is Apogee's idea, never billed for it. |
+| When | At a clean exit, on a line of its own; catch-up at the next start, three at most *(for veto)* | A thread the exiting process would kill loses the summary. Old chats are never summarised wholesale. |
+| The controls | `--no-recall` and `/recall off` stop recalling; `/private` stops summarising *(for veto)* | Each does what its name says. |
+| Decisions | From the knowledge collection after past chats, not twice with `auto_rag` *(for veto)* | The deliberate record beside the automatic one. |
+| Reporting | `Reporter::on_recall`: a `[memory]` line, a `memory` event | One event every surface adapts; the server's adapter never sees it. |
+| The acceptance models | The families *(the standing rule)* | |
+
+### 2026-10-04 — `attachment-map-card` (backlog item 26q): a folder attached with a map of itself
+
+**Why.** A folder attach gave the model excerpts and no map. In the attachment-representation spike (2026-10-03), a model given this whole repository and asked how its RAG works invented `lib/src/core/`, failed, guessed again, and cycled until the turn died. Excerpts answer "what does this code say". Nothing answered "where is anything".
+
+**What was built**
+
+- [x] **The card** (`agentloop/attachments`, `render_map_card`), built from the names the attach already found: no disk read and no model call.
+  - **What it says:** the prefix every attached path starts with; the directories two levels deep, each with the files under it; the files at the root; the extension mix; and the totals the user was told.
+  - **Bounded:** at most 30 tree lines (`kMapCardDepth`, `kMapCardLines`, `MapCardCaps`), eight extensions named and the rest counted as `other`.
+  - **Folding:** every top directory gets its line before any is opened. What does not fit folds into a counted line (`... 21 more directories, 630 files`).
+  - The same names always render the same bytes.
+- [x] **It rides like an inlined file** (`cli/chat_attachments`):
+  - A folder or glob of two files or more is given a card when the card fits the attachment share beside what is inlined already. It is counted in that share, so a file that fits alone is retrieved beside a big map.
+  - Where the window is unknown nothing is inlined, so nothing is mapped either.
+  - The attach line says which: `attached proj: 3 files, 3 chunks, with a map of its folders -- …`, or `no map: …` with why.
+  - The card is anchored on the next user message (`Attachment::map_at`, saved as `map_at`) and sent there on every request, rebuilt from the attachment's names and the index's chunk count (`AttachmentIndex::chunks_of`). A resumed chat sends the same bytes, and the saved message stays as typed.
+  - It is sent after its attachment's own text on that message, so the model reads the map first and a trim takes the text before the map.
+  - A trimmed map is dropped from then on, and said.
+  - After compaction the map rides the next message, once.
+  - `complete` and machine mode get it through the same class.
+- [x] **Two attachments on one message, trimmed one at a time** (`agentloop/budget`). Before, taking one off restored the message as it had been before *that* one, so a second strip could put the first back. That was rare while one message rarely carried two attachments; the map makes it common. Each attachment on a message now remembers the message as it was before the first of them, and a strip rebuilds the message from the rest.
+- [x] **Tests**:
+  - **Goldens:** the card for a project's names, byte-exact, including the folds at four and two lines, one level deep, and names with no common prefix.
+  - **Bounds:** a deep tree (50 × 10), a wide one sharing its inner lines, a flat thousand files, a glob, and the extension fold.
+  - **A real folder walk** feeding the card.
+  - **In chat:** the attach line; the card after its text on the message; none for one file; a glob rooted where its files start; the same bytes when resumed; after compaction on the next message once; a trimmed map said and gone; the share counted; none on an unknown window.
+  - **On the surfaces:** `complete --attach` sending it on the prompt; a chat's saved message as typed.
+  - **The budget's two-attachment case**, and `map_at` round-tripped.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Depth and size | 2 levels, 30 lines, named constants *(default, confirmed)* | A map that scrolls is a context bomb. |
+| The mix | Extension counts, no content sniffing *(default, confirmed)* | Instant and deterministic. |
+| Kept how | **Anchored like an inlined file and rebuilt each request, never saved as text** *(recorded 2026-10-03: "persisted history, not a transient prefix")* | It rides the same message every turn, so a cached prompt holds, and the transcript keeps the message as typed, the rule inlined files already follow. |
+| The root | **The directories every attached name starts with** *(group run, flagged for veto)* | It is the prefix a citation needs, always true of every name. A glob is named as spelled and rooted where its files start. |
+| What gets a card | **Two files or more** *(group run)* | One file is its own map, even when it is a folder's only file. |
+| An unknown window | **No card, and said** *(group run)* | The item says "never unconditionally", and an unknown window never reads as room for anything inlined. |
+| Its place on the message | **After its text: read first, trimmed last** *(group run)* | It is the smallest and most useful part of an attachment. |
+| A trimmed map | **Dropped from then on, and said** *(group run)* | As an inlined file is. |
+| The chunk total | **Counted from the index** *(group run)* | The same on resume, so the card's bytes never change under a cached prompt. |
+| The strip fix | **Built here** *(group run)* | The card makes two attachments on one message the normal case, and without the fix a trim could quietly bring one back. |
+
+**Verified on real weights.** Each family ran in one `chat --tools` process, with `lib/src/cli/source` (467 files) attached and indexed by Embedding-Gemma. Each was asked "What are the top-level directories of the attached source tree, and what does each one hold? Give each directory's path, and two of the directories inside each.", on the binary before this item and after it:
+
+| Family | Before | After |
+|---|---|---|
+| Qwen3-VL-8B | `business`, `agent`, `agentloop` from the excerpts, and no more | `business/` (with `agentloop/`, 40 files, and `knowledge/`, 12, both right), `data/`, … |
+| Llama 3.1 8B | Answered with raw tool calls on invented paths (`lib/src/business`, `lib/src/tools`) | `business`, `data`, `infrastructure`, `presentation`: all four, and only those |
+| Gemma 4 12B | Described a different tree (`src/cli`, with `assets/` and `build/`) | `business/` (`agent/`, `agentloop/`), `data/` (`backends/`, `contracts/`), … |
+| gpt-oss 20B | 21 paths cited, 12 of them invented (`completions/bash/`, `ApogeeDependencies.cmake`) | 4 paths cited, all real |
+
+A retrieval question ("where is the logic that decides which retriever a turn uses?") was asked first: every family found `agentloop/retriever.cpp` with or without the card. Retrieval answers *what*; the card is for *where*.
+
+**Guardrails, each mutation-tested (18 mutants, all caught).**
+- **The card:** deeper than the cap; no fold line; top directories not reserved; no common prefix; every extension named; the root's files unsaid.
+- **The budget:** a strip dropping the others; the base taken as the message stands.
+- **In chat:** one file mapped; the map costing nothing; mapped past the share; the map before its text; compaction forgetting it; the map following every message; a trimmed map kept; no chunks counted.
+- **The session:** `map_at` not written; `map_at` not read.
+
+**Not verified.**
+- **Cloud backends** get the card through the same request assembly; none was run.
+- **The answers' directory names** were checked by hand against the tree. The script flagged only slash-separated paths that do not exist.
 
 ## Milestone I — The full cloud set
 
@@ -503,6 +1055,594 @@ Two smaller corrections came from the same run: llama.cpp's own logging is now r
 
 **Not verified:** performance. The KV cache is asserted by token counts, never by wall-clock, and no large model was run.
 
+### 2026-09-25 — `local-tool-calling` (backlog item 25b): tools through each model's own template
+
+**The gap.** The local-tools spike (2026-09-25) found that no local model had ever been shown a tool. `LlamaCppProvider` rendered its prompt with `llama_chat_apply_template`, llama.cpp's legacy template function, which has no tools input, so `request.tools` was dropped. Asked to use `read_file`, Qwen3.8-27B replied that it had no such tool. The one local call path was Milestone P's gpt-oss parser, and even gpt-oss was never shown the list. The spike measured the fix outside Apogee: llama.cpp's own chat layer (`common/chat.h`, which llama-server runs) passed six tasks out of six on Qwen3.8-27B and on Qwen3-VL-8B.
+
+**What was built**
+
+- [x] **`backends/llama_chat.h/.cpp`**: llama.cpp's chat layer behind an interface of standard types. It loads a model's templates once per load and renders messages and tools through the template. It converts the grammar triggers the way llama-server does and resolves the preserved special tokens. Its parser returns content, reasoning and calls, and gives `false` where llama.cpp would throw.
+  - It lives in **a library of its own**, `apogee_llama_chat`, because `llama-common` carries its own nlohmann/json at another version (3.12 against Apogee's pinned 3.11.3), and the two share an include guard. This is the one translation unit that sees those headers.
+  - `common`'s own logger, which writes straight to stderr, is silenced once.
+- [x] **The seam** (`llama_runtime.h`).
+  - `LlamaModel::render_chat` returns a `ChatRendering`: the prompt, a `SamplingGrammar`, the preserved tokens, the stop strings, and a `ReplyReader`.
+  - `special_token_text` renders a special token as text: a call's opener (`<tool_call>` on Qwen) is a special token, and without this the reader would see the call as bare JSON.
+  - `LlamaContext::set_grammar` installs the grammar for one generation.
+  - The defaults refuse, so a runtime without the layer falls back honestly.
+- [x] **The real runtime** (`llama_real.cpp`) builds a fresh sampler chain per generation (`make_sampler`): the lazy tool grammar when there is one, then greedy selection. It also **no longer accepts a token twice**: `llama_sampler_sample` already accepts, and the extra `llama_sampler_accept` had been harmless only because greedy selection keeps no state. A grammar does keep state, so it would have advanced twice per token.
+- [x] **The provider** (`llamacpp`). Every request renders through one function, `render_request`, whether it is a text turn, an image turn (tools included, per the default) or the token count (which now counts the tool definitions).
+  - With the model's own template, `TemplateReply` re-reads the whole reply after every token, as llama-server does. It emits only the difference: reasoning to the thinking sink, content to the answer, and a call held back entirely.
+  - Stop strings end the reply. A call the format left without an id gets a nine-character one, the shape Mistral's template insists on.
+  - The grammar is set for every generation and cleared on a request without tools, because the session's context outlives any one request.
+  - **The fallback** (the GGUF ships no template, or its template cannot render the request) is the path from before 25b: the name-matched registry and the profile filters. `common` would otherwise have rendered a template-less model with a generic ChatML template, and a guessed format is worse than the registry. When a request carried tools, the fallback says so in one line.
+- [x] **A notice channel.** `StatusEvent::Type::Notice`, forwarded by the loop to a new `Reporter::on_notice`. The terminal shows it as a lasting `[warn]` line, machine mode as a `notice` event, and `serve` as a `notice` meta-frame. It is used for the dropped-tools line, a grammar that did not compile (the turn then runs unconstrained), and a reply that did not match its format (kept as text, with no call run).
+- [x] **The repeated-call guard** (`agentloop/loop.cpp`). The same tool with the same arguments, compared as JSON, a third time in one turn gets a tool result saying it already has that answer (`kRepeatedCallLimit`).
+- [x] **The link**. `llama-common` is linked into `apogee_llama_chat` with its vendored httplib cut from its link interface (`third_party/CMakeLists.txt`), because the downloader that needs httplib is never reached. That is now structural: if a repin made the chat code need httplib, the link would fail by name. The no-listen check's link-graph walk was made exact to match: for a static library it follows `INTERFACE_LINK_LIBRARIES`, which is what reaches the final link, because its private `LINK_LIBRARIES` never do. The walk had been scanning an archive the linker never saw, so the change scans exactly what is linked, no less. The executable's link line and `nm` both confirm that no downloader or httplib code is in the binary. `cli.no_listen_symbols` now scans 16 libraries.
+- [x] **Tests**: 14 new cases -- the provider over the scripted runtime (which models the seam at word level: a template, a reader, special words, grammars), in both builds, and the loop's guard and notice.
+
+**On real weights** (`apogee chat --tools` in machine mode, a driver answering each permission prompt "yes" and recording it; a throwaway home; `context_size` 32768; Q4_K_M):
+
+| Task | Qwen3-VL-8B | Qwen3.8-27B | gpt-oss-20b (F16) | Llama-3.2-3B |
+|---|---|---|---|---|
+| read a file | pass, 6.5 s | pass, 75 s | pass | pass |
+| write a file (gate prompted) | pass, 7.1 s | pass, 124 s | pass | pass |
+| count lines with the shell (gate prompted) | pass, 7.1 s | pass, 121 s | right answer, read the file instead of using the shell | looped, and printed a call as text |
+| list a folder, then read | pass, 24 s | pass, 242 s | pass | reply matched no format: noticed |
+| find a URL, then fetch it (asked per website) | pass, 17 s | pass, 189 s | pass | wandered through twelve calls |
+| arithmetic, no tool | pass, 5.7 s | pass, 31 s | pass | used the shell for `17 * 3` |
+| | **6/6** | **6/6** | 5/6 | 2/6 (the spike measured 3/6) |
+
+Every saved transcript held its calls and results as IR, with no `<tool_call>`, `<think>` or template markup. `apogee complete --tools -m qwen8b "What does notes.txt say?"` called `read_file` and answered from the file. `serve -m qwen8b --tools` answered the same question over HTTP with `apogee_tool_calls: ["read_file"]`. `analyze --agent security-review -m qwen8b --branch feature` found the hardcoded password in a branch it had not checked out, so it had called `git_diff`. The 27B's times are the hybrid-model re-read that [25c](#milestone-j--local-inference) exists for. Below 8B there is no special effort (the user's call); the repeated-call guard is the only concession.
+
+**Found on the way.**
+- **An empty answer.** When a reply matched no format and nothing of it had been shown, the turn ended with a notice and an empty answer. Found on Llama 3.2 3B. The raw reply now comes out as the text it was, the same safety net the fallback's gate keeps; the exception is a model that was still thinking, whose reasoning never becomes the answer.
+- **A template-less GGUF.** `common` defaults such a model to ChatML. Found reading `common_chat_templates_init`, and answered by keeping the registry for it.
+- **The link graph.** The no-listen scan read an archive the linker never sees. Found on the first link.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Whose format | **Each model's own template, through `common`** (spike) | A model trained on tool tokens ignores an injected prose protocol (Ommi's `TOOL_CALL:`); `common` is maintained upstream with the pin. |
+| Link or copy | **Link `llama-common`**, never copy it (spike) | Part of the pinned tree; the link map pulls only chat, parser, Jinja, grammar and sampling objects. |
+| Acceptance models | **8B-class and up** (the user's call) | Qwen3-VL-8B and Qwen3.8-27B. |
+| Profile filters | Replaced by `common`'s parser wherever Jinja renders *(default taken)* | One parser per template, maintained upstream; the filters stay for the fallback. |
+| Streaming | Re-read per token, emit the difference *(default taken)* | llama-server's method; quadratic, and nothing at chat lengths. |
+| Sampling | Greedy, plus the lazy grammar *(default taken)* | Per-family sampling is [26h](#milestone-j--local-inference); the chain it will extend is `make_sampler`. |
+| Tool choice | `auto`, parallel calls off *(default taken)* | One call per step is easier to gate and to show. |
+| Repeated calls | The third identical call is answered unrun *(default taken)* | The spike's 3B read one file three times and ran the shell eight. |
+| Image turns | Carry tools too *(default taken)* | A model asked about a picture can act on it (the Milestone O rule). |
+| `common`'s JSON | Isolated in `apogee_llama_chat` | Two nlohmann/json versions behind one include guard compile silently against whichever came first. |
+| httplib | Cut from `llama-common`'s link interface | Its only user is the downloader, never reached; cut, the link proves it. |
+| A template-less GGUF | The registry, not `common`'s ChatML | The model's own template when it has one, the name-matched guess before a generic one. |
+| An unmatched reply | Shown text stands; nothing shown → the raw text; no call runs | Never a turn with nothing in it; never a call run on a guess. |
+
+**Guardrails, each mutation-tested (20 mutants: 19 caught outright, 1 once its test was strengthened), run in a separate git worktree.**
+- **Rendering:** the tools dropped from the template (the guardrail's first named mutant); the template ignored for the fallback; the thinking switch ignored.
+- **Streaming:** a call printed as text, with the preserved opener not rendered (the second); reasoning in the answer (the third); content never shown; a stop string kept, or not stopping.
+- **The grammar:** never set; not cleared.
+- **The rest:** a call left without an id; tools dropped silently, or a notice with no tools to drop; an unshown reply left empty, or a thinking model's reasoning made the answer; the repeated-call guard off, early, or comparing arguments as text; notices dropped by the loop; and httplib put back on `llama-common`'s link interface, which `cli.no_listen_symbols` fails naming `libcpp-httplib.a`.
+
+**The survivor.** "Not cleared" survived because its test ran a templated request with no tools, whose grammar is empty anyway. The case that matters is a tool request followed by one that falls back, and the test now runs it.
+
+**Not verified.**
+- `common` on Linux and Windows. It builds on every target (LLAMA_BUILD_COMMON was already on), but the real-weights runs were on macOS only.
+- An image turn with tools on real weights; the scripted runtime covers the shared path.
+- The fallback's notice, on a real GGUF without a template: none is on this machine.
+
+### 2026-09-28 — `hybrid-prompt-checkpoints` (backlog item 25c): a hybrid model reads only what is new
+
+**The re-read.** Qwen3.5 and 3.8 mix attention layers with linear-attention layers, whose running state llama.cpp cannot rewind. A thinking model's template re-renders the last answer without its reasoning, so every turn's prompt parts from the cache inside that answer. The trim to the shared prefix was refused, the cache cleared, and the whole conversation read again. That has been correct since 2026-09-23, and slow: at 25b, Qwen3.8-27B spent 31–242 s per tool task, most of it re-reading.
+
+**What was built**
+
+- [x] **Checkpoints, as llama-server takes them.** The seam is in `llama_runtime.h`.
+  - `LlamaContext::checkpoint(position)` saves the part of the cache that cannot be rewound, as it stands after exactly `position` tokens. It uses `llama_state_seq_get_data_ext` with `LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY`: the running state only, while the attention half stays in the cache and trims like any other.
+  - `trim_to`, when refused, restores the newest checkpoint at or before the position and trims to it. The restored state ends exactly there, so the cut succeeds. It returns where the cache really ends. With no checkpoint to go back to, it clears as before.
+  - `needs_checkpoints()` answers true only for a recurrent or hybrid model (`llama_model_is_recurrent/hybrid`). A sliding-window model would qualify, but contexts keep a full-size window cache by default (`swa_full`), which trims.
+- [x] **One policy, shared** (`keep_checkpoint`, `checkpoint_for`, `forget_checkpoints_after`: templates in `llama_runtime.h`). A checkpoint at a held position replaces it. Past `kMaxCheckpoints` (8) the oldest goes. A restore takes the newest at or before the divergence, never one past it, and a trim drops every checkpoint past where the cache ends. The real runtime and the scripted one both use it, so the tests hold the real rules.
+- [x] **Where they are taken** (`LlamaCppProvider::checkpoint_marks`). `decode_in_batches` ends a batch at each mark and saves there.
+  - **Four tokens short of the prompt's end**, llama-server's offset. The next prompt diverges inside the generation prompt that opens this answer (`<|im_start|>assistant\n<think>\n` on Qwen), so a checkpoint at the very end would lie past the divergence.
+  - **Where the last user message starts.** It is found by rendering the conversation before it alone (`render_chat`, and the fallback's `render_prompt`, gained `add_generation_prompt`). It is kept only if it really is a token prefix of the prompt, because a template that renders earlier messages differently once they are not last gives no position.
+  - None on a side request's context, an image turn's, or a pure-attention model's, where finding the marks is skipped entirely.
+- [x] **The report.** A `PromptCache` status event per turn gives the prompt, the tokens reused and read, and the checkpoints held with their size. The loop hands it to a new `Reporter::on_progress`, and the terminal prints it under `--verbose` only; machine mode and `serve` drop it.
+- [x] **Tests**: 10 new cases, over the scripted runtime (`rewindable = false` now restores through the shared policy) and the policy itself, plus the loop's progress hand-off and the verbose-only print. The old "reads everything again" case now holds the invariant it was written for: decoding resumes exactly where the cache really ends, never past an uncut prefix.
+
+**On real weights** (Qwen3.8-27B Q4_K_M, `context_size` 32768, greedy; `--verbose` lines):
+
+| | prompt | from the cache | read | checkpoints held |
+|---|---|---|---|---|
+| chat, turn 1 | 61 | 0 | 61 | 1 (150 MiB) |
+| turn 2 | 115 | 57 | 58 | 3 |
+| turn 3 | 136 | 111 | 25 | 5 |
+| turn 4 | 168 | 132 | 36 | 7 (1047 MiB) |
+| tool loop, step 1 | 2752 | 0 | 2752 | 1 |
+| steps 2–6 | 2860–3142 | all but the new | 112, 140, 53, 51, 54 | 2–6 |
+
+- The four-turn chat's answers, and the tool loop's (list a folder, read its three files, name the color), were **byte-identical** to a build without checkpoints (25b, `1aa702d`) on the same prompts.
+- Wall time was 21.6 s against 33.7 s for the chat, and **46.5 s against 156.3 s** for the tool loop.
+- Qwen3-VL-8B (pure attention) took no checkpoints, and its turns reused the cache by trimming, as before.
+- **Measured: one checkpoint of Qwen3.8-27B's state is 149.6 MiB**, so the cap of 8 is about 1.2 GiB of host memory at most. A chat adds two per turn, the user-start one and the end one, and a tool step adds one.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| How | **Checkpoints, as llama-server does them** | Keeping reasoning in the IR so the prompt never diverges would break "thinking is never persisted", and would not help a template that changes earlier text for another reason. |
+| How many | 8 per context, the newest kept *(default taken)* | A chat needs the one before its latest answer. llama-server's 32 is for a server's slots; at 150 MiB each, 8 is already 1.2 GiB. |
+| Where | Four tokens short of the prompt's end, and the last user message's start *(default taken; the end one placed as llama-server places it)* | The two divergence points a chat and a tool loop produce. A checkpoint at the exact end would be past the thinking model's divergence and never usable. |
+| Image turns | None *(default taken)* | They run on a throwaway context. |
+| Which models | Recurrent or hybrid only | A pure-attention cache trims; `swa_full` makes a sliding-window one trim too. |
+| The policy's home | Templates in `llama_runtime.h`, shared by both runtimes | The cap and "never past the divergence" are tested where they run, not on a copy. |
+| A user-start mark that is not a prefix | Not taken | A checkpoint at a position the prompt never passed through holds a state no later prompt shares. |
+| The report | `--verbose` only | Memory the user never asked for is visible where they look for it, and silent otherwise. |
+
+**Guardrails, each mutation-tested (17 mutants, all caught), run in a separate git worktree.**
+- **The restore:** a checkpoint past the divergence restored (the guardrail's first named mutant); the restore skipped (the second).
+- **The policy:** the cap never evicting, or off by one; a same-position checkpoint doubled; stale checkpoints kept after a trim.
+- **The marks:** no checkpoint near the end, or one at the very end; the user-start mark taken without the prefix check (caught by a case added for it before the run: a template whose conversation-so-far renders differently), or not at all.
+- **The decode:** no batch split at a mark; a mark passed without a checkpoint.
+- **The rest:** a pure-attention model paying to find marks; a side request taking checkpoints; the report never sent; the loop dropping progress; the terminal printing it without `--verbose`.
+
+**Not verified.**
+- A Mamba or RWKV model: none is on this machine. They are recurrent, so they take checkpoints the same way.
+- The retrieval block at the conversation's start (`transient_at` 0, the default) still re-reads from 0 on a hybrid model whenever it changes: no checkpoint can be before position 0. Moving that block later is its own question.
+
+### 2026-09-28 — `context-fit-defaults` (backlog item 26a): a window sized to the machine
+
+**The memory nobody asked for.** A local backend with no `context_size` got its model's whole trained window, and llama.cpp allocates a context's attention cache up front. Qwen3.8-27B was trained for 262,144 positions: 16 GiB of cache at `f16` beside 16 GB of weights, before the first word. That is the memory helper models and attachments need next. And without a `context_size` the chat never knew the window at all: a local entry has no row in the fallback table, so a long local chat was never warned or compacted, only run into the wall.
+
+**What was built**
+
+- [x] **The default window** (`models/kv_cache.h`). Unset, a local backend's window is 32,768 tokens, or the trained window when that is smaller, or what free memory holds when that is smaller still (`default_local_window`). A `context_size` is used exactly as written, past the trained window too, and is never fitted.
+- [x] **Fitted only when it has to be** (`llama_real.cpp`, `fit_default_window`). llama.cpp's own fitter (`common/fit.h`, `common_fit_params`, the one llama-server runs) is the lowering step, behind `llama_chat::fit_window`. It projects the model onto each device's free memory by reading it over, which took 0.13–0.72 s on the models measured and, on a machine that holds the default, only ever answers "it fits". So a check that costs nothing goes first: the weights, the default window's cache from the header, the projector and llama-server's 1 GiB margin against what the GPU has free. Only a model that fails it, or whose cache the header cannot size, is handed to the fitter.
+- [x] **An 8-bit cache** (`cache_type` on a llamacpp backend: `f16`, `q8_0`, `q4_0`; unset is `q8_0`). A quantized cache needs flash attention, so it is turned on for one rather than left to detection, which on a device without the kernel would turn it off and fail the context. An `f16` cache leaves it to llama.cpp as before. When the default `q8_0` cannot be made (a head width its blocks of 32 do not divide, say), the context is made at `f16` instead; a type the config names is used or refused, with the way out in the message. `config add-backend --cache-type` and its admin twin write it, byte-identical; `config get` reads it.
+- [x] **The cost, stated** (`models/kv_cache.h`, `gguf_inspect`). The header reader now keeps the attention geometry, and `kv_values_per_position` counts what the cache keeps per position over the layers llama.cpp gives one: a Qwen3.5 or 3.8 every `full_attention_interval` layers of the main stack (its prediction layers excluded), none for a layer with no key-value heads or one sharing an earlier layer's cache (Gemma's `shared_kv_layers`), a sliding layer at its own widths. Latent attention (DeepSeek's) is unknown, never a guess. `models info` prints `window:` and `cache:`; `check`'s backend row ends with the same. `--verbose`'s per-turn cache line now ends with the window and how the cache is kept.
+- [x] **The window the chat measures against** (`ContextWindowReporting` in `provider.h`). `Harness::context_window_for_model` asks the entry's `context_size`, then the backend, then the table. The llamacpp provider answers with its session window once loaded, and before that with the default from the header, read once. Side contexts, image turns and the session all stay inside it; a side request could previously ask for up to the trained window.
+- [x] **Tests**: 24 new cases: the arithmetic rule by rule and against llama.cpp's own sizes, the header read, the provider's window and cache over the scripted runtime (which now has a trained length, a fitted window, a cache type and a vision switch), the harness asking it, a local chat at 90% flagged for compaction, the config, `check`, `models info`, the admin parity, and `config_lifecycle` on the real binary.
+
+**Checked against llama.cpp** (its own `llama_kv_cache: size` line creating a 32,768-position context at the pinned `b11151`, and `kv_values_per_position` on each model's header; every one equal to the MiB):
+
+| Model | `q8_0` | `f16` | Layers with a cache |
+|---|---|---|---|
+| Qwen3.8-27B | 1,088 MiB | 2,048 MiB | 16 of 64, plus 150 MiB of fixed recurrent state |
+| Qwen3-VL-8B | 2,448 MiB | 4,608 MiB | 36 |
+| Gemma 4 12B | 5,712 MiB | 10,752 MiB | 8 full, 40 sliding |
+| Gemma 4 31B | 14,960 MiB | 28,160 MiB | 10 full, 50 sliding |
+| Llama 3.1 8B | 2,176 MiB | 4,096 MiB | 32 |
+| Llama 3.2 3B | 1,904 MiB | 3,584 MiB | 28 |
+| gpt-oss-20b | 816 MiB | 1,536 MiB | 12 full, 12 sliding |
+
+**On real weights**
+
+- **Qwen3.8-27B, no `context_size`**: peak memory footprint (`/usr/bin/time -l`) **16.7 GiB before, 1.7 GiB after**, for the same one-word answer. The weights are memory-mapped and not counted, so the difference is the cache: 16 GiB at the trained window in `f16`, 1.06 GiB at 32K in `q8_0`. `--verbose` reads `window 32768, q8_0 cache`; `check` reads `32768-token window, 1088 MiB q8_0 cache`.
+- **The spike's six tasks** (`apogee complete --tools`, greedy, a throwaway home with writes and the shell allowed, both at the new 32K default): **6/6 on Qwen3-VL-8B and 6/6 on Qwen3.8-27B with the `q8_0` cache, and 6/6 on each with `f16`** -- read a file, write one, count lines with the shell, list a folder and read from it, find a URL and fetch it (a website asked about and allowed), and `17 * 3` without a tool. **Every answer was byte-identical between the two caches**, on both models. Peak memory per run: 2.8 GiB against 4.9 GiB on the 8B, 2.0 against 2.9 GiB on the 27B (which also holds its checkpoints).
+- **Speed** (llama-bench at the pin, flash attention on, 512-token prompt and 128 generated, at an empty cache and at 4,096 tokens deep; each cache type run twice, interleaved `q8_0`, `f16`, `f16`, `q8_0` so the GPU's heat falls on both alike -- it was hot, after an hour of runs, so every absolute number is below the quiet ones):
+
+  | | prompt, empty | generation, empty | prompt at 4K | generation at 4K |
+  |---|---|---|---|---|
+  | Qwen3-VL-8B, `q8_0` | 376.9 t/s | 32.1 | 297.6 | 28.8 |
+  | Qwen3-VL-8B, `f16` | 373.0 | 32.4 | 301.2 | 29.4 |
+  | Qwen3.8-27B, `q8_0` | 97.6 | 9.62 | 92.0 | 9.04 |
+  | Qwen3.8-27B, `f16` | 95.0 | 9.47 | 86.6 | 9.07 |
+
+  Within 2% either way, which is the noise between the two passes of one type, except that the 27B reads a prompt 6% faster at depth with the smaller cache. The six tasks' wall times favoured `q8_0` by more (60.9 s against 83.7 s on the 8B, 328 s against 404 s on the 27B), but those ran first, on a cooler GPU, so they are not the measurement.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The unset window | 32,768, or the trained window when smaller, lowered only when free memory cannot hold it *(default taken)* | Predictable beats clever: a long chat compacts at 90% rather than the cache taking gigabytes. |
+| Who lowers it | llama.cpp's fitter, as the item said — **asked only when a free check fails** *(refinement of the default)* | The fitter reads the model over (0.13–0.72 s a load) and, on this machine, never changed an answer. The free check is the same arithmetic `check` shows. |
+| The cache | `q8_0` keys and values *(default taken)*, measured against `f16` below | Half the memory; the answers and speed below. |
+| Flash attention | On for a quantized cache, llama.cpp's choice for `f16` *(the default, made precise)* | A quantized cache needs it, and auto-detection would fail such a context on a device without the kernel. For `f16` it is not needed, and forcing it on such a device would run attention on the CPU. Auto turned it on for every model measured on Metal. |
+| A model that cannot take `q8_0` | The default falls back to `f16`; a named type is refused | The default is ours to adjust; a named one is the user's. |
+| Showing the cost | `models info`, `check`, and `--verbose` *(default taken)* | Memory a user never asked for is visible where they look. |
+| The window the chat measures | Asked of the backend, after the entry's `context_size` | A local window is fitted at load; no table of names can hold it. |
+| Sliding-window layers | Kept at full size (`swa_full`), as before | Out of scope; see below. |
+
+**Guardrails, each mutation-tested (44 mutants, all caught, one only after its test was strengthened), run in a separate git worktree against the whole unit suite.**
+- **The window:** the trained window, or what fits, ignored; what fits raising the window; positions not padded; an explicit `context_size` fitted, or ignored for `models info`; the session, a side request or an image turn at the trained window; the fitted window ignored after a load; the window before a load taken from the trained one, or not asked of a loaded model.
+- **The layers:** a hybrid's prediction layers kept; no default interval; Qwen3.5 MoE and Qwen3-Next not hybrids; shared layers kept; an absent key-value head count unknown; sliding widths ignored; a sliding period off by one; latent attention sized; the pattern or the whole geometry dropped from the header read, and latent attention unnoticed there.
+- **The bytes:** `q8_0` at one byte a value; `q4_0` at `q8_0`'s size.
+- **The cache type:** any value accepted at load, or dropped; not written by the entry writer, `add-backend` or the admin twin, or missing from the view; not mapped from the config, not marked named, or not passed to the load.
+- **The window the chat measures:** the backend not asked; the backend asked before the entry's `context_size`.
+- **The display:** `models info` without its cache line or its "the default"; `check` without the window; an unsized cache shown as a size; the verbose line without the window.
+- **The survivor:** a width fallback that overrode a width the header did give. The test's value width equalled the fallback's by chance; it now differs.
+
+**Not verified, and found on the way.**
+- **The lowering itself** has not run on real hardware: this machine has 128 GB, and no model here fails the free check. The fitter was run directly: at the trained window it lowered Gemma 4 31B at F16 (62 GB of weights) to 105,728 positions, which the default then caps at 32K anyway.
+- **The `f16` fallback** has not met a model that needs it: every head width here divides into 32.
+- **Gemma 4's sliding layers are most of its cache**: 13.3 of Gemma 4 31B's 14.6 GiB at 32K, because contexts keep a full-size sliding-window cache (`swa_full`) so they can trim. A window-sized one would be about 0.6 GiB, but it cannot be rewound, so it needs the checkpoints 25c built for hybrid models. That became 26m, below, shipped the same day.
+
+### 2026-09-28 — `sliding-window-cache` (backlog item 26m): a window-sized cache for sliding-window models
+
+**The cache that was mostly window.** Gemma 4 alternates five sliding-window layers (a 1,024-token window) with one full one; gpt-oss alternates one to one (a 128-token window). A sliding layer only ever looks back its window, but Apogee's contexts kept every sliding layer at the conversation's full length (llama.cpp's `swa_full`), because a full-length cache can be cut back anywhere and a chat's next turn depends on that cut. Found shipping 26a: at the new 32K default that was **13.3 of Gemma 4 31B's 14.6 GiB** of cache. llama-server's own default is the other way round -- a window-sized cache, checkpoints, and a check before any cut is trusted -- and that is what this item ports.
+
+**What was built**
+
+- [x] **A window-sized sliding cache** (`llama_real.cpp`, `create`: `swa_full = false`). A sliding layer keeps its window and a batch -- 1,536 positions on Gemma 4, 768 on gpt-oss -- and llama.cpp's fitter projects the same (`llama_chat::fit_window`). A model with no sliding window is unaffected.
+- [x] **Checkpoints for sliding models** (`make_context`): a context needs them when `llama_model_n_swa` is set, as well as for a recurrent or hybrid model. They are 25c's: the same marks (four tokens short of the prompt's end, and the last user message's start), the same shared policy, the same `PARTIAL_ONLY` save -- which for a sliding cache holds just its sliding part (`llama_kv_cache_iswa::state_write`).
+- [x] **Every cut checked** (`window_intact` in `llama_runtime.h`, shared by both runtimes). After a cut to `p`, the cache must still hold the window before `p`: its oldest position (`llama_memory_seq_pos_min`) is 0 or lies before `p` minus the window -- llama-server's test and margin (`pos_min_thold`). A cut that fails it is refused as a hybrid model's is: the newest checkpoint at or before `p` is restored, else the prompt is read from 0. A restored checkpoint is checked the same way, though one taken from a cache llama.cpp builds always holds its window.
+- [x] **The stated cost follows** (`models/kv_cache.h`). `cache_shape` splits the cache into the layers that keep the whole context and the sliding ones, with the window; `sliding_positions` is llama.cpp's rule (the window and a batch of 512, padded to 256, never past the context); `cache_values` sums them. A layer slides only in a family llama.cpp runs with a sliding window -- Gemma 2, 3 and 4 and gpt-oss -- by the header's pattern or, where the header names none, llama.cpp's for the family (every other layer on gpt-oss and Gemma 2; every sixth full on Gemma 3; Gemma 2's window 4,096 when unstated). `gguf_inspect` reads `attention.sliding_window`. `models info` adds "sliding layers at 1536 positions".
+- [x] **The scripted runtime slides too** (`tests/support/fake_llama.h`): a context with a window drops positions older than what it keeps, refuses a cut that leaves the window short, and **fails any test that decodes with the window broken** -- `window_intact` asserted on every decode.
+- [x] **Tests**: 7 new cases and three extended: the rule itself at its edges, a sliding model's chat whose cut stands and one whose cut is refused and restored, a tool step, a cut with no checkpoint behind it read from 0, the sliding sizes against llama.cpp's own, the families (a Qwen2 header's window ignored, Gemma 2's default window, Gemma 3's default period, a pattern with nothing sliding), the padding, and `models info`.
+
+**Sizes** (llama.cpp's own `llama_kv_cache: size` lines at the pin, a 32,768-position context at `q8_0`; `models info` now states each to the MiB):
+
+| Model | Full-length sliding layers | Window-sized |
+|---|---|---|
+| Gemma 4 31B | 14,960 MiB | 1,998 MiB |
+| Gemma 4 12B | 5,712 MiB | 527 MiB |
+| gpt-oss-20b | 816 MiB | 418 MiB |
+
+**On real weights** (greedy, the new binary against a build of the 26a commit, which keeps full-length sliding layers; `--verbose` lines):
+
+- **Gemma 4 31B** (the Q4_K_M in the store, a base model -- see below): a one-shot completion's peak memory footprint went from **14.96 GiB to 2.29 GiB**, output identical. A four-turn chat: **16.80 GiB to 4.22 GiB**, including seven checkpoints at 1,978 MiB, with byte-identical answers and the same reuse every turn (432, 871, 1,309 tokens from the cache).
+- **gpt-oss-20b, a cut past the window**: a three-turn chat whose first answer lists 300 squares (about 1,500 tokens). Its template drops the reasoning from history, so turn two parts from the cache at position 88, over 1,400 tokens back -- far past the 768 positions the sliding layers still held. **The cut was refused, the checkpoint at 83 restored**, and 1,497 tokens read where the full-length cache read 1,492. All three answers byte-identical to the full-length cache's.
+- **gpt-oss-20b, a six-step tool loop** (read five files one at a time, name the one that mentions blue): byte-identical, each step reading only the call and its result (41, 42, 43, 40, 42 tokens), peak 0.91 GiB against 1.30.
+- **gpt-oss-20b, a four-turn chat**: the same words, but turn one's first answer ended two lines with two spaces (Markdown line breaks) -- a near-tie tipped on a fresh context, before any cut; the reuse (77, 103, 124 tokens) was the same.
+- **Gemma 4 12B, a four-turn chat**: peak 6.63 GiB to 1.82. Its answers parted inside turn one's 800-token repetition, again before any cut ("one per line." against "one per.").
+- **Without the check** (a build with it removed), the long gpt-oss run cut at 88 with the start of its window gone from half the model's layers -- and happened to give the same answers. The harm of a short window is subtle, which is why it is held by a rule and a test that fails any decode across it, not by comparing answers.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| When | Always window-sized for a sliding-window model, no setting *(default taken)* | llama-server's default; the answers matched wherever a cut was involved. |
+| The check | llama-server's `pos_min` test and margin, on every cut and every restore | It errs safe; a restore passing it is the normal case. |
+| How many checkpoints | 25c's 8, no byte cap *(default taken)* | Measured: seven held 1,978 MiB on Gemma 4 31B in a short chat; at most 8 × 637.5 MiB once the window fills, against the 12.6 GiB saved. |
+| Which layers slide in the stated cost | The four families llama.cpp runs sliding; any other family's layers full *(the default, refined)* | Converters write `sliding_window` for every model whose config has one -- Qwen2 and Mistral included -- and llama.cpp ignores it for them; "not known" would have hidden their cost. A sliding family not on the list is over-stated, as it was before. |
+| The scripted runtime | Asserts the window on every decode | The property the item exists for holds in every test that uses a sliding model, not only in the ones written for it. |
+
+**Guardrails, each mutation-tested (19 mutants, all caught), run in a separate git worktree against the whole unit suite.**
+- **The rule:** the window ignored; an emptied cache counted as intact; a cache held from 0 counted as short; llama-server's margin dropped.
+- **The sliding size:** the whole context instead of the window; no batch past the window; not padded; past the context; the values summed at the whole context.
+- **The families:** any family sliding; Gemma 2's window, Gemma 3's period or gpt-oss's pattern not assumed; the header's pattern or window ignored; a window reported with nothing sliding; the header's window not read.
+- **What is said:** `models info` without the sliding line, and the sliding positions never set.
+- **Not mutated, and why:** the real runtime's calls (`swa_full`, the checkpoints for a sliding model, the check after a cut and after a restore) compile only with llama.cpp and have no fake beneath them. They were exercised on real weights instead, above, including a build with the check removed.
+
+**Not verified, and found on the way.**
+- **Byte-identical answers are not guaranteed in general.** Twice, a near-tie tipped before any cut: gpt-oss's first answer on a fresh context, and Gemma 4 12B deep in a repetition loop. Two things differ there: the sliding layers attend over a 768- or 1,536-position cache rather than 32,768, and a prompt is now decoded in two batches, split at the checkpoint mark. Either can move a near-tie. Wherever a cut was refused or stood, the answers matched.
+- **The Gemma 4 GGUFs in this store are base models without a chat template.** Their snapshots carry none (`tokenizer_config.json` has no `chat_template`, and there is no `chat_template.jinja`), so they render through the ChatML fallback and continue text rather than answer. The measurements above used them as they are; a tool loop on Gemma 4 was not possible.
+- **Chunked attention** (Llama 4) also reports a window, so it gets the window-sized cache and checkpoints too; the check errs safe for a chunk as well. No such model is on this machine.
+
+### 2026-09-28 — A model file with no chat template: said, and stopped (a fix)
+
+**Found in use.** Two chats with tools, on backends named `Gemma4-12B-Q4KM` and `Llama3.1-8B-Q4KM`, printed "is answering without tools: the model ships no chat template" and then went wrong. Gemma 4 12B wrote an answer, then `<|im_start|>system` and an invented rest of the transcript, to the 4,096-token cap. Llama 3.1 8B answered, then repeated "(in Kelvin)" to its cap. Both files were converted from the **base (pretrained) releases**, `google/gemma-4-12B` and `meta-llama/Llama-3.1-8B`, which ship no chat template on Hugging Face; the chat releases are `google/gemma-4-12B-it` and `meta-llama/Llama-3.1-8B-Instruct`. `models pull` had said so at the time, and the chat never did. Three things in Apogee made it worse than it had to be:
+
+- **The warning named a symptom.** "Answering without tools" reads like a bug in Apogee's tool support, and it was the only thing said.
+- **A guessed framing had no end.** With no template, the prompt is rendered in a guessed format -- ChatML for Gemma, Llama 3's for Llama. A model that does not know that format's turn markers writes them out as text, never produces an end-of-generation token, and goes on to invent the rest of the conversation.
+- **A latent cache gap, found on the way.** The token that completes a stop string is never fed back into the cache, but it was kept in the conversation's cached tokens. A next prompt sharing that token would have decoded one position past the cache's end.
+
+**What was built**
+
+- [x] **Said once a conversation** (`LlamaCppProvider::notice_if_toolless`): a model file whose header has no `tokenizer.chat_template` gets, in place of the tools line, "*file* ships no chat template, so it is most likely a base (pretrained) model: it continues text rather than answering, and cannot use tools. For chat, use its instruction-tuned release, usually named '-it' or '-Instruct'". Named by its file, not its path. `gguf_inspect` notes the key's presence without reading it (`has_chat_template`), and `models info` adds a `template:` line.
+- [x] **A guessed framing's markers end the reply** (`RenderedPrompt::stops`, `StopWatch`). ChatML stops at `<|im_end|>` and `<|im_start|>`, Llama 3 at `<|eot_id|>` and `<|start_header_id|>`, Mistral at `</s>` and `[INST]`; the model's own template carries none, since its end is a real end-of-generation token. Text that could still become a marker is held back, so a marker never reaches the screen in part, and text that only looked like one is released.
+- [x] **A stop's token is not claimed by the cache** (`Generation::last_unfed`): it still counts as generated, and the conversation's cached tokens stop before it. The scripted context now refuses any decode past its end, so the gap cannot come back quietly.
+- [x] **Tests**: 7 new cases: the marker ending the reply unseen, a near-marker kept and a held one flushed, a stop's token and the next turn's decode, the notice once and in place of the tools line, the template noticed in the header, both `template:` lines, and every guessed framing's stops.
+
+**On real weights** (the new binary, both files as they are): Gemma 4 12B gave the notice once, answered, and stopped at its guessed format's marker after 6 s instead of running to its cap. Llama 3.1 8B gave the notice and still loops to its cap, repeating itself rather than writing any marker; a base model under greedy sampling does that, and taming it belongs to sampling ([26h](#milestone-j--local-inference)). The fix that makes those chats work is the instruct release.
+
+**Guardrails, each mutation-tested (13 mutants, all caught), run in a separate git worktree against the whole unit suite:** a marker never ending the reply, nothing held back, held text lost at the end, the reply going on past a marker; the stop's token claimed, or never marked; the notice every turn, never, or beside the tools line; the fallback with no stops; the template unnoticed or its value not stepped over; `models info` inverted.
+
+### 2026-10-03 — `sampling-profiles` (backlog item 26h): sampled the way the model's authors ask
+
+**Why.** The llama.cpp backend sampled greedily whatever was asked: `chat -t 0.7`, `/temperature` and a backend's `temperature:` were accepted and silently ignored on every local model, since 25b. Greedy decoding is also what Qwen advises against for its thinking models, which loop under it. Ommi honoured the temperature on its local path, so this was a regression, not only a missing feature.
+
+**What was built**
+
+- [x] **One ladder, per knob** (`backends/sampling.h/.cpp`). Each of temperature, top-p, top-k, min-p, repeat penalty and presence penalty takes the first rung that sets it:
+  1. the request's own -- `-t`, `/temperature`;
+  2. the backend's config;
+  3. the model file's `general.sampling.*` -- the authors' recommendation, which a conversion writes from `generation_config.json`;
+  4. the family's published default, split by thinking on and off;
+  5. llama.cpp's neutral value, which is greedy.
+
+  Per knob, not per rung: a file that names a temperature and no top-k leaves the top-k to its family.
+- [x] **The file's recommendation is read from the header** (`GgufInfo::sampling`): `temp`, `top_p`, `top_k`, `min_p` and `penalty_repeat`, any number type, a wrongly typed key stepped over. No weights are loaded. Every installed Gemma 4, Qwen3-VL, Qwen3.8 and Llama 3.x carries some of these; gpt-oss and Qwen3-Omni carry none.
+- [x] **Family defaults with their source** (`ModelProfile::sampling_thinking`, `sampling_answering`, `sampling_source`):
+  - Qwen3: 0.6, top-p 0.95, top-k 20, min-p 0 when thinking; 0.7, 0.8, 20, 0 when not.
+  - Gemma: 1.0, top-k 64, top-p 0.95, min-p 0.
+  - gpt-oss: 1.0, top-p 1.0.
+  - Llama 3.x: 0.6, top-p 0.9.
+  - DeepSeek-R1: 0.6, top-p 0.95.
+
+  `chatml` names none. A request that skips reasoning gets the family's no-thinking values.
+- [x] **One sampler chain** (`make_sampler`, `llama_real.cpp`): the grammar first, as before -- the schema grammar's prefill step kept -- then the penalties, the top-k, top-p and min-p cuts, the temperature and a seeded draw, llama-server's order.
+  - Temperature 0 is greedy, byte for byte reproducible.
+  - The penalties apply under greedy too, being deterministic.
+  - `LlamaContext::set_grammar` became `set_sampling(grammar, settings)`, rebuilt every generation, so one answer's seed is not the next one's.
+- [x] **The knobs in the config** (`top_p`, `top_k`, `min_p`, `repeat_penalty`, `presence_penalty`, `seed`), each range-checked at load and named in a refusal:
+  - written by the one editor;
+  - settable by `config add-backend` and its admin twin -- the config's own rules check both, since every edit re-parses what it writes;
+  - shown by the admin view, completed by `config get`, documented in the starter template.
+- [x] **`models info` shows what is in force and where each value came from**, the family's card named when it supplied one. On a cloud backend, it names any of the knobs that are set but not sent: the vendor samples with the temperature alone.
+
+**On real weights** (the family models, one at a time, each loaded once; no Qwen3.8-27B inference -- the user's call):
+- **`apogee complete -m Llama3.2-3B-Q4KM`:** `-t 0.9` twice gave two different sentences; `-t 0` twice gave byte-identical ones. Before this, all four would have been the same.
+- **`models info`, header only:**
+  - Qwen3.8-27B reads 1.0, 0.95, 20 from its file, min-p 0 from the Qwen3 card;
+  - Qwen3-VL-8B reads 0.7, 0.8, 20 from its file;
+  - Gemma 4 12B reads 1.0, 0.95, 64 from its file;
+  - Llama 3.1 8B reads 0.6, 0.9 from its file;
+  - gpt-oss-20b reads 1.0, 1.0 from its card, its file naming none.
+- **The spike's six tasks, sampled by the ladder** (the production loop and registry, each task its own conversation, a driver allowing every prompt):
+
+| Task | Qwen3-VL-8B (Q4_K_M) | Gemma 4 12B (Q4_K_M) | gpt-oss-20b (F16) | Llama 3.1 8B (Q4_K_M) |
+|---|---|---|---|---|
+| read a file | pass | pass | pass | pass |
+| write a file | pass | pass | pass | pass |
+| count lines with the shell | pass | pass | pass | pass |
+| list a folder, then read | pass | pass | pass | pass |
+| find a URL, then fetch it | pass | pass | pass | made up an address and a title |
+| `17 * 23`, no tool | pass | pass | pass | right answer, through the shell |
+| | **6/6** | **6/6** | **6/6** | 5/6 |
+
+The defaults lost no task: Llama 3.1 8B failed the URL task greedily too (26g's runs looped twelve calls on an invented address).
+
+**Tests**: 27 new cases, 230 assertions:
+- the ladder rung by rung and per knob;
+- the family source credited only when used;
+- the seed;
+- the header's five keys across number types;
+- `-t` reaching the sampler -- the regression;
+- greedy at 0 over a file that suggests otherwise;
+- the file, family (thinking or not), unprofiled and config rungs through the provider;
+- a side request's own temperature;
+- the config's bounds and the editor's round trip;
+- `add-backend` and the admin create byte-identical, both refusing a bad value;
+- `models info` local and cloud.
+
+**Guardrails, each mutation-tested (18 mutants, all caught), in a separate git worktree:** the ladder reordered twice, a default changed, the family credited wrongly, thinking ignored or inverted, a knob or the seed dropped at every hop (resolver, provider, header, editor, CLI, admin), the request's temperature dropped, a bound loosened.
+
+**Found on the way.** The test binary linked the SQLite amalgamation twice since A4 -- once by name, once through `embedstore`, which already hands it on -- and the linker said so on every build. Now once.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| A GGUF's sampling against its family's | The file's first *(confirmed by the user)* | It is specific to the model, and most files carry it. |
+| Tests | Scripted and recorded goldens pin temperature 0 *(confirmed by the user)* | Deterministic; every side request already asks for 0 (titles, the clerk, rerank, rewrites, summaries, media). |
+| Cloud backends | Only the temperature is sent; `models info` names the rest as unsent | The item's seam is the local backend. Each vendor's own top-p and top-k mapping would be wire changes of their own. |
+| The request rung | The temperature alone | `-t` and `/temperature` already existed. The rest are per backend, as the item's "as needed" left them. |
+| The seed | Config only; unset draws one per answer | "A seed is settable", and per-backend is where it repeats. |
+| Penalties under greedy | Applied | Deterministic, so `-t 0` stays reproducible with a configured penalty. |
+| The acceptance models | The model families, replacing the doc's two | The standing real-weights rule. The 27B named in the criterion was read header-only, never run. |
+
+### 2026-10-03 — `thinking-control` (backlog item 26i): on, off, automatic, and a budget
+
+**Why.** Reasoning was most of the time a thinking model took to answer -- 26 of 57 seconds of one ordinary answer on the reference machine (2026-09-25) -- and the same cost for a capital city as for a proof. Nothing could turn it down: the only switch was a Qwen-only `skip_reasoning` the title request used. Ommi displayed and filtered reasoning but never controlled it.
+
+**What was built**
+
+- [x] **One setting on every request** (`harness::Thinking` on `ChatRequest`): a mode -- `on`, `off` or `auto` -- and an optional budget in tokens. It replaces `transient.skip_reasoning`, which was its `off`; every side request that skipped reasoning now asks for `off`.
+- [x] **Set where every other run setting is set.**
+  - `--think on|off|auto` and `--think-budget N` on `chat` and `complete`.
+  - `/think` in chat, a row in the one command table with its three values completing: bare, it says what the next question gets; with a mode, it sets it. A chat saves both in its session (`think`, `think_budget`), so a resumed chat thinks as it did.
+  - A backend's `thinking:` and `thinking_budget:` in the config, settable by `config add-backend` and its admin twin, read by `config get`, documented in the starter template.
+  - `serve`, `analyze` and the legacy completion route apply the backend's setting too.
+- [x] **`auto`, decided once per question** (`agentloop/thinking`). The utility model, when the config names one, is asked one word -- greedy, a side request, its own thinking off -- and its yes or no decides. Without one, or when it fails or says anything else, a rule decides: think for a question over 200 characters, or one holding code, arithmetic, or the words why or how. The decision is made once per turn, so every step of a tool loop agrees, and `--verbose` says what decided it.
+- [x] **The local model's own switch** (`llamacpp`). `off` renders the template's `enable_thinking=false` (Qwen3, Gemma 4) and asks `reasoning_effort=low` (gpt-oss's least: it has no off).
+- [x] **The budget is a sampler in the one chain** -- llama.cpp's reasoning-budget sampler, first in `make_sampler`. It counts between the format's own reasoning tags, from inside the block when the template opens it, and forces the close tag at N. A format with no reasoning tags gets no budget, and the conversation is told once.
+- [x] **Every vendor's own control** (`*_wire`):
+  - Anthropic: off sends no thinking; a budget is sent at the API's 1024 floor or above, with `max_tokens` kept 1024 above it and no temperature while it thinks.
+  - OpenAI: off is each model's least effort -- `none` from gpt-5.1, `minimal` on gpt-5, `low` on the o-series -- and a model that does not reason is sent no effort at all.
+  - Gemini: off is `thinkingBudget` 0, or 128 on a Pro model, which cannot stop; models before 2.5 are sent none.
+- [x] **The display says what happened.** A budget that cut reasoning short reads `✻ Thought for 20s (budget reached)`, or ends a verbose transcript; machine mode sends a second `thinking` event with `"budget_reached": true`; `serve` a `thinking_budget` meta-frame. Thinking still never reaches history.
+- [x] **`models info` says what control there is.** A `thinking:` line on every backend: the mode and budget and where each came from, and what this backend does with them. A local model's template is read for whether it has a switch, names reasoning without one, or names none; a vendor CLI or the mock says it has no control here.
+
+**On real weights** (the families, one at a time, each loaded once, through the production loop; no Qwen3.8-27B -- the user's call, "only where nothing else works"; the mutation build ran beside gpt-oss, Qwen and Llama, whose times are therefore rough):
+
+| | Gemma 4 12B (Q4_K_M) | gpt-oss-20b (F16) | Qwen3-VL-8B (Q4_K_M) | Llama 3.1 8B (Q4_K_M) |
+|---|---|---|---|---|
+| on: thinking, first answer token | 1,176 chars, 35 s (the load included) | 1,101 chars, 11 s | none: it does not think | none |
+| off: thinking, first answer token | **none**, 0.32 s | 139 chars (`low`), 2.0 s | none, 0.05 s | none, 0.03 s |
+| budget 256 | **reached and said**: 584 chars, 9.8 s | **reached and said**: 572 chars | said not applied: no reasoning tags | said not applied |
+| ten chat questions, on / auto | 217 s / 150 s | 105 s / 116 s | no difference | no difference |
+| the six-task battery, on / auto | 6/6 / 6/6 | 6/6 / 6/6 | 6/6 / 6/6 | 6/6 / 4/6 |
+
+- **The arithmetic question answered with thinking off** on Gemma 4 ("A train leaves at 09:40…") began in 0.32 s with no thinking block.
+- **`auto` on the chat set, by the rule:** Gemma answered "Is 221 a prime number?" right in 3 s instead of 38, and the lookups in under a second. Its tool battery under `auto` was slower (83 s against 62): flipping the switch between tasks re-reads the whole tools prompt, because Gemma's template places the switch at the top. That is why `auto` stays opt-in.
+- **Llama 3.1 8B's two misses under `auto`** are sampling, not thinking: the template has no switch, and the first prompt of every task was the same size either way. It invented a call as text, and globbed `17 * 23` in the shell, as it has before (26g, 26h).
+- **The rule's literal "how"** sends small talk like "Hello! How are you today?" to thinking -- a known cost of the confirmed rule, measured, not changed.
+
+**Tests**: 37 new cases:
+- `auto`: the rule's table and the judge, with yes, no, anything else, unreachable, and no judge named;
+- the loop: deciding once and setting every request, and a backend's budget status reaching the reporter;
+- the local backend's switch, its budget, both notices;
+- each vendor's table and its wire body;
+- the config, the editor, `add-backend`, the admin create and the session round trip;
+- `/think`, `--think` end to end through the mock's new `{{thinking}}` placeholder, and `serve` applying the backend's default;
+- the three reporters, the view, the template reading, `models info`.
+
+**Guardrails, each mutation-tested (36 mutants, all caught), in a separate git worktree:** the rule's boundary, words and operators; the judge's verdict, failure and own thinking; the budget dropped, kept when off, its prefill, its once-only notice and status; each vendor mapping; the config bound and refusal; the editor, the session, `/think`, each reporter, the view, `models info`, `serve`'s default.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The default | `on` unless configured; `auto` opt-in *(confirmed by the user)* | Today's behaviour. The measurement above keeps `auto` opt-in. |
+| Judge-less `auto` | Over 200 characters, or code, maths, why or how *(confirmed by the user)* | Measured against the battery and ten chat questions, above. |
+| A budget | None unless chosen *(confirmed by the user)* | A budget changes answers. |
+| Qwen3.8-27B | Only where nothing else works *(the user's call)* | Gemma 4 and gpt-oss carry the switch the acceptance needed. |
+| Anthropic | Off sends nothing; a budget at the 1024 floor, room above it, no temperature | The API's own rules. |
+| OpenAI | Off is each model's least effort; nothing to a model that does not reason | The API refuses an effort a model does not take. |
+| Gemini | Off is 0, 128 on Pro; nothing before 2.5 | Pro cannot stop thinking; older models take no thinking config. |
+| A format with no reasoning tags | No budget, said once a conversation | Nothing to count; every step saying it would be noise. |
+| `serve`, `analyze`, legacy completions | The backend's setting; no per-request override | Mode parity. An override is named, not built. |
+| The session's keys | `think`, `think_budget` | A setting, not reasoning: the cleanliness check still finds no `thinking` in a saved file. |
+
+### 2026-10-04 — `persistent-prompt-cache` (backlog item 26j): a prompt cache that survives the process
+
+**Why.** The KV cache lived only as long as the process. `chat --resume` on a long conversation read the whole transcript before its first token -- 10,000 tokens was about 100 s on the reference machine's 27B -- and every new `--tools` chat read the same system prompt and tool definitions again. llama.cpp can save a sequence's state to a file and restore it, hybrid running state included.
+
+**What was built**
+
+- [x] **Two caches under `cache/prompt/`** (`backends/prompt_cache.h/.cpp`, `contracts/layout`'s `prompt_cache_dir()`):
+  - **the prefix cache**, per model: the state after everything before the first user message -- the system prompt, the environment note and the tools offered -- named by those tokens, the cache type and the window, kept from 512 tokens;
+  - **the chat cache**, per chat: the state a chat reached, saved at a clean exit (terminal and machine mode, never Ctrl-C) and after the turn that reads a compacted history, from 2,000 tokens.
+- [x] **The seam** (`LlamaContext::save_state`/`load_state`, over `llama_state_seq_save_file`/`load_file`). A load clears the context first, and is kept only when the sequence ends where its tokens do with its window whole.
+- [x] **A fresh session context starts from disk** (`LlamaCppProvider::restore_session`): the resumed chat's state, else the prefix; an unsaved prefix is read on its own and kept. The `--verbose` cache line says where the kept tokens came from: `11482 from the saved chat, 27 read`.
+- [x] **A chat is saved where its next prompt will agree with it**: `kCheckpointTail` tokens short of its last prompt's end -- a thinking model's next prompt re-renders the answer, and a restored state has no checkpoints to go back to.
+- [x] **A cache that cannot be used is discarded, never trusted**, each with one line:
+  - one made with another model file -- its path, size and modification time;
+  - one made with another cache type or window;
+  - one llama.cpp refuses;
+  - a saved chat that matches only in part, after what matched is used.
+
+  A model file that changed clears its whole prefix directory.
+- [x] **Bounded and private**: one 4 GiB cap across both, the least recently used evicted first and never the file just kept; every file `0600`, every directory `0700`. `check` reports the total against the cap.
+- [x] **Only where a restore is exact** (`LlamaContext::restores_exactly`): not a sliding-window model, said once.
+- [x] **Through the Harness as a capability** (`ConversationCaching`): `chat` names its conversation at the start and on `/model`, and saves it. Side requests never read or write the cache. The mock takes part as a test vehicle: `{{conversation}}`, and a save that says it kept nothing.
+
+**On real weights** (separate `apogee` processes, one family at a time -- surviving the process is the point; the mutation build ran beside the last checks):
+
+| | Qwen3-VL-8B (Q4_K_M) | Llama 3.1 8B (Q4_K_M) | Gemma 4 12B (Q4_K_M) | gpt-oss-20b (F16) |
+|---|---|---|---|---|
+| a new `--tools` chat, its second launch | 1,615 of 1,628 tokens from disk; first byte 0.9 s, was 4.2 s | no prefix file: the template writes the tools into the first user message | 1,408 of 1,425; 1.3 s, was 4.4 s | 1,097 of 1,108; 1.5 s, was 2.5 s |
+| greedy answer, restored against read | identical | identical | identical | identical |
+| an 11,500-token chat resumed | **0.8 s to the first byte, was 28.5 s** | **0.8 s, was 103.5 s** | 1.2 s, was 39.6 s | 2.6 s, was 26.8 s |
+| greedy answer after the resume | identical | identical | identical | **"Nonsense" against "Nonsense."** |
+| logits after a restore (llama.cpp's own API) | identical to the last bit | identical | up to 0.16 apart | up to 0.06 apart |
+| now | both caches | the chat cache | **none, said** | **none, said** |
+
+- **The rule that came of it.** A restored hybrid -- Qwen3.8-27B, the only hybrid installed, run once for this ("only where nothing else works") -- is bit-exact like a pure-attention model. A sliding-window cache is written as its window alone and laid out afresh, so its sums run in another order: deterministic on each side, never equal. Correctness first, so Gemma 4 and gpt-oss keep no cache on disk; the Gemma and gpt-oss times above were measured before that rule, and lifting it is one line.
+- **Replacing the model file** (an APFS clone of Qwen3-VL-8B, retouched): the next resume said both lines, once each -- the saved chat discarded and the prompt cache cleared -- read the conversation again, and saved it anew.
+- **With tool selection (26g)** the tools offered depend on the question, so a prefix is shared by questions that rank the same tools.
+
+**Tests**: 27 new cases:
+- the cache's files: fingerprints, a changed model's directory, names, ids that cannot escape, records, privacy, eviction order;
+- the provider across "processes": the prefix read once and restored; a short prefix not kept; a replaced file, a refused file and one holding other tokens each discarded with its line, a refused one gone even when it cannot be written again; side requests untouched; a resumed chat restored privately, a short one not saved, and one from another file or window, or no longer matching, discarded; the save point; the cap; sliding windows; the config mapping;
+- the Harness reaching the capability, and nothing where there is none;
+- `chat` naming, resuming and saving at exit and after compaction, end to end through the mock;
+- `check`'s row.
+
+**Guardrails, each mutation-tested (29 mutants, all caught -- three only once tests were added for them: the eviction order, a saved chat's window, a refused prefix that cannot be written again), in a separate git worktree:** the model check and its directory, names by cache type, ids, eviction order and the kept file, a chat's record, privacy, the modification time; the chat's model, window and restore, the prefix floor, its tokens, a refused file, a partial chat, the prefix save, the chat floor and save point, both sliding-window rules, the config mapping; `chat`'s naming and both saves; the Harness both ways; `check`'s row; the mock's placeholder.
+
+**Found on the way.** A restored sliding-window state was refused by our own window check: llama.cpp keeps exactly the window behind the last position, and llama-server's threshold, which `window_intact` follows, is one position stricter. A restore is now judged as of its last position, and a trim that cuts nothing returns at once.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The two caches | Prefix on; the chat cache from 2,000 tokens *(confirmed by the user)* | Short chats re-read in a second or two. |
+| The cap | 4 GiB across both, oldest first *(confirmed by the user)* | |
+| When a chat is saved | Clean exit and after compaction, never per turn *(confirmed by the user)* | The per-turn save already keeps the transcript. |
+| The acceptance models | The families, not Qwen3.8-27B *(the user's call)* | The 27B ran once, as the only hybrid, for the exactness probe. |
+| The model file's identity | Path, size and modification time | Hashing gigabytes per load would cost more than the cache saves. |
+| The prefix | Everything before the first user message, from 512 tokens | Shorter reads in under a second. |
+| The save point | `kCheckpointTail` short of the last prompt's end | Where the next prompt is sure to agree. |
+| A partial match | Used for what matched, then discarded with a line | The file no longer describes the chat. |
+| Sliding-window models | No cache on disk, said once *(for veto)* | Their restore is not exact; the item puts correctness first. |
+| The mock | Takes part as a test vehicle | So `chat`'s naming and saving are tested end to end. |
+
+### 2026-10-04 — `speculative-decoding` (backlog item 26k): measured, and not built
+
+**Why.** Generation is the slowest part of a local answer, and llama.cpp at the pin drafts several tokens cheaply and verifies them in one pass of the large model: a model's own multi-token-prediction head (MTP), a small draft model of the same family, or n-grams from the text already in context. The first look (2026-09-25) showed no win, so this item was a measurement first, built only on a clean 1.3× on one acceptance model across prose, code and editing.
+
+**What was done.** `tests/scripts/py/speculative_bench.py` -- run by hand, never by the suite -- drives a `llama-server` built from the pinned llama.cpp:
+- each method on its own server, the same three tasks: prose, code, and a copy-heavy edit;
+- greedy, thinking off, one short warm-up request first;
+- one run per task -- a second would let an n-gram drafter copy the first run's answer, which a first version of the script did, and measured the repeat instead of the method;
+- generation tokens per second, the share of drafted tokens accepted, and whether the text matched the run with no speculation.
+
+**The measurement** (2026-10-04, M3 Max; the GPU was not idle -- the desktop's own apps drew on it -- so each method was run against its own fresh baseline, minutes apart):
+
+| Model | Method | Prose | Code | Edit |
+|---|---|---|---|---|
+| Qwen3-VL-8B Q4_K_M | n-gram | 0.84× | 0.85× | 1.84× (91% accepted) |
+| Llama 3.1 8B Q4_K_M | n-gram | 0.94× | 0.90× | 1.87× (91%) |
+| | draft: Llama 3.2 1B | 0.45×, **output differs** | 0.61× | 0.64× |
+| Gemma 4 12B Q4_K_M | n-gram | 1.00× | 1.09× | 2.23× (88%) |
+| | draft: Gemma 4 E4B | 0.30×, **output differs** | 0.63× | 0.73× |
+| gpt-oss-20b F16 | n-gram | 1.07× | 1.00× | 2.17× (93%) |
+| Qwen3.8-27B Q4_K_M | MTP | 0.80×, **output differs** | 1.08× (88%) | 1.14× (99%) |
+| | n-gram | 0.88× | 0.78× | 1.73× (91%) |
+
+- **No method clears 1.3× on all three tasks on any model**, so the build half is not done: no `speculative:` setting, no draft-verify loop. The item is closed as measured.
+- **Copying is the one win.** N-gram drafting nearly doubles an edit's speed on every family -- 1.7× to 2.2× -- and costs prose and code 0 to 22%. A small draft model costs everywhere: on Apple silicon the draft's own passes are not cheap enough.
+- **MTP held its 2026-09-25 shape**: 99% accepted on the edit and still only 1.14×. A hybrid model rolls back its recurrent state for every rejected draft.
+- **Greedy output was not always unchanged.** Three methods changed a prose answer under greedy sampling: the verifier checks drafts in a batch, and a batch's arithmetic is not one token's. The item required unchanged output, so a build would have had a second problem besides speed.
+- The draft models were the families' installed small models: no Qwen3 small enough is installed, and none was downloaded (the standing rule). Qwen3.8-27B ran once, for its MTP head -- "only where nothing else works" (the user's call).
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The ship bar | A clean 1.3× on one acceptance model across all three tasks *(confirmed by the user)* | Below that the complexity is not repaid. |
+| The methods | MTP, a small same-family draft, `ngram-mod` *(confirmed by the user)* | The pin's three that need nothing new. The draft is the family's installed small model -- Llama 3.2 1B, Gemma 4 E4B -- since no Qwen3-0.6B is installed and none is downloaded. |
+| The models | The families, and Qwen3.8-27B for MTP alone *(the user's calls)* | The 27B is the only installed model with an MTP head. |
+| The GPU | Not idle; each method against its own baseline, minutes apart | Nothing here controls the desktop's apps. No method came near the bar, so the noise does not change the answer. |
+| The outcome | Closed as measured, not built; the script kept for the next pin | A later llama.cpp, or an edit-only mode, may change this. |
+
+### 2026-10-04 — `base-model-sessions` (backlog item 26r): a base model's session, honest and clean
+
+**Why.** The user's transcript (2026-10-03, `Gemma4-E4B-Q4KM`, a base model pulled that day) showed a session the product *knew* was compromised and let limp anyway. There was one dim warning at the top. Then came a fabricated temperature, a Bitcoin price ending `67,200.000000000005`, and invented playoff results, each presented like a real answer. Turn-marker fragments (`<|end|`, `<|end|><|im|`) spilled onto the screen, and `--tools` stayed offered to a model the warning itself said cannot use them. The 2026-09-28 fix ("Base models said, and stopped", above) said the warning once and stopped the guessed framing's *own* markers. A base model writes every family's markers, whole or cut short, and one warning scrolls away. Framing, never a gate: the session still runs.
+
+**What was built**
+
+- [x] **The fact, as plain data** (`ModelBehavior::base_model`). It is set by the local backend from the file's header (no chat template), so asking needs no model load.
+- [x] **The spill, closed at the source** (`backends/markup_filter`, `TurnMarkerFilter`). It runs in the backend's one funnel, after the guessed framing's stops, for a model with no template only. The screen, the returned answer, the saved session and machine mode therefore see the same bytes.
+  - A known family's marker ends the reply, as the guessed framing's own do. That holds whole (`<|im_end|>`) or cut short with two letters at least (`<|end|`, `<|im|`).
+  - The families live in the profile registry (`base_turn_markers()`): ChatML's `<|im_*|>`, the `<|end|>` style and the `<|eot_*|>` style.
+  - A marker of no known family (`<|fiap|`, seen on this model) is dropped where it stands, and the reply goes on.
+  - A `<|` fragment still open at end of stream is never emitted. A `<|` that starts no name (`a <| b`) is text.
+  - A model with a template is never filtered, so its literal `<|end|>` stands.
+- [x] **Tools honestly off** (`agentloop/loop`). A base model's turns run with no tools, no tool selection and no `ask_user`, on every surface, from one rule in the loop.
+  - `chat --tools` and `complete --tools` say once, at the start: `tools off: <model> is a base model, with no tool format to call them in -- it answers without them`.
+  - Machine mode adds nothing to its stream; the backend's own notice already says "cannot use tools".
+- [x] **The state, all session.**
+  - The banner says `<model>  ·  base model  ·  chat …`.
+  - The spinner says `Thinking… · base model` while a step waits (`CliReporter::set_resting_label`).
+  - `/model` to a base model says `switched to X -- a base model` and, with tools, the tools-off line.
+  - No answer is decorated.
+- [x] **One wording** (`models::base_model_note()`) shared by `models info` and the conversation's warning. It gains the missing sentence: what a base model says "can be confidently wrong".
+- [x] **Tests**:
+  - **The filter's replay fixtures:** the motivating patterns, each family, cut-short markers followed by more text, every two-point split of the stream, the end-of-stream fragment, unknown markers, and the nameless `<|`.
+  - **The backend:** the spill reaches neither the answer nor the stream, and the two match; a templated model's `<|end|>` stands.
+  - **The loop:** no tools and no `ask_user` for a base model; both for an instruct one.
+  - **`chat_test`:** `chat --tools` and `complete --tools` with a base model, with zero tools in every request and `tools off` said once; an instruct model keeps its tools, unsaid.
+  - **The spinner's label**, and the shared wording in `models info`.
+  - **The PTY check's `base-model` case:** the banner, the spinner and the one line on a real terminal.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Framing, not gating | **The session runs, ungated** *(recorded 2026-10-03)* | The open-models principle. |
+| The indicator | Banner plus the spinner's resting state *(default, confirmed)* | Visible all session; never on an answer. |
+| Where the families live | The profile registry *(default, confirmed)* | New ones join the registry, not the filter. |
+| Machine mode | **No new events or fields**; the answer it streams is the backend's one answer *(default confirmed, read this way: flagged for veto)* | The filter is in the backend's one funnel, as the item asks ("one filter home"), so every surface and the transcript see the same bytes. Machine mode's protocol is unchanged; the text it carries no longer holds the spill. |
+| The warning's sentence | Added *(default, confirmed)* | A base model's answers are continuations. |
+| A marker of no family | **Dropped where it stands, the reply going on** *(group run, flagged for veto)* | The guardrail says no `<|` fragment reaches the screen. Gemma 4 E4B wrote `<|fiap|` mid-answer. Ending the reply there would cut text the user may want. |
+| Cut short | **Two letters at least** *(group run)* | `<|im|` is ChatML's; `<|e` could be anything, and is dropped as noise rather than ending the reply. |
+| Where tools are withheld | **The loop, for every surface** *(group run)* | Mode parity: the rule lives once. Each surface says it where it starts; machine mode already hears the backend's notice. |
+| What counts as a base model | **No chat template in the header** *(group run)* | The fact the 2026-09-28 fix already used; never a guess from a name. |
+
+**Verified on real weights.** Google's Gemma 4 E4B base (Q4_K_M) is the transcript's own model. It ran a four-question `chat --tools` session (temperature, Bitcoin, the NBA finals, what to wear) on the binary before this item and after it, twice each:
+
+| | Before | After |
+|---|---|---|
+| `<\|` fragments on screen and in the saved session | 5, then 3 (`<\|fiap\|`, `<\|and Mark`, …) | **0 and 0** |
+| Tool calls | none (the model imitated, never called) | none, and none offered; `tools off` said once |
+| The warning | without the confidently-wrong sentence | `base_model_note()`'s words |
+| Saved answers equal to what was printed | yes | yes |
+
+The answers stayed what a base model writes: continuations, often confidently wrong, streamed ungated. Meta, Qwen and OpenAI have no base build installed, so those families were skipped.
+
+**Guardrails, each mutation-tested (17 mutants, all caught).**
+- **The filter:** no family known; cut-short markers unknown; one letter enough; a lone `<` not held; an open fragment flushed; a family-less marker kept; a nameless `<|` dropped.
+- **The families:** no ChatML.
+- **The backend:** the filter never built; the end of stream unfiltered; never a base model.
+- **The loop:** tools offered to a base model; `ask_user` kept.
+- **The surfaces:** the spinner's label unused; `tools off` unsaid in `chat`; unsaid in `complete`.
+- **The wording:** no confidently-wrong sentence.
+
+**Not verified.**
+- **The banner and spinner on real weights:** checked on a real terminal with a mock base model (the PTY case), not with Gemma, which ran on a pipe.
+- **A base model with a forced `chat_template:`** is still treated as base, since the header still has no template. That case was not exercised.
+
 ## Milestone K — The install contract
 
 **Goal.** Make v0.1.0 shippable, and do it by closing Ommi's dominant early bug class rather than by documenting it. Ommi lost real time to *silent install drift*: `make install` seeded one tree, `install.sh` another, the updater a third, and `check` validated a fourth — each list correct when written, diverging one commit at a time, and never failing loudly. The fix adopted here is structural: one layout declaration, and every install path reads it.
@@ -563,6 +1703,16 @@ The guards were then removed one at a time (tree, merged, version, other-commit 
 
 **Not verified.** Nothing here has run on GitHub's runners yet. The first real exercise is the rehearsal on this release's own pull request; the first publish is its merge.
 
+**After the merge, the same day: it worked, and the rebuild on `stable` is gone.** The v0.1.2 merge (PR #3, `b343620`) published v0.1.2 through this path:
+- the `closed` run (36200564148) ran `tag and release` alone, in 43 seconds, with every other job skipped;
+- the release carries the five archives from the pull request's own run (36196338575), tagged at the merge commit.
+
+The one piece of the old shape still in place was CI's `push: branches: [stable]` trigger, which had rebuilt and retested every merge commit from scratch (run 35813923174 after v0.1.1). The user's call: a merge must not start a fresh run from `stable`. The trigger is removed, and with it the `what changed` job's handling of push events, which nothing could reach any more.
+
+Nothing depended on that run. The merged tree is the one the pull request's run tested, and `tag and release` refuses to publish if it is not. A direct push to `stable` now runs nothing, and the branch protection rule is what keeps changes arriving by pull request.
+
+The removal governs from the next merge on: a push runs the workflow file of the commit pushed, and the next merge commit carries the change.
+
 ### 2026-09-25 — A pull request's CI run, rehearsed locally (`make pr-ci`)
 
 Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the workflow when a PR is made." `act` was ruled out: it runs Linux containers, so it cannot run the macOS job that matters most here, or the Windows ones. The workflow is instead replayed natively for the host's own target, through the scripts the workflow calls.
@@ -620,6 +1770,77 @@ Asked for directly (Taylor, 2026-09-25): "a make file command that can spoof the
 - **"A staging directory is claimed by its process"** kept the owner marker open in an `ifstream` while the commit had to delete it. Windows refuses to delete an open file, so the marker stayed. It is closed before the commit now.
 - **Three tests aged a directory** with `std::filesystem::last_write_time`, which MinGW's libstdc++ cannot do: it goes through `_wutime`, which cannot open a directory ("cannot set file time: Permission denied"). libc++ on the ARM runner can, which is why arm64 passed them. `tests/support/file_time` (`set_modified_time`) falls back to the Win32 API there, with the FILETIME borrowed from a scratch file the standard call can stamp, so no clock is converted by hand.
 - **Verified here as far as a Mac allows.** The affected tests pass on macOS (1,305 assertions), and `gcc-check.py` compiles all 363 files, the helper's Windows branch included, with the MinGW GCC. Nothing on this Mac can run a Windows binary (`wine` is an Intel build and Rosetta is not installed), so the run that proves them is the next pull request run.
+
+### 2026-09-25 — The CLI pipeline: built only when the CLI changes, copied from the latest release when not
+
+**Goal.** The user's call, made with the GUI applications in view: what CI and the release do today is the **CLI pipeline**, one pipeline per deliverable. It must run only when what the CLI is built from changes. When it has not changed, the CLI deliverables are copied from the latest release, so a future pull request that changes only a GUI application runs that application's pipeline and takes the latest CLI as it is. A release that leaves the CLI alone needs a name the CLI does not give it, so the release got its own version (the user chose it from two options):
+- `lib/release/VERSION` names the release (first at the top of the repository; moved to `lib/release/` the same day, the user's call);
+- the CLI's `project(... VERSION)` changes only when the CLI does, and then equals the release it ships in.
+
+**What was built**
+
+- [x] **`lib/release/VERSION`**, the release. It is one line, and deliberately not an input of the CLI's build, so bumping it alone runs no CLI pipeline.
+- [x] **`lib/scripts/changed.sh`: what each deliverable is built from, declared once.** `changed.sh cli <from> <to>` answers `cli=true|false`. The CLI's inputs are:
+  - `lib/src/cli/` and `lib/scripts/`, which the user named;
+  - the CLI pipeline's own `ci.yml`, `release.yml` and package action, because a change to how the CLI is built must be exercised by building it;
+  - `.gitattributes`, which sets the bytes the CLI's pinned assets are checked out with.
+
+  A GUI application adds its own entry there. An empty `<from>`, or a commit the repository does not have, answers true: when in doubt, build. It replaces `code-changed.sh` and that morning's documentation-only rule, which it subsumes: documentation is simply not a CLI input.
+- [x] **Against the latest release, not the pull request's base.** CI's `what changed` job diffs the latest release's commit (**`lib/scripts/latest-release.sh`**: published releases only, the commit as `origin` has it, never a local tag) against the test merge. A copy of the release is only true while the CLI that would merge is the CLI that was released, so that is the comparison. In the everyday case it agrees with the pull request's own diff.
+- [x] **An unchanged CLI in CI.** The clone, the unit tests and the builds still run under their required names, with the build steps skipped (the reason the morning's rule found: a matrix job skipped whole never reports its name). Each `build <target>` then copies that platform's archive from the latest release (**`lib/scripts/cli-from-release.sh`**, through the package action's new `from-release` input) and runs the copied binary on its own platform. The copy goes into the same `apogee-<target>` artifact a build makes, so every run carries the CLI, built or copied, where a later job will look for it.
+- [x] **`version bump` on every pull request.** When the CLI changed, `lib/release/VERSION` must be unreleased and the CLI's version must equal it. Otherwise the check passes and says what the merge will publish: a release with the CLI copied, or nothing.
+- [x] **`release-from-pr.sh` publishes `v<VERSION>`.** The name comes from `lib/release/VERSION` at the merge. With the CLI changed since the latest release (the release being made excepted, for a retried attempt), it uses the pull request's own archives under the same checks as before, and the executable must now report that version. With the CLI unchanged, it downloads the latest release's archives, runs the host's binary to prove the copy starts, and publishes them again as they are.
+- [x] **The manual path reads `lib/release/VERSION`.** `release.yml`'s gate and `make release`'s preflight compare the tag with it. The manual path still rebuilds the CLI even when it is unchanged; that is deliberate for an escape hatch, and recorded in the workflow's header.
+- [x] **`pr-ci.sh` asks the same question.** With the CLI unchanged, it builds nothing and copies the host's archive from the latest release. It passes CI's answers to `version bump`.
+
+**Verified.**
+- The three scripts were driven through 56 checks in a throwaway repository, with a bare `origin`, real commits and tags, and a stand-in `gh` serving canned API responses and archives, under both bash 5 and macOS's bash 3.2:
+  - `changed.sh` against CLI, documentation-plus-`lib/release/VERSION`, workflow and `.gitattributes` changes, and against no release, an unknown commit and an unknown deliverable;
+  - `version-check.sh` through every rule;
+  - `release-from-pr.sh` through a built release, a copied release, a documentation merge, a binary reporting the wrong version, a run whose archive was itself a copy, a rehearsal, an open pull request refused, finishing an earlier attempt, a latest release with no archives, and no release at all.
+- Seven rules were removed one at a time (always copy, the empty-copy check, the release-being-made exclusion, the CLI-equals-`VERSION` rule, the released-`VERSION` rule, and two CLI inputs), and every removal failed a check.
+- Against the real repository:
+  - `latest-release.sh` names v0.1.2 at `b343620` without `gh`;
+  - `changed.sh` calls this branch's version-bump commit a CLI change, and the skill-only commit `68d653c` not one;
+  - `cli-from-release.sh` copied v0.1.2's macOS archive and ran it (it reports `apogee 0.1.2 (5827772, …)`, the test merge's hash, as recorded above);
+  - `release.yml`'s gate script, run locally, passes a matching tag, refuses a mismatched one, and names the release on a dispatch.
+
+**Not verified.** None of it has run on a runner. The copying build jobs on the Windows runners (`curl` and `7z` in Git Bash) are exercised first by the first pull request that leaves the CLI alone. `make pr-ci` was not run end to end, because this branch changes the CLI, so a rehearsal would be a full build.
+
+### 2026-10-03 — Required checks, read from the pipeline
+
+**Goal.** The user asked for merges into `stable` to need the pipeline green, whatever the approvals, and for a script that keeps the required checks current as the pipeline changes. The repository's one ruleset, "Stable", had a required-status-checks rule listing **no** checks. Its 1-approval rule cannot be met on one's own pull request, so every merge went through the admin bypass, and the bypass is all-or-nothing per ruleset: it covered the checks as well.
+
+**What was built**
+
+- [x] **`lib/scripts/required-checks.py`.** It reads the required checks from GitHub's own record of a pull request's CI. That is every job that ran and passed in its runs, across every workflow, with each matrix row expanded, named and pinned to the app exactly as GitHub reports the check. So nobody types them, and a renamed job, a new platform or a GUI workflow follows from one passing run.
+  - The pull request is the newest open one into the default branch, else the last merged; `--pr N` picks one.
+  - Its head's newest run of each workflow must have passed, and must not be still running.
+  - A merged pull request's `closed` run is created at or after the merge, so it is ignored. `tag and release` is skipped on an open pull request, so it is never required.
+- [x] **The "Stable: CI must pass" ruleset**, created or updated by `--apply`. It requires those checks with **no bypass list**, and the branch up to date with `stable`. An update replaces only the check list and keeps the ruleset's other settings. Without `--apply` the script prints the difference and changes nothing. The "Stable" ruleset keeps its review rules and admin bypass.
+- [x] **The documented list now includes `what changed`.** It runs and passes on every pull request, and the rule "every job that ran and passed" no longer carves it out.
+- [x] **Every place a pipeline change is made or reviewed says what moves with it** (the user's call: a change to the pipeline must not leave the required checks behind).
+  - [DEVELOPER.md → Changing the pipeline](DEVELOPER.md#changing-the-pipeline) has the full list: the required checks re-applied before the merge, `pr-ci.sh` mirrored, the two matrices kept as one list, the job and artifact names `release-from-pr.sh` reads, no job-level `if:` on a required matrix job, `changed.sh` for new CLI inputs, and when `required-checks.py` itself must change.
+  - The short version is at the top of `ci.yml`.
+  - A checklist item is in CLAUDE.md → Implementing a Feature.
+  - The `apogee-cli-backlog-execute-item` (then `apogee-backlog-item`), `apogee-cli-maintenance-update-documents` (then `apogee-document-update`) and `apogee-cli-maintenance-summarize-pull-request` (then `apogee-pull-request`) skills each carry it. The docs pass runs the dry run; the PR description gains a **Before merging** section.
+  - The script's header lists its own assumptions.
+  - `--apply` is always the user's to run: it changes repository settings.
+
+**Verified.**
+- Against the real repository, read-only: the script picks PR #3, takes its passing run (36196338575), and derives 13 checks. `tag and release` is left out both ways: skipped in that run, and run only in the post-merge run, which the script ignores.
+- Against a stand-in `gh`, 26 checks pass:
+  - create and update, with the ruleset's other settings kept;
+  - already up to date;
+  - the bypass and enforcement warnings;
+  - a failed run and a running pipeline refused;
+  - an open pull request preferred;
+  - two workflows combined;
+  - a pull request into another branch refused.
+
+  Removing the post-merge filter or the "passed" filter fails them.
+
+**Not done.** The ruleset has not been created. Running `--apply` changes the repository's settings, and that is the user's to run.
 
 ### 2026-09-01 — Layout, doctor, installers, completions, release pipeline
 
@@ -1208,17 +2429,41 @@ The general lesson is the one this repo already applies elsewhere and had not ap
 | `cli.reference_driver` — the deltas rebuild the result | `result.text` + `" [truncated]"` → caught on both turns |
 | `cli.machine_schema_conformance` | Removing an event from the doc, and adding one the code cannot emit → caught in both directions |
 
-**The reference driver is documentation and test at once.** [`tests/reference_driver.py`](../../src/cli/tests/reference_driver.py) is the worked example a GUI author reads, and it checks that three independent paths agree: the concatenated `answer_delta` chunks, the `result` event's text, and what `apogee complete` printed in text mode. If they ever disagree, one surface has grown a behaviour the other lacks — the failure the shared Reporter seam exists to prevent.
+**The reference driver is documentation and test at once.** [`tests/reference_driver.py`](../../src/cli/tests/scripts/py/reference_driver.py) is the worked example a GUI author reads, and it checks that three independent paths agree: the concatenated `answer_delta` chunks, the `result` event's text, and what `apogee complete` printed in text mode. If they ever disagree, one surface has grown a behaviour the other lacks — the failure the shared Reporter seam exists to prevent.
 
 **The schema document is pinned to the code.** A protocol document that drifts is worse than none: a GUI author trusts it, builds against it, and debugs Apogee for a fault that is in the prose. `cli.machine_schema_conformance` checks the vocabulary in both directions, so an event added without documentation, or documented without an implementation, fails the build.
 
 **What this deliberately does not do.** No push channel (a driving GUI performs its own mutations by shelling out to `apogee config …`, so it already knows when to re-read); no socket, ever (`lsof`, sampled continuously while the child lives); no protocol representation of slash commands, which are terminal-REPL affordances a driver replaces with its own UI.
 
+### 2026-09-25 — The integration spike: a naive host embeds the binary (backlog item 28, for v0.1.5)
+
+Asked for by the user (2026-09-25): the CLI pluggable into **other people's** harnesses and applications, with the native machine mode as the floor and a common protocol integrators extend from. The spike's instrument is [`tests/naive_host_driver.py`](../../src/cli/tests/scripts/py/naive_host_driver.py) — a third-party-style host, kept as evidence and re-runnable (`naive_host_driver.py <binary> <work-dir>`), that knows **only what machine-mode.md says**: it may not learn from Apogee's source, and where the documented contract leaves it blind it records a wall instead of peeking. It ran against the installed `v0.1.2` binary (the shipped contract an integrator meets today) in a throwaway `APOGEE_HOME`, with a scripted `mock` backend as the model actor.
+
+**What worked, exactly as documented.** The host completed a tool-using conversation end to end: `ask_user` flowed out as a `question` event and the answer back in; the permission gate's `question` (`kind:"permission"`, `tool`, `target`) arrived, was answered `yes`, and the tool ran; a failed tool came back **as a tool result the model read**, and the turn continued to a clean `result` — the denial-semantics contract holding under a real failure. One child served both turns; stdout carried nothing but JSONL; an unknown *inbound* line was ignored exactly as the doc promises. And the headline measurement: **host-supplied tools already work today** — the host ran a 40-line MCP stdio server, registered it with `apogee mcp create`, and its tool round-tripped through the loop (`mcp__host__host_lookup` → `host-answer:…` in the final text) with **zero prompts**, the `readOnlyHint` honoured.
+
+**The seven walls** (full evidence in the probe's `findings/walls.md`):
+
+| # | Wall |
+|---|---|
+| W1 | No handshake or discovery: the host learns `protocol_version` only from the `session` event after spawning, and cannot declare itself or ask what the binary supports (`session` carries only `model` + `protocol_version`) |
+| W2 | No machine-readable schema: the host hand-transcribes the event vocabulary from prose; nothing ships to validate a stream against |
+| W3 | No turn or correlation ids: events belong to "the current turn" by position only, so a host cannot pipeline or attribute after a race |
+| W4 | No cancel: the only exits from an in-flight turn are killing the child or failing the turn by closing stdin |
+| W6 | Host tools need a config mutation: `mcp create` edits the install's config — global state a host must mutate and clean up to wire tools for one child; no per-run flag |
+| W7 | Reads are prose: "everything else is a CLI command", but the read commands emit human text, so a host UI screen-scrapes `apogee models` or re-reads config files |
+| W8 | The child's tool sandbox is scoped to the *user's* config, not the host's workspace: `write_file` into the host's own project was refused ("outside the allowed root `/Users/taylor`") because `tools.fs_root` defaults to the user's home — no per-run scoping exists |
+
+(W5 — undocumented outbound events — did not fire: the v0.1.2 stream is exactly its documented vocabulary.)
+
+**The recommendation: grow the JSONL contract; do not reframe it.** JSON-RPC/LSP framing would break every `protocol_version: 1` driver to buy request/response multiplexing the walls do not demand — turns serialize by design, and the one axis that wants a peer protocol (host tools) is **already answered by MCP as a sidecar**, proven above, wanting only per-run wiring. The decisive finding is that the existing tolerance rules make the contract **retrofittable in both directions**: an unknown inbound line is ignored (verified live), so a new host can send a `hello` to an old binary harmlessly, and rule 1 means an old host survives every additive event. The gaps close as additions: a handshake and a written stability promise (W1), a schema artifact pinned like the prose doc (W2), turn ids and an inbound cancel (W3, W4), per-run wiring for host MCP servers and the file-tool root (W6, W8 — W8's *default* also changes under item 25a's launch-folder rule, which shipped later the same day, [Milestone V](#milestone-v--the-native-toolsets); the spike's evidence is the v0.1.2 binary, and the per-run declaration remains the integration half), and `--output-format json` on the read commands a host UI needs (W7).
+
+**Split (2026-09-25), all five specced into the v0.1.5 table:** 28d the handshake and the stability promise → 28e per-run integration wiring → 28f turn ids and cancel → 28g the schema artifact → 28h machine-readable reads. **Parked with evidence, the user's call:** a push channel (v1's "events arrive in response to turns, never unprompted" held comfortably for an embedding host — the case for push is config/model change notification for long-lived embeds, and 28d's capability field is where it would negotiate if ever wanted). A SPEC revision naming third-party embedding as a product surface is proposed alongside the split rather than made unilaterally.
+
 ---
 
 ## Milestone N — Model operations
 
-**Goal.** Model management, end to end: one shared resolver for the `models:` role pointers, the `apogee models` suite, a real GGUF header reader that `check` uses to tell a working model from a broken one, and — from 2026-09-07 — acquiring, quantizing, and repairing models from Hugging Face and the user's Ollama store without ever leaving a half-downloaded one on disk.
+**Goal.** Model management, end to end: one shared resolver for the `models:` role pointers, the `apogee models` suite, a real GGUF header reader that `check` uses to tell a working model from a broken one, and — from 2026-09-07 — acquiring, quantizing, and repairing models from Hugging Face and the user's Ollama store without ever leaving a half-downloaded one on disk. From 2026-09-28 (26b), helper models beside the chat model: `vision`, `transcription` and `utility` in the same resolver.
 
 ### 2026-09-07 — `model-operations`: one resolver, and a check that stops lying
 
@@ -1422,6 +2667,335 @@ Asked for directly (Taylor): "I want there to be an extra line of white space be
 
 **Verification.** `cli.chat_typeahead_and_crash_safety` gains a `spacing` check on a PTY with the mock backend: run against the installed binary from before the change, both of its assertions fail. On the real machine, Taylor's two questions to Qwen3.8-27B Q4_K_M, recorded in a PTY and replayed through a terminal model, give exactly the layout asked for. All 1560 ctest cases pass, run serially.
 
+### 2026-09-28 — `helper-model-roles` (backlog item 26b): a small model for the chores, and a check on what a helper can read
+
+**Why.** A harness that gets the most from small local models uses several: the large one answers, and smaller ones do the chores and read what the large one cannot. Until now every chore went to the chat model. Titling a chat, compacting it, judging a rerank: each took the model that was also answering, and a large tool result was read whole by the slowest reader in the process. Asked for by the user on 2026-09-25, with "a helper is used automatically" as their call.
+
+**What was built**
+
+- [x] **Three roles in the one resolver** (`harness/roles.h`): `Vision`, `Transcription` and `Utility` join `Chat`, `Embedding` and `Extraction`, with pointers `models.default_vision`, `default_transcription` and `default_utility`. A helper has one more rung than the others, after its pointer and before `models.default`: **the conversation's own backend** (`RoleRequest::conversation`, reported as `ResolvedFrom::Conversation`). So an unset helper runs on whatever the chat is on, including a backend chosen with `-m`, and a user who sets nothing sees nothing change. `cli.one_role_resolver` still holds: every surface asks this chain.
+- [x] **One mutation path, and its admin twin.** `config set-default-vision`, `set-default-transcription` and `set-default-utility` (one `bind_set_role` call each, through `set_models_role`), `config get` of all three, and `POST /v1/admin/backends/default-vision`, `-transcription` and `-utility`, byte-identical to the CLI on the same file. `GET /v1/admin/backends` lists all six roles with the rung each resolved on. The template documents the helpers.
+- [x] **The utility model's chores**, each going to the chat's own backend when no utility model is set, and each saying under `--verbose` which model did it:
+  - **Titles** (`BackgroundTitle`, `title_request(session, backend)`).
+  - **Compaction**, automatic and `/compact`, in `chat` and `serve`.
+  - **A follow-up's search query** (`agentloop/query_rewrite`): before a retrieval turn in a conversation with an earlier user turn, the last six messages and the question become one standalone query ("which region does it deploy to?" becomes "Which region does Project Heron deploy to?"). The search changes and the chat model's question does not. It never fails a turn: an error, a blank reply or an answer instead of a query searches with the question as asked.
+  - **`rerank: on`**, a new value meaning the utility model, for the flag, a collection's pin, `check`, the admin routes and `/rerank`, all through one validator (`valid_rerank`).
+  - **A tool result over 8 KiB** (`agentloop/tool_summary`), summarised before a local chat model has to read it, but only by a **named** utility model: asking the chat model to summarise for itself costs the reading it saves. The chat model reads the summary under a header naming the size, the summariser, and how to see part of the rest -- a line range for `read_file`, the offset for `fetch_url`, a narrower call otherwise. A failed summary leaves the result as it was.
+  - **`/capture`'s clerk** in chat, only when a utility model is named; otherwise the model already loaded, as Milestone Y decided.
+- [x] **Side requests stay side requests.** The title, the query rewrite, the summary, the rerank judge and compaction all set `transient.side_request`, so a local helper runs on a context of its own and the chat's cache is never cleared. The judge and compaction were plain requests before.
+- [x] **Audio as a capability** (`harness/provider.h`): `AudioCapable::accepts_audio`, discovered by `Harness::accepts_audio` like the other probes. The local backend answers yes when llama.cpp is linked, an `mmproj_path` is set, and the projector's header declares an audio encoder. The header reader now reads a projector's `clip.has_vision_encoder` and `clip.has_audio_encoder`.
+- [x] **What a helper costs, and whether it can do its job.** `models status` lists six roles; an unset helper reads `(unset -- the chat's own backend)`, and a local backend is followed by `[local: N MiB of weights, M MiB of cache]`, since a helper is a second model resident beside the chat's. `check` warns when `default_vision` points at a local backend with no `mmproj_path` or a projector with no vision encoder, or `default_transcription` at one with no audio encoder or at a cloud backend, each naming why -- judged from the config and the projector's header, without loading anything. `idle_unload_seconds` was already per backend, so a resident helper can be given back on its own.
+
+**On real weights** (Qwen3.8-27B Q4_K_M as the chat, Qwen3-VL-8B Q4_K_M with its projector as the utility, Gemma 4 12B-it with its projector for transcription; greedy; `--verbose` lines):
+
+- **`models status`**: `chat: q27 [local: 16032 MiB of weights, 1088 MiB of cache]`, `utility: q8 [local: 4795 MiB of weights, 2448 MiB of cache]`, and the rest.
+- **`check`**, with `default_vision` at the 27B (no projector configured) and `default_transcription` at the 8B: `q27 -- it has no mmproj_path, so it cannot read an image` and `q8 -- its projector has no audio encoder`, both warnings. Pointed at the 8B and Gemma 4 12B, whose projector declares both encoders, both passed. A pointer at a backend that does not exist is refused by `config` before it is written.
+- **A three-question chat over a notes collection, with a `/compact`**: `titled by q8: Project Heron Overview`, `search query by q8: Which region does Project Heron deploy to?`, `history compacted by q8`, and all three answers right. Searched as asked, that follow-up ranked Project Heron's note last of three.
+- **The 27B's cache**: without retrieval, turns two and three read 57 and 98 tokens from the 27B's cache while the 8B titled the chat in the background -- the same as with no utility model set.
+- **A tool result**: asked for the one error in a 35 KB log, the 27B read the file; `read_file's 35 KB result summarised by q8`; the 27B's next step read **413 new tokens, 3,988 from its cache**, where the file itself is about ten thousand tokens. It then ran a narrower `grep_files` to confirm, and named the line, invoice and cause correctly.
+
+**Found on the way, and fixed.** The first real run titled a chat "Project Heron is a system for managing and scaling distribut…". Shown "In one sentence, what is Project Heron?" under "give this conversation a title", the 8B answered the question -- inventing the answer -- where the 27B had titled it. The prompt now says the questions are shown for their topic and are not to be answered, and the 8B gives "Project Heron Overview" and "What is a Ledger"; the 27B's titles are unchanged.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where an unset helper runs | The conversation's own backend, a rung of its own after the pointer *(default taken)* | "The chat backend" has to mean the one this chat is on; `models.default` would send a `-m` chat's chores to another model. |
+| Query rewriting | Only with an earlier user turn and retrieval on *(default taken)*; on the chat's backend when no utility model is set | A first question already stands alone. A follow-up searched as asked finds the wrong thing, whichever model restates it. |
+| Tool-result summaries | Over 8 KiB, and only by a named utility model *(default taken)* | The chat model summarising for itself would read the whole result anyway. |
+| The rerank judge's default | A new value, `on`: the utility model, else the chat's backend | A backend name still works; `on` says "whatever my helper is" without naming it twice. |
+| The capture clerk | The utility model only when one is named (2026-09-25) | Milestone Y's "the loaded model is the clerk, no second load" stands unless a helper was set on purpose. |
+| What `check` judges from | The config and the projector's header | A doctor that loads a model to find out would cost what a helper is meant to save. |
+| Audio on a cloud backend | Not a transcription backend here | Nothing in Apogee sends a cloud backend audio yet; `check` says so rather than pass a pointer that fails later. |
+
+**Guardrails, each mutation-tested (67 mutants), run in separate git worktrees against the whole unit suite.** 65 were caught there, ten of them only after a test was added for what they exposed. One more is caught by `cli.knowledge_lifecycle`, and one cannot be reached.
+- **The resolver:** the conversation's rung for every role, gone, or above the pointer; transcription not a helper; a helper's pointer unread; a role's key misnamed.
+- **The pointers:** not parsed, not compared, not an editable field; `config get` of one reading another; a verb or an admin route setting the wrong pointer, on its own and through the mux.
+- **The chores:**
+  - the title asked of the chat's backend, or its request ignoring the backend it was given;
+  - `/compact` and automatic compaction on the chat's backend, and compaction not a side request;
+  - the query rewrite on the chat's backend or not used at all, tried on a first question, shown the question twice, shown system prompts, the whole history or unclipped messages, not a side request, reasoning not skipped, no budget, its label or quotes kept, a blank or overlong reply used, a failure failing the turn, and never marked as a rewrite;
+  - the summary always taken, taken far past the threshold, never used, never said, shown the whole output, not a side request, blank accepted, missing its way back, a failure failing the call, and never asked by chat;
+  - `named_utility` taking any rung, and `helper_backend` ignoring the conversation;
+  - `rerank: on` refused, resolving the chat role, ignoring the conversation, or silent when nothing can judge; the judge not a side request.
+- **What is said:**
+  - `check` not checking the helpers, never judging a medium, passing a vision backend with no projector, ignoring the encoder flag, reading audio from the vision flag, or passing cloud audio;
+  - `models status` naming `models.default` for an unset helper, dropping the utility row, or its cost;
+  - the header's flags unread, swapped, or kept after a failed read;
+  - an undeclared audio capability counted as yes.
+- **Caught outside the unit suite:** `/capture`'s clerk never the utility model. `knowledge_e2e.sh` now points the utility model at a mock that only writes prose, and checks that the capture fails. The mutant passes the unit suite and fails that script; this was checked by hand.
+- **Cannot be reached:** the admin listing's "conversation" rung. The listing resolves without a conversation, so an unset helper reports `models.default`, as `http-api.md` says.
+
+**Not verified, and found on the way.**
+- **No audio is transcribed yet.** The role, its pointer, `accepts_audio` and `check` are here; [26e](#milestone-h--apogee-chat), shipped 2026-09-30, is what sends audio, and `Harness::accepts_audio` had no caller until then. The header probe was checked against real projector files: Gemma 4 12B-it's declares both encoders, and Qwen3-VL-8B's and Qwen3.8-27B's declare vision only.
+- **A retrieval turn re-reads a local model's whole prompt**, helper or not. The retrieved block sits at the conversation's start, as 25c's notes say. Every turn of the notes chat above read from 0 on the 27B, the same with no utility model set. That is its own change.
+- **Qwen3.8-27B answered one turn with nothing.** In a plain three-question chat, the third answer was saved empty, with and without a utility model set. It is older than this item and left for its own change.
+- **`--verbose` prints a tool call as `[tool] [tool] read_file`.** The tool's status line carries its own tag and the terminal adds another. It is cosmetic, and older than this item.
+
+### 2026-10-03 — `gguf-header-cache` (maintenance item M2): the header reader stops seeking, and no cache is needed
+
+**Why.** `apogee models list` took 14 seconds on this machine's store of 31 models, and `check`, which reads most of them twice, about 30. M2 was specced as a cache of what the headers say: a file under `cache/`, keyed by each model file's path, size and modification time, so that a second listing would read no headers at all. Shipping M1 the same day, a sample of `models list` showed that the time was not in the number of headers but in how each was read.
+- Nearly all of it was inside `inspect_gguf`, stepping over the tokenizer's vocabulary, and two-thirds of it was system time.
+- Each of a vocabulary's strings (150,000 or more in a current model) was skipped with its own `seekg`. A seek throws the stream's buffer away, so the next read went back to the operating system: some 300,000 system calls per file.
+
+**What was built**
+
+- [x] **Small skips read through the buffer** (`models/gguf_inspect.cpp`). A skip of up to 64 KiB (`kBufferedSkip`) is `ignore`d; only a larger one, such as an array of scores hundreds of kilobytes long, seeks. A skip that comes up short (a file cut after its size was taken) is a parse error with its reason, like every other short read.
+- [x] **`inspect_gguf(std::istream&, size)`**, the core the path overload now calls once the file is open. A test can hand it a stream that counts what a read costs. This reader's regression was in cost, not correctness, and only a count can hold that.
+- [x] **The test builder** (`tests/support/gguf_builder.h`) makes vocabularies and score arrays.
+
+**Measured** (this machine's store, read only, comparing the build from before the change with this one, output compared byte for byte):
+
+| Command | Before | After | Output |
+|---|---|---|---|
+| `models list` | 13.95 s | 0.34 s | identical |
+| `models status` | 0.86 s | 0.03 s | identical |
+| `check` | 27.6 s | 0.68 s | identical |
+
+Every other header read goes through the same function, so each is faster the same way with the same answer: the llamacpp backend's profile and window, `convert`, `quantize`, acquisition's verify and training's promotion.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| No cache | The reader fix only — **the user's call**, on the numbers above | A cache would save about another third of a second. It would cost a file under `cache/`, a window in which a listing could be stale, and guardrails of its own (the test keeping it off the loading paths). With the read this cheap, nothing is stored and no listing can be out of date. The document's four open calls were all about the cache, and lapsed with it. |
+| The threshold | 64 KiB | Every vocabulary string and every small value stays in the buffer. An array of scores, hundreds of kilobytes, is one seek rather than a read of bytes nothing looks at. |
+
+**Guardrails, each mutation-tested (5 mutants, all caught)**, against the whole unit suite. The mutants: every skip a seek, no skip a seek, a short skip unchecked, the size not passed to the stream overload, and the file size not recorded.
+- `gguf_inspect_test` reads through a stream that counts its seeks:
+  - a 50,000-string vocabulary is stepped over with no seeks, and its scores with one;
+  - the architecture after both is read in step;
+  - the stream and the file overloads read alike;
+  - a stream shorter than it claims fails inside a skip, the last field included.
+
+**Not verified, and found on the way.**
+- **Every measurement ran with the files in the operating system's cache**, read moments before. A first read after a restart also pays for the disk, for the same header bytes as before.
+- **Windows** uses the same standard library calls, but was not measured there.
+- **M1's busy line now shows only briefly.** A 31-model `models list` finishes in a third of a second, so its line appears for a frame or two after the 150 ms gate.
+
+### 2026-10-03 — `pull-register-chain` (maintenance item M3): one command from a pull to a runnable backend, and a quantize that stops talking over itself
+
+**Why.** Getting a full-weight model from Hugging Face to a chattable backend took four commands, each typed after watching the last finish (the user's transcript, 2026-10-03): `models pull … --safetensors`, `models convert`, `models quantize --type Q4_K_M`, then `config add-backend`. Every stage was already a shipped core. The same transcript showed `models quantize` printing llama.cpp's own metadata dump straight onto the terminal, where every other `models` verb reports in its own words: 14 lines for a one-tensor model, hundreds for a real one.
+
+**What was built**
+
+- [x] **`--register` and `--register-with <levels>`**, on `models pull <ref> --safetensors` and on `models convert <model>`.
+  - The chain pulls (when it starts from a pull), converts to F16 with its projector, quantizes to each listed level, and registers a backend for every artifact: `<model>-F16` and `<model>-<level>`, named since 2026-10-03 as the user names them (below).
+  - Levels are comma-separated and spelled any way the quantize table accepts; `q4_k_m` is `Q4_K_M`, and F16 is always made.
+  - `--register` without `--safetensors` is refused, naming why: a GGUF pull is runnable as it lands.
+- [x] **The verbs became functions the chain calls** (`commands/models_pull.cpp`): `pull_snapshot`, `convert_model` and `quantize_model`.
+  - Standalone, each prints exactly what it printed before.
+  - Chained, each hands its warnings (a base model, a projector that could not be made, an unrunnable architecture) to the chain, which says them once in its summary. Each verb's own "add a backend" and "make it smaller" hints give way to the chain's.
+  - Every stage keeps its guarantees because it is the same code: the staging directory, the hash-named store home, the projector carried to every quantization, Ctrl-C cleaning up.
+- [x] **The orchestration** (`commands/model_chain.h/.cpp`): stages in order under `[i/n]` lines.
+  - A stage that fails has said why; the chain then says where it stopped and the one command that resumes it, and passes the failure on with the stage's own exit code (a cancel stays a cancel).
+  - Once the pull is done, the chain says at once that from here on `apogee models convert <model>/safetensors/<id> --register-with …` resumes it. That command runs offline, and a run killed outright has already shown it.
+- [x] **Resuming makes nothing twice.** `convert` already found an existing conversion by its record; `quantize` now finds an existing quantization the same way (the source it was made from, and the level). Standalone `models quantize` benefits too: a level already made is reported, not made again.
+- [x] **Registration is the hand-typed edit.** Each backend goes through `harness::append_backend` in the one config editor, the edit `config add-backend <name> --type llamacpp --model-path … [--mmproj-path …]` makes. A name an earlier run of the same chain registered for the same files is left as it is.
+  - Before the first stage, the chain refuses what would refuse at its last: no config to register into, a name another model's backend holds, or a name differing only in case.
+- [x] **llama.cpp's log stays off the terminal** (`models/quantize.cpp`). For the run, its log callback is Apogee's `QuantizeLog`:
+  - the metadata dump is dropped;
+  - the per-tensor lines become a tensor count on M1's busy line;
+  - warnings and errors are kept and attached to a failure as `llama.cpp said: …`;
+  - the callback in place before (the backend's own, when a model is loaded) is put back afterwards.
+  - On a small hand-built model, the build from before printed 14 lines of llama.cpp's own. This one prints none, and on a failure says llama.cpp's reason in one line beneath its own.
+- [x] **The new flags complete after another flag** (`commands/complete_protocol.cpp`; the user's report, 2026-10-03). `models pull <repo> --safetensors --<TAB>` showed `--safetensors`' own description, and `--register` never appeared.
+  - The cause predates this item: since flag completion shipped, the protocol took every boolean flag for one that takes a value, so the word after any of them (`chat --raw`, `models delete --yes`) was read as that flag's value. It read CLI11's type size, which is one for every option, flags included; the parser reads the items an option expects, which is none for a flag. Completion now asks the parser's question.
+  - A fixed set the parser splits at commas completes its last word, as a collection list already did: `--register-with Q4_K_M,<TAB>` offers the other levels, not the one already listed.
+- [x] **Backend names the user's way, and `--base-name`** (`commands/models_pull.cpp`; asked for after the user's first live chain, 2026-10-03). The chain registered `gemma-4-E2B-F16` and `gemma-4-E2B-Q4_K_M` beside the user's own `Gemma4-E4B-F16` and `Gemma4-E4B-Q4KM`.
+  - A backend's level is written without its underscores: `-F16`, `-Q4KM`, `-Q5KM`, `-Q6K`, `-Q80`. The file keeps the table's spelling (`gemma-4-E2B-Q4_K_M.gguf`), and so does the record.
+  - `--base-name <name>`, after the levels on `pull` and on `convert`, is what every name begins with: `--base-name Gemma4-E2B` registers `Gemma4-E2B-F16` and `Gemma4-E2B-Q4KM`. Without it, the model's own name, as before.
+  - The resume command carries it, so a resumed chain registers the names the first run would have.
+  - A name the config cannot hold is refused before anything runs, by the very edit that will add it, run on the config's text and kept nowhere -- one rule, not a copy. `--base-name` without `--register`, or empty, is refused the same way.
+
+**Not run, by the user's call.** The guardrail's live check, one full-weight pull chained to a registered quant and chatted with, was not run: the user runs it (2026-10-03). Nothing in this item's tests downloads, converts or quantizes a real model.
+- The converter is the existing test's shell script.
+- The chain's quantizer is a stand-in that writes small GGUFs.
+- llama.cpp's real quantizer runs, on a llama build, only on a 2 KiB model built in the test (`quantizable_gguf`).
+- The pull stage itself, which needs the network, is exercised only through the orchestrator's tests.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| What registers | Every artifact: `<model>-F16` and `<model>-<level>` *(default taken)* | The user picks at chat time and deletes what they do not want. |
+| Backend names | `<base>-F16`, `<base>-Q4KM`: the level without underscores, the base `--base-name` or the model's name — **the user's call**, 2026-10-03 | The names the user gives backends by hand; the files keep the table's spelling. |
+| The F16 | Always made and kept *(default taken)* | It is the quantization source and the training input; retention is the user's, through `models delete`. |
+| Flag composition | `--register` without `--safetensors` refused *(default taken)* | The chain is for full-weight pulls; a GGUF pull is runnable as it lands. |
+| Discoverability | A plain `pull --safetensors` now suggests `--register-with Q4_K_M` *(default taken)* | The next pull can be one command. |
+| The resume command | `models convert <model>/safetensors/<id> --register…`, said as soon as the pull is done | Offline, and it skips what is done; `convert` gained the same flags for this. |
+| No real pull | Built and verified without downloading or converting a real model — **the user's call** | The live check is the user's; the tests need none of it. |
+
+**Guardrails, each mutation-tested (24 mutants, all caught on the first pass)**, against the whole unit suite; the quantize log's five on a llama build.
+- **The orchestration:** a failure unsaid or swallowed; the offline resume unsaid; a warning said twice.
+- **The chain:** registration not idempotent; another model's name, a name differing in case, or a missing config not refused up front; the names not checked first; the projector or the quantizations not registered; an existing quantization not recognised; levels kept as typed, or F16 kept as a level; `--type` allowed beside `--register`; a base model unmarked; a chained verb printing its own hints or its warnings inline; the resume command without its levels.
+- **The quantize log** (on a llama build): the log not routed or not put back, the reason dropped, the tensor count unsaid, the warnings not kept.
+- Not mutation-tested: the `--register needs --safetensors` refusal. Its mutant turns the test's command into a real pull, which reaches the network.
+- **The names** (7 more mutants, all caught): the level keeping its underscores; the base name ignored; the resume command without it; a name the config cannot hold not refused up front; `--base-name` taken with nothing to name, or empty; `convert` passing none. `pull`'s passing it on is not mutation-tested, for the reason above: its test would be a real pull.
+- **The completion fix** (4 more mutants, all caught): a flag read as taking a value, a set split at commas not completed as a list, the parser's delimiter not read, a level already listed offered again.
+
+**Tests.**
+- `model_chain_test`: the orchestration as a table over stand-in stages.
+- `models_convert_test`, all in process:
+  - the chain with a stand-in quantizer, each config byte-identical to `config add-backend` typed by hand;
+  - a stop at a quantize, resumed by the printed command, making nothing twice;
+  - a stop at the conversion, resumed by running the printed command itself;
+  - the up-front refusals;
+  - a base model's note said once;
+  - on a llama build, the whole chain through the command line with the real quantizer.
+- `quantize_test`, on a llama build: a real quantization writes nothing of llama.cpp's to the terminal (captured at the file descriptor) and counts its one tensor; a refusal carries llama.cpp's reason; the backend still hears llama.cpp afterwards.
+- `lifecycle_test`, for the completion fix: the reported line and its siblings (`--safetensors --`, `chat --raw --`, `uninstall -y --`, a positional after a flag); every spelling in the real tree held to the parser's own count of what it takes; `--register-with`'s comma list, and a single-word set that is not one.
+
+### 2026-10-03 — `models-list-lineage` (maintenance item M4): every model says where it came from, and a snapshot whose job is done leaves the listing
+
+**Why.** The user's `models list` (2026-10-03) opened with eleven `(not configured)` SafeTensors rows, and most of them had already done their job: each had been converted into the GGUFs registered below it. A consumed input shown as an unconfigured model reads as work to do, and it hides the one snapshot that really is waiting. The user's rule, taken as written: **a snapshot used to make a GGUF no longer shows as an unregistered model; one never converted still does — and what was built from a snapshot says so.**
+
+**What was found first.** The item was specced on the premise that lineage was recorded nowhere, so that `convert` and `quantize` would first have to start writing it. They already did. Since `models convert` first shipped (2026-09-23), the record beside every conversion has said `source: convert` with `ref` naming its snapshot as `<model>/safetensors/<id>`, and every quantization `source: quantize` with `ref` naming its GGUF. Every one of the 22 GGUF records on the user's store carries it. So the "record" half became a **reading** of those two fields, with no new field written: a `derived_from` beside `ref` would have been a second copy of one fact.
+
+**What was built**
+
+- [x] **The lineage core** (`models/lineage.h/.cpp`, new):
+  - `origin_from_record` reads a record: converted, quantized, pulled from Hugging Face or Ollama, a fine-tune, or unknown.
+  - `Lineage` is built from what one sweep of the store holds:
+    - `chain()` walks back from a model, one link per step: quantized from its F16, converted from its snapshot, pulled from its upstream.
+    - `consumed()` names the GGUFs whose chain reaches a snapshot.
+  - Recorded lineage answers first, and inference only where no record does. Every answer built on inference carries `inferred`.
+  - **Inference is narrow.** A GGUF with no record, under a model holding exactly one snapshot, is taken to be its conversion. So is a quantization whose F16 has been deleted, record and all; the F16 is the big file, and once quantized it is the one most often removed. With two snapshots nothing is guessed. Outside the store nothing is inferred at all.
+  - A fine-tune's record names its run, so it never consumes its base snapshot: the base model is no more runnable because a fine-tune of it exists.
+- [x] **One handle parser in the layout's file** (`models/store.h`): `weights_handle` and `parse_weights_handle` read `<model>/<format>/<id>` without asking the disk. A record's `ref` is read through them, never with path arithmetic in the display.
+- [x] **`models list` folds consumed snapshots** (`commands/models.cpp`).
+  - A snapshot the lineage says is consumed is not shown. It is still shown when it needs attention (a damaged one) or a backend points at it.
+  - One dim line under the table counts the fold: `12 snapshots consumed by conversions are folded -- --all lists them`.
+  - `--all` lists everything; nothing about the store changes, so `check`, `train` and `models delete` see what they saw before.
+  - Deleting a snapshot's GGUFs brings it back, because the listing follows the store.
+  - A GGUF whose chain passes through a conversion reads `converted` in SOURCE, backend or not; everything else reads what it read before.
+  - `--output-format stream-json` keeps every row: the fold is the table's, and lineage in machine output is 28h's.
+- [x] **The sweep reads nothing twice** ([M2](#milestone-n--model-operations)'s cost discipline).
+  - Each file's record is read inside its own counted step of the busy line, as before, and the lineage is applied in one pass over the finished rows.
+  - The first version read every record up front. That would have left the busy line on its uncounted label while the records loaded. It would also have hung `cli.busy_line`, which holds the sweep on a named-pipe sidecar until it sees a counted frame. It was caught reading that test, before it ran.
+- [x] **`models info` takes stored weights as well as a backend**: `<model>/<format>/<id>`, or a bare id.
+  - Completion offers both through a new name kind, `BACKEND_OR_WEIGHTS`.
+  - A local model's info prints its chain:
+    ```
+    lineage:      quantized to Q4_K_M from google--gemma-4-E4B/gguf/c52b3d2c5304 (recorded)
+                  converted from google--gemma-4-E4B/safetensors/af4523bb6580 (recorded)
+                  pulled from google/gemma-4-E4B (Hugging Face)
+    ```
+  - A broken link says what is gone: `-- source snapshot no longer on disk`, or `-- no longer on disk` for a quantization's F16.
+  - A snapshot's info says what was made from it, conversion first, and whether the listing folds it.
+  - A whole model name is refused with the handles to pick from.
+
+**On the user's store** (read-only, through a scratch `APOGEE_HOME` holding a copy of the config, with the models directory linked in).
+- `models list` went from 12 `(not configured)` snapshot rows to none, with the one tail line, and its 22 local backends now read `converted`. Every snapshot there had been converted, `google/gemma-4-E2B` among them, through M3's chain earlier the same day.
+- `--all` listed exactly the old table, line for line, apart from the SOURCE column.
+- Everything there is recorded, so nothing was inferred: the inferred path runs only on the tests' fixtures.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where lineage lives | A reading of the record's `source` and `ref`; no `derived_from` field | Convert and quantize have written the parent there since the store's first day; a second field would be a second copy. |
+| When to infer | Only where it names exactly one snapshot: a record-less GGUF, or a quantization whose F16 is gone | With two, either could be the parent, and a guess would fold the wrong one. |
+| A fine-tune | Does not consume its base | The base model stays unrunnable until it is converted. |
+| Discoverability of the fold | `models list --all`, plus one tail line counting what is folded *(default taken)* | The fold is visible, never silent. |
+| SOURCE | `converted` for a GGUF whose chain reaches a conversion, recorded or inferred; unchanged otherwise *(default taken)* | The full chain lives in `models info`, not in new columns. |
+| A snapshot a backend points at | Never folded *(default taken)* | Possible once MLX (27a) runs one directly; a backend's own model is never hidden. |
+| Machine output | `stream-json` keeps every row | A machine reader is not misled by `(not configured)`, and lineage there is 28h's. |
+| `models info` | Takes `<model>/<format>/<id>` or an id as well as a backend | The acceptance needs it: a fresh conversion is not a backend yet, and a folded snapshot must stay reachable. |
+| M3's chain | Stamps the same records through the same functions, nothing extra *(default taken)* | Proven through the command line: chain, then `info` and `list`. |
+
+**Guardrails, each mutation-tested (30 mutants, all caught on the first pass)**, against the whole unit suite. The three on `consumed()` ran again on its final form, after the conversion was ordered first.
+- **The reading:** a conversion, a pull or a fine-tune read as unknown.
+- **Inference:** none at all; not marked as inference; a guess between two snapshots; none across a deleted F16; not carried down a chain; an inference beating a record; the conversion not listed first.
+- **The chain:** a gone F16 or a gone snapshot not marked; a path outside the store not checked; the upstream link dropped; the walk unbounded.
+- **The handle parser:** any id accepted.
+- **The listing:** `converted` never said; a snapshot needing attention or a backend's own folded; nothing folded; `--all` ignored; the fold unsaid.
+- **Info:** inferred said as recorded; a gone snapshot or F16 unsaid; no stored handle taken; no lineage on a backend; the command line passing no store; a record not kept for the lineage.
+- **Completion:** stored handles not offered for `models info`.
+
+**Tests.**
+- `lineage_test`, over a store built in a temp directory:
+  - the record table;
+  - `consumed()` exhaustively: recorded; never converted; inferred; two snapshots with one converted (only the recorded one); two snapshots and no record (nothing guessed); a record beating an inference; a quantization reaching it through its F16; the F16 deleted, with one snapshot or two; a pulled GGUF, a fine-tune and another model's GGUF consuming nothing;
+  - the conversion ordered before its quantizations;
+  - a snapshot that stops being consumed once its GGUF is gone;
+  - the full chain to the upstream; the broken chains; the inferred chains; a parent outside the store, present and gone;
+  - a record naming itself; a store split across `paths.hf_dir`.
+- `store_test`: the handle parser against what is not a handle.
+- `models_test`:
+  - the listing's fold and its tail line, and `--all` as a superset of every line;
+  - `converted` on backends and stored rows, and a pulled GGUF unchanged;
+  - deleting the GGUFs brings the snapshot back; deleting only the F16 keeps it folded, said as inferred; deleting the snapshot names the break;
+  - a damaged snapshot and a backend's own never folded;
+  - the sweep's reads counted exactly as before;
+  - `info` goldens for a backend, a stored GGUF, a consumed snapshot, a waiting one, a bare id, an inferred conversion, an unknown origin and a whole model name.
+- `models_convert_test`: M3's chain run, then `models info` and `models list` through the command line on what it made.
+- `complete_sources_test`: `models info` completes backends and stored handles, and no bare model.
+- No inference was run, by the user's call: nothing in this item loads a model.
+
+### 2026-10-03 — `shell-completion` (maintenance item M7): a backend's name is enough to delete its model or register a stored one
+
+**Why.** The user's delete transcript (2026-10-03) showed the gap twice in three commands.
+- `apogee models delete gemma-4-E2B-F16` — the backend's name, as `models list` prints it — was refused: "no model 'gemma-4-E2B-F16'".
+- The store path that works, `google--gemma-4-E2B/gguf/513ee1b91245`, had to be hunted by hand. The accepted command's own warning then proved the mapping existed the other way: "backend 'gemma-4-E2B-F16' points into this".
+- Registration is the same friction inverted: `config add-backend` hand-types a name, `--type llamacpp` and a `--model-path` the store already knows.
+
+**What was found first.** The item was written as if Apogee had no shell completion. It has had it since v0.1.2:
+- the hidden `__complete` verb, reading candidates from the live config and store;
+- the zsh, bash, fish and PowerShell scripts that `make install` and `install.sh` put in place.
+
+So, **by the user's call**, the item builds on what is installed: no `apogee completion <shell>` command, and no second way to deliver the scripts. What was missing was candidates — `models delete <TAB>` offered store models but no backends, and `config add-backend <TAB>` nothing — plus the two behaviours behind them.
+
+**What was built**
+
+- [x] **`models delete` takes a backend's name** (`commands/models_pull.cpp`, `plan_delete(roots, config, name)`).
+  - A name the store knows means what it always did.
+  - Failing that, a backend whose `model_path` is a stored GGUF means that GGUF's weights, planned exactly as its handle would be. The will-remove text, the warning that the backend stops working, and `--yes` are the handle's, byte for byte.
+  - A store name that a backend also has keeps its store meaning, and the collision is said before the plan: `'org--repo' is also a backend -- its model, other/gguf/…, is not what this removes`. Nothing is said when the backend's model is among what goes, because the existing warning names it.
+  - A backend outside the store, or with no model file (a cloud one), is refused with the reason.
+- [x] **`config add-backend <name>` fills itself from the store** (`commands/config_cmd.cpp`, `fill_from_store`).
+  - A name that is a stored GGUF's file stem gives the type its format runs as, its `model_path` and its projector.
+  - It says them as the arguments they stand for (`filled from the store: <handle>` then `--type llamacpp --model-path … --mmproj-path …`), then makes the same `append_backend` edit a hand-typed command makes.
+  - A flag given always wins: a `--model-path` given, or another `--type`, fills nothing, and a `--mmproj-path` given is kept.
+  - Two stored GGUFs of one name are refused, both listed.
+  - `--type` is no longer required by the parser. When nothing fills it, the callback throws the parser's own `RequiredError`, so a name the store does not know still reads `--type is required` and exits 106.
+- [x] **The format → type map** (`models/store.h`, `backend_type_for_format`): `gguf` → `llamacpp`, one row per format beside the formats themselves, so MLX's `mlx/` (27b) is one more row.
+  - `stored_gguf_at` (the stored GGUF a backend points at) and `stored_ggufs_named` (the stored GGUFs of a name) are the lookups delete, add-backend and completion share.
+- [x] **Completion, through the resolver that exists** (`commands/complete_sources.cpp`), with two name kinds:
+  - `MODEL_OR_BACKEND`, for `models delete`: store models, handles, and the backends whose model is stored, never a cloud one.
+  - `NEW_BACKEND`, for `config add-backend`'s name: free text that offers the file names of the stored GGUFs no backend points at and no backend is named.
+  - Directories and the config only, never a header.
+  - The free riders were already wired: `models info` completes backends and stored weights (M4), and `chat -m` completes backends.
+
+**On the user's store** (read-only, the M4 scratch home): `models delete gemma-4<TAB>` offers `gemma-4-E2B-F16` and `gemma-4-E2B-Q4_K_M`. `config add-backend <TAB>` offers nothing but its hint: every stored GGUF there already has a backend.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Delivery | The installed scripts and the `__complete` that exists; no `apogee completion` — **the user's call** | Completion shipped in v0.1.2; a second delivery path would be a second copy of the scripts. |
+| Shells | zsh and bash checked, fish when present *(default taken)* | Already shipped; `cli.shell_completion` drives the real shells. |
+| A new backend's candidate name | The stored GGUF's file stem *(default taken)* | The name `models list` notes under the row. |
+| A name both the store and a backend have | The store's meaning, the backend said | Today's meaning stands; nothing is removed with fewer words. |
+| No match and no `--type` | The parser's own `RequiredError` | A non-store name behaves exactly as before. |
+| Free riders | Already wired; nothing new *(default taken)* | `models info` (M4) and `chat -m` complete backends. |
+
+**Guardrails, each mutation-tested (17 mutants, all caught on the first pass)**, against the whole unit suite.
+- **Delete:** a backend's name not tried, or tried before the store's; the collision unplanned, unsaid, or said for what goes; an outside backend called modelless; the command reading no config.
+- **Completion:** delete offering no backends; a registered GGUF, or a name already taken, offered as new.
+- **Add-backend:** no fill; a given model path, another type or a given projector filled over; two GGUFs of one name taken as one; the refusal in other words than the parser's; the `gguf` row naming another type.
+
+**Tests.**
+- `config_cmd_test` (new, over `support/cli_home`, a throwaway install the real command tree runs against in process):
+  - the fill written byte for byte as the hand-typed command writes it in a twin install, comments kept;
+  - each flag winning;
+  - the unknown name's exact refusal, with the config untouched;
+  - the ambiguous name.
+- `models_pull_test`: delete by a backend's name planned as its handle; the store's meaning kept and the collision said through the command line; refusals saying why; the confirmation and `--yes` byte-identical to the handle's through the command line.
+- `complete_sources_test`: both kinds over a store of files that are not GGUFs at all.
+- `lifecycle_test`: add-backend's name hint.
+- `cli.shell_completion`: the real zsh, autoloaded and sourced, and the real bash complete a backend for `models delete`, a handle prefix, and an unregistered GGUF's name for `config add-backend`. The three fail against the installed binary from before this item.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.
@@ -1514,7 +3088,7 @@ The lesson is the cheap one: **a plan inherited from the reference implementatio
 | Family | Embedded chat template | Observed |
 |---|---|---|
 | `gemma3` (1b-it Q8_0) | **yes** | Clean. Answered "Paris". Nothing to strip. |
-| `qwen3` (3.6-27b Q4_K_M) | **yes** | **Emitted `<think>\n\n</think>\n\n4` — all of it reaching the user.** |
+| `qwen3` (3.6-28e Q4_K_M) | **yes** | **Emitted `<think>\n\n</think>\n\n4` — all of it reaching the user.** |
 | `llama3` (3.2-3b, local files) | **no** | Degenerate on every prompt. |
 
 This item was written from Ommi's Gemma 4, which shipped **no** chat template and had to be reverse-engineered — that was the case the bespoke-override slot existed for. **Gemma 3 ships a good template and needs no help at all.** The family that needed help was Llama, and its files here carry a content hash where a name should be and degenerate like base models, so nothing about it could be verified.
@@ -1798,6 +3372,71 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 
 ---
 
+### 2026-10-04 — `retrieval-reporting-floor` (backlog item 26s): how strong a match, and a floor below which nothing is injected
+
+**Why.** The attachment-representation spike (2026-10-03, a sandboxed probe) measured two faults.
+- **The line misled.** A hybrid turn's score is Reciprocal Rank Fusion, whose best possible value (first in both lists) is 2/61 ≈ 0.033. The stress test's "top 0.023" and "top 0.031" were mid-to-high rank agreement, and the user and the assistant alike read them as junk.
+- **The injection had no floor.** It checked only for emptiness. A one-file attach handed the model a 0.000-score excerpt, and an unrelated question injected excerpts at 0.950 lexical, the same score an on-topic one got, because normalised BM25 saturates. Misleading context is worse than none: the stress-test model built its spiral on excerpts that did not answer.
+
+**What was built**
+
+- [x] **Strength, per retriever** (`agentloop/retriever`: `match_strength`, `MatchEvidence`, `MatchStrength`), read off the search's best hit on its own scale. The three scales stay apart.
+  - **Hybrid:** the score over RRF's ceiling (`rrf_ceiling()`, 2/61).
+  - **Vector:** the cosine as it is.
+  - **Lexical:** how many of the question's content words the hit holds, word for word as the index matches, stop words left out (`word_coverage`). BM25's saturation is why.
+  - Bands are `strong` / `fair` / `weak`, with each edge a named constant.
+- [x] **The floor** (`agentloop/rag`, in `retrieve_for_turn`, so attachments, `--rag`/`auto_rag`, `complete`, `serve`, `analyze` and recall all get it).
+  - The confirmed floors: a hybrid match under a quarter of RRF's ceiling, a cosine under 0.25, a lexical match holding none of the question's words.
+  - Under the floor the turn injects nothing, chunks or graph section, and says so. The turn itself runs.
+  - A hybrid search keeps its vector half (`fuse_rrf` over its two searches, exactly `Store::search_hybrid`), so the best hit's cosine is evidence.
+- [x] **The one line**, from the one renderer (`operations/retrieval`), for chat, `complete` and machine mode (whose diagnostics ride stderr). The strength comes first, then the raw score and retriever, then what it was read by:
+  - `4 excerpts from the attachments, strong match (0.032 [hybrid], 100% of RRF's ceiling)`
+  - `… fair match (0.930 [lexical], 2 of 3 question words)`
+  - floored: `nothing relevant in the attachments -- the best match is under the floor (0.660 [lexical], none of the question's words)`, and the same for a collection, its origin kept.
+- [x] **Tests**:
+  - **Tables:** every band edge and floor per retriever, and `word_coverage`.
+  - **The probe's fixtures through `retrieve_for_turn`:** the one-line file, the saturated off-topic question beside an on-topic one, a cosine of 0, a hybrid one-chunk store, a cosine alone as evidence, and first in both lists.
+  - **The line's goldens.**
+  - **End to end:** a one-line attachment with an unrelated question, where nothing is injected, the turn still answers, and the identical line appears on `complete` and in machine mode.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Per-retriever floors | **By measurement** *(recorded 2026-10-03)* | No shared threshold can exist across the three scales. |
+| How strength reads | A word band per retriever, raw score and retriever in parentheses *(default, confirmed)* | The word for a person, the facts for anyone checking. |
+| The floors | RRF under 25% of its ceiling, cosine under 0.25, lexical under one content word *(default, confirmed)* | Named constants, as confirmed. |
+| Where the floor applies | Attachment and `auto_rag` turns alike, an explicit `--retriever` too *(default, confirmed)* | One function, so every surface. |
+| Hybrid's floor | **Also floored when neither half has evidence: a cosine under 0.25 and none of the question's words** *(group run, flagged for veto)* | At the fetch depth a hybrid search uses (50 a half), a hit's RRF never falls under a quarter of the ceiling, so the confirmed floor alone could never fire. A single chunk is first in the vector half by construction. The two other floors already confirmed are the evidence. |
+| Word coverage | **Word for word**, stop words out *(group run)* | Measured: a five-letter shared stem let "painted" count for "painter". The lexical index itself matches whole words. |
+
+**Verified on the real binary.**
+
+- **Lexical** (no embedding model, `lib/documentation/assistant` attached, Qwen3-VL-8B answering):
+  - "What is photosynthesis?" went from `4 excerpts …, top 0.660 [lexical]` to `nothing relevant in the attachments -- the best match is under the floor (0.660 [lexical], none of the question's words)`. It matched only "what" and "is".
+  - "How is a release cut and published?" reads `fair match (0.930 [lexical], 2 of 3 question words)`.
+  - "Who painted the Mona Lisa?" and the sourdough question read `weak match (…, 1 of 3)` and `(…, 1 of 4)`. The docs do hold "painted" and "home", and the model answered from its own knowledge.
+- **Hybrid** (Embedding-Gemma): an on-topic question reads `strong match (0.032 [hybrid], 98% of RRF's ceiling)` where it read `top 0.032`.
+
+**Found, and left for the user (flagged).** Measured on Embedding-Gemma over the same docs:
+- **Off-topic questions still score cosine 0.56–0.59** ("bake sourdough bread", "the Mona Lisa"), against 0.71–0.76 for on-topic ones. The confirmed cosine floor of 0.25 therefore never fires on this model, and neither does hybrid's evidence rule.
+- **Rank agreement is not relevance.** The sourdough question's hybrid line reads `strong match (0.027 [hybrid], 85% of RRF's ceiling)`, because both halves ranked the same chunk first.
+
+A floor near 0.65 would separate this model's cases. Cosine baselines differ by embedding model, though, so a fixed higher floor would drop real matches on another; a per-model floor is the user's call.
+
+One more thing worth knowing: the probe's "unrelated" question, "What is the capital of France?", is in these docs verbatim, in the record of the search's OR-joining, so it matches for real.
+
+**Guardrails, each mutation-tested (17 mutants, all caught).**
+- **Lexical:** no floor; stop words counted; and against the first draft's stem rule, endings not shared. On the word-for-word code: a word counted when absent; case kept.
+- **Vector:** no floor; the strong edge moved.
+- **Hybrid:** no evidence rule; no RRF floor; the cosine ignored; the wrong ceiling.
+- **The turn:** the floor not applied; no cosine looked up.
+- **The line:** floored unsaid, for attachments and for a collection; no band.
+
+**Not verified.**
+- **Cloud embedders** (OpenAI, Google) were not run; their cosine baselines may differ from Embedding-Gemma's either way.
+- **The rerank judge** reorders after the floor; a turn the judge would have rescued is not.
+
 ## Milestone T — The public inference plane
 
 **Goal.** The third surface: `apogee serve`, an OpenAI-compatible HTTP server for **server deployments** — the executable on a server, remote mobile or desktop clients making REST calls to it — over the same agent loop every other surface runs, with server-owned sessions that are ordinary chat sessions, and the listening-socket invariant given its one reviewed exception.
@@ -1957,7 +3596,7 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 | The shell | **Gated**, default `ask` | Ommi shipped it unrestricted with a docstring warning; a tool that can `rm -rf` is what the gate is for. `allow` is one config line. |
 | Git | Shell out *(default taken)* | libgit2 is a dependency on six targets and a second ref resolver, for nothing the user's `git` lacks. |
 | Permissions keyed by | **Tool name** | A two-field struct would need a new field per gated tool; a namespaced MCP tool fits the same key. |
-| `fs_root` default | The home directory *(default taken)* | Ommi's default; a chat started from `/` would otherwise sandbox nothing. |
+| `fs_root` default | The home directory *(default taken)* | Ommi's default; a chat started from `/` would otherwise sandbox nothing. **Reversed 2026-09-25** (the user's call): the folder Apogee was started in — see *Tool safety defaults* below. |
 | The machine-mode prompt | The existing `question` event *(default taken)* | A `kind` field, no new channel; the "advertised iff someone can answer" rule already covers the no-driver case. |
 | `always` | Per tool, not per target *(default taken)* | A per-path allow-list is a larger schema for a case `session` covers. |
 | `git_diff` with a fetch | Read-only for the gate *(default taken)* | It updates remote-tracking refs, never the tree or history; prompting on every review diff trains the reflex the gate avoids. |
@@ -1970,6 +3609,393 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 **Guardrails, each mutation-tested (36 mutations: 35 caught outright, 1 caught after its test was strengthened).** The sandbox as a string prefix, or gone; `write_file`, `delete_file` and the shell ungated; hidden directories searched; the read cap silent; the shell's positionals visible to the command; a timeout reported as an ordinary exit; a ref allowed to start with a dash; the file argument reaching git unchecked; `never` fetching anyway; `auto` never fetching; the review defaults ignored; a note key holding a slash; the resolver's error ignored; hits not naming their retriever; a disabled toolset registered anyway; `run_command` dropped from the destructive list; a config `deny` reading as allow; session answers forgotten; `always` not written; an unknown answer allowing; the terminal prompt existing on a pipe; a closed driver denying instead of failing the turn; `tools.disabled` ignored by the registry; the served checker dropped; ask with nobody to ask allowing; the loader accepting `yes` as a level; `set_permission` accepting any level, or a path as a tool name; the doctor blind to a misspelt key; `restart_required` always false; the `PUT` permissions row ungated; `notes/` not a layout row; and `tools/` including a backend.
 
 **The one survivor, and what it taught.** "`never` fetches anyway" survived because the test's `never` case asked for a ref that existed *nowhere*, so the real code and the mutant refused it with the same message. The case now names a branch only the remote has: the real code refuses, a mutant that quietly fetched would succeed. A refusal test has to use something that *could* have been found.
+
+### 2026-09-25 — `tool-safety-defaults` (backlog item 25a): ask before a new website, work in the launch folder
+
+**Why it came first.** The local-tools spike (2026-09-25) found an exposure that already existed. `read_file` and `fetch_url` were both read-only to the gate, so neither ever asked, and the file tools reached the whole home directory. A model with `--tools` could read a file and send its contents out inside a URL with no prompt at any point, and a web page carrying hidden instructions was enough to set that off. Every cloud backend run with `--tools` had it. [Local tool calling](#milestone-j--local-inference) would hand it to local models, and [web search](#2026-09-28--web-search-searxng-backlog-item-25e-search-through-the-users-own-searxng) would multiply the untrusted pages a model reads. So this went first in the local-agent-tools track.
+
+**What was built**
+
+- [x] **Outbound, as its own kind of gated tool** (`agent/tool.h`). `Tool::outbound` sits beside `writes`. The gate is asked a `GateRequest`: the tool, the target it decides on, a `detail` it shows but never decides on, and whether the tool is outbound. An outbound tool must name a target (`ToolRegistry::add` refuses one that cannot), and a call it names none for is refused unrun. `run_gated` hands a running tool a `TargetGate`, so each further target goes through the same checker and the same prompt.
+- [x] **`fetch_url`, outbound** (`agent/fetch_url`). The target is the URL's host and the detail is the whole URL. `parse_http_url` is the one URL parser: userinfo, a backslash or a percent escape in the authority, a host that is not a bare host name, and a port outside 1–65535 are refused, and path bytes that are not printable ASCII are percent-encoded. **The URL fetched is rebuilt from those parts**, so the host asked about is the host the transport reaches. Redirects are followed one hop at a time (`resolve_redirect`, at most ten). A hop to a new host goes through the gate before anything is fetched from it, a hop on the same host does not ask again, and a redirect to any other scheme is refused. A redirected page's text starts with `[X redirected to Y]`.
+- [x] **The fetcher** (`commands/helpers`, `make_http_fetcher`): one GET with `follow_redirects = false` and `max_body_bytes` at 5 MB, both new on `HttpRequest`. `HttpResponse` gained `location` and `body_limit_exceeded`. Stopping at the cap is reported, not failed, so it is never retried. `CurlTransport`'s header callback now resets at each status line, so only the last response's headers count.
+- [x] **One definition of a host** (`harness/host.h`). `canonical_host` lowercases, drops one trailing dot and IPv6 brackets, and refuses anything else. `host_listed` compares in that form, **exactly**. The config, the checker, the URL parser, `check` and the editor all ask it.
+- [x] **Answers per website** (`commands/permissions`). For an outbound call the checker asks, in order: is the host in `tools.allowed_hosts`, has this session allowed it, else ask. `permissions.fetch_url` is not a key: `check` warns that it does nothing and names the list. `SessionApprovals` keeps tools and hosts apart, so `session` allows that one website. `always` adds the host through the editor. The terminal prompt shows the whole URL under the host (`Allow reaching this website?`), and machine mode's permission question gains `outbound` and `detail`.
+- [x] **`tools.allowed_hosts`**. The template's `tools:` section is active now, holding `allowed_hosts: []` with the rule in its comment, so `always` changes exactly one line. `add_allowed_host`/`remove_allowed_host` are exact inverses over flow and block lists, a missing key or section, and CRLF. `config add-allowed-host` and `delete-allowed-host` (the latter completing to the listed hosts, a new `ALLOWED_HOST` kind) have admin twins: `GET`, `PUT` and `DELETE /v1/admin/allowed-hosts[/{id}]`.
+- [x] **The launch folder** (`tools/toolsets`, `effective_fs_root`). `tools.fs_root` unset now means the folder Apogee was started in, not the home directory. A refusal names the root and both ways to widen it: start in a folder that contains the file, or set `tools.fs_root`.
+- [x] **`check`** reports the allowed hosts (an entry that is not a host is a warning, never a load failure), and the file root with where it came from.
+- [x] **The references**: [http-api.md](../reference/http-api.md) (the three routes, and the `serve --tools` behaviour change) and [machine-mode.md](../reference/machine-mode.md) (the per-website question). Each is pinned by its conformance check.
+- [x] **21 new test cases** (1608 in all), and `cli.config_lifecycle` drives the real binary.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Ask when | **Per new website** (the user's call) | Over asking only once a file has been read, an allow-list with no prompt, or no guard. A known site stays fast; a new one is always a visible choice. |
+| The file root | **The launch folder** (the user's call) | A chat started in a project works in that project; `tools.fs_root` still widens it. |
+| How `fetch_url` is gated | A new `Tool::outbound` flag *(default taken)* | Outbound is a different risk from mutation. A `read-only` agent (Milestone X's policy, which drops `writes` tools) keeps `fetch_url`, gated per website, so with nobody to ask it reaches only the listed hosts and still never blocks. |
+| `always` and `session` | The host into `tools.allowed_hosts`; the host for this process *(default taken)* | What the two answers already mean for a tool, applied to a host. |
+| Nobody to ask | Only `tools.allowed_hosts` *(default taken)* | `serve --tools` fetched anything before; the change is recorded in http-api.md. |
+| The search provider's host | Trusted by configuration *(default taken; built in 25e, below: the checker counts the instance's host as listed)* | The user named it. The pages a search returns are ordinary fetches and ask. |
+| `chat --resume` | The folder it is resumed in *(default taken)* | The root is a property of the process, not the transcript. It falls out: nothing in Apogee changes directory after startup. |
+| `permissions.fetch_url` | Not a key | A tool-level `allow` would reopen every website at once, which is what per-website asking exists to prevent. |
+| The URL handed to the transport | Rebuilt from the parsed parts | Two URL parsers that disagree about a host are the classic way round a host check; here the second parser has nothing ambiguous to read. |
+| A redirect on the same host | Not asked again | It was just allowed; asking again teaches the reflex the gate avoids. |
+| Redirect limit | Ten | It bounds a loop, not the guard: every new host is asked about anyway. |
+| Download cap | 5 MB, refused naming the size | 25a's seam named a cap and 25f had recorded the size, so it was taken here and marked consumed there ([25f](#2026-09-28--fetch-url-reader-backlog-item-25f-fetch_url-reads-a-page-as-a-model-should) shipped the reader). |
+| Where the host rule lives | `harness/host.h` | `agent/`, `commands/`, `httpserver/` and the editor all need it, and `harness/` is the one layer every one of them may include. |
+| A pasted URL in the list | Loads, and `check` warns | Refusing the whole config over one entry would take every other command down with it. |
+
+**Verified on the real binary.** `cli.config_lifecycle` covers the full sequence. On a pipe the fetch is refused, and the model reads the refusal as a tool result. A driver's `always` in machine mode names the host in the question and adds exactly `[127.0.0.1]` to the config. The same pipe run then reaches the host, and `check` lists both rows. `delete-allowed-host` restores the file's bytes. By hand, against a local server: a redirect to a different host was refused, and the server never saw the request; a same-host redirect was followed; a 6 MB page was refused, naming the limit, and requested once. Under a pseudo-terminal, the prompt showed the host and the whole URL, and `a` wrote the host to the config.
+
+**Guardrails, each mutation-tested (34 mutants: 31 caught outright, 2 caught once their tests were strengthened, 1 equivalent).**
+- **The host rule:** a suffix match in place of equality; a trailing dot kept; an empty label allowed.
+- **`fetch_url`:** a redirect hop not gated; the model's own URL fetched rather than the rebuilt one; the redirect bound off by one; control bytes passed raw; other schemes followed.
+- **The gate:** outbound not gated; an outbound call with no target allowed, at the gate and at dispatch; the hop gate always answering yes; an outbound tool without a target reader registered.
+- **The checker and answers:** the allow-list ignored; session hosts keyed by tool; outbound decided by the tool's level; a non-host asked about rather than denied; `session` remembering the tool; `always` writing a tool level.
+- **The fetcher:** curl following redirects itself; the body uncapped; an over-cap body read as a page; `Location` dropped.
+- **The editor:** a duplicate host added; the host written as typed; a missing key placed inside a nested list; a URL accepted as a host.
+- **The rest:** the unset root not the launch folder; machine mode's `outbound` dropped; the admin `PUT` never needing a restart; an unlisted `DELETE` not a 404.
+
+**The survivors, and what they taught.**
+- **The same host asked again.** A same-host hop that asked a second time was invisible, because the test's first host was on the allow-list, so the checker never reached the prompt. The case now allows the host by an answer.
+- **The first-item removal.** Removing the first of two hosts while leaving its separator went unseen, because the only first-item removal was followed by a second one, which tidied the stray comma. The case now checks the single removal's bytes.
+
+Both show the same gap: a check that another step can quietly repair proves nothing about the step before it.
+
+**The equivalent mutant.** Dropping `@` from the authority check changes nothing observable, because `canonical_host` refuses `@` as well. It stays as a second layer, stated in the code rather than relied on alone.
+
+**One incident, recorded.** The branch's commit of this work (`72c2d75`) was taken while the mutation run had the "allow-list ignored" mutant applied, so that commit's checker never allowed a listed host (it failed closed). The working tree was restored by the run, and the next commit carries the correct line.
+
+**Not verified.** The transport's new options (`follow_redirects`, `max_body_bytes`, the `Location` header) were exercised only on macOS's curl; the Linux and Windows builds set the same curl options. `apogee check`'s rows are asserted by the end-to-end test, not by a `check_test` case.
+
+### 2026-09-28 — `local-tool-ergonomics` (backlog item 25d): tools that return less and ask for less
+
+**Why.** The native tools were built for cloud models, with large windows and fast prompt reading. The local-tools spike (2026-09-25) measured the two costs that dominate on a local model instead: every byte a tool returns is read at roughly 100 tokens/s on a 27B model before the model can act on it, and a model that has to rewrite a whole file to change one line spends generation, at 10–15 tokens/s, on text it is not changing. So the tools return less, and ask for less. Every backend gets the change, since the tools are shared.
+
+**What was built**
+
+- [x] **`run_command`'s output, capped** (`tools/shell`, `tools/process`). The runner keeps each stream's first and last 8 KiB (`CapturedOutput`, bounded by an `OutputLimit`), so a command that prints gigabytes costs the kept bytes and a count. `git` keeps its last 256 KiB, as before. `render_command_output` cuts the rendered result — stdout, `[stderr]`, `[exit N]` — to its first and last 8 KiB, joined by a line naming exactly how many bytes were left out and how to see them: redirect to a file and read it in ranges, or search it. Each seam falls at a line break when one is in the kept half, and otherwise between characters, never through one. A 5.7 MB command returns under 17 KiB.
+- [x] **`read_file` in ranges** (`tools/fs`). `offset` and `limit`, in lines. Each line comes back prefixed with its number and a tab, `cat -n`'s shape, and a footer says `[lines A-B of T. Read on with offset B+1]`. A range is exact at both edges of the file. An offset past the end is an error naming the file's length. A range stops on a whole line at the 64 KiB cap and says so. The file is streamed, never held. A read without a range is unnumbered, byte for byte.
+- [x] **A plain read past the cap returns the file's size, not its first 64 KiB.** It names the size and line count and points at ranges and `grep_files`. This was decided on real weights; see below.
+- [x] **`edit_file`** replaces an exact string. It refuses when the string is absent, or when it occurs more than once without `replace_all`, saying how many times it occurs. Either refusal leaves the file untouched. The result names the lines it changed. The file is written beside itself and renamed into place (`write_file_atomically`), with its mode carried over, so an edited script stays executable. When the file has Windows line endings and the given text has none, the text still matches, and the replacement is written with the file's line endings. It declares `writes`, joins `destructive_tool_names()`, and the shipped template lists it at `ask`, so `check`, the admin view and machine mode's permission question all know it.
+- [x] **`grep_files`** searches file contents with an ECMAScript regular expression under the file root. Each match comes back as `path:line: text`, the path relative to the root, the files in sorted order. It takes a folder or one file, a `glob` and `ignore_case`. It skips hidden folders and binary files (a NUL byte in the first 8 KiB), and says how many binary files it skipped. A linked file or folder is judged by where it points, like any path. It returns at most 100 matches and 16 KiB, stops at the first match that does not fit (so what comes back has no gaps), and says how many more there were.
+- [x] **The environment note** (`tools/environment`, `agent::ToolRegistry`, `agentloop/loop`). It gives the date and weekday, the time zone's name and UTC offset (`platform::local_date`), the system, the working folder and the shell, and the file root. `register_native_toolsets` sets it on the registry it fills, even with every toolset switched off. `apply_tool_policy` carries it onto an agent's filtered registry. The loop renders it once per turn and puts it first in the request's transient block, ahead of any retrieval. It is never in history. It never gives the time of day.
+- [x] **The system messages opening a conversation reach a local template as one** (`backends/llamacpp`, `prompt_messages`). Qwen3.5 and 3.8's templates raise "System message must be at the beginning" on a second system message, and a failed render dropped the model to the fallback template, and its tools with it. The note ahead of a chat's own system prompt is the ordinary case. A retrieval block or review note ahead of one was already a case, so this fixes a latent bug too. They are joined a blank line apart, as the Anthropic and Google wires already join theirs.
+- [x] **Descriptions state the limits**: `read_file`'s cap and ranges, `run_command`'s kept ends, `grep_files`' caps and what it skips, `edit_file`'s rule of one exact match.
+- [x] **The references**: [machine-mode.md](../reference/machine-mode.md) and [http-api.md](../reference/http-api.md) name `edit_file` among the gated tools.
+- [x] **15 new test cases**: 1,681 pass under `make test`, and 1,646 in the unit suite built without llama.cpp, which is what CI gates on.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| What `run_command` keeps | The first and last 8 KiB *(default taken)* | Enough for a compiler's first error and a test runner's summary; stated in the description. |
+| What the cap measures | The whole rendered result, not each stream | A total bound. Capping each stream alone would let two long ones cost 32 KiB. The tail always ends in the exit status. |
+| `grep_files`' caps | 100 matches and 16 KiB *(default taken)* | Past either, it says how many more there were and to narrow the search. |
+| Line numbers | Only when a range is asked for *(default taken)* | A plain read stays byte for byte, for a model about to quote or edit it. |
+| The environment note | On whenever tools are *(default taken)* | About ninety tokens a turn, and a date a model cannot otherwise know. |
+| The note's time | **The date, never the time of day** | The note heads every request. A line that changed each turn would make every local turn re-read the whole conversation, since the KV cache and 25c's checkpoints both match from the first token. A model that needs the time can run `date`. |
+| A plain read past 64 KiB | **None of it, with its size and line count** *(decided on real weights, 2026-09-28)* | The item kept the cap, and it stays. What changed is what comes back past it. The first 64 KiB of an 80 KB file was 38,502 tokens, more than a 32K window, so the turn ended before the model could act. Refused, Qwen3.8-27B searched and read a range instead. Claude Code's Read tool refuses the same way. A cloud model pays one more step on a big file. |
+| Where the note is set | On the registry, by `register_native_toolsets` | Built once, where the tools are. Every surface builds its registry through `make_built_in_tools`, so no surface can have tools without the note. |
+| Joining system messages | On the local path only | The cloud wires already lift and join them, and OpenAI's API accepts several. The restriction is the local template's. |
+| `grep_files`' paths | Relative to the root | What `read_file` and `edit_file` resolve against. `search_files` gives paths relative to the folder it searched; that difference is recorded, not changed. |
+| The regular-expression engine | `std::regex`, ECMAScript | No new dependency. A line is searched in its first 4 KiB, because the engine recurses per character and a minified megabyte line would overflow the stack. |
+| `edit_file` on a missing file | Refused, naming `write_file` | One tool creates files and one changes them. |
+
+**Verified on real weights.** Two models, each with a 32K context: Qwen3.8-27B, a hybrid, and Qwen3-VL-8B. Every run used `complete --tools` at temperature 0 on the real binary, with `edit_file` allowed, in a folder holding a 2,000-line `settings.py` and a small Python package:
+
+| Task | Qwen3.8-27B | Qwen3-VL-8B |
+|---|---|---|
+| "What is today's date?" | "Monday, September 28, 2026 (MDT, UTC-06:00)", 29 s | "Monday, 2026-09-28", 7 s |
+| Change `TIMEOUT_SECONDS` from 30 to 45 | read refused → `grep_files` → a ranged read → `edit_file` → `grep_files` to check; 58 s | read refused → `grep_files` → `edit_file`; 12 s |
+| …the file afterwards | Line 1234 changed; the other 1,999 byte-identical | The same |
+| Where is `compute_checksum` defined? | One `grep_files` call, line 46; 37 s | One `grep_files` call, line 46; 9 s |
+
+Also checked:
+- On Qwen3.8, a system prompt and the note together rendered with the tools; nothing fell back.
+- A six-turn hybrid chat carrying the note read 39–171 new tokens per later turn, so the note leaves the cache intact.
+- `check` on a fresh config lists `permissions.edit_file ask`.
+
+**What real weights caught that the suite had not.**
+- **An invalid schema.** `grep_files`' parameter schema carried `int\s+main` in an example, and `\s` is not a JSON escape. The whole tool list then failed to render, and Qwen3.8 answered without tools (with the right date, from the note). A test now requires every built-in tool's parameters to parse as an object schema whose required properties are declared.
+- **The plain-read overflow** above.
+- **A phrasing trap, not a tool fault.** Asked where "the function `compute_checksum`" is defined, the 8B looked for a tool of that name. Qwen's template calls tools "functions". Asked where in the project's code it is defined, it found it in one call.
+
+**Guardrails, each mutation-tested (40 mutants).** 36 were caught outright, 2 once their test was strengthened, and 2 after mistakes in the run itself were fixed. The mutants, by area:
+- **The cap:** the capture's head never filling, or its tail never dropping bytes; the shell keeping no head; the output never cut; a gap left out of the count; the head not ended at a line; either cut going through a character.
+- **The ranges:** starting a line late; one line too many; "read on" offered at the end; a range past the end not refused; the byte cap ignored; a plain read past the cap returning its first 64 KiB again.
+- **`edit_file`:** an ambiguous match replaced; `replace_all` ignored; an absent match not refused; whitespace trimmed from the match; the tool ungated; the file's mode lost; the CRLF fallback gone.
+- **`grep_files`:** hidden folders walked; binary files read; a link out of the root followed; either cap removed; gaps in the shown matches after the cap; the schema's original `\s`.
+- **The rest:** `edit_file` dropped from the gated list or the template; the note never set, missing from the request, written into history, or lost by an agent's policy; the offset's sign flipped; the shell line shown with the shell off; the month counted from zero; the offset dropped; the system messages never joined, or an empty one kept.
+
+**The survivors, and what they taught.**
+- **The two character cuts.** The test shifted its text with a leading prefix. The head's cut lands at the stream's own head, where the runner stops. The tail is measured from the end, so its alignment against the characters never moved with that shift. The test now shifts both ends, with and without a gap, so each cut meets every alignment. A test that sweeps an input has to sweep the thing the cut is actually measured against.
+- **The two mistakes in the run.** The run filtered tests by tag, and the read-only-policy test is tagged `[permissions]` where the filter said `[permission]`, so it never ran. The schema mutant had a doubled backslash, which is valid JSON. Rerun against the whole suite with the original spelling, both were caught.
+
+**Not verified.**
+- **Windows.** Its paths (`cmd`, `localtime_s` and `_mkgmtime`, the zone's long name) are built by CI only.
+- **The 5 MB acceptance** is proven by a test that runs a real `awk` through the real shell. No model was asked to run one, since `run_command` asks first.
+- **Two tools stay uncapped.** `search_files` and `list_directory` were outside the item.
+- **A file under 64 KiB can still fill a small window.** Sizing what is sent to the real window became [26c](#milestone-f--the-shared-agent-loop)'s work, shipped 2026-09-28: a finished turn's results are sent as stubs.
+
+### 2026-09-28 — `web-search-searxng` (backlog item 25e): search through the user's own SearXNG
+
+**Why.** Local models have no provider-side search. With tools they could read a URL they were given, but they could not find one. On 2026-08-26 search had been left to the providers' own server-side tools, because Ommi's DuckDuckGo search scraped a results page, which breaks silently and returns nothing rather than failing. **This revises that decision** (the user's call, 2026-09-25: SearXNG, over Brave's or Tavily's keyed APIs and over MCP only). SearXNG is a metasearch engine the user runs. It answers over a JSON API, keeps its own engines working against upstream changes, and fails out loud: an HTTP status, or the engines it names in `unresponsive_engines`. So the rule the tool is built on is **never an empty success**.
+
+**What was built**
+
+- [x] **`web_search`** (`agent/web_search`). It takes a `query` and an optional `time_range` (day, week, month, year). It returns up to `results` results, each with its title, URL, date when the engine gave one, and a snippet. Any direct answer and fact box an engine gave comes too, and the engines that failed are named. It is `outbound`, and the instance's host is the target of every call.
+- [x] **The seam.** `SearchProvider` is a closure, so a keyed API would be a second implementation of it, never a reshaping of the tool. `make_searxng_provider` asks one GET per search through a `UrlFetcher`, so `agent/` includes no transport and everything is tested with no network. The search path is the instance's own path plus `search`, the query form-encoded, `format=json` always, and the instance's own `safesearch` and language.
+- [x] **`parse_searxng_response`**, pure. It reads results, answers in both the string and object forms SearXNG has used, infoboxes, and failing engines as `name (reason)`. A body that is not that JSON is an error that shows how it began.
+- [x] **Every failure says what to change.**
+  - Nothing matched: a result that says so and names the query.
+  - Every engine asked failed: an error naming them.
+  - HTTP 403, SearXNG's default with JSON off: an error naming `search.formats` in its `settings.yml`.
+  - HTTP 429: an error naming `server.limiter`.
+  - A refused connection: an error naming the configured URL.
+  - A redirect: an error naming where it went.
+- [x] **A tool that cannot work is withdrawn for the rest of the turn** (`ToolOutcome::unavailable`, `agentloop/loop`). An instance failure sets it. The loop then leaves the tool out of the turn's later requests, and answers a call that still names it without running it. The next turn offers it again. This was found on real weights; see below.
+- [x] **`tools.search`** (`harness/config`): `provider`, `url` (with `${ENV}`) and `results` (1 to 20, default 5). It is kept as written. `search_instance` is the one reading of it, used three places:
+  - registration: `make_built_in_tools` adds the tool beside `fetch_url`, over the same HTTP client, only for a usable instance, so a model is never offered a tool that can only fail;
+  - the checker: `make_permission_checker` counts the instance's host as listed (25a's recorded default, built here);
+  - `check`: the `Tools` section's `search` row says how to add search, where it points, or what is wrong, and makes no request.
+- [x] **The shipped config** carries the section commented out under `tools:`, with the JSON setting SearXNG needs.
+- [x] **[tools.md](../reference/tools.md)**, a new reference: running SearXNG in a container on a local port, its JSON output and limiter, the `tools.search` lines, `check`, what the model gets, and where a query goes. [http-api.md](../reference/http-api.md)'s `--tools` row names it.
+- [x] **Fixtures recorded from a real instance** (`tests/fixtures/searxng/`, the version pinned in their README): ordinary results with a failing engine, dated results, an answer, an infobox, nothing found, nothing because the one engine failed, and the 403 page.
+- [x] **12 new test cases**: 1,693 pass under `make test`, and 1,658 in the unit suite built without llama.cpp, which is what CI gates on.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Results per search | 5, each with title, URL, snippet and date *(default taken)* | A local model reads every result it is given; five is enough to choose one to open. `results` changes it, 1 to 20. |
+| `time_range` | Optional: day, week, month, year *(default taken)* | "What changed recently" is the commonest search a model makes. |
+| `check` | Configuration only, no request *(default taken)* | `check` never waits on the network. A failing instance is reported by the tool when used. |
+| `safesearch` and language | The instance's own *(default taken)* | Its owner already chose them. |
+| Backends | Every backend with tools on *(default taken)* | A cloud backend with `--search` has its provider's search as well; the model may use either. |
+| The instance's host | Counted as listed by the checker | "Trusted by configuration" (25a) made concrete: a search never asks, on any surface. A section that cannot be used trusts nothing. |
+| An absent `provider` | Means `searxng` | The one provider there is; `url` alone is enough. |
+| An unknown provider or unusable URL | Loads, registers nothing, and `check` warns | As with a pasted URL in `allowed_hosts`: refusing the whole config over one section would take every other command down with it. `results` out of range is a load error, as other numbers are. |
+| **An instance failure** | **The tool withdrawn for the rest of the turn** *(decided on real weights, 2026-09-28)* | Told in words to stop, Qwen3-VL-8B rephrased the query 12 times until the step limit (149 s). The repeated-call guard only catches identical calls. Withdrawn, the model searched once and answered in 77 s. Every engine failing does not withdraw the tool, because engines come back. |
+| Fixtures | Recorded, then cut to six results | As the vendor-CLI fixtures are. A change in the API's shape is detected, not silently absorbed. |
+
+**Verified on the real binary.** Two SearXNG containers (`searxng/searxng`, version `2026.9.25-12f8b6515`) ran on loopback: one with JSON on, one as shipped. The model was Qwen3-VL-8B, 32K context, temperature 0.
+- **Search, open, cite.** Asked, under a pseudo-terminal, what changed in llama.cpp release b11151, the model called `web_search`. It got five dated results, and opened a write-up of b11151 with `fetch_url`, which asked about the website first, showing its host and whole URL. The answer summarized the release and cited that URL. An earlier run on b6000 went through the same steps: a search, then two fetches, each asked about.
+- **JSON off.** Against the instance as shipped, the tool result named `search.formats` in `settings.yml`, and the model searched once more and answered without it.
+- **`check`.** With no `tools.search`, `check` shows the lines to add. With it, the row shows where search points and that its host is reached without asking.
+
+**Guardrails, each mutation-tested (34 mutants, every one run against the whole unit suite).** 33 were caught outright, and 1 once its test was strengthened. The mutants, by area:
+- **The parser:** a body without `results` accepted; a result with no URL kept; any `publishedDate` taken as a date; failing engines not read; answers in their object form ignored; an infobox's page not read from `urls`.
+- **The provider:** a 403, a 429, a refused connection or a redirect not explained; another status parsed as a success; more results than the count.
+- **The search URL:** no `format=json`; the query not encoded; `time_range` dropped; a `+` kept raw.
+- **The tool:** an instance failure not `unavailable`; every engine failing reported as nothing found; any `time_range` accepted; the tool not outbound; any provider accepted; a query in the instance's URL kept; a snippet not shortened, or cut through a character; nothing found without naming the query.
+- **The rest:** a withdrawn tool still offered, or still run; `unavailable` ignored; the instance's host not trusted; the tool never registered; a broken section reported ok, or no way to add search named; `results` unbounded; the section not read.
+
+**The survivor, and what it taught.** The snippet's cut through a character went unseen. The test's text of two- and three-byte characters put the 300-byte cut on a character boundary every time. It now shifts the text by up to four bytes, so the cut meets every position within a character. This is 25d's lesson again: a test that cuts text at a fixed length has to sweep the alignment.
+
+**Not verified.**
+- **Cloud backends.** They get the tool; no cloud model was run with it.
+- **The redirect, 429 and refused-connection messages** are proven against a scripted instance, not a real one.
+- **Found along the way, not fixed here.** On a turn that reaches the step limit, a local model can write its call as raw markup on the forced final step, where tools are withdrawn, and that markup reaches the answer. It predates this item (25b), and is recorded for its own fix.
+
+### 2026-09-28 — `fetch-url-reader` (backlog item 25f): fetch_url reads a page as a model should
+
+**Why.** `fetch_url` was Ommi's design, ported unchanged in Milestone F. It stripped every tag, kept the first 8,000 bytes, and marked the rest `[truncated]`. On a documentation or news page those bytes were mostly menu text, the links were gone, and whatever lay past the cut could not be reached. A local model also pays twice for the noise, once more to read it. The spike found two smaller faults as well: the cut could split a UTF-8 character, and no content type was checked, so a PDF was "stripped" into noise.
+
+**What was built**
+
+- [x] **The reader** (`agent/readable`), hand-written with no parser library (the recorded default).
+  - **Parsing.** A forgiving tokenizer builds a flat tree of the page: indices rather than pointers, HTML's implied end tags, scripts and styles skipped (still parting the words either side), and nesting capped at 256.
+  - **The content landmark.** `<main>` or `role="main"`; within it, an article holding at least half of all the articles' text (the story, not a list of teasers); else the body.
+  - **What is dropped.** Page furniture:
+    - by element: `nav`, `aside` (but never a footnote), and a form that doesn't hold the content;
+    - by role;
+    - `hidden`, `aria-hidden` and `display:none`;
+    - a short list of class and id names (consent banners, ad slots, share bars, sidebars, MediaWiki's menus and edit links). A name match never drops what holds the page's heading or half its text.
+  - **What is written.** Light Markdown: `#` headings, `-` and `1.` list items, fenced code with its whitespace, `|` table rows (a layout table as paragraphs), blockquotes, and links as `[text](absolute URL)`. Dot segments are resolved and `<base href>` honoured. In-page links keep their words, and a lone pilcrow or back-arrow goes.
+  - **Characters.** Every numeric and Latin-1 named entity is decoded, and any declared charset is converted to valid UTF-8 (`as_utf8`, `charset_of`, `meta_charset`); a stray byte becomes U+FFFD, since a tool result is serialized as JSON downstream.
+- [x] **Pages** (`page_of`). The first call returns at most 6 KiB of the page, and each call reading on at most 12 KiB. The cut falls at a paragraph break in the page's second half, else a line break, else a space, and never inside a character. The tool takes `offset`, says `Page N of M`, and ends a continuing page with the exact offset to read on from. Walking the offsets covers the text with no gap and no overlap.
+- [x] **A header line**: the title, and the final URL, with where a redirect came from. It replaces 25a's `[X redirected to Y]` line.
+- [x] **Content types** (`classify_body`). The response's `Content-Type` now travels through `HttpResponse` and `FetchResult`.
+  - HTML is extracted; `text/*`, JSON, XML and YAML pass through.
+  - An unlabelled or `octet-stream` body is read for what it is.
+  - A PDF (by type, or by its `%PDF-` bytes whatever it is labelled), an image, audio, a video, an archive or binary data is **refused by name**, never returned as bytes.
+- [x] **The description** says what it reads, the page size and how to read on.
+- [x] **The corpus** (`tests/fixtures/web/`), its sources and licences in its README:
+  - two pages recorded (a Python documentation page, PSF licence; a Wikipedia article, CC BY-SA), with the user's approval;
+  - three hand-written in real sites' structure with invented text, so no newspaper's copyright enters the repository: a news story, a GitHub release, a page built by scripts.
+- [x] **13 new test cases**: 1,706 pass under `make test`, and 1,671 in the unit suite built without llama.cpp, which CI gates on.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The extractor | Hand-written, no library *(default taken)* | The corpus passes without one. lexbor or gumbo stay the fallback, and each would be a dependency on five targets. |
+| One call's page | **6 KiB for the start of a page, then 12 KiB a call** *(the user's call, 2026-09-28: "whatever is fastest"; it replaced the recorded 12 KiB)* | A lookup reads only the start of a page, and every byte is read before the model can act: 12 KiB was about 3,000 tokens, ~40 s on a hot M3 Max running Qwen3.8-27B. Halving only the first page halves a lookup's reading (1,484 tokens for the start of the Python `json` page, where 12 KiB was about 3,000), while a model reading on gets 12 KiB at a time, so a long document costs no more calls, and no more reasoning steps, than before. The `json` page is four calls now: 6 + 12 + 12 KiB, and its end. |
+| PDFs | Refused with a note *(default taken)* | Reading PDFs is its own dependency and its own item. |
+| Links | Inline Markdown *(default taken)* | A numbered list at the end costs a lookup per link. |
+| The download cap | 5 MB *(consumed: 25a)* | Unchanged. |
+| The code layout | A new `agent/readable` pair beside `fetch_url` | The reader is most of the item. `fetch_url` stays the tool: gate, redirects, classification and paging. |
+| What `offset` counts | Bytes of the extracted text, from the start | A model copies the number the last page gave; the pages are counted from the start, so it is always "N of M". |
+| Refusing a body | After it is downloaded | The fetcher returns the whole body. Refusing on the headers alone would save the bandwidth, but it is not needed for correctness. |
+| Footnotes | Kept, even in `<aside>` | Sphinx wraps them so, and they are the text's. Found on the live page, where "Footnotes" stood alone. |
+| The corpus | Two recorded pages, three hand-written | The user's call on licensing: recorded where the licence allows, and never a newspaper's article. |
+
+**Verified on real pages.** Every run used Qwen3-VL-8B on the real binary, with `docs.python.org` and `arxiv.org` allowed.
+- **Paging.** Asked for the last command-line option on Python's `json` page (29 KB of text), the model read page 1 of 3, then offsets 12208 and 24127, and quoted from the last section. It named `--indent … --compact` rather than `-h, --help`, which follows it on the same page. Qwen3.8-27B read the same three pages and quoted the last option, `-h, --help`, "Show the help message.", exactly (196 s).
+- **Following a link.** The model read the `json` page, followed its (now absolute) link to `pickle`, and quoted pickle's first sentence exactly.
+- **A PDF.** `arxiv.org/pdf/1706.03762` was refused by name. The model searched, found the paper's HTML abstract page, read it, and summarized the paper correctly.
+
+**What makes a local answer slow on this machine** (investigated 2026-09-28, the user's question: a price lookup on Qwen3.8-27B took 2½ minutes).
+- **Heat, first.** Measured with `macmon`, the 14-inch M3 Max's GPU reaches 95–97 °C within about 25 s of steady generation, and its clock falls from 1,372 MHz to about 610 MHz after two minutes. Generation fell from 17.5 to 12.3 tokens/s over those two minutes and was still falling. After an hour of builds and model runs, it measured 5.2 tokens/s generating and 73 reading, against 13.6 and 152 when cool.
+- **Ruled out.** CPU load from builds (12 busy cores cost 7%). Graphics from the terminal and this desktop app, which kept the GPU "96% busy" at rest yet cost the model little. Apogee itself: llama.cpp's own benchmark, at the same pin, matches it.
+- **This machine supports High Power mode** (`pmset -g cap`), which runs the fans harder. It is the user's setting to change, not Apogee's.
+- **The rest is tokens.** Qwen3.8's reasoning before every step, and every byte a tool returns. That is what the smaller first page, and [thinking control](#milestone-j--local-inference) (26i, shipped 2026-10-03), address.
+
+**Guardrails, each mutation-tested (51 mutants, every one run against the whole unit suite).** 48 were caught outright, and 3 once their tests were strengthened. The mutants, by area:
+- **Landmarks:** `<main>` ignored; no dominant article, or any largest article taken.
+- **Furniture:** a page's header kept, or a section's dropped; `hidden`, roles or `display:none` ignored; class names ignored, or their content guard removed; every form, or no form, dropped; footnotes dropped.
+- **Links:** left relative; dot segments kept; `<base>` ignored; in-page links kept as links; a lone symbol kept; image alt text ignored.
+- **Markdown:** code blocks collapsed; no backticks; no table header rule; a layout table as rows; ordered lists as bullets; a marker's line broken; no quote prefix.
+- **Characters:** numeric entities, Latin-1 names, or C1 references not decoded; stray bytes kept; overlong sequences accepted; Latin-1 not converted; the `meta` charset ignored.
+- **The parser:** `li` or a block not closing what HTML closes; a script parting no words; no depth limit.
+- **Paging:** no seam; a cut through a character; overlapping pages; numbering from the offset.
+- **The tool:** a PDF by its bytes missed; an image unnamed; binary read as text; an unlabelled page not sniffed; the charset ignored; no offset to read on from; the redirect's source unnamed; the offset ignored; a negative offset accepted; the fetcher dropping the type.
+
+**The survivors, and what they taught.**
+- **"Any largest article."** The listing test's teasers were all under the 200-character floor, so none could ever be chosen whatever the dominance rule said. The listing now has entries long enough to be chosen.
+- **A list marker's line broken inside `block`.** No test put a heading directly in a list item, the one way to reach it.
+- **A paragraph not closed by a block.** It changes the tree, not the text, since every block writes its own breaks. Where it does show is `<p hidden>gone<div>shown</div>`: a browser closes the paragraph, so the `div` is seen.
+
+**Two mistakes in the run itself.** The run crashed on its 30th mutant when the tests printed a byte its script could not decode; its cleanup restored the file, and the rest was rerun. It was paused, not killed, while the speed was investigated.
+
+**Not verified, and known limits.**
+- **A page built by JavaScript still has no text.** The item keeps it out of scope; the tool now says it may need JavaScript.
+- **Pages go stale between calls.** Each page is a fresh fetch, so a page that changes between calls can shift the offsets.
+- **Answered `yes`, the next page asks again.** `session` is the answer for reading a whole page.
+- **An offset past the end** is an error that says to start again.
+- **What a real news site or GitHub looks like today** was not recorded; those fixtures copy their structure by hand.
+
+### 2026-10-04 — `session-permission-presets` (backlog item 26o): the `session` answer, given early
+
+**Why.** The prompt's `[s]ession` answer already granted a tool for the rest of a run, but only once the first prompt had asked, so a user who already knew what they wanted still had to wait to be asked. The user named the claude CLI's launch-time flags as the reference (2026-09-30). The gate itself needed no change. `SessionApprovals` was already the set the checker and the prompt share, so a preset only has to fill it before the first turn.
+
+**What was built**
+
+- [x] **Launch flags on `chat` and `complete`, the same on both** (`--allow`, `--deny` and `--allow-host`, each repeatable).
+  - `--allow write_file` names a gated tool, and `--allow-host docs.python.org` names a website.
+  - `--deny` takes either kind.
+  - They need `--tools`, because without tools nothing is ever asked.
+  - A machine-mode child takes them on its argv, so a front-end presets its session the same way. The `question` event is unchanged.
+- [x] **`complete --allow` is the one new reach, and it is deliberate.** `complete` has nobody to ask, so `ask` resolves to deny; with `--allow write_file`, a one-shot script uses a destructive tool on purpose. Without the flag the denial is the same tool result as before, byte for byte.
+- [x] **Slash verbs mid-chat** (`/allow`, `/deny`, `/revoke`, `/permissions`), four rows in the one command table:
+  - `/allow ` and `/deny ` complete the gated tools (the registry's `writes` tools, MCP tools without a read-only hint included).
+  - `/revoke ` completes the session's own answers.
+  - Bare `/allow` lists, as `/permissions` does.
+  - `/permissions` says each gated tool's answer and where it comes from, then the websites: `write_file   allow  (this session)`, `delete_file  allow  (config)`, `website example.org: deny (this session)`.
+  - `/revoke` reaches only the session's answers. For a config answer, it names `apogee config set-permission <tool> ask`, because chat never mutates config permissions.
+- [x] **The session's no** (`SessionApprovals::denied_tools`, `denied_hosts`).
+  - For a tool, the checker reads, in order: the config's `deny`, the session's no, the config's `allow`, the session's yes, then ask.
+  - For a website, the session's no comes before everything else.
+  - A no therefore wins over a config `allow`, and a yes never reaches past a config `deny`.
+  - `/allow` on a tool the config denies says the tool stays denied.
+  - `seed_approvals` applies denials last, so `--allow X --deny X` is a no.
+- [x] **A typo grants nothing** (`name_gated`). A name that is neither a gated tool nor a website is refused, naming the gated set. Websites are canonicalised by the one host rule (`harness::canonical_host`) and match exactly, the way the `s` answer remembers one.
+- [x] **Grants die with the process.** Nothing a preset or a verb does writes config, and a resumed chat starts with no session answers, asserted.
+- [x] **Tests**:
+  - **The equivalence table** (`[presets]`): every config level × preset × prompt answer, a flag-seeded session against an `s`-answered one, with a config `deny` never loosened in any of them.
+  - **Cases**: a no tightening a config allow, `--allow-host` answering one website and no other, typos, revoke, and the `/permissions` golden.
+  - **`chat_test`**: the `complete` pair; `chat --allow` writing without a prompt while a fresh chat asks; the slash verbs end to end with a clean resume.
+  - **Completion goldens.**
+  - **The PTY check's new presets case** (its ninth): `--allow write_file` writes with no prompt on a real terminal, `run_command` still asks, and `/permissions` says both.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The model | **A preset is the `session` answer, given early** *(recorded 2026-09-30)* | It reuses the shipped structure, so there is no second permission path, and the ladder stays config-first. |
+| Bare `/allow` | Lists *(default, confirmed by the user)* | Listing beats an error. |
+| Hosts on `--deny`/`/deny` | Yes *(default, confirmed)* | One vocabulary for both kinds of ask. |
+| `/revoke` of a config answer | Points at `config set-permission` *(default, confirmed)* | Chat never mutates config permissions. |
+| An unknown name | Refused, naming the set *(default, confirmed)* | A typo must not grant nothing silently. |
+| `--allow` and websites | **Tools only; websites take `--allow-host`** *(group run, flagged for veto)* | A typo'd tool name that parses as a host would otherwise become a website grant. A `--deny` that lands on a host by mistake only tightens. |
+| How a session host matches | **Exactly, by canonical host** *(group run)* | That is what the `s` answer already does. `tools.allowed_hosts` is unchanged. |
+| Allow and deny together | **Deny wins** *(group run)* | Tightening always wins. |
+| What is gated | **The registry's `writes` tools** *(group run)* | Outbound read-only tools are asked per website, so they are named by host. |
+| Presets without `--tools` | **Refused** *(group run)* | Without tools nothing is asked, so a preset there is a mistake, not a no-op. |
+
+**Guardrails, each mutation-tested (16 mutants, all caught).**
+- **The checker:** the session's no ignored, for a tool and for a website; the config's `allow` read before the session's no; a session yes read before a config `deny`.
+- **Seeding and names:** `--allow` winning over `--deny`; `--allow` taking a website; a typo accepted.
+- **The verbs:** an allow keeping a denial; a deny keeping an allowance; revoke keeping a website's answer; `/deny` not applied; `/revoke` of a config answer not naming `config set-permission`; `/permissions` calling a session answer the config's.
+- **The surfaces:** `chat`'s flags not seeded; `complete`'s not seeded; `complete` accepting presets without `--tools`.
+
+**Not verified.**
+- **Machine mode's argv path** is the same code as `complete`'s pipe path, not separately driven by a front-end.
+- **`--allow-host` on a real website** is covered by unit tests, not by a live fetch.
+
+### 2026-10-04 — `tool-use-policy` (backlog item 26p): reaching for the tool instead of refusing
+
+**Why.** The user's transcript (2026-10-03): Qwen3-VL-8B with `--tools` and search configured answered "What is the current temperature in Lehi Utah?" with *"I can't provide real-time weather information"*. Told to search, it searched and answered correctly. Nothing in the prompt pushed back on the trained refusal. The environment note (25d) said the date, the system and the folder, but nothing about when to use a tool. `web_search`'s description said what it *returns*, not when to reach for it.
+
+**What was built**
+
+- [x] **A policy paragraph in the environment note** (`tools/environment`: `tool_reach`, `render_tool_use_policy`).
+  - It follows the note after a blank line: for anything current, recent or beyond what the model can know (the weather, news, prices, scores, schedules, what a page says now), search the web and read what it finds before answering. It must never say it lacks access to information one of its tools can get, and when it already knows the answer, it just answers.
+  - **Composed from what the registry holds**, by capability:
+    - with search and a reader, the whole paragraph;
+    - with search alone, no promise of reading pages;
+    - with a reader alone, reading a page the user links or whose address the model knows, and no search named;
+    - with neither, no paragraph at all.
+- [x] **The note is rendered from the registry that asks for it** (`ToolRegistry::EnvironmentRender`, a renderer handed the registry). `fetch_url` and `web_search` are registered beside the native toolsets that set the note, and a read-only agent's filtered copy keeps them, so each registry's note says what that registry holds. `apply_tool_policy` copies the renderer unchanged.
+- [x] **Descriptions that lead with when to call the tool.**
+  - `web_search` now starts: "Search the web for anything current, recent or that you cannot know from memory: the weather, news, prices, scores, schedules, releases, or anything after your training data", and only then what it returns.
+  - `fetch_url` now starts: "Read a web page for what it says now: a URL the user gives you, a link a search result or another page names, or a page whose address you know."
+  - The descriptions also feed 26g's ranking, so the weather words now rank `web_search` for a weather question.
+- [x] **Tests**:
+  - **Goldens**: one per composition.
+  - **Size**: the paragraph stays under 512 bytes, well inside a note the budget never trims.
+  - **The note reads the registry when asked**, including a tool added after the note was set.
+  - **A read-only agent's note** carries the reader-only paragraph.
+  - **Byte-identical across turns**: a two-turn chat through the loop (three requests) sends the same note bytes on every request, and none of them reach history. This pins the prefix-cache property.
+  - **Trigger phrases**: both descriptions' trigger phrases come before what they return.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Policy, not heuristics | **Prompt-side** *(recorded 2026-10-03)* | Refusal detection or re-prompting treats the symptom per conversation at inference cost. |
+| The wording | The drafted policy, refined: the paragraph opens "How to use these tools:", and gains "When you already know the answer, just answer" *(default, confirmed; refined during the build)* | The draft told a model what to reach for, but not when to stop. Small talk must not search. |
+| Which descriptions | `web_search` and `fetch_url` only *(default, confirmed)* | The live runs showed no missed reach for files, the shell or git. |
+| What the paragraph names | Capabilities, not tools *(default, confirmed)* | An MCP tool that fits benefits without an edit. |
+| How capability is read | **By the two built-in tools' names** *(group run, flagged for veto)* | The doc's own rule is "no search claim without `web_search`, no page-reading claim without `fetch_url`". A generic flag on `Tool` would be speculative plumbing for tools that do not exist yet. |
+| Where the composition lives | **The renderer is handed the registry asking** *(group run)* | Capturing the tools when the note was set would miss `web_search` on some surfaces and a filtered copy's removals on others. Rendering per request from the asking registry is exact and still byte-stable, since the registry does not change during a session. |
+| A family that ignores it | **Not built** *(recorded 2026-10-03; the need now shown, below)* | The per-family line stays deferred, as the item says. Llama 3.1 8B's small-talk search is the evidence for it. |
+
+**Verified on real weights.** Each family ran in its own `serve --tools` process, model loaded once, against the user's SearXNG. Three independent conversations each asked "Hello, how are you?" and then the weather question, on the binary before this item and after it. Weather questions that searched on the first ask:
+
+| Family | Before | After |
+|---|---|---|
+| Qwen3-VL-8B | 1 of 3; twice "I can't provide real-time weather information", the transcript reproduced | **3 of 3**, each answering a temperature |
+| Llama 3.1 8B | 0 of 3; each reached for `run_command` and `curl` instead | **3 of 3**, each answering a temperature |
+| Gemma 4 12B | 3 of 3 | 3 of 3 |
+| gpt-oss 20B | 3 of 3 searched, but each then claimed it had no access to live data | 3 of 3 searched; one answered with the temperature, one said it needed to read a page, one still claimed it had no way. Its page fetches went to hosts not in `tools.allowed_hosts`, which a served request refuses (nobody can answer the prompt), so the claim followed real refusals. |
+
+- **Small talk** called no tool on Qwen, Gemma and gpt-oss, before and after.
+- **Llama 3.1 8B searches on "Hello" before and after.** The paragraph's last sentence did not change that. It is the demonstrated need the deferred per-family line waits for.
+- **The acceptance case, on `chat`:** `apogee chat --tools` on Qwen3-VL-8B answered "Hello" with no tool and the weather question with one `web_search`, giving a temperature.
+- **With search left unconfigured**, the same question got "I cannot directly provide the current temperature": the honest answer when no tool can find it.
+
+**Guardrails, each mutation-tested (12 mutants, all caught).**
+- **The paragraph:** a search claimed for a reader alone; a paragraph with nothing to reach; page reading promised without a reader; the never-claim sentence dropped.
+- **Reach:** search read off the reader's name.
+- **The note:** the policy from every tool rather than the registry's; a different note each time it is asked; the policy run into the last line; the note rendered from an empty registry; a read-only agent's copy without one.
+- **The descriptions:** each old lead restored.
+
+**Not verified.**
+- **Cloud backends** get the same note and descriptions through the same request assembly; no cloud model was run.
+- **MCP tools** reach the paragraph's wording but cannot switch it on: a session without `fetch_url` or `web_search` has no paragraph, whatever its MCP servers offer.
 
 ## Milestone W — The MCP client
 
@@ -2042,7 +4068,7 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 |---|---|---|
 | Vendor-CLI backends under `analyze` | **Refused by type, with the reason** *(user decision)* | Those CLIs run their own tools outside Apogee's gate, so a `read-only` policy cannot hold there and the loop sees no tool call; allowing them under `tools: none` would be the forwarding this item retires. Same shape as `serve`. |
 | Schema validation | `pboettch/json-schema-validator`, fetched and pinned *(default taken)* | It sits on nlohmann/json, already the project's JSON library; a hand-rolled validator would be a second draft-07. |
-| Local models | Prompt-level JSON, not a grammar *(default taken)* | The pinned llama.cpp subtree carries no schema-to-grammar converter; the validator and the retry cover it, and a grammar mode is a later upgrade behind the same request field. |
+| Local models | Prompt-level JSON, not a grammar *(default taken)* | The pinned llama.cpp subtree carries no schema-to-grammar converter; the validator and the retry cover it, and a grammar mode is a later upgrade behind the same request field. *Superseded 2026-10-03 by 26f, below: a grammar wherever the model's template can hold the schema, and the prompt only where it cannot.* |
 | Anthropic | The structured-outputs field where the model id says so, else one forced tool *(default taken)* | The forced-tool pattern is universal on the Messages API; the version parse reads both `claude-<family>-<major>-<minor>` and the older `claude-<major>-<minor>-<family>`, and an id it cannot read lands on the universal path rather than on a 400. |
 | Saved filenames | `<base>-YYYYMMDD-HHMMSS.<ext>` *(default taken)* | Ommi's format put a colon in every filename; Windows is a target. |
 | `analyses/` | A layout row *(default taken)* | Declared, seeded and doctor-checked like every other; Ommi's lazy `reviews/` was the one directory outside its parity check. |
@@ -2060,6 +4086,76 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 **The two survivors, and what each taught.** Removing the fold's presence check survived because the existing tool-call test asserted the calls and not the words: without the check an ordinary turn kept its calls and lost its text. The test now pins a turn with prose *and* a real call. Disabling the "prompt file already exists" refusal survived because the duplicate test collided on the config entry too, which refuses on its own; the check exists for a file with no entry — a seeded or edited bundled prompt — and the test now proves `agents create security-review` will not clobber one without `--force`. A mutant that survives is usually a property the test never stated.
 
 **A lesson recorded.** The first version of `fold_structured_output` moved every tool call out of the response *before* checking whether a structured call was present, so an ordinary turn — a real `search` call — came back with empty names and ids. The existing "tool calls arrive as structured IR tool calls" test caught it on the first full run, and the fix is a presence check before anything moves. A function that touches its input before deciding whether it applies is a function that breaks the callers it was never for.
+
+### 2026-10-03 — `local-structured-output` (backlog item 26f): a grammar holds a local model's answer to its schema
+
+**Why.** Structured output has worked on every provider since the section above. A local model, though, could only be *told* the schema: the pinned llama.cpp had no converter Apogee could reach. So the schema went into the prompt, and the validator and its one retry did the rest. Small models miss that way, and a miss can survive the retry. On the corpus below, Llama 3.2 3B, the extraction role in the user's own config, gave three of twenty capture records a `discipline` of `infrastructure`. That is not one of the five values the schema allows. When corrected, it gave the same answer again, so all three captures failed. In graph extraction, 8 of its 24 calls failed even after their retry. Since then, 25b had linked llama.cpp's `common` chat layer, which turns a schema into a grammar for the model's own format.
+
+**What was built**
+
+- [x] **The model's own template holds the schema.** A request with a `response_schema` and no tools is first rendered through llama.cpp's chat layer with the schema: `json_schema`, which is llama-server's `response_format`. The grammar this produces applies from the first token (it is not lazy). It allows the format's reasoning block first, then holds the whole answer to the schema token by token: every field, type, `enum` and `pattern`.
+- [x] **Advanced past the reply's opening.** The grammar for a format starts at its assistant header, which the prompt already contains. So the grammar is fed the generation prompt before the first sample (`SamplingGrammar::prefill`), as llama-server does. Without this, the grammar made the model write the header a second time, and the reply no longer matched its own format.
+- [x] **Compiled while the prompt can still change.** The grammar is compiled and advanced past the opening while the prompt is being rendered, so one that fails is caught while the schema can still be stated instead.
+- [x] **Stated once.** While a grammar holds the answer, the backend adds nothing to the prompt. Every structured caller already ends its system prompt with an OUTPUT FORMAT block of its own (`schema_instruction`). That block is the caller's prompt and is left alone: it is the one place the fields' meanings reach the model.
+- [x] **The fallback, said once.** Some cases fall back to stating the schema in the prompt, as before:
+  - the model has no template;
+  - its format has no place for a schema (Kimi, Functionary, GigaChat, Ling, Muse);
+  - the converter cannot express the schema, such as an unresolved `$ref` or an invalid `pattern`;
+  - the grammar does not compile.
+
+  Each reason is said once: as a notice where the surface shows notices, and as a line in the operational log, since the clerks and the extractor show none.
+- [x] **Tools first.** A grammar over the whole answer leaves no room for a tool call. So a turn with tools keeps its tool-call grammar and states the schema, the same rule Gemini follows in the section above. The clerks, the extractor and `refine` have no tools, so they are held from their first request. An `analyze` agent with tools is held only on the loop's final pass, which has no tools.
+- [x] **A thinking model still thinks.** The template's thinking switch is left as the request set it, and the reasoning reaches the thinking sink as on any turn.
+- [x] **The author's order.** `run_structured` gained an overload that takes the schema's own text and sends it on the request as written. The clerk, the extractor and `analyze` use it. A grammar writes the properties in the order the text lists them, but Apogee's JSON type sorts keys alphabetically when parsed. Without the overload, the clerk would have written its `decision` before the `intent` its schema puts first.
+- [x] **The mock echoes it.** In a scripted mock's answer, `{{response_schema:json}}` becomes the schema the request carried. That is how `cli.analyze_lifecycle` checks that `analyze` sends the schema file as written.
+
+**On real weights** (Q4_K_M weights). The test was the production clerk and extractor, run through a probe that counts attempts, over a corpus of twenty short meeting transcripts that each end in a decision, ingested as one collection of twenty chunks. "Before" is the last commit's build:
+
+| Model | Capture, valid on the first try | Graph extraction |
+|---|---|---|
+| Llama 3.2 3B, before | 17/20; the other 3 failed even after their retry | 24 calls: 11 retried, 8 failed |
+| Llama 3.2 3B, **after** | **20/20** | **20 calls, none retried, none failed** |
+| Qwen3-VL-8B, before | 20/20 | 20 calls, none retried |
+| Qwen3-VL-8B, **after** | **20/20** | **20 calls, none retried** |
+
+- The three records that failed before (Jenkins to Actions, cron to Airflow, DKIM) were valid on the first try: the grammar admits only the five disciplines.
+- **The grammar alone writes the schema.** The schema was given to the model nowhere but the grammar: two invented field names, one with a `^[A-Z]{3}-[0-9]{4}$` pattern. Qwen3-VL-8B, Gemma 4 12B, gpt-oss-20b and Llama 3.1 8B each answered with exactly those fields, in that form.
+- **A thinking model still thinks.** Gemma 4 12B and gpt-oss-20b reasoned first (667 and 525 bytes, to the thinking sink) and then wrote the JSON. Qwen3.8-27B did too, asked a word problem under a schema: it reasoned, then answered 205 minutes on the first try.
+- **Timings are not comparable.** The runs shared the GPU in different combinations before and after.
+
+**Found on the way, and settled.**
+- **The prefill.** llama-server feeds a format's grammar the reply's opening before it samples. A grammar applied without that step demanded the header again: `<|im_start|>assistant` on Qwen, `<|start_header_id|>assistant<|end_header_id|>` on Llama. Found by reading `common/sampling.cpp`, then confirmed on real weights with the step removed.
+- **Alphabetical keys.** Apogee's JSON type sorts object keys, so a schema re-serialized before it reached the grammar would have reordered every answer. Fixed for the local path with the text overload. The cloud wires re-parse the schema the same way and still send it sorted; that is left as it is, though OpenAI's structured outputs also write keys in schema order.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| When the grammar applies | Whenever a local request has a `response_schema` and no tools *(default taken)* | There is no reason to leave a local structured request unconstrained. The tools exception is the loop's rule for every provider whose JSON mode cannot share a turn with tools. |
+| A schema no grammar can hold | Falls back to the prompt statement with one note per reason, never an error *(default taken)* | The validator still guards the answer. |
+| The prompt statement | Dropped while a grammar holds the answer; a caller's own OUTPUT FORMAT block untouched | The spec's "stated once": the grammar is the second statement. A caller's block is its prompt, and it carries what the fields mean. With the schema stated nowhere, Llama 3.1 8B filled in two invented fields that were right in form and wrong in substance. |
+| Where the schema's text comes from | The author's own text, through a `run_structured` overload | A grammar fixes the order the properties are written in, and the author chose that order. |
+| When the grammar is checked | While the prompt is being rendered: compiled and advanced past the opening | A grammar that failed only at the first sample would leave the answer held by nothing: the prompt was already sent without the schema. |
+| Prefill | The template's generation prompt, and only for a grammar that is not lazy | llama-server's rule: a lazy tool-call grammar starts at its trigger, not at the header. |
+| Qwen3.8-27B in the acceptance runs | **Left out** *(user decision, 2026-10-03)* | It thinks before every answer, and a twenty-item run took hours. It is left out of real-weights tests until thinking control (26i) can set its level. It had passed 8 of 8 captures on the first try when stopped. The acceptance models are Qwen3-VL-8B, plus Llama 3.2 3B, the user's own extraction model. |
+
+**Guardrails, each mutation-tested (17 mutants, all caught on the first pass; 16 against the whole unit suite in a git worktree, one by `cli.analyze_lifecycle` on the real binary).** What they covered:
+- **The grammar:** dropped altogether; held on a turn with tools; the thinking switch turned off under a schema.
+- **Stated once:** the schema stated beside a grammar; the "already stated" guard removed; the fallback left unstated; the checkpoint prefix rendered with the statement, which loses the last-user checkpoint.
+- **The note:** said on every call, never said, without its reason, or without the model's name.
+- **The author's order:**
+  - the text overload re-serializing the schema, or validating against nothing;
+  - the clerk, the extractor or `analyze` sending the parsed object;
+  - the mock not echoing the schema.
+
+The prefill, which lives only in the llama build, was checked on real weights instead: removing it put the assistant header into every reply.
+
+**Not verified.**
+- Linux and Windows.
+- The families whose formats have no place for a schema were not run on real weights. Their fallback is tested over the scripted runtime.
+- DeepSeek's template renders the schema into the prompt itself, so a caller's OUTPUT FORMAT block states it a second time there. No DeepSeek model was run.
+- An `analyze` agent with tools is held only on its final pass, and most answer before it.
+- Qwen3.8-27B over the corpus (see the decision above).
 
 ## Milestone Y — The knowledge layer
 
@@ -2324,3 +4420,292 @@ Neither is reachable from the merge-blocking target, whose runtime is a fake wit
 **Verified on the real binary.** `cli.train_lifecycle` continues with the mock and no Python: a two-stage pipeline whose second stage regresses the first's suite aborting under the cumulative gate (stage 0 fused, the last stage not, the lineage in the stage manifests), `pipeline status` with the resume hint, `resume` after the data is fixed completing and the last stage promoted like any run, a complete run refused; a regime over two kits with the mock backend as the teacher and `--no-promote` (a dataset and a suite per kit, one pipeline, no new ledger); the cycle from a queue directory -- skipped with nothing queued, a pass promoting into `training.cycle.backend` with the anchor set and the file consumed and not a config line removed, a regression failing, discarding and tripping the breaker at `k=1`, the halted loop refused naming `cycle resume` and reported by `check`, resumed and running again with the lock released; `train status` rolling both up; `check` green. The merge-blocking build passes every test (1445) through `cicd.sh`; a rebuild after the lock's lint fix passed all but two in a parallel `ctest` -- two models-package cases of the known temp-directory flake class, untouched by this item, passing serially and on three repeats; the llama build passes all but the two embedstore ingest cases of the same class, passing serially. `make lint` ran clean over the tree once the lock moved into the platform seam (the full run's one error was that deleter; the three files it changed re-linted clean in the error classes). The format check is clean.
 
 **Guardrails, each mutation-tested.** 82 mutants, every one caught in its final form. Four were re-formed after the first run because `make format` had reflowed the lines their first shape named, and one was re-formed because its first shape was equivalent (dropping the "no prior data" short-circuit on the previous-cycle half changes nothing while scores are non-negative; the re-form makes no data *fail*, which the gate must not). **Two survived on first contact, and one of them was the design finding above:** "a failed gate still promotes" survived because no test could reach a regression -- the cycle read the last *passed* stage's score, which is 100% by definition, so the dual gate was dead code, in the reference as much as here; the cycle now reads the final stage and a soft-gate case drives a real regression through it. The other was a config test that refused a pipeline with no `stages` key but never one with `stages: []`. The mutations: stage 1's base not the fused checkpoint, the last stage fused too, the cumulative suite only the stage's own, a hard-gate failure ignored, the gate below 100%, a transition not written, `parent_run` and `pipeline_run_id` not set, resume always from stage 0, a complete run and a drifted spec resumable, cancellation not aborting, rehearsal never mixed and the fraction ignored, a failed stage not fused under continue, `completed_at` never set, `last_passed` counting every stage, the stage run never marked complete, its eval not recorded, the judge's baseline the candidate itself, a stage-count mismatch and a path-shaped id accepted; the teacher flag not winning, `--all-kits` unsorted and overriding `--kit`, the regime's `iters` never overriding, no kits accepted, the eval suite not materialised, the count not passed, `promote_run_id` not set, an empty teacher output not an error; `k = 0` not disabling the breaker, a halt ignored, resume not resetting the count, non-jsonl files collected, consumed files copied not moved, consent not required, the watermark ignored, the newest session not tracked, blank lines merged, the threshold ignored, no prior data failing, the anchor half ignored, the first passing score read instead of the last, a pass not resetting the count, a skip counted as a failure, the breaker tripping one late, no data still training, a failed gate still promoting, the queue not consumed, the anchor never set and overwritten on every pass, the lock not required and not exclusive and never released, the breaker not checked, stage datasets not replaced by the merge, the history not saved on a failure, the watermark not advanced, a failed promotion counted as a pass, the pinned anchor ignored, `consecutive_fails` not persisted, `history_exists` always true; a sessions source without consent loading, an unknown source type loading, the threshold unbounded, zero stages accepted, `eval_suite` not required, the breaker's default not 3; the active pipeline a complete one, pipelines oldest first; `?kind=pipeline` keeping the runs, the cycle route answering with no history, `active_pipeline` never reported; the mock's answer ignored and not carried into the fused checkpoint; a halted cycle not warned and a non-llamacpp cycle backend ok by the doctor; a failed cycle exiting 0, `--no-promote` ignored, the config edited despite a failed build, a resume refusal not honoured at the command.
+
+---
+
+## Milestone AA — The four layers
+
+**Goal.** Make the CLI's source say what it is: four layers -- **Presentation → Business → Data → Infrastructure** -- each package in one, each including only its own layer and those below, the law enforced by the build itself. Asked for by the user on 2026-10-03 and specced from a spike that measured the real include graph into the standing **Architecture** queue (A1–A4, A5 joining the same day). In C++ nothing makes this free; Go's import cycles made it free for Ommi, which is why the layering here has always been a guarded convention, and this milestone turns it into structure.
+
+### 2026-10-03 — `arch-contracts-carve` (architecture item A1): the contracts carved to the Data floor
+
+**Why.** The spike measured 22 packages and 81 include edges, and exactly **six edge types fought the four-layer model**: `backends → harness ×44`, `backends → models ×5`, `logger → harness ×6`, `secrets → harness ×2`, `mcp → agent ×2`, `mcp → harness ×1`, with a true cycle between `backends` and `models`. One root cause: the contracts every implementor reads -- the provider interface, the IR, errors, the config engine -- lived in `harness/`, a Business package, so the Data layer reached up for them. Re-measured at build: the same 81 edges, the same six types.
+
+**What was built**
+
+- [x] **`contracts/`, the Data floor** -- the provider interface, the message IR (`types.h`), `errors.h`, `cancellation.h`, `ModelBehavior` (`behavior.h`), the config engine (`config.h/.cpp`, its template, and the comment-preserving editor `config_edit.h/.cpp`), the layout contract (`layout.h`) and `paths.h`.
+  - With them, the moved files' own dependencies: the host rule (`host.h`), the bundled assets (`assets.h/.cpp` and the two generated units, whose generator now writes here), and `sha256.h`.
+  - It includes `platform/` and itself only, held there by `harness.layering`.
+- [x] **`modelstore/`, model files as data** -- `store`, `sidecar`, `snapshot`, `gguf_inspect`, `kv_cache`.
+  - Also `hf_ref.h/.cpp`: `HfRef`, `parse_hf_ref` and `repo_directory_name`, moved verbatim out of `models/source_hf` because the store names its directories with them.
+  - `snapshot.h`'s include of `source_hf.h`, which it never used, is gone.
+  - The backends read the header reader and the cache arithmetic from here, so the `backends ↔ models` cycle is gone both ways.
+- [x] **`transport/`, the wire primitives** -- the HTTP client, the SSE parser, the JSONL framer. `mcp/` and `training/` read the framer from here, so their named allowances into `backends/` are gone.
+- [x] **The factory fills the Harness without including it.** No carve could remove `backends/factory.h → harness/harness.h`: the Harness stays Business.
+  - `contracts/provider.h` gains `ProviderRegistry`: the three things the factory asks -- the config, `register_provider`, `use_default_router`.
+  - The Harness implements it, and `build_providers` takes it. Every call site still passes a Harness, unchanged.
+  - The capability-interface pattern CLAUDE.md prescribes, pointed the other way.
+- [x] **The four-layer law in the layering test** (`tests/layering.cmake`).
+  - The layer map holds every package, and any include that reaches up a layer fails, naming the file and both layers.
+  - A package with no row fails, and so does a row naming no package, so a new package declares its layer the day it exists.
+  - `contracts/`, `modelstore/` and `transport/` are held to their floors, and `secrets/`, `knowledge/`, `graph/` and `training/` to allow-lists naming `contracts/`.
+  - Each rule was verified against a planted violation in a scratch copy of the tree: a Data→Business include, a Business→Presentation include, `contracts/` reaching sideways, `modelstore/` and `transport/` past their floors, `secrets/` past the contracts, an unmapped package, a map row naming a missing package, and `mcp/` including a backend -- nine planted, nine caught by name.
+- [x] **The checks that name paths moved with them.** `cli.one_key_resolver`'s and `cli.one_role_resolver`'s allow-lists now name `contracts/`. Each now refuses an allow-list entry that names no file, so a file that moves without its entry fails loudly instead of being scanned under a stale allowance. Both were verified against a removed file.
+- [x] **Every includer updated** -- 549 include lines in 314 files, a scripted rewrite, then clang-format re-sorting the include blocks. **Namespaces did not move**: `apogee::harness::Config` lives in `contracts/config.h`. The include path is what the layers govern, and renaming namespaces would have touched thousands of lines for no layering gain.
+- [x] **Tests mirrored**: `tests/contracts/` (config, config edit, host, paths, types, assets, sha256), `tests/modelstore/` (store, sidecar, header reader, cache arithmetic), `tests/transport/` (HTTP client, SSE parser, framer).
+
+**The measurement after:** 91 edges, **zero upward**. `backends/`, `logger/` and `secrets/` include nothing from `harness/` or `agent/`; `contracts/` reaches only `platform/`; `modelstore/` and `transport/` only the contracts and the platform.
+
+**Decisions** -- the spike's file lists were right in spirit and short in four places, each settled the conservative way: move a dependency with what needs it, never change what code does.
+
+| Decision | Choice | Why |
+|---|---|---|
+| The config engine | Moves whole, loading with the types *(default taken)* | Splitting load from types would be a seam nobody asked for. |
+| What else `contracts/` takes | `host`, the bundled assets and the config template, `sha256` | The moved files' own dependencies; without them `contracts/` would include upward or sideways. |
+| `modelstore/` | Takes `snapshot` and the HF ref helpers (`hf_ref`, moved verbatim) | The store's own dependencies. |
+| `transport/`'s layer | **Data**, not Infrastructure | `http_client` speaks the contracts' cancellation token and errors; A2's table updated. |
+| `mcp/`'s layer | **Business**, and `agent/tool.h` stays put | The spike read `mcp → agent` as one struct; the use is the whole `ToolRegistry` and dispatch. Moving those to the floor would drag Business logic down; only `commands/` includes `mcp/`. |
+| The factory's reach into the Harness | `ProviderRegistry` in `contracts/`, implemented by the Harness | Dependency inversion; no call site changes. |
+| Namespaces | Unchanged | The include path is what the layers govern. |
+| `events/` | Stays put *(default taken)* | Already a leaf; Infrastructure by assignment. |
+| `transport/` before A2 | Named now, flat beside the others *(default taken)* | A2 makes the directories say the layers. |
+
+**Verified.** `make test` green on the llama build -- all 2,009, the usual one skip -- with no test logic edited: the config editor's byte-golden suite, `cli.one_key_resolver`, `cli.one_role_resolver`, `cli.install_parity` and `cli.no_listen_symbols` among them. The asset generator reproduces the moved units with only their path lines changed. Lint shows 0 errors.
+
+### 2026-10-03 — `arch-layer-move` (architecture item A2): the directories say the layers
+
+**Why.** With the contracts carved (A1), the include graph obeyed the four-layer model, but the tree did not show it: 25 packages sat side by side under `source/`. This item makes the directories carry the layers, and does nothing else, so it can be reviewed as what it is: renames.
+
+**What was built**
+
+- [x] **Every package `git mv`'d into its layer** -- `source/presentation/` (`commands`, `httpserver`, `markdown`, `render`), `source/business/` (`harness`, `agentloop`, `agent`, `tools`, `knowledge`, `graph`, `training`, `scaffold`, `models`, `mcp`), `source/data/` (`contracts`, `backends`, `embedstore`, `logger`, `secrets`, `modelstore`, `transport`), `source/infrastructure/` (`platform`, `ansi`, `events`, `version`).
+  - The tests are mirrored as `tests/<layer>/<package>/`. The cross-cutting checks, `support/`, `fixtures/` and the root-level suites stay at `tests/`'s root.
+- [x] **Short include paths, byte-stable.** The four layer directories are `apogee_core`'s include roots, root-first, and the flat `source/` directory is no longer one, so a stale path cannot resolve two ways. **No include line changed**: `#include "agentloop/loop.h"` names a package wherever its layer puts it, and moving a package between layers would change no include. `rg '#include "(business|data|presentation|infrastructure)/'` finds nothing.
+- [x] **The checks that name paths moved with them:**
+  - **`tests/layering.cmake`** reads the layer from the directory and requires it to agree with its map, so a package moved without its row, a row changed without the move, or a package outside any layer directory each fails by name.
+  - **The two resolver checks and `cli.no_vendor_credentials`** name layered paths.
+  - **The conformance checks** read `presentation/httpserver/mux.cpp` and `presentation/commands/json_reporter.cpp`.
+  - **The asset generator** writes `data/contracts/`.
+  - **Two tests that build paths into the tree** follow it: `attachment_guard_test` reads the command sources, and `progress_contract_test` its fixture and stub modules.
+  - **The no-listen check** attributes by object file name (`serve.cpp.o`), so it needed nothing.
+  - **The Makefile's `format`/`lint` scope** and `gcc-check.py` find sources recursively or from the compile database, so nothing there needed changing either.
+- [x] **The documentation sweep, in-change** -- a committed script, `lib/src/cli/scripts/sweep_layer_paths.py`, rewrote every `source/<package>` and `tests/<package>` path to its layered form across CLAUDE.md, DEVELOPER.md, the ROADMAP, every pending backlog document, the skills and the scripts' comments. Hand-written prose says what the tree now is: CLAUDE.md's "Where new source code goes" (a new package goes in its layer's directory with a row in the map) and the Codebase Map, DEVELOPER.md's tree and a layer table.
+
+**The diff, checked.** `git diff -M` over the move: 433 source and 194 test renames.
+- **Below 100% similarity:** seven files. Six carry one comment line each naming a test by its old flat path. The seventh is `attachment_guard_test`'s path line (`progress_contract_test`'s two path lines were fixed after the first run, below).
+- **Every other changed line** is a CMake path list, a check's path, or documentation. No line of code changed meaning.
+
+**Verified.**
+- **The suite:** `make test` on the llama build passes all 2,009, the usual one skip.
+  - The first run failed four training tests. `progress_contract_test` built its fixture's path from the tests root (`/training/fixtures/`), a path that had moved.
+  - Its two path lines were fixed, and the rerun was green.
+- **A fresh build:** a new worktree holding exactly the moved tree, with a brand-new build directory, configured, built and passed the whole unit suite and the path checks. Nothing cached locally can be what made it build.
+  - `cicd.sh --fresh` clones from GitHub, and these commits are not pushed, so the fresh worktree stood in for it.
+- **The planted violations, after the move:**
+  - a `listen()` planted in `data/transport/http_client.cpp` failed `cli.no_listen_symbols`, naming `http_client.cpp.o`;
+  - a Data→Business include failed the layering test; so did `logger` moved into `business/` without its row, a package directly under `source/`, and `contracts/` reaching sideways;
+  - a second key chain failed `cli.one_key_resolver`;
+  - an allow-listed file removed failed `cli.one_role_resolver`;
+  - a binary whose `__complete` answers nothing failed `cli.shell_completion` 65 ways.
+
+  Each passed again once the plant was removed. `make format-check` passes over the whole tree.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The window | Now, mid-`v0.1.3`, with the user's other session told to pause -- **the user's call** | It was still writing backlog documents when A1 committed; the user chose to commit and continue. |
+| Include resolution | Four layer roots, root-first; the flat `source/` root removed *(default taken)* | A stale short path cannot resolve two ways. |
+| The tests root | Cross-cutting checks, `support/`, `fixtures/` stay; per-package directories move *(default taken)* | They belong to no one layer. |
+| Sweep mechanics | A committed script, its diff read as text *(default taken)* | The 2026-08-24 pattern: two dozen documents cannot drift one by one. |
+| MILESTONES.md | Not swept | It records what shipped; its paths were true when written. |
+| Stale paths in source comments | Swept with the documents | They are path references like any other. The diff shows them as comment-only lines, so the renames stay reviewable. |
+| Where a layer is read from | The directory, checked against the map | Two declarations that must agree: a move without its row fails, and so does a row without its move. |
+
+### 2026-10-03 — `arch-commands-modules` (architecture item A3): `commands/` in three
+
+**Why.** `commands/` was the biggest package in the tree -- 85 files -- and it mixed three presentation concerns that change for different reasons: the commands themselves, what paints a terminal, and the machine-mode adapter. The code already kept them apart informally -- views never parse argv, the adapter never paints, commands compose both. This item makes those boundaries modules, kept separate from A2's renames because which unit is a view is a judgment, not a rename.
+
+**What was built**
+
+- [x] **Three modules in `source/presentation/`:**
+  - `cli/` -- every command, the root and registry, `helpers`, `permissions`, the one command table and the slash ecosystem whole (`chat_completer`), and the completion protocol. The composition root, unguarded as `commands/` was.
+  - `views/` -- `status_line`, `thinking_view`, `answer_view`, `line_reader`, `download_progress`, `ask_prompt`, `terminal`, `input_gate`, and the terminal adapter `cli_reporter`.
+  - `machine/` -- `json_reporter`, the machine-mode adapter.
+
+  Tests mirrored (`tests/presentation/{cli,views,machine}/`). No `presentation/common/` was needed; `httpserver/`, `markdown/` and `render/` are untouched.
+- [x] **Allow-lists for the two guarded modules** in `tests/layering.cmake`, the layer map listing the three in Presentation.
+  - `views/` includes itself, `ansi/`, `markdown/`, `platform/`, `contracts/` and `agentloop/` (the Reporter seam and `ask_user` its adapters implement), and **never `cli/`, `machine/` or CLI11**. A view that parses argv fails by name.
+  - `machine/` includes itself, `agentloop/`, `agent/` and `contracts/`, and **never a painter** (`views/`, `ansi/`, `markdown/`).
+  - Five planted violations, five caught by name: a view reaching the commands, a view including CLI11, the adapter including a view, the adapter including `ansi/`, a view reaching the adapter.
+- [x] **The include spellings updated in this item, the one place they legitimately change**: `#include "commands/status_line.h"` is now `"views/status_line.h"`. The module directories sit in the presentation include root A2 made, so no CMake include path changed. The checks that name paths followed: `cli.machine_schema_conformance` reads `presentation/machine/json_reporter.cpp`, the two resolver checks name `presentation/cli/`, and the attachment guard reads the command sources in `cli/`.
+- [x] **The documents name the modules**: a sweep mapped each `commands/<unit>` to its module across CLAUDE.md, DEVELOPER.md and 30 pending backlog documents. MILESTONES is left as history. The prose says what the three are.
+
+**Where each ambiguous unit landed**
+
+| Unit | Module | Why |
+|---|---|---|
+| `cli_reporter` | `views/` *(default taken)* | The terminal adapter: it owns paint order, composing the status line, the thinking view and the answer view behind the Reporter seam. |
+| `json_reporter` | `machine/` *(default taken)* | The machine-mode adapter; it writes events, never a painted byte. |
+| `interrupt` | `cli/` (the spec sketched `views/`) | The SIGINT scope a command runs under, exiting with `helpers`' `kCancelled`. It paints nothing, only command files use it, and in `views/` it would include `cli/`. |
+| `ask_prompt` | `views/` | It paints the question on the status line and reads the answer; `ask_user` is the seam it implements. |
+| `input_gate` · `line_reader` | `views/` | Terminal input as a view: typeahead and line editing, nothing about argv. |
+| `permissions` | `cli/` | It builds each surface's permission checker from config and composes the status line and the machine adapter -- composition. |
+| `chat_completer` | `cli/` | The slash ecosystem moves whole with the one command table; splitting dispatch from completion would reopen the drift item 24 closed. |
+| `tool_vectors` · `model_chain` · `helpers` | `cli/` | Composition: caches, orchestration and shared command helpers, used by commands only. |
+
+"Machine-input parsing" has no file of its own: machine mode's input is read in `chat.cpp`, a command, in `cli/`.
+
+**Verified.**
+- `make test` on the llama build passes all 2,009, the usual one skip: the PTY checks, machine-mode e2e and conformance, the piped byte-identity checks and the one-table completion test all pass unchanged.
+- `--help` output for 25 commands is byte-identical to a binary built before the split (the installed one, from A1's commit).
+- The diff is 116 renames: 11 exact, 105 differing only in include lines and comments.
+- `make format-check` passes over the whole tree.
+
+### 2026-10-03 — `arch-build-enforcement` (architecture item A4): the build holds the layers
+
+**Why.** After A1–A3 every package sat in its layer, but the law was a test's: `harness.layering` grepped the includes after the fact, and `apogee_core` -- one static library of everything -- let any file include any other and still link. In Go the reverse edge is an import cycle and the build fails; this item buys that back with the linker. The user's calls: **dual enforcement** (the link graph for the coarse law, the scan for the rules finer than a layer), and **the build in the ADRs' layer order**, expecting it to build faster -- an expectation measured below, not assumed.
+
+**What was built**
+
+- [x] **The module map, `cmake/modules.cmake`** -- every module's layer and the modules it links, 28 modules and 109 links, read by the build and the layering test alike. Plain `set()` data, so `cmake -P` reads it exactly as the configure does.
+- [x] **One static library per module**, `apogee_<layer>_<module>`, made by `apogee_add_module` (`source/CMakeLists.txt`) from its layer's `CMakeLists.txt`, which names only its sources and third-party code. Its links are the map's row, never the caller's.
+  - A module's PUBLIC include root is its own layer directory, so it sees its layer and what its links bring up from below. **An include that reaches up a layer does not compile.**
+  - Third-party code sits on the module that uses it: CLI11 on `cli/`, curl on `transport/`, httplib on `httpserver/`, replxx on `views/`, the schema validator on `agentloop/`, yaml-cpp on `contracts/` and `training/`, SQLite on `embedstore/`, llama.cpp on `backends/` and `models/` (with `apogee_llama_chat`, linked PRIVATE into `backends/`).
+  - **The version stamp sits on `version/` alone**, and `APOGEE_ENABLE_LLAMA` on the two modules that test it. Both used to sit on all of `apogee_core`.
+- [x] **The build in layer order.** `source/CMakeLists.txt` adds `infrastructure/`, `data/`, `business/`, `presentation/` in that order, ADR 0001's. Each layer is an INTERFACE target, `apogee_<layer>`, buildable alone: its one source, the layer's `CMakeLists.txt`, is never compiled; it is what makes CMake build an INTERFACE target. `apogee_core` is an INTERFACE over the four, the one name the executable and the cross-cutting suites link.
+- [x] **The link policy walks the graph** (`cmake/ApogeeLinkPolicy.cmake`), failing the configure step by name on:
+  - a module linking anything its row does not name, or missing a link it names (a `target_link_libraries` added by hand fails);
+  - a link up a layer;
+  - a cycle, even inside a layer (CMake itself allows cycles between static libraries);
+  - a module compiling a source outside its own directory;
+  - a layer's test library linking above its layer.
+  - "Nothing links `apogee`" stands as before.
+- [x] **`harness.layering` rescoped** (`tests/layering.cmake`), reading the map from `cmake/modules.cmake`:
+  - The directory ↔ map checks stand.
+  - **The coarse upward scan retired** in favor of **the map's mutation check**: the includes held to the map in both directions. An include of another module the row does not link fails, and so does a declared link nothing includes. The build sees a layer, not a module -- one include root per layer -- so an undeclared edge *inside* a layer, or downward, compiles; this is where it is caught.
+  - **The named rules stand verbatim**: the guarded packages never include `backends/`; `events/` a leaf; the floors of `contracts/`, `modelstore/`, `transport/` and `secrets/`; `markdown/` only `ansi/`; the `knowledge/`, `graph/` and `training/` allow-lists, the framer by name; `views/` and `machine/`. Each still fails with the map loosened to allow its violation.
+- [x] **`operations/`, a new Presentation module** -- the refactor the graph needed, on the user's word mid-build. The measured graph had a cycle: `cli/serve_cmd` includes `httpserver/`, and `httpserver/` included `cli/` for seven helpers both surfaces run. Moved there verbatim:
+  - `run_settings` -- the temperature, token cap and system prompt a run resolves;
+  - `retrieval` -- the one retrieval choice, its status-line sentences, `retrieve_for_collection`;
+  - `backend_names` -- the helper and utility backends, and an explicit model mapped to its entry;
+  - `collections` -- a collection's path and the names on disk;
+  - `knowledge_core` -- the capture core, `git mv`'d;
+  - `graph_members` -- a named graph's members and their validation;
+  - `dataset_core` -- session loading, `create_dataset`, the teacher.
+
+  `cli/`'s headers include them, so no command changed a line. The graph is acyclic: 28 modules, 109 edges.
+- [x] **Tests compile per layer, run as one** (ADR 0004).
+  - Four OBJECT libraries, `apogee_tests_<layer>`, each link their layer's aggregate and those below, so **a test that includes a header from above its layer does not compile**. All four link into the one `apogee_tests`, so test names, `catch_discover_tests` and `cicd.sh --unit-tests` are untouched.
+  - The three root suites (smoke, packages, bundled agents) compile in the executable against `apogee_core`. A support file sits with the lowest layer whose headers it includes.
+  - Eight test files reached up a layer and were re-homed to the highest layer they touch:
+    - the Harness-driven provider cases into `tests/business/harness/` (`provider_capability_test`, `factory_harness_test`, `llamacpp_harness_test`, 14 cases, moved verbatim);
+    - the `auto_rag` choice case into `tests/presentation/operations/retrieval_test.cpp`;
+    - `leak_test` into `tests/presentation/cli/`;
+    - the `ffmpeg` fakes split out of `support/media_fakes.h` into `support/fake_ffmpeg.h`, for the platform suite.
+
+    Every test name kept; the 2,009 cases all still run.
+- [x] **Two test hazards, fixed in passing.**
+  - **Shared scratch directories.** Seven suites (`embedstore/` ×4, `business/models/` ×2, `presentation/cli/models_test`) named their scratch directories by a per-process counter, so parallel ctest processes shared them. The re-homed tests reshuffled the schedule enough to show it: 27 failures under `-j8`, every one green alone. Each now draws a random name beside the counter, the fix `rag_test` already carried.
+  - **A test that deleted the developer's completions.** `plan_uninstall` finds the shell completions under the real home directory, and `lifecycle_test`'s uninstall cases planned against it. One of them ran `execute_uninstall`, deleting whatever `make install` had put there, and "an already-removed install plans nothing" failed whenever they were present. Each uninstall case now plans against a home of its own (`HOME`/`USERPROFILE` guarded), and a new case pins the lookup. The suite is 2,010.
+
+**The timings** -- measured on the dev host (Apple silicon, Ninja, `-j8`, RelWithDebInfo), the pre-A4 tree (`e11efcc`) against this one, each in a fresh worktree and build directory, with no other build running. Llama-on with ccache off: llama.cpp turns ccache on for the whole build, ours included, so a `touch` there is a cache hit -- those runs used real content edits instead, cold, and llama.cpp itself was built first, untimed.
+
+| Change | Llama off: before → after | Llama on: before → after |
+|---|---|---|
+| Clean build | 118.0 s → 113.3 s (553 → 563 units) | 113.9 s → 118.4 s (Apogee's own code) |
+| One `.cpp`, Infrastructure (`ansi/text_width.cpp`) | 1.9 s → 1.3 s | 2.0 s → 1.5 s |
+| One `.cpp`, Data (`backends/anthropic.cpp`) | 4.0 s → 3.5 s | 4.1 s → 3.6 s |
+| One `.cpp`, Business (`agentloop/loop.cpp`) | 3.8 s → 3.2 s | 4.0 s → 3.4 s |
+| One `.cpp`, Presentation (`views/status_line.cpp`) | 2.2 s → 1.6 s | 2.3 s → 1.8 s |
+| A Data floor header (`contracts/types.h`) | 62 s, 183 units → 62 s, 190 units | 62.5 s → 65 s |
+| A new commit (the configure-time stamp changes) | **55.3 s, 211 units → 1.5 s, 1 unit** | **57.6 s, 214 units → 2.8 s, 4 units** |
+
+What the numbers say, plainly:
+- **The user's expectation holds for the edit loop.** Every one-file edit, in every layer, is 0.5-0.6 s faster: the step that shrank is the archive -- one module's, not all of `apogee_core`'s 200-odd objects.
+- **Every `make` after a commit is the largest win.** It reconfigures, and the version stamp used to sit on all of `apogee_core`, so a new commit recompiled the whole core. It now recompiles `version.cpp`.
+- **A view edit recompiles one file and relinks** (1 unit, 3 links), with `backends/` untouched. That was already true: what recompiles follows the includes, and no library layout changes it -- which is also why a `contracts/types.h` edit costs the same, the Data floor being included nearly everywhere.
+- **Clean builds are a wash**, within the run-to-run noise: -4% with llama off, +4% with it on, for 27 more archives.
+- The layer order shows in the build's structure -- each layer buildable alone (below) -- more than in a parallel build's clock, as the item predicted.
+
+**Proving it bites** -- twenty planted violations in a scratch worktree, twenty caught, each naming the target or file and the rule; each restored, and the unplanted tree passing.
+- **Compile time:** an include up a layer at each boundary fails with the header not found -- Data→Business (`logger/session.cpp` → `harness/`), Business→Presentation (`harness/harness.cpp` → `cli/`), Infrastructure→Data (`ansi/ansi.cpp` → `contracts/`) -- and so does a Data test including the Harness.
+- **Configure time:** the link policy names each of these:
+  - a link up a layer in the map (`contracts → harness`);
+  - a cycle (`agentloop ↔ knowledge`, named as exactly those two);
+  - a `target_link_libraries` added by hand;
+  - a source compiled into the wrong module;
+  - a Data test library linking Business;
+  - a mapped module that no layer builds.
+- **The scan:**
+  - a declared link deleted inside a layer (`knowledge` without `harness`, which still compiles);
+  - a link nothing includes;
+  - a package with no row;
+  - a row disagreeing with its directory;
+  - **each named rule with the map loosened to permit its violation**: the harness including a backend, `markdown/` including a view, `events/` including the platform, a view including `cli/`.
+- **The symbol scan:** a `listen()` planted in `transport/` fails `cli.no_listen_symbols`, attributed to `libapogee_data_transport.a(http_client.cpp.o)`. The scan's walk now covers all 28 module archives.
+- **Each layer builds alone, from nothing:**
+  - `--target apogee_infrastructure` builds the four Infrastructure modules;
+  - `apogee_data` builds the seven Data modules plus `platform` and `events` -- not `ansi`, not `version`;
+  - `apogee_business` builds the ten Business modules plus the five Data modules they link -- not `backends`, not `secrets` -- and `platform`, `events`.
+
+**Verified.**
+- **The suite:** `cicd.sh --test` on the llama build (`macos-arm64`) passes all 2,010, the usual one skip; the no-llama build passes too, twice in a row under `-j8`.
+- **Test names:** listed from both binaries, every pre-A4 test name is unchanged; the one difference is the added uninstall case.
+- **A fresh build:** a new worktree holding exactly this tree, with a brand-new build directory, configured (`module graph OK (28 modules, 109 declared links, layered, acyclic)`), built and passed the suite. Its first run surfaced the two test hazards above, both fixed before the rest; the planted violations ran in it.
+- **Checks:** `make format-check` passes, and clang-tidy over every new and changed source shows 0 errors (its warnings are the moved code's, as before the move).
+
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Library kind | STATIC *(default taken)* | Ordinary link semantics; the symbol scan attributes by archive member as before. |
+| Where the map lives | One table, `cmake/modules.cmake`; the per-layer `CMakeLists.txt` name sources only *(default taken)* | Every link greppable in one place, read by both enforcers. |
+| Proving it bites | Planted violations, one per boundary and rule, then removed *(default taken)* | The house pattern. |
+| The frozen graph | Refactored: `operations/` and the re-homed tests -- **the user's call**, mid-build | A module cycle and upward test includes cannot be a link graph. |
+| Include grain | The layer, by construction; the edge inside a layer is the scan's | Per-module include roots would need symlinked shim directories, moving every header out of `source/`, out from under clang-tidy's header filter and the IDE, on Windows too. |
+| Layer aggregates | INTERFACE, with the layer's `CMakeLists.txt` as a never-compiled source | CMake builds an INTERFACE target only when it has sources. |
+| Tests | Per-layer OBJECT libraries in one executable | Compile-time layering for tests, with every name and entry point unchanged. |
+| Compile definitions | Scoped to the module that reads them | The version stamp on all of `apogee_core` recompiled the whole core at the first configure after every commit. |
+
+### 2026-10-03 — `arch-adrs-layer-context` (architecture item A5): the law next to the code
+
+**Why.** The layers were built and enforced (A1–A4), and their reasons were written down as ADRs the same day (`lib/documentation/adrs/cli/`, at the user's direction). But a model or a person opening a file in `source/business/` still had nothing in reach saying what the layer may include, which rules bind a change there, or where the law is enforced. The user asked that "each file … must know the correct context for its layer". This item puts a card at every layer root and gives the ADRs teeth.
+
+**What was built**
+
+- [x] **Eight layer cards**, a `CLAUDE.md` at each layer root -- `lib/src/cli/source/<layer>/` and `lib/src/cli/tests/<layer>/` -- which the context system reads for any file opened beneath them.
+  - **A source card** gives the layer's position, its **Modules:** line, what it may include, how the law is enforced, the rules finer than a layer that bind it, and what a change there owes. Its ADR links: ADR 0001 always, 0002 where behavior and modes meet, 0003/0004 for a new module, 0005/0006/0007 where they bind.
+  - **A test card** gives the mirror, the per-layer test library and what it may link, where a behavior spanning layers is tested, the support files at its floor, and the hermetic conventions.
+  - **Summaries that point**, 11 to 17 lines each: the rationale stays in the ADRs and DEVELOPER.md.
+- [x] **ADR 0008, the module map** -- the gap a card surfaced. ADR 0001's prose package list predated the settled module set: `transport` in Infrastructure, `commands` named, `agent`, `mcp` and `scaffold` missing. 0001 is append-only, so a new record states the map as a table, each layer's modules and what it may depend on, and 0001's Status names the supersession of its list alone. The rule itself, "its own layer or any layer below", stands in 0001.
+- [x] **`harness.layer_context`** (`tests/layer_context.cmake`), a `cmake -P` ctest case beside the layering test, reading the same map:
+  - **the cards:** all eight present, each at most 30 lines and 3,000 bytes, each linking ADR 0001, every relative link resolving, a source card's modules exactly its layer's;
+  - **the mirror** (ADR 0004's structural check): every test directory a module of its layer, every module with its test directory, `version` excepted by name (the root smoke test covers it);
+  - **the index:** every listed ADR present, numbered in order, titled and dated, every ADR file listed;
+  - **the law, golden:** ADR 0001's numbered layers in the map's order and its rule sentence verbatim, ADR 0008's table equal to the map -- membership per layer and the may-depend-on column. The prose law and the mechanical law are provably one.
+- [x] **The docs flow carries it:**
+  - CLAUDE.md's Documentation and Status step 4 adds the card and ADR 0008 for a module added or moved;
+  - the docs skill's mechanical validation names the cards' links and the check;
+  - DEVELOPER.md's tree and checks section describe both.
+
+**Proving it bites** -- sixteen planted violations in a scratch copy, sixteen caught by name, the unplanted and restored trees passing:
+- **The cards:** a card deleted; a card padded past its budget; a card's module list short one; a card's link broken; a card no longer linking ADR 0001.
+- **The mirror:** a test directory in the wrong layer; a module losing its test directory; `version`'s named cover gone.
+- **The index:** an indexed ADR missing; an ADR file the index does not list; an ADR titled with another number.
+- **The law:** ADR 0001's layers reordered; its rule sentence changed; ADR 0008 short a module; ADR 0008 letting Business depend up; the map moving a module with the documents unchanged.
+
+**Verified.** `cicd.sh --test` on the llama build -- all 2,011 pass, the usual one skip; `harness.layer_context` and `harness.layering` pass on the real tree; every relative link in the documentation and the cards resolves.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The law's form | "Its own layer and **any** below" *(default taken)* | The shipped graph: Presentation reads `contracts/` directly. The user's phrasing "the layer below it" is recorded; tightening would be a new ADR. |
+| Card placement | Four source, four tests; no ninth at `tests/`'s root *(default taken)* | The test cards mirror the source ones, as the trees do. |
+| Enforcement vehicle | A ctest case beside the layering test *(default taken)* | It rides the existing suite. |
+| ADR 0001's stale list | **A new record, ADR 0008**, superseding the list alone | ADRs are append-only; the item's seam says a gap becomes a new numbered record. |
+| Card budget | 30 lines, 3,000 bytes | Room to grow; no room to restate DEVELOPER.md. |
+| `version` without a test directory | Excepted by name, its cover checked | The root smoke test is its suite. |
+| The pipeline | Unchanged -- `changed.sh` does not list the ADRs | `cli.http_api_conformance`'s precedent with the HTTP reference; widening the CLI's inputs is a pipeline change of its own (ADR 0005), flagged for the user. |

@@ -3,7 +3,7 @@
 #include <string>
 #include <string_view>
 
-#include "commands/command.h"
+#include "cli/command.h"
 
 namespace apogee::testing {
 

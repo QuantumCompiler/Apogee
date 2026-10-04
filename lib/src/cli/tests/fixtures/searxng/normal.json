@@ -1,0 +1,231 @@
+{
+ "query": "llama.cpp b6000 release",
+ "results": [
+  {
+   "template": "default.html",
+   "title": "Misc. bug: llama-server crashes since b6000 when performing ...",
+   "content": "Jan 3, 2026 ... Name and Version llama-server.exe --version load_backend: loaded RPC backend from C:\\ai\\llama.cpp\\ggml-rpc.dll ggml_vulkan: Found 2 Vulkan ...",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "google cse"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    1
+   ],
+   "score": 1.0,
+   "category": "general",
+   "url": "https://github.com/ggml-org/llama.cpp/issues/18563",
+   "engine": "google cse",
+   "parsed_url": [
+    "https",
+    "github.com",
+    "/ggml-org/llama.cpp/issues/18563",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "template": "default.html",
+   "title": "Pushing the Envelope of LLM Inference with Ultra-Low-Bit ... - arXiv",
+   "content": "Aug 27, 2026 ... The Bonsai model release is accompanied by a fork of the llama.cpp [6] runtime that is able to serve the ternary models on x86 CPUs with a 2-bit ...",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "google cse"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    2
+   ],
+   "score": 0.5,
+   "category": "general",
+   "url": "https://arxiv.org/html/2508.06753v3",
+   "engine": "google cse",
+   "parsed_url": [
+    "https",
+    "arxiv.org",
+    "/html/2508.06753v3",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "template": "default.html",
+   "title": "Upgrade path from 4x 3090s : r/LocalLLaMA - Reddit",
+   "content": "May 28, 2026 ... More precisely - do model providers even target this VRAM tier for upcoming releases? For context, I don't have a hardcore production use case.",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "google cse"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    3
+   ],
+   "score": 0.3333333333333333,
+   "category": "general",
+   "url": "https://www.reddit.com/r/LocalLLaMA/comments/1tqfzvs/upgrade_path_from_4x_3090s/",
+   "engine": "google cse",
+   "parsed_url": [
+    "https",
+    "www.reddit.com",
+    "/r/LocalLLaMA/comments/1tqfzvs/upgrade_path_from_4x_3090s/",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "template": "default.html",
+   "title": "Hi all! I work on the Gemma team, one of many as this one was a ...",
+   "content": "... release. Happy to answer whatever questions I can. philipkglass 5 ... The Unsloth llama.cpp guide[1] recommends building the latest llama.cpp from ...",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "google cse"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    4
+   ],
+   "score": 0.25,
+   "category": "general",
+   "url": "https://news.ycombinator.com/item?id=47617137",
+   "engine": "google cse",
+   "parsed_url": [
+    "https",
+    "news.ycombinator.com",
+    "/item",
+    "",
+    "id=47617137",
+    ""
+   ]
+  },
+  {
+   "template": "default.html",
+   "title": "Will larger-parameter versions be released? - Hacker News",
+   "content": "Under llama.cpp on one RTX 6000 Pro I get ~215 tok/s generation speed. The ... b6000. (I'm close to just ordering a couple for myself it's working so ...",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "google cse"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    6
+   ],
+   "score": 0.16666666666666666,
+   "category": "general",
+   "url": "https://news.ycombinator.com/item?id=47617333",
+   "engine": "google cse",
+   "parsed_url": [
+    "https",
+    "news.ycombinator.com",
+    "/item",
+    "",
+    "id=47617333",
+    ""
+   ]
+  },
+  {
+   "template": "default.html",
+   "title": "Eval bug: Qwen3.5-0.8B-GGUF throughput is significantly lower than ...",
+   "content": "Mar 3, 2026 ... Name and Version version: 8191 (24350fd) built with GNU 12.4.0 for Linux x86_64 Operating systems Linux Which llama.cpp modules do you know ...",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "google cse"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    7
+   ],
+   "score": 0.14285714285714285,
+   "category": "general",
+   "url": "https://github.com/ggml-org/llama.cpp/issues/20072",
+   "engine": "google cse",
+   "parsed_url": [
+    "https",
+    "github.com",
+    "/ggml-org/llama.cpp/issues/20072",
+    "",
+    "",
+    ""
+   ]
+  }
+ ],
+ "answers": [],
+ "corrections": [],
+ "infoboxes": [],
+ "suggestions": [],
+ "unresponsive_engines": [
+  [
+   "duckduckgo",
+   "CAPTCHA"
+  ]
+ ]
+}

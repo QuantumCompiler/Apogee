@@ -11,8 +11,9 @@
 # merges it into this branch's HEAD, and runs ci.yml's pull-request jobs on
 # the result, each through the script the workflow itself calls:
 #
-#   what changed        lib/scripts/code-changed.sh -- documentation only
-#                       means CI builds nothing, and neither does this
+#   what changed        lib/scripts/changed.sh cli, against the latest
+#                       release -- unchanged means CI builds no CLI and
+#                       copies the release's instead, and so does this
 #   version bump        lib/scripts/version-check.sh
 #   clone llama.cpp     lib/scripts/cicd.sh --clone-llama
 #   unit tests <host>   lib/scripts/cicd.sh --unit-tests, llama.cpp off
@@ -175,16 +176,21 @@ prepare_worktree "$build_wt" "$merged"
 tree="$(git -C "$root" rev-parse "$merged^{tree}")"
 
 # --- what changed -------------------------------------------------------------
-# CI's first job: a pull request that changes only documentation builds
-# nothing, and every job reports success. Asked of the test merge's own
-# script, as the workflow asks the one it checked out; a branch from before
-# the rule has none, and runs everything.
-code=true
-if [ -x "$unit_wt/lib/scripts/code-changed.sh" ]; then
-    answer="$(git -C "$root" diff --name-only "$base_sha...$head" | "$unit_wt/lib/scripts/code-changed.sh")"
+# CI's first job: has what the CLI is built from changed since the latest
+# release? If not, CI builds no CLI -- every job reports success, and the
+# builds copy the release's archives -- and this does the same for this
+# host. Asked of the test merge's own scripts, as the workflow asks the ones
+# it checked out; a branch from before the rule has none, and runs everything.
+cli=true
+latest=""
+if [ -x "$unit_wt/lib/scripts/changed.sh" ] && [ -x "$unit_wt/lib/scripts/latest-release.sh" ]; then
+    found="$(cd "$unit_wt" && lib/scripts/latest-release.sh)" || die "could not look up the latest release"
+    commit=""
+    [ -z "$found" ] || read -r latest commit <<<"$found"
+    answer="$(cd "$unit_wt" && lib/scripts/changed.sh cli "$commit" HEAD)"
     printf '%s\n' "$answer" | sed 's/^/[pr-ci] /'
     case "$(printf '%s\n' "$answer" | tail -1)" in
-        code=false) code=false ;;
+        cli=false) cli=false ;;
     esac
 fi
 
@@ -222,19 +228,28 @@ run_job() {
     return "$status"
 }
 
-if [ "$code" = false ]; then
-    record "what changed" "documentation only"
-    # As CI reports them: `version bump` skipped whole (a skip passes), the
-    # others run under their own names with every step skipped.
-    record "version bump" "skipped (documentation only)"
-    for job in "clone llama.cpp" "unit tests $host" "build $host"; do
-        record "$job" "passed (documentation only: no steps run)"
-    done
+if [ "$cli" = false ]; then
+    record "what changed" "the CLI is unchanged since $latest"
 fi
 
-[ "$code" = false ] || run_job "version bump" "$unit_wt" lib/scripts/version-check.sh || true
+# On every pull request, as in CI; a branch from before 2026-09-25 has the
+# old check, which takes no arguments.
+if [ -x "$unit_wt/lib/scripts/changed.sh" ]; then
+    run_job "version bump" "$unit_wt" lib/scripts/version-check.sh --cli "$cli" --latest "$latest" || true
+else
+    run_job "version bump" "$unit_wt" lib/scripts/version-check.sh || true
+fi
 
-if [ "$code" = true ]; then
+if [ "$cli" = false ]; then
+    # As CI runs them: under their own names, with nothing built -- and the
+    # build job copying this host's archive from the latest release.
+    for job in "clone llama.cpp" "unit tests $host"; do
+        record "$job" "passed (the CLI is unchanged: no steps run)"
+    done
+    run_job "build $host" "$build_wt" lib/scripts/cli-from-release.sh "$latest" "$host" "$artifacts" || true
+fi
+
+if [ "$cli" = true ]; then
     clone_ok=0
     run_job "clone llama.cpp" "$unit_wt" lib/scripts/cicd.sh --clone-llama && clone_ok=1
 
@@ -296,7 +311,7 @@ for target in linux-x64 linux-arm64 macos-arm64 windows-x64 windows-arm64; do
     [ "$target" = "$host" ] || others="$others${others:+, }$target"
 done
 printf '[pr-ci]   not rehearsed: unit tests and build for %s -- each needs its own CI runner\n' "$others"
-[ "$code" = false ] || printf '[pr-ci]   (their compiles are what `gcc compile` stands in for; their tests are not)\n'
+[ "$cli" = false ] || printf '[pr-ci]   (their compiles are what `gcc compile` stands in for; their tests are not)\n'
 if ls "$artifacts"/apogee-"$host".* >/dev/null 2>&1; then
     printf '[pr-ci]   archive: %s\n' "$(ls "$artifacts"/apogee-"$host".tar.gz "$artifacts"/apogee-"$host".zip 2>/dev/null | head -1)"
 fi

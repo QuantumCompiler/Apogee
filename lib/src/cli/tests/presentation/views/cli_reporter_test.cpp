@@ -1,0 +1,340 @@
+#include "views/cli_reporter.h"
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "support/terminal_model.h"
+
+using apogee::ansi::Style;
+using apogee::ansi::Verbosity;
+using apogee::commands::CliReporter;
+using apogee::commands::TerminalWriter;
+
+namespace {
+
+struct Harness {
+    std::ostringstream answer;    // stdout
+    std::ostringstream progress;  // stderr
+    TerminalWriter writer{progress};
+
+    [[nodiscard]] CliReporter make(bool decorate = true, Verbosity verbosity = Verbosity::Line,
+                                   bool markdown = false) {
+        CliReporter::Options options;
+        options.answer_stream = &answer;
+        options.decorate = decorate;
+        options.verbosity = verbosity;
+        options.style = Style{false};
+        options.width = 40;
+        options.markdown = markdown;
+        return CliReporter{writer, options};
+    }
+};
+
+/// Non-overlapping occurrences of `needle`.
+std::size_t count_of(std::string_view haystack, std::string_view needle) {
+    std::size_t n = 0;
+    for (std::size_t at = haystack.find(needle); at != std::string_view::npos;
+         at = haystack.find(needle, at + needle.size())) {
+        ++n;
+    }
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("the answer goes to stdout and progress to stderr", "[ux][reporter]") {
+    // The split that keeps `apogee complete "..." | jq` working. Conflating
+    // the two streams is how spinner frames end up in piped output.
+    Harness h;
+    CliReporter reporter = h.make();
+
+    reporter.on_thinking();
+    reporter.on_tool_status("[tool] search");
+    reporter.on_clear_status();
+    reporter.on_answer_start();
+    reporter.on_answer_token("the answer");
+    reporter.on_answer_end();
+
+    CHECK(h.answer.str() == "the answer\n");
+    CHECK(h.answer.str().find("search") == std::string::npos);
+    CHECK(h.progress.str().find("search") != std::string::npos);
+    CHECK(reporter.emitted_answer());
+}
+
+TEST_CASE("an undecorated reporter writes no escape codes anywhere", "[ux][reporter]") {
+    // The whole non-TTY contract in one assertion.
+    Harness h;
+    CliReporter reporter = h.make(/*decorate=*/false);
+
+    reporter.on_thinking();
+    reporter.on_thinking_token("private reasoning");
+    reporter.on_tool_status("[tool] x");
+    reporter.on_clear_status();
+    reporter.on_answer_start();
+    reporter.on_answer_token("answer");
+    reporter.on_answer_end();
+
+    CHECK(h.answer.str() == "answer\n");
+    CHECK(h.answer.str().find('\033') == std::string::npos);
+    CHECK(h.progress.str().find('\033') == std::string::npos);
+    // Reasoning never reaches either stream on a pipe.
+    CHECK(h.answer.str().find("private reasoning") == std::string::npos);
+    CHECK(h.progress.str().find("private reasoning") == std::string::npos);
+}
+
+TEST_CASE("thinking never reaches the answer stream", "[ux][reporter]") {
+    // Display-only, always. If it reached the answer it would land in persisted
+    // history and be re-sent on every later turn.
+    Harness h;
+    CliReporter reporter = h.make();
+
+    reporter.on_thinking();
+    reporter.on_thinking_token("secret deliberation");
+    reporter.on_clear_status();
+    reporter.on_answer_start();
+    reporter.on_answer_token("public answer");
+    reporter.on_answer_end();
+
+    CHECK(h.answer.str() == "public answer\n");
+    CHECK(h.answer.str().find("secret deliberation") == std::string::npos);
+}
+
+TEST_CASE("what a turn recalled is said on the status line, never in the answer",
+          "[ux][reporter][recall]") {
+    Harness h;
+    CliReporter reporter = h.make();
+    reporter.on_recall(0, 0);
+    CHECK(h.progress.str().find("[memory]") == std::string::npos);
+    reporter.on_recall(2, 1);
+    CHECK(h.progress.str().find("[memory] 2 past chats, 1 decision") != std::string::npos);
+    CHECK(h.answer.str().empty());
+}
+
+TEST_CASE("a spent budget reaches the thinking block's summary", "[ux][reporter][thinking]") {
+    Harness h;
+    CliReporter reporter = h.make();
+    reporter.on_thinking();
+    reporter.on_thinking_token("deliberation");
+    reporter.on_thinking_budget_reached();
+    reporter.on_clear_status();
+    reporter.on_answer_start();
+    reporter.on_answer_token("answer");
+    reporter.on_answer_end();
+    CHECK(h.progress.str().find("(budget reached)") != std::string::npos);
+    CHECK(h.answer.str() == "answer\n");
+}
+
+TEST_CASE("side calls before the step and its reasoning are one block",
+          "[ux][reporter][side-call]") {
+    Harness h;
+    CliReporter reporter = h.make();
+    apogee::agentloop::SideCall call{.role = "utility", .detail = "rewriting"};
+    reporter.on_side_call(call);
+    call.done = true;
+    call.seconds = 0.4;
+    reporter.on_side_call(call);
+    // The loop's step begins: the block stays open for its reasoning.
+    reporter.on_thinking();
+    reporter.on_thinking_token("pondering");
+    reporter.on_clear_status();
+    reporter.on_answer_start();
+    reporter.on_answer_token("answer");
+    reporter.on_answer_end();
+    CHECK(h.progress.str().find("· utility — rewriting · 0.4 s") != std::string::npos);
+    CHECK(count_of(h.progress.str(), "Thought for") == 1);
+    CHECK(count_of(h.progress.str(), "Worked for") == 0);
+    // Never the answer's.
+    CHECK(h.answer.str() == "answer\n");
+}
+
+TEST_CASE("a line said during a turn lands above the open block, never inside it",
+          "[ux][reporter][side-call]") {
+    // Found on a real terminal (2026-10-04): the retrieval line printed into
+    // a block of side calls, and the block's next erase missed by a row.
+    Harness h;
+    CliReporter reporter = h.make();
+    reporter.on_side_call({.role = "embedding", .detail = "the question"});
+    reporter.keep_line("[warn] 1 chunk(s) from 'notes'");
+    reporter.on_recall(1, 0);
+    reporter.on_thinking();
+    reporter.on_thinking_token("pondering");
+    reporter.on_clear_status();
+    apogee::testing::TerminalModel screen{40};
+    screen.feed(h.progress.str());
+    CHECK(screen.lines() == std::vector<std::string>{"[warn] 1 chunk(s) from 'notes'",
+                                                     "[memory] 1 past chat", "✻ Thought for 1s"});
+}
+
+TEST_CASE("a pipe draws no side call", "[ux][reporter][side-call]") {
+    Harness h;
+    CliReporter reporter = h.make(/*decorate=*/false);
+    reporter.on_side_call({.role = "embedding", .detail = "zarquon-label"});
+    reporter.on_clear_status();
+    CHECK(h.progress.str().find("zarquon-label") == std::string::npos);
+    CHECK(h.answer.str().find("zarquon-label") == std::string::npos);
+}
+
+TEST_CASE("an empty thinking token opens nothing", "[ux][reporter]") {
+    // Redacted-thinking models send empty payloads on every turn.
+    Harness h;
+    CliReporter reporter = h.make();
+
+    reporter.on_thinking_token("");
+    reporter.on_thinking_token("");
+
+    CHECK(h.progress.str().find("✻ Thinking…") == std::string::npos);
+}
+
+TEST_CASE("no answer tokens means no trailing newline", "[ux][reporter]") {
+    // A turn that produced nothing must not emit a stray blank line into a
+    // pipe.
+    Harness h;
+    CliReporter reporter = h.make();
+
+    reporter.on_thinking();
+    reporter.on_clear_status();
+    reporter.on_answer_end();
+
+    CHECK(h.answer.str().empty());
+    CHECK_FALSE(reporter.emitted_answer());
+}
+
+TEST_CASE("the status line is reachable so surfaces need no raw stderr", "[ux][reporter]") {
+    // "Startup speaks on one line": a surface routes its own notices through
+    // here rather than writing stderr directly.
+    Harness h;
+    CliReporter reporter = h.make();
+
+    reporter.status().print_line("a startup notice");
+    CHECK(h.progress.str().find("a startup notice") != std::string::npos);
+    CHECK(h.answer.str().empty());
+}
+
+TEST_CASE("a reporter with no answer stream drops answer tokens safely", "[ux][reporter]") {
+    std::ostringstream progress;
+    TerminalWriter writer{progress};
+    CliReporter::Options options;
+    options.answer_stream = nullptr;
+    options.style = Style{false};
+    CliReporter reporter{writer, options};
+
+    CHECK_NOTHROW(reporter.on_answer_token("text"));
+    CHECK_NOTHROW(reporter.on_answer_end());
+    CHECK_FALSE(reporter.emitted_answer());
+}
+
+TEST_CASE("an answer neither starts nor ends with blank lines, however it streams",
+          "[ux][reporter]") {
+    // Qwen3.5 on 2026-09-23: the answer opened with the "\n\n" that followed
+    // the model's reasoning, and printed as a three-line gap under "Thought
+    // for Ns". The whitespace arrives as its own tokens, so the rule has to
+    // hold across chunk boundaries, not within one chunk.
+    Harness h;
+    CliReporter reporter = h.make();
+
+    reporter.on_answer_start();
+    for (const std::string_view chunk :
+         {"\n", "\n", "Hello", "!", "\n\n", "How are", " you?", "\n"}) {
+        reporter.on_answer_token(chunk);
+    }
+    reporter.on_answer_end();
+    CHECK(h.answer.str() == "Hello!\n\nHow are you?\n");
+
+    // The next answer starts afresh, and a first line's own indentation --
+    // the start of a code block -- is kept.
+    reporter.on_answer_start();
+    reporter.on_answer_token("\n    indented");
+    reporter.on_answer_end();
+    CHECK(h.answer.str() == "Hello!\n\nHow are you?\n    indented\n");
+
+    // An answer that is only whitespace shows nothing at all.
+    reporter.on_answer_start();
+    reporter.on_answer_token("\n\n ");
+    reporter.on_answer_end();
+    CHECK(h.answer.str() == "Hello!\n\nHow are you?\n    indented\n");
+}
+
+TEST_CASE("a decorated reporter renders the answer's Markdown", "[ux][reporter][answer]") {
+    Harness h;
+    CliReporter reporter = h.make(true, Verbosity::Line, /*markdown=*/true);
+    reporter.on_answer_start();
+    for (const std::string_view chunk : {"\n\nThe **vio", "lin**, mostly:\n\n- no fr", "ets\n"}) {
+        reporter.on_answer_token(chunk);
+    }
+    reporter.on_answer_end();
+    CHECK(reporter.emitted_answer());
+    apogee::testing::TerminalModel screen{40};
+    screen.feed(h.answer.str());
+    CHECK(screen.lines() == std::vector<std::string>{"The violin, mostly:", "", "• no frets"});
+    CHECK(h.progress.str().find("violin") == std::string::npos);  // never on stderr
+}
+
+TEST_CASE("an undecorated reporter passes the model's text through, Markdown and all",
+          "[ux][reporter][answer]") {
+    // THE pipe contract: rendering is a view for a terminal, and `apogee
+    // complete ... | jq` or `> file` receives exactly what the model wrote.
+    Harness h;
+    CliReporter reporter = h.make(false, Verbosity::Line, /*markdown=*/true);
+    reporter.on_answer_start();
+    for (const std::string_view chunk : {"The **vio", "lin**, mostly:\n\n- no fr", "ets"}) {
+        reporter.on_answer_token(chunk);
+    }
+    reporter.on_answer_end();
+    CHECK(h.answer.str() == "The **violin**, mostly:\n\n- no frets\n");
+}
+
+TEST_CASE("a status taking the terminal commits the answer line under it first",
+          "[ux][reporter][answer]") {
+    // A model that says "Let me look" and then calls a tool: the spinner and
+    // the tool line must not paint over the half-written sentence.
+    Harness h;
+    CliReporter reporter = h.make(true, Verbosity::Line, /*markdown=*/true);
+    reporter.on_answer_start();
+    reporter.on_answer_token("Let me look at that file.");
+    reporter.on_tool_status("read_file notes.txt");
+    CHECK(h.answer.str().ends_with("Let me look at that file.\n"));
+    reporter.on_clear_status();
+    reporter.on_answer_start();
+    reporter.on_answer_token("It says hello.");
+    reporter.on_answer_end();
+    apogee::testing::TerminalModel screen{40};
+    screen.feed(h.answer.str());
+    CHECK(screen.lines() ==
+          std::vector<std::string>{"Let me look at that file.", "It says hello."});
+}
+
+TEST_CASE("a progress note is printed only under --verbose", "[ux][reporter]") {
+    // What a local model's cache reused (25c): a log line for someone who
+    // asked for the log, and nothing in an ordinary run, where the spinner
+    // owns the line.
+    Harness plain;
+    CliReporter quiet = plain.make(true, Verbosity::Line);
+    quiet.on_progress("prompt 120 tokens: 100 from the cache, 20 read");
+    CHECK(plain.progress.str().find("from the cache") == std::string::npos);
+
+    Harness verbose;
+    CliReporter loud = verbose.make(true, Verbosity::Verbose);
+    loud.on_progress("prompt 120 tokens: 100 from the cache, 20 read");
+    CHECK(verbose.progress.str().find("prompt 120 tokens: 100 from the cache, 20 read") !=
+          std::string::npos);
+    CHECK(verbose.answer.str().empty());
+}
+
+TEST_CASE("the spinner says what the session is while a step waits", "[ux][reporter][base]") {
+    // A base model's session says so all session long (26r), in the
+    // spinner's resting label -- never on an answer.
+    Harness h;
+    CliReporter reporter = h.make();
+    reporter.on_thinking();
+    CHECK(reporter.status().spinner_label() == "Thinking…");
+    reporter.set_resting_label("Thinking… · base model");
+    reporter.on_thinking();
+    CHECK(reporter.status().spinner_label() == "Thinking… · base model");
+    reporter.on_answer_start();
+    reporter.on_answer_token("an answer");
+    reporter.on_answer_end();
+    CHECK(h.answer.str().find("base model") == std::string::npos);
+}

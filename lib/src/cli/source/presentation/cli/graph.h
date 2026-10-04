@@ -1,0 +1,69 @@
+#pragma once
+
+#include <map>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "cli/command.h"
+#include "contracts/config.h"
+#include "embedstore/graph.h"
+#include "embedstore/store.h"
+#include "graph/build.h"
+#include "operations/graph_members.h"
+
+/// `apogee graph` -- build and inspect the knowledge graph over a collection
+/// or a named multi-collection graph.
+///
+/// `build` runs the extraction clerk once per stale chunk -- one structured
+/// call each, validated in host code -- into `kg_*` tables inside the
+/// collection's own database, incrementally and resumably; `stats`, `show`
+/// and `delete` inspect and clear it. Retrieval-time expansion consumes what
+/// build produces, on every RAG surface, once the collection's `graph.enabled`
+/// is set -- which the first successful build does through the one config
+/// editor.
+///
+/// **Every subcommand resolves its `<name>` graphs-first**: a `graphs:` entry
+/// names a named graph over several collections -- built into its own
+/// database under `embeddings/graphs/`, one node per entity across every
+/// member, taking retrieval precedence for them, with nothing to enable --
+/// and anything else is a collection. `apogee check` keeps the two name
+/// spaces apart.
+///
+/// `communities` is the global layer: deterministic label-propagation
+/// clusters, each summarised by one generation call and stored as a
+/// retrievable pseudo-chunk, so "what are the main themes?" is answerable by
+/// plain retrieval. `dedupe` merges same-type entities whose vectors say
+/// they are the same thing -- never on its own, and never a decision node.
+///
+/// **Local extractor by default.** A full build, and a summariser run, never
+/// runs on a metered backend on Apogee's initiative: it does so only when
+/// that backend was named explicitly (`-m`, the entry's `extract_backend`,
+/// or the extraction role). Whether a backend is metered is a fact the
+/// provider states, discovered through the Harness.
+namespace apogee::commands {
+
+class GraphCommand final : public Command {
+public:
+    [[nodiscard]] std::string_view name() const noexcept override;
+    [[nodiscard]] std::string_view summary() const noexcept override;
+    void bind(CLI::App& root, const RootContext& context) override;
+};
+
+/// What `graph build <name>` runs -- shared with `embed ingest --graph`, so
+/// the chained build is the same build. Refusals throw the CLI's user error.
+struct GraphBuildRequest {
+    std::string name;
+    std::string model;
+    bool dry_run = false;
+    bool force = false;
+    int limit = 0;
+    /// No progress at all: no busy line on a terminal, no per-chunk line on
+    /// a pipe (M1). The results and every failure still print.
+    bool quiet = false;
+};
+
+void run_graph_build(const RootContext& context, const GraphBuildRequest& request);
+
+}  // namespace apogee::commands
