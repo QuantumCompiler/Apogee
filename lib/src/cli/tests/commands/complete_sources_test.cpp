@@ -163,6 +163,43 @@ TEST_CASE("the store's models complete by name and by handle, per format",
     CHECK_FALSE(has(info, "org--both"));
 }
 
+TEST_CASE("delete offers backends whose model is stored; add-backend the stored GGUFs none has",
+          "[commands][completion][sources]") {
+    // M7, from the user's delete transcript: `models delete gemma-4-E2B-F16`
+    // -- a backend's name -- and `config add-backend` hand-typing what the
+    // store already knows.
+    Home home;
+    const std::filesystem::path models = home.home / "models";
+    const std::filesystem::path registered =
+        models / "org--m" / "gguf" / "111111111111" / "m-F16.gguf";
+    // Not GGUFs at all: completion reads directories and the config, never a
+    // header, so what the files hold cannot matter.
+    write_file(registered, "not a gguf");
+    write_file(models / "org--m" / "gguf" / "222222222222" / "m-Q4_K_M.gguf", "not a gguf");
+    write_file(models / "org--m" / "gguf" / "222222222222" / "m-Q4_K_M-mmproj.gguf", "x");
+    write_file(models / "org--x" / "gguf" / "333333333333" / "claude.gguf", "not a gguf");
+    apogee::harness::BackendConfig local;
+    local.type = apogee::harness::BackendType::LlamaCpp;
+    local.model_path = registered.string();
+    home.config.backends["m-f16"] = local;
+    apogee::harness::BackendConfig elsewhere;
+    elsewhere.type = apogee::harness::BackendType::LlamaCpp;
+    elsewhere.model_path = "/models/elsewhere.gguf";
+    home.config.backends["elsewhere"] = elsewhere;
+
+    const std::vector<std::string> deletable = home.names(c::kModelOrBackendValue).names;
+    CHECK(has(deletable, "org--m"));
+    CHECK(has(deletable, "org--m/gguf/222222222222"));
+    CHECK(has(deletable, "m-f16"));
+    // A backend with nothing in the store is nothing to delete.
+    CHECK_FALSE(has(deletable, "claude"));
+    CHECK_FALSE(has(deletable, "elsewhere"));
+
+    // The stored GGUFs no backend points at, by file name -- never a
+    // projector, never one a backend has, never a name already taken.
+    CHECK(home.names(c::kNewBackendValue).names == std::vector<std::string>{"m-Q4_K_M"});
+}
+
 TEST_CASE("collections, datasets, kits and runs complete from the data directory",
           "[commands][completion][sources]") {
     const Home home;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -75,6 +76,33 @@ namespace {
             out.push_back(stored.model);
             out.push_back(stored.model + "/" + std::string{models::kSafetensorsFormat} + "/" +
                           stored.id);
+        }
+    }
+    return out;
+}
+
+/// The stored GGUFs no backend points at, by the name `models list` notes
+/// under each -- its file's stem; one a backend already has is no new name.
+[[nodiscard]] std::vector<std::string> unregistered_gguf_names(const harness::Config& config) {
+    std::vector<models::StoredGguf> pointed_at;
+    const std::vector<models::StoredGguf> ggufs = models::list_store_ggufs(store_roots(config));
+    for (const auto& [name, backend] : config.backends) {
+        if (!backend.model_path.empty()) {
+            if (const std::optional<models::StoredGguf> stored = models::stored_gguf_at(
+                    ggufs, harness::expand_env_and_home(backend.model_path))) {
+                pointed_at.push_back(*stored);
+            }
+        }
+    }
+    const std::vector<std::string> taken = config.backend_names();
+    std::vector<std::string> out;
+    for (const models::StoredGguf& stored : ggufs) {
+        const std::string stem = stored.file.stem().string();
+        const bool registered = std::ranges::any_of(
+            pointed_at,
+            [&stored](const models::StoredGguf& other) { return other.dir == stored.dir; });
+        if (!registered && std::ranges::find(taken, stem) == taken.end()) {
+            out.push_back(stem);
         }
     }
     return out;
@@ -239,6 +267,20 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
                 models::weights_handle(stored.model, models::kSafetensorsFormat, stored.id));
         }
         list.none = "no backends configured and the model store is empty";
+    } else if (kind == kModelOrBackendValue) {
+        const models::StoreRoots roots = store_roots(config);
+        list.names = stored_models(roots, true, true);
+        const std::vector<models::StoredGguf> ggufs = models::list_store_ggufs(roots);
+        for (const auto& [name, backend] : config.backends) {
+            if (!backend.model_path.empty() &&
+                models::stored_gguf_at(ggufs, harness::expand_env_and_home(backend.model_path))
+                    .has_value()) {
+                list.names.push_back(name);
+            }
+        }
+        list.none = "the model store is empty -- 'apogee models pull'";
+    } else if (kind == kNewBackendValue) {
+        list.names = unregistered_gguf_names(config);
     } else if (kind == kSnapshotIdValue) {
         list = weight_ids(context, false);
     } else if (kind == kGgufIdValue) {

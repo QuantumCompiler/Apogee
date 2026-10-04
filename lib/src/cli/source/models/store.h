@@ -229,6 +229,24 @@ struct StoredSnapshot {
 [[nodiscard]] std::vector<StoredGguf> list_store_ggufs(const StoreRoots& roots,
                                                        std::string_view model = {});
 
+/// The stored GGUF whose model file is `file` -- a backend's `model_path`,
+/// expanded -- among `ggufs`, compared as normal paths; nullopt when none is
+/// (M7: what `models delete <backend>` deletes).
+[[nodiscard]] std::optional<StoredGguf> stored_gguf_at(const std::vector<StoredGguf>& ggufs,
+                                                       const std::filesystem::path& file);
+
+/// The stored GGUFs whose model file is `<stem>.gguf` -- the name `models
+/// list` notes under the row, and what `config add-backend <stem>` fills
+/// itself from (M7). More than one when the same name was stored twice.
+[[nodiscard]] std::vector<StoredGguf> stored_ggufs_named(const std::vector<StoredGguf>& ggufs,
+                                                         std::string_view stem);
+
+/// The backend type a stored format runs as, in the config's spelling --
+/// `llamacpp` for `gguf` -- or empty for one no backend type runs directly
+/// yet. One row per format, beside the formats themselves, so a format that
+/// gains a runtime (MLX's `mlx/`, 31b) is one more row (M7).
+[[nodiscard]] std::string_view backend_type_for_format(std::string_view format) noexcept;
+
 /// Every stored SafeTensors set, by model then id, from both roots (new sets
 /// go under `paths.hf_dir`; ones pulled before it was set stay where they
 /// are). `model` narrows to one.

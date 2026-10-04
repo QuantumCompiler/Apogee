@@ -43,6 +43,15 @@ printf '{"layers":[{"mediaType":"application/vnd.ollama.image.model","digest":"s
     >"$OLLAMA_MODELS/manifests/registry.ollama.ai/library/llama3.2/3b"
 printf 'x' >"$OLLAMA_MODELS/blobs/sha256-ab12"
 
+# The model store (M7): one GGUF a backend points at, one no backend does.
+# Not real GGUFs -- completion reads directories and the config, never a header.
+gguf="$APOGEE_HOME/models/org--m/gguf"
+mkdir -p "$gguf/111111111111" "$gguf/222222222222"
+printf 'x' >"$gguf/111111111111/m-F16.gguf"
+printf 'x' >"$gguf/222222222222/m-Q4_K_M.gguf"
+apogee config add-backend m-f16 --type llamacpp --model-path "$gguf/111111111111/m-F16.gguf" \
+    </dev/null >/dev/null
+
 failures=0
 fail() {
     echo "FAIL: $*" >&2
@@ -79,6 +88,12 @@ cases=(
     # Words a command validates itself, offered from the same list.
     "knowledge|query|q|--status||rejected"
     "complete|--retriever|h|hybrid"
+    # M7: a backend whose model is stored is something to delete, and so is
+    # the store's own name for it; a stored GGUF no backend has is a name
+    # add-backend fills itself from.
+    "models|delete|m-|m-f16"
+    "models|delete|org--m/gguf/2|org--m/gguf/222222222222"
+    "config|add-backend||m-Q4_K_M"
 )
 
 # ---- bash -------------------------------------------------------------------

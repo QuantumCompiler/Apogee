@@ -74,6 +74,12 @@ inline constexpr const char* kGgufValue = "GGUF";
 /// A configured backend, or one set of stored weights (`<model>/<format>/<id>`)
 /// -- what `models info` shows.
 inline constexpr const char* kBackendOrWeightsValue = "BACKEND_OR_WEIGHTS";
+/// A model in the store, one set of its weights, or a backend whose model file
+/// is a stored GGUF -- what `models delete` takes (M7).
+inline constexpr const char* kModelOrBackendValue = "MODEL_OR_BACKEND";
+/// A name for a new backend: free text, offering the stems of the stored GGUFs
+/// no backend points at -- each a name that fills itself in (M7).
+inline constexpr const char* kNewBackendValue = "NEW_BACKEND";
 /// A SafeTensors set's id -- of the model named by the command's first
 /// positional.
 inline constexpr const char* kSnapshotIdValue = "SNAPSHOT_ID";
@@ -96,21 +102,35 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 27> kNameValues{
-    kCollectionValue, kCollectionListValue,
-    kGraphValue,      kNamedGraphValue,
-    kAgentValue,      kChatValue,
-    kServerValue,     kDatasetValue,
-    kKitValue,        kSuiteValue,
-    kRunValue,        kPipelineRunValue,
-    kPipelineValue,   kRegimeValue,
-    kModelValue,      kSnapshotValue,
-    kGgufValue,       kBackendOrWeightsValue,
-    kSnapshotIdValue, kGgufIdValue,
-    kPullRefValue,    kRecordValue,
-    kGitRefValue,     kGitRemoteValue,
-    kConfigKeyValue,  kToolValue,
-    kAllowedHostValue};
+inline constexpr std::array<std::string_view, 29> kNameValues{kCollectionValue,
+                                                              kCollectionListValue,
+                                                              kGraphValue,
+                                                              kNamedGraphValue,
+                                                              kAgentValue,
+                                                              kChatValue,
+                                                              kServerValue,
+                                                              kDatasetValue,
+                                                              kKitValue,
+                                                              kSuiteValue,
+                                                              kRunValue,
+                                                              kPipelineRunValue,
+                                                              kPipelineValue,
+                                                              kRegimeValue,
+                                                              kModelValue,
+                                                              kSnapshotValue,
+                                                              kGgufValue,
+                                                              kBackendOrWeightsValue,
+                                                              kModelOrBackendValue,
+                                                              kNewBackendValue,
+                                                              kSnapshotIdValue,
+                                                              kGgufIdValue,
+                                                              kPullRefValue,
+                                                              kRecordValue,
+                                                              kGitRefValue,
+                                                              kGitRemoteValue,
+                                                              kConfigKeyValue,
+                                                              kToolValue,
+                                                              kAllowedHostValue};
 
 /// The type name for free text with a known set of usual words: the parser
 /// still takes any word -- the command validates it, with its own message,

@@ -713,8 +713,11 @@ TEST_CASE("free text says what it wants instead of offering file names",
     CHECK_FALSE(model.files);
     CHECK(model.hint == "--model TEXT: Model name");
 
+    // A new backend's name is free text that offers the store's unregistered
+    // GGUFs (M7): with none to offer, it says what it wants, never files.
     const apogee::commands::Completion name = complete_full({"config", "add-backend"});
-    CHECK(name.hint == "name TEXT: Name for the new backend");
+    CHECK(name.hint ==
+          "name NEW_BACKEND: Name for the new backend -- a stored GGUF's name fills in the rest");
     CHECK_FALSE(name.files);
 
     const apogee::commands::Completion size =
@@ -892,7 +895,6 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "complete -s",
                                          "complete --system",
                                          "complete --context",
-                                         "config add-backend name",
                                          "config add-backend --api-key",
                                          "config add-backend --model",
                                          "config add-backend --embedding-model",

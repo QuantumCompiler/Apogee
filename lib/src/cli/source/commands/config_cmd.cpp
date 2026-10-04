@@ -15,7 +15,9 @@
 #include "harness/config.h"
 #include "harness/config_edit.h"
 #include "harness/host.h"
+#include "harness/layout.h"
 #include "harness/paths.h"
+#include "models/store.h"
 #include "tools/toolsets.h"
 
 namespace apogee::commands {
@@ -393,10 +395,47 @@ struct AddBackendFlags {
     double temperature = 0.0;
     bool force = false;
 
+    CLI::Option* type_option = nullptr;
     CLI::Option* context_size_option = nullptr;
     CLI::Option* max_tokens_option = nullptr;
     CLI::Option* temperature_option = nullptr;
 };
+
+/// A name the model store knows fills what the flags leave open (M7): a
+/// stored GGUF named `<name>.gguf` gives the type its format runs as, its
+/// file and its projector -- the arguments a hand-typed `add-backend` would
+/// carry, said as such. A flag given always wins; a model path given means
+/// nothing is filled. Two stored GGUFs of that name are refused, listed.
+void fill_from_store(AddBackendFlags& flags) {
+    const std::string_view type{models::backend_type_for_format(models::kGgufFormat)};
+    if (!flags.model_path.empty() || (flags.type_option->count() > 0 && flags.type != type)) {
+        return;
+    }
+    const std::vector<models::StoredGguf> named = models::stored_ggufs_named(
+        models::list_store_ggufs(models::StoreRoots::at(harness::models_dir())), flags.name);
+    if (named.empty()) {
+        return;
+    }
+    if (named.size() > 1) {
+        std::string files;
+        for (const models::StoredGguf& stored : named) {
+            files += "\n  " + stored.file.string();
+        }
+        fail("'" + flags.name + "' is the name of " + std::to_string(named.size()) +
+             " stored GGUFs -- pass --model-path with one of:" + files);
+    }
+    const models::StoredGguf& stored = named.front();
+    flags.type = type;
+    flags.model_path = stored.file.string();
+    std::string said = "--type " + flags.type + " --model-path " + flags.model_path;
+    if (flags.mmproj_path.empty() && !stored.projector.empty()) {
+        flags.mmproj_path = stored.projector.string();
+        said += " --mmproj-path " + flags.mmproj_path;
+    }
+    std::cout << "filled from the store: "
+              << models::weights_handle(stored.model, models::kGgufFormat, stored.id) << "\n  "
+              << said << "\n";
+}
 
 void bind_init(CLI::App& parent, const RootContext& context) {
     auto force = std::make_shared<bool>(false);
@@ -423,15 +462,19 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
     auto flags = std::make_shared<AddBackendFlags>();
 
     CLI::App* cmd = parent.add_subcommand("add-backend", "Add a backend entry");
-    cmd->add_option("name", flags->name, "Name for the new backend")->required();
+    cmd->add_option("name", flags->name,
+                    "Name for the new backend -- a stored GGUF's name fills in the rest")
+        ->type_name(kNewBackendValue)
+        ->required();
 
     std::vector<std::string> types;
     for (const std::string_view type : harness::backend_type_names()) {
         types.emplace_back(type);
     }
-    cmd->add_option("-t,--type", flags->type, "Backend type")
-        ->required()
-        ->check(CLI::IsMember(types));
+    // Not `->required()`: a stored GGUF's name supplies it (M7). Without one,
+    // the callback refuses exactly as the parser did.
+    flags->type_option =
+        cmd->add_option("-t,--type", flags->type, "Backend type")->check(CLI::IsMember(types));
 
     cmd->add_option("--api-key", flags->api_key,
                     "API key. Prefer a ${ENV_VAR} reference, which is stored literally and "
@@ -460,6 +503,10 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
 
     cmd->callback([&context, flags]() {
         const std::filesystem::path path = config_path_for(context);
+        fill_from_store(*flags);
+        if (flags->type.empty()) {
+            throw CLI::RequiredError("--type");
+        }
 
         BackendConfig backend;
         const std::optional<harness::BackendType> type =

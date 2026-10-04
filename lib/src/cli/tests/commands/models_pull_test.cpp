@@ -8,9 +8,12 @@
 #include <random>
 #include <string>
 #include <system_error>
+#include <vector>
 
+#include "harness/config.h"
 #include "models/sidecar.h"
 #include "models/store.h"
+#include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "support/file_time.h"
 #include "support/gguf_builder.h"
@@ -112,6 +115,145 @@ TEST_CASE("one set of weights is deleted by its id or its store path",
         CHECK(plan.removes.front() == gone.parent_path());
     }
     CHECK(std::filesystem::exists(kept));
+}
+
+TEST_CASE("a backend's name deletes the stored GGUF it points at, planned as its handle would be",
+          "[commands][models][delete][backend]") {
+    // M7, the user's transcript: `models delete gemma-4-E2B-F16` was refused
+    // while the store path it meant was hunted by hand.
+    const Store store;
+    const std::filesystem::path f16 = store.add_gguf("org--repo", "111111111111", "repo-F16.gguf");
+    (void)store.add_gguf("org--repo", "222222222222", "repo-Q4_K_M.gguf");
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig local;
+    local.type = apogee::harness::BackendType::LlamaCpp;
+    local.model_path = f16.string();
+    config.backends["repo-F16"] = local;
+
+    const DeletePlan by_backend = plan_delete(store.roots, config, "repo-F16");
+    REQUIRE(by_backend.ok);
+    CHECK(by_backend.backend == "repo-F16");
+    const DeletePlan by_handle = plan_delete(store.roots, "org--repo/gguf/111111111111");
+    REQUIRE(by_handle.ok);
+    CHECK(by_backend.removes == by_handle.removes);
+    CHECK(by_backend.removes == std::vector<std::filesystem::path>{f16.parent_path()});
+    CHECK(by_backend.also_backend.empty());
+}
+
+TEST_CASE("a name the store knows keeps its meaning, and a backend sharing it is said",
+          "[commands][models][delete][backend]") {
+    const Store store;
+    (void)store.add_gguf("org--repo", "111111111111", "repo.gguf");
+    const std::filesystem::path other = store.add_gguf("other", "333333333333", "other.gguf");
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig local;
+    local.type = apogee::harness::BackendType::LlamaCpp;
+    local.model_path = other.string();
+    config.backends["org--repo"] = local;
+
+    const DeletePlan plan = plan_delete(store.roots, config, "org--repo");
+    REQUIRE(plan.ok);
+    CHECK(plan.backend.empty());
+    CHECK(plan.removes == std::vector<std::filesystem::path>{store.roots.models / "org--repo" /
+                                                             "gguf" / "111111111111"});
+    CHECK(plan.also_backend == "org--repo");
+    CHECK(plan.also_backend_weights == "other/gguf/333333333333");
+
+    // A backend whose model is among what goes is no collision: the warning
+    // that it stops working already names it.
+    config.backends["org--repo"].model_path =
+        (store.roots.models / "org--repo" / "gguf" / "111111111111" / "repo.gguf").string();
+    CHECK(plan_delete(store.roots, config, "org--repo").also_backend.empty());
+}
+
+TEST_CASE("a backend with nothing in the store is refused, saying why",
+          "[commands][models][delete][backend]") {
+    const Store store;
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig outside;
+    outside.type = apogee::harness::BackendType::LlamaCpp;
+    outside.model_path = "/somewhere/else.gguf";
+    config.backends["hand-placed"] = outside;
+    apogee::harness::BackendConfig cloud;
+    cloud.type = apogee::harness::BackendType::Anthropic;
+    cloud.model = "claude-sonnet-5";
+    config.backends["claude"] = cloud;
+
+    const DeletePlan placed = plan_delete(store.roots, config, "hand-placed");
+    CHECK_FALSE(placed.ok);
+    CHECK(placed.error ==
+          "backend 'hand-placed' points at /somewhere/else.gguf, outside the model store -- "
+          "Apogee deletes only what is in it");
+    const DeletePlan remote = plan_delete(store.roots, config, "claude");
+    CHECK_FALSE(remote.ok);
+    CHECK(remote.error.starts_with("backend 'claude' (anthropic) has no model file to delete"));
+    CHECK(remote.error.find("apogee config delete-backend claude") != std::string::npos);
+    // A name that is neither: today's refusal, word for word.
+    CHECK(plan_delete(store.roots, config, "nothing").error ==
+          plan_delete(store.roots, "nothing").error);
+}
+
+TEST_CASE("deleting by a backend's name prints and removes what its handle would",
+          "[commands][models][delete][backend]") {
+    // The transcript, inverted, through the command line: the confirmation
+    // text byte for byte the handle's, warning included, and --yes removing
+    // the same entry.
+    const auto install = [](apogee::testing::CliHome& home) {
+        const std::filesystem::path file = home.models() / "google--gemma-4-E2B" / "gguf" /
+                                           "513ee1b91245" / "gemma-4-E2B-F16.gguf";
+        std::filesystem::create_directories(file.parent_path());
+        std::ofstream{file, std::ios::binary} << apogee::testing::minimal_gguf("gemma4");
+        std::ofstream{home.config_path(), std::ios::binary}
+            << "backends:\n  gemma-4-E2B-F16:\n    type: llamacpp\n    model_path: " +
+                   file.string() + "\n";
+        return file;
+    };
+    apogee::testing::CliHome by_name{""};
+    apogee::testing::CliHome by_handle{""};
+    const std::filesystem::path file = install(by_name);
+    (void)install(by_handle);
+    std::string named;
+    std::string handled;
+    REQUIRE(by_name.run({"models", "delete", "gemma-4-E2B-F16"}, &named) == 0);
+    REQUIRE(by_handle.run({"models", "delete", "google--gemma-4-E2B/gguf/513ee1b91245"},
+                          &handled) == 0);
+    const auto in_home = [](std::string text, const apogee::testing::CliHome& home) {
+        // The two homes differ only in their temp paths.
+        for (std::size_t at = text.find(home.home().string()); at != std::string::npos;
+             at = text.find(home.home().string())) {
+            text.replace(at, home.home().string().size(), "<home>");
+        }
+        return text;
+    };
+    CHECK(in_home(named, by_name) == in_home(handled, by_handle));
+    CHECK(named.find("backend 'gemma-4-E2B-F16' points into this and will stop working") !=
+          std::string::npos);
+    CHECK(std::filesystem::exists(file));
+
+    REQUIRE(by_name.run({"models", "delete", "gemma-4-E2B-F16", "--yes"}, &named) == 0);
+    REQUIRE(by_handle.run({"models", "delete", "google--gemma-4-E2B/gguf/513ee1b91245", "--yes"},
+                          &handled) == 0);
+    CHECK(in_home(named, by_name) == in_home(handled, by_handle));
+    CHECK_FALSE(std::filesystem::exists(file.parent_path()));
+}
+
+TEST_CASE("a store name a backend also has says so before the plan",
+          "[commands][models][delete][backend]") {
+    apogee::testing::CliHome home{""};
+    const std::filesystem::path theirs =
+        home.models() / "other" / "gguf" / "333333333333" / "other.gguf";
+    for (const std::filesystem::path& file :
+         {home.models() / "org--repo" / "gguf" / "111111111111" / "repo.gguf", theirs}) {
+        std::filesystem::create_directories(file.parent_path());
+        std::ofstream{file, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+    }
+    std::ofstream{home.config_path(), std::ios::binary}
+        << "backends:\n  org--repo:\n    type: llamacpp\n    model_path: " + theirs.string() + "\n";
+    std::string out;
+    REQUIRE(home.run({"models", "delete", "org--repo"}, &out) == 0);
+    CHECK(
+        out.starts_with("'org--repo' is also a backend -- its model, other/gguf/333333333333, "
+                        "is not what this removes; name that to delete it.\n\nwill remove:\n"));
 }
 
 TEST_CASE("a name containing .. is refused before anything is touched",

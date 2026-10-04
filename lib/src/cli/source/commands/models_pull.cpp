@@ -480,6 +480,49 @@ DeletePlan plan_delete(const models::StoreRoots& roots, std::string_view name) {
     return plan;
 }
 
+DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& config,
+                       std::string_view name) {
+    const auto backend = config.backends.find(std::string{name});
+    std::optional<models::StoredGguf> pointed_at;
+    if (backend != config.backends.end() && !backend->second.model_path.empty()) {
+        pointed_at =
+            models::stored_gguf_at(models::list_store_ggufs(roots),
+                                   harness::expand_env_and_home(backend->second.model_path));
+    }
+    const auto handle_of = [](const models::StoredGguf& stored) {
+        return models::weights_handle(stored.model, models::kGgufFormat, stored.id);
+    };
+
+    DeletePlan plan = plan_delete(roots, name);
+    if (plan.ok) {
+        // The store's meaning stands; a backend of the same name is said.
+        if (pointed_at.has_value() &&
+            std::ranges::find(plan.removes, pointed_at->dir) == plan.removes.end()) {
+            plan.also_backend = std::string{name};
+            plan.also_backend_weights = handle_of(*pointed_at);
+        }
+        return plan;
+    }
+    if (backend == config.backends.end()) {
+        return plan;
+    }
+    if (pointed_at.has_value()) {
+        DeletePlan by_backend = plan_delete(roots, handle_of(*pointed_at));
+        by_backend.backend = std::string{name};
+        return by_backend;
+    }
+    plan.error = backend->second.model_path.empty()
+                     ? "backend '" + std::string{name} + "' (" +
+                           std::string{harness::to_string(backend->second.type)} +
+                           ") has no model file to delete -- remove the backend itself with "
+                           "'apogee config delete-backend " +
+                           std::string{name} + "'"
+                     : "backend '" + std::string{name} + "' points at " +
+                           harness::expand_env_and_home(backend->second.model_path) +
+                           ", outside the model store -- Apogee deletes only what is in it";
+    return plan;
+}
+
 std::string render_repair(const models::StoreRoots& roots, std::string_view name) {
     const models::StoreTarget target = models::resolve_store_target(roots, name);
     if (!target.error.empty() || target.outside || target.format == models::kSafetensorsFormat) {
@@ -1612,16 +1655,34 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     CLI::App* remove = models.add_subcommand("delete", "Remove a model, or one set of its weights");
     remove
         ->add_option("name", *delete_name,
-                     "A model (owner/repo or its directory name), <model>/<format>/<id>, or an id")
-        ->type_name(kModelValue)
+                     "A model (owner/repo or its directory name), <model>/<format>/<id>, an id, "
+                     "or a backend whose model is in the store")
+        ->type_name(kModelOrBackendValue)
         ->required();
     remove->add_flag("-y,--yes", *delete_yes, "Do not ask for confirmation");
 
     remove->callback([delete_name, delete_yes, models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
-        const DeletePlan plan = plan_delete(roots, *delete_name);
+        // The config, for a backend's name (M7); without one, names mean the
+        // store alone, as they always did.
+        harness::Config config;
+        try {
+            const std::filesystem::path path = harness::resolve_config_path(context.config_path);
+            std::error_code code;
+            if (std::filesystem::exists(path, code)) {
+                config = harness::load_config(path);
+            }
+        } catch (const harness::ConfigError&) {
+            // `check` reports a broken config; a store name still deletes.
+        }
+        const DeletePlan plan = plan_delete(roots, config, *delete_name);
         if (!plan.ok) {
             fail(plan.error);
+        }
+        if (!plan.also_backend.empty()) {
+            std::cout << "'" << plan.also_backend << "' is also a backend -- its model, "
+                      << plan.also_backend_weights
+                      << ", is not what this removes; name that to delete it.\n\n";
         }
 
         std::cout << "will remove:\n";

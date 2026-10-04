@@ -433,6 +433,35 @@ std::vector<StoredGguf> list_store_ggufs(const StoreRoots& roots, std::string_vi
     return out;
 }
 
+std::optional<StoredGguf> stored_gguf_at(const std::vector<StoredGguf>& ggufs,
+                                         const std::filesystem::path& file) {
+    const std::filesystem::path normal = file.lexically_normal();
+    for (const StoredGguf& stored : ggufs) {
+        if (stored.file.lexically_normal() == normal) {
+            return stored;
+        }
+    }
+    return std::nullopt;
+}
+
+std::vector<StoredGguf> stored_ggufs_named(const std::vector<StoredGguf>& ggufs,
+                                           std::string_view stem) {
+    std::vector<StoredGguf> out;
+    for (const StoredGguf& stored : ggufs) {
+        if (stored.file.stem().string() == stem) {
+            out.push_back(stored);
+        }
+    }
+    return out;
+}
+
+std::string_view backend_type_for_format(std::string_view format) noexcept {
+    if (format == kGgufFormat) {
+        return "llamacpp";
+    }
+    return {};
+}
+
 std::vector<StoredSnapshot> list_store_snapshots(const StoreRoots& roots, std::string_view model) {
     std::vector<StoredSnapshot> out;
     std::vector<std::filesystem::path> model_paths = subdirectories(roots.safetensors);

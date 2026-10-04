@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "commands/command.h"
+#include "harness/config.h"
 #include "models/quantize.h"
 #include "models/sidecar.h"
 #include "models/store.h"
@@ -52,6 +53,15 @@ struct DeletePlan {
     /// original: `ollama rm`. It never touches that store itself.
     bool ollama_sourced = false;
     std::string ollama_ref;
+
+    /// The backend the name was taken as (M7): its model file is the stored
+    /// GGUF this plan removes. Empty when the name meant the store.
+    std::string backend;
+    /// A backend shares the name the store took, and its model is not what
+    /// goes -- said before the plan, since a user may have meant it (M7).
+    std::string also_backend;
+    /// That backend's model, by its handle.
+    std::string also_backend_weights;
 };
 
 /// Builds the plan for deleting `name` -- `owner/repo`, a model directory
@@ -60,6 +70,14 @@ struct DeletePlan {
 /// Refuses anything outside the store -- a path elsewhere, a `..` -- because
 /// "delete a model by name" must never become "delete a file by path".
 [[nodiscard]] DeletePlan plan_delete(const models::StoreRoots& roots, std::string_view name);
+
+/// `plan_delete`, a backend's name taken too (M7). A name the store knows
+/// means what it always did -- `also_backend` saying when a backend has it --
+/// else a backend whose model file is a stored GGUF means that GGUF's
+/// weights, planned exactly as its handle would be. A backend with no stored
+/// file is refused, saying why.
+[[nodiscard]] DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& config,
+                                     std::string_view name);
 
 /// The GGUF half of `apogee models repair <name>`: re-verify each stored GGUF
 /// `name` covers against its record, and say what to do. Empty when `name`

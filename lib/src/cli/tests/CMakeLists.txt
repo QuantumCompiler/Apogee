@@ -60,6 +60,7 @@ add_executable(apogee_tests
     commands/model_chain_test.cpp
     commands/complete_sources_test.cpp
     commands/models_test.cpp
+    commands/config_cmd_test.cpp
     commands/attachment_guard_test.cpp
     backends/jsonl_framer_test.cpp
     backends/think_filter_test.cpp
@@ -192,6 +193,8 @@ add_executable(apogee_tests
     training/cycle_test.cpp
     support/fake_command.h
     support/fake_command.cpp
+    support/cli_home.h
+    support/cli_home.cpp
     support/env_guard.h
     support/env_guard.cpp
     support/file_time.h

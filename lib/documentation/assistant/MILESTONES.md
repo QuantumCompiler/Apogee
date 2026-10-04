@@ -2459,6 +2459,69 @@ Every other header read goes through the same function, so each is faster the sa
 - `complete_sources_test`: `models info` completes backends and stored handles, and no bare model.
 - No inference was run, by the user's call: nothing in this item loads a model.
 
+### 2026-10-03 — `shell-completion` (maintenance item M7): a backend's name is enough to delete its model or register a stored one
+
+**Why.** The user's delete transcript (2026-10-03) showed the gap twice in three commands.
+- `apogee models delete gemma-4-E2B-F16` — the backend's name, as `models list` prints it — was refused: "no model 'gemma-4-E2B-F16'".
+- The store path that works, `google--gemma-4-E2B/gguf/513ee1b91245`, had to be hunted by hand. The accepted command's own warning then proved the mapping existed the other way: "backend 'gemma-4-E2B-F16' points into this".
+- Registration is the same friction inverted: `config add-backend` hand-types a name, `--type llamacpp` and a `--model-path` the store already knows.
+
+**What was found first.** The item was written as if Apogee had no shell completion. It has had it since v0.1.2:
+- the hidden `__complete` verb, reading candidates from the live config and store;
+- the zsh, bash, fish and PowerShell scripts that `make install` and `install.sh` put in place.
+
+So, **by the user's call**, the item builds on what is installed: no `apogee completion <shell>` command, and no second way to deliver the scripts. What was missing was candidates — `models delete <TAB>` offered store models but no backends, and `config add-backend <TAB>` nothing — plus the two behaviours behind them.
+
+**What was built**
+
+- [x] **`models delete` takes a backend's name** (`commands/models_pull.cpp`, `plan_delete(roots, config, name)`).
+  - A name the store knows means what it always did.
+  - Failing that, a backend whose `model_path` is a stored GGUF means that GGUF's weights, planned exactly as its handle would be. The will-remove text, the warning that the backend stops working, and `--yes` are the handle's, byte for byte.
+  - A store name that a backend also has keeps its store meaning, and the collision is said before the plan: `'org--repo' is also a backend -- its model, other/gguf/…, is not what this removes`. Nothing is said when the backend's model is among what goes, because the existing warning names it.
+  - A backend outside the store, or with no model file (a cloud one), is refused with the reason.
+- [x] **`config add-backend <name>` fills itself from the store** (`commands/config_cmd.cpp`, `fill_from_store`).
+  - A name that is a stored GGUF's file stem gives the type its format runs as, its `model_path` and its projector.
+  - It says them as the arguments they stand for (`filled from the store: <handle>` then `--type llamacpp --model-path … --mmproj-path …`), then makes the same `append_backend` edit a hand-typed command makes.
+  - A flag given always wins: a `--model-path` given, or another `--type`, fills nothing, and a `--mmproj-path` given is kept.
+  - Two stored GGUFs of one name are refused, both listed.
+  - `--type` is no longer required by the parser. When nothing fills it, the callback throws the parser's own `RequiredError`, so a name the store does not know still reads `--type is required` and exits 106.
+- [x] **The format → type map** (`models/store.h`, `backend_type_for_format`): `gguf` → `llamacpp`, one row per format beside the formats themselves, so MLX's `mlx/` (31b) is one more row.
+  - `stored_gguf_at` (the stored GGUF a backend points at) and `stored_ggufs_named` (the stored GGUFs of a name) are the lookups delete, add-backend and completion share.
+- [x] **Completion, through the resolver that exists** (`commands/complete_sources.cpp`), with two name kinds:
+  - `MODEL_OR_BACKEND`, for `models delete`: store models, handles, and the backends whose model is stored, never a cloud one.
+  - `NEW_BACKEND`, for `config add-backend`'s name: free text that offers the file names of the stored GGUFs no backend points at and no backend is named.
+  - Directories and the config only, never a header.
+  - The free riders were already wired: `models info` completes backends and stored weights (M4), and `chat -m` completes backends.
+
+**On the user's store** (read-only, the M4 scratch home): `models delete gemma-4<TAB>` offers `gemma-4-E2B-F16` and `gemma-4-E2B-Q4_K_M`. `config add-backend <TAB>` offers nothing but its hint: every stored GGUF there already has a backend.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Delivery | The installed scripts and the `__complete` that exists; no `apogee completion` — **the user's call** | Completion shipped in v0.1.2; a second delivery path would be a second copy of the scripts. |
+| Shells | zsh and bash checked, fish when present *(default taken)* | Already shipped; `cli.shell_completion` drives the real shells. |
+| A new backend's candidate name | The stored GGUF's file stem *(default taken)* | The name `models list` notes under the row. |
+| A name both the store and a backend have | The store's meaning, the backend said | Today's meaning stands; nothing is removed with fewer words. |
+| No match and no `--type` | The parser's own `RequiredError` | A non-store name behaves exactly as before. |
+| Free riders | Already wired; nothing new *(default taken)* | `models info` (M4) and `chat -m` complete backends. |
+
+**Guardrails, each mutation-tested (17 mutants, all caught on the first pass)**, against the whole unit suite.
+- **Delete:** a backend's name not tried, or tried before the store's; the collision unplanned, unsaid, or said for what goes; an outside backend called modelless; the command reading no config.
+- **Completion:** delete offering no backends; a registered GGUF, or a name already taken, offered as new.
+- **Add-backend:** no fill; a given model path, another type or a given projector filled over; two GGUFs of one name taken as one; the refusal in other words than the parser's; the `gguf` row naming another type.
+
+**Tests.**
+- `config_cmd_test` (new, over `support/cli_home`, a throwaway install the real command tree runs against in process):
+  - the fill written byte for byte as the hand-typed command writes it in a twin install, comments kept;
+  - each flag winning;
+  - the unknown name's exact refusal, with the config untouched;
+  - the ambiguous name.
+- `models_pull_test`: delete by a backend's name planned as its handle; the store's meaning kept and the collision said through the command line; refusals saying why; the confirmation and `--yes` byte-identical to the handle's through the command line.
+- `complete_sources_test`: both kinds over a store of files that are not GGUFs at all.
+- `lifecycle_test`: add-backend's name hint.
+- `cli.shell_completion`: the real zsh, autoloaded and sourced, and the real bash complete a backend for `models delete`, a handle prefix, and an unregistered GGUF's name for `config add-backend`. The three fail against the installed binary from before this item.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.
