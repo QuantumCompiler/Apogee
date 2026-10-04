@@ -44,10 +44,10 @@ using apogee::training::Spawner;
 using apogee::training::TrainOutcome;
 using apogee::training::TrainRequest;
 
-const std::filesystem::path kFixture =
-    std::filesystem::path{APOGEE_TESTS_DIR} / "training" / "fixtures" / "progress.jsonl";
+const std::filesystem::path kFixture = std::filesystem::path{APOGEE_TESTS_DIR} / "business" /
+                                       "training" / "fixtures" / "progress.jsonl";
 const std::filesystem::path kStubs =
-    std::filesystem::path{APOGEE_TESTS_DIR} / "training" / "scripts";
+    std::filesystem::path{APOGEE_TESTS_DIR} / "business" / "training" / "scripts";
 const std::filesystem::path kAssets = std::filesystem::path{APOGEE_ASSETS_DIR} / "training";
 
 std::string read(const std::filesystem::path& path) {

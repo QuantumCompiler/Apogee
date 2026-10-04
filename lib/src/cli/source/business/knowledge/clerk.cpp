@@ -14,7 +14,7 @@
 // The clerk's prompt and schema are GENERATED from lib/src/cli/assets/clerks/
 // capture_prompt.txt and capture_schema.json (the script is recorded in
 // MILESTONES.md). The shipped files and these literals are byte-identical, and
-// tests/knowledge/clerk_test.cpp fails the build the moment they drift -- the
+// tests/business/knowledge/clerk_test.cpp fails the build the moment they drift -- the
 // same contract the config template and the bundled agents keep. Edit the
 // FILES, then regenerate; never edit a literal here.
 //

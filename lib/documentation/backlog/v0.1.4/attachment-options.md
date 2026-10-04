@@ -16,7 +16,7 @@
 - `commands/chat_completer.cpp` — the flag and its values in the command table.
 - `contracts/config.h` / `config.cpp` — the `attachments:` block (`graph: code|off`, default `code`); `contracts/config_edit.cpp` — its editor entry, comment-preserving like every other.
 - `commands/chat_attachments.cpp/.h` — `attach()` takes the resolved method; the resolution function lives here, pure.
-- Tests: `tests/harness/config` round-trips of the block (comments preserved); `tests/commands/` parse tables for `/attach` (paths with spaces, bad values refused with the valid set named); the precedence table.
+- Tests: `tests/data/contracts/config` round-trips of the block (comments preserved); `tests/presentation/commands/` parse tables for `/attach` (paths with spaces, bad values refused with the valid set named); the precedence table.
 - Consumes: [27n](attachment-code-graph.md) (the method the option selects — including its `complete`-skips-graph default, which `--graph=code` overrides); 24 (shipped: completion); 26o (shipped: the flag-completion precedent).
 
 **Reference (Ommi).** No analog — Ommi has neither chat attachments nor per-command option completion of this shape; the config-block-plus-editor pattern is Apogee's own standing mechanism.

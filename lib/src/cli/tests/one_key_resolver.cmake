@@ -22,14 +22,14 @@ if(source_count EQUAL 0)
 endif()
 
 set(allowed
-    "secrets/resolve.cpp"          # the chain itself
-    "secrets/store.cpp"            # the slot file; never names a variable
-    "contracts/config.cpp"           # parses the api_key field
-    "contracts/config_edit.cpp"      # writes the api_key field
-    "contracts/config_template.cpp"  # the starter config's commentary
-    "commands/config_cmd.cpp"      # the --api-key flag, stored literally
-    "httpserver/admin_config.cpp"  # api_key_set in the view; is_literal_api_key
-    "commands/auth_cmd.cpp"        # names the variables to TELL the user which to export
+    "data/secrets/resolve.cpp"          # the chain itself
+    "data/secrets/store.cpp"            # the slot file; never names a variable
+    "data/contracts/config.cpp"           # parses the api_key field
+    "data/contracts/config_edit.cpp"      # writes the api_key field
+    "data/contracts/config_template.cpp"  # the starter config's commentary
+    "presentation/commands/config_cmd.cpp"      # the --api-key flag, stored literally
+    "presentation/httpserver/admin_config.cpp"  # api_key_set in the view; is_literal_api_key
+    "presentation/commands/auth_cmd.cpp"        # names the variables to TELL the user which to export
 )
 
 # Every allowance names a file that exists: one left behind by a move would

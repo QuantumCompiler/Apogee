@@ -48,33 +48,56 @@ foreach(layer IN LISTS LAYERS)
     math(EXPR layer_index "${layer_index} + 1")
 endforeach()
 
-file(GLOB package_dirs LIST_DIRECTORIES true "${APOGEE_SOURCE_DIR}/*")
+# Since A2 the tree says the layers too: every package sits in
+# source/<layer>/<package>/, and the directory must agree with the map -- a
+# package moved without its row, or a row changed without the move, fails.
 set(PACKAGES "")
-foreach(dir IN LISTS package_dirs)
+file(GLOB top_level LIST_DIRECTORIES true "${APOGEE_SOURCE_DIR}/*")
+foreach(dir IN LISTS top_level)
     if(IS_DIRECTORY "${dir}")
-        get_filename_component(package "${dir}" NAME)
-        if(NOT DEFINED LAYER_OF_${package})
-            message(FATAL_ERROR "the package '${package}' is in no layer -- give it a row in "
-                                "tests/layering.cmake's layer map (Presentation, Business, Data "
-                                "or Infrastructure)")
+        get_filename_component(name "${dir}" NAME)
+        if(NOT name IN_LIST LAYERS)
+            message(FATAL_ERROR "'${name}' sits directly under ${APOGEE_SOURCE_DIR} -- a package "
+                                "lives in its layer's directory (presentation, business, data or "
+                                "infrastructure)")
         endif()
-        list(APPEND PACKAGES ${package})
     endif()
+endforeach()
+foreach(layer IN LISTS LAYERS)
+    file(GLOB layer_dirs LIST_DIRECTORIES true "${APOGEE_SOURCE_DIR}/${layer}/*")
+    foreach(dir IN LISTS layer_dirs)
+        if(IS_DIRECTORY "${dir}")
+            get_filename_component(package "${dir}" NAME)
+            if(NOT DEFINED LAYER_OF_${package})
+                message(FATAL_ERROR "the package '${package}' is in no layer -- give it a row in "
+                                    "tests/layering.cmake's layer map (Presentation, Business, "
+                                    "Data or Infrastructure)")
+            endif()
+            if(NOT LAYER_NAME_${package} STREQUAL layer)
+                message(FATAL_ERROR "the package '${package}' sits in ${layer}/ but the layer map "
+                                    "puts it in ${LAYER_NAME_${package}} -- move one to match "
+                                    "the other")
+            endif()
+            list(APPEND PACKAGES ${package})
+        endif()
+    endforeach()
 endforeach()
 foreach(layer IN LISTS LAYERS)
     foreach(package IN LISTS LAYER_${layer})
         if(NOT package IN_LIST PACKAGES)
             message(FATAL_ERROR "the layer map names '${package}', which is not a package under "
-                                "${APOGEE_SOURCE_DIR} -- a package that moved must move here too")
+                                "${APOGEE_SOURCE_DIR}/${layer} -- a package that moved must move "
+                                "here too")
         endif()
+        set(PACKAGE_DIR_${package} "${APOGEE_SOURCE_DIR}/${layer}/${package}")
     endforeach()
 endforeach()
 
 set(UPWARD "")
 set(layered_sources 0)
 foreach(package IN LISTS PACKAGES)
-    file(GLOB_RECURSE package_sources "${APOGEE_SOURCE_DIR}/${package}/*.h"
-                                      "${APOGEE_SOURCE_DIR}/${package}/*.cpp")
+    file(GLOB_RECURSE package_sources "${PACKAGE_DIR_${package}}/*.h"
+                                      "${PACKAGE_DIR_${package}}/*.cpp")
     foreach(source IN LISTS package_sources)
         math(EXPR layered_sources "${layered_sources} + 1")
         file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"[a-z_]+/")
@@ -107,10 +130,10 @@ set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph t
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
-    file(GLOB_RECURSE package_sources "${APOGEE_SOURCE_DIR}/${package}/*.h"
-                                      "${APOGEE_SOURCE_DIR}/${package}/*.cpp")
+    file(GLOB_RECURSE package_sources "${PACKAGE_DIR_${package}}/*.h"
+                                      "${PACKAGE_DIR_${package}}/*.cpp")
     if(package_sources STREQUAL "")
-        message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/${package} — "
+        message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_${package}} — "
                             "this check would pass vacuously")
     endif()
     list(APPEND ALL_SOURCES ${package_sources})
@@ -144,10 +167,10 @@ endif()
 # That is what lets any subsystem publish to it without an include cycle --
 # and the day it includes `harness/` or `httpserver/`, a backend that publishes
 # has pulled the server into the harness's dependency graph.
-file(GLOB_RECURSE events_sources "${APOGEE_SOURCE_DIR}/events/*.h"
-                                 "${APOGEE_SOURCE_DIR}/events/*.cpp")
+file(GLOB_RECURSE events_sources "${PACKAGE_DIR_events}/*.h"
+                                 "${PACKAGE_DIR_events}/*.cpp")
 if(events_sources STREQUAL "")
-    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/events — "
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_events} — "
                         "this check would pass vacuously")
 endif()
 foreach(source IN LISTS events_sources)
@@ -170,10 +193,10 @@ endif()
 # `httpserver/` or `commands/`, the one place that returns a key has grown a
 # dependency on a surface that renders -- the leak the package exists to
 # make impossible.
-file(GLOB_RECURSE secrets_sources "${APOGEE_SOURCE_DIR}/secrets/*.h"
-                                  "${APOGEE_SOURCE_DIR}/secrets/*.cpp")
+file(GLOB_RECURSE secrets_sources "${PACKAGE_DIR_secrets}/*.h"
+                                  "${PACKAGE_DIR_secrets}/*.cpp")
 if(secrets_sources STREQUAL "")
-    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/secrets — "
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_secrets} — "
                         "this check would pass vacuously")
 endif()
 foreach(source IN LISTS secrets_sources)
@@ -197,10 +220,10 @@ endif()
 # line so it is testable as operations with no terminal at all -- the day it
 # includes `commands/`, the painter's bytes and the renderer's decisions have
 # become one thing again.
-file(GLOB_RECURSE markdown_sources "${APOGEE_SOURCE_DIR}/markdown/*.h"
-                                   "${APOGEE_SOURCE_DIR}/markdown/*.cpp")
+file(GLOB_RECURSE markdown_sources "${PACKAGE_DIR_markdown}/*.h"
+                                   "${PACKAGE_DIR_markdown}/*.cpp")
 if(markdown_sources STREQUAL "")
-    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/markdown — "
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_markdown} — "
                         "this check would pass vacuously")
 endif()
 foreach(source IN LISTS markdown_sources)
@@ -223,10 +246,10 @@ endif()
 # includes `commands/` or `httpserver/`, the record logic every surface
 # shares has grown a dependency on one of them, and the parity between the
 # CLI capture, chat's /capture and the HTTP twin stops being structural.
-file(GLOB_RECURSE knowledge_sources "${APOGEE_SOURCE_DIR}/knowledge/*.h"
-                                    "${APOGEE_SOURCE_DIR}/knowledge/*.cpp")
+file(GLOB_RECURSE knowledge_sources "${PACKAGE_DIR_knowledge}/*.h"
+                                    "${PACKAGE_DIR_knowledge}/*.cpp")
 if(knowledge_sources STREQUAL "")
-    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/knowledge — "
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_knowledge} — "
                         "this check would pass vacuously")
 endif()
 foreach(source IN LISTS knowledge_sources)
@@ -250,10 +273,10 @@ endif()
 # records it materialises, the loop (for the one OUTPUT FORMAT wording and
 # `run_structured`), the harness, the platform seam and itself -- never a
 # surface, and never a backend: generation and embedding arrive as closures.
-file(GLOB_RECURSE graph_sources "${APOGEE_SOURCE_DIR}/graph/*.h"
-                                "${APOGEE_SOURCE_DIR}/graph/*.cpp")
+file(GLOB_RECURSE graph_sources "${PACKAGE_DIR_graph}/*.h"
+                                "${PACKAGE_DIR_graph}/*.cpp")
 if(graph_sources STREQUAL "")
-    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/graph — "
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_graph} — "
                         "this check would pass vacuously")
 endif()
 foreach(source IN LISTS graph_sources)
@@ -278,10 +301,10 @@ endif()
 # and itself -- never a surface, and never a backend: generation arrives as a
 # closure. The JSONL framer, `transport/jsonl_framer.h`, is allowed by name;
 # the run manifests hash with `contracts/sha256.h`.
-file(GLOB_RECURSE training_sources "${APOGEE_SOURCE_DIR}/training/*.h"
-                                   "${APOGEE_SOURCE_DIR}/training/*.cpp")
+file(GLOB_RECURSE training_sources "${PACKAGE_DIR_training}/*.h"
+                                   "${PACKAGE_DIR_training}/*.cpp")
 if(training_sources STREQUAL "")
-    message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/training — "
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_training} — "
                         "this check would pass vacuously")
 endif()
 foreach(source IN LISTS training_sources)
@@ -314,10 +337,10 @@ foreach(rule "contracts:contracts|platform"
     string(REPLACE ":" ";" parts "${rule}")
     list(GET parts 0 package)
     list(GET parts 1 allowed)
-    file(GLOB_RECURSE carved_sources "${APOGEE_SOURCE_DIR}/${package}/*.h"
-                                     "${APOGEE_SOURCE_DIR}/${package}/*.cpp")
+    file(GLOB_RECURSE carved_sources "${PACKAGE_DIR_${package}}/*.h"
+                                     "${PACKAGE_DIR_${package}}/*.cpp")
     if(carved_sources STREQUAL "")
-        message(FATAL_ERROR "no sources found under ${APOGEE_SOURCE_DIR}/${package} — "
+        message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_${package}} — "
                             "this check would pass vacuously")
     endif()
     foreach(source IN LISTS carved_sources)

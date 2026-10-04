@@ -5,7 +5,7 @@
 # Ommi's dominant early bug class was *silent install drift*: `make install`
 # seeded one tree, the install script another, and nothing failed -- a fresh
 # install simply lacked a directory some command needed months later. The fix
-# adopted here is structural (one layout declaration, in source/contracts/layout.h)
+# adopted here is structural (one layout declaration, in source/data/contracts/layout.h)
 # and this is the check that keeps it honest.
 #
 # It installs twice, by two different paths, into two throwaway roots, and

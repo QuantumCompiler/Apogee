@@ -15,7 +15,7 @@
 - `agentloop/validate.h/.cpp` (new): the seam registry (tool-args, extraction, answer-on-request), the cheap-first pipeline, the bounded-round state; pure over injected checkers and the member-call closure.
 - `agentloop/loop.cpp`: the tool-args hook (between selection and execution) and the answer-on-request path (`/check` or flag — see open call); `knowledge/`'s extraction call sites: the extraction hook.
 - `harness/config` (27d's block): `validate:` per suite — seams on/off, the verifier member, through the one editor.
-- Tests: `tests/agentloop/validate` — pipeline tables (structural catches → no model call, asserted by call counts; model disagreement → one round → surface), the budget interplay with 27f, goldens for the surfaced-disagreement rendering.
+- Tests: `tests/business/agentloop/validate` — pipeline tables (structural catches → no model call, asserted by call counts; model disagreement → one round → surface), the budget interplay with 27f, goldens for the surfaced-disagreement rendering.
 - Consumes: [27d](model-suites.md) (the suite, the verifier member), [27f](suite-consult.md) (the call mechanics and caps — this item adds *policy*, not a second model-calling path); 26f (shipped — the structural floor); the rerank judge's degradation honesty (shipped) as the reporting model.
 
 **Reference (Ommi).** The judge shape is the analog — Ommi's training eval gate and rerank judge (both ported) are models scoring models, harness-wired; a *configurable* validation policy at interaction seams has no analog there.

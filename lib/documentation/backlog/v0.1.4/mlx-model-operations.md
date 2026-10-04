@@ -15,7 +15,7 @@
 - `commands/models.cpp`: list/info/status rows for the format; `commands/check.cpp`: the store validation extended.
 - `models/convert.cpp` + the venv script path: `models convert --mlx <source>` over the script runner; staging and Ctrl-C per the house rules.
 - `harness/` window plumbing: the `mlx` entry type's context size resolved from `mlx_info` when unset (the 26a chain).
-- Tests: `tests/models/mlx_info_test.cpp` goldens over fixture directories (well-formed, missing fields, truncated shard); store/migrate cases; a pull e2e against a local fixture "source"; convert staged-cleanup case.
+- Tests: `tests/business/models/mlx_info_test.cpp` goldens over fixture directories (well-formed, missing fields, truncated shard); store/migrate cases; a pull e2e against a local fixture "source"; convert staged-cleanup case.
 
 **Reference (Ommi).** No analog — Ommi had no second local format (and no open acquisition at all; its models were allowlisted). The in-house precedents consumed: the model store and its ladder (Milestone N, revised 2026-09-23), the GGUF info reader's honesty rule, and the training track's SafeTensors snapshot fetching.
 

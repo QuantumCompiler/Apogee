@@ -12,7 +12,7 @@
 # the config-display command means a second chain has started.
 #
 # This is the structural half of the item's acceptance criterion. The table test
-# in tests/harness/roles_test.cpp proves the chain is CORRECT; this proves it is
+# in tests/business/harness/roles_test.cpp proves the chain is CORRECT; this proves it is
 # the ONLY one. Neither is sufficient alone: a correct resolver nobody calls
 # fixes nothing.
 #
@@ -37,13 +37,13 @@ endif()
 #   commands/check.cpp   -- validates each pointer AS WRITTEN, which is the one
 #                           place the unresolved value is the point
 set(allowed
-    "harness/roles.cpp"
-    "contracts/config.cpp"
-    "contracts/config_edit.cpp"
-    "contracts/config_template.cpp"
-    "harness/harness.cpp"
-    "commands/config_cmd.cpp"
-    "commands/check.cpp"
+    "business/harness/roles.cpp"
+    "data/contracts/config.cpp"
+    "data/contracts/config_edit.cpp"
+    "data/contracts/config_template.cpp"
+    "business/harness/harness.cpp"
+    "presentation/commands/config_cmd.cpp"
+    "presentation/commands/check.cpp"
 )
 
 # Every allowance names a file that exists: one left behind by a move would

@@ -14,7 +14,7 @@
 - `tools/consult.h/.cpp` (new): the tool — schema (member role, question), the bounded call through the resolver (`harness/roles.h`, the suite rung), the answer as the result; registered by the chat/complete surfaces when the suite designates members.
 - `harness/config` (27d's `suites:` block): the `consultable:` member list and the caps, through the one editor.
 - `agentloop/` narration: the consult line in the thinking block per 26n's conventions (label, member, duration), collapsing with it.
-- Tests: `tests/tools/consult` — registration lifecycle (suite with/without consultables), the brief's isolation (wire-recorded: the member's request contains exactly the brief), caps enforced with honest refusals ("consult budget spent this turn"), serial execution asserted; a metered member refused at config time.
+- Tests: `tests/business/tools/consult` — registration lifecycle (suite with/without consultables), the brief's isolation (wire-recorded: the member's request contains exactly the brief), caps enforced with honest refusals ("consult budget spent this turn"), serial execution asserted; a metered member refused at config time.
 - Consumes: [27d](model-suites.md) (the suite, member windows); 26g (shipped — ranking); 26b's resolver seams (shipped); 26n (narration conventions, adopted early).
 
 **Reference (Ommi).** No analog — Ommi's models never called models; the harness-initiated judge/teacher calls in its training track (`initSingleBackend`) are the closest shape and were never a tool. The isolation contract (brief-only context) follows the utility seams' existing practice, made explicit.

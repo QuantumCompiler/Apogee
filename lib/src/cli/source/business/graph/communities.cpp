@@ -13,7 +13,7 @@
 #include "harness/harness.h"
 
 // The summariser's prompt is GENERATED from lib/src/cli/assets/clerks/
-// community_prompt.txt; tests/graph/communities_test.cpp fails the build the
+// community_prompt.txt; tests/business/graph/communities_test.cpp fails the build the
 // moment the two drift. Edit the FILE, then regenerate; never the literal.
 
 namespace apogee::graph {

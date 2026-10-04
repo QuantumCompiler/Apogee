@@ -66,7 +66,7 @@ bool is_helper(ModelRole role) noexcept {
 
 Resolution resolve_backend(const Config& config, const RoleRequest& request) {
     // The order below IS the contract, and it is table-tested rung by rung in
-    // tests/harness/roles_test.cpp. Reordering these five returns is the whole
+    // tests/business/harness/roles_test.cpp. Reordering these five returns is the whole
     // bug this file exists to prevent, so it is asserted rather than reviewed.
     if (const std::string_view value = trim(request.override); !value.empty()) {
         return {.key = std::string{value}, .from = ResolvedFrom::Override};

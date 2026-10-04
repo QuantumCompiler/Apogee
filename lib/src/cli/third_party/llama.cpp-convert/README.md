@@ -37,7 +37,7 @@ requirement set still installs PyPI's `gguf`, for the dependencies it brings
 (numpy, tqdm, PyYAML, requests); it is shadowed, never imported.
 
 **How it reaches the user.** `scripts/generate_training_assets.py` compiles
-every file here into `source/harness/assets_converter.cpp` (chunked raw
+every file here into `source/data/contracts/assets_converter.cpp` (chunked raw
 string literals, under MSVC's limit), and the one seeding path materialises
 them under `~/.apogee/training/scripts/convert/` skip-if-present -- the same
 contract the bundled agents, kits and drivers keep. `apogee check` reports

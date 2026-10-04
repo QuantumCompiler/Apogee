@@ -15,7 +15,7 @@
 - `contracts/config.h/.cpp` + `config_edit.cpp`: the `suites:` block (members per role; optional per-member `context_size`, `toolset`) and its editor entries.
 - `commands/chat.cpp` (+ the one command table / `chat_completer`): `--suite`, `/suite` with completion (the 24/26o precedents), the banner naming the active suite.
 - `commands/models_cmd` (`status`): the suite column/rung in the existing output.
-- Tests: `tests/harness/roles` chain tables extended (suite set/unset × every rung); config round-trips with comments; `models status` goldens.
+- Tests: `tests/business/harness/roles` chain tables extended (suite set/unset × every rung); config round-trips with comments; `models status` goldens.
 - Consumes: 26g (shipped) for toolset trimming; 26k's `draft:<backend>` precedent for backend references in config; the shipped shell-completion resolver (`__complete`, [Milestone G](../../assistant/MILESTONES.md#milestone-g--the-terminal-ux-layer)) picks up suite names as a free rider.
 
 **Reference (Ommi).** The role pointers and the one-resolver discipline are the ported analog — `roles.h`'s own header records Ommi's duplicated-resolver bug as its reason to exist. **A named suite unit has no Ommi analog**; Ommi's nearest shape is training's per-run judge/teacher providers (`initSingleBackend`), task-scoped model bundles that never reached chat.

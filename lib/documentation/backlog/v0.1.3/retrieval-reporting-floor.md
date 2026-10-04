@@ -7,14 +7,14 @@
 - **Scales never mix.** Strength is computed per retriever (RRF, cosine, normalized BM25) and the retriever tag stays on the line — the rule `RagResult::retriever` already states ("a number shown without its retriever invites exactly the comparison that cannot be made") extends to the floor: there is no single threshold constant.
 - **The floor is honest, not silent.** Below-floor is a said outcome ("nothing relevant…"), never a quiet absence; the existing principle that answering without retrieved context beats refusing is untouched — the turn still runs.
 - **Lexical saturation is respected.** Normalized BM25 cannot tell the probe's irrelevant question from its on-topic one by score; its floor must use a different signal (question-term coverage of the hit) or be honestly absent — never a score threshold that the measurement shows cannot work.
-- **Raw facts survive for machines.** Wherever the result reaches a machine surface (29e's JSON reads, machine-mode events), the raw score and retriever ride along; the readable strength is presentation.
+- **Raw facts survive for machines.** Wherever the result reaches a machine surface (28h's JSON reads, machine-mode events), the raw score and retriever ride along; the readable strength is presentation.
 - Code style carries: `.h`/`.cpp` pairs, smart pointers only.
 
 **Seam + files.**
 - `agentloop/rag.cpp` / `rag.h` — the floor at the two packaging sites (`package_attachments` and the collection path); `RagResult` gains the strength/floored facts the renderer needs.
 - `agentloop/retriever.h/.cpp` — the per-retriever strength mapping and floor live beside the scale knowledge (RRF's ceiling from `embedstore/vector.h`'s `kRrfK`, cosine as-is, BM25's coverage signal).
 - `commands/helpers.cpp` — the one line renderer: strength first, raw + retriever kept.
-- Tests: `tests/agentloop/` rag tables — boundary cases per retriever, the floored-turn wording, the one-renderer golden.
+- Tests: `tests/business/agentloop/` rag tables — boundary cases per retriever, the floored-turn wording, the one-renderer golden.
 - Consumes: 26d's attachment pipeline (shipped), 26c's budget behavior (shipped) — unchanged by this item.
 
 **Reference (Ommi).** No analog: Ommi's knowledge layer (`lib/cli/documentation/internal/KNOWLEDGE.md`) reports hits without a floor or a strength scale — this failure mode was inherited faithfully and is being fixed in Apogee first.

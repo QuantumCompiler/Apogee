@@ -18,7 +18,7 @@
 
 // The extractor's prompt and schema are GENERATED from lib/src/cli/assets/
 // clerks/extract_prompt.txt and extract_schema.json. The shipped files and
-// these literals are byte-identical, and tests/graph/extract_test.cpp fails
+// these literals are byte-identical, and tests/business/graph/extract_test.cpp fails
 // the build the moment they drift -- the same contract the capture clerk, the
 // config template and the bundled agents keep. Edit the FILES, then
 // regenerate; never edit a literal here.

@@ -15,7 +15,7 @@
 - `commands/chat.cpp` (and the shared interactive-entry seam it uses): the first-launch offer hook — fires only when a terminal is interactive, providers are detected, zero provider backends are configured, and the asked-once marker is unset.
 - `contracts/config_edit.cpp`: reused as-is (the add-backend writer); no new writer.
 - The per-provider default entry (name, type, whether a `model:` is written) lives beside 28a's knowledge table — one table, one home.
-- Tests: `tests/commands/` — register-pass tables (none detected / some / all registered already / name collision), the once-ever offer lifecycle, the pipe/machine/serve suppression, config byte-comparison for the declined path.
+- Tests: `tests/presentation/commands/` — register-pass tables (none detected / some / all registered already / name collision), the once-ever offer lifecycle, the pipe/machine/serve suppression, config byte-comparison for the declined path.
 - Consumes: [provider-detection.md](provider-detection.md) (tiers, cache, knowledge table); the shipped `config add-backend` and editor; 26o's precedent that session-scoped consent never loosens config.
 
 **Reference (Ommi).** No analog — Ommi never offered registration; its backends were always hand-configured. The consent shape follows Apogee's own recorded spirit (nothing spent or changed at scale on Apogee's initiative — the 26e rule, applied to config).

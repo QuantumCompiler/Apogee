@@ -79,7 +79,7 @@ foreach(source IN LISTS sources)
             # goes through `kCredentialsFileName`, so this is the whole
             # exemption -- a vendor's file of the same name is still caught
             # anywhere else, including secrets/store.cpp.
-            if(relative STREQUAL "secrets/store.h" AND pattern STREQUAL "credentials[.]json")
+            if(relative STREQUAL "data/secrets/store.h" AND pattern STREQUAL "credentials[.]json")
                 continue()
             endif()
             if(line MATCHES "${pattern}")

@@ -6,15 +6,15 @@
 - **`check` stays offline and fast:** the section reads the cache and runs at most 28a's cheap re-checks (existence, `command -v`, key resolution); expensive probes only under the fingerprint rule. A missing cache degrades to "not scanned yet — run `apogee check --refresh-providers` or `providers scan`", never to silence or a probe storm.
 - **Words, not claims:** the vocabulary is the tier model's — *installed / credentials found / verified <date> / not found / unknown* — with evidence named where it helps ("logged in per `codex login status`"). The word "authenticated" appears nowhere.
 - **The verified record is passive and local:** written on a provider backend's successful turn (any surface), read by displays; never earned by a probe turn — no code path spends tokens to verify on Apogee's initiative. It is disposable cache state: absent means "not verified that we saw", never an error.
-- **One set of facts:** the CLI rendering, any JSON output (the 29e conventions, adopted whether or not [29e](../v0.1.6/machine-readable-reads.md) has shipped first), and `check`'s section all read the same tier structure — no surface computes its own.
+- **One set of facts:** the CLI rendering, any JSON output (the 28h conventions, adopted whether or not [28h](../v0.1.5/machine-readable-reads.md) has shipped first), and `check`'s section all read the same tier structure — no surface computes its own.
 - **Layering holds:** the write hook lives at the backends' completion seam via the 28a cache module; the harness never includes backends; `check` and `models` consume through the same module. Code style carries: `.h`/`.cpp` pairs, smart pointers only.
 
 **Seam + files.**
 - `commands/check.cpp`: the Providers section — configured provider backends first (tier, warn + remediation on missing binary), then detected-unregistered mentions; the `--refresh-providers` spelling riding `check`'s existing flag conventions.
 - `commands/models_cmd` (list/info): provider rows' `STATE`/`VERIFIED` cells from the tier structure; `models info` gains the evidence line for a provider backend.
 - `backends/provider_cache.h/.cpp` (28a's): the verified-slot write, called from the shared provider-backend completion seam — one helper, each provider backend type calling it on turn success.
-- Tests: `tests/commands/` — the check section against scripted cache states (including no cache); PATH-stripped sandbox check warns (the spike's probe, inverted into a test); `models list` golden rows per tier; the verified write exercised through the mock-shaped completion seam.
-- Consumes: [provider-detection.md](provider-detection.md) (tiers, cache, cheap-check rules); the use-time error text (shipped) as the remediation source; [29e](../v0.1.6/machine-readable-reads.md) output conventions (adopted early, consumed decision).
+- Tests: `tests/presentation/commands/` — the check section against scripted cache states (including no cache); PATH-stripped sandbox check warns (the spike's probe, inverted into a test); `models list` golden rows per tier; the verified write exercised through the mock-shaped completion seam.
+- Consumes: [provider-detection.md](provider-detection.md) (tiers, cache, cheap-check rules); the use-time error text (shipped) as the remediation source; [28h](../v0.1.5/machine-readable-reads.md) output conventions (adopted early, consumed decision).
 
 **Reference (Ommi).** The doctor precedent is Ommi's `check` (its models doctor read GGUF headers so "a model that would die on its first turn is caught by the doctor rather than a user" — MODELS.md; the exact failure-shape this item ports to providers). No analog for provider tiers or a verified record.
 
@@ -31,7 +31,7 @@
 - The inverted spike probe as a pinned test: a configured `claude-cli` backend with no binary on PATH makes `check` **warn** with the remediation text — never `ok`.
 - Golden `check` sections and `models list` rows across the cache-state matrix (no cache / absent / installed / credentialed / verified, per provider type).
 - The passive-only pin: no code path issues a provider turn from `check`, `models` or the cache module (asserted structurally, the no-hot-path style).
-- JSON and human outputs carry the same tier facts (golden-compared where 29e's shape exists).
+- JSON and human outputs carry the same tier facts (golden-compared where 28h's shape exists).
 
 **Acceptance criteria:**
 - [ ] In the sandbox with a registered `claude-cli` backend and a stripped PATH, `apogee check` warns on that backend naming the install/binary remediation; with the binary present, it reports the tier honestly instead of bare `ok`.

@@ -12,7 +12,7 @@
 **Seam + files.**
 - `tools/toolsets.cpp` (or the unit that builds `ToolRegistry::environment()` today): `tool_use_policy(registry)` — composes the paragraph from the registered reach-sensitive tools, appended to the existing note; pure, golden-testable.
 - `agent/web_search.cpp`, `agent/fetch_url.cpp`: descriptions led by trigger cases ("current events, weather, prices, scores, anything time-sensitive or after your training data" / "read a page a search found, or any URL the user or a result names") ahead of the output shape.
-- Tests: `tests/tools/` goldens for the note per registry composition (search+fetch; fetch only; neither — the policy paragraph shrinking honestly each time); the byte-stable-across-turns assertion; description trigger-phrase assertions so a later rewrite cannot silently regress the reach behavior.
+- Tests: `tests/business/tools/` goldens for the note per registry composition (search+fetch; fetch only; neither — the policy paragraph shrinking honestly each time); the byte-stable-across-turns assertion; description trigger-phrase assertions so a later rewrite cannot silently regress the reach behavior.
 - Live verification on ship (recorded in MILESTONES per house style): the motivating transcript's question against Qwen3-VL-8B — 8B-class, per the standing no-27B-until-26i rule — issues a `web_search` on the first ask.
 
 **Reference (Ommi).** No analog — Ommi never put tools in front of local models at all (the 25b finding), so the reach problem could not arise there. The in-house precedents consumed: 25d's environment note (the vehicle), 24e's `web_search` and 25f's `fetch_url` (the subjects), and Milestone P's profile registry (the named escalation path below).

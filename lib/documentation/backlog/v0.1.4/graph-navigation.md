@@ -7,15 +7,15 @@
 - **One traversal core.** The CLI verbs, the toolset, and any admin read all call one implementation in `graph/`; the agentloop's expansion keeps its own budgeted path but shares the store queries — no second neighbor-walk growing its own bugs.
 - **Honest resolution:** a name that matches nothing says so and suggests near matches; a name matching several nodes lists them and asks for the qualified one, never silently picks. Graphs-first precedence (a named graph over its member collections) applies exactly as it does for expansion.
 - **Bounded output by construction:** `path` caps hops, `explain` caps neighbors per relation, `query` keeps the expansion budget — a model-facing tool that can dump an unbounded subgraph is a context bomb.
-- **Parity:** the verbs ride `--graph`/`--collection` selection like every graph command; machine-readable output follows [29e](../v0.1.6/machine-readable-reads.md)'s `--output-format json` conventions (adopted whether or not 29e has shipped first); served reads follow the existing admin graph routes' pattern.
+- **Parity:** the verbs ride `--graph`/`--collection` selection like every graph command; machine-readable output follows [28h](../v0.1.5/machine-readable-reads.md)'s `--output-format json` conventions (adopted whether or not 28h has shipped first); served reads follow the existing admin graph routes' pattern.
 
 **Seam + files.**
 - `graph/navigate.h/.cpp` (new, guarded like the rest of `graph/`): `shortest_path`, `neighborhood`, `node_card` (the explain payload) over `embedstore/graph` queries; pure over an injected store handle.
 - `embedstore/graph.h/.cpp`: the two or three indexed queries traversal needs (edges by node and relation, bidirectional), added beside the existing ones.
-- `commands/graph.cpp`: the three verbs, human rendering (hops as `a -[calls·extracted]-> b`), JSON per 29e.
+- `commands/graph.cpp`: the three verbs, human rendering (hops as `a -[calls·extracted]-> b`), JSON per 28h.
 - `tools/` (the `graph` toolset): `graph_query`, `graph_path`, `graph_explain`, `graph_neighbors` — thin wrappers over the one core, registered read-only; served by `__mcp-tools` with zero additional code (asserted, not assumed).
 - `httpserver/`: read twins only where the existing graph admin surface already has the pattern; nothing mutating.
-- Tests: `tests/graph/navigate_test.cpp` (path/neighborhood over a fixture graph, table-tested: no path, self, caps, ambiguity); `tests/tools/` for the toolset's bounds; an `mcp_e2e`-style check that an external MCP client reaches `graph_path`.
+- Tests: `tests/business/graph/navigate_test.cpp` (path/neighborhood over a fixture graph, table-tested: no path, self, caps, ambiguity); `tests/business/tools/` for the toolset's bounds; an `mcp_e2e`-style check that an external MCP client reaches `graph_path`.
 
 **Reference (Ommi).** No analog — Ommi's graph layer (the shape Milestone Y ported) had build and expansion, not user-facing traversal. External prior art: Graphify's `query` / `path` / `explain` verbs and its MCP tool set, adopted in Apogee idiom; divergence: no "strict mode" forcing models through the graph — the toolset is offered, selection stays the model's (and [26g](../../assistant/MILESTONES.md#milestone-f--the-shared-agent-loop)'s, shipped 2026-10-03).
 

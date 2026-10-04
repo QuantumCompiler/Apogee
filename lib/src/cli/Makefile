@@ -83,7 +83,7 @@ build:
 #
 # That last step is the parity rule in one line: this target does NOT know what
 # `~/.apogee/` contains. `apogee check --fix` creates it from the single
-# declaration in source/contracts/layout.h, and install.sh / install.ps1 end with
+# declaration in source/data/contracts/layout.h, and install.sh / install.ps1 end with
 # the same call -- so no install path holds a list of directories that could go
 # stale against the others. Ommi's dominant early bug class was exactly that
 # drift; the CI parity gate diffs two installs to keep it closed.

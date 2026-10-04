@@ -2,7 +2,7 @@
 #
 # The shell stubs, run in the real shells against the real binary.
 #
-# The protocol's own tests (`tests/commands/lifecycle_test.cpp`) prove what
+# The protocol's own tests (`tests/presentation/commands/lifecycle_test.cpp`) prove what
 # `apogee __complete` answers. They cannot see what a stub SENDS it, and that
 # is where two of the bugs lived that made nested verbs never complete in zsh:
 #

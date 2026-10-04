@@ -6,7 +6,7 @@
 - **Additive only.** `session` keeps every field it has; `capabilities` is a new field, `hello` a new inbound type. A `protocol_version: 1` driver that never sends `hello` sees today's behaviour exactly. No version bump.
 - **The child still speaks first.** `session` is emitted unprompted as today; `hello` refines it (a host that sent one may get capabilities scoped to what it asked for), never gates it — a contract where the child waited for `hello` would hang every existing driver.
 - **The conformance discipline extends:** the new field and inbound type are documented in machine-mode.md and pinned by `cli.machine_schema_conformance` in both directions, like everything else in the protocol.
-- **Field-tolerance becomes explicit.** Rule 1 covers unknown *types*; the stability promise must also state that drivers ignore unknown *fields* on known events — the additions this ring makes (capabilities here, `turn` in [29c](machine-turn-control.md)) depend on it.
+- **Field-tolerance becomes explicit.** Rule 1 covers unknown *types*; the stability promise must also state that drivers ignore unknown *fields* on known events — the additions this ring makes (capabilities here, `turn` in [28f](machine-turn-control.md)) depend on it.
 - **No secrets in the handshake:** capabilities name what the binary can do, never a key, a path into the private layout, or a config value.
 
 **Seam + files.**
@@ -22,7 +22,7 @@
 - 2026-09-25 — **The push channel is parked, the user's call**, with the spike's evidence: v1's "events arrive in response to turns" held comfortably for an embedding host. If ever wanted, `capabilities` is where a host and binary would negotiate it — nothing in this item's design forecloses that.
 
 **Open calls:**
-- [default: `capabilities` carries `events` (outbound types), `accepts` (inbound types), `tools` (bool), `ask` (bool), `schema` (the schema version [29d](machine-schema-artifact.md) will publish)] The field's shape.
+- [default: `capabilities` carries `events` (outbound types), `accepts` (inbound types), `tools` (bool), `ask` (bool), `schema` (the schema version [28g](machine-schema-artifact.md) will publish)] The field's shape.
 - [default: `hello` carries `client` `{name, version}` and optional `wants` (inbound types the host intends to use); the binary logs it to the session for diagnostics and does not change behaviour on it in the first cut] What `hello` does beyond declaring.
 - [default: a `hello` sent mid-conversation is ignored with a dim stderr note, not an error] Misuse handling.
 
@@ -38,4 +38,4 @@
 - [ ] `hello` from a host is accepted first-line, recorded, and harmless everywhere else — including against the *previous* release's binary (ignored, by its own inbound tolerance).
 - [ ] machine-mode.md carries the stability promise: v1's guarantees, type *and* field additivity, and the deprecation policy, conformance-pinned where mechanical.
 
-**Scope note.** Item **29a**, earmarked for **v0.1.6** — first of the integration ring; gated on nothing pending. Out of scope: any push channel (parked, the user's call); behaviour changes negotiated by `hello` (later items may add them); the schema artifact itself ([29d](machine-schema-artifact.md)).
+**Scope note.** Item **28d** (27a at birth; 28a, then 29a, through the day's renumbers; 28d since 2026-10-03's collapse into v0.1.5 — the user's calls), earmarked for **v0.1.5** — first of the integration ring; gated on nothing pending. Out of scope: any push channel (parked, the user's call); behaviour changes negotiated by `hello` (later items may add them); the schema artifact itself ([28g](machine-schema-artifact.md)).

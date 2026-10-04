@@ -17,7 +17,7 @@
 
     **The parity rule.** This script does not know what the data directory
     contains. It runs `apogee check --fix`, and the binary creates the layout
-    from the single declaration in source/contracts/layout.h -- exactly as
+    from the single declaration in source/data/contracts/layout.h -- exactly as
     install.sh and `make install` do. None of the three holds a list that could
     go stale.
 

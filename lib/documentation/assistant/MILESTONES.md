@@ -1983,7 +1983,7 @@ Asked for by the user (2026-09-25): the CLI pluggable into **other people's** ha
 
 **The recommendation: grow the JSONL contract; do not reframe it.** JSON-RPC/LSP framing would break every `protocol_version: 1` driver to buy request/response multiplexing the walls do not demand — turns serialize by design, and the one axis that wants a peer protocol (host tools) is **already answered by MCP as a sidecar**, proven above, wanting only per-run wiring. The decisive finding is that the existing tolerance rules make the contract **retrofittable in both directions**: an unknown inbound line is ignored (verified live), so a new host can send a `hello` to an old binary harmlessly, and rule 1 means an old host survives every additive event. The gaps close as additions: a handshake and a written stability promise (W1), a schema artifact pinned like the prose doc (W2), turn ids and an inbound cancel (W3, W4), per-run wiring for host MCP servers and the file-tool root (W6, W8 — W8's *default* also changes under item 25a's launch-folder rule, which shipped later the same day, [Milestone V](#milestone-v--the-native-toolsets); the spike's evidence is the v0.1.2 binary, and the per-run declaration remains the integration half), and `--output-format json` on the read commands a host UI needs (W7).
 
-**Split (2026-09-25), all five specced into the v0.1.5 table:** 29a the handshake and the stability promise → 29b per-run integration wiring → 29c turn ids and cancel → 29d the schema artifact → 29e machine-readable reads. **Parked with evidence, the user's call:** a push channel (v1's "events arrive in response to turns, never unprompted" held comfortably for an embedding host — the case for push is config/model change notification for long-lived embeds, and 29a's capability field is where it would negotiate if ever wanted). A SPEC revision naming third-party embedding as a product surface is proposed alongside the split rather than made unilaterally.
+**Split (2026-09-25), all five specced into the v0.1.5 table:** 28d the handshake and the stability promise → 28e per-run integration wiring → 28f turn ids and cancel → 28g the schema artifact → 28h machine-readable reads. **Parked with evidence, the user's call:** a push channel (v1's "events arrive in response to turns, never unprompted" held comfortably for an embedding host — the case for push is config/model change notification for long-lived embeds, and 28d's capability field is where it would negotiate if ever wanted). A SPEC revision naming third-party embedding as a product surface is proposed alongside the split rather than made unilaterally.
 
 ---
 
@@ -2395,7 +2395,7 @@ Every other header read goes through the same function, so each is faster the sa
   - `--all` lists everything; nothing about the store changes, so `check`, `train` and `models delete` see what they saw before.
   - Deleting a snapshot's GGUFs brings it back, because the listing follows the store.
   - A GGUF whose chain passes through a conversion reads `converted` in SOURCE, backend or not; everything else reads what it read before.
-  - `--output-format stream-json` keeps every row: the fold is the table's, and lineage in machine output is 29e's.
+  - `--output-format stream-json` keeps every row: the fold is the table's, and lineage in machine output is 28h's.
 - [x] **The sweep reads nothing twice** ([M2](#milestone-n--model-operations)'s cost discipline).
   - Each file's record is read inside its own counted step of the busy line, as before, and the lineage is applied in one pass over the finished rows.
   - The first version read every record up front. That would have left the busy line on its uncounted label while the records loaded. It would also have hung `cli.busy_line`, which holds the sweep on a named-pipe sidecar until it sees a counted frame. It was caught reading that test, before it ran.
@@ -2426,7 +2426,7 @@ Every other header read goes through the same function, so each is faster the sa
 | Discoverability of the fold | `models list --all`, plus one tail line counting what is folded *(default taken)* | The fold is visible, never silent. |
 | SOURCE | `converted` for a GGUF whose chain reaches a conversion, recorded or inferred; unchanged otherwise *(default taken)* | The full chain lives in `models info`, not in new columns. |
 | A snapshot a backend points at | Never folded *(default taken)* | Possible once MLX (27a) runs one directly; a backend's own model is never hidden. |
-| Machine output | `stream-json` keeps every row | A machine reader is not misled by `(not configured)`, and lineage there is 29e's. |
+| Machine output | `stream-json` keeps every row | A machine reader is not misled by `(not configured)`, and lineage there is 28h's. |
 | `models info` | Takes `<model>/<format>/<id>` or an id as well as a backend | The acceptance needs it: a fresh conversion is not a backend yet, and a folded snapshot must stay reachable. |
 | M3's chain | Stamps the same records through the same functions, nothing extra *(default taken)* | Proven through the command line: chain, then `info` and `list`. |
 
@@ -2614,7 +2614,7 @@ The lesson is the cheap one: **a plan inherited from the reference implementatio
 | Family | Embedded chat template | Observed |
 |---|---|---|
 | `gemma3` (1b-it Q8_0) | **yes** | Clean. Answered "Paris". Nothing to strip. |
-| `qwen3` (3.6-29b Q4_K_M) | **yes** | **Emitted `<think>\n\n</think>\n\n4` — all of it reaching the user.** |
+| `qwen3` (3.6-28e Q4_K_M) | **yes** | **Emitted `<think>\n\n</think>\n\n4` — all of it reaching the user.** |
 | `llama3` (3.2-3b, local files) | **no** | Degenerate on every prompt. |
 
 This item was written from Ommi's Gemma 4, which shipped **no** chat template and had to be reverse-engineered — that was the case the bespoke-override slot existed for. **Gemma 3 ships a good template and needs no help at all.** The family that needed help was Llama, and its files here carry a content hash where a name should be and degenerate like base models, so nothing about it could be verified.
@@ -3812,3 +3812,53 @@ The prefill, which lives only in the llama build, was checked on real weights in
 | `transport/` before A2 | Named now, flat beside the others *(default taken)* | A2 makes the directories say the layers. |
 
 **Verified.** `make test` green on the llama build -- all 2,009, the usual one skip -- with no test logic edited: the config editor's byte-golden suite, `cli.one_key_resolver`, `cli.one_role_resolver`, `cli.install_parity` and `cli.no_listen_symbols` among them. The asset generator reproduces the moved units with only their path lines changed. Lint shows 0 errors.
+
+### 2026-10-03 — `arch-layer-move` (architecture item A2): the directories say the layers
+
+**Why.** With the contracts carved (A1), the include graph obeyed the four-layer model, but the tree did not show it: 25 packages sat side by side under `source/`. This item makes the directories carry the layers, and does nothing else, so it can be reviewed as what it is: renames.
+
+**What was built**
+
+- [x] **Every package `git mv`'d into its layer** -- `source/presentation/` (`commands`, `httpserver`, `markdown`, `render`), `source/business/` (`harness`, `agentloop`, `agent`, `tools`, `knowledge`, `graph`, `training`, `scaffold`, `models`, `mcp`), `source/data/` (`contracts`, `backends`, `embedstore`, `logger`, `secrets`, `modelstore`, `transport`), `source/infrastructure/` (`platform`, `ansi`, `events`, `version`).
+  - The tests are mirrored as `tests/<layer>/<package>/`. The cross-cutting checks, `support/`, `fixtures/` and the root-level suites stay at `tests/`'s root.
+- [x] **Short include paths, byte-stable.** The four layer directories are `apogee_core`'s include roots, root-first, and the flat `source/` directory is no longer one, so a stale path cannot resolve two ways. **No include line changed**: `#include "agentloop/loop.h"` names a package wherever its layer puts it, and moving a package between layers would change no include. `rg '#include "(business|data|presentation|infrastructure)/'` finds nothing.
+- [x] **The checks that name paths moved with them:**
+  - **`tests/layering.cmake`** reads the layer from the directory and requires it to agree with its map, so a package moved without its row, a row changed without the move, or a package outside any layer directory each fails by name.
+  - **The two resolver checks and `cli.no_vendor_credentials`** name layered paths.
+  - **The conformance checks** read `presentation/httpserver/mux.cpp` and `presentation/commands/json_reporter.cpp`.
+  - **The asset generator** writes `data/contracts/`.
+  - **Two tests that build paths into the tree** follow it: `attachment_guard_test` reads the command sources, and `progress_contract_test` its fixture and stub modules.
+  - **The no-listen check** attributes by object file name (`serve.cpp.o`), so it needed nothing.
+  - **The Makefile's `format`/`lint` scope** and `gcc-check.py` find sources recursively or from the compile database, so nothing there needed changing either.
+- [x] **The documentation sweep, in-change** -- a committed script, `lib/src/cli/scripts/sweep_layer_paths.py`, rewrote every `source/<package>` and `tests/<package>` path to its layered form across CLAUDE.md, DEVELOPER.md, the ROADMAP, every pending backlog document, the skills and the scripts' comments. Hand-written prose says what the tree now is: CLAUDE.md's "Where new source code goes" (a new package goes in its layer's directory with a row in the map) and the Codebase Map, DEVELOPER.md's tree and a layer table.
+
+**The diff, checked.** `git diff -M` over the move: 433 source and 194 test renames.
+- **Below 100% similarity:** seven files. Six carry one comment line each naming a test by its old flat path. The seventh is `attachment_guard_test`'s path line (`progress_contract_test`'s two path lines were fixed after the first run, below).
+- **Every other changed line** is a CMake path list, a check's path, or documentation. No line of code changed meaning.
+
+**Verified.**
+- **The suite:** `make test` on the llama build passes all 2,009, the usual one skip.
+  - The first run failed four training tests. `progress_contract_test` built its fixture's path from the tests root (`/training/fixtures/`), a path that had moved.
+  - Its two path lines were fixed, and the rerun was green.
+- **A fresh build:** a new worktree holding exactly the moved tree, with a brand-new build directory, configured, built and passed the whole unit suite and the path checks. Nothing cached locally can be what made it build.
+  - `cicd.sh --fresh` clones from GitHub, and these commits are not pushed, so the fresh worktree stood in for it.
+- **The planted violations, after the move:**
+  - a `listen()` planted in `data/transport/http_client.cpp` failed `cli.no_listen_symbols`, naming `http_client.cpp.o`;
+  - a Data→Business include failed the layering test; so did `logger` moved into `business/` without its row, a package directly under `source/`, and `contracts/` reaching sideways;
+  - a second key chain failed `cli.one_key_resolver`;
+  - an allow-listed file removed failed `cli.one_role_resolver`;
+  - a binary whose `__complete` answers nothing failed `cli.shell_completion` 65 ways.
+
+  Each passed again once the plant was removed. `make format-check` passes over the whole tree.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The window | Now, mid-`v0.1.3`, with the user's other session told to pause -- **the user's call** | It was still writing backlog documents when A1 committed; the user chose to commit and continue. |
+| Include resolution | Four layer roots, root-first; the flat `source/` root removed *(default taken)* | A stale short path cannot resolve two ways. |
+| The tests root | Cross-cutting checks, `support/`, `fixtures/` stay; per-package directories move *(default taken)* | They belong to no one layer. |
+| Sweep mechanics | A committed script, its diff read as text *(default taken)* | The 2026-08-24 pattern: two dozen documents cannot drift one by one. |
+| MILESTONES.md | Not swept | It records what shipped; its paths were true when written. |
+| Stale paths in source comments | Swept with the documents | They are path references like any other. The diff shows them as comment-only lines, so the renames stay reviewable. |
+| Where a layer is read from | The directory, checked against the map | Two declarations that must agree: a move without its row fails, and so does a row without its move. |

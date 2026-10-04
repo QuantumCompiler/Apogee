@@ -10,7 +10,7 @@
 // The refine prompt is GENERATED from lib/src/cli/assets/clerks/refine_prompt.txt
 // (the same script that generates the capture clerk's literals, recorded in
 // MILESTONES.md). The shipped file and this literal are byte-identical, and
-// tests/knowledge/refine_test.cpp fails the build the moment they drift.
+// tests/business/knowledge/refine_test.cpp fails the build the moment they drift.
 // Compiled in, not seeded: a fixed system concern, no install-parity surface.
 
 namespace apogee::knowledge {

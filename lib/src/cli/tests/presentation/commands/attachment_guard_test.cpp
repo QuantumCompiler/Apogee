@@ -77,7 +77,7 @@ public:
 /// Reads a source file from the tree, for the cross-surface scan.
 [[nodiscard]] std::string read_source(std::string_view relative) {
     const std::filesystem::path path =
-        std::filesystem::path{APOGEE_SOURCE_DIR} / "commands" / relative;
+        std::filesystem::path{APOGEE_SOURCE_DIR} / "presentation" / "commands" / relative;
     std::ifstream in(path, std::ios::binary);
     REQUIRE(in.good());
     return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
