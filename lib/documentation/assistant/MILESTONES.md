@@ -3862,3 +3862,43 @@ The prefill, which lives only in the llama build, was checked on real weights in
 | MILESTONES.md | Not swept | It records what shipped; its paths were true when written. |
 | Stale paths in source comments | Swept with the documents | They are path references like any other. The diff shows them as comment-only lines, so the renames stay reviewable. |
 | Where a layer is read from | The directory, checked against the map | Two declarations that must agree: a move without its row fails, and so does a row without its move. |
+
+### 2026-10-03 — `arch-commands-modules` (architecture item A3): `commands/` in three
+
+**Why.** `commands/` was the biggest package in the tree -- 85 files -- and it mixed three presentation concerns that change for different reasons: the commands themselves, what paints a terminal, and the machine-mode adapter. The code already kept them apart informally -- views never parse argv, the adapter never paints, commands compose both. This item makes those boundaries modules, kept separate from A2's renames because which unit is a view is a judgment, not a rename.
+
+**What was built**
+
+- [x] **Three modules in `source/presentation/`:**
+  - `cli/` -- every command, the root and registry, `helpers`, `permissions`, the one command table and the slash ecosystem whole (`chat_completer`), and the completion protocol. The composition root, unguarded as `commands/` was.
+  - `views/` -- `status_line`, `thinking_view`, `answer_view`, `line_reader`, `download_progress`, `ask_prompt`, `terminal`, `input_gate`, and the terminal adapter `cli_reporter`.
+  - `machine/` -- `json_reporter`, the machine-mode adapter.
+
+  Tests mirrored (`tests/presentation/{cli,views,machine}/`). No `presentation/common/` was needed; `httpserver/`, `markdown/` and `render/` are untouched.
+- [x] **Allow-lists for the two guarded modules** in `tests/layering.cmake`, the layer map listing the three in Presentation.
+  - `views/` includes itself, `ansi/`, `markdown/`, `platform/`, `contracts/` and `agentloop/` (the Reporter seam and `ask_user` its adapters implement), and **never `cli/`, `machine/` or CLI11**. A view that parses argv fails by name.
+  - `machine/` includes itself, `agentloop/`, `agent/` and `contracts/`, and **never a painter** (`views/`, `ansi/`, `markdown/`).
+  - Five planted violations, five caught by name: a view reaching the commands, a view including CLI11, the adapter including a view, the adapter including `ansi/`, a view reaching the adapter.
+- [x] **The include spellings updated in this item, the one place they legitimately change**: `#include "commands/status_line.h"` is now `"views/status_line.h"`. The module directories sit in the presentation include root A2 made, so no CMake include path changed. The checks that name paths followed: `cli.machine_schema_conformance` reads `presentation/machine/json_reporter.cpp`, the two resolver checks name `presentation/cli/`, and the attachment guard reads the command sources in `cli/`.
+- [x] **The documents name the modules**: a sweep mapped each `commands/<unit>` to its module across CLAUDE.md, DEVELOPER.md and 30 pending backlog documents. MILESTONES is left as history. The prose says what the three are.
+
+**Where each ambiguous unit landed**
+
+| Unit | Module | Why |
+|---|---|---|
+| `cli_reporter` | `views/` *(default taken)* | The terminal adapter: it owns paint order, composing the status line, the thinking view and the answer view behind the Reporter seam. |
+| `json_reporter` | `machine/` *(default taken)* | The machine-mode adapter; it writes events, never a painted byte. |
+| `interrupt` | `cli/` (the spec sketched `views/`) | The SIGINT scope a command runs under, exiting with `helpers`' `kCancelled`. It paints nothing, only command files use it, and in `views/` it would include `cli/`. |
+| `ask_prompt` | `views/` | It paints the question on the status line and reads the answer; `ask_user` is the seam it implements. |
+| `input_gate` · `line_reader` | `views/` | Terminal input as a view: typeahead and line editing, nothing about argv. |
+| `permissions` | `cli/` | It builds each surface's permission checker from config and composes the status line and the machine adapter -- composition. |
+| `chat_completer` | `cli/` | The slash ecosystem moves whole with the one command table; splitting dispatch from completion would reopen the drift item 24 closed. |
+| `tool_vectors` · `model_chain` · `helpers` | `cli/` | Composition: caches, orchestration and shared command helpers, used by commands only. |
+
+"Machine-input parsing" has no file of its own: machine mode's input is read in `chat.cpp`, a command, in `cli/`.
+
+**Verified.**
+- `make test` on the llama build passes all 2,009, the usual one skip: the PTY checks, machine-mode e2e and conformance, the piped byte-identity checks and the one-table completion test all pass unchanged.
+- `--help` output for 25 commands is byte-identical to a binary built before the split (the installed one, from A1's commit).
+- The diff is 116 renames: 11 exact, 105 differing only in include lines and comments.
+- `make format-check` passes over the whole tree.

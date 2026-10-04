@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
-#include "commands/registry.h"
-#include "commands/root.h"
+#include "cli/registry.h"
+#include "cli/root.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "events/bus.h"

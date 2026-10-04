@@ -21,8 +21,8 @@ Proposed order of precedence:
 - `backends/llamacpp.cpp`: the precedence resolution.
 - `backends/model_profile.h/.cpp`: per-family defaults, split by thinking on or off.
 - `contracts/config.h/.cpp` and the template: the new per-backend knobs beside `temperature`.
-- `commands/models.cpp` (`models info`): the settings in force and their source.
-- `commands/chat.cpp`: `/temperature` already exists and gains the others as needed.
+- `cli/models.cpp` (`models info`): the settings in force and their source.
+- `cli/chat.cpp`: `/temperature` already exists and gains the others as needed.
 
 **Reference (Ommi).** Ommi honoured the temperature on its local path (CHAT.md: `--temperature`, "config or 0.7"). This item restores that and adds the per-family and per-file defaults.
 

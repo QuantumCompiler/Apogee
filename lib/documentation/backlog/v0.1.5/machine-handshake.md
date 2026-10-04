@@ -10,8 +10,8 @@
 - **No secrets in the handshake:** capabilities name what the binary can do, never a key, a path into the private layout, or a config value.
 
 **Seam + files.**
-- `commands/json_reporter.cpp` / `render/json_report.h/.cpp`: `capabilities` on the session event — built from what is actually wired (tools registry present, ask available, input format), not a hardcoded list.
-- `commands/chat.cpp` / `commands/complete.cpp`: accept and parse the optional `hello` first line on stream-json stdin; an absent or malformed one is ignored per the inbound-tolerance rule.
+- `machine/json_reporter.cpp` / `render/json_report.h/.cpp`: `capabilities` on the session event — built from what is actually wired (tools registry present, ask available, input format), not a hardcoded list.
+- `cli/chat.cpp` / `cli/complete.cpp`: accept and parse the optional `hello` first line on stream-json stdin; an absent or malformed one is ignored per the inbound-tolerance rule.
 - [machine-mode.md](../../reference/machine-mode.md): the `hello` line, the `capabilities` field, and a new **"The stability promise"** section (guarantees, additivity of types *and* fields, deprecation policy).
 - `tests/schema_conformance.py` + the machine-mode e2e: pin both additions; `tests/naive_host_driver.py` grows a hello-aware path proving old-binary compatibility semantics stay.
 

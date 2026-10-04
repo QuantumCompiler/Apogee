@@ -12,10 +12,10 @@
 
 **Seam + files.**
 - `agentloop/reporter.h`: one new event — `on_side_call(role, detail)` with a paired completion carrying elapsed/tokens-when-known — defaulted no-op, so every adapter compiles unchanged and opts in (the header's own "a local change rather than a rewrite" doctrine).
-- Emission sites: `agentloop/rag.cpp` (the embed and the retrieval round), the query-rewrite and tool-result-summary paths (the utility role's in-turn work), `agentloop/rerank*` (the judge), the attachment read path where the vision/transcription role runs in-turn, and `commands/chat.cpp`'s `/capture` clerk.
-- `commands/cli_reporter.cpp` + `commands/thinking_view.h/.cpp`: side-call lines join the rolling window interleaved with reasoning in arrival order; a labeled-line entry point beside `write()` so the view, not the reporter, owns the dim styling and the collapse.
-- `commands/json_reporter.cpp` / `httpserver/sse_reporter`: the mapping onto the existing display-prose events; byte-level goldens prove no vocabulary change.
-- Tests: `tests/presentation/commands/cli_reporter_test.cpp` goldens (a scripted turn with embed + rewrite + rerank narrates in order inside the block and collapses with it); transcript-purity assertions (saved session and `result` free of narration); the machine-mode e2e and conformance untouched; the PTY chat check extended one case.
+- Emission sites: `agentloop/rag.cpp` (the embed and the retrieval round), the query-rewrite and tool-result-summary paths (the utility role's in-turn work), `agentloop/rerank*` (the judge), the attachment read path where the vision/transcription role runs in-turn, and `cli/chat.cpp`'s `/capture` clerk.
+- `views/cli_reporter.cpp` + `views/thinking_view.h/.cpp`: side-call lines join the rolling window interleaved with reasoning in arrival order; a labeled-line entry point beside `write()` so the view, not the reporter, owns the dim styling and the collapse.
+- `machine/json_reporter.cpp` / `httpserver/sse_reporter`: the mapping onto the existing display-prose events; byte-level goldens prove no vocabulary change.
+- Tests: `tests/presentation/views/cli_reporter_test.cpp` goldens (a scripted turn with embed + rewrite + rerank narrates in order inside the block and collapses with it); transcript-purity assertions (saved session and `result` free of narration); the machine-mode e2e and conformance untouched; the PTY chat check extended one case.
 
 **Reference (Ommi).** No analog — Ommi surfaced none of its side work; the typed thinking display is Apogee's own (Milestones D and G), and the helper-role side-request architecture it narrates is 26b's. This item is those two shipped pieces meeting.
 

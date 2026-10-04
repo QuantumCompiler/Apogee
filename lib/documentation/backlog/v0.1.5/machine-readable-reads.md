@@ -10,7 +10,7 @@
 - **A stable contract once shipped:** these documents join the stability promise ([28d](machine-handshake.md)) — fields are added, not renamed; a host may build on them.
 
 **Seam + files.**
-- `commands/models.cpp`, `chat_history.cpp` (`chats list`), `agents_cmd.cpp`, `mcp_cmd.cpp`, `check.cpp`: the flag, each routing its existing gathered data through the JSON renderer instead of the table printer.
+- `cli/models.cpp`, `chat_history.cpp` (`chats list`), `agents_cmd.cpp`, `mcp_cmd.cpp`, `check.cpp`: the flag, each routing its existing gathered data through the JSON renderer instead of the table printer.
 - `render/json_report.h/.cpp` and the `httpserver/` listing serialisers: the shared document shapes — whichever of the two already owns a listing's shape is the one the CLI rendering calls.
 - [machine-mode.md](../../reference/machine-mode.md): the "everything else is a CLI command" section gains the flag and an example, so an integrator finds the read contract where they found the write one.
 - Tests: golden JSON per command (hermetic, mock-backed); a parity assertion per listing that the human and JSON views enumerate the same rows; `tests/naive_host_driver.py` phase 3 flips from wall to check — W7 closes.

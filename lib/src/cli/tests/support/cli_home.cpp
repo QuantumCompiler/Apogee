@@ -5,8 +5,8 @@
 #include <iterator>
 #include <sstream>
 
-#include "commands/registry.h"
-#include "commands/root.h"
+#include "cli/registry.h"
+#include "cli/root.h"
 
 namespace apogee::testing {
 

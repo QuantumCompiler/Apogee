@@ -12,7 +12,7 @@
 
 **Seam + files.**
 - `commands/providers_cmd.h/.cpp` (new): `providers scan [--register] [--refresh]` — the table rendering (tier words, evidence strings), the registration pass over the knowledge table's defaults.
-- `commands/chat.cpp` (and the shared interactive-entry seam it uses): the first-launch offer hook — fires only when a terminal is interactive, providers are detected, zero provider backends are configured, and the asked-once marker is unset.
+- `cli/chat.cpp` (and the shared interactive-entry seam it uses): the first-launch offer hook — fires only when a terminal is interactive, providers are detected, zero provider backends are configured, and the asked-once marker is unset.
 - `contracts/config_edit.cpp`: reused as-is (the add-backend writer); no new writer.
 - The per-provider default entry (name, type, whether a `model:` is written) lives beside 28a's knowledge table — one table, one home.
 - Tests: `tests/presentation/commands/` — register-pass tables (none detected / some / all registered already / name collision), the once-ever offer lifecycle, the pipe/machine/serve suppression, config byte-comparison for the declined path.

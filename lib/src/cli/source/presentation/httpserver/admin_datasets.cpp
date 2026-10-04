@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "commands/datasets.h"
+#include "cli/datasets.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "httpserver/handler.h"

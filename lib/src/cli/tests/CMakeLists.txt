@@ -16,8 +16,8 @@ add_executable(apogee_tests
     infrastructure/platform/platform_test.cpp
     infrastructure/platform/child_process_test.cpp
     infrastructure/platform/ffmpeg_test.cpp
-    presentation/commands/registry_test.cpp
-    presentation/commands/root_test.cpp
+    presentation/cli/registry_test.cpp
+    presentation/cli/root_test.cpp
     data/contracts/config_test.cpp
     data/contracts/config_edit_test.cpp
     data/contracts/host_test.cpp
@@ -54,14 +54,14 @@ add_executable(apogee_tests
     data/modelstore/sidecar_test.cpp
     business/models/source_ollama_test.cpp
     business/models/source_hf_test.cpp
-    presentation/commands/models_pull_test.cpp
-    presentation/commands/models_migrate_test.cpp
-    presentation/commands/models_convert_test.cpp
-    presentation/commands/model_chain_test.cpp
-    presentation/commands/complete_sources_test.cpp
-    presentation/commands/models_test.cpp
-    presentation/commands/config_cmd_test.cpp
-    presentation/commands/attachment_guard_test.cpp
+    presentation/cli/models_pull_test.cpp
+    presentation/cli/models_migrate_test.cpp
+    presentation/cli/models_convert_test.cpp
+    presentation/cli/model_chain_test.cpp
+    presentation/cli/complete_sources_test.cpp
+    presentation/cli/models_test.cpp
+    presentation/cli/config_cmd_test.cpp
+    presentation/cli/attachment_guard_test.cpp
     data/transport/jsonl_framer_test.cpp
     data/backends/think_filter_test.cpp
     data/backends/markup_filter_test.cpp
@@ -80,24 +80,24 @@ add_executable(apogee_tests
     data/embedstore/chunk_test.cpp
     data/embedstore/ingest_test.cpp
     business/agentloop/conformance_test.cpp
-    presentation/commands/helpers_test.cpp
-    presentation/commands/tool_vectors_test.cpp
-    presentation/commands/thinking_view_test.cpp
-    presentation/commands/status_line_test.cpp
-    presentation/commands/download_progress_test.cpp
-    presentation/commands/cli_reporter_test.cpp
-    presentation/commands/answer_view_test.cpp
+    presentation/cli/helpers_test.cpp
+    presentation/cli/tool_vectors_test.cpp
+    presentation/views/thinking_view_test.cpp
+    presentation/views/status_line_test.cpp
+    presentation/views/download_progress_test.cpp
+    presentation/views/cli_reporter_test.cpp
+    presentation/views/answer_view_test.cpp
     presentation/markdown/inline_test.cpp
     presentation/markdown/stream_renderer_test.cpp
     presentation/markdown/corpus_test.cpp
     infrastructure/ansi/ansi_test.cpp
-    presentation/commands/chat_test.cpp
-    presentation/commands/check_test.cpp
-    presentation/commands/lifecycle_test.cpp
-    presentation/commands/machine_mode_test.cpp
-    presentation/commands/line_reader_test.cpp
-    presentation/commands/chat_attachments_test.cpp
-    presentation/commands/chat_completer_test.cpp
+    presentation/cli/chat_test.cpp
+    presentation/cli/check_test.cpp
+    presentation/cli/lifecycle_test.cpp
+    presentation/machine/machine_mode_test.cpp
+    presentation/views/line_reader_test.cpp
+    presentation/cli/chat_attachments_test.cpp
+    presentation/cli/chat_completer_test.cpp
     data/logger/session_test.cpp
     business/agent/tool_test.cpp
     business/agent/fetch_url_test.cpp
@@ -131,7 +131,7 @@ add_executable(apogee_tests
     business/tools/rag_query_test.cpp
     business/tools/gate_test.cpp
     business/tools/environment_test.cpp
-    presentation/commands/permissions_test.cpp
+    presentation/cli/permissions_test.cpp
     business/mcp/types_test.cpp
     business/mcp/transport_test.cpp
     business/mcp/client_test.cpp
@@ -144,8 +144,8 @@ add_executable(apogee_tests
     presentation/render/json_report_test.cpp
     data/contracts/assets_test.cpp
     bundled_agents_test.cpp
-    presentation/commands/analyze_test.cpp
-    presentation/commands/agents_test.cpp
+    presentation/cli/analyze_test.cpp
+    presentation/cli/agents_test.cpp
     presentation/httpserver/admin_agents_test.cpp
     business/knowledge/record_test.cpp
     business/knowledge/clerk_test.cpp
@@ -154,7 +154,7 @@ add_executable(apogee_tests
     business/knowledge/refine_test.cpp
     business/knowledge/export_test.cpp
     data/embedstore/metadata_test.cpp
-    presentation/commands/knowledge_test.cpp
+    presentation/cli/knowledge_test.cpp
     presentation/httpserver/admin_knowledge_test.cpp
     data/embedstore/graph_test.cpp
     data/embedstore/graph_search_test.cpp
@@ -162,7 +162,7 @@ add_executable(apogee_tests
     business/graph/build_test.cpp
     business/graph/records_test.cpp
     business/agentloop/graph_context_test.cpp
-    presentation/commands/graph_test.cpp
+    presentation/cli/graph_test.cpp
     presentation/httpserver/admin_graph_test.cpp
     data/embedstore/graph_communities_test.cpp
     data/embedstore/graph_dedupe_test.cpp
@@ -177,8 +177,8 @@ add_executable(apogee_tests
     business/training/synth_test.cpp
     business/training/datasets_test.cpp
     business/training/prepare_script_test.cpp
-    presentation/commands/datasets_test.cpp
-    presentation/commands/train_test.cpp
+    presentation/cli/datasets_test.cpp
+    presentation/cli/train_test.cpp
     presentation/httpserver/admin_datasets_test.cpp
     business/training/trainer_test.cpp
     business/training/progress_contract_test.cpp
@@ -624,7 +624,7 @@ if(UNIX)
         add_test(NAME cli.machine_schema_conformance
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/schema_conformance.py"
-                "${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/commands/json_reporter.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/machine/json_reporter.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/machine-mode.md"
         )
         set_tests_properties(cli.machine_schema_conformance PROPERTIES TIMEOUT 60)

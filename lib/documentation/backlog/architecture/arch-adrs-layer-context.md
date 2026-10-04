@@ -1,0 +1,44 @@
+# ADRs and per-layer context files
+
+**What / why.** The four-layer architecture now exists on disk (A1/A2 shipped 2026-10-03, Milestone AA: `source/<layer>/<package>/`, tests mirrored, zero upward edges) and its law is about to become compile-time ([arch-build-enforcement.md](arch-build-enforcement.md)) — but the *reasons* live in this planning system, not next to the code. An agent (or person) opening a file in `source/business/` has nothing in reach that says what the layer may include, which rules bind a change, or where the law is enforced. **The ADRs themselves are written** (2026-10-03, at the user's direction, ahead of this build): [`lib/documentation/adrs/cli/`](../../adrs/cli/README.md) holds the six standing rules as dated, append-only records — [0001 layer enforcement](../../adrs/cli/layer-enforcement.md) (Infrastructure → Data → Business → Presentation, dependencies only down), [0002 mode parity](../../adrs/cli/mode-parity.md) (a change propagates to CLI, HTTP and machine alike), [0003 granular modules](../../adrs/cli/granular-modules.md), [0004 tests mirror the architecture](../../adrs/cli/tests-mirror-architecture.md), [0005 install-mode stability](../../adrs/cli/install-mode-stability.md), [0006 backwards compatibility](../../adrs/cli/backwards-compatibility.md) — each with its context, decision, consequences and the place its rule is enforced. **This item builds what remains: the layer cards and the teeth.** A short `CLAUDE.md` at the root of each layer directory — source and tests — so **every file opened in a layer carries that layer's context automatically** (the context system reads them hierarchically): each card is **a summary of its ADRs and a pointer to them** — the layer's position, what it may include, its packages, and the ADR links for depth. Cards **summarize and reference, never duplicate** — the ADRs stay the single source of rationale, and a per-layer file that restates DEVELOPER.md is drift waiting to happen.
+
+**Core constraint(s).**
+- **Point, don't duplicate:** each ADR is the one home for its rule's *rationale*; the per-layer `CLAUDE.md` files are short (the layer's law in a few lines + links to the ADRs and the assistant docs); anything already recorded in [CLAUDE.md](../../assistant/CLAUDE.md)/[DEVELOPER.md](../../assistant/DEVELOPER.md) is linked, not restated.
+- **The ADR cannot drift from the enforcement.** ADR-0001's allowed-dependency statement is asserted against the layering test's own map (the `harness.layering` four-layer map A1 shipped, and A4's link graph when it lands) — a golden check, so the prose law and the mechanical law are provably the same.
+- **ADRs are append-only records:** named for the decision alone (the number lives in the title and the index), dated, with a Status line (accepted/superseded-by); a changed decision is a new ADR superseding the old, never an edit that rewrites history — the MILESTONES discipline, applied locally.
+- **Consumed decisions are cited, not reopened:** the four-layer model, contracts-in-Data, the three presentation modules, per-layer include dirs, dual enforcement are A1–A4's recorded calls; the ADRs state them with their dates and point at the records.
+- **Install and compatibility ADRs codify existing practice**, they don't invent policy: ADR-0005 states what `changed.sh`/`install.sh`/self-update already guarantee; ADR-0006 states the additive-protocol (`protocol_version: 1` tolerance), config-compat and store-migration rules already shipped. New *policy* would be a SPEC conversation first.
+- Code style and the docs flow carry: the ADR directory and context files join the documentation sweeps (`/apogee-maintenance-update-documents` audits them like any doc).
+
+**Seam + files.**
+- `lib/documentation/adrs/cli/` (**exists** — index + ADRs 0001–0006, written 2026-10-03): the build extends it only if a card surfaces a gap, as a new numbered record.
+- `lib/src/cli/source/{infrastructure,data,business,presentation}/CLAUDE.md` (new, four files) and the mirrored `lib/src/cli/tests/<layer>/CLAUDE.md` (four more): the layer card — position, include law, packages, test conventions for that layer, and the ADR links (`lib/documentation/adrs/cli/…`) for depth.
+- `lib/src/cli/tests/` docs-presence check (new, beside the layering test): every layer root carries its `CLAUDE.md`; every ADR the index lists exists; ADR-0001's dependency table matches the layering map (golden).
+- Docs: [DEVELOPER.md](../../assistant/DEVELOPER.md)'s tree gains the `adr/` row and the context-file convention; [CLAUDE.md](../../assistant/CLAUDE.md)'s map likewise, one line each.
+- Consumes: A1/A2 (shipped — the layers and the four-layer map), [A3](../../assistant/MILESTONES.md#milestone-aa--the-four-layers) (the presentation modules the layer card names), [A4](arch-build-enforcement.md) (the link-graph law ADR-0001 cites as its enforcement).
+
+**Reference (Ommi).** No ADR analog — Ommi's decisions lived in its assistant docs alone, and its CLAUDE.md was a single root file. The hierarchical per-directory context file is the deliberate divergence: the law travels with the code it governs, which a single root document cannot do for an agent editing one layer.
+
+**Decisions made** (dated):
+- 2026-10-03 — Asked for by the user, placed at the **end of the Architecture queue** (their call): six standing rules as ADRs in the source tree plus per-layer context files for source *and* tests, "each file … must know the correct context for its layer."
+- 2026-10-03 — Gated on A3 and A4: the layer cards name the presentation modules A3 creates, and ADR-0001 cites the compile-time law A4 builds — writing them first would document a shape still moving.
+- 2026-10-03 — **The ADRs were written immediately** (the user's call, same day): they live in the documentation tree at `lib/documentation/adrs/cli/` — per-application directories, the GUI siblings getting their own beside `cli/` — rather than inside the source tree; the cards this item builds are summaries that reference them for in-depth context.
+
+**Open calls:**
+- [default: the dependency law reads "a layer depends on its own layer and **any layer below it**" (transitive), matching the shipped graph and the layering test's map — strict adjacent-only would invalidate shipped seams (Presentation reads `contracts` directly). The user's phrasing "the layer below it" is recorded; veto moves it to ADR-0001 as a stated tightening goal, not a day-one law] The law's exact form.
+- [default: the tests' context files mirror the four source ones rather than adding a ninth at `tests/` root] Card placement. *(The ADR location is decided and done: `lib/documentation/adrs/cli/`.)*
+- [default: the docs-presence check is a plain unit test beside the layering test, not a CI job — it rides the existing suite] Enforcement vehicle.
+
+**Guardrail(s).**
+- The presence test: four source + four test `CLAUDE.md` files and every indexed ADR exist — a deleted or renamed one fails the suite by name.
+- The no-drift golden: ADR-0001's allowed-dependency table equals the layering map (regenerated comparison, not prose review).
+- The no-duplication rule is reviewable by construction: each context file is capped short (a named line budget), so restating DEVELOPER.md doesn't fit.
+- The docs sweep (`/apogee-maintenance-update-documents`) covers `adr/` and the context files — asserted by that skill's mechanical validation picking them up.
+
+**Acceptance criteria:**
+- [ ] ADR-0001's dependency law matches the layering test's map by golden comparison (the ADRs at `lib/documentation/adrs/cli/` exist already; the build adds the check that keeps them true).
+- [ ] Each of the eight layer roots (four source, four tests) carries a `CLAUDE.md` naming the layer's position, include law, packages, and the ADR links — within the line budget, duplicating nothing.
+- [ ] Opening any source or test file under a layer, the context system presents that layer's card (verified structurally: the file sits at the layer root where the hierarchy reads it).
+- [ ] The presence-and-drift test runs in the default suite and fails loudly when an ADR, context file, or the ADR-0001 table goes stale.
+
+**Scope note.** Item **A5**, Architecture — claimable by name once its gate clears; **gated on [A3](../../assistant/MILESTONES.md#milestone-aa--the-four-layers), [A4](arch-build-enforcement.md)**. Out of scope: retro-writing ADRs for every past decision (MILESTONES holds history; ADRs start with the six standing rules and grow per decision); per-package context files (layers only, until a package proves the need); any new policy — codification only.

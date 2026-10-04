@@ -14,7 +14,7 @@
 - `modelstore/kv_cache.h/.cpp` (shipped, 26a) + the store's size records: the admission function — `suite_footprint(config, suite, machine)` → per-member weights + KV at its pinned window, with unknowns named.
 - `harness/harness.h/.cpp`: the in-use hold on providers (the idle-unload clock consults it); the warmup walk.
 - `backends/llamacpp.h/.cpp`: the hold honored where `idle_unload` fires.
-- `commands/chat.cpp` / `commands/models_cmd`: admission at `--suite`/`/suite` selection (stated, refusable, `--force`); `models status` footprint lines; `--warm` on suite selection.
+- `cli/chat.cpp` / `commands/models_cmd`: admission at `--suite`/`/suite` selection (stated, refusable, `--force`); `models status` footprint lines; `--warm` on suite selection.
 - Tests: admission tables over scripted stores and fake machine budgets (fits / doesn't / unknown-size member); the hold's lifecycle (fires after session end, never during); busy-line goldens for warmup.
 - Consumes: [model-suites.md](model-suites.md) (27d — the unit this manages); 26a/26m (shipped — window and cache math); M1 (shipped — the line).
 

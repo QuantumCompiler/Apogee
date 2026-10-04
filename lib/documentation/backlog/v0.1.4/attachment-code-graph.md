@@ -11,7 +11,7 @@
 - Code style carries: `.h`/`.cpp` pairs, smart pointers only; tree-sitter handles stay behind 27k's boundary class.
 
 **Seam + files.**
-- `commands/chat_attachments.cpp/.h` — the worker queues a graph pass per settled folder attachment (supported-language files only); `describe()` gains the graph's one-line state for `/attachments`; the notice through the existing `say` hook.
+- `cli/chat_attachments.cpp/.h` — the worker queues a graph pass per settled folder attachment (supported-language files only); `describe()` gains the graph's one-line state for `/attachments`; the notice through the existing `say` hook.
 - `graph/build.h/.cpp` (27k's) — a build entry over an injected file list (the source-root build parameterized by explicit files), shared verbatim with `graph build --source`.
 - `agentloop/attachments.h/.cpp` — the supported-language test over `FoundFiles` (by extension against 27k's grammar set), pure and table-tested.
 - Tests: `tests/presentation/commands/` chat-attachment tests over the fixture mini-repo 27k commits; the byte-equivalence check against a direct build; the cancel case.

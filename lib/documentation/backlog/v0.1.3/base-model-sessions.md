@@ -12,7 +12,7 @@
 **Seam + files.**
 - `backends/markup_filter.h/.cpp` + `backends/model_profile.h`: the template-less marker mode — trailing-fragment hold across chunk boundaries, the known stop-marker families as reply enders, end-of-stream residue never emitted.
 - `backends/llama_chat.cpp` / `llamacpp.cpp` (the detection + today's once-only warning): the base-model fact exposed on `ModelBehavior` so surfaces can act on it, not just print it.
-- `agentloop/loop.cpp` consumers / `commands/chat.cpp`: tools and `ask_user` withheld on the behavior flag with the startup notice; the banner and status resting state carry the base tag for the session.
+- `agentloop/loop.cpp` consumers / `cli/chat.cpp`: tools and `ask_user` withheld on the behavior flag with the startup notice; the banner and status resting state carry the base tag for the session.
 - Tests: recorded-stream replays (this transcript's byte patterns as fixtures — truncated `<|end|`, chained `<|end|><|im|`, fragments split across chunk boundaries) through the filter, plain and rendered; the quoting guard (an instruct-templated stream containing literal `<|end|>` renders it untouched); the tools-off notice and withheld registry asserted in `chat_test`.
 
 **Reference (Ommi).** No analog — Ommi's allowlist meant a base model could never arrive, which is exactly why open-models Apogee keeps meeting problems Ommi never had. The predecessor is in-house: the 2026-09-28 base-model fix (Milestone J), extended here with the transcript that found its edges.

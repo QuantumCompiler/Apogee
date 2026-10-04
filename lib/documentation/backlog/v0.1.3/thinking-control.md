@@ -19,8 +19,8 @@ Switching thinking off goes through the template's own `enable_thinking` now tha
 - `backends/llamacpp.cpp` and `llama_real.cpp`: `enable_thinking` into the render, and the budget sampler.
 - `backends/anthropic*.cpp`, `openai*.cpp`, `google*.cpp`: the vendor mappings.
 - `agentloop/`: `auto`'s decision, asked of the utility model as a side request when one is set.
-- `commands/chat.cpp`, `commands/complete.cpp`: the flag and the slash command, a row in chat's command table (`commands/chat_completer.cpp`, which `/help`, completion and dispatch all read) with `on`, `off` and `auto` as its values.
-- `commands/thinking_view.cpp`: the budget note on the summary line.
+- `cli/chat.cpp`, `cli/complete.cpp`: the flag and the slash command, a row in chat's command table (`cli/chat_completer.cpp`, which `/help`, completion and dispatch all read) with `on`, `off` and `auto` as its values.
+- `views/thinking_view.cpp`: the budget note on the summary line.
 - `harness/config.*`: the per-backend default.
 
 **Reference (Ommi).** Ommi displayed and filtered reasoning (think_filter.go, CHAT.md) but had no control over whether or how long a model thought.

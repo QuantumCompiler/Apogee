@@ -10,7 +10,7 @@
 /// routes, and the stateless capture → review → store flow.
 ///
 /// Every write runs through the same capture core the CLI and chat call
-/// (`commands/knowledge_core.h`), on the inference plane's own harness -- one
+/// (`cli/knowledge_core.h`), on the inference plane's own harness -- one
 /// set of providers per server -- with the clerk's backend resolved the way a
 /// chat request's `model` is: served backends only, a vendor CLI refused by
 /// type. A record captured here is the record the CLI would have produced.

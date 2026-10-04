@@ -12,8 +12,8 @@
 #include <vector>
 
 #include "agentloop/graph_context.h"
-#include "commands/embed.h"
-#include "commands/graph.h"
+#include "cli/embed.h"
+#include "cli/graph.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "embedstore/store.h"

@@ -1,6 +1,6 @@
 # Attachment options and defaults
 
-**What / why.** Attaching has no option channel: `/attach takes a file, a folder or a glob` (`commands/chat.cpp`), an `@` mention is a bare path by contract (`mentioned_paths` — "The message itself is never changed"), `complete --attach` takes specs only, and no `attachments:` block exists in config. That was fine while attach did one thing; with [27n](attachment-code-graph.md) it does two, and the user asked for the method to be "set with defaults or overridden with inline commands." This item is that surface: **`--graph=code|off`** accepted by `/attach` and by `complete --attach` (per invocation), a new **`attachments:` config block** holding the default (`graph: code`), written only through the comment-preserving config editor, and completion for the flag through the one command table. The `@` mention **stays a bare path** — the spike's recorded call: the mention contract promises the message reaches the model unchanged, so flags typed there would arrive as prose; a user who wants the non-default method uses `/attach` (one Tab away, 24's completion).
+**What / why.** Attaching has no option channel: `/attach takes a file, a folder or a glob` (`cli/chat.cpp`), an `@` mention is a bare path by contract (`mentioned_paths` — "The message itself is never changed"), `complete --attach` takes specs only, and no `attachments:` block exists in config. That was fine while attach did one thing; with [27n](attachment-code-graph.md) it does two, and the user asked for the method to be "set with defaults or overridden with inline commands." This item is that surface: **`--graph=code|off`** accepted by `/attach` and by `complete --attach` (per invocation), a new **`attachments:` config block** holding the default (`graph: code`), written only through the comment-preserving config editor, and completion for the flag through the one command table. The `@` mention **stays a bare path** — the spike's recorded call: the mention contract promises the message reaches the model unchanged, so flags typed there would arrive as prose; a user who wants the non-default method uses `/attach` (one Tab away, 24's completion).
 
 **Core constraint(s).**
 - **One config-mutation path:** the `attachments:` block is read by the config loader and written only by the comment-preserving editor — no second writer, per the standing invariant.
@@ -11,11 +11,11 @@
 - Code style carries: `.h`/`.cpp` pairs, smart pointers only.
 
 **Seam + files.**
-- `commands/chat.cpp` — `/attach` argument parsing grows the flag (spec stays first, flags after; a quoted path with spaces keeps working).
-- `commands/complete.cpp` — `--graph` beside `--attach`, applying to that invocation's attaches.
-- `commands/chat_completer.cpp` — the flag and its values in the command table.
+- `cli/chat.cpp` — `/attach` argument parsing grows the flag (spec stays first, flags after; a quoted path with spaces keeps working).
+- `cli/complete.cpp` — `--graph` beside `--attach`, applying to that invocation's attaches.
+- `cli/chat_completer.cpp` — the flag and its values in the command table.
 - `contracts/config.h` / `config.cpp` — the `attachments:` block (`graph: code|off`, default `code`); `contracts/config_edit.cpp` — its editor entry, comment-preserving like every other.
-- `commands/chat_attachments.cpp/.h` — `attach()` takes the resolved method; the resolution function lives here, pure.
+- `cli/chat_attachments.cpp/.h` — `attach()` takes the resolved method; the resolution function lives here, pure.
 - Tests: `tests/data/contracts/config` round-trips of the block (comments preserved); `tests/presentation/commands/` parse tables for `/attach` (paths with spaces, bad values refused with the valid set named); the precedence table.
 - Consumes: [27n](attachment-code-graph.md) (the method the option selects — including its `complete`-skips-graph default, which `--graph=code` overrides); 24 (shipped: completion); 26o (shipped: the flag-completion precedent).
 

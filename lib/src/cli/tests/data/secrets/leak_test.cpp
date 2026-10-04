@@ -10,8 +10,8 @@
 #include <string_view>
 
 #include "backends/factory.h"
-#include "commands/auth_cmd.h"
-#include "commands/check.h"
+#include "cli/auth_cmd.h"
+#include "cli/check.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "events/bus.h"

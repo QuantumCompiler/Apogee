@@ -13,7 +13,7 @@
 ///
 /// Only the files: what points AT them -- a backend's `model_path`, a
 /// collection's recorded embedding model, a promotion ledger -- is the
-/// command's to rewrite (`commands/models_migrate.cpp`), since the config has
+/// command's to rewrite (`cli/models_migrate.cpp`), since the config has
 /// one mutation path and this package is not it.
 namespace apogee::models {
 

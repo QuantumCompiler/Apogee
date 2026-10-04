@@ -10,7 +10,7 @@
 - **Layering holds:** the write hook lives at the backends' completion seam via the 28a cache module; the harness never includes backends; `check` and `models` consume through the same module. Code style carries: `.h`/`.cpp` pairs, smart pointers only.
 
 **Seam + files.**
-- `commands/check.cpp`: the Providers section — configured provider backends first (tier, warn + remediation on missing binary), then detected-unregistered mentions; the `--refresh-providers` spelling riding `check`'s existing flag conventions.
+- `cli/check.cpp`: the Providers section — configured provider backends first (tier, warn + remediation on missing binary), then detected-unregistered mentions; the `--refresh-providers` spelling riding `check`'s existing flag conventions.
 - `commands/models_cmd` (list/info): provider rows' `STATE`/`VERIFIED` cells from the tier structure; `models info` gains the evidence line for a provider backend.
 - `backends/provider_cache.h/.cpp` (28a's): the verified-slot write, called from the shared provider-backend completion seam — one helper, each provider backend type calling it on turn success.
 - Tests: `tests/presentation/commands/` — the check section against scripted cache states (including no cache); PATH-stripped sandbox check warns (the spike's probe, inverted into a test); `models list` golden rows per tier; the verified write exercised through the mock-shaped completion seam.

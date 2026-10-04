@@ -13,7 +13,7 @@
 **Seam + files.**
 - `harness/roles.h/.cpp`: the suite rung (`RoleRequest` gains the active suite's name; `ResolvedFrom::Suite`), between the per-feature backend and the global role pointer — a session's suite speaks for its roles, an explicit `-m` and a feature's pinned backend still win.
 - `contracts/config.h/.cpp` + `config_edit.cpp`: the `suites:` block (members per role; optional per-member `context_size`, `toolset`) and its editor entries.
-- `commands/chat.cpp` (+ the one command table / `chat_completer`): `--suite`, `/suite` with completion (the 24/26o precedents), the banner naming the active suite.
+- `cli/chat.cpp` (+ the one command table / `chat_completer`): `--suite`, `/suite` with completion (the 24/26o precedents), the banner naming the active suite.
 - `commands/models_cmd` (`status`): the suite column/rung in the existing output.
 - Tests: `tests/business/harness/roles` chain tables extended (suite set/unset × every rung); config round-trips with comments; `models status` goldens.
 - Consumes: 26g (shipped) for toolset trimming; 26k's `draft:<backend>` precedent for backend references in config; the shipped shell-completion resolver (`__complete`, [Milestone G](../../assistant/MILESTONES.md#milestone-g--the-terminal-ux-layer)) picks up suite names as a free rider.

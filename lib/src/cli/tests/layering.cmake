@@ -11,8 +11,9 @@
 # starts special-casing one vendor's tool dialect, and "one shared loop for all
 # surfaces" quietly becomes "one loop with an Anthropic branch".
 #
-# `commands/` is deliberately NOT checked: it is the composition root, and
-# assembling providers is its job.
+# `cli/` is deliberately NOT checked: it is the composition root, and
+# assembling providers is its job (`views/` and `machine/`, the other two
+# modules `commands/` split into in A3, are held below).
 #
 # C++ has no such enforcement — a `#include "backends/anthropic.h"` in the
 # harness compiles perfectly and the layering is gone, silently. So the check is
@@ -33,7 +34,7 @@ endif()
 # their includes put them. A package with no row fails here: a new package
 # declares its layer the day it exists. Same-layer includes are allowed; the
 # per-package rules below narrow them where it matters.
-set(LAYER_presentation commands httpserver markdown render)
+set(LAYER_presentation cli views machine httpserver markdown render)
 set(LAYER_business harness agentloop agent tools knowledge graph training scaffold models mcp)
 set(LAYER_data contracts backends embedstore logger secrets modelstore transport)
 set(LAYER_infrastructure platform ansi events version)
@@ -190,7 +191,7 @@ endif()
 
 # `secrets/` sits on the contracts: it may include `contracts/` (for the
 # backend types and the config editor) and itself, and nothing else. The day it includes
-# `httpserver/` or `commands/`, the one place that returns a key has grown a
+# `httpserver/` or `cli/`, the one place that returns a key has grown a
 # dependency on a surface that renders -- the leak the package exists to
 # make impossible.
 file(GLOB_RECURSE secrets_sources "${PACKAGE_DIR_secrets}/*.h"
@@ -218,7 +219,7 @@ endif()
 # attributes a span carries and the width arithmetic) and itself, and nothing
 # else. The logic is kept free of the terminal, the reporter and the command
 # line so it is testable as operations with no terminal at all -- the day it
-# includes `commands/`, the painter's bytes and the renderer's decisions have
+# includes `cli/` or `views/`, the painter's bytes and the renderer's decisions have
 # become one thing again.
 file(GLOB_RECURSE markdown_sources "${PACKAGE_DIR_markdown}/*.h"
                                    "${PACKAGE_DIR_markdown}/*.cpp")
@@ -243,7 +244,7 @@ endif()
 
 # `knowledge/` is a domain core: it may include the chunk store, the loop,
 # the harness, the platform seam and itself -- never a surface. The day it
-# includes `commands/` or `httpserver/`, the record logic every surface
+# includes `cli/` or `httpserver/`, the record logic every surface
 # shares has grown a dependency on one of them, and the parity between the
 # CLI capture, chat's /capture and the HTTP twin stops being structural.
 file(GLOB_RECURSE knowledge_sources "${PACKAGE_DIR_knowledge}/*.h"
@@ -358,6 +359,45 @@ if(NOT VIOLATIONS STREQUAL "")
     message(FATAL_ERROR "a carved package includes more than its floor:\n${pretty}\n"
                         "contracts/ may include only platform/ and itself; modelstore/ and "
                         "transport/ only contracts/, platform/ and themselves.")
+endif()
+
+# The presentation modules A3 split `commands/` into. `views/` paints -- the
+# status line, the answer, the line reader, the terminal adapter -- and never
+# parses argv or reaches the commands: it includes itself, `ansi/`,
+# `markdown/`, `platform/`, `contracts/` and `agentloop/` (the Reporter seam
+# and `ask_user` its adapters implement), never `cli/`, `machine/` or CLI11.
+# `machine/` is the machine-mode adapter and never paints: itself,
+# `agentloop/`, `agent/` and `contracts/` -- never `views/`, `ansi/` or
+# `markdown/`. `cli/`, the composition root, assembles both.
+foreach(rule "views:views|ansi|markdown|platform|contracts|agentloop"
+             "machine:machine|agentloop|agent|contracts")
+    string(REPLACE ":" ";" parts "${rule}")
+    list(GET parts 0 package)
+    list(GET parts 1 allowed)
+    file(GLOB_RECURSE module_sources "${PACKAGE_DIR_${package}}/*.h"
+                                     "${PACKAGE_DIR_${package}}/*.cpp")
+    if(module_sources STREQUAL "")
+        message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_${package}} — "
+                            "this check would pass vacuously")
+    endif()
+    foreach(source IN LISTS module_sources)
+        file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*[\"<]")
+        foreach(line IN LISTS project_includes)
+            if(line MATCHES "#[ \t]*include[ \t]*<CLI/" OR
+               (line MATCHES "#[ \t]*include[ \t]*\"" AND
+                NOT line MATCHES "#[ \t]*include[ \t]*\"(${allowed})/"))
+                get_filename_component(name "${source}" NAME)
+                list(APPEND VIOLATIONS "  ${package}/${name} reaches past ${allowed}: ${line}")
+            endif()
+        endforeach()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "a presentation module reaches past its rule:\n${pretty}\n"
+                        "views/ paints and never parses argv: views/, ansi/, markdown/, "
+                        "platform/, contracts/, agentloop/ only. machine/ never paints: "
+                        "machine/, agentloop/, agent/, contracts/ only.")
 endif()
 
 list(LENGTH ALL_SOURCES count)

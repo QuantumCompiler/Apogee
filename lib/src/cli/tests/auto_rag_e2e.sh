@@ -5,7 +5,7 @@
 #    config_e2e.cmake: CMake's execute_process drops an empty list element, so
 #    there is no way to hand the binary an EMPTY argument from a cmake -P
 #    script at all. The precedence itself is table-tested in
-#    tests/presentation/commands/helpers_test.cpp; this proves the empty value survives the
+#    tests/presentation/cli/helpers_test.cpp; this proves the empty value survives the
 #    trip from a real command line through CLI11 to that table.
 #
 # 2. The key is read at TURN BUILD, not at startup, so an edit mid-session

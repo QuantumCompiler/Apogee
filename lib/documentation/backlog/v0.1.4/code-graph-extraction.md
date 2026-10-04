@@ -18,7 +18,7 @@
 - `graph/code_resolve.h/.cpp` (new): the deterministic cross-file pass — qualified-name tables from the parse, import-edge resolution, call-site → definition linking, the unresolved-name accounting.
 - `graph/build.h/.cpp`: a build whose member is a **source root** (not only a collection) — the fingerprint becomes per-file content hashes in `kg_state`, and `graph update` rescans changed files only.
 - `embedstore/graph.h/.cpp`: the `origin`/`confidence` columns and the code node kinds; `graph_dedupe` keeps origin-aware unions (an `extracted` edge never merges *down* to `inferred`).
-- `commands/graph.cpp`: `graph build --source <dir>` (and `--lang` filters), `graph update`, counts of parsed/skipped files in the human output.
+- `cli/graph.cpp`: `graph build --source <dir>` (and `--lang` filters), `graph update`, counts of parsed/skipped files in the human output.
 - `third_party/tree-sitter/` + pinned grammars; `lib/src/cli/CMakeLists.txt` targets; lint scope excludes them as it does llama.cpp.
 - Tests: `tests/business/graph/code_extract_test.cpp` over a fixture mini-repo (hermetic — committed source files, no network); golden node/edge sets per language; the update path asserted by touching one file.
 

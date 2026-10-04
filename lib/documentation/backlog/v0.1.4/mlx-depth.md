@@ -5,7 +5,7 @@
 **Core constraint(s).**
 - **One attachment and image pipeline** (consumed decisions — 26d/26e): an MLX vision model is just another backend that answers "yes" to reading images natively; the media machinery routes to it exactly as it routes to mtmd-equipped llamacpp entries. No MLX-specific path in `agentloop/`.
 - **Serve's exclusions keep their meaning:** vendor-CLI types stay refused by type (credentials); `mlx` routes like `llamacpp` does. The driver child under `serve` still opens no socket of its own — only `serve.cpp` listens, per the allow-listed object rule, and the no-listen checks run over a served MLX turn.
-- **Promotion stays one plan** (consumed decision — Milestone Z): gate → (fuse) → register → version ledger → retention → rollback, with the MLX target one branch of the existing closure-driven plan in `commands/train.cpp` — `training/` still never names a backend or edits config itself.
+- **Promotion stays one plan** (consumed decision — Milestone Z): gate → (fuse) → register → version ledger → retention → rollback, with the MLX target one branch of the existing closure-driven plan in `cli/train.cpp` — `training/` still never names a backend or edits config itself.
 - **No silent capability claims:** `check` and `models status` say whether the vision path is actually available (venv has `mlx-vlm`); a `vision` role pointed at a non-vision MLX entry warns exactly as it does elsewhere.
 - **Parity:** everything here reaches every surface through the shared cores; nothing is CLI-only except training control, which stays CLI-only by the standing rule.
 
@@ -13,7 +13,7 @@
 - `assets/mlx/mlx_generate.py`: the vision extension (image parts in the request protocol, `mlx-vlm` loading when the model carries it); the stub-module suite grows the image cases.
 - `backends/mlx_local.cpp`: image-capability answer from the model directory's own markers; the capability probe stays a harness question.
 - `httpserver/`: nothing structural — a conformance case proving an `mlx` entry serves `/v1/chat/completions` streamed, and the type-refusal test updated to assert it is *not* refused.
-- `training/promote` plan + `commands/train.cpp`: the MLX registration target (`--target mlx`), fused-SafeTensors path through [27b](mlx-model-operations.md)'s store row, the version ledger unchanged.
+- `training/promote` plan + `cli/train.cpp`: the MLX registration target (`--target mlx`), fused-SafeTensors path through [27b](mlx-model-operations.md)'s store row, the version ledger unchanged.
 - Tests: fake-driver image round-trip; promote-plan table gains the MLX branch (closure-tested like the GGUF one); the served-stream conformance case; `check` rows.
 
 **Reference (Ommi).** No analog for any of the three: Ommi had no second runtime, no vision on local models, and its training promoted into its one format. The in-house precedents consumed: local multimodal (Milestone O), the serve plane's refusal semantics (Milestone T), and the promote plan (Milestone Z).

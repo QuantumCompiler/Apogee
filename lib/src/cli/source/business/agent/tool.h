@@ -56,7 +56,7 @@ struct GateRequest {
 /// Returns the decision for one operation on one target. Injected rather than
 /// read from config here: `agent/` knows nothing about config files, and each
 /// surface makes its checker from the `permissions:` and `tools:` sections
-/// (`commands/permissions.h`).
+/// (`cli/permissions.h`).
 using PermissionChecker = std::function<Permission(const GateRequest& request)>;
 
 /// Asks someone to confirm a gated operation. Non-null only on a surface with

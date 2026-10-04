@@ -14,11 +14,11 @@ A small model has no memory beyond its window. This gives it the user's history 
 
 **Seam + files.**
 - `agentloop/recall.h/.cpp` (new): summarising (a side request to the utility role, with the generator arriving as a closure), indexing, and per-turn retrieval.
-- `commands/chat.cpp`: summarise on exit in the background, and the slash commands.
-- `commands/chat_history.cpp`: deleting from the index.
+- `cli/chat.cpp`: summarise on exit in the background, and the slash commands.
+- `cli/chat_history.cpp`: deleting from the index.
 - `harness/config.*` and the template: `memory.recall`.
 - `contracts/layout.h`: the private row for the chats index.
-- `commands/check.cpp`: the index's size and mode.
+- `cli/check.cpp`: the index's size and mode.
 - Machine mode: a `memory` meta event beside the existing retrieval one, in [machine-mode.md](../../reference/machine-mode.md).
 
 **Reference (Ommi).** None: Ommi kept sessions and captured knowledge records (which Apogee ported as Milestone Y), but never recalled past conversations automatically.

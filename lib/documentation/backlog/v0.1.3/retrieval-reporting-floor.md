@@ -3,7 +3,7 @@
 **What / why.** The attachments line misleads, and the injection behind it has no floor. Both halves were measured on the shipped binary (2026-10-03, sandboxed probe over a temp `APOGEE_HOME`): a hybrid turn's scores are Reciprocal Rank Fusion with `kRrfK = 60` (`embedstore/vector.h`), so the *best possible* score — rank 1 in both lists — is 2/61 ≈ **0.033**; the stress-test lines the user read as junk ("top 0.023", "top 0.031") were actually mid-to-high rank agreement, and nothing on the line says so. Meanwhile the injection site (`package_attachments`, `agentloop/rag.cpp`) checks only emptiness: the probe got a **0.000-score excerpt** handed to the model from a one-file attach, and an entirely unrelated question ("What is the capital of France?" over this repo's assistant docs) injected excerpts at **0.950 lexical** — the same score the on-topic question got, because normalized BM25 saturates. Two deliverables, one item: **(a)** the line reports match strength on a scale a person can read — per retriever, since the three scales are incomparable (`agentloop/retriever.h` says exactly this) — keeping the raw score and the retriever tag; **(b)** a per-retriever relevance floor: a turn whose best hit falls below it injects **nothing** and the line says "nothing relevant in the attachments", because misleading context is worse than none — the stress-test model built its hallucination spiral on excerpts that did not answer a structural question.
 
 **Core constraint(s).**
-- **One renderer.** Every surface's attachments line comes from the one composer in `commands/helpers.cpp` today; it stays one function, so chat, `complete` and machine mode cannot drift.
+- **One renderer.** Every surface's attachments line comes from the one composer in `cli/helpers.cpp` today; it stays one function, so chat, `complete` and machine mode cannot drift.
 - **Scales never mix.** Strength is computed per retriever (RRF, cosine, normalized BM25) and the retriever tag stays on the line — the rule `RagResult::retriever` already states ("a number shown without its retriever invites exactly the comparison that cannot be made") extends to the floor: there is no single threshold constant.
 - **The floor is honest, not silent.** Below-floor is a said outcome ("nothing relevant…"), never a quiet absence; the existing principle that answering without retrieved context beats refusing is untouched — the turn still runs.
 - **Lexical saturation is respected.** Normalized BM25 cannot tell the probe's irrelevant question from its on-topic one by score; its floor must use a different signal (question-term coverage of the hit) or be honestly absent — never a score threshold that the measurement shows cannot work.
@@ -13,7 +13,7 @@
 **Seam + files.**
 - `agentloop/rag.cpp` / `rag.h` — the floor at the two packaging sites (`package_attachments` and the collection path); `RagResult` gains the strength/floored facts the renderer needs.
 - `agentloop/retriever.h/.cpp` — the per-retriever strength mapping and floor live beside the scale knowledge (RRF's ceiling from `embedstore/vector.h`'s `kRrfK`, cosine as-is, BM25's coverage signal).
-- `commands/helpers.cpp` — the one line renderer: strength first, raw + retriever kept.
+- `cli/helpers.cpp` — the one line renderer: strength first, raw + retriever kept.
 - Tests: `tests/business/agentloop/` rag tables — boundary cases per retriever, the floored-turn wording, the one-renderer golden.
 - Consumes: 26d's attachment pipeline (shipped), 26c's budget behavior (shipped) — unchanged by this item.
 

@@ -10,7 +10,7 @@
 - **Never a push channel by the back door:** task events are emitted by the task's own process on its stdout during `task run --output-format stream-json`; a *separate* chat child does not start narrating tasks unasked. The parked push-channel question stays parked and stays the user's.
 
 **Seam + files.**
-- `commands/json_reporter.cpp` / `render/json_report.h/.cpp`: the task event types (started, plan recorded, round started/ended with check states, grant exercised, finished with outcome), emitted when `task run` is invoked with `--output-format stream-json`; the `task status`/`task list` JSON documents per 28h's flag and framing conventions.
+- `machine/json_reporter.cpp` / `render/json_report.h/.cpp`: the task event types (started, plan recorded, round started/ended with check states, grant exercised, finished with outcome), emitted when `task run` is invoked with `--output-format stream-json`; the `task status`/`task list` JSON documents per 28h's flag and framing conventions.
 - `httpserver/`: `GET /v1/admin/tasks` and `GET /v1/admin/tasks/{id}` over the same view builder; the parity test's classification updated (reads served, controls carved out by name).
 - [machine-mode.md](../../reference/machine-mode.md): the task events section; [http-api.md](../../reference/http-api.md): the two routes — both under their existing conformance pins.
 - Tests: golden JSON for status/list; an e2e that runs a scripted-mock task under `--output-format stream-json` and asserts the event sequence matches the ledger's transition sequence one for one; the admin-route tests and the leak sweep over served views.

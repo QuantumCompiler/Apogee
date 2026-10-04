@@ -33,8 +33,8 @@ endif()
 #   contracts/config.cpp   -- parses them out of YAML
 #   contracts/config_edit.cpp / config_template.cpp -- writes and documents them
 #   harness/harness.cpp  -- holds default_model() for display; calls the resolver
-#   commands/config_cmd.cpp -- `config get models.default` must print the raw value
-#   commands/check.cpp   -- validates each pointer AS WRITTEN, which is the one
+#   cli/config_cmd.cpp -- `config get models.default` must print the raw value
+#   cli/check.cpp   -- validates each pointer AS WRITTEN, which is the one
 #                           place the unresolved value is the point
 set(allowed
     "business/harness/roles.cpp"
@@ -42,8 +42,8 @@ set(allowed
     "data/contracts/config_edit.cpp"
     "data/contracts/config_template.cpp"
     "business/harness/harness.cpp"
-    "presentation/commands/config_cmd.cpp"
-    "presentation/commands/check.cpp"
+    "presentation/cli/config_cmd.cpp"
+    "presentation/cli/check.cpp"
 )
 
 # Every allowance names a file that exists: one left behind by a move would

@@ -18,8 +18,8 @@ Two caches:
 - `backends/llama_real.cpp`: the llama.h calls.
 - `backends/llamacpp.cpp`: the prefix cache consulted when a session context is created; the chat cache restored when a resumed session's first prompt matches; `session_tokens_` set from what was restored, so prefix matching continues as today.
 - `contracts/layout.h`: `cache/` is already declared, and gains a documented subdirectory.
-- `commands/chat.cpp`: save at exit (the per-turn save stays the transcript only).
-- `commands/check.cpp`: the cache's size and its cap.
+- `cli/chat.cpp`: save at exit (the per-turn save stays the transcript only).
+- `cli/check.cpp`: the cache's size and its cap.
 
 **Reference (Ommi).** Ommi's `ommi-completion` kept an on-disk prompt cache per session with longest-common-prefix reuse, discarded itself when unusable, and was opened read-only on RAG turns so injected chunks never poisoned it (CHAT.md). Apogee's in-process cache made that file unnecessary until a process ends; this brings the persistence back without the per-turn spawn.
 

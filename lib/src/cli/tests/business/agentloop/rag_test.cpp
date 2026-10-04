@@ -17,7 +17,7 @@
 #include "agentloop/loop.h"
 #include "agentloop/retriever.h"
 #include "backends/mock.h"
-#include "commands/helpers.h"
+#include "cli/helpers.h"
 #include "contracts/config.h"
 #include "embedstore/store.h"
 #include "harness/harness.h"

@@ -247,7 +247,7 @@ public:
 /// Implemented by a provider that can accept image content parts.
 ///
 /// Exists so no surface has to ask "what type is this backend?" before
-/// attaching an image. `commands/complete.cpp` did exactly that as a recorded
+/// attaching an image. `cli/complete.cpp` did exactly that as a recorded
 /// stopgap while llamacpp had no implementation to ask; a type switch is the
 /// shape the capability rule exists to prevent, and this retires it.
 ///

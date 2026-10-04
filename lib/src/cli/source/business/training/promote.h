@@ -21,7 +21,7 @@
 ///
 /// Nothing here edits the config or knows a backend type: the conversion,
 /// the header check and the quantizer arrive as closures, and the config
-/// edit is the command's (`commands/train.cpp`, the composition root). What
+/// edit is the command's (`cli/train.cpp`, the composition root). What
 /// this package owns is the arithmetic the reference got wrong -- version
 /// numbers are `max + 1`, never the count, because a count regresses after
 /// the first prune and the next promote overwrote a live file -- and

@@ -28,7 +28,7 @@ The GPU was shared with a terminal and a monitor drawing on it (55–83% busy wi
 - **If it earns a build:**
   - `backends/llama_real.cpp`: `common_speculative_init_from_params` and the draft-verify loop in generation.
   - `backends/llamacpp.cpp`: the setting, and the `generate` loop accepting multiple tokens per step (the per-token callbacks unchanged);
-  - `commands/models.cpp`: the MTP head's presence.
+  - `cli/models.cpp`: the MTP head's presence.
 
 **Reference (Ommi).** None; Ommi never used speculative decoding.
 

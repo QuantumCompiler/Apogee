@@ -9,10 +9,10 @@
 #include <string>
 #include <vector>
 
-#include "commands/answer_view.h"
 #include "markdown/layout.h"
 #include "markdown/stream_renderer.h"
 #include "support/terminal_model.h"
+#include "views/answer_view.h"
 
 /// Real answers, recorded from the local models on 2026-09-25 with
 /// `apogee complete --raw` (which pipes the model's text untouched), rendered

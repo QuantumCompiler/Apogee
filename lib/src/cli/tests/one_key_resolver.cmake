@@ -27,9 +27,9 @@ set(allowed
     "data/contracts/config.cpp"           # parses the api_key field
     "data/contracts/config_edit.cpp"      # writes the api_key field
     "data/contracts/config_template.cpp"  # the starter config's commentary
-    "presentation/commands/config_cmd.cpp"      # the --api-key flag, stored literally
+    "presentation/cli/config_cmd.cpp"      # the --api-key flag, stored literally
     "presentation/httpserver/admin_config.cpp"  # api_key_set in the view; is_literal_api_key
-    "presentation/commands/auth_cmd.cpp"        # names the variables to TELL the user which to export
+    "presentation/cli/auth_cmd.cpp"        # names the variables to TELL the user which to export
 )
 
 # Every allowance names a file that exists: one left behind by a move would

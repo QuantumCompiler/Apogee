@@ -12,7 +12,7 @@
 **Seam + files.**
 - `graph/navigate.h/.cpp` (new, guarded like the rest of `graph/`): `shortest_path`, `neighborhood`, `node_card` (the explain payload) over `embedstore/graph` queries; pure over an injected store handle.
 - `embedstore/graph.h/.cpp`: the two or three indexed queries traversal needs (edges by node and relation, bidirectional), added beside the existing ones.
-- `commands/graph.cpp`: the three verbs, human rendering (hops as `a -[calls·extracted]-> b`), JSON per 28h.
+- `cli/graph.cpp`: the three verbs, human rendering (hops as `a -[calls·extracted]-> b`), JSON per 28h.
 - `tools/` (the `graph` toolset): `graph_query`, `graph_path`, `graph_explain`, `graph_neighbors` — thin wrappers over the one core, registered read-only; served by `__mcp-tools` with zero additional code (asserted, not assumed).
 - `httpserver/`: read twins only where the existing graph admin surface already has the pattern; nothing mutating.
 - Tests: `tests/business/graph/navigate_test.cpp` (path/neighborhood over a fixture graph, table-tested: no path, self, caps, ambiguity); `tests/business/tools/` for the toolset's bounds; an `mcp_e2e`-style check that an external MCP client reaches `graph_path`.

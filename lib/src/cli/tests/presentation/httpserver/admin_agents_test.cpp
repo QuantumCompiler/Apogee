@@ -10,8 +10,8 @@
 #include <string>
 #include <vector>
 
-#include "commands/registry.h"
-#include "commands/root.h"
+#include "cli/registry.h"
+#include "cli/root.h"
 #include "contracts/config.h"
 #include "httpserver/http_types.h"
 #include "support/env_guard.h"

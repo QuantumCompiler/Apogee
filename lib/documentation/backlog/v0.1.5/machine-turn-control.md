@@ -10,8 +10,8 @@
 - **A `cancel` with nothing in flight is ignored** — the inbound-tolerance rule, not an error; racing a cancel against a turn that just finished must be harmless.
 
 **Seam + files.**
-- `commands/json_reporter.cpp` / `render/json_report.h/.cpp`: the `turn` counter, stamped on `answer_*`, `thinking*`, `tool_status`, `question`, `result`, `error`; the cancellation `finish_reason` on `result`.
-- `commands/chat.cpp`: the stdin reader accepts `cancel` and trips the same cancellation the interrupt handler trips; a queued `user` line after a `cancel` starts the next turn normally.
+- `machine/json_reporter.cpp` / `render/json_report.h/.cpp`: the `turn` counter, stamped on `answer_*`, `thinking*`, `tool_status`, `question`, `result`, `error`; the cancellation `finish_reason` on `result`.
+- `cli/chat.cpp`: the stdin reader accepts `cancel` and trips the same cancellation the interrupt handler trips; a queued `user` line after a `cancel` starts the next turn normally.
 - `agentloop/loop.cpp`: no new mechanism — the existing `cancellation` seam and half-turn rollback are the implementation; this item only gives machine mode a way to reach them.
 - [machine-mode.md](../../reference/machine-mode.md): both additions, plus the turn-accounting rule stated for drivers.
 - Tests: `tests/schema_conformance.py`, the machine-mode e2e (a cancelled long turn: `result` arrives, session survives, next turn works), `tests/naive_host_driver.py` re-run — W3 and W4 close.

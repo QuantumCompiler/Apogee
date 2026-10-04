@@ -39,7 +39,7 @@ using apogee::models::SourcePromise;
 struct Scratch {
     // A per-process counter alone named the same path in two ctest processes
     // running in parallel, and each deleted the other's directory (the flake
-    // class `commands/check_test.cpp` records); a random suffix makes the
+    // class `cli/check_test.cpp` records); a random suffix makes the
     // name this process's own.
     std::filesystem::path root =
         std::filesystem::temp_directory_path() / ("apogee-acquire-" + std::to_string(counter()) +

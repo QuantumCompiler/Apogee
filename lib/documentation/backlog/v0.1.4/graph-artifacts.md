@@ -12,7 +12,7 @@
 **Seam + files.**
 - `graph/report.h/.cpp` (new, guarded): the report model — hubs by degree, origin mix, community roll-up, decision list, orphan sample — pure over the store; rendered through `render/` (the `human_summary`-last discipline).
 - `graph/export_html.h/.cpp`, `graph/export_graphml.h/.cpp`, `graph/export_mermaid.h/.cpp`: serializers over the same payloads; the HTML template an `assets/` file compiled in like the clerks' prompts, data embedded as one JSON block.
-- `commands/graph.cpp`: `graph report [--out <file>]`, `graph export html|graphml|mermaid --out <file>`, both honoring `--graph`/`--collection`.
+- `cli/graph.cpp`: `graph report [--out <file>]`, `graph export html|graphml|mermaid --out <file>`, both honoring `--graph`/`--collection`.
 - Tests: `tests/business/graph/report_test.cpp` (golden report over the fixture graph; the no-summaries case; cap behavior), `export_test.cpp` (GraphML round-trips through a reference parser; the HTML contains its data block, its cap note, and no external reference; Mermaid output parses).
 
 **Reference (Ommi).** No analog — Ommi's knowledge layer exported records (`knowledge export`), never graph artifacts. External prior art: Graphify's `graph.html`, `GRAPH_REPORT.md` (god nodes, surprising connections, suggested questions) and its Mermaid/GraphML/Neo4j exports. Divergences: no wiki/Obsidian publishing in the first cut; no Neo4j-specific format (GraphML covers the import path); the report reuses paid-for community summaries instead of generating fresh prose.

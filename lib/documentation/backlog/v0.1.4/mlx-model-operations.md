@@ -11,8 +11,8 @@
 
 **Seam + files.**
 - `modelstore/store.h/.cpp`: the `mlx/` format row and its resolution; `models/mlx_info.h/.cpp` (new): the `config.json`/index reader — window, quant bits, shard inventory, total size — pure over injected files.
-- `models/acquire.cpp` / `commands/models_pull.cpp`: recognizing an MLX snapshot (directory with `config.json` + MLX quant markers) and landing it under `mlx/<hash>/`.
-- `commands/models.cpp`: list/info/status rows for the format; `commands/check.cpp`: the store validation extended.
+- `models/acquire.cpp` / `cli/models_pull.cpp`: recognizing an MLX snapshot (directory with `config.json` + MLX quant markers) and landing it under `mlx/<hash>/`.
+- `cli/models.cpp`: list/info/status rows for the format; `cli/check.cpp`: the store validation extended.
 - `models/convert.cpp` + the venv script path: `models convert --mlx <source>` over the script runner; staging and Ctrl-C per the house rules.
 - `harness/` window plumbing: the `mlx` entry type's context size resolved from `mlx_info` when unset (the 26a chain).
 - Tests: `tests/business/models/mlx_info_test.cpp` goldens over fixture directories (well-formed, missing fields, truncated shard); store/migrate cases; a pull e2e against a local fixture "source"; convert staged-cleanup case.
