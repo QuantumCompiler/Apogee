@@ -1277,6 +1277,31 @@ TEST_CASE("complete --allow is the user answering at invocation; without it, den
     CHECK(chat.run({"complete", "--allow", "write_file", "write it"}) != 0);
 }
 
+TEST_CASE("a repeated --allow, --deny or --allow-host is taken whole, on chat and complete",
+          "[chat][cli][permissions][presets]") {
+    // Each flag is repeatable for real: a second use was refused by the
+    // parser ("At Most 1 required but received 2") until 27i.
+    HelperChat chat{texts({"fine"}), {"Title"}};
+    REQUIRE(chat.run({"chat", "--tools", "--allow", "write_file", "--allow", "edit_file", "--deny",
+                      "run_command", "--deny", "example.org", "--allow-host", "docs.python.org",
+                      "--allow-host", "en.wikipedia.org"},
+                     "/permissions\n") == 0);
+    const std::string said = chat.out + chat.err;
+    CHECK(said.find("write_file   allow  (this session)") != std::string::npos);
+    CHECK(said.find("edit_file    allow  (this session)") != std::string::npos);
+    CHECK(said.find("run_command  deny   (this session)") != std::string::npos);
+    CHECK(said.find("website example.org: deny (this session)") != std::string::npos);
+    CHECK(said.find("website docs.python.org: allow (this session)") != std::string::npos);
+    CHECK(said.find("website en.wikipedia.org: allow (this session)") != std::string::npos);
+
+    HelperChat once{writes_a_file(), {"unused"}};
+    sandboxed(once);
+    REQUIRE(once.run({"complete", "--tools", "--allow", "edit_file", "--allow", "write_file",
+                      "--deny", "run_command", "--deny", "delete_file", "--allow-host",
+                      "docs.python.org", "--allow-host", "en.wikipedia.org", "write it"}) == 0);
+    CHECK(std::filesystem::exists(once.home.path() / "work" / "out.txt"));
+}
+
 TEST_CASE("chat --allow writes without asking, and a fresh chat asks again",
           "[chat][cli][permissions][presets]") {
     HelperChat chat{writes_a_file(), {"Title"}};

@@ -231,6 +231,33 @@ TEST_CASE("the plan message states the goal, the acceptance and the unattended r
     CHECK(t::plan_message(task).find("refusal is its result") != std::string::npos);
 }
 
+TEST_CASE("the plan message says what the task was handed, and nothing when it was not",
+          "[tasks][messages][policy]") {
+    Task task = task_with({{CheckKind::Require, "42"}});
+    task.plan.clear();
+    task.tools = true;
+    // 27h's message, byte for byte, for a task handed nothing.
+    const std::string plain = t::plan_message(task);
+    CHECK(plain.ends_with(
+        "No one will answer questions while the task runs: asking one ends the task. A tool "
+        "that changes something runs only where the configuration allows it; otherwise it is "
+        "refused, and the refusal is its result."));
+
+    task.policy.grants = {"edit_file", "write_file"};
+    const std::string granted = t::plan_message(task);
+    CHECK(granted.find("runs only where the configuration allows it or this task was granted "
+                       "it (edit_file, write_file); otherwise it is refused") != std::string::npos);
+
+    task.policy.on_question = t::OnQuestion::Answer;
+    task.policy.answer = "blue";
+    const std::string answered = t::plan_message(task);
+    CHECK(answered.find("any question you ask gets the one answer declared for this task") !=
+          std::string::npos);
+    CHECK(answered.find("asking one ends the task") == std::string::npos);
+    // The declared answer itself is the answer to a question, never the plan's.
+    CHECK(answered.find("blue") == std::string::npos);
+}
+
 TEST_CASE("round messages carry the plan, and a correction names what failed",
           "[tasks][messages]") {
     Task task = task_with({{CheckKind::Require, "42"}, {CheckKind::Require, "Paris"}});
@@ -281,6 +308,16 @@ TEST_CASE("the ledger's JSON round-trips every field", "[tasks][json]") {
     task.created_at = "2026-10-04T12:00:00Z";
     play(task, 1, "42", {use("write_file", "{}")});
     task.rounds.back().denied.push_back({.tool = "run_command", .target = "rm -rf /"});
+    task.rounds.back().denied.push_back(
+        {.tool = "delete_file", .target = "a.txt", .by = std::string{t::kByNobody}});
+    task.rounds.back().allowed.push_back(
+        {.tool = "write_file", .target = "out.txt", .by = std::string{t::kByGrant}});
+    task.rounds.back().answered.push_back(
+        {.question = "Which colour?", .answer = "blue", .by = std::string{t::kByDeclared}});
+    task.policy.grants = {"write_file"};
+    task.policy.on_question = t::OnQuestion::Answer;
+    task.policy.answer = "blue";
+    task.policy.agent = "helper";
     task.rounds.back().tokens = 120;
     task.rounds.back().tokens_estimated = true;
     task.rounds.back().adopted = true;
@@ -290,9 +327,31 @@ TEST_CASE("the ledger's JSON round-trips every field", "[tasks][json]") {
     CHECK(t::task_to_json(back) == t::task_to_json(task));
     CHECK(back.checks[1].kind == CheckKind::RequireFile);
     CHECK(back.rounds.back().denied.front().target == "rm -rf /");
+    CHECK(back.rounds.back().denied.front().by.empty());
+    CHECK(back.rounds.back().denied.back().by == t::kByNobody);
+    CHECK(back.rounds.back().allowed.front().by == t::kByGrant);
+    CHECK(back.rounds.back().allowed.front().target == "out.txt");
+    CHECK(back.rounds.back().answered.front().answer == "blue");
+    CHECK(back.policy.grants == std::vector<std::string>{"write_file"});
+    CHECK(back.policy.answer == "blue");
+    CHECK(back.policy.agent == "helper");
     CHECK(back.rounds.back().adopted);
     CHECK(back.transitions.back().round == 1);
     CHECK(back.updated_at == "2026-10-04T12:01:00Z");
+}
+
+TEST_CASE("a ledger written before the policy reads as handed nothing", "[tasks][json][policy]") {
+    nlohmann::json json = t::task_to_json(task_with({}));
+    json.erase("policy");
+    for (nlohmann::json& round : json["rounds"]) {
+        round.erase("allowed");
+        round.erase("answered");
+    }
+    const Task older = t::task_from_json(json);
+    CHECK(older.policy.grants.empty());
+    CHECK(older.policy.on_question == t::OnQuestion::Fail);
+    CHECK(older.rounds.front().allowed.empty());
+    CHECK(older.rounds.front().answered.empty());
 }
 
 TEST_CASE("a ledger of the wrong shape is refused, and a budget outside its bounds is held",

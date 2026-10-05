@@ -328,16 +328,19 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                     "Allow a tool for this chat without asking (repeatable, with --tools)")
         ->type_name(kToolValue)
         ->expected(1)
-        ->allow_extra_args(false);
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--deny", flags->deny,
                     "Refuse a tool or website for this chat without asking (repeatable)")
         ->type_name(kToolValue)
         ->expected(1)
-        ->allow_extra_args(false);
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--allow-host", flags->allow_hosts,
                     "Allow fetching from a website for this chat without asking (repeatable)")
         ->expected(1)
-        ->allow_extra_args(false);
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     flags->think_budget_option =
         cmd->add_option("--think-budget", flags->think_budget,
                         "The most tokens a reasoning model may think for before it answers")

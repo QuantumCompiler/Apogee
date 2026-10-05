@@ -38,6 +38,13 @@ Ten checks:
               terminal's echo back on -- it was off during the turn, and a
               shell left with echo off takes input blind.
 
+  task-attended
+              An attended `task run` (27i): a tool granted with `--allow`
+              runs with no prompt, one not granted is asked about at the
+              terminal -- policy adds to the human path, never replaces it --
+              and a question with no declared answer is put to the person
+              there; each answer is recorded in the ledger as the person's.
+
 POSIX only -- `pty` and SIGKILL have no portable Windows equivalent.  Recorded
 as a per-item skip in CLAUDE.md -> Platforms.
 """
@@ -225,10 +232,10 @@ def scripted(binary, env, home, turns):
 class Pty:
     """A chat on a pseudo-terminal, its output collected as it runs."""
 
-    def __init__(self, binary, env, extra=(), cwd=None):
+    def __init__(self, binary, env, extra=(), cwd=None, command=("chat",)):
         self.primary, self.secondary = pty.openpty()
         self.process = subprocess.Popen(
-            [os.path.abspath(binary), "chat", *extra],
+            [os.path.abspath(binary), *command, *extra],
             stdin=self.secondary, stdout=self.secondary, stderr=self.secondary,
             env=env, close_fds=True, cwd=cwd,
         )
@@ -251,6 +258,13 @@ class Pty:
 
     def send(self, data):
         os.write(self.primary, data)
+
+    def wait_for(self, needle, seconds):
+        """Drains until `needle` has been seen, or `seconds` pass."""
+        deadline = time.time() + seconds
+        while time.time() < deadline and needle not in self.text():
+            self.drain(0.1)
+        return needle in self.text()
 
     def echo_on(self):
         return bool(termios.tcgetattr(self.secondary)[3] & termios.ECHO)
@@ -363,6 +377,64 @@ def check_presets(binary, home, env):
     elif b"run_command" not in text.split(b"Allow? [y]es")[0].splitlines()[-2] + \
             text.split(b"Allow? [y]es")[0].splitlines()[-1]:
         failures.append(f"the prompt was not run_command's: {text!r}")
+    return failures
+
+
+def check_task_attended(binary, home, env):
+    """A task run at a terminal: granted runs, ungranted asks, a question
+    goes to the person, each answer recorded as theirs (27i)."""
+    work = os.path.join(home, "work")
+    os.makedirs(work)
+    scripted(binary, env, home, [
+        {"text": "1. Write, run, ask."},
+        {"tool_calls": [{"name": "write_file",
+                         "arguments": {"path": "out.txt", "content": "hello"}}]},
+        {"tool_calls": [{"name": "run_command", "arguments": {"command": "echo hi"}}]},
+        {"tool_calls": [{"name": "ask_user", "arguments": {"questions": [
+            {"header": "Colour", "question": "Which colour?",
+             "options": [{"label": "Red"}, {"label": "Green"}]}]}}]},
+        {"text": "Done: {{last_tool_result}}\nTASK STATUS: DONE"},
+    ])
+    term = Pty(binary, env, ("Do the work", "--tools", "--allow", "write_file", "--rounds", "1"),
+               cwd=work, command=("task", "run"))
+    failures = []
+    if not term.wait_for(b"Allow? [y]es", 15.0):
+        failures.append(f"run_command was never asked about: {term.text()!r}")
+    term.send(b"n\r")
+    if not term.wait_for(b"Choose a number, or type your own answer", 10.0):
+        failures.append(f"the question was never put: {term.text()!r}")
+    term.send(b"blue\r")
+    term.drain(3.0)
+    term.close()
+    text = term.text()
+    if term.process.returncode != 0:
+        failures.append(f"the task did not end done ({term.process.returncode}): {text!r}")
+    if not os.path.exists(os.path.join(work, "out.txt")):
+        failures.append("the granted write did not happen")
+    asks = text.count(b"Allow? [y]es")
+    if asks != 1:
+        failures.append(f"expected one prompt -- for run_command -- saw {asks}: {text!r}")
+    elif b"run_command" not in text.split(b"Allow? [y]es")[0].splitlines()[-2] + \
+            text.split(b"Allow? [y]es")[0].splitlines()[-1]:
+        failures.append(f"the prompt was not run_command's: {text!r}")
+    tasks = os.path.join(home, "tasks")
+    ledgers = [os.path.join(tasks, name, "task.json") for name in os.listdir(tasks)
+               if os.path.isfile(os.path.join(tasks, name, "task.json"))] \
+        if os.path.isdir(tasks) else []
+    if len(ledgers) != 1:
+        return failures + [f"expected one task ledger, found {ledgers}"]
+    with open(ledgers[0], encoding="utf-8") as handle:
+        task = json.load(handle)
+    round_ = task["rounds"][-1]
+    if round_.get("allowed") != [{"by": "grant", "target": "out.txt", "tool": "write_file"}]:
+        failures.append(f"the grant's use is not recorded: {round_.get('allowed')}")
+    if round_.get("denied") != [{"by": "person", "target": "echo hi", "tool": "run_command"}]:
+        failures.append(f"the person's no is not recorded: {round_.get('denied')}")
+    if round_.get("answered") != [{"answer": "blue", "by": "person",
+                                   "question": "Which colour?"}]:
+        failures.append(f"the person's answer is not recorded: {round_.get('answered')}")
+    if task.get("status") != "done":
+        failures.append(f"the task is {task.get('status')}: {task.get('reason')}")
     return failures
 
 
@@ -516,6 +588,7 @@ def main():
                         ("typeahead-hidden", check_typeahead_hidden),
                         ("side-calls", check_side_calls),
                         ("presets", check_presets),
+                        ("task-attended", check_task_attended),
                         ("base-model", check_base_model),
                         ("interrupt", check_interrupt)):
         home = tempfile.mkdtemp(prefix=f"apogee-chat-{name}-")
@@ -535,7 +608,7 @@ def main():
 
     print("typeahead discarded once; completed turns survive a kill -9; "
           "the banner and each question stand apart; answers render, raw with --raw; "
-          "typing mid-reply waits for the prompt; side calls are narrated in the block; a preset is the session answer given early; a base model is said and its tools are off; "
+          "typing mid-reply waits for the prompt; side calls are narrated in the block; a preset is the session answer given early; an attended task asks for what it was not granted; a base model is said and its tools are off; "
           "Ctrl-C restores echo - OK")
     return 0
 

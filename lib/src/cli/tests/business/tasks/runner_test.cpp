@@ -40,6 +40,8 @@ struct Step {
     std::string error;
     std::vector<t::ToolUse> tools;
     std::vector<t::Denial> denied;
+    std::vector<t::Permit> allowed;
+    std::vector<t::Answered> answered;
     /// Run first: what another process -- or Ctrl-C -- does meanwhile.
     std::function<void()> before;
 };
@@ -73,6 +75,8 @@ struct Scripted {
         t::TurnResult result;
         result.tools = step.tools;
         result.denied = step.denied;
+        result.allowed = step.allowed;
+        result.answered = step.answered;
         if (step.wait_for_cancel) {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
             while (!request.cancellation.stop_requested() &&
@@ -418,6 +422,74 @@ TEST_CASE("a denial and the tools a round ran are recorded on it", "[tasks][runn
                             "[task] denied: write_file on out.txt -- nobody is "
                             "present to allow it") != fixture.said.end());
     CHECK(t::task_to_json(fixture.on_disk()) == t::task_to_json(outcome.task));
+}
+
+TEST_CASE("what a round's authority let through, refused and answered is recorded and said",
+          "[tasks][runner][policy]") {
+    Fixture fixture;
+    fixture.scripted.steps = {
+        {.answer = "plan"},
+        {.answer = "blue\nTASK STATUS: DONE",
+         .denied = {{.tool = "run_command", .target = "make", .by = std::string{t::kByConfig}},
+                    {.tool = "delete_file", .target = "a.txt", .by = std::string{t::kByPerson}}},
+         .allowed = {{.tool = "write_file", .target = "out.txt", .by = std::string{t::kByGrant}},
+                     {.tool = "edit_file", .target = "b.txt", .by = std::string{t::kByConfig}}},
+         .answered = {
+             {.question = "Which colour?", .answer = "blue", .by = std::string{t::kByDeclared}}}}};
+    const t::RunOutcome outcome = fixture.run(fixture.task({}));
+    CHECK(outcome.task.status == t::kDone);
+    const t::Round& round = outcome.task.rounds.back();
+    REQUIRE(round.allowed.size() == 2);
+    CHECK(round.allowed[0].by == t::kByGrant);
+    REQUIRE(round.answered.size() == 1);
+    CHECK(round.answered[0].answer == "blue");
+    const auto said = [&fixture](const std::string& line) {
+        return std::ranges::find(fixture.said, line) != fixture.said.end();
+    };
+    CHECK(said("[task] write_file on out.txt -- allowed by this task's grant"));
+    // The config's standing allows are the config's to say.
+    CHECK(std::ranges::none_of(fixture.said, [](const std::string& line) {
+        return line.find("edit_file") != std::string::npos;
+    }));
+    CHECK(said("[task] denied: run_command on make -- the config denies it"));
+    CHECK(said("[task] denied: delete_file on a.txt -- refused at the prompt"));
+    // The question is said; the declared answer is the ledger's.
+    CHECK(said("[task] a question answered with the declared answer: Which colour?"));
+    CHECK(std::ranges::none_of(fixture.said, [](const std::string& line) {
+        return line.find("blue") != std::string::npos;
+    }));
+    CHECK(t::task_to_json(fixture.on_disk()) == t::task_to_json(outcome.task));
+}
+
+TEST_CASE("a round run again keeps what its interrupted attempt let through and answered",
+          "[tasks][runner][policy]") {
+    Fixture fixture;
+    fixture.scripted.steps = {
+        {.answer = "plan"},
+        // The first attempt writes, is answered, then fails on a question.
+        {.question = "Which file?",
+         .denied = {{.tool = "run_command", .target = "make", .by = std::string{t::kByNobody}}},
+         .allowed = {{.tool = "write_file", .target = "a.txt", .by = std::string{t::kByGrant}}},
+         .answered = {
+             {.question = "Which colour?", .answer = "blue", .by = std::string{t::kByDeclared}}}}};
+    const t::RunOutcome failed = fixture.run(fixture.task({}));
+    REQUIRE(failed.task.status == t::kFailed);
+    REQUIRE(failed.task.rounds.back().allowed.size() == 1);
+    CHECK(t::task_to_json(fixture.on_disk()) == t::task_to_json(failed.task));
+
+    fixture.scripted.steps.push_back(
+        {.answer = "TASK STATUS: DONE",
+         .allowed = {{.tool = "write_file", .target = "b.txt", .by = std::string{t::kByGrant}}}});
+    const t::RunOutcome resumed = fixture.run(failed.task, /*resume=*/true);
+    CHECK(resumed.task.status == t::kDone);
+    const t::Round& round = resumed.task.rounds.back();
+    // The write the rolled-back attempt made happened: it stays recorded.
+    REQUIRE(round.allowed.size() == 2);
+    CHECK(round.allowed[0].target == "a.txt");
+    CHECK(round.allowed[1].target == "b.txt");
+    REQUIRE(round.answered.size() == 1);
+    // Denials and activity are the attempt's own, as before.
+    CHECK(round.denied.empty());
 }
 
 TEST_CASE("a request a process that ended left behind does not stop the next run",

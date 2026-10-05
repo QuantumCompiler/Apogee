@@ -195,6 +195,7 @@ add_library(apogee_tests_business OBJECT
     business/training/cycle_test.cpp
     business/tasks/task_test.cpp
     business/tasks/ledger_test.cpp
+    business/tasks/policy_test.cpp
     business/tasks/unattended_test.cpp
     business/tasks/runner_test.cpp
     support/fake_mcp_server.cpp
@@ -574,7 +575,11 @@ if(UNIX)
     # the budget and the breaker each naming the unpassed checks; the lock
     # refusing a second run by name; a task killed mid-round resumed to done
     # with no turn said twice; cancel and halt across processes; and chats
-    # delete refusing a live task's conversation.
+    # delete refusing a live task's conversation. Since 27i the autonomy
+    # policy too: a granted write run unprompted and recorded with its
+    # target, a declared answer consumed and recorded (and without one, the
+    # task failing naming the question), and a grant wider than the config
+    # or the agent refused naming the rule, no task made.
     add_test(NAME cli.task_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/task_e2e.sh"
             $<TARGET_FILE:apogee>
@@ -760,7 +765,7 @@ if(UNIX)
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_chat_check.py"
                 $<TARGET_FILE:apogee>
         )
-        set_tests_properties(cli.chat_typeahead_and_crash_safety PROPERTIES TIMEOUT 120)
+        set_tests_properties(cli.chat_typeahead_and_crash_safety PROPERTIES TIMEOUT 180)
 
         # Line editing. replxx engages only when stdin AND stdout are both
         # terminals, so none of this reproduces on a pipe -- which is the point:

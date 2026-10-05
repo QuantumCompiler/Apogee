@@ -683,6 +683,11 @@ TEST_CASE("a fixed set of values completes from the parser's own validator",
     CHECK(contains(precisions, "q8_0"));
     // A snapshot directory is one accepted form: files once no name matches.
     CHECK(complete_full({"models", "convert"}, "./", fake_sources()).files);
+    // A word of the set may hold a colon: `--on-question`'s forms (27i).
+    CHECK(complete_line({"task", "run", "goal", "--on-question"}) ==
+          std::vector<std::string>{"fail", "answer:"});
+    CHECK(complete_line({"task", "run", "goal", "--on-question"}, "a") ==
+          std::vector<std::string>{"answer:"});
 }
 
 TEST_CASE("a flag that takes no value leaves the next word to the line",

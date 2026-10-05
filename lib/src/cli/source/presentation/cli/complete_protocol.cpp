@@ -37,8 +37,18 @@ namespace {
         value.source = base;
     }
     if (colon != std::string::npos) {
-        std::stringstream validators{type.substr(colon + 1)};
-        for (std::string part; std::getline(validators, part, ':');) {
+        // Colon-separated -- a `{...}` set read whole, since a word in it may
+        // hold a colon itself (`--on-question`'s `answer:`, 27i).
+        const std::string validators = type.substr(colon + 1);
+        for (std::size_t at = 0; at < validators.size();) {
+            std::size_t end = validators.find(validators[at] == '{' ? '}' : ':', at);
+            if (end == std::string::npos) {
+                end = validators.size();
+            } else if (validators[at] == '{') {
+                ++end;  // the set's closing brace is its own
+            }
+            const std::string part = validators.substr(at, end - at);
+            at = end + 1;
             if (part.size() >= 2 && part.front() == '{' && part.back() == '}') {
                 // `CLI::IsMember` -- the set the parser will hold the word to.
                 value.kind = ValueKind::Choice;

@@ -56,6 +56,10 @@ struct TurnResult {
     bool tokens_estimated = false;
     std::vector<ToolUse> tools;
     std::vector<Denial> denied;
+    /// The gated calls let through, each with its authority (27i).
+    std::vector<Permit> allowed;
+    /// The questions answered, and by whom (27i).
+    std::vector<Answered> answered;
 };
 
 using TurnFn = std::function<TurnResult(const TurnRequest& request)>;

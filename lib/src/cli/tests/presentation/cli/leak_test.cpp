@@ -21,7 +21,9 @@
 #include "logger/operational.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
+#include "support/cli_home.h"
 #include "support/env_guard.h"
+#include "tasks/ledger.h"
 
 /// The leak test: one distinctive key, stored every way a key can be stored,
 /// then every surface that reports on keys is rendered and searched for it.
@@ -34,6 +36,8 @@ namespace {
 
 constexpr std::string_view kKey = "sk-LEAKPROBE-7f3a9c1e5b2d";
 constexpr std::string_view kFragment = "LEAKPROBE";
+/// A task's declared answer, distinctive enough to find anywhere (27i).
+constexpr std::string_view kAnswerProbe = "ANSWERPROBE-4e9b1c7d";
 
 struct World {
     apogee::testing::TempDir home{"secrets-leak-" + std::to_string(std::random_device{}())};
@@ -184,4 +188,80 @@ TEST_CASE("a stored key reaches no listing, report, response, event or log", "[s
                std::filesystem::perms::mask) ==
               (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write));
     }
+}
+
+/// The ledger sweep (27i): a task's declared answer is stored in its ledger
+/// like any other field -- the docs and `--help` say plainly that a
+/// credential does not belong in one -- so this holds where it may travel.
+/// It belongs in the ledger, in `task status` (which shows what the task was
+/// handed), and in the conversation, as the tool result the model read; and
+/// nowhere else: not the run's own lines, not `task list` or `chats list`,
+/// not the operational log, not the event bus. No route serves a ledger yet;
+/// 27j's served view says an answer existed, never what it said.
+TEST_CASE("a task's declared answer is found only where it belongs", "[tasks][leak][policy]") {
+    apogee::testing::CliHome home{""};
+    const std::filesystem::path script = home.home() / "script.json";
+    std::ofstream{script} << R"({"turns": [{"text": "1. Ask."},
+        {"text": "", "tool_calls": [{"name": "ask_user", "arguments": {"questions": [
+          {"header": "Colour", "question": "Which colour?",
+           "options": [{"label": "Red"}, {"label": "Green"}]}]}}]},
+        {"text": "Settled.\nTASK STATUS: DONE"}]})";
+    std::ofstream{home.config_path()}
+        << "backends:\n  m:\n    type: mock\n    model_path: " << script.string()
+        << "\nmodels:\n  default: m\nmemory:\n  recall: false\n";
+    std::filesystem::create_directories(home.home() / "logs");
+
+    apogee::events::Subscription subscription =
+        apogee::events::subscribe(apogee::events::default_bus());
+    apogee::logger::set_enabled(true);
+
+    struct Restore {
+        Restore() = default;
+
+        ~Restore() {
+            apogee::logger::set_enabled(false);
+        }
+
+        Restore(const Restore&) = delete;
+        Restore& operator=(const Restore&) = delete;
+        Restore(Restore&&) = delete;
+        Restore& operator=(Restore&&) = delete;
+    } restore;
+
+    std::string ran;
+    REQUIRE(home.run({"task", "run", "Pick a colour", "--tools", "--on-question",
+                      "answer:" + std::string{kAnswerProbe}},
+                     &ran) == 0);
+    const std::vector<apogee::tasks::Task> tasks = apogee::tasks::list_tasks(home.home() / "tasks");
+    REQUIRE(tasks.size() == 1);
+    const apogee::tasks::Task& task = tasks.front();
+
+    // Where it belongs -- else the sweep proves nothing.
+    const auto read = [](const std::filesystem::path& path) {
+        std::ifstream in{path};
+        std::ostringstream out;
+        out << in.rdbuf();
+        return out.str();
+    };
+    CHECK(read(apogee::tasks::ledger_path(home.home() / "tasks", task.id)).find(kAnswerProbe) !=
+          std::string::npos);
+    std::string status;
+    REQUIRE(home.run({"task", "status", task.id}, &status) == 0);
+    CHECK(status.find(kAnswerProbe) != std::string::npos);
+    CHECK(read(home.home() / "sessions" / (task.session_id + ".json")).find(kAnswerProbe) !=
+          std::string::npos);
+
+    // And nowhere else.
+    const auto clean = [](const std::string& surface, const std::string& text) {
+        INFO(surface << ":\n" << text);
+        CHECK(text.find(kAnswerProbe) == std::string::npos);
+    };
+    clean("the run's own output", ran);
+    std::string listed;
+    REQUIRE(home.run({"task", "list"}, &listed) == 0);
+    clean("task list", listed);
+    REQUIRE(home.run({"chats", "list"}, &listed) == 0);
+    clean("chats list", listed);
+    clean("event bus", drain(subscription));
+    clean("operational log", logs_under(home.home() / "logs"));
 }

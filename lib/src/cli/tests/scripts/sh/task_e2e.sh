@@ -18,7 +18,14 @@
 #   * `task cancel` ending a running task's turn through the loop's
 #     cancellation, and `task halt` stopping one when its round ends;
 #   * `chats delete` refused on a live task's conversation, allowed once the
-#     task is cancelled; and the task ids offered by completion.
+#     task is cancelled; and the task ids offered by completion;
+#   * the autonomy policy (27i): a write granted with `--allow` run with
+#     nothing prompting, the grant and its use with its target in the ledger
+#     and `task status`; a question answered by `--on-question answer:` to
+#     done, the question and the answer recorded -- and without it, the task
+#     failing naming the question; a grant wider than the config or the
+#     agent refused at `task run` naming the rule, with no task made; and the
+#     repeatable flags taken whole.
 #
 # Recall is off in the config so no summary spends a scripted turn. POSIX
 # only, like the other .sh checks here (CLAUDE.md -> Platforms).
@@ -41,13 +48,13 @@ script() {  # script <backend> <json turns>
     printf '{"turns": [%s]}\n' "$2" > "$WORK_DIR/scripts/$1.json"
 }
 
-for name in cycle denied stalled killed cancelled halted; do
+for name in cycle denied granted asked stalled killed cancelled halted; do
     script "$name" '{"text": "placeholder"}'
 done
 mkdir -p "$APOGEE_HOME/config"
 {
     echo "backends:"
-    for name in cycle denied stalled killed cancelled halted; do
+    for name in cycle denied granted asked stalled killed cancelled halted; do
         echo "  $name:"
         echo "    type: mock"
         echo "    model_path: $WORK_DIR/scripts/$name.json"
@@ -147,7 +154,7 @@ grep -q "\[task\] denied: write_file on report.txt -- nobody is present to allow
 grep -q "The write came back: Error: the user denied permission to run 'write_file'" \
     "$WORK_DIR/denied.txt" || fail "the denial was not the tool's result, the turn going on"
 grep -qi "\[y\]es" "$WORK_DIR/denied.txt" && fail "the task prompted"
-[ "$(field "$DENIED" "t['rounds'][-1]['denied']")" = "[{'target': 'report.txt', 'tool': 'write_file'}]" ] \
+[ "$(field "$DENIED" "t['rounds'][-1]['denied']")" = "[{'by': 'nobody', 'target': 'report.txt', 'tool': 'write_file'}]" ] \
     || fail "the ledger does not record the denial: $(field "$DENIED" "t['rounds'][-1]")"
 # The budget: an honest status naming the check -- the model's own "done"
 # claimed nothing.
@@ -157,13 +164,75 @@ field "$DENIED" "t['reason']" | grep -q "the round budget (1) is spent and the t
 "$APOGEE_BIN" task status "$DENIED" </dev/null 2>&1 | grep -q "round 1: write_file on report.txt" \
     || fail "task status does not show the denial"
 
+# --- 27i: a granted write runs unprompted, recorded with its target -------------
+script granted '{"text": "1. Write the report."},
+                {"text": "", "tool_calls": [{"name": "write_file", "arguments": {"path": "granted.txt", "content": "the report"}}]},
+                {"text": "The write came back: {{last_tool_result}}\nTASK STATUS: DONE"}'
+"$APOGEE_BIN" task run "Write the granted report" -m granted --tools --allow write_file \
+    --rounds 1 --require-file granted.txt </dev/null >"$WORK_DIR/granted.out" 2>&1 \
+    || fail "the granted task did not finish done: $(cat "$WORK_DIR/granted.out")"
+[ -s granted.txt ] || fail "the granted write wrote nothing"
+grep -qi "\[y\]es" "$WORK_DIR/granted.out" && fail "the granted task prompted"
+grep -q "\[task\] write_file on granted.txt -- allowed by this task's grant" "$WORK_DIR/granted.out" \
+    || fail "the grant's use was not said: $(cat "$WORK_DIR/granted.out")"
+GRANTED=$(newest)
+[ "$(field "$GRANTED" "t['policy']['grants']")" = "['write_file']" ] \
+    || fail "the ledger does not record the grant: $(field "$GRANTED" "t['policy']")"
+[ "$(field "$GRANTED" "t['rounds'][-1]['allowed']")" = "[{'by': 'grant', 'target': 'granted.txt', 'tool': 'write_file'}]" ] \
+    || fail "the ledger does not record the grant's use: $(field "$GRANTED" "t['rounds'][-1]")"
+STATUS=$("$APOGEE_BIN" task status "$GRANTED" </dev/null 2>&1)
+for want in "grants:        write_file" "allowed:" "  round 1: write_file on granted.txt -- this task's grant"; do
+    echo "$STATUS" | grep -qF -- "$want" || fail "task status lacks '$want':
+$STATUS"
+done
+
+# --- 27i: a declared answer, consumed and recorded; without it, a failure ----------
+ASK='{"text": "1. Ask which colour."},
+     {"text": "", "tool_calls": [{"name": "ask_user", "arguments": {"questions": [{"header": "Colour", "question": "Which colour?", "options": [{"label": "Red"}, {"label": "Green"}]}]}}]},
+     {"text": "Told: {{last_tool_result}}\nTASK STATUS: DONE"}'
+script asked "$ASK"
+"$APOGEE_BIN" task run "Pick a colour" -m asked --tools --on-question 'answer:"blue"' --require blue \
+    </dev/null >"$WORK_DIR/asked.out" 2>&1 \
+    || fail "the question-asking task did not finish done: $(cat "$WORK_DIR/asked.out")"
+ASKED=$(newest)
+[ "$(field "$ASKED" "t['rounds'][-1]['answered']")" = "[{'answer': 'blue', 'by': 'declared', 'question': 'Which colour?'}]" ] \
+    || fail "the ledger does not record the answered question: $(field "$ASKED" "t['rounds'][-1]")"
+grep -q "\[task\] a question answered with the declared answer: Which colour?" "$WORK_DIR/asked.out" \
+    || fail "the answered question was not said: $(cat "$WORK_DIR/asked.out")"
+STATUS=$("$APOGEE_BIN" task status "$ASKED" </dev/null 2>&1)
+for want in 'on question:   answer "blue" -- every question gets this declared answer' \
+    'round 1: Which colour? -- "blue", the declared answer'; do
+    echo "$STATUS" | grep -qF -- "$want" || fail "task status lacks '$want':
+$STATUS"
+done
+script asked "$ASK"
+"$APOGEE_BIN" task run "Pick a colour" -m asked --tools --require blue \
+    </dev/null >"$WORK_DIR/unasked.out" 2>&1 && fail "a question nobody answered ended done"
+UNASKED=$(newest)
+[ "$(field "$UNASKED" "t['status']")" = failed ] || fail "the unanswered task did not fail"
+[ "$(field "$UNASKED" "t['reason']")" = "round 1: the model asked a question and no one is present to answer it: Which colour?" ] \
+    || fail "the failure does not name the question: $(field "$UNASKED" "t['reason']")"
+
+# --- 27i: a grant wider than the config or the agent is refused, naming the rule ----
+printf 'permissions:\n  delete_file: deny\n' >>"$APOGEE_HOME/config/config.yaml"
+BEFORE=$(newest)
+"$APOGEE_BIN" task run "Delete it" -m granted --tools --allow delete_file </dev/null \
+    >"$WORK_DIR/wide.out" 2>&1 && fail "a grant the config denies ran"
+grep -q "\-\-allow delete_file: the config says permissions.delete_file: deny -- a task's grant is never wider than the config" \
+    "$WORK_DIR/wide.out" || fail "the config's refusal: $(cat "$WORK_DIR/wide.out")"
+"$APOGEE_BIN" task run "Write it" -m granted --tools --agent security-review --allow write_file \
+    </dev/null >"$WORK_DIR/wide.out" 2>&1 && fail "a grant the agent does not allow ran"
+grep -q "the agent 'security-review' runs with tools: read-only, which leaves out write_file -- a task's grant is never wider than its agent's policy" \
+    "$WORK_DIR/wide.out" || fail "the agent's refusal: $(cat "$WORK_DIR/wide.out")"
+[ "$(newest)" = "$BEFORE" ] || fail "a refused grant made a task"
+
 # --- the breaker ----------------------------------------------------------------
 script stalled '{"text": "1. Try."}, {"text": "No luck."}, {"text": "Still no luck."}'
-"$APOGEE_BIN" task run "Find the word" -m stalled --require "eureka" --rounds 5 \
+"$APOGEE_BIN" task run "Find the word" -m stalled --require "eureka" --require "found" --rounds 5 \
     </dev/null >"$WORK_DIR/stalled.txt" 2>&1 && fail "a stalled task exited 0"
 STALLED=$(newest)
 [ "$(field "$STALLED" "t['status']")" = stalled ] || fail "the breaker did not trip: $(cat "$WORK_DIR/stalled.txt")"
-grep -q "task $STALLED stalled -- no progress in 2 rounds -- no check newly passed and no new tool call ran -- not passed: the answer contains \"eureka\" (not in the answer); not reported done by the model" \
+grep -q "task $STALLED stalled -- no progress in 2 rounds -- no check newly passed and no new tool call ran -- not passed: the answer contains \"eureka\" (not in the answer); not passed: the answer contains \"found\" (not in the answer); not reported done by the model" \
     "$WORK_DIR/stalled.txt" || fail "the breaker's status: $(cat "$WORK_DIR/stalled.txt")"
 
 LIST=$("$APOGEE_BIN" task list </dev/null 2>&1)

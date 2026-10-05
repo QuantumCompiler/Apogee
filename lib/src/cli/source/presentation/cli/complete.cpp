@@ -591,16 +591,19 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                     "Allow a tool for this run without asking (repeatable, with --tools)")
         ->type_name(kToolValue)
         ->expected(1)
-        ->allow_extra_args(false);
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--deny", flags->deny,
                     "Refuse a tool or website for this run without asking (repeatable)")
         ->type_name(kToolValue)
         ->expected(1)
-        ->allow_extra_args(false);
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--allow-host", flags->allow_hosts,
                     "Allow fetching from a website for this run without asking (repeatable)")
         ->expected(1)
-        ->allow_extra_args(false);
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_flag("--no-color", flags->no_color, "Disable ANSI colour output");
     cmd->add_flag("--raw", flags->raw,
                   "Show the answer's Markdown as written instead of rendering it on the terminal");

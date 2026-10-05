@@ -100,6 +100,17 @@ private:
     }
 }
 
+/// Why a call was refused, as the run says it.
+[[nodiscard]] std::string denial_words(const Denial& denial) {
+    if (denial.by == kByConfig) {
+        return "the config denies it";
+    }
+    if (denial.by == kByPerson) {
+        return "refused at the prompt";
+    }
+    return "nobody is present to allow it";
+}
+
 [[nodiscard]] std::string checks_line(const Round& round) {
     int passed = 0;
     for (const CheckResult& result : round.checks) {
@@ -224,6 +235,9 @@ private:
         round.session_turns_before = session_turns_;
         round.tools.clear();
         round.denied.clear();
+        // What an earlier attempt at this round let through and answered is
+        // kept: its turn was rolled back, its effects were not, and the audit
+        // trail is of what happened (27i).
         round.tokens = 0;
         round.tokens_estimated = false;
         task_.status = std::string{round_index == 0 ? kPlanning : kRunning};
@@ -242,12 +256,30 @@ private:
         done.ended_at = now_timestamp();
         done.tools = result.tools;
         done.denied = result.denied;
+        done.allowed.insert(done.allowed.end(), result.allowed.begin(), result.allowed.end());
+        done.answered.insert(done.answered.end(), result.answered.begin(), result.answered.end());
         done.tokens = result.tokens;
         done.tokens_estimated = result.tokens_estimated;
+        for (const Permit& permit : result.allowed) {
+            // The config's standing allows are the config's to say; what the
+            // task's own authority let through is said as it happens.
+            if (permit.by == kByGrant) {
+                say("[task] " + permit.tool +
+                    (permit.target.empty() ? std::string{} : " on " + permit.target) +
+                    " -- allowed by this task's grant");
+            }
+        }
         for (const Denial& denial : result.denied) {
             say("[task] denied: " + denial.tool +
-                (denial.target.empty() ? std::string{} : " on " + denial.target) +
-                " -- nobody is present to allow it");
+                (denial.target.empty() ? std::string{} : " on " + denial.target) + " -- " +
+                denial_words(denial));
+        }
+        for (const Answered& question : result.answered) {
+            // The question, never the answer: the ledger and `task status`
+            // hold what was declared.
+            if (question.by == kByDeclared) {
+                say("[task] a question answered with the declared answer: " + question.question);
+            }
         }
         if (result.completed) {
             ++session_turns_;

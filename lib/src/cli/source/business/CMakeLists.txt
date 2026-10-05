@@ -218,13 +218,16 @@ target_link_libraries(apogee_business_training PUBLIC nlohmann_json::nlohmann_js
                       PRIVATE yaml-cpp::yaml-cpp)
 
 # The task runner (27h): the record and its transitions, the ledger and the
-# one-task lock, what a turn does with nobody present, and the outer loop --
-# a turn arrives as a closure, so it never names a backend or a surface.
+# one-task lock, the autonomy policy and its ceiling (27i), what a turn does
+# with nobody present, and the outer loop -- a turn arrives as a closure, so
+# it never names a backend or a surface.
 apogee_add_module(tasks
     tasks/task.h
     tasks/task.cpp
     tasks/ledger.h
     tasks/ledger.cpp
+    tasks/policy.h
+    tasks/policy.cpp
     tasks/unattended.h
     tasks/unattended.cpp
     tasks/runner.h

@@ -137,7 +137,20 @@ constexpr std::array<std::pair<SelfReport, std::string_view>, 3> kReports{{
     }
     nlohmann::json denied = nlohmann::json::array();
     for (const Denial& denial : round.denied) {
-        denied.push_back({{"tool", denial.tool}, {"target", denial.target}});
+        nlohmann::json row{{"tool", denial.tool}, {"target", denial.target}};
+        if (!denial.by.empty()) {
+            row["by"] = denial.by;
+        }
+        denied.push_back(std::move(row));
+    }
+    nlohmann::json allowed = nlohmann::json::array();
+    for (const Permit& permit : round.allowed) {
+        allowed.push_back({{"tool", permit.tool}, {"target", permit.target}, {"by", permit.by}});
+    }
+    nlohmann::json answered = nlohmann::json::array();
+    for (const Answered& question : round.answered) {
+        answered.push_back(
+            {{"question", question.question}, {"answer", question.answer}, {"by", question.by}});
     }
     nlohmann::json out{{"index", round.index},
                        {"kind", round.kind},
@@ -149,6 +162,8 @@ constexpr std::array<std::pair<SelfReport, std::string_view>, 3> kReports{{
                        {"checks", std::move(checks)},
                        {"tools", std::move(tools)},
                        {"denied", std::move(denied)},
+                       {"allowed", std::move(allowed)},
+                       {"answered", std::move(answered)},
                        {"tokens", round.tokens},
                        {"tokens_estimated", round.tokens_estimated},
                        {"progress", round.progress}};
@@ -184,7 +199,18 @@ constexpr std::array<std::pair<SelfReport, std::string_view>, 3> kReports{{
     }
     for (const nlohmann::json& denial : json.value("denied", nlohmann::json::array())) {
         round.denied.push_back(Denial{.tool = denial.value("tool", std::string{}),
-                                      .target = denial.value("target", std::string{})});
+                                      .target = denial.value("target", std::string{}),
+                                      .by = denial.value("by", std::string{})});
+    }
+    for (const nlohmann::json& permit : json.value("allowed", nlohmann::json::array())) {
+        round.allowed.push_back(Permit{.tool = permit.value("tool", std::string{}),
+                                       .target = permit.value("target", std::string{}),
+                                       .by = permit.value("by", std::string{})});
+    }
+    for (const nlohmann::json& question : json.value("answered", nlohmann::json::array())) {
+        round.answered.push_back(Answered{.question = question.value("question", std::string{}),
+                                          .answer = question.value("answer", std::string{}),
+                                          .by = question.value("by", std::string{})});
     }
     return round;
 }
@@ -365,11 +391,26 @@ std::string plan_message(const Task& task) {
     out +=
         "\nPlan first: reply with a short, numbered plan for reaching the goal, and nothing "
         "else. Do not carry it out yet.\n\n";
-    out += "No one will answer questions while the task runs: asking one ends the task.";
-    if (task.tools) {
+    if (task.policy.on_question == OnQuestion::Answer) {
+        out +=
+            "No one is present to answer questions while the task runs: any question you ask "
+            "gets the one answer declared for this task.";
+    } else {
+        out += "No one will answer questions while the task runs: asking one ends the task.";
+    }
+    if (task.tools && task.policy.grants.empty()) {
         out +=
             " A tool that changes something runs only where the configuration allows it; "
             "otherwise it is refused, and the refusal is its result.";
+    } else if (task.tools) {
+        std::string granted;
+        for (const std::string& tool : task.policy.grants) {
+            granted += (granted.empty() ? "" : ", ") + tool;
+        }
+        out +=
+            " A tool that changes something runs only where the configuration allows it or "
+            "this task was granted it (" +
+            granted + "); otherwise it is refused, and the refusal is its result.";
     }
     return out;
 }
@@ -511,6 +552,7 @@ nlohmann::json task_to_json(const Task& task) {
                           {"working_directory", task.working_directory},
                           {"session_id", task.session_id},
                           {"tools", task.tools},
+                          {"policy", policy_to_json(task.policy)},
                           {"status", task.status},
                           {"reason", task.reason},
                           {"plan", task.plan},
@@ -536,6 +578,7 @@ Task task_from_json(const nlohmann::json& json) {
     task.working_directory = json.value("working_directory", std::string{});
     task.session_id = json.value("session_id", std::string{});
     task.tools = json.value("tools", false);
+    task.policy = policy_from_json(json.value("policy", nlohmann::json{}));
     task.status = json.value("status", std::string{kPlanning});
     task.reason = json.value("reason", std::string{});
     task.plan = json.value("plan", std::string{});

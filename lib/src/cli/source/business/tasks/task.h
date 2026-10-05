@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+#include "tasks/policy.h"
+
 /// A task: a goal the application drives to done over successive turns of
 /// one ordinary chat session, with nobody at the keyboard (27h).
 ///
@@ -143,10 +145,47 @@ struct ToolUse {
 /// `arguments`.
 [[nodiscard]] std::string fingerprint(std::string_view tool, std::string_view arguments);
 
-/// A gated call the gate refused: `deny`, or `ask` with nobody to answer.
+// --- on whose authority (27i) ------------------------------------------------------
+
+/// The config's own levels -- `permissions:`, `tools.allowed_hosts` --
+/// allowed it, or denied it.
+inline constexpr std::string_view kByConfig = "config";
+/// The task's declared grant (`--allow`) allowed it.
+inline constexpr std::string_view kByGrant = "grant";
+/// The person at the terminal answered: at the prompt, or by a `session` or
+/// `always` answer earlier in the run.
+inline constexpr std::string_view kByPerson = "person";
+/// `ask` with nobody present to answer: denied.
+inline constexpr std::string_view kByNobody = "nobody";
+/// The task's declared answer (`--on-question answer:`) answered it.
+inline constexpr std::string_view kByDeclared = "declared";
+
+/// A gated call the gate refused: `deny`, or `ask` with nobody to answer
+/// -- or, attended, the person present saying no.
 struct Denial {
     std::string tool;
     std::string target;
+    /// `config`, `nobody` or `person`; empty in a ledger written before 27i.
+    std::string by;
+};
+
+/// A gated call the gate let through, and on whose authority (27i): the
+/// config's, the task's grant, or the person present.
+struct Permit {
+    std::string tool;
+    std::string target;
+    /// `config`, `grant` or `person`.
+    std::string by;
+};
+
+/// A question the model asked that was answered (27i): by the declared
+/// answer, or by the person present. A question nobody answered fails the
+/// task instead, and is its reason.
+struct Answered {
+    std::string question;
+    std::string answer;
+    /// `declared` or `person`.
+    std::string by;
 };
 
 struct Round {
@@ -170,6 +209,10 @@ struct Round {
     std::vector<CheckResult> checks;
     std::vector<ToolUse> tools;
     std::vector<Denial> denied;
+    /// Every gated call the gate let through, with its authority (27i).
+    std::vector<Permit> allowed;
+    /// Every question answered, and by whom (27i).
+    std::vector<Answered> answered;
     std::int64_t tokens = 0;
     bool tokens_estimated = false;
     /// A check passed that had never passed before, or a tool call ran that
@@ -200,6 +243,9 @@ struct Task {
     std::string session_id;
     /// Whether its turns were offered tools (`--tools`).
     bool tools = false;
+    /// What it was handed before it ran (27i): its grants, its question
+    /// policy and the declared answer, the agent whose policy it runs under.
+    AutonomyPolicy policy;
     std::string status = std::string{kPlanning};
     /// Why it stopped, said in full: the unpassed checks, the error, the
     /// question nobody answered. Empty while it runs.

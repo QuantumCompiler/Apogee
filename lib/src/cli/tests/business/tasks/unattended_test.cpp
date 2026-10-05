@@ -16,6 +16,10 @@
 /// the result an unwatched gate gives, the turn going on -- every refusal
 /// and every call that ran recorded, the checker's decisions unchanged; and
 /// a question that ends the turn naming itself, the half-turn rolled back.
+/// And with the authority handed to it (27i): every call let through
+/// recorded with whose authority -- the config's, the grant's, the person's
+/// -- every refusal with its reason, a declared answer consumed and
+/// recorded, and the person at the terminal asked and recorded either way.
 namespace {
 
 using apogee::agent::Permission;
@@ -90,7 +94,8 @@ std::string result_of(const std::vector<ChatMessage>& history, std::string_view 
 }
 
 std::vector<ChatMessage> run_turn(const ToolRegistry& tools,
-                                  const apogee::agent::PermissionChecker& permission) {
+                                  const apogee::agent::PermissionChecker& permission,
+                                  const apogee::agent::ConfirmFn& confirm = {}) {
     Loop loop = make_loop({calls({{.id = "1", .name = "write_file", .arguments = "{}"},
                                   {.id = "2", .name = "read_file", .arguments = R"({"p":1})"}}),
                            text("carried on")});
@@ -98,7 +103,8 @@ std::vector<ChatMessage> run_turn(const ToolRegistry& tools,
     apogee::agentloop::Options options;
     options.model = "mock";
     options.tools = &tools;
-    options.permission = permission;  // and no confirm function: nobody is present
+    options.permission = permission;
+    options.confirm = confirm;  // null: nobody is present
     const apogee::agentloop::RunResult result =
         apogee::agentloop::run(*loop.harness, history, options);
     CHECK(result.answer == "carried on");
@@ -120,7 +126,9 @@ TEST_CASE("an ask-level call in a task denies exactly as an unwatched gate does,
     // The same turn, watched.
     const t::TurnRecorder recorder;
     const ToolRegistry observed = recorder.observe(tools);
-    const std::vector<ChatMessage> watched = run_turn(observed, recorder.gate(ask));
+    const t::WatchedGate gate = recorder.watch(ask, ask, {}, nullptr);
+    CHECK_FALSE(gate.confirm);  // nobody present stays nobody present
+    const std::vector<ChatMessage> watched = run_turn(observed, gate.permission, gate.confirm);
     CHECK(writes == 0);
     // Denial-as-tool-result, byte for byte, and the turn went on.
     CHECK_FALSE(result_of(watched, "write_file").empty());
@@ -132,6 +140,8 @@ TEST_CASE("an ask-level call in a task denies exactly as an unwatched gate does,
     REQUIRE(denials.size() == 1);
     CHECK(denials[0].tool == "write_file");
     CHECK(denials[0].target == "out.txt");
+    CHECK(denials[0].by == t::kByNobody);
+    CHECK(recorder.take_allowed().empty());
     // Only the call that ran is activity.
     const std::vector<t::ToolUse> ran = recorder.take_tools();
     REQUIRE(ran.size() == 1);
@@ -146,14 +156,21 @@ TEST_CASE("the recorder returns the checker's decisions unchanged", "[tasks][una
     const t::TurnRecorder recorder;
     const apogee::agent::GateRequest request{"write_file", "out.txt", "", false};
     for (const Permission decision : {Permission::Allow, Permission::Deny, Permission::Ask}) {
-        const auto checker =
-            recorder.gate([decision](const apogee::agent::GateRequest&) { return decision; });
-        CHECK(checker(request) == decision);
+        const auto checker = [decision](const apogee::agent::GateRequest&) { return decision; };
+        CHECK(recorder.watch(checker, checker, {}, nullptr).permission(request) == decision);
     }
-    // Allow is no refusal; Deny and Ask are.
-    CHECK(recorder.take_denials().size() == 2);
+    // Allow is no refusal -- the config's own, since the standing checker
+    // allows it too; Deny is the config's refusal, and Ask nobody's.
+    const std::vector<t::Permit> allowed = recorder.take_allowed();
+    REQUIRE(allowed.size() == 1);
+    CHECK(allowed[0].by == t::kByConfig);
+    CHECK(allowed[0].target == "out.txt");
+    const std::vector<t::Denial> denials = recorder.take_denials();
+    REQUIRE(denials.size() == 2);
+    CHECK(denials[0].by == t::kByConfig);
+    CHECK(denials[1].by == t::kByNobody);
     // No checker at all asks -- which nobody answers.
-    CHECK(recorder.gate({})(request) == Permission::Ask);
+    CHECK(recorder.watch({}, {}, {}, nullptr).permission(request) == Permission::Ask);
 }
 
 TEST_CASE("a config-allowed tool runs in a task and is recorded as activity",
@@ -161,13 +178,81 @@ TEST_CASE("a config-allowed tool runs in a task and is recorded as activity",
     int writes = 0;
     const ToolRegistry tools = registry(writes);
     const t::TurnRecorder recorder;
-    const std::vector<ChatMessage> history = run_turn(
-        recorder.observe(tools),
-        recorder.gate([](const apogee::agent::GateRequest&) { return Permission::Allow; }));
+    const auto allow = [](const apogee::agent::GateRequest&) { return Permission::Allow; };
+    const t::WatchedGate gate = recorder.watch(allow, allow, {"write_file"}, nullptr);
+    const std::vector<ChatMessage> history = run_turn(recorder.observe(tools), gate.permission);
     CHECK(writes == 1);
     CHECK(result_of(history, "write_file") == "written");
     CHECK(recorder.take_tools().size() == 2);
     CHECK(recorder.take_denials().empty());
+    // The config allowed it: a grant of the same tool is not what let it run.
+    const std::vector<t::Permit> allowed = recorder.take_allowed();
+    REQUIRE(allowed.size() == 1);
+    CHECK(allowed[0].by == t::kByConfig);
+}
+
+TEST_CASE("a granted tool runs unprompted and is recorded as the grant's, with its target",
+          "[tasks][unattended][gate][grant]") {
+    int writes = 0;
+    const ToolRegistry tools = registry(writes);
+    const t::TurnRecorder recorder;
+    // The task's checker allows what the config alone asks about.
+    const auto granted = [](const apogee::agent::GateRequest&) { return Permission::Allow; };
+    const auto standing = [](const apogee::agent::GateRequest&) { return Permission::Ask; };
+    const t::WatchedGate gate = recorder.watch(granted, standing, {"write_file"}, nullptr);
+    const std::vector<ChatMessage> history = run_turn(recorder.observe(tools), gate.permission);
+    CHECK(writes == 1);
+    CHECK(result_of(history, "write_file") == "written");
+    const std::vector<t::Permit> allowed = recorder.take_allowed();
+    REQUIRE(allowed.size() == 1);
+    CHECK(allowed[0].tool == "write_file");
+    CHECK(allowed[0].target == "out.txt");
+    CHECK(allowed[0].by == t::kByGrant);
+    CHECK(recorder.take_denials().empty());
+
+    // An allow the grant does not name is the person's -- an earlier
+    // `session` answer -- and an outbound call is never the grant's.
+    const t::WatchedGate unnamed = recorder.watch(granted, standing, {"edit_file"}, nullptr);
+    (void)unnamed.permission(apogee::agent::GateRequest{"write_file", "out.txt", "", false});
+    (void)gate.permission(apogee::agent::GateRequest{"write_file", "example.org", "", true});
+    const std::vector<t::Permit> others = recorder.take_allowed();
+    REQUIRE(others.size() == 2);
+    CHECK(others[0].by == t::kByPerson);
+    CHECK(others[1].by == t::kByPerson);
+}
+
+TEST_CASE("with someone present the prompt decides, recorded either way",
+          "[tasks][unattended][gate][attended]") {
+    int writes = 0;
+    const ToolRegistry tools = registry(writes);
+    const auto ask = [](const apogee::agent::GateRequest&) { return Permission::Ask; };
+    for (const bool yes : {true, false}) {
+        const t::TurnRecorder recorder;
+        int asked = 0;
+        const t::WatchedGate gate =
+            recorder.watch(ask, ask, {}, [&asked, yes](const apogee::agent::GateRequest&) {
+                ++asked;
+                return yes;
+            });
+        REQUIRE(gate.confirm);
+        const std::vector<ChatMessage> history =
+            run_turn(recorder.observe(tools), gate.permission, gate.confirm);
+        CHECK(asked == 1);
+        if (yes) {
+            CHECK(result_of(history, "write_file") == "written");
+            const std::vector<t::Permit> allowed = recorder.take_allowed();
+            REQUIRE(allowed.size() == 1);
+            CHECK(allowed[0].by == t::kByPerson);
+            CHECK(recorder.take_denials().empty());
+        } else {
+            CHECK(result_of(history, "write_file").starts_with("Error: the user denied"));
+            const std::vector<t::Denial> denials = recorder.take_denials();
+            REQUIRE(denials.size() == 1);
+            CHECK(denials[0].by == t::kByPerson);
+            CHECK(recorder.take_allowed().empty());
+        }
+    }
+    CHECK(writes == 1);
 }
 
 TEST_CASE("a watched registry keeps every tool's definition and the environment note",
@@ -218,4 +303,68 @@ TEST_CASE("several questions are named together", "[tasks][unattended][question]
     request.questions.push_back({.header = "A", .question = "First?"});
     request.questions.push_back({.header = "B", .question = ""});
     CHECK(t::question_text(request) == "First? / B");
+}
+
+namespace {
+
+std::vector<ChatMessage> ask_turn(const apogee::agentloop::AskFn& ask, std::string& answer) {
+    Loop loop = make_loop(
+        {calls({{.id = "q",
+                 .name = "ask_user",
+                 .arguments = R"({"questions":[{"header":"Colour","question":"Which colour?",)"
+                              R"("options":[{"label":"Red"},{"label":"Green"}]}]})"}}),
+         text("going with it")});
+    std::vector<ChatMessage> history{ChatMessage::user("go")};
+    apogee::agentloop::Options options;
+    options.model = "mock";
+    const ToolRegistry none;
+    options.tools = &none;
+    options.ask = ask;
+    answer = apogee::agentloop::run(*loop.harness, history, options).answer;
+    return history;
+}
+
+}  // namespace
+
+TEST_CASE("a declared answer is given to every question, and each is recorded",
+          "[tasks][unattended][question][declared]") {
+    const t::TurnRecorder recorder;
+    std::string answer;
+    const std::vector<ChatMessage> history = ask_turn(recorder.declared_answer("blue"), answer);
+    // The question was answered, not failed: the turn went on.
+    CHECK(answer == "going with it");
+    CHECK(result_of(history, "ask_user").find("Which colour?\n  blue") != std::string::npos);
+    const std::vector<t::Answered> answered = recorder.take_answered();
+    REQUIRE(answered.size() == 1);
+    CHECK(answered[0].question == "Which colour?");
+    CHECK(answered[0].answer == "blue");
+    CHECK(answered[0].by == t::kByDeclared);
+    CHECK(recorder.take_answered().empty());
+
+    // Several at once: the one answer, each.
+    apogee::agentloop::QuestionRequest request;
+    request.questions.push_back({.header = "A", .question = "First?"});
+    request.questions.push_back({.header = "B", .question = ""});
+    const apogee::agentloop::Answers answers = recorder.declared_answer("blue")(request);
+    CHECK(answers.values == std::vector<std::string>{"blue", "blue"});
+    const std::vector<t::Answered> both = recorder.take_answered();
+    REQUIRE(both.size() == 2);
+    CHECK(both[1].question == "B");
+}
+
+TEST_CASE("the person at the terminal answers a question, recorded as theirs",
+          "[tasks][unattended][question][attended]") {
+    const t::TurnRecorder recorder;
+    CHECK_FALSE(recorder.person({}));  // nobody there: no ask_user to wrap
+    std::string answer;
+    const std::vector<ChatMessage> history =
+        ask_turn(recorder.person([](const apogee::agentloop::QuestionRequest&) {
+            return apogee::agentloop::Answers{{"Green"}};
+        }),
+                 answer);
+    CHECK(answer == "going with it");
+    const std::vector<t::Answered> answered = recorder.take_answered();
+    REQUIRE(answered.size() == 1);
+    CHECK(answered[0].answer == "Green");
+    CHECK(answered[0].by == t::kByPerson);
 }
