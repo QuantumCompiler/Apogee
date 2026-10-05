@@ -15,6 +15,7 @@
 #include "agentloop/embed_func.h"
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
+#include "agentloop/validate.h"
 #include "backends/factory.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
@@ -160,10 +161,24 @@ void print_fields(const knowledge::Record& record) {
     if (!result.notes.empty()) {
         out["notes"] = result.notes;
     }
+    if (result.validation.has_value()) {
+        out["validation"] = agentloop::validation_json(*result.validation);
+    }
     if (!draft) {
         out["registered"] = result.registered;
     }
     return out;
+}
+
+/// What the suite's verifier made of the record (27g), for the human report
+/// -- on stderr, beside the notes, so stdout stays the record.
+void print_validation(const CaptureResult& result) {
+    if (!result.validation.has_value()) {
+        return;
+    }
+    for (const std::string& line : agentloop::extraction_lines(*result.validation)) {
+        std::cerr << "apogee knowledge: " << line << "\n";
+    }
 }
 
 /// The config, or the defaults with a warning when it cannot be read. A
@@ -471,6 +486,7 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
             }
             std::cout << "Draft (not stored)\n";
             print_fields(result.record);
+            print_validation(result);
             std::cout << "\nWould store in \"" << result.decision.db
                       << "\" (retriever: " << agentloop::to_string(result.decision.retriever)
                       << ")\n";
@@ -498,6 +514,7 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         }
         std::cout << "Captured " << result.record.id << "\n";
         print_fields(result.record);
+        print_validation(result);
         std::cout << "\nStored in \"" << result.decision.db
                   << "\" (retriever: " << agentloop::to_string(result.decision.retriever) << ")";
         if (result.decision.retriever == agentloop::Retriever::Lexical) {

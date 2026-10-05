@@ -2340,3 +2340,65 @@ TEST_CASE("a suite's row names whom its root may consult, and fails a member bil
     REQUIRE(row != nullptr);
     CHECK(row->status == Status::Ok);
 }
+
+TEST_CASE("a suite's row names what its verifier checks, and fails a verifier billed per call",
+          "[commands][check][suites][validate]") {
+    Install install;
+    install.seed();
+    const auto check = [&](const std::string& validate,
+                           const apogee::commands::MeteredProbe& metered) {
+        CheckInputs inputs = inputs_for(install);
+        install.write("config/config.yaml",
+                      "models:\n  default: root\nbackends:\n  root:\n    type: mock\n"
+                      "  helper:\n    type: mock\nsuites:\n  research:\n    members:\n"
+                      "      chat: root\n      utility: helper\n" +
+                          validate);
+        load_into(inputs);
+        inputs.metered = metered;
+        return run_checks(inputs);
+    };
+    using apogee::commands::MeteredAnswer;
+    const apogee::commands::MeteredProbe local = [](const apogee::harness::Config&,
+                                                    std::string_view) {
+        return MeteredAnswer{.metered = false};
+    };
+    const CheckReport checked =
+        check("    validate:\n      tool_args: on\n      answers: always\n", local);
+    const auto* row = row_with(checked, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+    CHECK(row->detail ==
+          "chat root · utility helper  · validate: tool_args, answers always (verifier utility)");
+    // A block that switches nothing on still names its verifier, for /check.
+    const CheckReport nothing_on = check("    validate:\n      tool_args: off\n", local);
+    row = row_with(nothing_on, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->detail == "chat root · utility helper  · validate: on request (verifier utility)");
+    // No block: the row is as it was.
+    const CheckReport no_block = check("", local);
+    row = row_with(no_block, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->detail == "chat root · utility helper");
+
+    const CheckReport billed = check("    validate:\n      tool_args: on\n",
+                                     [](const apogee::harness::Config&, std::string_view) {
+                                         return MeteredAnswer{.metered = true};
+                                     });
+    row = row_with(billed, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail ==
+          "verifier utility -- 'helper' is billed per call; a check runs on Apogee's initiative, "
+          "which never spends");
+    CHECK(row->remedy ==
+          "apogee config set-suite research --verifier <a local member>, or --utility <a local "
+          "backend>");
+    const CheckReport unknown =
+        check("    validate:\n      tool_args: on\n",
+              [](const apogee::harness::Config&, std::string_view) {
+                  return MeteredAnswer{.metered = false, .unknown = "no API key"};
+              });
+    row = row_with(unknown, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Warn);
+}

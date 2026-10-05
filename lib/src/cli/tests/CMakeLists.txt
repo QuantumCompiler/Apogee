@@ -142,6 +142,7 @@ add_library(apogee_tests_business OBJECT
     business/agentloop/recall_test.cpp
     business/agentloop/side_call_test.cpp
     business/agentloop/member_call_test.cpp
+    business/agentloop/validate_test.cpp
     business/tools/fs_test.cpp
     business/tools/shell_test.cpp
     business/tools/notes_test.cpp
@@ -151,6 +152,7 @@ add_library(apogee_tests_business OBJECT
     business/tools/environment_test.cpp
     business/tools/toolsets_test.cpp
     business/tools/consult_test.cpp
+    business/tools/tool_args_validation_test.cpp
     business/mcp/types_test.cpp
     business/mcp/transport_test.cpp
     business/mcp/client_test.cpp

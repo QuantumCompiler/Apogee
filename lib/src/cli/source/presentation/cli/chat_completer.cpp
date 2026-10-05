@@ -45,6 +45,8 @@ constexpr std::array kCommands{
     ChatCommandSpec{"capture", ChatVerb::Capture, "[status|link]",
                     "Save this conversation as a knowledge record",
                     ArgumentValues::CaptureStatuses},
+    ChatCommandSpec{"check", ChatVerb::Check, "",
+                    "Have the suite's verifier check the last answer, once"},
     ChatCommandSpec{"attach", ChatVerb::Attach, "<path>",
                     "Attach a file, folder or glob: inlined when it fits, retrieved when not",
                     ArgumentValues::Paths},

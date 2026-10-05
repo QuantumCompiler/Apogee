@@ -54,6 +54,64 @@ constexpr std::string_view kConflict = "conflict";
     return out;
 }
 
+/// A suite's `validate:` block as written (27g): only the keys it sets,
+/// each seam a boolean -- `on` in the file is `true` here.
+[[nodiscard]] nlohmann::json validate_json(const harness::ValidateConfig& validate) {
+    nlohmann::json out = nlohmann::json::object();
+    if (validate.verifier.has_value()) {
+        out["verifier"] = *validate.verifier;
+    }
+    if (validate.tool_args.has_value()) {
+        out["tool_args"] = *validate.tool_args;
+    }
+    if (validate.extraction.has_value()) {
+        out["extraction"] = *validate.extraction;
+    }
+    if (validate.answers.has_value()) {
+        out["answers"] = *validate.answers;
+    }
+    return out;
+}
+
+/// `validate` from a body, applied onto `into` (27g): `verifier` a role,
+/// `tool_args`/`extraction` booleans, `answers` `request` or `always`; a key
+/// left out keeps what `into` has, and `null` puts it back to its default.
+[[nodiscard]] bool apply_validate_json(const nlohmann::json& in, harness::ValidateConfig& into,
+                                       std::string& error) {
+    if (!in.is_object()) {
+        error = "validate must be an object of verifier, tool_args, extraction, answers";
+        return false;
+    }
+    for (const auto& [key, value] : in.items()) {
+        if (key == "verifier" || key == "answers") {
+            std::optional<std::string>& slot = key == "verifier" ? into.verifier : into.answers;
+            if (value.is_null()) {
+                slot.reset();
+            } else if (value.is_string()) {
+                slot = value.get<std::string>();
+            } else {
+                error = "validate." + key + " must be a string";
+                return false;
+            }
+        } else if (key == "tool_args" || key == "extraction") {
+            std::optional<bool>& slot = key == "tool_args" ? into.tool_args : into.extraction;
+            if (value.is_null()) {
+                slot.reset();
+            } else if (value.is_boolean()) {
+                slot = value.get<bool>();
+            } else {
+                error = "validate." + key + " must be true or false";
+                return false;
+            }
+        } else {
+            error = "validate." + key +
+                    ": not a validate key (verifier, tool_args, extraction, answers)";
+            return false;
+        }
+    }
+    return true;
+}
+
 [[nodiscard]] nlohmann::json suite_json(const harness::Config& config, std::string_view name,
                                         const harness::SuiteConfig& suite) {
     nlohmann::json members = nlohmann::json::object();
@@ -71,6 +129,9 @@ constexpr std::string_view kConflict = "conflict";
     }
     if (suite.consult_caps.any()) {
         out["consult_caps"] = caps_json(suite.consult_caps);
+    }
+    if (suite.validate.any()) {
+        out["validate"] = validate_json(suite.validate);
     }
     return out;
 }
@@ -233,6 +294,11 @@ struct Parsed {
             return out;
         }
         out.suite.consult_caps = *caps;
+    }
+    if (const auto it = body.find("validate"); it != body.end() && !it->is_null()) {
+        if (!apply_validate_json(*it, out.suite.validate, out.error)) {
+            return out;
+        }
     }
     return out;
 }
@@ -494,6 +560,41 @@ HttpResponse admin_set_suite_consult(const AdminConfigContext& context, std::str
             edited = harness::set_suite_consult_caps(edited, found->first, after.consult_caps);
         }
         return edited;
+    });
+}
+
+HttpResponse admin_set_suite_validate(const AdminConfigContext& context, std::string_view name,
+                                      const HttpRequest& request) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+    if (body.is_discarded() || !body.is_object()) {
+        return error_response(400, "the request body must be a JSON object");
+    }
+    HttpResponse failure;
+    const std::optional<harness::Config> config = load_now(context, failure);
+    if (!config.has_value()) {
+        return failure;
+    }
+    const auto found = config->suites.find(name);
+    if (found == config->suites.end()) {
+        return error_response(404, "suite '" + std::string{name} + "' is not configured",
+                              kNotFoundError);
+    }
+    const harness::SuiteConfig before = found->second;
+    harness::SuiteConfig after = before;
+    std::string error;
+    if (!apply_validate_json(body, after.validate, error)) {
+        return error_response(400, error);
+    }
+    if (const std::string refused =
+            commands::validate_suite(*config, found->first, after, context.metered);
+        !refused.empty()) {
+        return error_response(400, refused);
+    }
+    return write(context, found->first, 200, [&](std::string_view content) {
+        if (after.validate == before.validate) {
+            return std::string{content};
+        }
+        return harness::set_suite_validate(content, found->first, after.validate);
     });
 }
 

@@ -5,7 +5,9 @@
 # that cannot fit refused until --force, and --warm silent on a pipe; since
 # 27f, the root consulting a member on exactly the brief, a metered member
 # refused at config time, and machine mode carrying the consult as any tool
-# call -- with the run's own records as the evidence:
+# call; since 27g, validation -- a tool call objected to as its round-one
+# result and its revision run, /check, and a capture's planted wrong field
+# disputed -- with the run's own records as the evidence:
 #
 #   * who titled the chat: the utility role does, so a title from the helper's
 #     script proves `--suite research` resolved utility to `helper` (and the
@@ -298,5 +300,144 @@ printf 'first question\n/suite consult\nwhat is the codeword now?\n' \
 grep -q "FASTROOT-SAYS" "$WORK_DIR/consult-switch.txt" || fail "fast did not answer first"
 grep -q "ROOT-RELAYS utility (oracle) answered:" "$WORK_DIR/consult-switch.txt" \
     || fail "/suite did not offer consult: $(cat "$WORK_DIR/consult-switch.txt")"
+
+# --- validation (27g): members checking each other's work -------------------
+# The tool-argument seam on the real filesystem tools: the root deletes the
+# wrong note first; the verifier objects, the objection comes back as the
+# call's result and the file survives; the revised call is checked again and
+# runs. The verifier's script is the evidence of each check.
+cat >"$WORK_DIR/scripts/deleter.json" <<'JSON'
+{"turns": [{"text": "", "tool_calls": [{"name": "delete_file", "arguments": {"path": "notes/final.md"}}]},
+           {"text": "", "tool_calls": [{"name": "delete_file", "arguments": {"path": "notes/draft.md"}}]},
+           {"text": "ROOT-DELETED {{last_tool_result}}"}]}
+JSON
+cat >"$WORK_DIR/scripts/verifier.json" <<'JSON'
+{"turns": [{"text": "OBJECT: the user asked to delete the draft; notes/final.md is the final copy"},
+           {"text": "AGREE"}]}
+JSON
+for name in deleter verifier; do
+    "$APOGEE_BIN" config add-backend "$name" --type mock \
+        --model-path "$WORK_DIR/scripts/$name.json" >/dev/null || fail "add-backend $name"
+done
+# A verifier billed per call is refused at config time, the file untouched.
+BEFORE_VALIDATE=$(cat "$CONFIG")
+"$APOGEE_BIN" config add-suite paidcheck --chat deleter --utility paid --validate tool_args=on \
+    >"$WORK_DIR/paidcheck.txt" 2>&1 && fail "a metered verifier was written"
+grep -q "validate: 'paid' is billed per call" "$WORK_DIR/paidcheck.txt" \
+    || fail "the metered verifier was not refused with the reason: $(cat "$WORK_DIR/paidcheck.txt")"
+[ "$(cat "$CONFIG")" = "$BEFORE_VALIDATE" ] || fail "a refused validate edit changed the file"
+# --validate is repeatable.
+"$APOGEE_BIN" config add-suite checked --chat deleter --utility verifier \
+    --validate tool_args=on --validate extraction=off >/dev/null || fail "add-suite checked"
+grep -q "^    validate:$" "$CONFIG" || fail "validate was not written: $(cat "$CONFIG")"
+"$APOGEE_BIN" config get suites.checked.validate >"$WORK_DIR/validate-get.txt" 2>&1 \
+    || fail "config get validate"
+grep -qx "verifier utility (default), tool_args on, extraction off, answers request (default)" \
+    "$WORK_DIR/validate-get.txt" || fail "config get validate: $(cat "$WORK_DIR/validate-get.txt")"
+
+mkdir -p "$WORK_DIR/ws/notes"
+echo draft >"$WORK_DIR/ws/notes/draft.md"
+echo final >"$WORK_DIR/ws/notes/final.md"
+(cd "$WORK_DIR/ws" && echo "Delete the draft notes." \
+    | "$APOGEE_BIN" chat --suite checked --tools --allow delete_file) >"$WORK_DIR/validate.txt" 2>&1 \
+    || fail "the validated chat failed: $(cat "$WORK_DIR/validate.txt")"
+[ -f "$WORK_DIR/ws/notes/final.md" ] || fail "the call objected to ran: final.md is gone"
+[ -f "$WORK_DIR/ws/notes/draft.md" ] && fail "the revised call did not run: draft.md is still there"
+grep -q "validate: utility (verifier) objected to delete_file {\"path\":\"notes/final.md\"}" \
+    "$WORK_DIR/validate.txt" || fail "the objection was not said: $(cat "$WORK_DIR/validate.txt")"
+grep -q "ROOT-DELETED Deleted" "$WORK_DIR/validate.txt" \
+    || fail "the revision's result did not reach the root: $(cat "$WORK_DIR/validate.txt")"
+VALIDATED=$(session_of "Delete the draft notes.")
+[ -n "$VALIDATED" ] || fail "the validated chat was not saved"
+python3 - "$VALIDATED" <<'PY' || fail "the objection is not round one's tool result: $(cat "$VALIDATED")"
+import json, sys
+messages = json.load(open(sys.argv[1]))["messages"]
+results = [m["content"] if isinstance(m["content"], str) else json.dumps(m["content"])
+           for m in messages if m.get("role") == "tool"]
+assert len(results) == 2, results
+assert results[0].startswith("Not run: before delete_file ran, utility (verifier) checked it and objected"), results
+assert "Deleted" in results[1], results
+PY
+
+# Machine mode: the same rounds in events a driver already reads.
+echo draft >"$WORK_DIR/ws/notes/draft.md"
+(cd "$WORK_DIR/ws" && printf '{"type":"user","text":"Delete the draft notes, driven."}\n' \
+    | "$APOGEE_BIN" chat --suite checked --tools --allow delete_file --output-format stream-json) \
+    >"$WORK_DIR/validate.jsonl" 2>"$WORK_DIR/validate-machine.err" \
+    || fail "the driven validated chat failed: $(cat "$WORK_DIR/validate-machine.err")"
+python3 - "$WORK_DIR/validate.jsonl" <<'PY' || fail "machine mode carried validation in an unknown shape: $(cat "$WORK_DIR/validate.jsonl")"
+import json, sys
+known = {"session", "thinking", "thinking_delta", "memory", "tool_status", "notice",
+         "answer_start", "answer_delta", "answer_end", "result", "question", "error"}
+events = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+assert all(event["type"] in known for event in events), [e["type"] for e in events]
+notices = [e["text"] for e in events if e["type"] == "notice"]
+assert any(n.startswith("validate: utility (verifier) objected to delete_file") for n in notices), notices
+statuses = [e["text"] for e in events if e["type"] == "tool_status"]
+assert any(s.startswith("validate — asking utility (verifier): Check a tool call before it runs") for s in statuses), statuses
+PY
+[ -f "$WORK_DIR/ws/notes/final.md" ] || fail "the driven call objected to ran"
+
+# /check on the real binary: the verifier once, the model's reply beside it.
+# The utility member titles the chat first, so its script's first turn is
+# the title.
+printf '{"turns": [{"text": "381"}, {"text": "You are right: 391."}]}\n' \
+    >"$WORK_DIR/scripts/answerer.json"
+printf '{"turns": [{"text": "A Title"}, {"text": "OBJECT: 17 x 23 is 391, not 381."}]}\n' \
+    >"$WORK_DIR/scripts/checker.json"
+for name in answerer checker; do
+    "$APOGEE_BIN" config add-backend "$name" --type mock \
+        --model-path "$WORK_DIR/scripts/$name.json" >/dev/null || fail "add-backend $name"
+done
+"$APOGEE_BIN" config add-suite asking --chat answerer --utility checker >/dev/null \
+    || fail "add-suite asking"
+printf 'what is 17 x 23?\n/check\n' | "$APOGEE_BIN" chat --suite asking >"$WORK_DIR/check-answer.txt" 2>&1 \
+    || fail "/check failed: $(cat "$WORK_DIR/check-answer.txt")"
+grep -q 'check: utility (checker) objects to the answer -- "17 x 23 is 391, not 381."' \
+    "$WORK_DIR/check-answer.txt" || fail "/check did not say the objection: $(cat "$WORK_DIR/check-answer.txt")"
+grep -q 'check: shown the objection, the model answered -- "You are right: 391."' \
+    "$WORK_DIR/check-answer.txt" || fail "/check did not say the model's reply: $(cat "$WORK_DIR/check-answer.txt")"
+CHECKED=$(session_of "what is 17 x 23?")
+python3 - "$CHECKED" <<'PY' || fail "/check changed the conversation: $(cat "$CHECKED")"
+import json, sys
+messages = json.load(open(sys.argv[1]))["messages"]
+assert [m["role"] for m in messages] == ["user", "assistant"], messages
+PY
+
+# The extraction seam: a capture whose clerk plants one wrong field -- the
+# link -- and stands by it; the verifier objects, the clerk is asked once
+# more, and the dispute is surfaced with the record kept as the clerk wrote it.
+cat >"$WORK_DIR/scripts/clerk.json" <<'JSON'
+{"turns": [{"text": "{\"intent\": \"Testers kept mistaking the cancel button for back.\", \"decision\": \"Remove the cancel button.\", \"status\": \"shipped\", \"discipline\": \"ux\", \"downstream_link\": \"PROJ-24\", \"provenance\": {\"source\": \"meeting\"}}"}]}
+JSON
+printf '{"turns": [{"text": "OBJECT: downstream_link is PROJ-24; the source says PROJ-42."}]}\n' \
+    >"$WORK_DIR/scripts/linkcheck.json"
+for name in clerk linkcheck; do
+    "$APOGEE_BIN" config add-backend "$name" --type mock \
+        --model-path "$WORK_DIR/scripts/$name.json" >/dev/null || fail "add-backend $name"
+done
+"$APOGEE_BIN" config add-suite capturing --chat root --extraction clerk --utility linkcheck \
+    --validate extraction=on >/dev/null || fail "add-suite capturing"
+"$APOGEE_BIN" config set-default-suite capturing >/dev/null || fail "set-default-suite capturing"
+echo "Ada: testers kept mistaking the cancel button for back, so we removed it. Shipped in PROJ-42." \
+    | "$APOGEE_BIN" knowledge capture --dry-run --json >"$WORK_DIR/capture.json" 2>"$WORK_DIR/capture.err" \
+    || fail "the validated capture failed: $(cat "$WORK_DIR/capture.err")"
+python3 - "$WORK_DIR/capture.json" <<'PY' || fail "the capture's validation is not the dispute: $(cat "$WORK_DIR/capture.json")"
+import json, sys
+out = json.load(open(sys.argv[1]))
+v = out["validation"]
+assert v["result"] == "disputed", v
+assert v["verifier"] == "utility (linkcheck)", v
+assert v["objection"] == "downstream_link is PROJ-24; the source says PROJ-42.", v
+assert v["verifier_calls"] == 1 and v["revisions"] == 1 and v.get("insisted") is True, v
+assert out["record"]["downstream_link"] == "PROJ-24", out["record"]
+PY
+# And in words, on the human path.
+echo "Ada: we removed the cancel button. Shipped in PROJ-42." \
+    | "$APOGEE_BIN" knowledge capture --dry-run >"$WORK_DIR/capture.txt" 2>&1 \
+    || fail "the validated capture (text) failed: $(cat "$WORK_DIR/capture.txt")"
+grep -q 'apogee knowledge: disputed by utility (linkcheck): "downstream_link is PROJ-24; the source says PROJ-42." -- the clerk returned the same record' \
+    "$WORK_DIR/capture.txt" || fail "the dispute was not said: $(cat "$WORK_DIR/capture.txt")"
+"$APOGEE_BIN" config set-default-suite off >/dev/null || fail "set-default-suite off"
 
 echo "suites: OK"

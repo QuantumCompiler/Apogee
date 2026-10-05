@@ -18,6 +18,7 @@
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
 #include "agentloop/review_context.h"
+#include "agentloop/validate.h"
 #include "ansi/ansi.h"
 #include "backends/factory.h"
 #include "cli/chat_attachments.h"
@@ -257,13 +258,15 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     // A large tool result is summarised by the utility model, when one is
     // set, before the chat model reads it (26b).
     loop_options.summary_model = named_utility(harness.config());
+    // The member calls a turn may make (27f), counted from zero each turn --
+    // with tools or without, since the suite's validation (27g) spends from
+    // the same count: a standing answer check needs no tool.
+    loop_options.member_calls = member_calls;
     if (tools != nullptr) {
         loop_options.tools = tools;
         // The tools each step offers, when there are many (26g): one
         // selection for the conversation, so a turn can keep the last one's.
         loop_options.tool_selection = selection;
-        // The consults a turn may make (27f), counted from zero each turn.
-        loop_options.member_calls = member_calls;
         loop_options.ask = ask;
         loop_options.permission = gate.permission;
         loop_options.confirm = gate.confirm;
@@ -1262,6 +1265,10 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             CaptureInputs inputs;
             inputs.raw = transcript;
             inputs.overrides = std::move(overrides);
+            // A verifier checking the record (27g) is said where the clerk is.
+            inputs.narrate = [&reporter](const agentloop::SideCall& call) {
+                reporter.on_side_call(call);
+            };
             // The clerk is the chat's own model -- loaded already, so no second
             // load (Milestone Y) -- unless a utility model is named (26b).
             const std::string utility = named_utility(config);
@@ -1290,6 +1297,15 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " captured " +
                                          result.record.id + " [" + result.record.status + "] -- " +
                                          preview_text(result.record.intent, 80));
+            if (result.validation.has_value()) {
+                const bool clean =
+                    result.validation->result == agentloop::Validated::Result::Passed ||
+                    result.validation->result == agentloop::Validated::Result::Revised;
+                for (const std::string& line : agentloop::extraction_lines(*result.validation)) {
+                    reporter.status().print_line(
+                        style.tag(clean ? ansi::Role::Apogee : ansi::Role::Warning) + " " + line);
+                }
+            }
         };
 
         // --- the REPL --------------------------------------------------------
@@ -1718,6 +1734,57 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                 ? style.tag(ansi::Role::Apogee) + " detached " + name
                                 : style.tag(ansi::Role::Error) + " nothing attached as '" + name +
                                       "' -- /attachments lists them");
+                        break;
+                    }
+                    case ChatVerb::Check: {
+                        // The answer seam on request (27g): the suite's
+                        // verifier, once, briefed with the question and the
+                        // answer alone; on an objection the chat's model
+                        // answers it once. Both said; nothing added to the
+                        // conversation.
+                        const agentloop::VerifierRole role =
+                            agentloop::verifier_role(harness.config());
+                        if (!role.missing.empty()) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " check: " + role.missing);
+                            break;
+                        }
+                        if (session.messages.empty() ||
+                            session.messages.back().role != harness::Role::Assistant ||
+                            session.messages.back().content.plain_text().empty()) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " check: there is no answer to check yet");
+                            break;
+                        }
+                        attached.settle();
+                        const agentloop::SideCallSink side =
+                            [&reporter](const agentloop::SideCall& call) {
+                                reporter.on_side_call(call);
+                            };
+                        agentloop::Validated checked;
+                        try {
+                            // A turn of its own: the suite's cap bounds it,
+                            // as it bounds a turn's consults.
+                            const agentloop::MemberCalls::Turn turn =
+                                member_calls->begin_turn(side, {});
+                            const agentloop::Verifier verifier =
+                                agentloop::bind_verifier(harness, *member_calls, role.role);
+                            checked = agentloop::check_answer(harness, session.backend,
+                                                              session.messages, verifier, side,
+                                                              session.params.max_tokens, {});
+                        } catch (const harness::HarnessError& e) {
+                            reporter.on_clear_status();
+                            reporter.status().print_line(style.tag(ansi::Role::Error) +
+                                                         " check: " + e.what());
+                            break;
+                        }
+                        reporter.on_clear_status();
+                        const bool agreed = checked.result == agentloop::Validated::Result::Passed;
+                        for (const std::string& line : agentloop::answer_lines(checked)) {
+                            reporter.status().print_line(
+                                style.tag(agreed ? ansi::Role::Apogee : ansi::Role::Warning) + " " +
+                                line);
+                        }
                         break;
                     }
                     case ChatVerb::Compact: {

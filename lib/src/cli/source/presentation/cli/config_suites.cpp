@@ -112,7 +112,24 @@ struct MemberFlags {
     /// `--consultable`, when given -- "" for none.
     std::optional<std::string> consultable;
     std::vector<std::string> consult_caps;
+    /// `--verifier`, when given -- "" for the default (27g).
+    std::optional<std::string> verifier;
+    /// `--validate SEAM=VALUE`, each; `off` clears the block.
+    std::vector<std::string> validate;
 };
+
+/// `tool_args=`, ...: what `--validate` offers, and `off`.
+const std::vector<std::string>& seam_prefixes() {
+    static const std::vector<std::string> prefixes = [] {
+        std::vector<std::string> out;
+        for (const std::string_view seam : harness::validate_seam_names()) {
+            out.push_back(std::string{seam} + "=");
+        }
+        out.emplace_back("off");
+        return out;
+    }();
+    return prefixes;
+}
 
 /// `per_turn=`, ...: what `--consult-cap` offers.
 const std::vector<std::string>& cap_prefixes() {
@@ -170,6 +187,95 @@ void bind_member_flags(CLI::App& cmd, MemberFlags& flags) {
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
+    cmd.add_option_function<std::string>(
+           "--verifier", [&flags](const std::string& value) { flags.verifier = value; },
+           "The member that checks the others' work when a validate seam is on: a ROLE -- "
+           "local, unmetered members only; \"\" for the default (utility)")
+        ->type_name(words_value(harness::consultable_role_names()))
+        ->expected(1);
+    cmd.add_option("--validate", flags.validate,
+                   "Have the verifier check a seam: tool_args=on|off, extraction=on|off, "
+                   "answers=request|always; SEAM= for the default; off for no validation at all "
+                   "(repeatable)")
+        ->type_name(words_value(seam_prefixes()))
+        ->expected(1)
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
+}
+
+/// `--validate SEAM=on|off`'s value: on, off, or empty for the default.
+std::optional<bool> switch_value(const std::string& text, std::string_view seam,
+                                 std::string_view value) {
+    if (value == "on") {
+        return true;
+    }
+    if (value == "off") {
+        return false;
+    }
+    if (!value.empty()) {
+        fail("--validate " + text + ": " + std::string{seam} + " is on or off");
+    }
+    return std::nullopt;
+}
+
+/// `--validate answers=request|always`'s value, or empty for the default.
+std::optional<std::string> answers_value(const std::string& text, std::string value) {
+    if (value.empty()) {
+        return std::nullopt;
+    }
+    const std::span<const std::string_view> whens = harness::answer_check_names();
+    if (std::ranges::find(whens, value) == whens.end()) {
+        fail("--validate " + text + ": answers is request or always");
+    }
+    return value;
+}
+
+/// The validate flags applied onto `suite` (27g), in the order given: `off`
+/// clears the whole block, `SEAM=VALUE` sets a seam, `SEAM=` resets it.
+void apply_validate(SuiteConfig& suite, const MemberFlags& flags) {
+    for (const std::string& text : flags.validate) {
+        if (trimmed_word(text) == "off") {
+            suite.validate = {};
+            continue;
+        }
+        const std::size_t equals = text.find('=');
+        const std::string seam =
+            trimmed_word(equals == std::string::npos ? std::string_view{text}
+                                                     : std::string_view{text}.substr(0, equals));
+        const std::span<const std::string_view> seams = harness::validate_seam_names();
+        if (equals == std::string::npos || std::ranges::find(seams, seam) == seams.end()) {
+            std::vector<std::string> accepted;
+            for (const std::string_view name : seams) {
+                accepted.emplace_back(name);
+            }
+            fail("--validate " + text + ": not SEAM=VALUE with SEAM one of " + joined(accepted) +
+                 ", nor off");
+        }
+        std::string value = trimmed_word(std::string_view{text}.substr(equals + 1));
+        if (seam == "answers") {
+            suite.validate.answers = answers_value(text, std::move(value));
+        } else if (seam == "tool_args") {
+            suite.validate.tool_args = switch_value(text, seam, value);
+        } else {
+            suite.validate.extraction = switch_value(text, seam, value);
+        }
+    }
+    if (flags.verifier.has_value()) {
+        const std::string role = trimmed_word(*flags.verifier);
+        suite.validate.verifier = role.empty() ? std::nullopt : std::optional<std::string>{role};
+    }
+}
+
+/// A suite's validation as it holds -- `verifier utility (default),
+/// tool_args on, extraction off (default), answers request (default)` (27g).
+std::string describe_validate(const SuiteConfig& suite) {
+    const harness::ValidatePolicy policy = harness::validate_policy(suite.validate);
+    const harness::ValidateConfig& set = suite.validate;
+    const auto mark = [](bool given) { return given ? std::string{} : std::string{" (default)"}; };
+    return "verifier " + policy.verifier + mark(set.verifier.has_value()) + ", tool_args " +
+           (policy.tool_args ? "on" : "off") + mark(set.tool_args.has_value()) + ", extraction " +
+           (policy.extraction ? "on" : "off") + mark(set.extraction.has_value()) + ", answers " +
+           (policy.answers_always ? "always" : "request") + mark(set.answers.has_value());
 }
 
 /// `--consultable`'s roles, as given: comma-separated, blanks dropped.
@@ -308,6 +414,7 @@ void bind_add_suite(CLI::App& parent, const RootContext& context) {
         }
         apply_knobs(suite, flags->members);
         apply_consult(suite, flags->members);
+        apply_validate(suite, flags->members);
         if (const std::string refused =
                 validate_suite(config, flags->name, suite, provider_metered_probe(path));
             !refused.empty()) {
@@ -379,6 +486,7 @@ void bind_set_suite(CLI::App& parent, const RootContext& context) {
         }
         apply_knobs(after, flags->members);
         apply_consult(after, flags->members);
+        apply_validate(after, flags->members);
         if (const std::string refused =
                 validate_suite(config, flags->name, after, provider_metered_probe(path));
             !refused.empty()) {
@@ -387,7 +495,8 @@ void bind_set_suite(CLI::App& parent, const RootContext& context) {
         if (after == before) {
             fail(
                 "set-suite: nothing to change -- name a member with --<role>, or pass "
-                "--context-size, --toolset, --unpin, --remove, --consultable or --consult-cap");
+                "--context-size, --toolset, --unpin, --remove, --consultable, --consult-cap, "
+                "--verifier or --validate");
         }
         // One member at a time, each in place: every other line of the
         // entry, its comments included, stays as it was.
@@ -409,6 +518,9 @@ void bind_set_suite(CLI::App& parent, const RootContext& context) {
             }
             if (after.consult_caps != before.consult_caps) {
                 edited = harness::set_suite_consult_caps(edited, flags->name, after.consult_caps);
+            }
+            if (after.validate != before.validate) {
+                edited = harness::set_suite_validate(edited, flags->name, after.validate);
             }
             return edited;
         });
@@ -546,6 +658,9 @@ std::optional<std::string> suite_lookup(const Config& config, std::string_view k
         if (suite->consult_caps.any()) {
             lines.push_back("consult_caps: " + describe_caps(*suite));
         }
+        if (suite->validate.any()) {
+            lines.push_back("validate: " + describe_validate(*suite));
+        }
         return joined(lines, "\n");
     }
     const std::string_view field = rest.substr(dot + 1);
@@ -557,6 +672,9 @@ std::optional<std::string> suite_lookup(const Config& config, std::string_view k
     }
     if (field == "consult_caps") {
         return describe_caps(*suite);
+    }
+    if (field == "validate") {
+        return describe_validate(*suite);
     }
     const std::span<const std::string_view> roles = harness::suite_role_names();
     if (std::ranges::find(roles, field) == roles.end()) {
@@ -590,6 +708,7 @@ void append_suite_keys(const Config& config, std::vector<std::string>& keys) {
         keys.push_back(prefix + ".description");
         keys.push_back(prefix + ".consultable");
         keys.push_back(prefix + ".consult_caps");
+        keys.push_back(prefix + ".validate");
         for (const std::string_view role : harness::suite_role_names()) {
             keys.push_back(prefix + "." + std::string{role});
         }

@@ -295,3 +295,81 @@ TEST_CASE("a suite's consultable members and caps over HTTP are byte-identical t
                                  with_body("PUT", {{"role", "chat"}, {"member", "embedder"}}))
               .status == 200);
 }
+
+TEST_CASE("a suite's validation over HTTP is byte-identical to the CLI's",
+          "[httpserver][admin][suites][parity][validate]") {
+    const Fixture fixture;
+    AdminConfigContext context = fixture.context();
+    context.metered = apogee::commands::provider_metered_probe(fixture.http_config);
+
+    // add-suite --validate <-> POST with `validate`.
+    REQUIRE(fixture.cli({"config", "add-suite", "research", "--chat", "root", "--utility", "helper",
+                         "--extraction", "embedder", "--validate", "tool_args=on", "--validate",
+                         "answers=always"}) == 0);
+    const HttpResponse created = admin_create_suite(
+        context,
+        with_body("POST", {{"name", "research"},
+                           {"members",
+                            {{"chat", "root"}, {"utility", "helper"}, {"extraction", "embedder"}}},
+                           {"validate", {{"tool_args", true}, {"answers", "always"}}}}));
+    REQUIRE(created.status == 201);
+    CHECK(fixture.same());
+    CHECK(parsed(created)["data"]["validate"] ==
+          nlohmann::json({{"tool_args", true}, {"answers", "always"}}));
+
+    // set-suite --verifier/--validate <-> PUT validate, in place: a key left
+    // out kept, null back to its default.
+    REQUIRE(fixture.cli({"config", "set-suite", "research", "--verifier", "extraction",
+                         "--validate", "extraction=on", "--validate", "answers="}) == 0);
+    const HttpResponse changed = apogee::httpserver::admin_set_suite_validate(
+        context, "research",
+        with_body("PUT", {{"verifier", "extraction"}, {"extraction", true}, {"answers", nullptr}}));
+    REQUIRE(changed.status == 200);
+    CHECK(fixture.same());
+    CHECK(parsed(changed)["data"]["validate"] ==
+          nlohmann::json({{"verifier", "extraction"}, {"tool_args", true}, {"extraction", true}}));
+    // Cleared alike.
+    REQUIRE(fixture.cli({"config", "set-suite", "research", "--validate", "off"}) == 0);
+    REQUIRE(apogee::httpserver::admin_set_suite_validate(context, "research",
+                                                         with_body("PUT", {{"verifier", nullptr},
+                                                                           {"tool_args", nullptr},
+                                                                           {"extraction", nullptr},
+                                                                           {"answers", nullptr}}))
+                .status == 200);
+    CHECK(fixture.same());
+    CHECK_FALSE(parsed(admin_get_suite(context, "research"))["data"].contains("validate"));
+
+    // Refused alike, the file untouched.
+    const std::string before = Fixture::bytes(fixture.http_config);
+    CHECK(fixture.cli({"config", "set-suite", "research", "--verifier", "chat"}) != 0);
+    CHECK(apogee::httpserver::admin_set_suite_validate(context, "research",
+                                                       with_body("PUT", {{"verifier", "chat"}}))
+              .status == 400);
+    CHECK(apogee::httpserver::admin_set_suite_validate(fixture.context(), "research",
+                                                       with_body("PUT", {{"tool_args", true}}))
+              .status == 400);  // no probe: whether the verifier bills cannot be told
+    CHECK(apogee::httpserver::admin_set_suite_validate(context, "research",
+                                                       with_body("PUT", {{"tool_args", "on"}}))
+              .status == 400);
+    CHECK(apogee::httpserver::admin_set_suite_validate(context, "research",
+                                                       with_body("PUT", {{"quorum", 2}}))
+              .status == 400);
+    CHECK(apogee::httpserver::admin_set_suite_validate(context, "nope",
+                                                       with_body("PUT", {{"tool_args", true}}))
+              .status == 404);
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+
+    // The verifier's member moved, by the member route, to a billed backend
+    // is refused as the CLI refuses it.
+    REQUIRE(apogee::httpserver::admin_set_suite_validate(context, "research",
+                                                         with_body("PUT", {{"tool_args", true}}))
+                .status == 200);
+    AdminConfigContext billing = context;
+    billing.metered = [](const apogee::harness::Config&, std::string_view backend) {
+        return apogee::commands::MeteredAnswer{.metered = backend == "embedder"};
+    };
+    const HttpResponse moved = admin_set_suite_member(
+        billing, "research", with_body("PUT", {{"role", "utility"}, {"member", "embedder"}}));
+    CHECK(moved.status == 400);
+    CHECK(moved.body.find("validate: 'embedder' is billed per call") != std::string::npos);
+}

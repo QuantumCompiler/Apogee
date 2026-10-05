@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "agentloop/validate.h"
 #include "knowledge/record.h"
 
 namespace apogee::harness {
@@ -83,6 +84,10 @@ struct Draft {
     Record record;
     /// Why the draft cannot be stored; empty when it can.
     std::string error;
+    /// What the suite's verifier made of the record (27g), when the
+    /// extraction seam checked it: passed, revised once, disputed -- the
+    /// record kept is the clerk's last word -- or unchecked, and why.
+    std::optional<agentloop::Validated> validation;
 
     [[nodiscard]] bool ok() const noexcept {
         return error.empty();
@@ -96,8 +101,23 @@ struct Draft {
 
 /// Runs `clerk` over `raw` and drafts the result. A non-conforming outcome
 /// is an error carrying the validator's message, never a partial record.
+///
+/// With a `verifier` -- the active suite's, when its `validate:` block turns
+/// `extraction` on (27g) -- a draft that passed its structure is checked
+/// against `raw` on the fixed rubric (`agentloop::extraction_brief`), the
+/// record as the clerk wrote it, before any override, which is the user's
+/// own word. An objection goes back to the clerk once, with the record and
+/// the objection beside the source; the revision is checked again, and one
+/// still objected to is kept with the dispute in `Draft::validation`. A
+/// record that fails its structure never reaches the verifier.
 [[nodiscard]] Draft run_capture(const ClerkFn& clerk, std::string_view raw,
-                                const Overrides& overrides);
+                                const Overrides& overrides,
+                                const agentloop::Verifier* verifier = nullptr);
+
+/// The user message the clerk revises a record with (27g): the source, the
+/// record it wrote, and the objection to it.
+[[nodiscard]] std::string revision_message(std::string_view raw, std::string_view record,
+                                           std::string_view objection);
 
 /// Assigns the system fields a store needs: the id and the timestamp, both
 /// from `now`. `raw_ref` is the store's to set when it archives.

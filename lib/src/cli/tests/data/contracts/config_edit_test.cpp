@@ -1444,3 +1444,69 @@ TEST_CASE("setting a suite's consultable members and caps leaves every other lin
     CHECK_THROWS_AS((void)set_suite_consultable(hand, "nope", {"utility"}), ConfigEditError);
     CHECK_THROWS_AS((void)set_suite_consult_caps(kCommented, "s", caps), ConfigEditError);
 }
+
+TEST_CASE("a suite's validate: block is written last, only what is set, and round-trips",
+          "[config_edit][golden][suites][validate]") {
+    using apogee::harness::append_suite;
+    apogee::harness::SuiteConfig suite = research_suite();
+    suite.consultable = {"utility"};
+    suite.validate.tool_args = true;
+    suite.validate.answers = "always";
+    const std::string added = append_suite(kCommented, "research", suite, false);
+    require_parses(added);
+    CHECK(
+        added.ends_with("        toolset: [fs]\n    consultable: [utility]\n"
+                        "    validate:\n      tool_args: on\n      answers: always\n"));
+    CHECK(*apogee::harness::parse_config(added, "<test>").find_suite("research") == suite);
+    CHECK(apogee::harness::delete_suite(added, "research") ==
+          std::string{kCommented} + "\nsuites:\n");
+    // Every key, in its writing order.
+    suite.validate.verifier = "vision";
+    suite.validate.extraction = false;
+    suite.members["vision"] = {.backend = "claude"};
+    const std::string full = append_suite(kCommented, "research", suite, false);
+    CHECK(
+        full.ends_with("    validate:\n      verifier: vision\n      tool_args: on\n"
+                       "      extraction: off\n      answers: always\n"));
+    CHECK(*apogee::harness::parse_config(full, "<test>").find_suite("research") == suite);
+}
+
+TEST_CASE("setting a suite's validate: block leaves every other line as it was",
+          "[config_edit][golden][suites][validate]") {
+    using apogee::harness::set_suite_validate;
+    using apogee::harness::ValidateConfig;
+    const std::string hand{kHandSuite};
+
+    // Added at the entry's end.
+    const std::string added =
+        set_suite_validate(hand, "research", ValidateConfig{.tool_args = true});
+    require_parses(added);
+    std::string expected = hand;
+    expected.insert(expected.find("  fast:\n"), "    validate:\n      tool_args: on\n");
+    CHECK(added == expected);
+
+    // Replaced in place, a comment inside it gone with it and one above kept.
+    const std::string commented = std::string{kHandSuite}.insert(
+        std::string{kHandSuite}.find("  fast:\n"),
+        "    # checks\n    validate:\n      tool_args: on   # tools first\n");
+    require_parses(commented);
+    const std::string widened = set_suite_validate(
+        commented, "research", ValidateConfig{.tool_args = true, .answers = "always"});
+    CHECK(widened ==
+          std::string{kHandSuite}.insert(
+              std::string{kHandSuite}.find("  fast:\n"),
+              "    # checks\n    validate:\n      tool_args: on\n      answers: always\n"));
+    // Removed: nothing set, no block.
+    CHECK(set_suite_validate(added, "research", ValidateConfig{}) == hand);
+    CHECK(set_suite_validate(hand, "research", ValidateConfig{}) == hand);
+    // The last suite: at the file's end.
+    CHECK(set_suite_validate(hand, "fast", ValidateConfig{.answers = "always"})
+              .ends_with("      chat: local\n    validate:\n      answers: always\n"));
+    // The re-parse is what refuses a verifier with no member.
+    CHECK_THROWS_AS(
+        apogee::harness::parse_config(
+            set_suite_validate(hand, "fast", ValidateConfig{.tool_args = true}), "<test>"),
+        apogee::harness::ConfigError);
+    CHECK_THROWS_AS((void)set_suite_validate(hand, "nope", ValidateConfig{.tool_args = true}),
+                    ConfigEditError);
+}

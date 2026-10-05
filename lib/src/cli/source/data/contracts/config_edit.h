@@ -205,7 +205,8 @@ public:
 /// section when absent: `description` when set, then `members:` in role
 /// order, each `role: backend` alone or, when it pins a knob, the long form
 /// with `backend`, `context_size` and `toolset`; then, when set, its
-/// `consultable:` flow list and `consult_caps:` block (27f). Same collision
+/// `consultable:` flow list and `consult_caps:` block (27f), and its
+/// `validate:` block (27g). Same collision
 /// and `force` rules as `append_backend`; the name `off` is refused, being
 /// `/suite off`.
 [[nodiscard]] std::string append_suite(std::string_view content, std::string_view name,
@@ -239,6 +240,14 @@ public:
 /// `caps` -- none set removes it -- in place, as `set_suite_consultable` does.
 [[nodiscard]] std::string set_suite_consult_caps(std::string_view content, std::string_view suite,
                                                  const ConsultCaps& caps);
+
+/// Sets an existing suite's `validate:` block (27g) to the fields set in
+/// `validate` -- none set removes it -- in place, as `set_suite_consultable`
+/// does: a block already written is replaced where it stands, a new one goes
+/// at the entry's end, and every other line is left as it was. The re-parse
+/// refuses a verifier that cannot check or has no member.
+[[nodiscard]] std::string set_suite_validate(std::string_view content, std::string_view suite,
+                                             const ValidateConfig& validate);
 
 /// Sets `models.default_suite` -- the suite every surface resolves under --
 /// as `set_models_role` sets a pointer; "" clears it. The re-parse refuses a

@@ -3,7 +3,8 @@
 The reference for setting up the tools a model reaches with `--tools` that
 need something set up first. Today that is two: **web search**, answered by
 a SearXNG instance you run, and **consult**, answered by a member of a model
-suite you configure.
+suite you configure -- and beside it **validation**, the same member checking
+the others' work.
 
 The native toolsets (files, the shell, git, notes, document search) and
 `fetch_url` need no setup. `apogee check` lists each one's permission level
@@ -202,4 +203,69 @@ consultable. `config add-suite`/`set-suite` (and their admin twins) ask the
 member's provider and refuse it with the reason; a config edited by hand to
 name one fails in `apogee check`, and the tool does not offer it. There is no
 permission prompt: a consult reads nothing and writes nothing.
+
+## Validation: members checking each other's work
+
+A suite can have one member check the others' work (27g) -- the small
+helper reading over the root's shoulder. It is off until a suite's
+`validate:` block switches a seam on:
+
+```bash
+apogee config set-suite research --validate tool_args=on --validate extraction=on
+```
+
+```yaml
+suites:
+  research:
+    members:
+      chat: root
+      utility: helper
+    validate:
+      verifier: utility    # optional: the member that checks; utility by default
+      tool_args: on        # a tool that writes or reaches out, checked before it runs
+      extraction: on       # a knowledge capture's record, checked against its source
+      answers: always      # optional: request (the default -- /check only) or always
+```
+
+### What is checked
+
+| Seam | When | What the verifier sees |
+|---|---|---|
+| `tool_args` | Before a tool that writes or sends data off the machine runs (`write_file`, `edit_file`, `delete_file`, the shell, `fetch_url`, …) | The call, the request it serves (your latest message) and what the tool does |
+| `extraction` | When `knowledge capture`, chat's `/capture` or the admin twin draws a record from a conversation | The conversation and the record, against a fixed rubric: every required field supported, every name, number, count, date and link matching, nothing contradicted |
+| `answers` | `/check` in chat, on the last answer -- or after every answer with `answers: always` (chat, `complete`) | The question and the answer |
+
+**Structure first.** Before any model is asked, a tool call's arguments are
+parsed, held to the tool's own schema and, for `edit_file` and
+`delete_file`, to the file existing; a capture's record is held to its
+schema. Whatever structure catches, no model is woken for.
+
+**The verifier is a consult.** It sees the brief in the table and nothing
+else, runs one call at a time, and spends from the same per-turn budget as
+`consult` (`consult_caps:`). With the budget spent, a check falls back to
+structure alone, and says so. Like a consultable member, the verifier must
+be local and unmetered.
+
+### One round, then you decide
+
+An objection goes back once:
+
+- **A tool call** objected to does not run: the objection is the call's
+  result, so the model can correct it. Its next call of that tool is checked
+  again and runs once it passes -- or, if the verifier still objects (or the
+  model makes the same call again), runs anyway with the dispute shown first.
+  The permission prompt is exactly what it always is: a check never stands in
+  for it.
+- **A capture**'s clerk is shown the objection and writes the record once
+  more; the revision is checked again. A record still objected to is kept as
+  the clerk wrote it, with the dispute beside it (on stderr, and as
+  `validation` in `--json` and the admin route).
+- **An answer** is checked once; on an objection the chat model is shown it
+  once and answers -- and both are printed. Nothing is added to the
+  conversation.
+
+There is never a second revision. A check that passes is a line in the
+thinking block (`validate — asking utility (helper): …`); an objection, a
+dispute and a check that could not be made are kept on screen, and in
+machine mode they are `notice` events.
 

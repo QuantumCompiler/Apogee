@@ -133,3 +133,57 @@ TEST_CASE("a consultable member is written only when its provider says it is loc
     CHECK(validate_suite_consult(config, shaped, local) ==
           "consult caps must be positive whole numbers");
 }
+
+TEST_CASE("a verifier is written only when its provider says it is local and unmetered",
+          "[operations][suites][validate]") {
+    using apogee::commands::MeteredAnswer;
+    using apogee::commands::MeteredProbe;
+    using apogee::commands::validate_suite_validation;
+    const Config config = two_backends();
+    SuiteConfig suite;
+    suite.members["chat"] = {.backend = "root"};
+    suite.members["utility"] = {.backend = "helper"};
+    std::vector<std::string> asked;
+    const MeteredProbe local = [&asked](const Config&, std::string_view backend) {
+        asked.emplace_back(backend);
+        return MeteredAnswer{.metered = false};
+    };
+    const MeteredProbe billed = [](const Config&, std::string_view) {
+        return MeteredAnswer{.metered = true};
+    };
+    const MeteredProbe unknown = [](const Config&, std::string_view) {
+        return MeteredAnswer{.metered = false, .unknown = "no API key"};
+    };
+    // No block: nothing to hold, no probe asked.
+    CHECK(validate_suite_validation(config, suite, {}).empty());
+    suite.validate.tool_args = true;
+    CHECK(validate_suite(config, "s", suite, local).empty());
+    // The default verifier's backend -- the utility member's -- is asked.
+    CHECK(asked == std::vector<std::string>{"helper"});
+    CHECK(validate_suite(config, "s", suite, billed) ==
+          "validate: 'helper' is billed per call -- a check runs on Apogee's initiative, which "
+          "never spends: only a local, unmetered member can be the verifier");
+    CHECK(validate_suite_validation(config, suite, unknown) ==
+          "validate: whether 'helper' is billed per call cannot be told (no API key) -- unknown "
+          "is metered, and only a local, unmetered member can check");
+    CHECK(validate_suite(config, "s", suite).find("cannot be told") != std::string::npos);
+
+    // The shape, in the write's words.
+    SuiteConfig shaped = suite;
+    shaped.validate.verifier = "chat";
+    CHECK(validate_suite_validation(config, shaped, local).find("the root itself") !=
+          std::string::npos);
+    shaped.validate.verifier = "vision";
+    CHECK(validate_suite_validation(config, shaped, local) ==
+          "validate: the verifier is the vision member, and the suite has none -- name its "
+          "backend with --vision, or another verifier with --verifier");
+    shaped.validate.verifier.reset();
+    shaped.validate.answers = "sometimes";
+    CHECK(validate_suite_validation(config, shaped, local) ==
+          "validate: answers is request, always, not 'sometimes'");
+    // Removing the verifier's member is refused while the block stands.
+    SuiteConfig removed = suite;
+    removed.members.erase("utility");
+    CHECK(validate_suite(config, "s", removed, local).find("the verifier is the utility member") !=
+          std::string::npos);
+}

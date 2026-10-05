@@ -103,6 +103,55 @@ std::string validate_suite_consult(const harness::Config& config, const harness:
         !positive(suite.consult_caps.answer_tokens)) {
         return "consult caps must be positive whole numbers";
     }
+    // Validation's verifier is a member call too (27g), held to the same
+    // rule as a consult.
+    return validate_suite_validation(config, suite, metered);
+}
+
+std::string validate_suite_validation(const harness::Config& config,
+                                      const harness::SuiteConfig& suite,
+                                      const MeteredProbe& metered) {
+    if (!suite.validate.any()) {
+        return {};
+    }
+    const harness::ValidatePolicy policy = harness::validate_policy(suite.validate);
+    const std::string where = "validate: ";
+    const std::span<const std::string_view> roles = harness::consultable_role_names();
+    if (std::ranges::find(roles, policy.verifier) == roles.end()) {
+        if (policy.verifier == "chat") {
+            return where +
+                   "the chat model is the root itself -- its work is what a member checks, so it "
+                   "cannot be the one checking";
+        }
+        return where + "'" + policy.verifier +
+               "' is not a role that can check (accepted: " + joined(roles) + ")";
+    }
+    if (suite.validate.answers.has_value()) {
+        const std::span<const std::string_view> whens = harness::answer_check_names();
+        if (std::ranges::find(whens, *suite.validate.answers) == whens.end()) {
+            return where + "answers is " + joined(whens) + ", not '" + *suite.validate.answers +
+                   "'";
+        }
+    }
+    const auto member = suite.members.find(policy.verifier);
+    if (member == suite.members.end()) {
+        return where + "the verifier is the " + policy.verifier +
+               " member, and the suite has none " + "-- name its backend with --" +
+               policy.verifier + ", or another verifier with " + "--verifier";
+    }
+    const MeteredAnswer answer =
+        metered ? metered(config, member->second.backend)
+                : MeteredAnswer{.metered = true, .unknown = "nothing here can ask its provider"};
+    if (!answer.unknown.empty()) {
+        return where + "whether '" + member->second.backend +
+               "' is billed per call cannot be told (" + answer.unknown +
+               ") -- unknown is metered, and only a local, unmetered member can check";
+    }
+    if (answer.metered) {
+        return where + "'" + member->second.backend +
+               "' is billed per call -- a check runs on Apogee's initiative, which never spends: "
+               "only a local, unmetered member can be the verifier";
+    }
     return {};
 }
 

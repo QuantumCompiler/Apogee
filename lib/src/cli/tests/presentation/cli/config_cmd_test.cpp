@@ -370,3 +370,75 @@ TEST_CASE("the suite verbs name consultable members, refusing one billed per cal
               .find_suite("research")
               ->consultable.empty());
 }
+
+TEST_CASE("the suite verbs switch validation seams and name the verifier, refusing a billed one",
+          "[commands][config][suites][validate]") {
+    const CliHome probe{""};
+    const std::filesystem::path script = probe.home() / "paid.json";
+    {
+        std::ofstream out{script};
+        out << R"({"metered": true, "turns": [{"text": "paid"}]})";
+    }
+    const CliHome home{std::string{kSuiteConfig} +
+                       "  paid:\n    type: mock\n    model_path: " + script.string() + "\n"};
+    std::string out;
+    // `--validate` is repeatable: each seam its own occurrence.
+    REQUIRE(
+        home.run({"config", "add-suite", "research", "--chat", "root", "--utility", "helper",
+                  "--vision", "paid", "--validate", "tool_args=on", "--validate", "answers=always"},
+                 &out) == 0);
+    INFO(out);
+    CHECK(home.config_text().ends_with(
+        "\nsuites:\n  research:\n    members:\n      chat: root\n      vision: paid\n"
+        "      utility: helper\n    validate:\n      tool_args: on\n      answers: always\n"));
+    REQUIRE(home.run({"config", "get", "suites.research.validate"}, &out) == 0);
+    CHECK(out ==
+          "verifier utility (default), tool_args on, extraction off (default), answers always\n");
+    REQUIRE(home.run({"config", "get", "suites.research"}, &out) == 0);
+    CHECK(
+        out.ends_with("validate: verifier utility (default), tool_args on, extraction off "
+                      "(default), answers always\n"));
+
+    const std::string before = home.config_text();
+    const std::vector<std::pair<std::vector<std::string>, std::string>> refused{
+        {{"config", "set-suite", "research", "--verifier", "vision"},
+         "validate: 'paid' is billed per call -- a check runs on Apogee's initiative, which "
+         "never spends"},
+        {{"config", "set-suite", "research", "--utility", "paid"},
+         "validate: 'paid' is billed per call"},
+        {{"config", "set-suite", "research", "--remove", "utility"},
+         "validate: the verifier is the utility member, and the suite has none"},
+        {{"config", "set-suite", "research", "--verifier", "chat"}, "the root itself"},
+        {{"config", "set-suite", "research", "--validate", "quorum=2"},
+         "--validate quorum=2: not SEAM=VALUE with SEAM one of tool_args, extraction, answers, "
+         "nor off"},
+        {{"config", "set-suite", "research", "--validate", "tool_args=maybe"},
+         "--validate tool_args=maybe: tool_args is on or off"},
+        {{"config", "set-suite", "research", "--validate", "answers=often"},
+         "--validate answers=often: answers is request or always"},
+        {{"config", "add-suite", "x", "--chat", "root", "--validate", "tool_args=on"},
+         "validate: the verifier is the utility member, and the suite has none"},
+    };
+    for (const auto& [args, said] : refused) {
+        INFO(said);
+        CHECK(home.run(args, &out) != 0);
+        CHECK(out.find(said) != std::string::npos);
+        CHECK(home.config_text() == before);
+    }
+
+    // Changed in place, a seam reset to its default, and the block cleared.
+    REQUIRE(home.run({"config", "set-suite", "research", "--validate", "extraction=on",
+                      "--validate", "answers="},
+                     &out) == 0);
+    CHECK(
+        home.config_text().ends_with("    validate:\n      tool_args: on\n      extraction: on\n"));
+    REQUIRE(home.run({"config", "set-suite", "research", "--validate", "tool_args=off"}, &out) ==
+            0);
+    CHECK(home.config_text().ends_with(
+        "    validate:\n      tool_args: off\n      extraction: on\n"));
+    REQUIRE(home.run({"config", "set-suite", "research", "--validate", "off"}, &out) == 0);
+    CHECK(home.config_text().ends_with("      utility: helper\n"));
+    CHECK_FALSE(apogee::harness::parse_config(home.config_text(), "<test>")
+                    .find_suite("research")
+                    ->validate.any());
+}

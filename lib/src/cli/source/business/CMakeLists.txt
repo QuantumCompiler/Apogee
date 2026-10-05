@@ -50,6 +50,8 @@ apogee_add_module(agentloop
     agentloop/side_call.cpp
     agentloop/member_call.h
     agentloop/member_call.cpp
+    agentloop/validate.h
+    agentloop/validate.cpp
     agentloop/rag.h
     agentloop/rag.cpp
     agentloop/graph_context.h

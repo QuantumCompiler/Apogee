@@ -220,7 +220,8 @@ void check_role_pointer(CheckReport& report, const harness::Config& config,
 /// member reads its medium, as a pointer at that role must. Since 27f a
 /// consultable member's provider is asked whether it bills per call -- a
 /// hand-edited one that does fails here, where the config verbs would have
-/// refused it -- and the row names whom the root may consult.
+/// refused it -- and the row names whom the root may consult. Since 27g the
+/// verifier is held the same way, and the row names the seams it checks.
 void check_suites(CheckReport& report, const harness::Config& config, const backends::MlxHost& host,
                   const MeteredProbe& metered) {
     const harness::SuiteConfig* active = harness::active_suite(config);
@@ -299,13 +300,52 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
                 reported = true;
             }
         }
+        // The verifier is a member call too (27g): held to the same rule.
+        const harness::ValidatePolicy policy = harness::validate_policy(suite.validate);
+        if (!reported && suite.validate.any()) {
+            if (const auto it = suite.members.find(policy.verifier); it != suite.members.end()) {
+                const MeteredAnswer answer = metered(config, it->second.backend);
+                const std::string fix = "apogee config set-suite " + name +
+                                        " --verifier <a local member>, or --" + policy.verifier +
+                                        " <a local backend>";
+                if (!answer.unknown.empty()) {
+                    add(report, Status::Warn, "Config", label,
+                        "verifier " + policy.verifier + " -- whether '" + it->second.backend +
+                            "' is billed per call cannot be told (" + answer.unknown +
+                            "), so nothing is checked by it",
+                        fix);
+                    reported = true;
+                } else if (answer.metered) {
+                    add(report, Status::Fail, "Config", label,
+                        "verifier " + policy.verifier + " -- '" + it->second.backend +
+                            "' is billed per call; a check runs on Apogee's initiative, which "
+                            "never spends",
+                        fix);
+                    reported = true;
+                }
+            }
+        }
         if (!reported) {
             std::string consult;
             for (const std::string& role : suite.consultable) {
                 consult += (consult.empty() ? "  · consult: " : ", ") + role;
             }
+            std::string validate;
+            if (suite.validate.any()) {
+                std::string seams;
+                const auto seam = [&seams](bool on, std::string_view name) {
+                    if (on) {
+                        seams += (seams.empty() ? "" : ", ") + std::string{name};
+                    }
+                };
+                seam(policy.tool_args, "tool_args");
+                seam(policy.extraction, "extraction");
+                seam(policy.answers_always, "answers always");
+                validate = "  · validate: " + (seams.empty() ? std::string{"on request"} : seams) +
+                           " (verifier " + policy.verifier + ")";
+            }
             add(report, Status::Ok, "Config", label,
-                members + consult + (active == &suite ? "  -- the default suite" : ""));
+                members + consult + validate + (active == &suite ? "  -- the default suite" : ""));
         }
     }
 }

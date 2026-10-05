@@ -1456,3 +1456,91 @@ TEST_CASE("chat and complete offer consult under a suite that designates a membe
     CHECK(chat.out.find("MEMBER-ANSWER") == std::string::npos);
     CHECK(chat.out.find("relayed Error: no tool named 'consult'") != std::string::npos);
 }
+
+TEST_CASE("/check has the suite's verifier check the last answer once, and says both sides",
+          "[chat][cli][validate]") {
+    // 27g: the verifier, once, briefed with the question and the answer; the
+    // chat's model answers the objection once; both said; the conversation
+    // untouched. The helper titles the chat first, as the utility member.
+    HelperChat chat{texts({"381", "You're right: 391."}),
+                    {"Helper Title", "OBJECT: 17 x 23 is 391, not 381."},
+                    {},
+                    "suites:\n  checked:\n    members:\n      chat: chatty\n"
+                    "      utility: helper\n"};
+    REQUIRE(chat.run({"chat", "--suite", "checked"}, "what is 17 x 23?\n/check\n") == 0);
+    INFO(chat.err);
+    const std::string said = chat.out + chat.err;
+    CHECK(said.find("check: utility (helper) objects to the answer -- \"17 x 23 is 391, not "
+                    "381.\"") != std::string::npos);
+    CHECK(said.find("check: shown the objection, the model answered -- \"You're right: 391.\"") !=
+          std::string::npos);
+    // Never a transcript mutation: the question and the answer as given.
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.messages.size() == 2);
+    CHECK(session.messages.back().content.plain_text() == "381");
+}
+
+TEST_CASE("/check says why it cannot run, and asks nobody", "[chat][cli][validate]") {
+    HelperChat chat{texts({"381"}),
+                    {"Helper Title"},
+                    {},
+                    "suites:\n  lonely:\n    members:\n      chat: chatty\n"};
+    REQUIRE(chat.run({"chat"}, "/check\n") == 0);
+    CHECK((chat.out + chat.err).find("check: no suite is active") != std::string::npos);
+    REQUIRE(chat.run({"chat", "--suite", "lonely"}, "what?\n/check\n") == 0);
+    CHECK((chat.out + chat.err).find("check: suite lonely has no utility member to check with") !=
+          std::string::npos);
+    HelperChat fresh{texts({"381"}),
+                     {"Helper Title"},
+                     {},
+                     "suites:\n  checked:\n    members:\n      chat: chatty\n"
+                     "      utility: helper\n"};
+    REQUIRE(fresh.run({"chat", "--suite", "checked"}, "/check\n") == 0);
+    CHECK((fresh.out + fresh.err).find("check: there is no answer to check yet") !=
+          std::string::npos);
+}
+
+TEST_CASE("answers always: every answer checked, in chat and machine mode alike",
+          "[chat][cli][validate]") {
+    HelperChat chat{texts({"381", "You're right: 391."}),
+                    {"OBJECT: 17 x 23 is 391, not 381.", "Helper Title"},
+                    {},
+                    "suites:\n  checked:\n    members:\n      chat: chatty\n"
+                    "      utility: helper\n    validate:\n      answers: always\n"};
+    REQUIRE(chat.run({"chat", "--suite", "checked", "--output-format", "stream-json"},
+                     R"({"type":"user","text":"what is 17 x 23?"})"
+                     "\n") == 0);
+    INFO(chat.out);
+    // Said as notices: events of a type the protocol already has.
+    CHECK(chat.out.find("{\"text\":\"validate: utility (helper) objects to the answer -- \\\"17 x "
+                        "23 is 391, not 381.\\\"\",\"type\":\"notice\"}") != std::string::npos);
+    CHECK(chat.out.find("\"validate — asking utility (helper): Check an answer against the "
+                        "question it answers.") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.messages.size() == 2);
+    CHECK(session.messages.back().content.plain_text() == "381");
+}
+
+TEST_CASE("answers always reaches complete, with tools or without", "[chat][cli][validate]") {
+    HelperChat chat{texts({"381", "You're right: 391."}),
+                    {"OBJECT: 17 x 23 is 391, not 381."},
+                    {},
+                    "suites:\n  checked:\n    members:\n      chat: chatty\n"
+                    "      utility: helper\n    validate:\n      answers: always\n"};
+    std::string text;
+    {
+        const std::ifstream in{chat.config_path, std::ios::binary};
+        std::ostringstream read;
+        read << in.rdbuf();
+        text = read.str();
+    }
+    const std::string models = "models:\n  default: chatty\n";
+    text.replace(text.find(models), models.size(), models + "  default_suite: checked\n");
+    std::ofstream{chat.config_path, std::ios::binary} << text;
+    REQUIRE(chat.run({"complete", "what is 17 x 23?"}) == 0);
+    INFO(chat.err);
+    CHECK(chat.out.find("381") != std::string::npos);
+    CHECK((chat.out + chat.err)
+              .find("validate: utility (helper) objects to the answer -- \"17 x 23 is 391, not "
+                    "381.\"") != std::string::npos);
+}

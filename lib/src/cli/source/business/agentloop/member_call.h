@@ -36,6 +36,10 @@ namespace apogee::agentloop {
 /// `tools/`.
 inline constexpr std::string_view kConsultToolName = "consult";
 
+/// The role `name` spells, as `members:`, `consultable:` and `validate:`
+/// name one; nullopt for a word that names none.
+[[nodiscard]] std::optional<harness::ModelRole> role_named(std::string_view name);
+
 /// One member call.
 struct MemberCall {
     /// The role whose member answers, resolved through the one chain
@@ -122,8 +126,8 @@ struct ConsultableMember {
 [[nodiscard]] std::vector<ConsultableMember> consultable_members(const harness::Harness& harness);
 
 /// A conversation's member calls, counted per turn (27f): the budget the
-/// consult tool spends from -- and, once 27g lands, validation, from the
-/// same count -- read against the active suite's `consult_caps:` at the
+/// consult tool spends from -- and validation (27g), from the same count --
+/// read against the active suite's `consult_caps:` at the
 /// moment of each call, so `/suite` moves it with the suite.
 ///
 /// The loop opens a turn (`agentloop::Options::member_calls`): the count

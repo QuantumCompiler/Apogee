@@ -827,6 +827,31 @@ Lines format_consult_caps(const ConsultCaps& caps, std::string_view terminator) 
     return out;
 }
 
+/// The `validate:` block (27g), its keys in writing order -- `verifier`,
+/// then `validate_seam_names()` -- each only when set; nothing when none is.
+Lines format_validate(const ValidateConfig& validate, std::string_view terminator) {
+    if (!validate.any()) {
+        return {};
+    }
+    const std::string end{terminator};
+    const std::string field(kMemberIndent, ' ');
+    Lines out{std::string(kFieldIndent, ' ') + "validate:" + end};
+    if (validate.verifier.has_value()) {
+        out.push_back(field + "verifier: " + yaml_scalar(*validate.verifier) + end);
+    }
+    const auto add = [&](std::string_view name, const std::optional<bool>& value) {
+        if (value.has_value()) {
+            out.push_back(field + std::string{name} + ": " + (*value ? "on" : "off") + end);
+        }
+    };
+    add("tool_args", validate.tool_args);
+    add("extraction", validate.extraction);
+    if (validate.answers.has_value()) {
+        out.push_back(field + "answers: " + yaml_scalar(*validate.answers) + end);
+    }
+    return out;
+}
+
 Lines format_suite_entry(std::string_view name, const SuiteConfig& suite,
                          std::string_view terminator) {
     const std::string end{terminator};
@@ -849,6 +874,8 @@ Lines format_suite_entry(std::string_view name, const SuiteConfig& suite,
     out.insert(out.end(), consultable.begin(), consultable.end());
     const Lines caps = format_consult_caps(suite.consult_caps, terminator);
     out.insert(out.end(), caps.begin(), caps.end());
+    const Lines validate = format_validate(suite.validate, terminator);
+    out.insert(out.end(), validate.begin(), validate.end());
     return out;
 }
 
@@ -1111,6 +1138,13 @@ std::string set_suite_consult_caps(std::string_view content, std::string_view su
     return set_suite_field(
         content, suite, "consult_caps", "",
         [&caps](std::string_view terminator) { return format_consult_caps(caps, terminator); });
+}
+
+std::string set_suite_validate(std::string_view content, std::string_view suite,
+                               const ValidateConfig& validate) {
+    return set_suite_field(
+        content, suite, "validate", "",
+        [&validate](std::string_view terminator) { return format_validate(validate, terminator); });
 }
 
 std::vector<std::string_view> models_role_fields() {

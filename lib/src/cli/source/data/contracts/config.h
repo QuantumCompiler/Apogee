@@ -317,12 +317,60 @@ struct ConsultLimits {
 /// text into vectors and answers nothing.
 [[nodiscard]] std::span<const std::string_view> consultable_role_names() noexcept;
 
+/// The seams a suite's `validate:` block switches (27g), in the order it is
+/// written: `tool_args` (a gated tool's arguments, before it runs),
+/// `extraction` (a knowledge capture's record, against its source) and
+/// `answers` (an answer, on request or always).
+[[nodiscard]] std::span<const std::string_view> validate_seam_names() noexcept;
+
+/// What `validate.answers` takes (27g): `request` -- `/check` only, the
+/// default -- or `always`, a standing check after every answer.
+[[nodiscard]] std::span<const std::string_view> answer_check_names() noexcept;
+
+/// The role whose member checks when `validate.verifier` names none (27g):
+/// the small helper a suite already has for the chores.
+inline constexpr std::string_view kDefaultVerifier = "utility";
+
+/// A suite's `validate:` block (27g): which seams a member checks, and which
+/// member -- each unset field taking its default (the utility member, the
+/// seams off, answers on request), and none set writing no block. Off by
+/// default, opted into per seam.
+struct ValidateConfig {
+    /// The role whose member checks, one of `consultable_role_names()` with
+    /// a member in the suite.
+    std::optional<std::string> verifier;
+    std::optional<bool> tool_args;
+    std::optional<bool> extraction;
+    /// One of `answer_check_names()`.
+    std::optional<std::string> answers;
+
+    /// Whether any is set -- the block is written for it.
+    [[nodiscard]] bool any() const noexcept {
+        return verifier.has_value() || tool_args.has_value() || extraction.has_value() ||
+               answers.has_value();
+    }
+
+    bool operator==(const ValidateConfig&) const = default;
+};
+
+/// The block as it holds: each set field, else its default.
+struct ValidatePolicy {
+    std::string verifier{kDefaultVerifier};
+    bool tool_args = false;
+    bool extraction = false;
+    bool answers_always = false;
+
+    bool operator==(const ValidatePolicy&) const = default;
+};
+
+[[nodiscard]] ValidatePolicy validate_policy(const ValidateConfig& validate);
+
 /// One entry under `suites:` -- a named bundle of models (27d): a member per
 /// role it speaks for, every other role falling through the existing chain.
 ///
 /// Later items hang their policy here, beside `members:` -- the consultable
-/// members (27f), the validation seams (27g), orchestration (27t) -- and none
-/// of them is declared until something consumes it.
+/// members (27f), the validation seams (27g), orchestration (27t, not yet
+/// declared) -- and none of them is declared until something consumes it.
 struct SuiteConfig {
     /// Free text, for a listing. Never interpreted.
     std::string description;
@@ -335,9 +383,13 @@ struct SuiteConfig {
     /// and unmetered is its provider's to say, so that is held where a
     /// provider can be asked -- the config verbs, and the tool at use.
     std::vector<std::string> consultable;
-    /// What bounds them (27f) -- and, once 27g lands, validation too, which
-    /// spends from the same per-turn budget.
+    /// What bounds them (27f) -- and validation too (27g), which spends from
+    /// the same per-turn budget.
     ConsultCaps consult_caps;
+    /// Which seams a member checks, and which member (27g). Its verifier must
+    /// be a member of this suite; whether that member is local and unmetered
+    /// is held where a provider can be asked, as for `consultable:`.
+    ValidateConfig validate;
 
     bool operator==(const SuiteConfig&) const = default;
 };

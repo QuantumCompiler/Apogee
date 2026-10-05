@@ -279,6 +279,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         std::unique_ptr<agentloop::ToolSelection> machine_selection;
         const auto machine_mcp = std::make_shared<mcp::Registry>();
         const auto machine_consults = std::make_shared<agentloop::MemberCalls>(harness);
+        // The run's member calls (27f), with tools or without: the suite's
+        // validation (27g) spends from the same count.
+        machine_options.member_calls = machine_consults.get();
         if (flags.tools) {
             // stdout is the protocol: connection notes go to stderr.
             // The toolset the active suite pins on this backend, if any (27d).
@@ -295,7 +298,6 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                  tools::register_consult_tool(machine_registry, harness, machine_consults).notes) {
                 std::cerr << "apogee: " << note << "\n";
             }
-            machine_options.member_calls = machine_consults.get();
             machine_options.tools = &machine_registry;
             // Past a dozen and a half tools, the ones the question needs (26g).
             std::string ranked_by;
@@ -444,6 +446,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     std::unique_ptr<agentloop::ToolSelection> selection;
     const auto mcp_registry = std::make_shared<mcp::Registry>();
     const auto consults = std::make_shared<agentloop::MemberCalls>(harness);
+    // The run's member calls (27f), with tools or without: the suite's
+    // validation (27g) spends from the same count.
+    loop_options.member_calls = consults.get();
     if (flags.tools) {
         // The toolset the active suite pins on this backend, if any (27d).
         registry = pin_toolset(
@@ -464,7 +469,6 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             reporter.status().print_line(reporter_options.style.tag(ansi::Role::Warning) + " " +
                                          note);
         }
-        loop_options.member_calls = consults.get();
         loop_options.tools = &registry;
         // Past a dozen and a half tools, the ones the question needs (26g).
         std::string ranked_by;

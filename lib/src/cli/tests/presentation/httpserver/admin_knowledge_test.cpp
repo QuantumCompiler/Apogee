@@ -721,3 +721,76 @@ TEST_CASE(
     CHECK(fixture.reindex(nlohmann::json{}).status == 400);  // `null` is not an object
     CHECK(fixture.reindex({{"db", "other"}}).status == 404);
 }
+
+TEST_CASE("a capture under a suite that validates extraction carries what its verifier made of it",
+          "[httpserver][admin][knowledge][validate]") {
+    // 27g, through the one capture core the CLI shares: the record as the
+    // clerk wrote it checked against `raw`; a planted wrong link objected to;
+    // the clerk standing by it; the dispute surfaced and the record kept.
+    const apogee::testing::TempDir home{"admin-knowledge-validate-" +
+                                        std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    const std::filesystem::path config_path = home.path() / "config" / "config.yaml";
+    std::filesystem::create_directories(config_path.parent_path());
+    std::ofstream{config_path, std::ios::binary}
+        << "models:\n  default: mock\n  default_suite: checked\nbackends:\n  mock:\n"
+           "    type: mock\n  checker:\n    type: mock\nsuites:\n  checked:\n    members:\n"
+           "      chat: mock\n      extraction: mock\n      utility: checker\n    validate:\n"
+           "      extraction: on\n";
+    const apogee::harness::Config config = apogee::harness::load_config(config_path);
+    apogee::harness::Harness harness{config};
+    std::string planted{kRecord};
+    planted.replace(planted.find(R"("downstream_link": "")"),
+                    std::string{R"("downstream_link": "")"}.size(),
+                    R"("downstream_link": "PROJ-24")");
+    MockProvider::Options clerk;
+    clerk.backend_name = "mock";
+    clerk.turns = {MockTurn{.text = planted}};
+    const auto clerk_mock = std::make_shared<MockProvider>(std::move(clerk));
+    MockProvider::Options checker;
+    checker.backend_name = "checker";
+    checker.turns = {
+        MockTurn{.text = "OBJECT: downstream_link is PROJ-24; the source says PROJ-42."}};
+    const auto checker_mock = std::make_shared<MockProvider>(std::move(checker));
+    harness.register_provider("mock", clerk_mock);
+    harness.register_provider("checker", checker_mock);
+    harness.use_default_router();
+    HandlerOptions served;
+    served.served = {"mock"};
+    served.default_backend = "mock";
+    Handler handler{harness, served, nullptr};
+    const AdminConfigContext context{.config_path = config_path, .startup = &config};
+    const std::string raw =
+        "Ada: testers kept mistaking the cancel button for back, so we removed it. PROJ-42.";
+
+    const HttpResponse drafted = apogee::httpserver::admin_capture_knowledge(
+        context, handler, Fixture::post({{"raw", raw}, {"draft", true}}));
+    REQUIRE(drafted.status == 200);
+    const nlohmann::json draft = nlohmann::json::parse(drafted.body);
+    INFO(draft.dump());
+    CHECK(draft["record"]["downstream_link"] == "PROJ-24");
+    CHECK(draft["validation"] ==
+          nlohmann::json({{"result", "disputed"},
+                          {"verifier", "utility (checker)"},
+                          {"objection", "downstream_link is PROJ-24; the source says PROJ-42."},
+                          {"revisions", 1},
+                          {"verifier_calls", 1},
+                          {"insisted", true}}));
+    // The verifier was sent the brief and nothing else: the source and the
+    // record as the clerk wrote it.
+    REQUIRE(checker_mock->requests().size() == 1);
+    REQUIRE(checker_mock->requests()[0].messages.size() == 1);
+    const std::string brief = checker_mock->requests()[0].messages[0].content.plain_text();
+    CHECK(brief.find(raw) != std::string::npos);
+    CHECK(brief.find("PROJ-24") != std::string::npos);
+    // The clerk was asked twice: the capture, and its one revision.
+    CHECK(clerk_mock->requests().size() == 2);
+
+    // Stored, the record is kept as the clerk wrote it, the dispute beside it.
+    const HttpResponse stored = apogee::httpserver::admin_capture_knowledge(
+        context, handler, Fixture::post({{"raw", raw}}));
+    REQUIRE(stored.status == 201);
+    const nlohmann::json kept = nlohmann::json::parse(stored.body);
+    CHECK(kept["record"]["downstream_link"] == "PROJ-24");
+    CHECK(kept["validation"]["result"] == "disputed");
+}

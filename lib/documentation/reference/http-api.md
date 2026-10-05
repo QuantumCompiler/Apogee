@@ -454,8 +454,15 @@ same spend rule), and `draft` (below).
 `registered` says the collection was added under `embeddings:` by this call
 (the first capture into a new name); `note` carries the resolver's fallback
 reason when there is one, `notes` anything non-fatal (a `supersedes` target
-that does not exist). The raw conversation is archived on the server under
-`knowledge/raw/` and never returned. `400` on a missing `raw`, a bad status,
+that does not exist). When the server's suite validates extraction (27g --
+`validate: {extraction: on}`), `validation` says what its verifier made of
+the record, checked against `raw` before any override: `{result, verifier,
+objection?, revisions, verifier_calls, insisted?, notes?}`, `result` one of
+`passed`, `revised` (objected to, revised once by the clerk, and the revision
+agreed with), `disputed` (an objection still standing beside the record the
+clerk kept -- never silently overridden) or `unchecked` (the verifier could
+not decide; `notes` say why). The raw conversation is archived on the server
+under `knowledge/raw/` and never returned. `400` on a missing `raw`, a bad status,
 a bad retriever, or a resolver refusal (an explicit `vector` with no embedding
 backend); `501` when the server serves no generation backend; `502` when the
 clerk failed to produce a conforming record after its one retry.
@@ -463,7 +470,8 @@ clerk failed to produce a conforming record after its one retry.
 **`"draft": true`** runs the clerk, applies the overrides, normalises and
 validates -- and stores nothing: the HTTP twin of `capture --dry-run`, and
 the first step of the capture → review → store flow below. `200` with
-`{draft: true, record, db, retriever[, warning][, note]}`: the record has an
+`{draft: true, record, db, retriever[, warning][, note][, notes][,
+validation]}`: the record has an
 empty `id` and `timestamp` and no `raw_ref` (only a store mints those), `db`
 and `retriever` are the store decision a real capture would make, and
 `warning` says what a real capture would fail on (an explicit `vector` with
@@ -787,7 +795,13 @@ the roles whose members the suite's chat model may consult through the
 `consult` tool (27f) -- `extraction`, `vision`, `transcription` or `utility`
 -- and `consult_caps` the caps a turn's consults run under (`per_turn`,
 `brief_tokens`, `answer_tokens`; each absent one at its default, 4, 1024
-and 512). A suite is resolution, not transport: the server resolves every
+and 512). `validate` (27g) is the suite's rubber-duck validation as written
+-- `{verifier?, tool_args?, extraction?, answers?}`, only the keys set: the
+role whose member checks the others' work (`utility` when absent), whether a
+gated tool's arguments are checked before it runs and a knowledge capture's
+record against its source (booleans, `on`/`off` in the file), and whether
+answers are checked on request (`request`, the default: chat's `/check`) or
+`always`. A suite is resolution, not transport: the server resolves every
 request under the suite it started with -- the config's default, never a
 request's -- and each write below answers `restart_required` when the file
 has moved on from it.
@@ -797,14 +811,17 @@ has moved on from it.
 Adds an entry through the same comment-preserving transform the CLI uses,
 byte-identical. Body: `name` and `members` (role -> a backend's name, or
 `{backend, context_size?, toolset?}`) required; `description`,
-`consultable` (a list of roles) and `consult_caps` (`{per_turn?,
-brief_tokens?, answer_tokens?}`) optional. The CLI's rules, answered as
+`consultable` (a list of roles), `consult_caps` (`{per_turn?,
+brief_tokens?, answer_tokens?}`) and `validate` (`{verifier?, tool_args?,
+extraction?, answers?}`) optional. The CLI's rules, answered as
 `400`: a name that is not `off` (`/suite off` means no suite), at least one
 member, every member a configured backend, a positive window, known toolset
 words, one backend pinned one way -- and each consultable role one that
 answers, with a member in the suite whose backend's provider says it is not
 billed per call (asked as the CLI asks it: a consult runs on the model's
-initiative, which never spends), every cap positive. `201
+initiative, which never spends), every cap positive -- and a verifier that
+can check (not `chat`, not `embedding`) with a member in the suite whose
+provider says it is not billed per call, held the same way. `201
 {"data": {…}, "restart_required"}`; `409` when the name exists -- `PUT`
 replaces.
 
@@ -851,6 +868,19 @@ default. The two keys are replaced in place and every other line of the
 entry is left as it was. `200 {"data": {…}, "restart_required"}`; `404` when
 the suite is not configured, `400` under the CLI's rules -- a member billed
 per call among them.
+
+### `PUT /v1/admin/suites/{id}/validate`
+
+The twin of `apogee config set-suite --verifier`/`--validate` (27g): which
+seams the suite's verifier checks, and which member checks. Body
+`{"verifier"?: role | null, "tool_args"?: bool | null, "extraction"?: bool |
+null, "answers"?: "request" | "always" | null}` -- a key left out keeps what
+the entry has, `null` puts it back to its default, and with nothing left set
+the block is removed (the twin of `--validate off`). The block is replaced in
+place and every other line of the entry is left as it was. `200 {"data":
+{…}, "restart_required"}`; `404` when the suite is not configured, `400`
+under the CLI's rules -- a verifier with no member, or one billed per call,
+among them.
 
 ### `POST /v1/admin/knowledge`
 

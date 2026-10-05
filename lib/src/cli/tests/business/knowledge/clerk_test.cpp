@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <memory>
@@ -299,4 +300,158 @@ TEST_CASE(
         apogee::knowledge::make_structured_clerk(harness, "mock"), "raw", {});
     CHECK_FALSE(failed.ok());
     CHECK(failed.error.find("after 2 attempts") != std::string::npos);
+}
+
+// ---- the extraction seam (27g) ---------------------------------------------
+
+namespace {
+
+/// A clerk that answers each call with the next of `texts` (the last
+/// repeated), as FakeClerk does.
+struct SequenceClerk {
+    std::vector<std::string> texts;
+    std::vector<std::string> users;
+
+    [[nodiscard]] ClerkFn fn() {
+        return [this](std::string_view system, std::string_view user) {
+            users.emplace_back(user);
+            FakeClerk one{.text = texts[std::min(users.size(), texts.size()) - 1]};
+            return one.fn()(system, user);
+        };
+    }
+};
+
+/// A scripted verifier counting what it was sent.
+struct ScriptedVerifier {
+    std::vector<std::string> replies;
+    std::vector<std::string> briefs;
+
+    [[nodiscard]] apogee::agentloop::Verifier verifier() {
+        apogee::agentloop::Verifier out;
+        out.role = "utility";
+        out.brief_tokens = 100000;
+        out.ask = [this](const std::string& brief) {
+            briefs.push_back(brief);
+            apogee::agentloop::MemberAnswer answer;
+            answer.backend = "l3b";
+            answer.text = replies[std::min(briefs.size(), replies.size()) - 1];
+            return answer;
+        };
+        return out;
+    }
+};
+
+constexpr std::string_view kSource =
+    "Ada: testers kept mistaking the cancel button for back, so we removed it. It shipped "
+    "in PROJ-42.";
+
+/// The answer with one field seeded wrong: the link the source names is
+/// PROJ-42.
+constexpr std::string_view kPlanted =
+    R"({"intent": "We dropped the cancel button because testers kept mistaking it for back.",
+ "decision": "Remove the cancel button.", "status": "shipped", "discipline": "ux",
+ "downstream_link": "PROJ-24", "provenance": {"source": "meeting", "attribution": "Ada"}})";
+
+}  // namespace
+
+TEST_CASE("a malformed extraction never reaches the verifier", "[knowledge][clerk][validate]") {
+    ScriptedVerifier checker{.replies = {"AGREE"}};
+    const apogee::agentloop::Verifier verifier = checker.verifier();
+    FakeClerk prose{.text = "I cannot produce JSON."};
+    const Draft failed = apogee::knowledge::run_capture(prose.fn(), kSource, {}, &verifier);
+    CHECK_FALSE(failed.ok());
+    CHECK(failed.error.starts_with("the clerk did not return a record"));
+    CHECK_FALSE(failed.validation.has_value());
+    // A record that parses but fails its own validation: also structure's.
+    FakeClerk no_intent{.text = R"({"intent": "", "decision": "x", "status": "shipped",
+                                     "discipline": "eng", "provenance": {"source": "chat"}})"};
+    CHECK_FALSE(apogee::knowledge::run_capture(no_intent.fn(), kSource, {}, &verifier).ok());
+    // The call counts: nothing was sent to the verifier.
+    CHECK(checker.briefs.empty());
+}
+
+TEST_CASE("a seeded wrong field is objected to, revised once, and checked again",
+          "[knowledge][clerk][validate]") {
+    ScriptedVerifier checker{
+        .replies = {"OBJECT: downstream_link is PROJ-24; the source says PROJ-42.", "AGREE"}};
+    const apogee::agentloop::Verifier verifier = checker.verifier();
+    SequenceClerk clerk{.texts = {std::string{kPlanted}, kAnswer}};
+    const Draft draft = apogee::knowledge::run_capture(clerk.fn(), kSource, {}, &verifier);
+    REQUIRE(draft.ok());
+    CHECK(draft.record.downstream_link == "PROJ-42");
+    REQUIRE(draft.validation.has_value());
+    CHECK(draft.validation->result == apogee::agentloop::Validated::Result::Revised);
+    CHECK(draft.validation->model_calls == 2);
+    CHECK(draft.validation->revisions == 1);
+    // The verifier saw the source and the record as the clerk wrote it, on
+    // the fixed rubric -- and nothing else.
+    REQUIRE(checker.briefs.size() == 2);
+    CHECK(checker.briefs[0].starts_with(
+        "Check a record extracted from a source text, against that source."));
+    CHECK(checker.briefs[0].find(kSource) != std::string::npos);
+    CHECK(checker.briefs[0].find("PROJ-24") != std::string::npos);
+    CHECK(checker.briefs[0].find("1. A required field (intent, decision, status, discipline, "
+                                 "provenance, provenance.source)") != std::string::npos);
+    // The clerk's revision: the source, its record, and the objection.
+    REQUIRE(clerk.users.size() == 2);
+    CHECK(clerk.users[1] == apogee::knowledge::revision_message(
+                                kSource, nlohmann::json::parse(std::string{kPlanted}).dump(2),
+                                "downstream_link is PROJ-24; the source says PROJ-42."));
+}
+
+TEST_CASE("a clerk that stands by its record is surfaced within the round, and kept",
+          "[knowledge][clerk][validate]") {
+    ScriptedVerifier checker{
+        .replies = {"OBJECT: downstream_link is PROJ-24; the source says PROJ-42."}};
+    const apogee::agentloop::Verifier verifier = checker.verifier();
+    SequenceClerk clerk{.texts = {std::string{kPlanted}}};
+    const Draft draft = apogee::knowledge::run_capture(clerk.fn(), kSource, {}, &verifier);
+    REQUIRE(draft.ok());
+    CHECK(draft.record.downstream_link == "PROJ-24");  // never silently overridden
+    REQUIRE(draft.validation.has_value());
+    CHECK(draft.validation->result == apogee::agentloop::Validated::Result::Disputed);
+    CHECK(draft.validation->insisted);
+    CHECK(draft.validation->objection == "downstream_link is PROJ-24; the source says PROJ-42.");
+    CHECK(checker.briefs.size() == 1);
+    CHECK(clerk.users.size() == 2);
+}
+
+TEST_CASE("a revision that fails its structure leaves the first record, disputed",
+          "[knowledge][clerk][validate]") {
+    ScriptedVerifier checker{.replies = {"OBJECT: wrong link", "AGREE"}};
+    const apogee::agentloop::Verifier verifier = checker.verifier();
+    SequenceClerk clerk{.texts = {std::string{kPlanted}, "not json"}};
+    const Draft draft = apogee::knowledge::run_capture(clerk.fn(), kSource, {}, &verifier);
+    REQUIRE(draft.ok());
+    CHECK(draft.record.downstream_link == "PROJ-24");
+    REQUIRE(draft.validation.has_value());
+    CHECK(draft.validation->result == apogee::agentloop::Validated::Result::Disputed);
+    REQUIRE(draft.validation->notes.size() == 1);
+    CHECK(draft.validation->notes.front().starts_with(
+        "its revision failed: the clerk did not return a record"));
+    CHECK(checker.briefs.size() == 1);
+}
+
+TEST_CASE("the verifier checks the clerk's record; the user's overrides stay the user's",
+          "[knowledge][clerk][validate]") {
+    ScriptedVerifier checker{.replies = {"AGREE"}};
+    const apogee::agentloop::Verifier verifier = checker.verifier();
+    FakeClerk clerk{.text = kAnswer};
+    const Draft draft =
+        apogee::knowledge::run_capture(clerk.fn(), kSource, Overrides{.link = "PR-9"}, &verifier);
+    REQUIRE(draft.ok());
+    CHECK(draft.record.downstream_link == "PR-9");
+    REQUIRE(checker.briefs.size() == 1);
+    CHECK(checker.briefs[0].find("PROJ-42") != std::string::npos);
+    CHECK(checker.briefs[0].find("PR-9") == std::string::npos);
+    CHECK(draft.validation->result == apogee::agentloop::Validated::Result::Passed);
+}
+
+TEST_CASE("without a verifier a capture is exactly what it was", "[knowledge][clerk][validate]") {
+    FakeClerk clerk{.text = std::string{kPlanted}};
+    const Draft draft = apogee::knowledge::run_capture(clerk.fn(), kSource, {});
+    REQUIRE(draft.ok());
+    CHECK_FALSE(draft.validation.has_value());
+    CHECK(clerk.calls == 1);
+    CHECK(clerk.users.front() == std::string{kSource});
 }

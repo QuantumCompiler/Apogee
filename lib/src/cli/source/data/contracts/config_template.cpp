@@ -90,6 +90,14 @@ models:
 # that and nothing else -- and reads its answer. Local, unmetered members
 # only; `consult_caps:` bounds it (per_turn 4, brief_tokens 1024,
 # answer_tokens 512 unless set).
+# `validate:` has a member check the others' work, each seam opted into:
+# tool_args (a tool that writes or reaches out, its arguments checked before
+# it runs), extraction (a knowledge capture's record, against its source) and
+# answers (`/check` on request, or `always`). Structure is checked first and
+# the verifier -- the utility member unless `verifier:` names another -- only
+# when that passes; an objection goes back once for one revision, and one
+# still standing is shown to you with both sides. It spends from the same
+# per-turn budget as consult.
 #
 # suites:
 #   research:
@@ -101,6 +109,8 @@ models:
 #         context_size: 4096
 #       embedding: embedder
 #     consultable: [utility]
+#     validate:
+#       tool_args: on
 
 # Optional search roots that pre-fill path prompts. Each is optional; an empty
 # value simply means "no default". ${ENV_VAR} references are expanded.

@@ -38,11 +38,23 @@ using MeteredProbe =
 /// or empty: each consultable role one that can answer
 /// (`harness::consultable_role_names()`), listed once, with a member in the
 /// suite whose backend `metered` says is local and unmetered -- a consult runs
-/// on the model's initiative, which never spends -- and every cap positive.
-/// A null probe can tell nothing, and unknown is metered.
+/// on the model's initiative, which never spends -- and every cap positive;
+/// then `validate_suite_validation`. A null probe can tell nothing, and
+/// unknown is metered.
 [[nodiscard]] std::string validate_suite_consult(const harness::Config& config,
                                                  const harness::SuiteConfig& suite,
                                                  const MeteredProbe& metered);
+
+/// Why `suite`'s `validate:` block cannot be written (27g), or empty: its
+/// verifier -- named, or the utility member by default -- a role that can
+/// check (`harness::consultable_role_names()`) with a member in the suite
+/// whose backend `metered` says is local and unmetered, since a check runs on
+/// Apogee's initiative; `answers` one of `harness::answer_check_names()`. No
+/// block is always writable. `validate_suite_consult` ends with it, so every
+/// path that holds a consultable member holds the verifier too.
+[[nodiscard]] std::string validate_suite_validation(const harness::Config& config,
+                                                    const harness::SuiteConfig& suite,
+                                                    const MeteredProbe& metered);
 
 /// Why `suite` cannot be written as `name`, or empty: a name that is not
 /// `off`, at least one member, every member valid, and its consultable

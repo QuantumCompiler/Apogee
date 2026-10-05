@@ -74,9 +74,25 @@ CaptureResult draft_capture(const harness::Harness& harness, const harness::Conf
     // Decided BEFORE the clerk runs, so the dry run reports exactly the
     // decision a real run makes, from the same config.
     result.decision = decide_store(harness, config, inputs.db, inputs.retriever_flag);
+    // The extraction seam (27g): the active suite's verifier, asked within a
+    // turn of the capture's own -- the suite's per-turn cap bounding it.
+    std::optional<agentloop::MemberCalls> calls;
+    std::optional<agentloop::MemberCalls::Turn> turn;
+    std::optional<agentloop::Verifier> verifier;
+    if (agentloop::seam_on(harness.config(), agentloop::Seam::Extraction)) {
+        if (const agentloop::VerifierRole role = agentloop::verifier_role(harness.config());
+            role.missing.empty()) {
+            calls.emplace(harness);
+            turn.emplace(calls->begin_turn(inputs.narrate, {}));
+            verifier = agentloop::bind_verifier(harness, *calls, role.role);
+        } else {
+            result.notes.push_back("not validated -- " + role.missing);
+        }
+    }
     knowledge::Draft draft;
     try {
-        draft = knowledge::run_capture(clerk, inputs.raw, inputs.overrides);
+        draft = knowledge::run_capture(clerk, inputs.raw, inputs.overrides,
+                                       verifier.has_value() ? &*verifier : nullptr);
     } catch (const harness::HarnessError& e) {
         result.error = std::string{"the clerk could not run: "} + e.what();
         result.backend_error = true;
@@ -91,6 +107,7 @@ CaptureResult draft_capture(const harness::Harness& harness, const harness::Conf
         return result;
     }
     result.record = std::move(draft.record);
+    result.validation = std::move(draft.validation);
     return result;
 }
 
@@ -205,8 +222,11 @@ CaptureResult capture_and_store(const harness::Harness& harness, const harness::
     if (!drafted.ok()) {
         return drafted;
     }
-    return store_record(harness, config, config_path, std::move(drafted.record), inputs.raw,
-                        drafted.decision);
+    CaptureResult stored = store_record(harness, config, config_path, std::move(drafted.record),
+                                        inputs.raw, drafted.decision);
+    stored.validation = std::move(drafted.validation);
+    stored.notes.insert(stored.notes.begin(), drafted.notes.begin(), drafted.notes.end());
+    return stored;
 }
 
 std::string preview_text(std::string_view text, std::size_t width) {

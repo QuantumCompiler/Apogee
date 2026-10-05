@@ -43,6 +43,7 @@ enum class ChatVerb : std::uint8_t {
     Rerank,
     Branch,
     Capture,
+    Check,
     Attach,
     Attachments,
     Detach,

@@ -13,6 +13,7 @@
 #include "agentloop/question.h"
 #include "agentloop/reporter.h"
 #include "agentloop/tool_selection.h"
+#include "agentloop/validate.h"
 #include "contracts/types.h"
 #include "harness/harness.h"
 
@@ -113,6 +114,12 @@ struct Options {
     /// the per-turn count starting over, a call narrated through this run's
     /// Reporter and cancelled with it -- for as long as it runs. Set wherever
     /// the `consult` tool is registered; null for none. The caller owns it.
+    ///
+    /// It is also where the active suite's validation runs (27g): with it
+    /// set, a `validate:` block's `tool_args` checks a gated tool's
+    /// arguments before the call runs, and `answers: always` checks the
+    /// turn's answer once it is given -- each spending from this same
+    /// count. With no suite, no block, or a seam off, nothing changes.
     MemberCalls* member_calls = nullptr;
 
     /// Hard ceiling on model→tool→model cycles.
@@ -156,6 +163,11 @@ struct RunResult {
     /// Inlined attachments some request of the run could not send (26d): the
     /// caller retrieves them from then on.
     std::vector<std::string> inline_dropped;
+
+    /// The standing answer check (27g), when the active suite's
+    /// `validate.answers` is `always` and the answer was checked. Said
+    /// through the Reporter as it happened; never in `history`.
+    std::optional<Validated> answer_check;
 };
 
 /// Drives the loop until the model stops asking for tools.
@@ -170,6 +182,28 @@ struct RunResult {
 [[nodiscard]] RunResult run(const harness::Harness& harness,
                             std::vector<harness::ChatMessage>& history, const Options& options,
                             Reporter& reporter);
+
+/// The producer's side of the answer seam (27g): `model`, shown `objection`
+/// to the answer that ends `history`, answers it once -- a corrected answer,
+/// or why its answer stands -- on a side request over a copy of the
+/// conversation, so the transcript is untouched. Empty when it said
+/// nothing; a provider's failure throws as `harness.chat` does.
+[[nodiscard]] std::string answer_objection(const harness::Harness& harness,
+                                           const std::string& model,
+                                           const std::vector<harness::ChatMessage>& history,
+                                           std::string_view objection,
+                                           std::optional<std::int64_t> max_tokens,
+                                           const harness::CancellationToken& cancellation);
+
+/// Checks the answer that ends `history` (27g), through `verifier` -- a
+/// `/check`, or the loop's standing check: the brief-only verifier call
+/// once, and on an objection `model`'s one answer to it, narrated through
+/// `narrate`. Nothing is added to `history`.
+[[nodiscard]] Validated check_answer(const harness::Harness& harness, const std::string& model,
+                                     const std::vector<harness::ChatMessage>& history,
+                                     const Verifier& verifier, const SideCallSink& narrate,
+                                     std::optional<std::int64_t> max_tokens,
+                                     const harness::CancellationToken& cancellation);
 
 /// Convenience overload for callers that want no output at all.
 [[nodiscard]] RunResult run(const harness::Harness& harness,

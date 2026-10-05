@@ -37,15 +37,6 @@ std::string trimmed(std::string_view text) {
     return std::string{text.substr(begin, end - begin + 1)};
 }
 
-std::optional<harness::ModelRole> role_named(std::string_view name) {
-    for (const harness::ModelRole role : kRoles) {
-        if (harness::suite_role(role) == name) {
-            return role;
-        }
-    }
-    return std::nullopt;
-}
-
 /// Why `key`'s backend cannot answer a member call for `role` here, or empty
 /// -- with `backend` set to the name the config spells it. A name the
 /// router does not know would fall to `models.default` and answer from a
@@ -77,6 +68,15 @@ std::string unavailable(const harness::Harness& harness, std::string_view role,
 }
 
 }  // namespace
+
+std::optional<harness::ModelRole> role_named(std::string_view name) {
+    for (const harness::ModelRole role : kRoles) {
+        if (harness::suite_role(role) == name) {
+            return role;
+        }
+    }
+    return std::nullopt;
+}
 
 harness::ChatRequest member_request(const std::string& backend, std::string_view brief,
                                     std::int64_t answer_tokens) {

@@ -446,6 +446,12 @@ constexpr std::array<std::string_view, 4> kConsultableRoles{"extraction", "visio
 /// The keys `consult_caps:` accepts (27f), in writing order.
 constexpr std::array<std::string_view, 3> kConsultCaps{"per_turn", "brief_tokens", "answer_tokens"};
 
+/// The seams `validate:` switches (27g), in writing order.
+constexpr std::array<std::string_view, 3> kValidateSeams{"tool_args", "extraction", "answers"};
+
+/// What `validate.answers` takes (27g).
+constexpr std::array<std::string_view, 2> kAnswerChecks{"request", "always"};
+
 /// The accepted roles, joined for a message.
 std::string accepted_suite_roles() {
     std::string out;
@@ -575,6 +581,76 @@ void parse_consult(const YAML::Node& node, std::string_view origin, const std::s
     }
 }
 
+/// `on` or `off` -- `true`/`false` and `yes`/`no` read the same -- for a
+/// `validate:` seam (27g).
+bool parse_switch(const YAML::Node& node, std::string_view origin, const std::string& key) {
+    std::string word = scalar(node, origin, key);
+    std::ranges::transform(word, word.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (word == "on" || word == "true" || word == "yes") {
+        return true;
+    }
+    if (word == "off" || word == "false" || word == "no") {
+        return false;
+    }
+    fail(origin, key + ": expected on or off, not '" + word + "'");
+}
+
+/// A suite's `validate:` block (27g), read once its members are. The
+/// verifier -- named, or the utility member by default -- must be a role
+/// that can answer and must have a member here: config-internal facts, so a
+/// typo fails the load; whether that member is local and unmetered is its
+/// provider's to say, asked where one can be built.
+void parse_validate(const YAML::Node& node, std::string_view origin, const std::string& where,
+                    SuiteConfig& suite) {
+    const YAML::Node block = node["validate"];
+    if (!block.IsDefined() || block.IsNull()) {
+        return;
+    }
+    const std::string key = where + ".validate";
+    if (!block.IsMap()) {
+        fail(origin, key + ": expected a mapping of verifier, " + joined_names(kValidateSeams));
+    }
+    for (const auto& entry : block) {
+        const std::string name = entry.first.Scalar();
+        const std::string field = key + "." + name;
+        if (name == "verifier") {
+            std::string role = scalar(entry.second, origin, field);
+            if (std::ranges::find(kConsultableRoles, std::string_view{role}) ==
+                kConsultableRoles.end()) {
+                if (role == "chat") {
+                    fail(origin, field +
+                                     ": 'chat' is the root itself -- its work is what a member "
+                                     "checks, so it cannot be the one checking");
+                }
+                fail(origin, field + ": '" + role + "' is not a role that can check (accepted: " +
+                                 joined_names(kConsultableRoles) + ")");
+            }
+            suite.validate.verifier = std::move(role);
+        } else if (name == "tool_args") {
+            suite.validate.tool_args = parse_switch(entry.second, origin, field);
+        } else if (name == "extraction") {
+            suite.validate.extraction = parse_switch(entry.second, origin, field);
+        } else if (name == "answers") {
+            const std::string when = scalar(entry.second, origin, field);
+            if (std::ranges::find(kAnswerChecks, std::string_view{when}) == kAnswerChecks.end()) {
+                fail(origin, field + ": '" + when + "' is not when to check answers (accepted: " +
+                                 joined_names(kAnswerChecks) + ")");
+            }
+            suite.validate.answers = when;
+        } else {
+            fail(origin, field + ": not a validate key (accepted: verifier, " +
+                             joined_names(kValidateSeams) + ")");
+        }
+    }
+    const std::string verifier = validate_policy(suite.validate).verifier;
+    if (!suite.members.contains(verifier)) {
+        fail(origin, key + ": the verifier is the " + verifier +
+                         " member, and this suite has none -- name its backend under members:, "
+                         "or name another verifier");
+    }
+}
+
 /// One `suites:` entry. Two members pinning one backend two ways fail: one
 /// backend is one model with one window, so the pins could not both hold.
 SuiteConfig parse_suite(const YAML::Node& node, std::string_view origin, const std::string& name) {
@@ -590,6 +666,7 @@ SuiteConfig parse_suite(const YAML::Node& node, std::string_view origin, const s
     const YAML::Node members = node["members"];
     if (!members.IsDefined() || members.IsNull()) {
         parse_consult(node, origin, where, suite);
+        parse_validate(node, origin, where, suite);
         return suite;
     }
     if (!members.IsMap()) {
@@ -623,6 +700,7 @@ SuiteConfig parse_suite(const YAML::Node& node, std::string_view origin, const s
         }
     }
     parse_consult(node, origin, where, suite);
+    parse_validate(node, origin, where, suite);
     return suite;
 }
 
@@ -834,6 +912,25 @@ std::span<const std::string_view> consultable_role_names() noexcept {
 
 std::span<const std::string_view> consult_cap_names() noexcept {
     return kConsultCaps;
+}
+
+std::span<const std::string_view> validate_seam_names() noexcept {
+    return kValidateSeams;
+}
+
+std::span<const std::string_view> answer_check_names() noexcept {
+    return kAnswerChecks;
+}
+
+ValidatePolicy validate_policy(const ValidateConfig& validate) {
+    ValidatePolicy policy;
+    if (validate.verifier.has_value()) {
+        policy.verifier = *validate.verifier;
+    }
+    policy.tool_args = validate.tool_args.value_or(false);
+    policy.extraction = validate.extraction.value_or(false);
+    policy.answers_always = validate.answers.value_or("request") == "always";
+    return policy;
 }
 
 ConsultLimits consult_limits(const ConsultCaps& caps) noexcept {

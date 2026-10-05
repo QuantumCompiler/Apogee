@@ -269,6 +269,36 @@ bool wildcard_match(std::string_view pattern, std::string_view name) {
     return p == pattern.size();
 }
 
+namespace {
+
+/// Why a call whose `path` must name an existing file cannot do what it says
+/// -- 27g's structural check, run before any verifier -- or empty. Arguments
+/// that do not parse, or name no path, are the schema check's to report.
+std::string existing_file_problem(const std::filesystem::path& root, std::string_view arguments,
+                                  std::string_view what) {
+    agent::ToolOutcome unused;
+    const std::optional<Arguments> args = parse_arguments(arguments, "{}", unused);
+    if (!args.has_value() || args->string("path").empty()) {
+        return {};
+    }
+    std::string problem;
+    const std::optional<std::filesystem::path> path =
+        resolve_in_root(root, args->string("path"), problem);
+    if (!path.has_value()) {
+        return problem;
+    }
+    std::error_code code;
+    if (!std::filesystem::exists(*path, code)) {
+        return "No such file: " + path->string() + " (" + std::string{what} + ")";
+    }
+    if (!std::filesystem::is_regular_file(*path, code)) {
+        return path->string() + " is not a regular file";
+    }
+    return {};
+}
+
+}  // namespace
+
 void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::path& root,
                        std::size_t read_limit) {
     const std::string root_text = root.string();
@@ -395,6 +425,11 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
         R"({"type":"object","properties":{"path":{"type":"string","description":"Absolute path, ~ path, or a path relative to the root"},"old_string":{"type":"string","description":"The exact text to replace"},"new_string":{"type":"string","description":"The text to put in its place"},"replace_all":{"type":"boolean","description":"Replace every occurrence rather than exactly one"}},"required":["path","old_string","new_string"]})";
     edit.writes = true;
     edit.describe_target = read.describe_target;
+    // What validation checks before waking a verifier (27g): the file must
+    // be there to be edited.
+    edit.precheck = [root](std::string_view arguments) -> std::string {
+        return existing_file_problem(root, arguments, "edit_file changes an existing file");
+    };
     edit.run = [root](std::string_view arguments) -> agent::ToolOutcome {
         agent::ToolOutcome failure;
         const std::optional<Arguments> args = parse_arguments(
@@ -515,6 +550,9 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
     remove.parameters_schema = read.parameters_schema;
     remove.writes = true;
     remove.describe_target = read.describe_target;
+    remove.precheck = [root](std::string_view arguments) -> std::string {
+        return existing_file_problem(root, arguments, "delete_file deletes an existing file");
+    };
     remove.run = [root](std::string_view arguments) -> agent::ToolOutcome {
         agent::ToolOutcome failure;
         const std::optional<Arguments> args =

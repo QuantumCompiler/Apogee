@@ -41,6 +41,15 @@ namespace apogee::httpserver {
 [[nodiscard]] HttpResponse admin_set_suite_consult(const AdminConfigContext& context,
                                                    std::string_view name,
                                                    const HttpRequest& request);
+/// The twin of `config set-suite --verifier/--validate` (27g): `{"verifier"?:
+/// role | null, "tool_args"?: bool | null, "extraction"?: bool | null,
+/// "answers"?: "request" | "always" | null}` -- a key left out keeps what the
+/// entry has, `null` puts it back to its default, and nothing left set removes
+/// the block. Replaced in place, every other line of the entry as it was; the
+/// verifier must be a local, unmetered member, as the CLI holds it.
+[[nodiscard]] HttpResponse admin_set_suite_validate(const AdminConfigContext& context,
+                                                    std::string_view name,
+                                                    const HttpRequest& request);
 /// The twin of `config set-default-suite`: `{"name"}`, `off` for none.
 [[nodiscard]] HttpResponse admin_set_default_suite(const AdminConfigContext& context,
                                                    const HttpRequest& request);

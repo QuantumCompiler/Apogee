@@ -1286,3 +1286,90 @@ TEST_CASE("the consult vocabularies are the answering roles and the three caps",
     CHECK(apogee::harness::kConsultBriefTokens == 1024);
     CHECK(apogee::harness::kConsultAnswerTokens == 512);
 }
+
+TEST_CASE("a suite's validate: block opts each seam in, and names its verifier",
+          "[config][suites][validate]") {
+    const Config config = load_text(with_suites(R"YAML(  checked:
+    members:
+      chat: root
+      utility: helper
+      extraction: embedder
+    validate:
+      verifier: extraction
+      tool_args: on
+      extraction: off
+      answers: always
+  defaults:
+    members:
+      chat: root
+      utility: helper
+    validate:
+      tool_args: true
+  plain:
+    members:
+      chat: root
+)YAML"));
+    const apogee::harness::SuiteConfig& checked = *config.find_suite("checked");
+    CHECK(checked.validate.verifier == "extraction");
+    CHECK(checked.validate.tool_args == true);
+    CHECK(checked.validate.extraction == false);
+    CHECK(checked.validate.answers == "always");
+    CHECK(apogee::harness::validate_policy(checked.validate) ==
+          apogee::harness::ValidatePolicy{.verifier = "extraction",
+                                          .tool_args = true,
+                                          .extraction = false,
+                                          .answers_always = true});
+    // Each unset field takes its default: the utility member, the seams off,
+    // answers on request.
+    const apogee::harness::SuiteConfig& defaults = *config.find_suite("defaults");
+    CHECK_FALSE(defaults.validate.verifier.has_value());
+    CHECK(apogee::harness::validate_policy(defaults.validate) ==
+          apogee::harness::ValidatePolicy{.verifier = "utility", .tool_args = true});
+    // No block: nothing on, and the policy is the defaults.
+    const apogee::harness::SuiteConfig& plain = *config.find_suite("plain");
+    CHECK_FALSE(plain.validate.any());
+    CHECK(apogee::harness::validate_policy(plain.validate) == apogee::harness::ValidatePolicy{});
+    // The vocabularies.
+    const auto seams = apogee::harness::validate_seam_names();
+    CHECK(std::vector<std::string_view>(seams.begin(), seams.end()) ==
+          std::vector<std::string_view>{"tool_args", "extraction", "answers"});
+    const auto whens = apogee::harness::answer_check_names();
+    CHECK(std::vector<std::string_view>(whens.begin(), whens.end()) ==
+          std::vector<std::string_view>{"request", "always"});
+    CHECK(apogee::harness::kDefaultVerifier == "utility");
+}
+
+TEST_CASE("a validation that cannot hold is refused at load, by name",
+          "[config][suites][validate]") {
+    const std::string members = "  s:\n    members:\n      chat: root\n      utility: helper\n";
+    const std::vector<std::pair<std::string, std::string>> refused{
+        {members + "    validate:\n      verifier: chat\n",
+         "suites.s.validate.verifier: 'chat' is the root itself"},
+        {members + "    validate:\n      verifier: embedding\n",
+         "suites.s.validate.verifier: 'embedding' is not a role that can check (accepted: "
+         "extraction, vision, transcription, utility)"},
+        {members + "    validate:\n      verifier: vision\n",
+         "suites.s.validate: the verifier is the vision member, and this suite has none"},
+        {"  s:\n    members:\n      chat: root\n    validate:\n      tool_args: on\n",
+         "suites.s.validate: the verifier is the utility member, and this suite has none"},
+        {members + "    validate:\n      tool_args: maybe\n",
+         "suites.s.validate.tool_args: expected on or off, not 'maybe'"},
+        {members + "    validate:\n      answers: sometimes\n",
+         "suites.s.validate.answers: 'sometimes' is not when to check answers (accepted: "
+         "request, always)"},
+        {members + "    validate:\n      quorum: 2\n",
+         "suites.s.validate.quorum: not a validate key (accepted: verifier, tool_args, "
+         "extraction, answers)"},
+        {members + "    validate: on\n", "suites.s.validate: expected a mapping"},
+    };
+    for (const auto& [suites, said] : refused) {
+        INFO(suites);
+        try {
+            (void)load_text(with_suites(suites));
+            FAIL("expected a ConfigError");
+        } catch (const ConfigError& e) {
+            CHECK_THAT(std::string{e.what()}, Catch::Matchers::ContainsSubstring(said));
+        }
+    }
+    CHECK_NOTHROW(load_text(with_suites(members + "    validate:\n")));
+}
