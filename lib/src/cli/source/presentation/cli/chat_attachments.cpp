@@ -95,7 +95,7 @@ ChatAttachments::ChatAttachments(const harness::Harness& harness, logger::Sessio
     // vectorised through a metered embedder on Apogee's initiative.
     const harness::Resolution role = harness::resolve_backend(
         harness_.config(), harness::RoleRequest{.role = harness::ModelRole::Embedding});
-    if (role.from != harness::ResolvedFrom::RolePointer) {
+    if (!harness::is_named(role.from)) {
         lexical_reason_ = "no embedding model is set ('apogee config set-default-embedding')";
         return;
     }

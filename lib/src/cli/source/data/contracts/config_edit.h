@@ -201,6 +201,33 @@ public:
 /// graph's database (its derived data) is not this function's business.
 [[nodiscard]] std::string delete_graph(std::string_view content, std::string_view name);
 
+/// Appends a `suites:` entry -- a named bundle of models (27d) -- creating the
+/// section when absent: `description` when set, then `members:` in role
+/// order, each `role: backend` alone or, when it pins a knob, the long form
+/// with `backend`, `context_size` and `toolset`. Same collision and `force`
+/// rules as `append_backend`; the name `off` is refused, being `/suite off`.
+[[nodiscard]] std::string append_suite(std::string_view content, std::string_view name,
+                                       const SuiteConfig& suite, bool force);
+
+/// Removes the entry and its fields; the exact inverse of the append. The
+/// re-parse refuses it while `models.default_suite` names the suite.
+[[nodiscard]] std::string delete_suite(std::string_view content, std::string_view name);
+
+/// Sets one member of an existing suite -- `role` one of
+/// `suite_role_names()` -- replacing that member's lines in place, inserting
+/// it in role order, or with nullopt removing it; every other line of the
+/// entry, its comments included, is left as it was. A `members:` written as
+/// a one-line flow mapping is refused rather than misread. Throws
+/// ConfigEditError when the suite, or a member to remove, is missing.
+[[nodiscard]] std::string set_suite_member(std::string_view content, std::string_view suite,
+                                           std::string_view role,
+                                           const std::optional<SuiteMember>& member);
+
+/// Sets `models.default_suite` -- the suite every surface resolves under --
+/// as `set_models_role` sets a pointer; "" clears it. The re-parse refuses a
+/// name with no `suites:` entry.
+[[nodiscard]] std::string set_default_suite(std::string_view content, std::string_view name);
+
 /// Sets `permissions.<tool>` to `level` (`ask`, `allow`, or `deny`),
 /// replacing the existing line (keeping any trailing comment) or inserting
 /// one, creating `permissions:` if needed. The one path by which the

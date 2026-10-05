@@ -9,7 +9,11 @@
 #
 # So the shape of that line is what is banned. Reading `models.default_backend`
 # (or either role pointer) anywhere outside the resolver, the config engine, and
-# the config-display command means a second chain has started.
+# the config-display command means a second chain has started. Since 27d the
+# same holds for a suite's members: looking one up by role (`members.find(`,
+# `members.at(`, `members[`) is the suite rung restated, and only the resolver,
+# the config engine, the doctor and the suite verbs and their admin twins --
+# which display, validate and write members, never run one -- may do it.
 #
 # This is the structural half of the item's acceptance criterion. The table test
 # in tests/business/harness/roles_test.cpp proves the chain is CORRECT; this proves it is
@@ -36,6 +40,9 @@ endif()
 #   cli/config_cmd.cpp -- `config get models.default` must print the raw value
 #   cli/check.cpp   -- validates each pointer AS WRITTEN, which is the one
 #                           place the unresolved value is the point
+#   cli/config_suites.cpp, httpserver/admin_suites.cpp, operations/suites.cpp
+#                        -- the suite verbs, their twins and the rules both
+#                           share write, display and validate members (27d)
 set(allowed
     "business/harness/roles.cpp"
     "data/contracts/config.cpp"
@@ -44,6 +51,9 @@ set(allowed
     "business/harness/harness.cpp"
     "presentation/cli/config_cmd.cpp"
     "presentation/cli/check.cpp"
+    "presentation/cli/config_suites.cpp"
+    "presentation/httpserver/admin_suites.cpp"
+    "presentation/operations/suites.cpp"
 )
 
 # Every allowance names a file that exists: one left behind by a move would
@@ -85,7 +95,8 @@ foreach(source IN LISTS sources)
 
         if(line MATCHES "models\\.default_backend" OR
            line MATCHES "models\\.default_embedding" OR
-           line MATCHES "models\\.default_extraction")
+           line MATCHES "models\\.default_extraction" OR
+           line MATCHES "members(\\.find\\(|\\.at\\(|\\[)")
             list(APPEND offenders "${relative}:${line_number}: ${stripped}")
         endif()
     endforeach()
@@ -99,7 +110,8 @@ if(offenders)
     string(REPLACE ";" "\n  " pretty "${offenders}")
     message(FATAL_ERROR
         "A second role-resolution chain is starting:\n  ${pretty}\n"
-        "Reading models.default_* directly is how the CLI and the HTTP plane come to disagree. "
+        "Reading models.default_* or a suite's member directly is how the CLI and the HTTP plane "
+        "come to disagree. "
         "Call harness::resolve_backend_key() (or resolve_chat_backend()) instead -- it takes "
         "the override and any per-feature pin and applies the whole chain. If this file genuinely "
         "needs the raw value, add it to the allowlist in this file WITH a reason.")

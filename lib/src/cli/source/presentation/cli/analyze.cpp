@@ -36,6 +36,7 @@
 #include "harness/roles.h"
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
+#include "operations/suites.h"
 #include "platform/platform.h"
 #include "render/json_report.h"
 #include "tools/git.h"
@@ -562,6 +563,10 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                       "agent's tool policy cannot be enforced inside a vendor CLI's own loop");
         }
 
+        // A suite member naming nothing is refused, never routed around (27d).
+        if (const std::string refused = validate_active_suite(config); !refused.empty()) {
+            fail_user(refused);
+        }
         harness::Harness harness{config};
         backends::BuildOptions build_options;
         build_options.config_path = config_path;
@@ -617,20 +622,24 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
         const auto mcp_registry = std::make_shared<mcp::Registry>();
         const auto build_tools = [&](const std::function<void(std::string_view)>& status) {
             // Designators in declaration order: C++20 requires it, and GCC
-            // enforces what Clang only warns about.
-            return make_built_in_tools(BuiltInToolOptions{
-                .config = &config,
-                .harness = &harness,
-                .review = review_defaults,
-                .policy = policy,
-                .mcp_servers = std::optional<std::vector<std::string>>{loaded.config.mcp},
-                .mcp = mcp_registry,
-                .mcp_status = status,
-                .mcp_server_log = flags->verbose
-                                      ? mcp::StderrTail::Sink{[](std::string_view bytes) {
-                                            std::cerr << bytes << std::flush;
-                                        }}
-                                      : mcp::StderrTail::Sink{}});
+            // enforces what Clang only warns about. The agent's policy first,
+            // then the toolset the active suite pins on its backend (27d):
+            // a pin only ever narrows.
+            return pin_toolset(
+                make_built_in_tools(BuiltInToolOptions{
+                    .config = &config,
+                    .harness = &harness,
+                    .review = review_defaults,
+                    .policy = policy,
+                    .mcp_servers = std::optional<std::vector<std::string>>{loaded.config.mcp},
+                    .mcp = mcp_registry,
+                    .mcp_status = status,
+                    .mcp_server_log = flags->verbose
+                                          ? mcp::StderrTail::Sink{[](std::string_view bytes) {
+                                                std::cerr << bytes << std::flush;
+                                            }}
+                                          : mcp::StderrTail::Sink{}}),
+                config, model);
         };
 
         std::vector<harness::ChatMessage> history;

@@ -146,6 +146,7 @@ add_library(apogee_tests_business OBJECT
     business/tools/rag_query_test.cpp
     business/tools/gate_test.cpp
     business/tools/environment_test.cpp
+    business/tools/toolsets_test.cpp
     business/mcp/types_test.cpp
     business/mcp/transport_test.cpp
     business/mcp/client_test.cpp
@@ -204,6 +205,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/config_cmd_test.cpp
     presentation/cli/attachment_guard_test.cpp
     presentation/operations/retrieval_test.cpp
+    presentation/operations/suites_test.cpp
     presentation/cli/helpers_test.cpp
     presentation/cli/tool_vectors_test.cpp
     presentation/views/thinking_view_test.cpp
@@ -243,6 +245,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/graph_test.cpp
     presentation/httpserver/admin_graph_test.cpp
     presentation/httpserver/admin_graphs_test.cpp
+    presentation/httpserver/admin_suites_test.cpp
     presentation/cli/datasets_test.cpp
     presentation/cli/train_test.cpp
     presentation/httpserver/admin_datasets_test.cpp
@@ -539,6 +542,17 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/auto-rag
     )
     set_tests_properties(cli.auto_rag PROPERTIES TIMEOUT 60)
+
+    # Suites (27d) on the real binary: add-suite through the one editor, a
+    # chat whose utility resolves through the suite rung (the helper titles
+    # it), /suite switching the bundle and off restoring the pointers, both
+    # surviving resume.
+    add_test(NAME cli.suites_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/suites_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/suites
+    )
+    set_tests_properties(cli.suites_lifecycle PROPERTIES TIMEOUT 120)
 
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_listen_check.sh"

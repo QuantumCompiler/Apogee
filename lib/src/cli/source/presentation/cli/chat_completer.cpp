@@ -19,6 +19,9 @@ constexpr std::array kCommands{
     ChatCommandSpec{"model", ChatVerb::Model, "[backend]",
                     "Show the backend answering, or switch to another", ArgumentValues::Backends},
     ChatCommandSpec{"models", ChatVerb::Models, "", "List the configured backends"},
+    ChatCommandSpec{"suite", ChatVerb::Suite, "[name|off]",
+                    "Show the suite the chat runs under, switch to another, or off",
+                    ArgumentValues::Suites},
     ChatCommandSpec{"system", ChatVerb::System, "<text>", "Replace the system prompt"},
     ChatCommandSpec{"temperature", ChatVerb::Temperature, "<number>",
                     "Set the sampling temperature"},
@@ -277,6 +280,10 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
                 }
             }
             break;
+        case ArgumentValues::Suites:
+            choices = sources.suites;
+            choices.push_back({std::string{harness::kSuiteOff}, "No suite: the global pointers"});
+            break;
     }
     return choices;
 }
@@ -374,6 +381,10 @@ ChatCompletionSources chat_completion_sources(const harness::Config& config,
             description += " · " + model;
         }
         sources.backends.push_back({name, std::move(description)});
+    }
+    for (const std::string& name : config.suite_names()) {
+        const harness::SuiteConfig* suite = config.find_suite(name);
+        sources.suites.push_back({name, suite != nullptr ? suite->description : std::string{}});
     }
     sources.working_directory = std::move(working_directory);
     sources.list = list_directory;

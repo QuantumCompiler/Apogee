@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "cli/config_suites.h"
 #include "cli/graph.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -102,6 +103,9 @@ std::string render_secret(const std::string& value, bool reveal) {
 /// Resolves a dotted key against a loaded config.
 /// Returns nullopt when the key does not name anything.
 std::optional<std::string> lookup(const Config& config, std::string_view key, bool reveal) {
+    if (std::optional<std::string> suite = suite_lookup(config, key); suite.has_value()) {
+        return suite;
+    }
     if (key == "status_mode") {
         return std::string{harness::to_string(config.status_mode)};
     }
@@ -942,6 +946,7 @@ std::vector<std::string> config_keys(const harness::Config& config) {
         entry("embeddings", name,
               {"chunk_size", "chunk_overlap", "description", "backend", "retriever", "rerank"});
     }
+    append_suite_keys(config, keys);
     return keys;
 }
 
@@ -973,6 +978,7 @@ void ConfigCommand::bind(CLI::App& root, const RootContext& context) {
     bind_set_role(*cmd, context, "set-default-utility", "default_utility",
                   "Set the backend for chores: titles, compaction, search queries, large tool "
                   "results");
+    bind_suite_verbs(*cmd, context);
     bind_set_permission(*cmd, context);
     bind_add_allowed_host(*cmd, context);
     bind_delete_allowed_host(*cmd, context);

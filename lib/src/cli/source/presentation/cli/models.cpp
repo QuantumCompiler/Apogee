@@ -18,6 +18,7 @@
 #include "backends/openai.h"
 #include "backends/openai_wire.h"
 #include "backends/sampling.h"
+#include "cli/helpers.h"
 #include "cli/models_pull.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
@@ -1206,6 +1207,19 @@ std::string render_model_info(const harness::Config& config, std::string_view na
 
 std::string render_role_status(const harness::Config& config, const BusyProgress& progress) {
     std::ostringstream out;
+    // The suite every role below resolves under, when one is active (27d).
+    // With none, nothing here changes from before suites.
+    const harness::SuiteConfig* suite = harness::active_suite(config);
+    std::string suite_name;
+    for (const auto& [name, entry] : config.suites) {
+        if (&entry == suite) {
+            suite_name = name;  // as the file spells it
+        }
+    }
+    if (suite != nullptr) {
+        out << "suite: " << suite_name
+            << (suite->description.empty() ? "" : "   (" + suite->description + ")") << "\n";
+    }
     for (const auto [role, label] : {std::pair{harness::ModelRole::Chat, "chat"},
                                      std::pair{harness::ModelRole::Embedding, "embedding"},
                                      std::pair{harness::ModelRole::Extraction, "extraction"},
@@ -1220,7 +1234,7 @@ std::string render_role_status(const harness::Config& config, const BusyProgress
         // A helper with no pointer of its own runs on whatever the chat is
         // on, which is not a fact this command can know: say so rather than
         // naming models.default as if it were the answer.
-        if (harness::is_helper(role) && resolved.from != harness::ResolvedFrom::RolePointer) {
+        if (harness::is_helper(role) && !harness::is_named(resolved.from)) {
             out << "(unset -- the chat's own backend)\n";
             continue;
         }
@@ -1235,6 +1249,9 @@ std::string render_role_status(const harness::Config& config, const BusyProgress
         // chain -- which cli.one_role_resolver would (correctly) reject.
         if (resolved.from == harness::ResolvedFrom::Default && role != harness::ModelRole::Chat) {
             out << "   (via models.default)";
+        }
+        if (resolved.from == harness::ResolvedFrom::Suite) {
+            out << "   (via suite " << suite_name << ")";
         }
 
         // Resolving and validating are separate on purpose: the resolver
@@ -1267,12 +1284,35 @@ std::string render_role_status(const harness::Config& config, const BusyProgress
             const models::GgufInfo info = models::inspect_gguf(
                 std::filesystem::path{harness::expand_env(entry->second.model_path)});
             if (info.parsed) {
-                const models::LocalWindow window = models::local_window(info, entry->second);
+                // At the window the backend runs at: the suite's pin, while
+                // one is active (27d).
+                const models::LocalWindow window =
+                    models::local_window(info, harness::backend_as_run(config, key));
                 out << "   [local: " << models::mib(info.file_size) << " of weights";
                 if (window.cache_bytes.has_value()) {
                     out << ", " << models::mib(*window.cache_bytes) << " of cache";
                 }
                 out << "]";
+            }
+        }
+        // What the suite pins on the backend, said where it holds (27d).
+        if (entry != config.backends.end()) {
+            if (const harness::MemberPins pins = harness::suite_pins(config, key);
+                pins.context_size.has_value() || pins.toolset.has_value()) {
+                std::string pinned;
+                if (pins.context_size.has_value()) {
+                    pinned = "window " + std::to_string(*pins.context_size);
+                }
+                if (pins.toolset.has_value()) {
+                    std::string names;
+                    for (const std::string& name : *pins.toolset) {
+                        names += names.empty() ? "" : ",";
+                        names += name;
+                    }
+                    pinned += std::string{pinned.empty() ? "" : " · "} + "toolset " +
+                              (names.empty() ? std::string{"none"} : names);
+                }
+                out << "   [suite pins " << pinned << "]";
             }
         }
         out << "\n";
@@ -1386,8 +1426,18 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
     auto status_quiet = std::make_shared<bool>(false);
     CLI::App* status = cmd->add_subcommand("status", "Show which backend each role resolves to");
     status->add_flag("-q,--quiet", *status_quiet, "No progress line while the models are read");
-    status->callback([load, status_quiet]() {
-        const harness::Config config = load();
+    const auto status_suite = std::make_shared<std::string>();
+    status
+        ->add_option("--suite", *status_suite,
+                     "Resolve under this suite instead of models.default_suite, or off for none")
+        ->type_name(kModelSuiteValue);
+    status->callback([load, status_quiet, status_suite]() {
+        harness::Config config = load();
+        if (!status_suite->empty()) {
+            if (const std::string refused = select_suite(config, *status_suite); !refused.empty()) {
+                fail("--suite: " + refused);
+            }
+        }
         std::string body;
         {
             BusyLine busy{std::cerr, "resolving the roles", busy_options(*status_quiet)};

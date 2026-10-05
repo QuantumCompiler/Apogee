@@ -32,6 +32,7 @@
 #include "httpserver/serve.h"
 #include "logger/operational.h"
 #include "mcp/registry.h"
+#include "operations/suites.h"
 
 namespace apogee::commands {
 namespace {
@@ -176,6 +177,11 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user("--rerank: no backend named '" + flags->rerank + "'");
         }
 
+        // A suite member naming nothing is refused at startup, never routed
+        // around per request (27d).
+        if (const std::string refused = validate_active_suite(config); !refused.empty()) {
+            fail_user(refused);
+        }
         harness::Harness harness{config};
         backends::BuildOptions build_options;
         build_options.web_search = flags->search;
@@ -214,6 +220,12 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
         }
         for (const auto& [name, reason] : options.unavailable) {
             note("skipping " + name + ": " + reason);
+        }
+        // The suite every request resolves under, said once (27d): the
+        // config's default -- never a request's, so nothing one client asks
+        // for can move another's roles.
+        if (harness::active_suite(config) != nullptr) {
+            note("resolving roles under suite " + config.models.default_suite);
         }
         if (options.served.empty()) {
             std::string message = "no servable backend";
@@ -265,6 +277,23 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
                           << " registered: each request offers the ones its question needs, "
                              "ranked by "
                           << ranked_by << "\n";
+            }
+            // A served backend the config's suite pins a toolset on is offered
+            // that toolset (27d) -- decided once, as the suite is.
+            for (const std::string& name : options.served) {
+                if (!harness::suite_pins(config, name).toolset.has_value()) {
+                    continue;
+                }
+                auto pinned = std::make_shared<const agent::ToolRegistry>(
+                    pin_toolset(registry, config, name));
+                std::shared_ptr<const agentloop::ToolRanker> ranker;
+                if (pinned->size() > agentloop::kToolSelectionThreshold) {
+                    std::string ranked_by;
+                    ranker = make_tool_ranker(harness, config, *pinned,
+                                              tool_vector_cache_path(config_path), ranked_by);
+                }
+                options.pinned_tools[name] = httpserver::HandlerOptions::PinnedTools{
+                    .registry = std::move(pinned), .ranker = std::move(ranker)};
             }
         }
 

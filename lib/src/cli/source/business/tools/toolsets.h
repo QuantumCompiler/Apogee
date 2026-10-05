@@ -60,6 +60,11 @@ struct FsRoot {
 /// The toolset names `tools.disabled` accepts: fs, shell, git, notes, rag.
 [[nodiscard]] std::span<const std::string_view> toolset_names() noexcept;
 
+/// The word of `harness::suite_toolset_names()` a registered tool falls
+/// under (27d) -- its native toolset, `web` or `mcp` -- or empty for one none
+/// of them names.
+[[nodiscard]] std::string toolset_of(std::string_view tool);
+
 /// The tools that declare `writes` -- the `permissions:` keys a config may
 /// carry, and what the shipped template lists.
 [[nodiscard]] std::span<const std::string_view> destructive_tool_names() noexcept;

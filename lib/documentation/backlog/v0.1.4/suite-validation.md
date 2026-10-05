@@ -16,7 +16,7 @@
 - `agentloop/loop.cpp`: the tool-args hook (between selection and execution) and the answer-on-request path (`/check` or flag — see open call); `knowledge/`'s extraction call sites: the extraction hook.
 - `harness/config` (27d's block): `validate:` per suite — seams on/off, the verifier member, through the one editor.
 - Tests: `tests/business/agentloop/validate` — pipeline tables (structural catches → no model call, asserted by call counts; model disagreement → one round → surface), the budget interplay with 27f, goldens for the surfaced-disagreement rendering.
-- Consumes: [27d](model-suites.md) (the suite, the verifier member), [27f](suite-consult.md) (the call mechanics and caps — this item adds *policy*, not a second model-calling path); 26f (shipped — the structural floor); the rerank judge's degradation honesty (shipped) as the reporting model.
+- Consumes: [27d](../../assistant/MILESTONES.md#milestone-ac--model-suites) (shipped — the suite, the verifier member), [27f](suite-consult.md) (the call mechanics and caps — this item adds *policy*, not a second model-calling path); 26f (shipped — the structural floor); the rerank judge's degradation honesty (shipped) as the reporting model.
 
 **Reference.** The judge shape is the in-house precedent — the training eval gate and the rerank judge are models scoring models, harness-wired; a *configurable* validation policy at interaction seams is what this item adds.
 
@@ -40,4 +40,4 @@
 - [ ] `/check` on an answer runs the verifier once with the brief-only contract and prints agreement or the two positions; round three is unreachable.
 - [ ] With validation unconfigured, every pipeline is pass-through — wire and output byte-identical to today.
 
-**Scope note.** Item **27g**, earmarked for **v0.1.4**; **gated on [27d](model-suites.md), [27f](suite-consult.md)** — not on the MLX items. Out of scope: multi-verifier quorums; validating harness-internal calls (titles, compaction — chores stay cheap); auto-retry beyond the one bounded round; training-track gates (they have their own, shipped).
+**Scope note.** Item **27g**, earmarked for **v0.1.4**; **gated on [27f](suite-consult.md)** ([27d](../../assistant/MILESTONES.md#milestone-ac--model-suites) shipped 2026-10-04) — not on the MLX items. Out of scope: multi-verifier quorums; validating harness-internal calls (titles, compaction — chores stay cheap); auto-retry beyond the one bounded round; training-track gates (they have their own, shipped).

@@ -39,7 +39,8 @@ struct AdminConfigContext {
                                           const harness::BackendConfig& backend);
 
 /// Whether the file now differs from what the server started with, in what
-/// it serves: backend membership or the role pointers. Stateless on purpose,
+/// it serves: backend membership, the role pointers, or the suites and the
+/// default suite (27d). Stateless on purpose,
 /// so drift a CLI edit made while the server ran is reported too.
 [[nodiscard]] bool config_drifted(const harness::Config& startup, const harness::Config& now);
 

@@ -15,7 +15,7 @@
 - The one command table + `chat_completer`: `/play`, `/symphonies` with completion; the `__complete` resolver picks up suite and symphony names as the free rider it was built to be.
 - `presentation/machine/`: the play's stage narration through the existing side-call event shape; nothing new on the wire.
 - Tests: `tests/presentation/cli/` — the refusal and default-suite paths, banner goldens, `/play` end-to-end over scripted providers, chat-unchanged byte-equivalence; machine-mode transcript goldens for a played symphony.
-- Consumes: [27q](symphonies.md) (symphonies to play), [27d](model-suites.md) (the suite, via 27q's gate), 27e's admission/warmup (shipped by then or riding the same seam), 26o (shipped — permission presets), M1 (shipped — the busy line).
+- Consumes: [27q](symphonies.md) (symphonies to play), [27d](../../assistant/MILESTONES.md#milestone-ac--model-suites) (shipped — the suite; `commands::activate_suite`, the switch `chat --suite` and `/suite` share, and `operations::validate_active_suite`, the refusal at use), 27e's admission/warmup (shipped by then or riding the same seam), 26o (shipped — permission presets), M1 (shipped — the busy line).
 
 **Reference.** The in-house precedent is chat itself, deliberately generalized rather than copied; execute is a CLI surface like chat, not a screen (specced under the then-standing no-TUI non-goal, which was removed later on 2026-10-04 — the TUI set is [32b](../v0.1.6/tui-shell.md)–32d; this item is unaffected either way).
 

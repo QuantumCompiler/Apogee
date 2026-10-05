@@ -65,6 +65,8 @@ apogee_add_module(operations
     operations/retrieval.cpp
     operations/run_settings.h
     operations/run_settings.cpp
+    operations/suites.h
+    operations/suites.cpp
 )
 target_link_libraries(apogee_presentation_operations PUBLIC nlohmann_json::nlohmann_json)
 
@@ -100,6 +102,8 @@ apogee_add_module(httpserver
     httpserver/admin_graph.cpp
     httpserver/admin_graphs.h
     httpserver/admin_graphs.cpp
+    httpserver/admin_suites.h
+    httpserver/admin_suites.cpp
     httpserver/admin_datasets.h
     httpserver/admin_datasets.cpp
     httpserver/admin_training.h
@@ -138,6 +142,8 @@ apogee_add_module(cli
     cli/version_command.cpp
     cli/config_cmd.h
     cli/config_cmd.cpp
+    cli/config_suites.h
+    cli/config_suites.cpp
     cli/check.h
     cli/complete_protocol.h
     cli/complete_protocol.cpp

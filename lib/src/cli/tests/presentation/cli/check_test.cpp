@@ -2246,3 +2246,45 @@ TEST_CASE("stored MLX models are validated by their files, and a broken one name
     CHECK(std::filesystem::exists(broken / "config.json"));
     CHECK(std::filesystem::exists(whole / "model.safetensors"));
 }
+
+TEST_CASE("each suite has a row: its members named, a member at nothing failed",
+          "[commands][check][suites]") {
+    // 27d: a suite naming a backend that is not there is found here, in the
+    // doctor's words, not at the first turn that resolves through it.
+    Install install;
+    install.seed();
+    const auto check = [&](const std::string& suites, const std::string& models = {}) {
+        CheckInputs inputs = inputs_for(install);
+        install.write("config/config.yaml",
+                      "models:\n  default: root\n" + models +
+                          "backends:\n  root:\n    type: mock\n  helper:\n    type: mock\n"
+                          "suites:\n" +
+                          suites);
+        load_into(inputs);
+        return run_checks(inputs);
+    };
+
+    const CheckReport good = check(
+        "  research:\n    members:\n      chat: root\n      utility:\n        backend: helper\n"
+        "        context_size: 4096\n",
+        "  default_suite: research\n");
+    const auto* row = row_with(good, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+    CHECK(row->detail == "chat root · utility helper (window 4096)  -- the default suite");
+
+    const CheckReport ghost = check(
+        "  broken:\n    members:\n      chat: root\n"
+        "      utility: ghost\n");
+    row = row_with(ghost, "suite: broken");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail == "utility names a backend that is not configured: 'ghost'");
+    CHECK(row->remedy ==
+          "apogee config set-suite broken --utility <one of your configured backends>");
+
+    const CheckReport empty = check("  bare:\n");
+    row = row_with(empty, "suite: bare");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Warn);
+}

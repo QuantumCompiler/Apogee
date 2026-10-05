@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 73> kRoutes{{
+constexpr std::array<Route, 80> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -234,6 +234,36 @@ constexpr std::array<Route, 73> kRoutes{{
     {"DELETE", "/v1/admin/graphs/{id}", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->delete_graph_config(r, id);
+     }},
+    // The suites: config slice (27d) -- the literal `default` first, so it
+    // is never read as a suite's name on a POST.
+    {"GET", "/v1/admin/suites", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_suites(r);
+     }},
+    {"POST", "/v1/admin/suites", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->create_suite(r);
+     }},
+    {"POST", "/v1/admin/suites/default", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->set_default_suite(r);
+     }},
+    {"GET", "/v1/admin/suites/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->get_suite(r, id);
+     }},
+    {"PUT", "/v1/admin/suites/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->put_suite(r, id);
+     }},
+    {"DELETE", "/v1/admin/suites/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->delete_suite(r, id);
+     }},
+    {"PUT", "/v1/admin/suites/{id}/members", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->set_suite_member(r, id);
      }},
     // The datasets slice: the literal paths first, so `synth` and `kits`
     // are never read as dataset names.

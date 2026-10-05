@@ -57,6 +57,9 @@ inline constexpr const char* kDatasetValue = "DATASET";
 inline constexpr const char* kKitValue = "KIT";
 /// An eval suite, a prepared `<name>.eval`, a kit, or a path.
 inline constexpr const char* kSuiteValue = "SUITE";
+/// A `suites:` entry -- a named bundle of models (27d). Not `SUITE`, which
+/// is the training track's eval suite.
+inline constexpr const char* kModelSuiteValue = "MODEL_SUITE";
 /// A training run id.
 inline constexpr const char* kRunValue = "RUN";
 /// A pipeline run id.
@@ -102,7 +105,7 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 29> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 30> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -112,6 +115,7 @@ inline constexpr std::array<std::string_view, 29> kNameValues{kCollectionValue,
                                                               kDatasetValue,
                                                               kKitValue,
                                                               kSuiteValue,
+                                                              kModelSuiteValue,
                                                               kRunValue,
                                                               kPipelineRunValue,
                                                               kPipelineValue,

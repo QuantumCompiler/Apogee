@@ -14,6 +14,7 @@
 #include <tuple>
 #include <vector>
 
+#include "cli/helpers.h"
 #include "harness/roles.h"
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/sidecar.h"
@@ -1203,4 +1204,75 @@ TEST_CASE("info on a cloud backend says which local-only knobs it does not send"
     plain.seed.reset();
     config.backends["plain"] = plain;
     CHECK(render_model_info(config, "plain").find("sampling:") == std::string::npos);
+}
+
+namespace {
+
+/// The sandbox the suite goldens read: three mock backends, the chat and
+/// embedding pointers set, and a suite over them (27d).
+Config status_config() {
+    return apogee::harness::parse_config(R"(
+models:
+  default: root
+  default_embedding: embedder
+backends:
+  root:
+    type: mock
+  helper:
+    type: mock
+  embedder:
+    type: mock
+suites:
+  research:
+    description: Deep work
+    members:
+      chat: root
+      utility:
+        backend: helper
+        context_size: 4096
+        toolset: [fs, git]
+      embedding: embedder
+)",
+                                         "<test>");
+}
+
+}  // namespace
+
+TEST_CASE("status with no suite active is the status from before suites",
+          "[commands][models][roles][suites]") {
+    // Golden: the binary's own output for this config before 27d, byte for
+    // byte -- a configured suite changes nothing until it is the active one.
+    CHECK(render_role_status(status_config()) ==
+          "chat: root\n"
+          "embedding: embedder\n"
+          "extraction: root   (via models.default)\n"
+          "vision: (unset -- the chat's own backend)\n"
+          "transcription: (unset -- the chat's own backend)\n"
+          "utility: (unset -- the chat's own backend)\n");
+}
+
+TEST_CASE("status with a suite active names the suite rung where it answered",
+          "[commands][models][roles][suites]") {
+    Config config = status_config();
+    config.models.default_suite = "research";
+    CHECK(render_role_status(config) ==
+          "suite: research   (Deep work)\n"
+          "chat: root   (via suite research)\n"
+          "embedding: embedder   (via suite research)\n"
+          "extraction: root   (via models.default)\n"
+          "vision: (unset -- the chat's own backend)\n"
+          "transcription: (unset -- the chat's own backend)\n"
+          "utility: helper   (via suite research)   [suite pins window 4096 · toolset fs,git]\n");
+
+    // `--suite off` is the session's view with none: the global pointers.
+    std::string refused = apogee::commands::select_suite(config, "off");
+    CHECK(refused.empty());
+    CHECK(render_role_status(config) == render_role_status(status_config()));
+    // A name with no suite is refused, the config untouched.
+    refused = apogee::commands::select_suite(config, "nope");
+    CHECK(refused == "no suite named 'nope' (configured: research)");
+    CHECK(config.models.default_suite.empty());
+    // Matched as names are, and spelled as the file spells it afterwards.
+    CHECK(apogee::commands::select_suite(config, "RESEARCH").empty());
+    CHECK(config.models.default_suite == "research");
 }

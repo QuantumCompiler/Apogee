@@ -13,6 +13,7 @@
 #include "httpserver/admin_graph.h"
 #include "httpserver/admin_graphs.h"
 #include "httpserver/admin_knowledge.h"
+#include "httpserver/admin_suites.h"
 #include "httpserver/admin_training.h"
 #include "httpserver/http_types.h"
 #include "httpserver/jobs.h"
@@ -103,6 +104,16 @@ public:
     [[nodiscard]] HttpResponse put_graph(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse delete_graph_config(const HttpRequest& request,
                                                    std::string_view name);
+
+    /// The `suites:` config slice (27d) -- the twins of `config add-suite`,
+    /// `set-suite`, `delete-suite` and `set-default-suite`.
+    [[nodiscard]] HttpResponse list_suites(const HttpRequest& request);
+    [[nodiscard]] HttpResponse create_suite(const HttpRequest& request);
+    [[nodiscard]] HttpResponse set_default_suite(const HttpRequest& request);
+    [[nodiscard]] HttpResponse get_suite(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse put_suite(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse delete_suite(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse set_suite_member(const HttpRequest& request, std::string_view name);
 
     /// The datasets slice -- the twins of `apogee datasets`; synth is the
     /// plane's third job kind (teacher inference, not training).

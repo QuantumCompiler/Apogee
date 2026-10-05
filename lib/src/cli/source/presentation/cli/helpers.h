@@ -15,6 +15,7 @@
 #include "agentloop/budget.h"
 #include "agentloop/rag.h"
 #include "agentloop/tool_selection.h"
+#include "backends/factory.h"
 #include "contracts/cancellation.h"
 #include "contracts/config.h"
 #include "contracts/types.h"
@@ -152,6 +153,42 @@ inline constexpr std::size_t kFetchMaxBodyBytes = std::size_t{5} * 1024 * 1024;
 /// a tool that is not registered is not advertised, whatever the model asks.
 [[nodiscard]] agent::ToolRegistry apply_tool_policy(const agent::ToolRegistry& registry,
                                                     harness::AgentToolPolicy policy);
+
+/// Makes `suite` the active suite of `config` -- this run's view of it, never
+/// the file (27d): a `suites:` name, matched as names are, or `off` for none.
+/// Returns why it cannot -- no suite of that name, with the ones there are --
+/// or empty, leaving `config` untouched on a refusal.
+[[nodiscard]] std::string select_suite(harness::Config& config, std::string_view suite);
+
+/// Makes `suite` ("" for none) the active suite of a running session (27d):
+/// the session's `config` and `harness`'s view of it agree on it, and every
+/// backend whose window the switch re-pins is built again at its new one --
+/// a window is a construction parameter, so it cannot follow any other way.
+/// Every other provider is left as it is, model loaded and all. Returns what
+/// to say about a backend that could not be rebuilt: it keeps its old
+/// provider. Shared by `chat --suite`, `/suite` and, later, `execute`.
+[[nodiscard]] std::vector<std::string> activate_suite(harness::Harness& harness,
+                                                      harness::Config& config,
+                                                      const std::string& suite,
+                                                      const backends::BuildOptions& options);
+
+/// The suites `config` has, joined for a message: "a, b", or a pointer to
+/// `config add-suite` when it has none.
+[[nodiscard]] std::string known_suites(const harness::Config& config);
+
+/// `registry` narrowed to the tools of `toolset` -- words of
+/// `harness::suite_toolset_names()` (27d). An empty list keeps none.
+[[nodiscard]] agent::ToolRegistry apply_toolset(const agent::ToolRegistry& registry,
+                                                const std::vector<std::string>& toolset);
+
+/// The tools a conversation on `backend` is offered under the active suite
+/// (27d): `registry` narrowed to the toolset the suite pins on that backend,
+/// or `registry` whole when it pins none -- so with no suite nothing changes.
+/// Every surface that builds a tool offer for a backend applies it, after
+/// `tools.disabled` and an agent's policy, so a pin only ever narrows.
+[[nodiscard]] agent::ToolRegistry pin_toolset(const agent::ToolRegistry& registry,
+                                              const harness::Config& config,
+                                              std::string_view backend);
 
 /// Reads all of standard input. Used when no prompt argument was given.
 [[nodiscard]] std::string read_stdin();

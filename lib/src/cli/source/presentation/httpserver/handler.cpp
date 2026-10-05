@@ -434,10 +434,19 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
     // A selection of the request's own (26g): a served request carries its
     // whole conversation, so there is no last turn here to keep tools from.
     std::optional<agentloop::ToolSelection> selection;
-    if (tools_ != nullptr && plan.tool_mode == ToolMode::All && !tools_->empty()) {
-        loop_options.tools = tools_;
-        if (options_.tool_ranker != nullptr) {
-            selection.emplace(options_.tool_ranker, tools_->size());
+    // The toolset the active suite pins on this backend, when it pins one
+    // (27d); every tool otherwise.
+    const agent::ToolRegistry* offered = tools_;
+    std::shared_ptr<const agentloop::ToolRanker> ranker = options_.tool_ranker;
+    if (const auto pinned = options_.pinned_tools.find(plan.backend);
+        tools_ != nullptr && pinned != options_.pinned_tools.end()) {
+        offered = pinned->second.registry.get();
+        ranker = pinned->second.ranker;
+    }
+    if (offered != nullptr && plan.tool_mode == ToolMode::All && !offered->empty()) {
+        loop_options.tools = offered;
+        if (ranker != nullptr) {
+            selection.emplace(ranker, offered->size());
             loop_options.tool_selection = &*selection;
         }
         loop_options.permission = options_.permission;

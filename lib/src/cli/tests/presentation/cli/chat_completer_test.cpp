@@ -355,3 +355,29 @@ TEST_CASE("/help wraps to the terminal, short of its last column", "[chat][compl
     CHECK(narrow[0] == "  /help");
     CHECK(narrow[1] == "    List these commands");
 }
+
+TEST_CASE("/suite completes the configured suites and off", "[chat][completer][suites]") {
+    // 27d: the bundle switch is completable from the one table, as /model is.
+    ChatCompletionSources sources = project();
+    sources.suites = {{"fast", "All small"}, {"research", "Deep work"}};
+    const Suggestions all = suggest_chat_input("/suite ", sources);
+    CHECK(texts(all) == std::vector<std::string>{"fast", "research", "off"});
+    CHECK(all.candidates[1].description == "Deep work");
+    CHECK(texts(suggest_chat_input("/suite r", sources)) == std::vector<std::string>{"research"});
+    CHECK(texts(suggest_chat_input("/suite o", sources)) == std::vector<std::string>{"off"});
+    // No suites configured: off alone, never an empty list that reads as broken.
+    CHECK(texts(suggest_chat_input("/suite ", project())) == std::vector<std::string>{"off"});
+    REQUIRE(find_chat_command("suite") != nullptr);
+    CHECK(find_chat_command("suite")->id == ChatVerb::Suite);
+
+    // The sources read them from the config, described by what they are for.
+    const apogee::harness::Config config = apogee::harness::parse_config(
+        "backends:\n  a:\n    type: mock\nsuites:\n  fast:\n    description: All small\n"
+        "    members:\n      chat: a\n",
+        "<test>");
+    const ChatCompletionSources from_config =
+        apogee::commands::chat_completion_sources(config, "/work");
+    REQUIRE(from_config.suites.size() == 1);
+    CHECK(from_config.suites.front().name == "fast");
+    CHECK(from_config.suites.front().description == "All small");
+}

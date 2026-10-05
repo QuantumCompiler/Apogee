@@ -2,16 +2,22 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <string>
+#include <vector>
 
+#include "agentloop/loop.h"
+#include "backends/factory.h"
+#include "backends/mock.h"
 #include "contracts/config.h"
 #include "embedstore/store.h"
 #include "harness/roles.h"
 #include "support/env_guard.h"
+#include "tools/toolsets.h"
 
 using apogee::commands::base64_encode;
 using apogee::commands::build_messages;
@@ -357,4 +363,168 @@ TEST_CASE("the retrieval line names chunks, score, retriever, and its origin",
     CHECK(describe_retrieval(from_config, broken).find("retrieval unavailable") !=
           std::string::npos);
     CHECK(describe_retrieval(from_config, broken).find("(auto_rag)") != std::string::npos);
+}
+
+namespace {
+
+/// A config whose suite pins `helper` to the fs and git toolsets (27d).
+apogee::harness::Config pinned_config(bool active) {
+    apogee::harness::Config config = apogee::harness::parse_config(R"(
+models:
+  default: root
+backends:
+  root:
+    type: mock
+  helper:
+    type: mock
+suites:
+  research:
+    members:
+      chat:
+        backend: helper
+        toolset: [fs, git]
+)",
+                                                                   "<test>");
+    config.models.default_suite = active ? "research" : "";
+    return config;
+}
+
+class QuietReporter final : public apogee::agentloop::Reporter {};
+
+}  // namespace
+
+TEST_CASE("a suite's toolset pin narrows the offer to its toolsets, and nothing else does",
+          "[commands][helpers][suites]") {
+    using apogee::commands::apply_toolset;
+    using apogee::commands::pin_toolset;
+    const apogee::harness::Config active = pinned_config(true);
+    const apogee::agent::ToolRegistry registry = apogee::commands::make_built_in_tools(
+        apogee::commands::BuiltInToolOptions{.config = &active});
+    REQUIRE(registry.find("fetch_url") != nullptr);
+    REQUIRE(registry.find("run_command") != nullptr);
+
+    const apogee::agent::ToolRegistry pinned = pin_toolset(registry, active, "helper");
+    REQUIRE_FALSE(pinned.empty());
+    for (const std::string& name : pinned.names()) {
+        INFO(name);
+        const std::string toolset = apogee::tools::toolset_of(name);
+        CHECK((toolset == "fs" || toolset == "git"));
+    }
+    CHECK(pinned.find("read_file") != nullptr);
+    CHECK(pinned.find("git_diff") != nullptr);
+    CHECK(pinned.find("run_command") == nullptr);
+    CHECK(pinned.find("fetch_url") == nullptr);
+    // The environment note rides along: a narrowed offer still knows the date.
+    CHECK_FALSE(pinned.environment().empty());
+
+    // A backend the suite does not pin, or no suite active: the whole offer.
+    CHECK(pin_toolset(registry, active, "root").names() == registry.names());
+    CHECK(pin_toolset(registry, pinned_config(false), "helper").names() == registry.names());
+    // An empty pin offers nothing.
+    CHECK(apply_toolset(registry, {}).empty());
+}
+
+TEST_CASE("a pinned member's request carries exactly its toolset", "[commands][helpers][suites]") {
+    // 27d's guardrail at the wire: what the provider is handed is the pinned
+    // offer, recorded by the provider itself.
+    const apogee::harness::Config config = pinned_config(true);
+    apogee::harness::Harness harness{config};
+    std::vector<std::vector<std::string>> offered;
+    apogee::backends::MockProvider::Options mock;
+    mock.backend_name = "helper";
+    mock.turns = {apogee::backends::MockTurn{.text = "done"}};
+    mock.on_request = [&offered](const apogee::harness::ChatRequest& request) {
+        std::vector<std::string> names;
+        for (const apogee::harness::Tool& tool : request.tools) {
+            names.push_back(tool.name);
+        }
+        offered.push_back(std::move(names));
+    };
+    harness.register_provider("helper",
+                              std::make_shared<apogee::backends::MockProvider>(std::move(mock)));
+    harness.use_default_router();
+
+    const apogee::agent::ToolRegistry registry = apogee::commands::make_built_in_tools(
+        apogee::commands::BuiltInToolOptions{.config = &config});
+    const apogee::agent::ToolRegistry pinned =
+        apogee::commands::pin_toolset(registry, config, "helper");
+    std::vector<apogee::harness::ChatMessage> history{
+        apogee::harness::ChatMessage::user("list the files")};
+    apogee::agentloop::Options options;
+    options.model = "helper";
+    options.tools = &pinned;
+    QuietReporter reporter;
+    (void)apogee::agentloop::run(harness, history, options, reporter);
+
+    REQUIRE(offered.size() == 1);
+    std::vector<std::string> expected = pinned.names();
+    std::vector<std::string> sent = offered.front();
+    std::ranges::sort(expected);
+    std::ranges::sort(sent);
+    CHECK(sent == expected);
+    CHECK(std::ranges::find(sent, "run_command") == sent.end());
+}
+
+TEST_CASE("activating a suite rebuilds the backends it re-pins and only those",
+          "[commands][helpers][suites]") {
+    // 27d: `/suite` and `chat --suite` move the window a member's backend
+    // runs at; one provider holds one window, so exactly the re-pinned ones
+    // are built again -- the rest keep their loaded models.
+    apogee::harness::Config config = apogee::harness::parse_config(R"(
+models:
+  default: root
+backends:
+  root:
+    type: mock
+  helper:
+    type: mock
+  other:
+    type: mock
+suites:
+  small:
+    members:
+      utility:
+        backend: helper
+        context_size: 2048
+  roomy:
+    members:
+      utility:
+        backend: helper
+        context_size: 8192
+      chat: root
+)",
+                                                                   "<test>");
+    apogee::harness::Harness harness{config};
+    (void)apogee::backends::build_providers(harness);
+    const auto identity = [&harness](std::string_view name) { return &harness.provider(name); };
+    const auto* root = identity("root");
+    const auto* helper = identity("helper");
+    const auto* other = identity("other");
+
+    CHECK(apogee::commands::activate_suite(harness, config, "small", {}).empty());
+    CHECK(config.models.default_suite == "small");
+    CHECK(harness.config().models.default_suite == "small");
+    CHECK(harness.context_window_for_model("helper") == 2048);
+    CHECK(identity("helper") != helper);
+    CHECK(identity("root") == root);
+    CHECK(identity("other") == other);
+
+    // A switch that moves the pin rebuilds it again; one that names a backend
+    // with no pin (root, the chat member) rebuilds nothing for it.
+    helper = identity("helper");
+    CHECK(apogee::commands::activate_suite(harness, config, "roomy", {}).empty());
+    CHECK(harness.context_window_for_model("helper") == 8192);
+    CHECK(identity("helper") != helper);
+    CHECK(identity("root") == root);
+
+    // Off: the entry's own window again, rebuilt to it.
+    helper = identity("helper");
+    CHECK(apogee::commands::activate_suite(harness, config, "", {}).empty());
+    CHECK(config.models.default_suite.empty());
+    CHECK(identity("helper") != helper);
+    CHECK(identity("other") == other);
+    // And a switch that moves nothing rebuilds nothing.
+    helper = identity("helper");
+    CHECK(apogee::commands::activate_suite(harness, config, "", {}).empty());
+    CHECK(identity("helper") == helper);
 }

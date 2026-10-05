@@ -23,6 +23,7 @@
 #include "cli/chat_completer.h"
 #include "cli/chat_history.h"
 #include "cli/chat_recall.h"
+#include "cli/config_suites.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/permissions.h"
@@ -37,6 +38,7 @@
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
 #include "operations/knowledge_core.h"
+#include "operations/suites.h"
 #include "platform/platform.h"
 #include "tools/git.h"
 #include "views/ask_prompt.h"
@@ -98,6 +100,9 @@ struct ChatFlags {
     bool verbose = false;
     std::string resume;
     bool cont = false;
+    /// The suite the chat runs under (27d), or `off`; empty leaves it to what
+    /// the chat last had, else the config's default suite.
+    std::string suite;
     /// The arbitrary-branch review: the git tools' defaults and a system
     /// note, from flags -- and re-pointed by `/branch` mid-session.
     std::string branch;
@@ -180,7 +185,7 @@ struct RagSettings {
 }
 
 void run_chat_turn(const harness::Harness& harness, logger::Session& session,
-                   const std::string& input, agent::ToolRegistry* tools,
+                   const std::string& input, const agent::ToolRegistry* tools,
                    agentloop::ToolSelection* selection, const agentloop::AskFn& ask,
                    const ToolGate& gate, agentloop::Reporter& reporter,
                    const std::function<void(const std::string&)>& notice, const RagSettings& rag,
@@ -265,6 +270,9 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
     std::optional<harness::Config> turn_config;
     try {
         turn_config = harness::load_config(rag.config_path);
+        // The chat's suite, not the file's default: retrieval's embedder and
+        // judge resolve under the suite the chat is running (27d).
+        turn_config->models.default_suite = harness.config().models.default_suite;
     } catch (const harness::ConfigError& e) {
         if (!rag.flag_given) {
             notice(std::string{"auto_rag skipped -- config unreadable: "} + e.what());
@@ -615,6 +623,10 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("-v,--verbose", flags->verbose, "Print progress notes");
     cmd->add_option("--resume", flags->resume, "Resume a saved conversation by id or name")
         ->type_name(kChatValue);
+    cmd->add_option("--suite", flags->suite,
+                    "Run under this suite -- its members answer for the roles it names -- or off "
+                    "for none")
+        ->type_name(kModelSuiteValue);
     cmd->add_flag("-c,--continue", flags->cont, "Resume the most recent conversation");
     cmd->add_option("--branch", flags->branch,
                     "Branch under review for the git tools (the head); never checked out")
@@ -636,6 +648,14 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             config = harness::load_config(config_path);
         } catch (const harness::ConfigError& e) {
             fail_user(e.what());
+        }
+        // A suite named on the command line must exist before anything is
+        // built for it (27d).
+        if (!flags->suite.empty()) {
+            harness::Config probe = config;
+            if (const std::string refused = select_suite(probe, flags->suite); !refused.empty()) {
+                fail_user("--suite: " + refused);
+            }
         }
 
         // Every configured backend is constructed up front, which is what makes
@@ -673,6 +693,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         logger::Session session;
         logger::KnownDependencies known;
         known.backends = config.backend_names();
+        known.suites = config.suite_names();
+        known.check_suites = true;
 
         if (!flags->resume.empty() || flags->cont) {
             try {
@@ -701,6 +723,49 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             }
         } else {
             session.chat_id = logger::new_chat_id();
+        }
+
+        // The chat's suite (27d): the flag, else what the chat last had, else
+        // the config's default. Chosen before the chat's backend, which the
+        // suite's chat member answers for.
+        std::optional<std::string> chosen_suite;
+        if (!flags->suite.empty()) {
+            harness::Config probe = config;
+            (void)select_suite(probe, flags->suite);  // validated above
+            chosen_suite = probe.models.default_suite;
+        } else if (session.suite.has_value() && session.suite->empty()) {
+            chosen_suite = std::string{};
+        } else if (session.suite.has_value()) {
+            // Checked against the config as the chat was loaded: a suite since
+            // deleted was dropped there, with a warning.
+            if (harness::Config probe = config; select_suite(probe, *session.suite).empty()) {
+                chosen_suite = probe.models.default_suite;
+            }
+        }
+        if (chosen_suite.has_value() && *chosen_suite != config.models.default_suite) {
+            for (const std::string& line :
+                 activate_suite(harness, config, *chosen_suite, build_options)) {
+                reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + line);
+            }
+        }
+        // A member naming nothing is refused before a turn could fall back to
+        // models.default and answer from a model nobody chose.
+        if (const std::string refused = validate_active_suite(config); !refused.empty()) {
+            fail_user(refused);
+        }
+        if (!config.models.default_suite.empty()) {
+            session.suite = config.models.default_suite;
+        } else if (chosen_suite.has_value()) {
+            session.suite = std::string{};  // turned off, and kept off on resume
+        }
+        // A suite named at launch speaks for a resumed chat's role too, as
+        // /suite does mid-chat; -m still wins.
+        if (!flags->suite.empty() && flags->model.empty()) {
+            if (const harness::Resolution chat = harness::resolve_backend(
+                    config, harness::RoleRequest{.role = harness::ModelRole::Chat});
+                chat.from == harness::ResolvedFrom::Suite) {
+                session.backend = chat.key;
+            }
         }
 
         // Precedence: an explicit flag beats the saved value beats the default
@@ -797,18 +862,41 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                         }}
                                       : mcp::StderrTail::Sink{}});
         }
+        // What the chat's backend is offered: every registered tool, or the
+        // toolset the active suite pins on that backend (27d) -- recomputed
+        // only when a switch moves the pin.
+        std::optional<agent::ToolRegistry> pinned_registry;
+        std::optional<std::vector<std::string>> offered_pin;
+        const agent::ToolRegistry* offered = &registry;
         // Past a dozen and a half tools, each turn offers the ones its
         // question needs (26g); one selection for the whole conversation.
         std::unique_ptr<agentloop::ToolSelection> selection;
-        if (flags->tools) {
+        const auto offer_tools = [&]() {
+            offered_pin = harness::suite_pins(config, session.backend).toolset;
+            if (offered_pin.has_value()) {
+                pinned_registry = apply_toolset(registry, *offered_pin);
+                offered = &*pinned_registry;
+            } else {
+                pinned_registry.reset();
+                offered = &registry;
+            }
             std::string ranked_by;
-            selection = make_tool_selection(harness, config, registry, config_path, ranked_by);
+            selection = make_tool_selection(harness, config, *offered, config_path, ranked_by);
             if (selection != nullptr && flags->verbose) {
-                reporter.status().print_line("[tools] " + std::to_string(registry.size()) +
+                reporter.status().print_line("[tools] " + std::to_string(offered->size()) +
                                              " registered: each turn offers the ones its question "
                                              "needs, ranked by " +
                                              ranked_by);
             }
+        };
+        const auto reoffer_tools = [&]() {
+            if (flags->tools &&
+                harness::suite_pins(config, session.backend).toolset != offered_pin) {
+                offer_tools();
+            }
+        };
+        if (flags->tools) {
+            offer_tools();
         }
         // The gate: config levels, then what the user answers for this
         // session. The prompt half is chosen per surface below.
@@ -837,6 +925,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             // (26r) -- never on an answer.
             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + model +
                                          (is_base_model(harness, model) ? "  ·  base model" : "") +
+                                         (config.models.default_suite.empty()
+                                              ? ""
+                                              : "  ·  suite " + config.models.default_suite) +
                                          "  ·  chat " + session.chat_id +
                                          "  ·  /help for commands");
         }
@@ -957,7 +1048,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 // The driver reads structured input, so there IS someone to
                 // answer a question -- the loop's "nil AskFn <=> never
                 // advertised" rule is satisfied rather than sidestepped.
-                run_chat_turn(harness, session, message.text, flags->tools ? &registry : nullptr,
+                run_chat_turn(harness, session, message.text, flags->tools ? offered : nullptr,
                               selection.get(), driver_ask,
                               ToolGate{permission, flags->tools ? make_driver_confirm_fn(
                                                                       machine_reporter, std::cin,
@@ -1273,6 +1364,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                             // was constructed up front and history is neutral IR.
                             session.backend = argument;
                             harness.resume_conversation(session.backend, session.chat_id);
+                            // A suite's toolset pin follows the backend (27d).
+                            reoffer_tools();
                             const bool base = is_base_model(harness, argument);
                             reporter.status().print_line(style.tag(ansi::Role::Apogee) +
                                                          " switched to " + argument +
@@ -1283,6 +1376,62 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                             }
                         }
                         break;
+                    case ChatVerb::Suite: {
+                        if (argument.empty()) {
+                            reporter.status().print_line(style.tag(ansi::Role::Apogee) +
+                                                         " suite: " + active_suite_summary(config));
+                            break;
+                        }
+                        harness::Config probe = config;
+                        std::string refused = select_suite(probe, argument);
+                        if (refused.empty()) {
+                            refused = validate_active_suite(probe);
+                        }
+                        if (!refused.empty()) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) + " " +
+                                                         refused);
+                            break;
+                        }
+                        // Rebuilding a backend is a model call's business:
+                        // what is reading an attachment settles first.
+                        attached.settle();
+                        for (const std::string& said : activate_suite(
+                                 harness, config, probe.models.default_suite, build_options)) {
+                            reporter.status().print_line(style.tag(ansi::Role::Warning) + " " +
+                                                         said);
+                        }
+                        session.suite = config.models.default_suite;
+                        // The suite's chat member speaks for the conversation,
+                        // as /model would; with none, or off, it stays put.
+                        std::string moved;
+                        if (const harness::Resolution chat = harness::resolve_backend(
+                                config, harness::RoleRequest{.role = harness::ModelRole::Chat});
+                            chat.from == harness::ResolvedFrom::Suite &&
+                            chat.key != session.backend &&
+                            config.find_backend(chat.key) != nullptr) {
+                            session.backend = chat.key;
+                            harness.resume_conversation(session.backend, session.chat_id);
+                            moved = chat.key;
+                        }
+                        reoffer_tools();
+                        logger::save(session);
+                        if (config.models.default_suite.empty()) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Apogee) +
+                                " suite off -- the roles follow the global pointers; the "
+                                "conversation stays on " +
+                                session.backend);
+                        } else {
+                            reporter.status().print_line(style.tag(ansi::Role::Apogee) + " suite " +
+                                                         active_suite_summary(config));
+                            if (!moved.empty()) {
+                                reporter.status().print_line(
+                                    style.tag(ansi::Role::Apogee) + " switched to " + moved +
+                                    (is_base_model(harness, moved) ? " -- a base model" : ""));
+                            }
+                        }
+                        break;
+                    }
                     case ChatVerb::Branch:
                         if (argument.empty()) {
                             reporter.status().print_line(
@@ -1488,7 +1637,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             reporter.set_resting_label(
                 is_base_model(harness, session.backend) ? "Thinking… · base model" : "Thinking…");
             run_chat_turn(
-                harness, session, input, flags->tools ? &registry : nullptr, selection.get(),
+                harness, session, input, flags->tools ? offered : nullptr, selection.get(),
                 flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
                 ToolGate{permission, flags->tools ? terminal_confirm_fn(reporter.status(), style,
                                                                         config_path, approvals)

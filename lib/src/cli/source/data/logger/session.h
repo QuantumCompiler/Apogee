@@ -54,6 +54,9 @@ enum class WarningKind : std::uint8_t {
     BackendMissing,
     /// The saved rerank judge is no longer in the config; resumed without it.
     RerankBackendMissing,
+    /// The saved suite is no longer in the config (27d); resumed under the
+    /// config's default suite, if it has one.
+    SuiteMissing,
     /// The file parsed but a field was the wrong shape; a default was used.
     FieldDropped,
 };
@@ -152,6 +155,11 @@ struct Session {
     /// a resumed session continues as it was last set.
     std::string retriever;
     std::string rerank;
+    /// The suite the chat runs under (27d), as `--suite` or `/suite` left it:
+    /// a suite's name, "" for one turned off, and unset for a chat that never
+    /// had one -- which follows the config's default suite, and writes
+    /// nothing, so a chat with no suite saves exactly as it did before.
+    std::optional<std::string> suite;
     /// What is attached to this chat, in the order attached (26d). Its index
     /// is `attachments/<chat_id>.db`, deleted with the chat.
     std::vector<Attachment> attachments;
@@ -167,6 +175,10 @@ struct Session {
 /// config include. An empty list disables backend checking.
 struct KnownDependencies {
     std::vector<std::string> backends;
+    /// The configured suites (27d). A saved suite missing from it is a
+    /// warning and dropped; with `check_suites` false nothing is checked.
+    std::vector<std::string> suites{};
+    bool check_suites = false;
 };
 
 struct LoadedSession {

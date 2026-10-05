@@ -32,6 +32,7 @@ enum class ChatVerb : std::uint8_t {
     Help,
     Model,
     Models,
+    Suite,
     System,
     Temperature,
     Think,
@@ -74,6 +75,8 @@ enum class ArgumentValues : std::uint8_t {
     GatedTools,
     /// The tools and websites this chat has answered for itself (26o).
     SessionPermissions,
+    /// The configured suites, and `off` (27d).
+    Suites,
 };
 
 /// One row of the table.
@@ -122,6 +125,8 @@ struct NamedChoice {
 struct ChatCompletionSources {
     /// Each configured backend, in config order, described by type and model.
     std::vector<NamedChoice> backends;
+    /// Each configured suite, described by what it is for (27d).
+    std::vector<NamedChoice> suites;
     /// What `@` paths are relative to.
     std::filesystem::path working_directory;
     /// What is attached to the chat, for `/detach` (26d). Empty offers none.

@@ -194,3 +194,113 @@ TEST_CASE("add-backend takes a thinking default and budget, and refuses a bad on
     CHECK(out.find("thinking_budget") != std::string::npos);
     CHECK(home.config_text() == before);
 }
+
+namespace {
+
+/// Three backends and a comment the suite verbs must leave where it is.
+constexpr const char* kSuiteConfig = R"(# my models
+models:
+  default: root   # the big one
+backends:
+  root:
+    type: mock
+  helper:
+    type: mock
+  embedder:
+    type: mock
+)";
+
+}  // namespace
+
+TEST_CASE("add-suite writes the block through the one editor, comments kept",
+          "[commands][config][suites]") {
+    // 27d's first acceptance criterion, at the command.
+    const CliHome home{kSuiteConfig};
+    std::string out;
+    REQUIRE(home.run({"config", "add-suite", "research", "--chat", "root", "--utility", "helper",
+                      "--embedding", "embedder"},
+                     &out) == 0);
+    INFO(out);
+    CHECK(home.config_text() == std::string{kSuiteConfig} +
+                                    "\nsuites:\n  research:\n    members:\n      chat: root\n"
+                                    "      embedding: embedder\n      utility: helper\n");
+    CHECK(out.find("added suite 'research'") != std::string::npos);
+
+    // The knobs, pinned per member; the CLI's words for each refusal.
+    REQUIRE(home.run({"config", "add-suite", "fast", "--chat", "helper", "--context-size",
+                      "chat=4096", "--toolset", "chat=fs,git", "--description", "All small"},
+                     &out) == 0);
+    const auto config = apogee::harness::parse_config(home.config_text(), "<test>");
+    const apogee::harness::SuiteMember& chat = config.find_suite("fast")->members.at("chat");
+    CHECK(chat.backend == "helper");
+    CHECK(chat.context_size == 4096);
+    CHECK(chat.toolset == std::vector<std::string>{"fs", "git"});
+    CHECK(config.find_suite("fast")->description == "All small");
+
+    const std::vector<std::pair<std::vector<std::string>, std::string>> refused{
+        {{"config", "add-suite", "empty"}, "names at least one member"},
+        {{"config", "add-suite", "ghost", "--chat", "nope"}, "no backend named 'nope'"},
+        {{"config", "add-suite", "off", "--chat", "root"}, "'off' is reserved"},
+        {{"config", "add-suite", "Research", "--chat", "root"}, "collides with existing"},
+        {{"config", "add-suite", "x", "--chat", "root", "--context-size", "utility=4096"},
+         "the suite has no utility member"},
+        {{"config", "add-suite", "x", "--chat", "root", "--context-size", "chat=lots"},
+         "is not a positive number of tokens"},
+        {{"config", "add-suite", "x", "--chat", "root", "--toolset", "chat=fs,browser"},
+         "'browser' is not a toolset"},
+        {{"config", "add-suite", "x", "--chat", "root", "--toolset", "root=fs"},
+         "'root' is not a role"},
+    };
+    const std::string before = home.config_text();
+    for (const auto& [args, said] : refused) {
+        INFO(said);
+        CHECK(home.run(args, &out) != 0);
+        CHECK(out.find(said) != std::string::npos);
+        CHECK(home.config_text() == before);
+    }
+}
+
+TEST_CASE("set-suite edits one member in place; delete-suite and the default suite",
+          "[commands][config][suites]") {
+    const CliHome home{kSuiteConfig};
+    std::string out;
+    REQUIRE(home.run({"config", "add-suite", "research", "--chat", "root", "--utility", "helper"},
+                     &out) == 0);
+    REQUIRE(home.run({"config", "set-suite", "research", "--utility", "embedder", "--context-size",
+                      "utility=2048", "--embedding", "embedder"},
+                     &out) == 0);
+    INFO(out);
+    CHECK(home.config_text() ==
+          std::string{kSuiteConfig} +
+              "\nsuites:\n  research:\n    members:\n      chat: root\n"
+              "      embedding: embedder\n      utility:\n        backend: embedder\n"
+              "        context_size: 2048\n");
+    // --unpin drops the knobs, --remove the member.
+    REQUIRE(
+        home.run({"config", "set-suite", "research", "--unpin", "utility", "--remove", "embedding"},
+                 &out) == 0);
+    CHECK(home.config_text() ==
+          std::string{kSuiteConfig} +
+              "\nsuites:\n  research:\n    members:\n      chat: root\n      utility: embedder\n");
+    CHECK(home.run({"config", "set-suite", "research"}, &out) != 0);
+    CHECK(out.find("nothing to change") != std::string::npos);
+    CHECK(home.run({"config", "set-suite", "nope", "--chat", "root"}, &out) != 0);
+    CHECK(out.find("no suite named 'nope' (configured: research)") != std::string::npos);
+
+    // The default suite: set, read back through config get, refused while
+    // set from deletion, cleared with off.
+    REQUIRE(home.run({"config", "set-default-suite", "RESEARCH"}, &out) == 0);
+    CHECK(out.find("models.default_suite = research") != std::string::npos);
+    REQUIRE(home.run({"config", "get", "models.default_suite"}, &out) == 0);
+    CHECK(out == "research\n");
+    REQUIRE(home.run({"config", "get", "suites.research"}, &out) == 0);
+    CHECK(out == "chat: root\nutility: embedder\n");
+    REQUIRE(home.run({"config", "get", "suites.research.utility"}, &out) == 0);
+    CHECK(out == "embedder\n");
+    CHECK(home.run({"config", "delete-suite", "research"}, &out) != 0);
+    CHECK(out.find("'research' is the default suite (models.default_suite)") != std::string::npos);
+    CHECK(home.run({"config", "set-default-suite", "nope"}, &out) != 0);
+    REQUIRE(home.run({"config", "set-default-suite", "off"}, &out) == 0);
+    REQUIRE(home.run({"config", "delete-suite", "research"}, &out) == 0);
+    CHECK(apogee::harness::parse_config(home.config_text(), "<test>").suites.empty());
+}

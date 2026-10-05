@@ -4,8 +4,10 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "contracts/config.h"
 #include "support/env_guard.h"
@@ -1186,4 +1188,169 @@ TEST_CASE("the helper role pointers are set through the one editor", "[config_ed
         CHECK(message.find("default_vision, default_transcription, default_utility") !=
               std::string::npos);
     }
+}
+
+namespace {
+
+apogee::harness::SuiteConfig research_suite() {
+    apogee::harness::SuiteConfig suite;
+    suite.members["chat"] = {.backend = "claude"};
+    suite.members["utility"] = {
+        .backend = "local", .context_size = 4096, .toolset = std::vector<std::string>{"fs"}};
+    suite.members["embedding"] = {.backend = "local"};
+    return suite;
+}
+
+/// A suite written by hand, comments and all, to edit one member of.
+constexpr std::string_view kHandSuite = R"YAML(models:
+  default: claude
+backends:
+  claude:
+    type: mock
+  local:
+    type: mock
+  helper:
+    type: mock
+suites:
+  # The everyday suite.
+  research:
+    description: Deep work   # what it is for
+    members:
+      chat: claude          # the big model
+      # The small one does the chores.
+      utility:
+        backend: local
+        context_size: 4096  # small on purpose
+      vision: claude
+  fast:
+    members:
+      chat: local
+)YAML";
+
+}  // namespace
+
+TEST_CASE("a suites: entry round-trips byte-exactly, members in role order",
+          "[config_edit][golden][suites]") {
+    using apogee::harness::append_suite;
+    using apogee::harness::delete_suite;
+    const std::string added = append_suite(kCommented, "research", research_suite(), false);
+    require_parses(added);
+    CHECK(added.starts_with(std::string{kCommented}));
+    // Role order, not the map's; the short form where nothing is pinned.
+    CHECK(
+        added.ends_with("\nsuites:\n  research:\n    members:\n      chat: claude\n"
+                        "      embedding: local\n      utility:\n        backend: local\n"
+                        "        context_size: 4096\n        toolset: [fs]\n"));
+    CHECK(delete_suite(added, "research") == std::string{kCommented} + "\nsuites:\n");
+    const auto loaded = apogee::harness::parse_config(added, "<test>");
+    REQUIRE(loaded.find_suite("research") != nullptr);
+    CHECK(*loaded.find_suite("research") == research_suite());
+
+    // A description when it says something, and an empty toolset written as one.
+    apogee::harness::SuiteConfig described;
+    described.description = "Deep: work";
+    described.members["chat"] = {.backend = "claude", .toolset = std::vector<std::string>{}};
+    const std::string full = append_suite("suites:\n", "s", described, false);
+    CHECK(full ==
+          "suites:\n  s:\n    description: \"Deep: work\"\n    members:\n      chat:\n"
+          "        backend: claude\n        toolset: []\n");
+    CHECK(*apogee::harness::parse_config(full, "<test>").find_suite("s") == described);
+
+    // Collisions as every section's, and `off` -- `/suite off` -- refused.
+    CHECK_THROWS_AS((void)append_suite(added, "Research", research_suite(), false),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)append_suite(added, "research", research_suite(), false),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)append_suite(kCommented, "off", research_suite(), false),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)append_suite(kCommented, "OFF", research_suite(), true), ConfigEditError);
+    const std::string replaced = append_suite(added, "research", described, true);
+    CHECK(apogee::harness::section_entry_names(replaced, "suites").size() == 1);
+    CHECK(*apogee::harness::parse_config(replaced, "<test>").find_suite("research") == described);
+    CHECK_THROWS_AS((void)delete_suite(kCommented, "research"), ConfigEditError);
+}
+
+TEST_CASE("setting one member leaves every other line of the suite as it was",
+          "[config_edit][golden][suites]") {
+    using apogee::harness::set_suite_member;
+    using apogee::harness::SuiteMember;
+    require_parses(kHandSuite);
+    const std::string hand{kHandSuite};
+
+    // Replaced in place: the member's own lines go, its neighbours' comments stay.
+    const std::string swapped =
+        set_suite_member(hand, "research", "utility", SuiteMember{.backend = "helper"});
+    require_parses(swapped);
+    std::string expected = hand;
+    const std::string utility_lines =
+        "      utility:\n        backend: local\n        context_size: 4096  # small on "
+        "purpose\n";
+    expected.replace(expected.find(utility_lines), utility_lines.size(), "      utility: helper\n");
+    CHECK(swapped == expected);
+
+    // Inserted in role order: embedding after chat, before its comment-led
+    // utility -- which keeps its comment.
+    const std::string inserted =
+        set_suite_member(hand, "RESEARCH", "embedding", SuiteMember{.backend = "local"});
+    expected = hand;
+    expected.insert(expected.find("      # The small one"), "      embedding: local\n");
+    CHECK(inserted == expected);
+    // After every role it knows: at the end of the block.
+    const std::string last = set_suite_member(
+        hand, "fast", "utility", SuiteMember{.backend = "helper", .context_size = 1024});
+    expected = hand;
+    expected += "      utility:\n        backend: helper\n        context_size: 1024\n";
+    CHECK(last == expected);
+
+    // Removed: the member and only it.
+    const std::string removed = set_suite_member(hand, "research", "vision", std::nullopt);
+    expected = hand;
+    expected.erase(expected.find("      vision: claude\n"),
+                   std::string{"      vision: claude\n"}.size());
+    CHECK(removed == expected);
+    // And put back, it goes in role order: before utility and the comment
+    // leading it.
+    expected = removed;
+    expected.insert(expected.find("      # The small one"), "      vision: claude\n");
+    CHECK(set_suite_member(removed, "research", "vision", SuiteMember{.backend = "claude"}) ==
+          expected);
+
+    // A suite with no members: block yet gains one.
+    const std::string bare = "suites:\n  s:\n    description: x\n";
+    CHECK(set_suite_member(bare, "s", "chat", SuiteMember{.backend = "claude"}) ==
+          "suites:\n  s:\n    description: x\n    members:\n      chat: claude\n");
+
+    // Refusals: a role that is none, a suite or a member that is not there, a
+    // members: block written on one line.
+    CHECK_THROWS_AS((void)set_suite_member(hand, "research", "root", SuiteMember{.backend = "x"}),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)set_suite_member(hand, "nope", "chat", SuiteMember{.backend = "x"}),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)set_suite_member(hand, "fast", "vision", std::nullopt), ConfigEditError);
+    CHECK_THROWS_AS((void)set_suite_member(kCommented, "s", "chat", SuiteMember{.backend = "x"}),
+                    ConfigEditError);
+    CHECK_THROWS_AS((void)set_suite_member("suites:\n  s:\n    members: {chat: claude}\n", "s",
+                                           "utility", SuiteMember{.backend = "x"}),
+                    ConfigEditError);
+}
+
+TEST_CASE("the default suite is set like a pointer, and the loader holds it to a suite",
+          "[config_edit][suites]") {
+    using apogee::harness::set_default_suite;
+    const std::string hand{kHandSuite};
+    const std::string set = set_default_suite(hand, "fast");
+    CHECK(set == "models:\n  default: claude\n  default_suite: fast\n" +
+                     hand.substr(std::string{"models:\n  default: claude\n"}.size()));
+    CHECK(apogee::harness::parse_config(set, "<test>").models.default_suite == "fast");
+    // Replaced in place, then cleared.
+    const std::string cleared = set_default_suite(set_default_suite(set, "research"), "");
+    CHECK(cleared.find("  default_suite: \"\"\n") != std::string::npos);
+    CHECK(apogee::harness::parse_config(cleared, "<test>").models.default_suite.empty());
+    // The re-parse is what refuses a dangling name, and the default suite's
+    // deletion: the edit never lands.
+    CHECK_THROWS_AS(apogee::harness::parse_config(set_default_suite(hand, "nope"), "<test>"),
+                    apogee::harness::ConfigError);
+    CHECK_THROWS_AS(
+        apogee::harness::parse_config(apogee::harness::delete_suite(set, "fast"), "<test>"),
+        apogee::harness::ConfigError);
 }

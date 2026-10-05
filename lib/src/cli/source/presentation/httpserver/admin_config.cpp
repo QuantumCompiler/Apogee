@@ -61,6 +61,9 @@ nlohmann::json role_view(const harness::Config& config, harness::ModelRole role)
         case harness::ResolvedFrom::EntryBackend:
             from = "entry";
             break;
+        case harness::ResolvedFrom::Suite:
+            from = "suite";
+            break;
         case harness::ResolvedFrom::RolePointer:
             from = "role_pointer";
             break;
@@ -165,7 +168,9 @@ bool config_drifted(const harness::Config& startup, const harness::Config& now) 
     if (startup.backend_names() != now.backend_names()) {
         return true;
     }
-    return !(startup.models == now.models);
+    // The suites too (27d): a member changed under the active suite moves a
+    // role exactly as a changed pointer does.
+    return !(startup.models == now.models) || startup.suites != now.suites;
 }
 
 bool is_literal_api_key(std::string_view api_key) noexcept {

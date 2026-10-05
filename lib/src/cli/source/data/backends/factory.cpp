@@ -203,13 +203,16 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
 BuildResult build_providers(harness::ProviderRegistry& harness, const BuildOptions& options) {
     BuildResult result;
 
-    for (const auto& [name, config] : harness.config().backends) {
+    for (const auto& [name, unused] : harness.config().backends) {
         BackendStatus status;
         status.name = name;
 
+        // The entry as the active suite runs it (27d): a member's window pin
+        // is the window the backend is built at. With no suite active it is
+        // the entry as written.
         std::string reason;
         std::shared_ptr<harness::LLMProvider> provider =
-            make_provider(name, config, reason, options);
+            make_provider(name, harness::backend_as_run(harness.config(), name), reason, options);
         if (provider == nullptr) {
             status.reason = reason.empty() ? "could not be constructed" : reason;
             result.statuses.push_back(std::move(status));
@@ -221,6 +224,35 @@ BuildResult build_providers(harness::ProviderRegistry& harness, const BuildOptio
         result.statuses.push_back(std::move(status));
     }
 
+    harness.use_default_router();
+    return result;
+}
+
+BuildResult rebuild_providers(harness::ProviderRegistry& harness,
+                              const std::vector<std::string>& names, const BuildOptions& options) {
+    BuildResult result;
+    for (const std::string& name : names) {
+        BackendStatus status;
+        status.name = name;
+        if (harness.config().find_backend(name) == nullptr) {
+            status.reason = "not configured";
+            result.statuses.push_back(std::move(status));
+            continue;
+        }
+        std::string reason;
+        std::shared_ptr<harness::LLMProvider> provider =
+            make_provider(name, harness::backend_as_run(harness.config(), name), reason, options);
+        if (provider == nullptr) {
+            // The provider already registered stays: a backend that built a
+            // moment ago and cannot now is said, never dropped mid-session.
+            status.reason = reason.empty() ? "could not be constructed" : reason;
+            result.statuses.push_back(std::move(status));
+            continue;
+        }
+        harness.register_provider(name, std::move(provider));
+        status.constructed = true;
+        result.statuses.push_back(std::move(status));
+    }
     harness.use_default_router();
     return result;
 }

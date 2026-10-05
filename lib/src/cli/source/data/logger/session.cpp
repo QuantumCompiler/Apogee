@@ -61,6 +61,8 @@ std::string_view to_string(WarningKind kind) noexcept {
             return "field_dropped";
         case WarningKind::RerankBackendMissing:
             return "rerank_backend_missing";
+        case WarningKind::SuiteMissing:
+            return "suite_missing";
     }
     return "unknown";
 }
@@ -127,6 +129,9 @@ std::string serialize(const Session& session) {
     }
     if (!session.rerank.empty()) {
         out["rerank"] = session.rerank;
+    }
+    if (session.suite.has_value()) {
+        out["suite"] = *session.suite;
     }
     if (!session.title.empty()) {
         out["title"] = session.title;
@@ -207,6 +212,31 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
                                    "rerank backend '" + session.rerank +
                                        "' is no longer configured -- resuming without reranking"});
         session.rerank.clear();
+    }
+    if (const auto it = parsed.find("suite"); it != parsed.end() && !it->is_null()) {
+        if (it->is_string()) {
+            session.suite = it->get<std::string>();
+        } else {
+            loaded.warnings.push_back(
+                ResumeWarning{WarningKind::FieldDropped, "suite",
+                              "field 'suite' had an unexpected shape and was ignored"});
+        }
+    }
+    // A suite since deleted: resume under the config's default, and say so.
+    // "" is a suite turned off, not a name, and is never checked.
+    if (known.check_suites && session.suite.has_value() && !session.suite->empty() &&
+        std::none_of(known.suites.begin(), known.suites.end(), [&](const std::string& name) {
+            return name.size() == session.suite->size() &&
+                   std::equal(name.begin(), name.end(), session.suite->begin(), [](char a, char b) {
+                       return std::tolower(static_cast<unsigned char>(a)) ==
+                              std::tolower(static_cast<unsigned char>(b));
+                   });
+        })) {
+        loaded.warnings.push_back({WarningKind::SuiteMissing, *session.suite,
+                                   "suite '" + *session.suite +
+                                       "' is no longer configured -- resuming under the "
+                                       "config's default suite, if it has one"});
+        session.suite.reset();
     }
     session.provider_session_id = string_field(parsed, "provider_session_id", loaded.warnings);
     session.started_at = string_field(parsed, "started_at", loaded.warnings);

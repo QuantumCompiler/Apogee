@@ -263,7 +263,8 @@ apogee serve --print-admin-token
 
 Every write reads the config fresh from disk and reports `restart_required`:
 `true` when the file now differs from what the running server started with, in
-backend membership or the role pointers. The server does not hot-reload; a
+backend membership, the role pointers, or the suites (`suites:` and
+`models.default_suite`). The server does not hot-reload; a
 backend added here is served after a restart (and only if the server is started
 with `-m` or `--all-backends` to serve it).
 
@@ -271,7 +272,8 @@ with `-m` or `--all-backends` to serve it).
 
 Every backend entry as a **view that has no `api_key` field** — `api_key_set`
 says whether one is configured — plus `roles`, each named by the backend that
-*resolves* for it and which rung answered (`default`, `role_pointer`, …), and
+*resolves* for it and which rung answered (`default`, `role_pointer`, `suite`
+when `models.default_suite` names a suite whose member answers, …), and
 `restart_required`. The roles are `default`, `default_embedding`,
 `default_extraction`, and the helpers `default_vision`,
 `default_transcription` and `default_utility`; with no conversation to fall
@@ -770,6 +772,63 @@ Removes the entry and answers `{"deleted": name}`. The graph's database is
 left on disk exactly as `apogee config delete-graph` leaves it --
 `DELETE /v1/admin/graph/{id}` while the entry still exists removes the data.
 `404` when not configured.
+
+### `GET /v1/admin/suites`
+
+The `suites:` entries -- named bundles of models, one backend per role a
+suite speaks for -- the twins of `apogee config add-suite`, `set-suite`,
+`delete-suite` and `set-default-suite`. `200 {"object": "list", "data":
+[{name, description?, members: {role: {backend, context_size?, toolset?}},
+default}]}`, `default` saying whether `models.default_suite` names it. The
+roles are `chat`, `embedding`, `extraction`, `vision`, `transcription` and
+`utility`; `toolset` words are `fs`, `shell`, `git`, `notes`, `rag`, `web`
+and `mcp`. A suite is resolution, not transport: the server resolves every
+request under the suite it started with -- the config's default, never a
+request's -- and each write below answers `restart_required` when the file
+has moved on from it.
+
+### `POST /v1/admin/suites`
+
+Adds an entry through the same comment-preserving transform the CLI uses,
+byte-identical. Body: `name` and `members` (role -> a backend's name, or
+`{backend, context_size?, toolset?}`) required; `description` optional. The
+CLI's rules, answered as `400`: a name that is not `off` (`/suite off` means
+no suite), at least one member, every member a configured backend, a
+positive window, known toolset words, one backend pinned one way. `201
+{"data": {…}, "restart_required"}`; `409` when the name exists -- `PUT`
+replaces.
+
+### `POST /v1/admin/suites/default`
+
+The twin of `apogee config set-default-suite`: body `{"name"}`, a suite or
+`off` for none. `200 {"field": "default_suite", "name", "restart_required"}`;
+`400` for a suite that is not configured.
+
+### `GET /v1/admin/suites/{id}`
+
+One entry, `200 {"data": {…}}` in the shape above; `404` when not
+configured.
+
+### `PUT /v1/admin/suites/{id}`
+
+Replaces the entry in place, under the same rules as `POST`; a body `name`,
+when present, must match the path (`400` otherwise). `200 {"data": {…},
+"restart_required"}`; `404` when not configured.
+
+### `DELETE /v1/admin/suites/{id}`
+
+Removes the entry and answers `{"deleted": name}`; `404` when not
+configured, `409` while `models.default_suite` names it.
+
+### `PUT /v1/admin/suites/{id}/members`
+
+The twin of `apogee config set-suite`, one member at a time: body `{"role",
+"member"}`, the member a backend's name or `{backend, context_size?,
+toolset?}`, or `null` to remove it -- the role then falls through to the
+global pointers. That member's lines are replaced in place, and every other
+line of the entry, its comments included, is left as it was. `200 {"data":
+{…}, "restart_required"}`; `404` when the suite is not configured, `400` under
+the CLI's rules.
 
 ### `POST /v1/admin/knowledge`
 

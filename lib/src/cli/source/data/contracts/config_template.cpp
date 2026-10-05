@@ -36,7 +36,8 @@ constexpr std::string_view kConfigTemplate = R"APOGEE(# Apogee configuration.
 models:
   # Role pointers. Each names an entry under `backends:` below, and every one
   # resolves through one shared chain:
-  #     -m on the command line  >  a per-feature pin  >  the role pointer here
+  #     -m on the command line  >  a per-feature pin  >  the active suite's
+  #       member (see suites: below)  >  the role pointer here
   #       >  (a helper role) the backend the chat is on  >  models.default
   # `apogee models status` prints which rung answered for each role.
 
@@ -68,6 +69,32 @@ models:
   # default_vision: vision
   # default_transcription: listener
   # default_utility: helper
+
+  # The suite every command resolves its roles under: a name under `suites:`
+  # below. Unset means none, and the chain above is exactly as written.
+  # `apogee chat --suite <name>` (or `/suite <name>` mid-chat) picks one for a
+  # single chat instead, and `--suite off` none.
+  # default_suite: research
+
+# Suites: named bundles of models, one backend per role a suite speaks for --
+# a research suite on a large model with a small helper for the chores, a fast
+# one all on the small model -- so switching between them is one word rather
+# than a rewrite of the pointers above. A role a suite leaves out falls through
+# to those pointers. A member is a backend's name, or a mapping that also pins,
+# while the suite is active, what makes a helper small: its window
+# (context_size) and the tools it is offered (toolset: any of fs, shell, git,
+# notes, rag, web, mcp; [] for none). `apogee config add-suite` writes one and
+# `apogee models status --suite <name>` shows which roles it answers.
+#
+# suites:
+#   research:
+#     description: Deep work on the large model, chores on the small one
+#     members:
+#       chat: root
+#       utility:
+#         backend: helper
+#         context_size: 4096
+#       embedding: embedder
 
 # Optional search roots that pre-fill path prompts. Each is optional; an empty
 # value simply means "no default". ${ENV_VAR} references are expanded.

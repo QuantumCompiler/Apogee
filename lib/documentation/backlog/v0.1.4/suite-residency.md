@@ -16,7 +16,7 @@
 - `backends/llamacpp.h/.cpp`: the hold honored where `idle_unload` fires.
 - `cli/chat.cpp` / `commands/models_cmd`: admission at `--suite`/`/suite` selection (stated, refusable, `--force`); `models status` footprint lines; `--warm` on suite selection.
 - Tests: admission tables over scripted stores and fake machine budgets (fits / doesn't / unknown-size member); the hold's lifecycle (fires after session end, never during); busy-line goldens for warmup.
-- Consumes: [model-suites.md](model-suites.md) (27d — the unit this manages); 26a/26m (shipped — window and cache math); M1 (shipped — the line).
+- Consumes: [27d](../../assistant/MILESTONES.md#milestone-ac--model-suites) (shipped 2026-10-04 — the unit this manages: `harness::active_suite`, the members' window pins through `suite_pins`/`backend_as_run`, and `commands::activate_suite`, the one switch `--suite`/`/suite` go through, where admission fires); 26a/26m (shipped — window and cache math); M1 (shipped — the line).
 
 **Decisions made** (dated):
 - 2026-10-03 — Split from the suites spike as its own item: residency is policy over shipped machinery (the spike found every input already existing), and bundling it into 27d would make the config item balloon.
@@ -36,4 +36,4 @@
 - [ ] `apogee chat --suite research --warm` loads the members up front on the busy line; `models status` then shows each resident with the set's total.
 - [ ] A member with no recorded size yields an admission line that says unknown — and still runs.
 
-**Scope note.** Item **27e**, earmarked for **v0.1.4**; **gated on [27d](model-suites.md)**. Out of scope: cross-process residency or any daemon; GPU-vs-CPU placement (llama.cpp's own affair); eviction-policy redesign; MLX members' footprints (27b's `config.json` windows slot into the same math when that track lands — interplay, not a gate). Symphony plays ([27q](symphonies.md)) hop members serially and are covered by this item's session hold as-is — interplay, not a gate.
+**Scope note.** Item **27e**, earmarked for **v0.1.4**; its gate, [27d](../../assistant/MILESTONES.md#milestone-ac--model-suites), **shipped 2026-10-04** — workable. Out of scope: cross-process residency or any daemon; GPU-vs-CPU placement (llama.cpp's own affair); eviction-policy redesign; MLX members' footprints (27b's `config.json` windows slot into the same math when that track lands — interplay, not a gate). Symphony plays ([27q](symphonies.md)) hop members serially and are covered by this item's session hold as-is — interplay, not a gate.

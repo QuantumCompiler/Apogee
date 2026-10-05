@@ -437,3 +437,49 @@ TEST_CASE("attachments round-trip by reference, and an older file has none",
     REQUIRE_FALSE(bad.warnings.empty());
     CHECK(bad.warnings.front().kind == WarningKind::FieldDropped);
 }
+
+TEST_CASE("a chat's suite is saved as left, and a chat with none saves as before",
+          "[logger][session][suites]") {
+    // 27d: no suite, no new key -- the file is the one an older Apogee wrote.
+    const Session plain = sample();
+    const std::string plain_text = apogee::logger::serialize(plain);
+    CHECK(plain_text.find("suite") == std::string::npos);
+    CHECK_FALSE(deserialize(plain_text, {}).session.suite.has_value());
+
+    // A suite's name, and "" -- a suite turned off, which a resume keeps off.
+    for (const std::string& suite : {std::string{"research"}, std::string{}}) {
+        Session session = sample();
+        session.suite = suite;
+        const std::string text = apogee::logger::serialize(session);
+        CHECK(nlohmann::json::parse(text).at("suite") == suite);
+        KnownDependencies known;
+        known.suites = {"Research"};
+        known.check_suites = true;
+        const auto loaded = deserialize(text, known);
+        CHECK(loaded.warnings.empty());
+        CHECK(loaded.session.suite == suite);
+    }
+}
+
+TEST_CASE("a suite since deleted is dropped with a warning, never fatal",
+          "[logger][session][suites]") {
+    Session session = sample();
+    session.suite = "vanished";
+    KnownDependencies known;
+    known.suites = {"research"};
+    known.check_suites = true;
+    const auto loaded = deserialize(apogee::logger::serialize(session), known);
+    CHECK_FALSE(loaded.session.suite.has_value());
+    REQUIRE(loaded.warnings.size() == 1);
+    CHECK(loaded.warnings.front().kind == WarningKind::SuiteMissing);
+    CHECK(loaded.warnings.front().message.find("vanished") != std::string::npos);
+    CHECK(apogee::logger::to_string(WarningKind::SuiteMissing) == "suite_missing");
+
+    // Unchecked, it is kept as written.
+    CHECK(deserialize(apogee::logger::serialize(session), {}).session.suite == "vanished");
+    // A wrong shape is a dropped field, the chat still opens.
+    const auto odd = deserialize(R"({"chat_id":"x","backend":"b","suite":7})", {});
+    CHECK_FALSE(odd.session.suite.has_value());
+    REQUIRE(odd.warnings.size() == 2);  // the shape, and the missing schema
+    CHECK(odd.warnings.front().kind == WarningKind::FieldDropped);
+}

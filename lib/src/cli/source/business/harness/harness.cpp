@@ -187,6 +187,10 @@ const std::string& Harness::default_model() const noexcept {
     return config_.models.default_backend;
 }
 
+void Harness::set_active_suite(std::string suite) {
+    config_.models.default_suite = std::move(suite);
+}
+
 ChatResponse Harness::chat(const ChatRequest& request,
                            const CancellationToken& cancellation) const {
     return route(request.model).chat(request, cancellation);
@@ -405,8 +409,10 @@ std::int64_t Harness::context_window_for_model(std::string_view model) const {
 
     // An explicit context_size on the backend entry always wins: the user
     // knows something we do not, such as a model served with a deliberately
-    // shortened window.
-    const std::int64_t configured = backend != nullptr ? backend->context_size.value_or(0) : 0;
+    // shortened window. The active suite's pin is that entry's, while the
+    // suite is active (27d) -- the window the factory built the backend at.
+    const std::int64_t configured =
+        backend != nullptr ? backend_as_run(config_, name).context_size.value_or(0) : 0;
     if (configured > 0) {
         return configured;
     }

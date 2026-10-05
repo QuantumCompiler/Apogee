@@ -215,6 +215,66 @@ void check_role_pointer(CheckReport& report, const harness::Config& config,
     add(report, Status::Ok, "Config", std::string{what}, value);
 }
 
+/// One row per suite (27d): each member names a configured backend -- the
+/// row that says so before a session does -- and a vision or transcription
+/// member reads its medium, as a pointer at that role must.
+void check_suites(CheckReport& report, const harness::Config& config,
+                  const backends::MlxHost& host) {
+    const harness::SuiteConfig* active = harness::active_suite(config);
+    for (const auto& [name, suite] : config.suites) {
+        const std::string label = "suite: " + name;
+        if (suite.members.empty()) {
+            add(report, Status::Warn, "Config", label,
+                "names no members -- every role falls through to the global pointers",
+                "apogee config set-suite " + name + " --<role> <backend>");
+            continue;
+        }
+        std::string members;
+        bool reported = false;
+        for (const std::string_view role : harness::suite_role_names()) {
+            const auto it = suite.members.find(role);
+            if (it == suite.members.end()) {
+                continue;
+            }
+            const harness::SuiteMember& member = it->second;
+            const harness::BackendConfig* backend = config.find_backend(member.backend);
+            if (backend == nullptr) {
+                add(report, Status::Fail, "Config", label,
+                    std::string{role} + " names a backend that is not configured: '" +
+                        member.backend + "'",
+                    "apogee config set-suite " + name + " --" + std::string{role} +
+                        " <one of your configured backends>");
+                reported = true;
+                break;
+            }
+            std::optional<Medium> medium;
+            if (role == "vision") {
+                medium = Medium::Image;
+            } else if (role == "transcription") {
+                medium = Medium::Audio;
+            }
+            if (medium.has_value()) {
+                if (const MediumGap gap = medium_gap(*backend, *medium, host);
+                    !gap.reason.empty()) {
+                    add(report, Status::Warn, "Config", label,
+                        std::string{role} + " " + member.backend + " -- " + gap.reason, gap.remedy);
+                    reported = true;
+                    break;
+                }
+            }
+            members += members.empty() ? "" : " · ";
+            members += std::string{role} + " " + member.backend;
+            if (member.context_size.has_value()) {
+                members += " (window " + std::to_string(*member.context_size) + ")";
+            }
+        }
+        if (!reported) {
+            add(report, Status::Ok, "Config", label,
+                members + (active == &suite ? "  -- the default suite" : ""));
+        }
+    }
+}
+
 void check_config(CheckReport& report, const CheckInputs& inputs) {
     if (inputs.config_missing) {
         // A fresh install has no config yet. That is a state with an obvious
@@ -405,6 +465,7 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
     check_role_pointer(report, config, host, "default_transcription",
                        config.models.default_transcription, Medium::Audio);
     check_role_pointer(report, config, host, "default_utility", config.models.default_utility);
+    check_suites(report, config, host);
 
     // Collections: a typo in `retriever:` must never silently mean auto, and a
     // `rerank:` or `backend:` must name something that exists. The validator

@@ -29,6 +29,7 @@
 #include "harness/roles.h"
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
+#include "operations/suites.h"
 #include "platform/platform.h"
 #include "views/ask_prompt.h"
 #include "views/cli_reporter.h"
@@ -277,11 +278,14 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         const auto machine_mcp = std::make_shared<mcp::Registry>();
         if (flags.tools) {
             // stdout is the protocol: connection notes go to stderr.
-            machine_registry = make_built_in_tools(BuiltInToolOptions{
-                .config = &config,
-                .harness = &harness,
-                .mcp = machine_mcp,
-                .mcp_status = [](std::string_view line) { std::cerr << line << "\n"; }});
+            // The toolset the active suite pins on this backend, if any (27d).
+            machine_registry = pin_toolset(
+                make_built_in_tools(BuiltInToolOptions{
+                    .config = &config,
+                    .harness = &harness,
+                    .mcp = machine_mcp,
+                    .mcp_status = [](std::string_view line) { std::cerr << line << "\n"; }}),
+                config, model);
             machine_options.tools = &machine_registry;
             // Past a dozen and a half tools, the ones the question needs (26g).
             std::string ranked_by;
@@ -430,15 +434,18 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     std::unique_ptr<agentloop::ToolSelection> selection;
     const auto mcp_registry = std::make_shared<mcp::Registry>();
     if (flags.tools) {
-        registry = make_built_in_tools(BuiltInToolOptions{
-            .config = &config,
-            .harness = &harness,
-            .mcp = mcp_registry,
-            .mcp_status = mcp_status_line(reporter.status()),
-            .mcp_server_log = flags.verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
-                std::cerr << bytes << std::flush;
-            }}
-                                            : mcp::StderrTail::Sink{}});
+        // The toolset the active suite pins on this backend, if any (27d).
+        registry = pin_toolset(
+            make_built_in_tools(BuiltInToolOptions{
+                .config = &config,
+                .harness = &harness,
+                .mcp = mcp_registry,
+                .mcp_status = mcp_status_line(reporter.status()),
+                .mcp_server_log = flags.verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
+                    std::cerr << bytes << std::flush;
+                }}
+                                                : mcp::StderrTail::Sink{}}),
+            config, model);
         loop_options.tools = &registry;
         // Past a dozen and a half tools, the ones the question needs (26g).
         std::string ranked_by;
@@ -619,6 +626,10 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user(message);
         }
 
+        // A suite member naming nothing is refused, never routed around (27d).
+        if (const std::string refused = validate_active_suite(config); !refused.empty()) {
+            fail_user(refused);
+        }
         const std::string prompt = resolve_prompt(*flags);
         check_images(*flags);
 

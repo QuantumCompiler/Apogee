@@ -1,0 +1,1728 @@
+default='' pointers=-1 role=chat override='' entry='' conversation='' -> '' nothing
+default='' pointers=-1 role=chat override='' entry='' conversation='on' -> '' nothing
+default='' pointers=-1 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=-1 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=-1 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=-1 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=-1 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=-1 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=-1 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=-1 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=-1 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=-1 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=-1 role=embedding override='' entry='' conversation='' -> '' nothing
+default='' pointers=-1 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='' pointers=-1 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=-1 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=-1 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=-1 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=-1 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=-1 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=-1 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=-1 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=-1 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=-1 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=-1 role=extraction override='' entry='' conversation='' -> '' nothing
+default='' pointers=-1 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='' pointers=-1 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=-1 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=-1 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=-1 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=-1 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=-1 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=-1 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=-1 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=-1 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=-1 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=-1 role=vision override='' entry='' conversation='' -> '' nothing
+default='' pointers=-1 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=-1 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=-1 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=-1 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=-1 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=-1 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=-1 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=-1 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=-1 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=-1 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=-1 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=-1 role=transcription override='' entry='' conversation='' -> '' nothing
+default='' pointers=-1 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=-1 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=-1 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=-1 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=-1 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=-1 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=-1 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=-1 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=-1 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=-1 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=-1 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=-1 role=utility override='' entry='' conversation='' -> '' nothing
+default='' pointers=-1 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=-1 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=-1 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=-1 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=-1 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=-1 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=-1 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=-1 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=-1 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=-1 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=-1 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=0 role=chat override='' entry='' conversation='' -> '' nothing
+default='' pointers=0 role=chat override='' entry='' conversation='on' -> '' nothing
+default='' pointers=0 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=0 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=0 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=0 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=0 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=0 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=0 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=0 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=0 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=0 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=0 role=embedding override='' entry='' conversation='' -> '' nothing
+default='' pointers=0 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='' pointers=0 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=0 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=0 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=0 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=0 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=0 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=0 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=0 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=0 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=0 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=0 role=extraction override='' entry='' conversation='' -> '' nothing
+default='' pointers=0 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='' pointers=0 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=0 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=0 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=0 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=0 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=0 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=0 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=0 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=0 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=0 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=0 role=vision override='' entry='' conversation='' -> '' nothing
+default='' pointers=0 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=0 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=0 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=0 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=0 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=0 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=0 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=0 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=0 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=0 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=0 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=0 role=transcription override='' entry='' conversation='' -> '' nothing
+default='' pointers=0 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=0 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=0 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=0 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=0 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=0 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=0 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=0 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=0 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=0 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=0 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=0 role=utility override='' entry='' conversation='' -> '' nothing
+default='' pointers=0 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=0 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=0 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=0 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=0 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=0 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=0 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=0 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=0 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=0 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=0 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=1 role=chat override='' entry='' conversation='' -> '' nothing
+default='' pointers=1 role=chat override='' entry='' conversation='on' -> '' nothing
+default='' pointers=1 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=1 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=1 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=1 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=1 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=1 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=1 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=1 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=1 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=1 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=1 role=embedding override='' entry='' conversation='' -> 'embedding-p' pointer
+default='' pointers=1 role=embedding override='' entry='' conversation='on' -> 'embedding-p' pointer
+default='' pointers=1 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=1 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=1 role=embedding override='' entry=' ' conversation='' -> 'embedding-p' pointer
+default='' pointers=1 role=embedding override='' entry=' ' conversation='on' -> 'embedding-p' pointer
+default='' pointers=1 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=1 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=1 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=1 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=1 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=1 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=1 role=extraction override='' entry='' conversation='' -> '' nothing
+default='' pointers=1 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='' pointers=1 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=1 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=1 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=1 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=1 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=1 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=1 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=1 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=1 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=1 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=1 role=vision override='' entry='' conversation='' -> '' nothing
+default='' pointers=1 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=1 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=1 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=1 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=1 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=1 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=1 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=1 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=1 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=1 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=1 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=1 role=transcription override='' entry='' conversation='' -> '' nothing
+default='' pointers=1 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=1 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=1 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=1 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=1 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=1 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=1 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=1 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=1 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=1 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=1 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=1 role=utility override='' entry='' conversation='' -> '' nothing
+default='' pointers=1 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=1 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=1 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=1 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=1 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=1 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=1 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=1 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=1 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=1 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=1 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=2 role=chat override='' entry='' conversation='' -> '' nothing
+default='' pointers=2 role=chat override='' entry='' conversation='on' -> '' nothing
+default='' pointers=2 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=2 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=2 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=2 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=2 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=2 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=2 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=2 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=2 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=2 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=2 role=embedding override='' entry='' conversation='' -> '' nothing
+default='' pointers=2 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='' pointers=2 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=2 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=2 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=2 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=2 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=2 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=2 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=2 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=2 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=2 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=2 role=extraction override='' entry='' conversation='' -> 'extraction-p' pointer
+default='' pointers=2 role=extraction override='' entry='' conversation='on' -> 'extraction-p' pointer
+default='' pointers=2 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=2 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=2 role=extraction override='' entry=' ' conversation='' -> 'extraction-p' pointer
+default='' pointers=2 role=extraction override='' entry=' ' conversation='on' -> 'extraction-p' pointer
+default='' pointers=2 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=2 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=2 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=2 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=2 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=2 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=2 role=vision override='' entry='' conversation='' -> '' nothing
+default='' pointers=2 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=2 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=2 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=2 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=2 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=2 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=2 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=2 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=2 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=2 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=2 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=2 role=transcription override='' entry='' conversation='' -> '' nothing
+default='' pointers=2 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=2 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=2 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=2 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=2 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=2 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=2 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=2 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=2 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=2 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=2 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=2 role=utility override='' entry='' conversation='' -> '' nothing
+default='' pointers=2 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=2 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=2 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=2 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=2 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=2 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=2 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=2 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=2 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=2 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=2 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=3 role=chat override='' entry='' conversation='' -> '' nothing
+default='' pointers=3 role=chat override='' entry='' conversation='on' -> '' nothing
+default='' pointers=3 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=3 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=3 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=3 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=3 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=3 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=3 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=3 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=3 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=3 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=3 role=embedding override='' entry='' conversation='' -> '' nothing
+default='' pointers=3 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='' pointers=3 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=3 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=3 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=3 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=3 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=3 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=3 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=3 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=3 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=3 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=3 role=extraction override='' entry='' conversation='' -> '' nothing
+default='' pointers=3 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='' pointers=3 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=3 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=3 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=3 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=3 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=3 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=3 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=3 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=3 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=3 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=3 role=vision override='' entry='' conversation='' -> 'vision-p' pointer
+default='' pointers=3 role=vision override='' entry='' conversation='on' -> 'vision-p' pointer
+default='' pointers=3 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=3 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=3 role=vision override='' entry=' ' conversation='' -> 'vision-p' pointer
+default='' pointers=3 role=vision override='' entry=' ' conversation='on' -> 'vision-p' pointer
+default='' pointers=3 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=3 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=3 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=3 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=3 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=3 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=3 role=transcription override='' entry='' conversation='' -> '' nothing
+default='' pointers=3 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=3 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=3 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=3 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=3 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=3 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=3 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=3 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=3 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=3 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=3 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=3 role=utility override='' entry='' conversation='' -> '' nothing
+default='' pointers=3 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=3 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=3 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=3 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=3 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=3 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=3 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=3 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=3 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=3 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=3 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=4 role=chat override='' entry='' conversation='' -> '' nothing
+default='' pointers=4 role=chat override='' entry='' conversation='on' -> '' nothing
+default='' pointers=4 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=4 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=4 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=4 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=4 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=4 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=4 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=4 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=4 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=4 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=4 role=embedding override='' entry='' conversation='' -> '' nothing
+default='' pointers=4 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='' pointers=4 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=4 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=4 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=4 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=4 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=4 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=4 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=4 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=4 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=4 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=4 role=extraction override='' entry='' conversation='' -> '' nothing
+default='' pointers=4 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='' pointers=4 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=4 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=4 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=4 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=4 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=4 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=4 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=4 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=4 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=4 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=4 role=vision override='' entry='' conversation='' -> '' nothing
+default='' pointers=4 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=4 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=4 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=4 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=4 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=4 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=4 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=4 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=4 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=4 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=4 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=4 role=transcription override='' entry='' conversation='' -> 'transcription-p' pointer
+default='' pointers=4 role=transcription override='' entry='' conversation='on' -> 'transcription-p' pointer
+default='' pointers=4 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=4 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=4 role=transcription override='' entry=' ' conversation='' -> 'transcription-p' pointer
+default='' pointers=4 role=transcription override='' entry=' ' conversation='on' -> 'transcription-p' pointer
+default='' pointers=4 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=4 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=4 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=4 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=4 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=4 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=4 role=utility override='' entry='' conversation='' -> '' nothing
+default='' pointers=4 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=4 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=4 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=4 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=4 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=4 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=4 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=4 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=4 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=4 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=4 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=5 role=chat override='' entry='' conversation='' -> '' nothing
+default='' pointers=5 role=chat override='' entry='' conversation='on' -> '' nothing
+default='' pointers=5 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=5 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=5 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=5 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=5 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=5 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=5 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=5 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=5 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=5 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=5 role=embedding override='' entry='' conversation='' -> '' nothing
+default='' pointers=5 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='' pointers=5 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=5 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=5 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=5 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=5 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=5 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=5 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=5 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=5 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=5 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=5 role=extraction override='' entry='' conversation='' -> '' nothing
+default='' pointers=5 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='' pointers=5 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=5 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=5 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=5 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=5 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=5 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=5 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=5 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=5 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=5 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=5 role=vision override='' entry='' conversation='' -> '' nothing
+default='' pointers=5 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=5 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=5 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=5 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=5 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=5 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=5 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=5 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=5 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=5 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=5 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=5 role=transcription override='' entry='' conversation='' -> '' nothing
+default='' pointers=5 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='' pointers=5 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=5 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=5 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=5 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='' pointers=5 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=5 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=5 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=5 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=5 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=5 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=5 role=utility override='' entry='' conversation='' -> 'utility-p' pointer
+default='' pointers=5 role=utility override='' entry='' conversation='on' -> 'utility-p' pointer
+default='' pointers=5 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=5 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=5 role=utility override='' entry=' ' conversation='' -> 'utility-p' pointer
+default='' pointers=5 role=utility override='' entry=' ' conversation='on' -> 'utility-p' pointer
+default='' pointers=5 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=5 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=5 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=5 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=5 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=5 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=6 role=chat override='' entry='' conversation='' -> '' nothing
+default='' pointers=6 role=chat override='' entry='' conversation='on' -> '' nothing
+default='' pointers=6 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=6 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=6 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='' pointers=6 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='' pointers=6 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=6 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=6 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=6 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=6 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=6 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=6 role=embedding override='' entry='' conversation='' -> 'embedding-p' pointer
+default='' pointers=6 role=embedding override='' entry='' conversation='on' -> 'embedding-p' pointer
+default='' pointers=6 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=6 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=6 role=embedding override='' entry=' ' conversation='' -> 'embedding-p' pointer
+default='' pointers=6 role=embedding override='' entry=' ' conversation='on' -> 'embedding-p' pointer
+default='' pointers=6 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=6 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=6 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=6 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=6 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=6 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=6 role=extraction override='' entry='' conversation='' -> 'extraction-p' pointer
+default='' pointers=6 role=extraction override='' entry='' conversation='on' -> 'extraction-p' pointer
+default='' pointers=6 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=6 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=6 role=extraction override='' entry=' ' conversation='' -> 'extraction-p' pointer
+default='' pointers=6 role=extraction override='' entry=' ' conversation='on' -> 'extraction-p' pointer
+default='' pointers=6 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=6 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=6 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=6 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=6 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=6 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=6 role=vision override='' entry='' conversation='' -> 'vision-p' pointer
+default='' pointers=6 role=vision override='' entry='' conversation='on' -> 'vision-p' pointer
+default='' pointers=6 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=6 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=6 role=vision override='' entry=' ' conversation='' -> 'vision-p' pointer
+default='' pointers=6 role=vision override='' entry=' ' conversation='on' -> 'vision-p' pointer
+default='' pointers=6 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=6 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=6 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=6 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=6 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=6 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=6 role=transcription override='' entry='' conversation='' -> 'transcription-p' pointer
+default='' pointers=6 role=transcription override='' entry='' conversation='on' -> 'transcription-p' pointer
+default='' pointers=6 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=6 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=6 role=transcription override='' entry=' ' conversation='' -> 'transcription-p' pointer
+default='' pointers=6 role=transcription override='' entry=' ' conversation='on' -> 'transcription-p' pointer
+default='' pointers=6 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=6 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=6 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=6 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=6 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=6 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='' pointers=6 role=utility override='' entry='' conversation='' -> 'utility-p' pointer
+default='' pointers=6 role=utility override='' entry='' conversation='on' -> 'utility-p' pointer
+default='' pointers=6 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='' pointers=6 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='' pointers=6 role=utility override='' entry=' ' conversation='' -> 'utility-p' pointer
+default='' pointers=6 role=utility override='' entry=' ' conversation='on' -> 'utility-p' pointer
+default='' pointers=6 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='' pointers=6 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='' pointers=6 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='' pointers=6 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='' pointers=6 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='' pointers=6 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=chat override='' entry='' conversation='' -> 'base' default
+default='base' pointers=-1 role=chat override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=-1 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=-1 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=-1 role=chat override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=-1 role=chat override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=-1 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=-1 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=-1 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=-1 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=embedding override='' entry='' conversation='' -> 'base' default
+default='base' pointers=-1 role=embedding override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=-1 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=-1 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=-1 role=embedding override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=-1 role=embedding override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=-1 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=-1 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=-1 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=-1 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=extraction override='' entry='' conversation='' -> 'base' default
+default='base' pointers=-1 role=extraction override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=-1 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=-1 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=-1 role=extraction override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=-1 role=extraction override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=-1 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=-1 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=-1 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=-1 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=vision override='' entry='' conversation='' -> 'base' default
+default='base' pointers=-1 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=-1 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=-1 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=-1 role=vision override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=-1 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=-1 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=-1 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=-1 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=-1 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=transcription override='' entry='' conversation='' -> 'base' default
+default='base' pointers=-1 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=-1 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=-1 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=-1 role=transcription override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=-1 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=-1 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=-1 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=-1 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=-1 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=utility override='' entry='' conversation='' -> 'base' default
+default='base' pointers=-1 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=-1 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=-1 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=-1 role=utility override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=-1 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=-1 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=-1 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=-1 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=-1 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=-1 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=0 role=chat override='' entry='' conversation='' -> 'base' default
+default='base' pointers=0 role=chat override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=0 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=0 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=0 role=chat override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=0 role=chat override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=0 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=0 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=0 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=0 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=0 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=0 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=0 role=embedding override='' entry='' conversation='' -> 'base' default
+default='base' pointers=0 role=embedding override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=0 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=0 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=0 role=embedding override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=0 role=embedding override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=0 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=0 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=0 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=0 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=0 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=0 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=0 role=extraction override='' entry='' conversation='' -> 'base' default
+default='base' pointers=0 role=extraction override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=0 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=0 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=0 role=extraction override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=0 role=extraction override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=0 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=0 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=0 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=0 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=0 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=0 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=0 role=vision override='' entry='' conversation='' -> 'base' default
+default='base' pointers=0 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=0 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=0 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=0 role=vision override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=0 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=0 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=0 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=0 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=0 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=0 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=0 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=0 role=transcription override='' entry='' conversation='' -> 'base' default
+default='base' pointers=0 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=0 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=0 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=0 role=transcription override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=0 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=0 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=0 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=0 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=0 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=0 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=0 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=0 role=utility override='' entry='' conversation='' -> 'base' default
+default='base' pointers=0 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=0 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=0 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=0 role=utility override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=0 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=0 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=0 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=0 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=0 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=0 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=0 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=1 role=chat override='' entry='' conversation='' -> 'base' default
+default='base' pointers=1 role=chat override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=1 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=1 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=1 role=chat override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=1 role=chat override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=1 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=1 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=1 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=1 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=1 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=1 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=1 role=embedding override='' entry='' conversation='' -> 'embedding-p' pointer
+default='base' pointers=1 role=embedding override='' entry='' conversation='on' -> 'embedding-p' pointer
+default='base' pointers=1 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=1 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=1 role=embedding override='' entry=' ' conversation='' -> 'embedding-p' pointer
+default='base' pointers=1 role=embedding override='' entry=' ' conversation='on' -> 'embedding-p' pointer
+default='base' pointers=1 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=1 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=1 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=1 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=1 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=1 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=1 role=extraction override='' entry='' conversation='' -> 'base' default
+default='base' pointers=1 role=extraction override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=1 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=1 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=1 role=extraction override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=1 role=extraction override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=1 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=1 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=1 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=1 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=1 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=1 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=1 role=vision override='' entry='' conversation='' -> 'base' default
+default='base' pointers=1 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=1 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=1 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=1 role=vision override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=1 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=1 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=1 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=1 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=1 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=1 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=1 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=1 role=transcription override='' entry='' conversation='' -> 'base' default
+default='base' pointers=1 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=1 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=1 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=1 role=transcription override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=1 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=1 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=1 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=1 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=1 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=1 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=1 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=1 role=utility override='' entry='' conversation='' -> 'base' default
+default='base' pointers=1 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=1 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=1 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=1 role=utility override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=1 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=1 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=1 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=1 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=1 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=1 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=1 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=2 role=chat override='' entry='' conversation='' -> 'base' default
+default='base' pointers=2 role=chat override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=2 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=2 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=2 role=chat override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=2 role=chat override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=2 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=2 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=2 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=2 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=2 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=2 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=2 role=embedding override='' entry='' conversation='' -> 'base' default
+default='base' pointers=2 role=embedding override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=2 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=2 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=2 role=embedding override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=2 role=embedding override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=2 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=2 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=2 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=2 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=2 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=2 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=2 role=extraction override='' entry='' conversation='' -> 'extraction-p' pointer
+default='base' pointers=2 role=extraction override='' entry='' conversation='on' -> 'extraction-p' pointer
+default='base' pointers=2 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=2 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=2 role=extraction override='' entry=' ' conversation='' -> 'extraction-p' pointer
+default='base' pointers=2 role=extraction override='' entry=' ' conversation='on' -> 'extraction-p' pointer
+default='base' pointers=2 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=2 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=2 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=2 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=2 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=2 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=2 role=vision override='' entry='' conversation='' -> 'base' default
+default='base' pointers=2 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=2 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=2 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=2 role=vision override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=2 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=2 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=2 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=2 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=2 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=2 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=2 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=2 role=transcription override='' entry='' conversation='' -> 'base' default
+default='base' pointers=2 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=2 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=2 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=2 role=transcription override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=2 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=2 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=2 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=2 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=2 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=2 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=2 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=2 role=utility override='' entry='' conversation='' -> 'base' default
+default='base' pointers=2 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=2 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=2 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=2 role=utility override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=2 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=2 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=2 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=2 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=2 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=2 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=2 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=3 role=chat override='' entry='' conversation='' -> 'base' default
+default='base' pointers=3 role=chat override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=3 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=3 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=3 role=chat override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=3 role=chat override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=3 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=3 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=3 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=3 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=3 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=3 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=3 role=embedding override='' entry='' conversation='' -> 'base' default
+default='base' pointers=3 role=embedding override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=3 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=3 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=3 role=embedding override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=3 role=embedding override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=3 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=3 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=3 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=3 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=3 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=3 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=3 role=extraction override='' entry='' conversation='' -> 'base' default
+default='base' pointers=3 role=extraction override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=3 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=3 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=3 role=extraction override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=3 role=extraction override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=3 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=3 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=3 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=3 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=3 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=3 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=3 role=vision override='' entry='' conversation='' -> 'vision-p' pointer
+default='base' pointers=3 role=vision override='' entry='' conversation='on' -> 'vision-p' pointer
+default='base' pointers=3 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=3 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=3 role=vision override='' entry=' ' conversation='' -> 'vision-p' pointer
+default='base' pointers=3 role=vision override='' entry=' ' conversation='on' -> 'vision-p' pointer
+default='base' pointers=3 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=3 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=3 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=3 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=3 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=3 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=3 role=transcription override='' entry='' conversation='' -> 'base' default
+default='base' pointers=3 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=3 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=3 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=3 role=transcription override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=3 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=3 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=3 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=3 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=3 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=3 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=3 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=3 role=utility override='' entry='' conversation='' -> 'base' default
+default='base' pointers=3 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=3 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=3 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=3 role=utility override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=3 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=3 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=3 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=3 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=3 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=3 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=3 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=4 role=chat override='' entry='' conversation='' -> 'base' default
+default='base' pointers=4 role=chat override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=4 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=4 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=4 role=chat override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=4 role=chat override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=4 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=4 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=4 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=4 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=4 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=4 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=4 role=embedding override='' entry='' conversation='' -> 'base' default
+default='base' pointers=4 role=embedding override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=4 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=4 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=4 role=embedding override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=4 role=embedding override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=4 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=4 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=4 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=4 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=4 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=4 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=4 role=extraction override='' entry='' conversation='' -> 'base' default
+default='base' pointers=4 role=extraction override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=4 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=4 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=4 role=extraction override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=4 role=extraction override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=4 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=4 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=4 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=4 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=4 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=4 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=4 role=vision override='' entry='' conversation='' -> 'base' default
+default='base' pointers=4 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=4 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=4 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=4 role=vision override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=4 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=4 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=4 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=4 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=4 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=4 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=4 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=4 role=transcription override='' entry='' conversation='' -> 'transcription-p' pointer
+default='base' pointers=4 role=transcription override='' entry='' conversation='on' -> 'transcription-p' pointer
+default='base' pointers=4 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=4 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=4 role=transcription override='' entry=' ' conversation='' -> 'transcription-p' pointer
+default='base' pointers=4 role=transcription override='' entry=' ' conversation='on' -> 'transcription-p' pointer
+default='base' pointers=4 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=4 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=4 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=4 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=4 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=4 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=4 role=utility override='' entry='' conversation='' -> 'base' default
+default='base' pointers=4 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=4 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=4 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=4 role=utility override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=4 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=4 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=4 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=4 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=4 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=4 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=4 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=5 role=chat override='' entry='' conversation='' -> 'base' default
+default='base' pointers=5 role=chat override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=5 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=5 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=5 role=chat override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=5 role=chat override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=5 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=5 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=5 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=5 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=5 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=5 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=5 role=embedding override='' entry='' conversation='' -> 'base' default
+default='base' pointers=5 role=embedding override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=5 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=5 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=5 role=embedding override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=5 role=embedding override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=5 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=5 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=5 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=5 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=5 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=5 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=5 role=extraction override='' entry='' conversation='' -> 'base' default
+default='base' pointers=5 role=extraction override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=5 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=5 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=5 role=extraction override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=5 role=extraction override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=5 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=5 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=5 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=5 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=5 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=5 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=5 role=vision override='' entry='' conversation='' -> 'base' default
+default='base' pointers=5 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=5 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=5 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=5 role=vision override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=5 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=5 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=5 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=5 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=5 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=5 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=5 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=5 role=transcription override='' entry='' conversation='' -> 'base' default
+default='base' pointers=5 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='base' pointers=5 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=5 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=5 role=transcription override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=5 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='base' pointers=5 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=5 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=5 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=5 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=5 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=5 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=5 role=utility override='' entry='' conversation='' -> 'utility-p' pointer
+default='base' pointers=5 role=utility override='' entry='' conversation='on' -> 'utility-p' pointer
+default='base' pointers=5 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=5 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=5 role=utility override='' entry=' ' conversation='' -> 'utility-p' pointer
+default='base' pointers=5 role=utility override='' entry=' ' conversation='on' -> 'utility-p' pointer
+default='base' pointers=5 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=5 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=5 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=5 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=5 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=5 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=6 role=chat override='' entry='' conversation='' -> 'base' default
+default='base' pointers=6 role=chat override='' entry='' conversation='on' -> 'base' default
+default='base' pointers=6 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=6 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=6 role=chat override='' entry=' ' conversation='' -> 'base' default
+default='base' pointers=6 role=chat override='' entry=' ' conversation='on' -> 'base' default
+default='base' pointers=6 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=6 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=6 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=6 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=6 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=6 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=6 role=embedding override='' entry='' conversation='' -> 'embedding-p' pointer
+default='base' pointers=6 role=embedding override='' entry='' conversation='on' -> 'embedding-p' pointer
+default='base' pointers=6 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=6 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=6 role=embedding override='' entry=' ' conversation='' -> 'embedding-p' pointer
+default='base' pointers=6 role=embedding override='' entry=' ' conversation='on' -> 'embedding-p' pointer
+default='base' pointers=6 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=6 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=6 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=6 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=6 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=6 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=6 role=extraction override='' entry='' conversation='' -> 'extraction-p' pointer
+default='base' pointers=6 role=extraction override='' entry='' conversation='on' -> 'extraction-p' pointer
+default='base' pointers=6 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=6 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=6 role=extraction override='' entry=' ' conversation='' -> 'extraction-p' pointer
+default='base' pointers=6 role=extraction override='' entry=' ' conversation='on' -> 'extraction-p' pointer
+default='base' pointers=6 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=6 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=6 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=6 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=6 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=6 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=6 role=vision override='' entry='' conversation='' -> 'vision-p' pointer
+default='base' pointers=6 role=vision override='' entry='' conversation='on' -> 'vision-p' pointer
+default='base' pointers=6 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=6 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=6 role=vision override='' entry=' ' conversation='' -> 'vision-p' pointer
+default='base' pointers=6 role=vision override='' entry=' ' conversation='on' -> 'vision-p' pointer
+default='base' pointers=6 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=6 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=6 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=6 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=6 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=6 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=6 role=transcription override='' entry='' conversation='' -> 'transcription-p' pointer
+default='base' pointers=6 role=transcription override='' entry='' conversation='on' -> 'transcription-p' pointer
+default='base' pointers=6 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=6 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=6 role=transcription override='' entry=' ' conversation='' -> 'transcription-p' pointer
+default='base' pointers=6 role=transcription override='' entry=' ' conversation='on' -> 'transcription-p' pointer
+default='base' pointers=6 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=6 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=6 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=6 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=6 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=6 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='base' pointers=6 role=utility override='' entry='' conversation='' -> 'utility-p' pointer
+default='base' pointers=6 role=utility override='' entry='' conversation='on' -> 'utility-p' pointer
+default='base' pointers=6 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='base' pointers=6 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='base' pointers=6 role=utility override='' entry=' ' conversation='' -> 'utility-p' pointer
+default='base' pointers=6 role=utility override='' entry=' ' conversation='on' -> 'utility-p' pointer
+default='base' pointers=6 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='base' pointers=6 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='base' pointers=6 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='base' pointers=6 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='base' pointers=6 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='base' pointers=6 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=chat override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=-1 role=chat override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=-1 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=-1 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=-1 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=-1 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=-1 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=embedding override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=-1 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=-1 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=-1 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=-1 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=-1 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=-1 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=extraction override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=-1 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=-1 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=-1 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=-1 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=-1 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=-1 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=vision override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=-1 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=-1 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=-1 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=-1 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=-1 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=-1 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=transcription override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=-1 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=-1 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=-1 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=-1 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=-1 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=-1 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=utility override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=-1 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=-1 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=-1 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=-1 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=-1 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=-1 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=-1 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=-1 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=chat override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=0 role=chat override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=0 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=0 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=0 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=0 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=0 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=0 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=0 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=0 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=embedding override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=0 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=0 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=0 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=0 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=0 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=0 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=0 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=0 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=0 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=extraction override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=0 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=0 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=0 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=0 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=0 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=0 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=0 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=0 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=0 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=vision override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=0 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=0 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=0 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=0 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=0 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=0 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=0 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=0 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=0 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=transcription override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=0 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=0 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=0 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=0 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=0 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=0 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=0 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=0 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=0 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=utility override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=0 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=0 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=0 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=0 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=0 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=0 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=0 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=0 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=0 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=0 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=chat override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=1 role=chat override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=1 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=1 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=1 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=1 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=1 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=1 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=1 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=1 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=embedding override='' entry='' conversation='' -> 'embedding-p' pointer
+default='  ' pointers=1 role=embedding override='' entry='' conversation='on' -> 'embedding-p' pointer
+default='  ' pointers=1 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=1 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=1 role=embedding override='' entry=' ' conversation='' -> 'embedding-p' pointer
+default='  ' pointers=1 role=embedding override='' entry=' ' conversation='on' -> 'embedding-p' pointer
+default='  ' pointers=1 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=1 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=1 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=1 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=extraction override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=1 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=1 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=1 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=1 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=1 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=1 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=1 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=1 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=1 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=vision override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=1 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=1 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=1 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=1 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=1 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=1 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=1 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=1 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=1 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=transcription override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=1 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=1 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=1 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=1 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=1 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=1 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=1 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=1 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=1 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=utility override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=1 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=1 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=1 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=1 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=1 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=1 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=1 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=1 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=1 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=1 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=chat override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=2 role=chat override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=2 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=2 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=2 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=2 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=2 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=2 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=2 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=2 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=embedding override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=2 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=2 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=2 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=2 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=2 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=2 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=2 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=2 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=2 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=extraction override='' entry='' conversation='' -> 'extraction-p' pointer
+default='  ' pointers=2 role=extraction override='' entry='' conversation='on' -> 'extraction-p' pointer
+default='  ' pointers=2 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=2 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=2 role=extraction override='' entry=' ' conversation='' -> 'extraction-p' pointer
+default='  ' pointers=2 role=extraction override='' entry=' ' conversation='on' -> 'extraction-p' pointer
+default='  ' pointers=2 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=2 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=2 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=2 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=vision override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=2 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=2 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=2 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=2 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=2 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=2 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=2 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=2 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=2 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=transcription override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=2 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=2 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=2 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=2 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=2 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=2 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=2 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=2 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=2 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=utility override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=2 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=2 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=2 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=2 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=2 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=2 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=2 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=2 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=2 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=2 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=chat override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=3 role=chat override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=3 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=3 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=3 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=3 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=3 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=3 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=3 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=3 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=embedding override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=3 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=3 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=3 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=3 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=3 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=3 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=3 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=3 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=3 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=extraction override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=3 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=3 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=3 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=3 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=3 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=3 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=3 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=3 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=3 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=vision override='' entry='' conversation='' -> 'vision-p' pointer
+default='  ' pointers=3 role=vision override='' entry='' conversation='on' -> 'vision-p' pointer
+default='  ' pointers=3 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=3 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=3 role=vision override='' entry=' ' conversation='' -> 'vision-p' pointer
+default='  ' pointers=3 role=vision override='' entry=' ' conversation='on' -> 'vision-p' pointer
+default='  ' pointers=3 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=3 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=3 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=3 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=transcription override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=3 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=3 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=3 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=3 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=3 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=3 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=3 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=3 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=3 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=utility override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=3 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=3 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=3 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=3 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=3 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=3 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=3 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=3 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=3 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=3 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=chat override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=4 role=chat override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=4 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=4 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=4 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=4 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=4 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=4 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=4 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=4 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=embedding override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=4 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=4 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=4 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=4 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=4 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=4 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=4 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=4 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=4 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=extraction override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=4 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=4 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=4 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=4 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=4 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=4 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=4 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=4 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=4 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=vision override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=4 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=4 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=4 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=4 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=4 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=4 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=4 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=4 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=4 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=transcription override='' entry='' conversation='' -> 'transcription-p' pointer
+default='  ' pointers=4 role=transcription override='' entry='' conversation='on' -> 'transcription-p' pointer
+default='  ' pointers=4 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=4 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=4 role=transcription override='' entry=' ' conversation='' -> 'transcription-p' pointer
+default='  ' pointers=4 role=transcription override='' entry=' ' conversation='on' -> 'transcription-p' pointer
+default='  ' pointers=4 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=4 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=4 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=4 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=utility override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=4 role=utility override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=4 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=4 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=4 role=utility override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=4 role=utility override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=4 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=4 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=4 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=4 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=4 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=chat override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=5 role=chat override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=5 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=5 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=5 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=5 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=5 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=5 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=5 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=5 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=embedding override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=5 role=embedding override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=5 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=5 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=5 role=embedding override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=5 role=embedding override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=5 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=5 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=5 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=5 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=extraction override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=5 role=extraction override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=5 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=5 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=5 role=extraction override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=5 role=extraction override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=5 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=5 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=5 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=5 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=vision override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=5 role=vision override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=5 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=5 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=5 role=vision override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=5 role=vision override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=5 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=5 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=5 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=5 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=transcription override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=5 role=transcription override='' entry='' conversation='on' -> 'on' conversation
+default='  ' pointers=5 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=5 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=5 role=transcription override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=5 role=transcription override='' entry=' ' conversation='on' -> 'on' conversation
+default='  ' pointers=5 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=5 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=5 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=5 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=utility override='' entry='' conversation='' -> 'utility-p' pointer
+default='  ' pointers=5 role=utility override='' entry='' conversation='on' -> 'utility-p' pointer
+default='  ' pointers=5 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=5 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=5 role=utility override='' entry=' ' conversation='' -> 'utility-p' pointer
+default='  ' pointers=5 role=utility override='' entry=' ' conversation='on' -> 'utility-p' pointer
+default='  ' pointers=5 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=5 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=5 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=5 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=5 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=chat override='' entry='' conversation='' -> '' nothing
+default='  ' pointers=6 role=chat override='' entry='' conversation='on' -> '' nothing
+default='  ' pointers=6 role=chat override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=6 role=chat override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=6 role=chat override='' entry=' ' conversation='' -> '' nothing
+default='  ' pointers=6 role=chat override='' entry=' ' conversation='on' -> '' nothing
+default='  ' pointers=6 role=chat override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=6 role=chat override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=chat override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=6 role=chat override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=chat override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=6 role=chat override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=embedding override='' entry='' conversation='' -> 'embedding-p' pointer
+default='  ' pointers=6 role=embedding override='' entry='' conversation='on' -> 'embedding-p' pointer
+default='  ' pointers=6 role=embedding override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=6 role=embedding override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=6 role=embedding override='' entry=' ' conversation='' -> 'embedding-p' pointer
+default='  ' pointers=6 role=embedding override='' entry=' ' conversation='on' -> 'embedding-p' pointer
+default='  ' pointers=6 role=embedding override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=6 role=embedding override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=embedding override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=6 role=embedding override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=embedding override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=6 role=embedding override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=extraction override='' entry='' conversation='' -> 'extraction-p' pointer
+default='  ' pointers=6 role=extraction override='' entry='' conversation='on' -> 'extraction-p' pointer
+default='  ' pointers=6 role=extraction override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=6 role=extraction override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=6 role=extraction override='' entry=' ' conversation='' -> 'extraction-p' pointer
+default='  ' pointers=6 role=extraction override='' entry=' ' conversation='on' -> 'extraction-p' pointer
+default='  ' pointers=6 role=extraction override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=6 role=extraction override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=extraction override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=6 role=extraction override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=extraction override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=6 role=extraction override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=vision override='' entry='' conversation='' -> 'vision-p' pointer
+default='  ' pointers=6 role=vision override='' entry='' conversation='on' -> 'vision-p' pointer
+default='  ' pointers=6 role=vision override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=6 role=vision override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=6 role=vision override='' entry=' ' conversation='' -> 'vision-p' pointer
+default='  ' pointers=6 role=vision override='' entry=' ' conversation='on' -> 'vision-p' pointer
+default='  ' pointers=6 role=vision override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=6 role=vision override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=vision override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=6 role=vision override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=vision override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=6 role=vision override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=transcription override='' entry='' conversation='' -> 'transcription-p' pointer
+default='  ' pointers=6 role=transcription override='' entry='' conversation='on' -> 'transcription-p' pointer
+default='  ' pointers=6 role=transcription override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=6 role=transcription override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=6 role=transcription override='' entry=' ' conversation='' -> 'transcription-p' pointer
+default='  ' pointers=6 role=transcription override='' entry=' ' conversation='on' -> 'transcription-p' pointer
+default='  ' pointers=6 role=transcription override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=6 role=transcription override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=transcription override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=6 role=transcription override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=transcription override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=6 role=transcription override='picked' entry=' ' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=utility override='' entry='' conversation='' -> 'utility-p' pointer
+default='  ' pointers=6 role=utility override='' entry='' conversation='on' -> 'utility-p' pointer
+default='  ' pointers=6 role=utility override='' entry='entry' conversation='' -> 'entry' entry
+default='  ' pointers=6 role=utility override='' entry='entry' conversation='on' -> 'entry' entry
+default='  ' pointers=6 role=utility override='' entry=' ' conversation='' -> 'utility-p' pointer
+default='  ' pointers=6 role=utility override='' entry=' ' conversation='on' -> 'utility-p' pointer
+default='  ' pointers=6 role=utility override='picked' entry='' conversation='' -> 'picked' override
+default='  ' pointers=6 role=utility override='picked' entry='' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=utility override='picked' entry='entry' conversation='' -> 'picked' override
+default='  ' pointers=6 role=utility override='picked' entry='entry' conversation='on' -> 'picked' override
+default='  ' pointers=6 role=utility override='picked' entry=' ' conversation='' -> 'picked' override
+default='  ' pointers=6 role=utility override='picked' entry=' ' conversation='on' -> 'picked' override

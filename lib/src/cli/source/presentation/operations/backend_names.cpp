@@ -13,7 +13,7 @@ std::string helper_backend(const harness::Config& config, harness::ModelRole rol
 std::string named_utility(const harness::Config& config) {
     const harness::Resolution resolved =
         harness::resolve_backend(config, harness::RoleRequest{.role = harness::ModelRole::Utility});
-    return resolved.from == harness::ResolvedFrom::RolePointer ? resolved.key : std::string{};
+    return harness::is_named(resolved.from) ? resolved.key : std::string{};
 }
 
 std::string configured_backend_key(const harness::Config& config, std::string_view model) {

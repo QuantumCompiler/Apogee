@@ -1030,3 +1030,172 @@ TEST_CASE("memory.recall is on unless the config turns it off", "[config][recall
     CHECK_THROWS_AS(load_text("memory:\n  recall: sometimes\n"), ConfigError);
     CHECK_THROWS_AS(load_text("memory: yes\n"), ConfigError);
 }
+
+namespace {
+
+/// A config with three mock backends and the suites under test (27d).
+std::string with_suites(std::string_view suites, std::string_view models = {}) {
+    return std::string{"models:\n  default: root\n"} + std::string{models} +
+           "backends:\n  root:\n    type: mock\n  helper:\n    type: mock\n"
+           "  embedder:\n    type: mock\nsuites:\n" +
+           std::string{suites};
+}
+
+}  // namespace
+
+TEST_CASE("a suite's members parse in the short and the long form", "[config][suites]") {
+    const Config config = load_text(with_suites(R"YAML(  research:
+    description: Deep work, chores on the small one
+    members:
+      chat: root
+      utility:
+        backend: helper
+        context_size: 4096
+        toolset: [fs, git]
+      embedding: embedder
+  bare:
+)YAML",
+                                                "  default_suite: research\n"));
+    REQUIRE(config.find_suite("research") != nullptr);
+    const apogee::harness::SuiteConfig& research = *config.find_suite("RESEARCH");
+    CHECK(research.description == "Deep work, chores on the small one");
+    CHECK(research.members.size() == 3);
+    CHECK(research.members.at("chat").backend == "root");
+    CHECK_FALSE(research.members.at("chat").pins());
+    CHECK(research.members.at("utility").backend == "helper");
+    CHECK(research.members.at("utility").context_size == 4096);
+    CHECK(research.members.at("utility").toolset == std::vector<std::string>{"fs", "git"});
+    // A suite with nothing under it loads, naming no members.
+    REQUIRE(config.find_suite("bare") != nullptr);
+    CHECK(config.find_suite("bare")->members.empty());
+    CHECK(config.suite_names() == std::vector<std::string>{"bare", "research"});
+    CHECK(config.models.default_suite == "research");
+    CHECK(apogee::harness::active_suite(config) == &research);
+    // An empty toolset is a pin: no tools.
+    const Config none = load_text(with_suites(
+        "  quiet:\n    members:\n      chat:\n        backend: root\n        toolset: []\n"));
+    CHECK(none.find_suite("quiet")->members.at("chat").toolset == std::vector<std::string>{});
+}
+
+TEST_CASE("a suite that cannot hold is refused at load, by name", "[config][suites]") {
+    const std::vector<std::pair<std::string, std::string>> refused{
+        {"  s:\n    members:\n      root: root\n",
+         "suites.s.members.root: not a role (accepted: chat, embedding, extraction, vision, "
+         "transcription, utility)"},
+        {"  s:\n    members:\n      chat: \"\"\n", "suites.s.members.chat: names no backend"},
+        {"  s:\n    members:\n      chat:\n        context_size: 4096\n",
+         "suites.s.members.chat: names no backend"},
+        {"  s:\n    members:\n      chat:\n        backend: root\n        context_size: 0\n",
+         "suites.s.members.chat.context_size: must be a positive number of tokens"},
+        {"  s:\n    members:\n      chat:\n        backend: root\n        toolset: [fs, web, "
+         "browser]\n",
+         "suites.s.members.chat.toolset: 'browser' is not a toolset"},
+        {"  s:\n    members: [root]\n", "suites.s.members: expected a mapping"},
+        {"  s: root\n", "suites.s: expected a mapping"},
+        // One backend is one window: two members pinning it two ways cannot hold.
+        {"  s:\n    members:\n      utility:\n        backend: helper\n        context_size: "
+         "4096\n      vision:\n        backend: HELPER\n        context_size: 8192\n",
+         "suites.s: 'helper' is pinned two ways, by utility and vision -- one backend runs at "
+         "one window"},
+        {"  s:\n    members:\n      chat:\n        backend: root\n        toolset: [fs]\n"
+         "      utility:\n        backend: root\n        toolset: [git]\n",
+         "one backend runs at one toolset"},
+        {"  off:\n    members:\n      chat: root\n", "suites: 'off' is reserved"},
+        {"  Off:\n    members:\n      chat: root\n", "suites: 'Off' is reserved"},
+        {"  fast:\n    members:\n      chat: root\n  FAST:\n    members:\n      chat: root\n",
+         "collides with"},
+    };
+    for (const auto& [suites, said] : refused) {
+        INFO(suites);
+        try {
+            (void)load_text(with_suites(suites));
+            FAIL("expected a ConfigError");
+        } catch (const ConfigError& e) {
+            CHECK_THAT(std::string{e.what()}, Catch::Matchers::ContainsSubstring(said));
+        }
+    }
+    // Two members on one backend agreeing -- or one pinning, one not -- is fine.
+    CHECK_NOTHROW(load_text(with_suites(
+        "  s:\n    members:\n      chat: helper\n      utility:\n        backend: helper\n"
+        "        context_size: 4096\n")));
+}
+
+TEST_CASE("a default suite naming nothing is refused where it is written", "[config][suites]") {
+    try {
+        (void)load_text(with_suites("  research:\n    members:\n      chat: root\n",
+                                    "  default_suite: reserch\n"));
+        FAIL("expected a ConfigError");
+    } catch (const ConfigError& e) {
+        CHECK_THAT(std::string{e.what()},
+                   Catch::Matchers::ContainsSubstring(
+                       "models.default_suite: no suite named 'reserch' under suites: "
+                       "(configured: research)"));
+    }
+    try {
+        (void)load_text("models:\n  default_suite: research\n");
+        FAIL("expected a ConfigError");
+    } catch (const ConfigError& e) {
+        CHECK_THAT(std::string{e.what()},
+                   Catch::Matchers::ContainsSubstring("none is configured -- 'apogee config "
+                                                      "add-suite'"));
+    }
+    // Whitespace is no name: no suite, as on every pointer.
+    CHECK(apogee::harness::active_suite(load_text("models:\n  default_suite: \"  \"\n")) ==
+          nullptr);
+    // And no suites, no default: the config of today.
+    const Config today = load_text("models:\n  default: root\n");
+    CHECK(today.suites.empty());
+    CHECK(today.models.default_suite.empty());
+    CHECK(apogee::harness::active_suite(today) == nullptr);
+}
+
+TEST_CASE("the active suite's pins hold on its members' backends and nowhere else",
+          "[config][suites]") {
+    Config config = load_text(with_suites(R"YAML(  research:
+    members:
+      chat: root
+      utility:
+        backend: helper
+        context_size: 4096
+        toolset: [fs, git]
+)YAML",
+                                          "  default_suite: research\n"));
+    using apogee::harness::backend_as_run;
+    using apogee::harness::suite_pins;
+    CHECK(suite_pins(config, "helper").context_size == 4096);
+    CHECK(suite_pins(config, "HELPER").toolset == std::vector<std::string>{"fs", "git"});
+    CHECK(suite_pins(config, "root") == apogee::harness::MemberPins{});
+    CHECK(suite_pins(config, "embedder") == apogee::harness::MemberPins{});
+    CHECK(backend_as_run(config, "helper").context_size == 4096);
+    CHECK(backend_as_run(config, "helper").type == BackendType::Mock);
+    CHECK_FALSE(backend_as_run(config, "root").context_size.has_value());
+
+    // The suite pins only while it is active: the entry as written otherwise.
+    config.models.default_suite.clear();
+    CHECK(suite_pins(config, "helper") == apogee::harness::MemberPins{});
+    CHECK_FALSE(backend_as_run(config, "helper").context_size.has_value());
+
+    // A pin replaces the entry's own window; nothing else of the entry moves.
+    config = load_text(
+        "backends:\n  helper:\n    type: mock\n    context_size: 32768\n    max_tokens: 99\n"
+        "suites:\n  s:\n    members:\n      utility:\n        backend: helper\n"
+        "        context_size: 2048\nmodels:\n  default_suite: s\n");
+    CHECK(backend_as_run(config, "helper").context_size == 2048);
+    CHECK(backend_as_run(config, "helper").max_tokens == 99);
+    CHECK(config.find_backend("helper")->context_size == 32768);
+}
+
+TEST_CASE("the suite vocabularies are the roles and the toolsets", "[config][suites]") {
+    const auto roles = apogee::harness::suite_role_names();
+    CHECK(std::vector<std::string_view>(roles.begin(), roles.end()) ==
+          std::vector<std::string_view>{"chat", "embedding", "extraction", "vision",
+                                        "transcription", "utility"});
+    const auto toolsets = apogee::harness::suite_toolset_names();
+    CHECK(std::vector<std::string_view>(toolsets.begin(), toolsets.end()) ==
+          std::vector<std::string_view>{"fs", "shell", "git", "notes", "rag", "web", "mcp"});
+    // The shipped template documents suites and configures none.
+    const Config shipped = load_text(apogee::harness::config_template());
+    CHECK(shipped.suites.empty());
+    CHECK(shipped.models.default_suite.empty());
+    CHECK(std::string{apogee::harness::config_template()}.find("# suites:") != std::string::npos);
+}

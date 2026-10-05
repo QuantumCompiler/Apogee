@@ -207,6 +207,9 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(std::move(name));
         }
         list.none = "no named graphs or collections yet";
+    } else if (kind == kModelSuiteValue) {
+        list.names = config.suite_names();
+        list.none = "no suites -- 'apogee config add-suite' makes one";
     } else if (kind == kNamedGraphValue) {
         list.names = config.graph_names();
         list.none = "no named graphs -- 'apogee config add-graph' makes one";

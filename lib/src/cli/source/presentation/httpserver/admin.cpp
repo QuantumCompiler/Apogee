@@ -273,6 +273,34 @@ HttpResponse AdminHandler::delete_graph_config(const HttpRequest& /*request*/,
     return admin_delete_graph_config(config_context(), name);
 }
 
+HttpResponse AdminHandler::list_suites(const HttpRequest& /*request*/) {
+    return admin_list_suites(config_context());
+}
+
+HttpResponse AdminHandler::create_suite(const HttpRequest& request) {
+    return admin_create_suite(config_context(), request);
+}
+
+HttpResponse AdminHandler::set_default_suite(const HttpRequest& request) {
+    return admin_set_default_suite(config_context(), request);
+}
+
+HttpResponse AdminHandler::get_suite(const HttpRequest& /*request*/, std::string_view name) {
+    return admin_get_suite(config_context(), name);
+}
+
+HttpResponse AdminHandler::put_suite(const HttpRequest& request, std::string_view name) {
+    return admin_put_suite(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::delete_suite(const HttpRequest& /*request*/, std::string_view name) {
+    return admin_delete_suite(config_context(), name);
+}
+
+HttpResponse AdminHandler::set_suite_member(const HttpRequest& request, std::string_view name) {
+    return admin_set_suite_member(config_context(), name, request);
+}
+
 HttpResponse AdminHandler::list_jobs(const HttpRequest& /*request*/) {
     nlohmann::json data = nlohmann::json::array();
     for (const JobRecord& record : jobs_->list()) {

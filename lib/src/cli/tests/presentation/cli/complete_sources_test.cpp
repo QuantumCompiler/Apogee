@@ -342,3 +342,18 @@ TEST_CASE("the words the Python drivers validate are the ones offered",
         CHECK(std::vector<std::string>(accepted.begin(), accepted.end()) == methods);
     }
 }
+
+TEST_CASE("a model suite completes from the config's suites, never the eval suites",
+          "[commands][completion][sources][suites]") {
+    // 27d: MODEL_SUITE is the `suites:` names -- what `--suite` and the suite
+    // verbs take -- and the training track's SUITE stays its own.
+    Home home;
+    CHECK(home.names(c::kModelSuiteValue).names.empty());
+    CHECK(home.names(c::kModelSuiteValue).none.find("config add-suite") != std::string::npos);
+    home.config = apogee::harness::parse_config(
+        "backends:\n  a:\n    type: mock\nsuites:\n  research:\n    members:\n      chat: a\n"
+        "  fast:\n    members:\n      chat: a\n",
+        "test");
+    CHECK(home.names(c::kModelSuiteValue).names == std::vector<std::string>{"fast", "research"});
+    CHECK_FALSE(has(home.names(c::kSuiteValue).names, "research"));
+}

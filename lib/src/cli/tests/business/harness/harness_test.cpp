@@ -570,3 +570,43 @@ TEST_CASE("audio is asked of the provider, and a provider that does not say is t
     CHECK(harness.accepts_images("cloud"));
     CHECK_FALSE(harness.accepts_audio("ghost"));
 }
+
+TEST_CASE("the active suite's window pin is the window the harness measures against",
+          "[harness][context][suites]") {
+    // 27d: a member's context_size pins its backend while the suite is
+    // active -- the budget, the warning and compaction all read it from here.
+    Config config = config_from(R"(
+models:
+  default: claude
+backends:
+  claude:
+    type: mock
+    model: claude-sonnet-5
+  helper:
+    type: mock
+    model: claude-sonnet-5
+    context_size: 32768
+suites:
+  research:
+    members:
+      chat: claude
+      utility:
+        backend: helper
+        context_size: 4096
+)");
+    Harness harness{config};
+    // No suite active: the entry's own, and the table's.
+    CHECK(harness.context_window_for_model("helper") == 32768);
+    CHECK(harness.context_window_for_model("claude") == 200000);
+
+    harness.set_active_suite("research");
+    CHECK(harness.config().models.default_suite == "research");
+    CHECK(harness.context_window_for_model("helper") == 4096);
+    // A member with no pin keeps its backend's window.
+    CHECK(harness.context_window_for_model("claude") == 200000);
+    // The chat role resolves to the suite's chat member when no model is named.
+    CHECK(harness.context_window_for_model("") == 200000);
+
+    harness.set_active_suite("");
+    CHECK(harness.context_window_for_model("helper") == 32768);
+}

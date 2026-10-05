@@ -430,6 +430,117 @@ CycleConfig parse_cycle(const YAML::Node& node, std::string_view origin) {
     return cycle;
 }
 
+/// The roles `suites.<name>.members` accepts, in listing order (27d).
+constexpr std::array<std::string_view, 6> kSuiteRoles{"chat",   "embedding",     "extraction",
+                                                      "vision", "transcription", "utility"};
+
+/// The words `toolset:` accepts (27d).
+constexpr std::array<std::string_view, 7> kSuiteToolsets{"fs",  "shell", "git", "notes",
+                                                         "rag", "web",   "mcp"};
+
+/// The accepted roles, joined for a message.
+std::string accepted_suite_roles() {
+    std::string out;
+    for (const std::string_view role : kSuiteRoles) {
+        out += out.empty() ? "" : ", ";
+        out += role;
+    }
+    return out;
+}
+
+bool same_folded(std::string_view lhs, std::string_view rhs) noexcept {
+    const CaseInsensitiveLess less;
+    return !less(lhs, rhs) && !less(rhs, lhs);
+}
+
+/// One member: a backend key, or a mapping with `backend` and the knobs.
+SuiteMember parse_suite_member(const YAML::Node& node, std::string_view origin,
+                               const std::string& where) {
+    SuiteMember member;
+    if (node.IsDefined() && node.IsMap()) {
+        member.backend = scalar(node["backend"], origin, where + ".backend");
+        if (const std::optional<std::int64_t> window =
+                integer(node["context_size"], origin, where + ".context_size");
+            window.has_value()) {
+            if (*window < 1) {
+                fail(origin, where + ".context_size: must be a positive number of tokens");
+            }
+            member.context_size = window;
+        }
+        if (const YAML::Node toolset = node["toolset"]; toolset.IsDefined() && !toolset.IsNull()) {
+            member.toolset = string_list(toolset, origin, where + ".toolset", false);
+            for (const std::string& word : *member.toolset) {
+                if (std::ranges::find(kSuiteToolsets, std::string_view{word}) ==
+                    kSuiteToolsets.end()) {
+                    std::string accepted;
+                    for (const std::string_view name : kSuiteToolsets) {
+                        accepted += accepted.empty() ? "" : ", ";
+                        accepted += name;
+                    }
+                    fail(origin, where + ".toolset: '" + word +
+                                     "' is not a toolset (accepted: " + accepted + ")");
+                }
+            }
+        }
+    } else {
+        member.backend = scalar(node, origin, where);
+    }
+    const auto first = member.backend.find_first_not_of(" \t");
+    if (first == std::string::npos) {
+        fail(origin, where + ": names no backend");
+    }
+    return member;
+}
+
+/// One `suites:` entry. Two members pinning one backend two ways fail: one
+/// backend is one model with one window, so the pins could not both hold.
+SuiteConfig parse_suite(const YAML::Node& node, std::string_view origin, const std::string& name) {
+    const std::string where = "suites." + name;
+    SuiteConfig suite;
+    if (!node.IsDefined() || node.IsNull()) {
+        return suite;
+    }
+    if (!node.IsMap()) {
+        fail(origin, where + ": expected a mapping with members:");
+    }
+    suite.description = scalar(node["description"], origin, where + ".description");
+    const YAML::Node members = node["members"];
+    if (!members.IsDefined() || members.IsNull()) {
+        return suite;
+    }
+    if (!members.IsMap()) {
+        fail(origin, where + ".members: expected a mapping of role -> backend");
+    }
+    for (const auto& entry : members) {
+        const std::string role = entry.first.Scalar();
+        if (std::ranges::find(kSuiteRoles, std::string_view{role}) == kSuiteRoles.end()) {
+            fail(origin, where + ".members." + role +
+                             ": not a role (accepted: " + accepted_suite_roles() + ")");
+        }
+        suite.members[role] = parse_suite_member(entry.second, origin, where + ".members." + role);
+    }
+    for (auto first = suite.members.begin(); first != suite.members.end(); ++first) {
+        for (auto second = std::next(first); second != suite.members.end(); ++second) {
+            const SuiteMember& a = first->second;
+            const SuiteMember& b = second->second;
+            if (!same_folded(a.backend, b.backend)) {
+                continue;
+            }
+            const bool windows = a.context_size.has_value() && b.context_size.has_value() &&
+                                 *a.context_size != *b.context_size;
+            const bool toolsets =
+                a.toolset.has_value() && b.toolset.has_value() && *a.toolset != *b.toolset;
+            if (windows || toolsets) {
+                fail(origin, where + ": '" + a.backend + "' is pinned two ways, by " +
+                                 first->first + " and " + second->first +
+                                 " -- one backend runs at one " + (windows ? "window" : "toolset") +
+                                 ", so give the pin to one member or name two backends");
+            }
+        }
+    }
+    return suite;
+}
+
 AgentConfig parse_agent(const YAML::Node& node, std::string_view origin, const std::string& name) {
     const std::string where = "agents." + name;
     AgentConfig agent;
@@ -608,6 +719,70 @@ std::vector<std::string> Config::graph_names() const {
         names.push_back(name);
     }
     return names;
+}
+
+const SuiteConfig* Config::find_suite(std::string_view name) const noexcept {
+    const auto it = suites.find(name);
+    return it == suites.end() ? nullptr : &it->second;
+}
+
+std::vector<std::string> Config::suite_names() const {
+    std::vector<std::string> names;
+    names.reserve(suites.size());
+    for (const auto& [name, unused] : suites) {
+        names.push_back(name);
+    }
+    return names;
+}
+
+std::span<const std::string_view> suite_role_names() noexcept {
+    return kSuiteRoles;
+}
+
+std::span<const std::string_view> suite_toolset_names() noexcept {
+    return kSuiteToolsets;
+}
+
+const SuiteConfig* active_suite(const Config& config) {
+    std::string_view name = config.models.default_suite;
+    const std::size_t first = name.find_first_not_of(" \t");
+    if (first == std::string_view::npos) {
+        return nullptr;
+    }
+    name = name.substr(first, name.find_last_not_of(" \t") - first + 1);
+    return config.find_suite(name);
+}
+
+MemberPins suite_pins(const Config& config, std::string_view backend) {
+    MemberPins pins;
+    const SuiteConfig* suite = active_suite(config);
+    if (suite == nullptr || backend.empty()) {
+        return pins;
+    }
+    // Every member naming the backend contributes its knobs; the load refused
+    // two that disagree, so taking the first set of each is taking the one.
+    for (const auto& [role, member] : suite->members) {
+        if (!same_folded(member.backend, backend)) {
+            continue;
+        }
+        if (!pins.context_size.has_value()) {
+            pins.context_size = member.context_size;
+        }
+        if (!pins.toolset.has_value()) {
+            pins.toolset = member.toolset;
+        }
+    }
+    return pins;
+}
+
+BackendConfig backend_as_run(const Config& config, std::string_view name) {
+    const BackendConfig* entry = config.find_backend(name);
+    BackendConfig run = entry != nullptr ? *entry : BackendConfig{};
+    if (const std::optional<std::int64_t> window = suite_pins(config, name).context_size;
+        window.has_value()) {
+        run.context_size = window;
+    }
+    return run;
 }
 
 const AgentConfig* Config::find_agent(std::string_view name) const noexcept {
@@ -843,6 +1018,8 @@ Config parse_config(std::string_view content, std::string_view origin) {
             scalar(models["default_transcription"], origin, "models.default_transcription");
         config.models.default_utility =
             scalar(models["default_utility"], origin, "models.default_utility");
+        config.models.default_suite =
+            scalar(models["default_suite"], origin, "models.default_suite");
     }
 
     if (const YAML::Node paths = root["paths"]; paths.IsDefined() && !paths.IsNull()) {
@@ -1068,6 +1245,43 @@ Config parse_config(std::string_view content, std::string_view origin) {
         }
     }
 
+    if (const YAML::Node suites = root["suites"]; suites.IsDefined() && !suites.IsNull()) {
+        if (!suites.IsMap()) {
+            fail(origin, "suites: expected a mapping of suite name -> members");
+        }
+        for (const auto& entry : suites) {
+            const std::string name = entry.first.Scalar();
+            if (name.empty()) {
+                fail(origin, "suites: an entry has an empty name");
+            }
+            if (same_folded(name, kSuiteOff)) {
+                fail(origin, "suites: '" + name + "' is reserved -- '/suite " +
+                                 std::string{kSuiteOff} + "' means no suite; rename it");
+            }
+            SuiteConfig suite = parse_suite(entry.second, origin, name);
+            const auto [it, inserted] = config.suites.emplace(name, std::move(suite));
+            if (!inserted) {
+                fail(origin, "suites: '" + name + "' collides with '" + it->first +
+                                 "' -- suite names are compared case-insensitively, so these "
+                                 "would be the same suite; rename one");
+            }
+        }
+    }
+    // A default suite that names nothing would run every command on the
+    // global pointers without a word -- the typo is said where it is made.
+    if (const std::string& wanted = config.models.default_suite;
+        wanted.find_first_not_of(" \t") != std::string::npos && active_suite(config) == nullptr) {
+        const std::vector<std::string> known = config.suite_names();
+        std::string listed;
+        for (const std::string& name : known) {
+            listed += listed.empty() ? "" : ", ";
+            listed += name;
+        }
+        fail(origin, "models.default_suite: no suite named '" + wanted + "' under suites:" +
+                         (known.empty() ? " (none is configured -- 'apogee config add-suite')"
+                                        : " (configured: " + listed + ")"));
+    }
+
     if (const YAML::Node tools = root["tools"]; tools.IsDefined() && !tools.IsNull()) {
         if (!tools.IsMap()) {
             fail(origin, "tools: expected a mapping");
@@ -1277,7 +1491,7 @@ bool operator==(const ModelsConfig& lhs, const ModelsConfig& rhs) noexcept {
            lhs.default_extraction == rhs.default_extraction &&
            lhs.default_vision == rhs.default_vision &&
            lhs.default_transcription == rhs.default_transcription &&
-           lhs.default_utility == rhs.default_utility;
+           lhs.default_utility == rhs.default_utility && lhs.default_suite == rhs.default_suite;
 }
 
 }  // namespace apogee::harness

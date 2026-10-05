@@ -219,6 +219,76 @@ struct ModelsConfig {
     std::string default_vision;
     std::string default_transcription;
     std::string default_utility;
+
+    /// The suite every role resolves under (27d): a `suites:` name, or empty
+    /// for none -- and none is exactly the chain as it was before suites.
+    /// In the file it is the default; in the config a running session
+    /// resolves against it is that session's ACTIVE suite, which `--suite`
+    /// and `/suite` set in memory and never write back. A name with no
+    /// `suites:` entry fails the load, as a typo here would otherwise run
+    /// every command on the global pointers without a word.
+    std::string default_suite;
+};
+
+/// The roles a suite names members for (27d), as `suites.<name>.members`
+/// spells them: the six roles `harness/roles.h` resolves, called by the role
+/// rather than by the pointer (`chat`, not `default`), in the order every
+/// listing shows them.
+[[nodiscard]] std::span<const std::string_view> suite_role_names() noexcept;
+
+/// The words a suite member's `toolset:` takes (27d): the native toolsets
+/// `tools/toolsets.h` registers (`fs`, `shell`, `git`, `notes`, `rag`), `web`
+/// (fetch_url and web_search) and `mcp` (every MCP server's tools). Declared
+/// here, beside the parser that refuses any other word, as `lora_methods()`
+/// is; a test holds it to the toolsets that exist.
+[[nodiscard]] std::span<const std::string_view> suite_toolset_names() noexcept;
+
+/// The word `--suite` and `/suite` take for "no suite" -- reserved, so no
+/// suite may be named it.
+inline constexpr std::string_view kSuiteOff = "off";
+
+/// One member of a suite: the backend that answers for a role while the suite
+/// is active, and the two knobs that make a small helper small (27d).
+///
+/// The knobs **pin the backend while the suite is active**, whichever role it
+/// answers for at that moment: one backend is one loaded model with one
+/// window, so a pin cannot follow the role. Two members of one suite pinning
+/// the same backend two ways fail the load.
+struct SuiteMember {
+    /// A key under `backends:`, validated where it is used -- the existing
+    /// "no backend named" wording at use, a `Fail` row in `check` -- never at
+    /// load, exactly as a role pointer is.
+    std::string backend;
+    /// The window the backend runs at, in tokens: its `context_size` while
+    /// the suite is active. Unset keeps the entry's own.
+    std::optional<std::int64_t> context_size;
+    /// The toolsets the backend is offered when it runs a conversation's
+    /// tools, words of `suite_toolset_names()`. Unset offers every
+    /// registered tool; an empty list offers none.
+    std::optional<std::vector<std::string>> toolset;
+
+    /// Whether either knob is set -- the long form is written for it.
+    [[nodiscard]] bool pins() const noexcept {
+        return context_size.has_value() || toolset.has_value();
+    }
+
+    bool operator==(const SuiteMember&) const = default;
+};
+
+/// One entry under `suites:` -- a named bundle of models (27d): a member per
+/// role it speaks for, every other role falling through the existing chain.
+///
+/// Later items hang their policy here, beside `members:` -- the consultable
+/// members (27f), the validation seams (27g), orchestration (27t) -- and none
+/// of them is declared until something consumes it.
+struct SuiteConfig {
+    /// Free text, for a listing. Never interpreted.
+    std::string description;
+    /// Keyed by role name (`suite_role_names()`); a role absent here is not
+    /// spoken for.
+    std::map<std::string, SuiteMember, std::less<>> members;
+
+    bool operator==(const SuiteConfig&) const = default;
 };
 
 /// Whether two role-pointer sets are identical. Defined in `config.cpp` -- the
@@ -725,6 +795,11 @@ struct Config {
     /// rule reads them first to last, so the order is the user's).
     std::vector<std::pair<std::string, NamedGraphConfig>> graphs;
 
+    /// Suites keyed by name AS WRITTEN, compared case-insensitively (27d).
+    /// Which backend a member gives a role is `harness/roles.h`'s answer, the
+    /// one chain; read the members directly only to display or validate them.
+    std::map<std::string, SuiteConfig, CaseInsensitiveLess> suites;
+
     StatusMode status_mode = StatusMode::Line;
     bool color = true;
 
@@ -759,7 +834,40 @@ struct Config {
 
     /// Graph names as written, in the file's order.
     [[nodiscard]] std::vector<std::string> graph_names() const;
+
+    /// Case-insensitive lookup of a `suites:` entry. nullptr when absent.
+    [[nodiscard]] const SuiteConfig* find_suite(std::string_view name) const noexcept;
+
+    /// Suite names as written, in the map's (case-folded) order.
+    [[nodiscard]] std::vector<std::string> suite_names() const;
 };
+
+/// The active suite: the entry `models.default_suite` names, surrounding
+/// whitespace ignored as the resolver ignores it on every pointer. nullptr
+/// when it names none.
+[[nodiscard]] const SuiteConfig* active_suite(const Config& config);
+
+/// What the active suite (`models.default_suite`) pins on one backend: the
+/// knobs of the member that names it (27d). Both unset when no suite is
+/// active, or none of its members names the backend.
+struct MemberPins {
+    std::optional<std::int64_t> context_size;
+    std::optional<std::vector<std::string>> toolset;
+
+    bool operator==(const MemberPins&) const = default;
+};
+
+/// The active suite's pins on `backend`, matched as backend names are
+/// (case-insensitively). The one reader of a member's knobs: the provider
+/// factory, the harness's window and every surface's tool offer all ask it,
+/// so a pin cannot hold on one of them and not another.
+[[nodiscard]] MemberPins suite_pins(const Config& config, std::string_view backend);
+
+/// `backends.<name>` as it runs under the active suite: the entry as written,
+/// its `context_size` replaced by the suite's pin when there is one. What the
+/// provider factory constructs from. A default entry when there is no such
+/// backend.
+[[nodiscard]] BackendConfig backend_as_run(const Config& config, std::string_view name);
 
 /// `expand_env`, then a leading `~` or `~/` replaced by the home directory.
 /// What every path-like MCP field is read through.

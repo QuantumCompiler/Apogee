@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <optional>
 #include <random>
+#include <span>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -758,6 +760,233 @@ std::string delete_embedding(std::string_view content, std::string_view name) {
     return delete_entry(content, "embeddings", "collection", name);
 }
 
+namespace {
+
+/// A suite member's role sits at this indent under `members:`, and a long-form
+/// member's fields at the next.
+constexpr std::size_t kMemberIndent = 6;
+constexpr std::size_t kMemberFieldIndent = 8;
+
+/// A flow list of YAML scalars: `[a, b]`.
+std::string flow_list(const std::vector<std::string>& values) {
+    std::string rendered = "[";
+    for (const std::string& value : values) {
+        rendered += rendered.size() > 1 ? ", " : "";
+        rendered += yaml_scalar(value);
+    }
+    return rendered + "]";
+}
+
+/// One member's lines: `role: backend` alone, or the long form when it pins.
+Lines format_suite_member(std::string_view role, const SuiteMember& member,
+                          std::string_view terminator) {
+    const std::string indent(kMemberIndent, ' ');
+    const std::string field(kMemberFieldIndent, ' ');
+    const std::string end{terminator};
+    if (!member.pins()) {
+        return {indent + std::string{role} + ": " + yaml_scalar(member.backend) + end};
+    }
+    Lines out{indent + std::string{role} + ":" + end,
+              field + "backend: " + yaml_scalar(member.backend) + end};
+    if (member.context_size.has_value()) {
+        out.push_back(field + "context_size: " + std::to_string(*member.context_size) + end);
+    }
+    if (member.toolset.has_value()) {
+        out.push_back(field + "toolset: " + flow_list(*member.toolset) + end);
+    }
+    return out;
+}
+
+Lines format_suite_entry(std::string_view name, const SuiteConfig& suite,
+                         std::string_view terminator) {
+    const std::string end{terminator};
+    Lines out{std::string(kEntryIndent, ' ') + std::string{name} + ":" + end};
+    if (!suite.description.empty()) {
+        out.push_back(std::string(kFieldIndent, ' ') +
+                      "description: " + yaml_scalar(suite.description) + end);
+    }
+    if (suite.members.empty()) {
+        return out;
+    }
+    out.push_back(std::string(kFieldIndent, ' ') + "members:" + end);
+    // In the order every listing shows the roles, not the map's.
+    for (const std::string_view role : suite_role_names()) {
+        if (const auto it = suite.members.find(role); it != suite.members.end()) {
+            const Lines member = format_suite_member(role, it->second, terminator);
+            out.insert(out.end(), member.begin(), member.end());
+        }
+    }
+    return out;
+}
+
+/// The lines a key at `key_index` owns: those after it indented at least
+/// `child_indent`, up to `limit` -- blank and comment lines kept only when a
+/// child follows them, as `entry_extent` keeps them.
+std::pair<std::size_t, std::size_t> block_extent(const Lines& lines, std::size_t key_index,
+                                                 std::size_t limit, std::size_t child_indent) {
+    std::size_t last_content = key_index;
+    for (std::size_t i = key_index + 1; i < limit; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        if (indent_of(line) >= child_indent) {
+            last_content = i;
+            continue;
+        }
+        break;
+    }
+    return {key_index, last_content + 1};
+}
+
+/// The key a content line at exactly `indent` names (`key:` or `key: value`),
+/// or nullopt.
+std::optional<std::string_view> key_at(std::string_view line_body, std::size_t indent) {
+    if (is_blank(line_body) || is_comment(line_body) || indent_of(line_body) != indent) {
+        return std::nullopt;
+    }
+    const std::string_view rest = line_body.substr(indent);
+    const std::size_t colon = rest.find(':');
+    if (colon == std::string_view::npos || colon == 0) {
+        return std::nullopt;
+    }
+    return rest.substr(0, colon);
+}
+
+/// Inserts `added` at `at`, giving an unterminated last line its terminator
+/// first when the insertion follows it.
+void insert_lines(Lines& lines, std::size_t at, const Lines& added, const std::string& terminator) {
+    if (at > 0 && at == lines.size()) {
+        std::string& previous = lines.back();
+        if (!previous.empty() && previous.back() != '\n') {
+            previous += terminator;
+        }
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(at), added.begin(), added.end());
+}
+
+}  // namespace
+
+std::string append_suite(std::string_view content, std::string_view name, const SuiteConfig& suite,
+                         bool force) {
+    if (equals_folded(name, kSuiteOff)) {
+        throw ConfigEditError("suite name '" + std::string{name} + "' is reserved -- '/suite " +
+                              std::string{kSuiteOff} + "' means no suite; choose another");
+    }
+    const Lines lines = split_lines(content);
+    return append_entry(content, "suites", "suite", name,
+                        format_suite_entry(name, suite, dominant_terminator(lines)), force);
+}
+
+std::string delete_suite(std::string_view content, std::string_view name) {
+    return delete_entry(content, "suites", "suite", name);
+}
+
+std::string set_suite_member(std::string_view content, std::string_view suite,
+                             std::string_view role, const std::optional<SuiteMember>& member) {
+    const std::span<const std::string_view> roles = suite_role_names();
+    const auto rank = std::ranges::find(roles, role);
+    if (rank == roles.end()) {
+        std::string accepted;
+        for (const std::string_view name : roles) {
+            accepted += (accepted.empty() ? "" : ", ") + std::string{name};
+        }
+        throw ConfigEditError("'" + std::string{role} + "' is not a role (accepted: " + accepted +
+                              ")");
+    }
+
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange section = find_section(lines, "suites");
+    if (!section.found) {
+        throw ConfigEditError("no 'suites:' section in this config");
+    }
+    const std::optional<std::size_t> key = find_entry_line(lines, section, suite);
+    if (!key.has_value()) {
+        throw ConfigEditError("suite '" + std::string{suite} + "' not found in config");
+    }
+    const auto [entry_begin, entry_end] = entry_extent(lines, *key, section.end);
+    const std::string missing =
+        "suite '" + std::string{suite} + "' has no " + std::string{role} + " member";
+
+    // The `members:` block, written as a block: a flow mapping on one line is
+    // legal YAML, and rare enough that refusing it beats a splice that
+    // misreads it.
+    std::optional<std::size_t> members_line;
+    for (std::size_t i = entry_begin + 1; i < entry_end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (key_at(line, kFieldIndent) != std::optional<std::string_view>{"members"}) {
+            continue;
+        }
+        std::string_view value = line.substr(line.find(':') + 1);
+        value.remove_prefix(std::min(value.find_first_not_of(" \t"), value.size()));
+        if (!value.empty() && value.front() != '#') {
+            throw ConfigEditError("suites." + std::string{suite} +
+                                  ".members is written inline -- write it as a block, or "
+                                  "replace the suite with add-suite --force");
+        }
+        members_line = i;
+        break;
+    }
+
+    if (!members_line.has_value()) {
+        if (!member.has_value()) {
+            throw ConfigEditError(missing);
+        }
+        Lines added{std::string(kFieldIndent, ' ') + "members:" + terminator};
+        const Lines rendered = format_suite_member(role, *member, terminator);
+        added.insert(added.end(), rendered.begin(), rendered.end());
+        insert_lines(lines, entry_end, added, terminator);
+        return join_lines(lines);
+    }
+
+    const auto [block_begin, block_end] =
+        block_extent(lines, *members_line, entry_end, kMemberIndent);
+    std::optional<std::size_t> role_line;
+    std::optional<std::size_t> later_role;
+    for (std::size_t i = block_begin + 1; i < block_end; ++i) {
+        const std::optional<std::string_view> name = key_at(body(lines[i]), kMemberIndent);
+        if (!name.has_value()) {
+            continue;
+        }
+        if (*name == role) {
+            role_line = i;
+            break;
+        }
+        // The first member that sorts after this role: a new one goes before
+        // it, so the members read in the order every listing shows them.
+        if (!later_role.has_value()) {
+            if (const auto at = std::ranges::find(roles, *name); at != roles.end() && at > rank) {
+                later_role = i;
+            }
+        }
+    }
+
+    if (role_line.has_value()) {
+        const auto [begin, end] = block_extent(lines, *role_line, block_end, kMemberFieldIndent);
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
+                    lines.begin() + static_cast<std::ptrdiff_t>(end));
+        if (member.has_value()) {
+            insert_lines(lines, begin, format_suite_member(role, *member, terminator), terminator);
+        }
+        return join_lines(lines);
+    }
+    if (!member.has_value()) {
+        throw ConfigEditError(missing);
+    }
+    std::size_t at = block_end;
+    if (later_role.has_value()) {
+        // Above the comment that leads the member it goes before: that
+        // comment is the later member's, and stays on it.
+        at = *later_role;
+        while (at > block_begin + 1 && is_comment(body(lines[at - 1]))) {
+            --at;
+        }
+    }
+    insert_lines(lines, at, format_suite_member(role, *member, terminator), terminator);
+    return join_lines(lines);
+}
+
 std::vector<std::string_view> models_role_fields() {
     return {"default",        "default_embedding",     "default_extraction",
             "default_vision", "default_transcription", "default_utility"};
@@ -1038,6 +1267,10 @@ std::string set_models_role(std::string_view content, std::string_view field,
                               "' (accepted: " + accepted + ")");
     }
     return set_section_scalar(content, "models", field, value);
+}
+
+std::string set_default_suite(std::string_view content, std::string_view name) {
+    return set_section_scalar(content, "models", "default_suite", name);
 }
 
 std::string set_permission(std::string_view content, std::string_view tool,

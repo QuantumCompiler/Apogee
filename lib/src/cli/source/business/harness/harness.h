@@ -131,6 +131,13 @@ public:
     /// `models.default` from config.
     [[nodiscard]] const std::string& default_model() const noexcept;
 
+    /// Makes `suite` the one every role resolves under, "" for none (27d):
+    /// this harness's view of the config, as `--suite` and `/suite` set it --
+    /// never the file. A backend the switch re-pins needs rebuilding to run
+    /// at its new window; the caller, who can build providers, does that
+    /// (`backends::rebuild_providers`).
+    void set_active_suite(std::string suite);
+
     // --- Request paths -----------------------------------------------------
     //
     // Thin: route, then delegate. They exist so a surface holds one object

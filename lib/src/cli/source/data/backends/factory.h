@@ -73,6 +73,15 @@ struct BuildOptions {
 [[nodiscard]] BuildResult build_providers(harness::ProviderRegistry& harness,
                                           const BuildOptions& options = {});
 
+/// Constructs `names` again from the config as it is now and registers each
+/// over the one before, then reinstalls the default router -- for a backend a
+/// suite switch re-pinned (27d), which must be rebuilt to run at its new
+/// window. A backend that cannot be built keeps the provider it had, and its
+/// reason is in the result.
+[[nodiscard]] BuildResult rebuild_providers(harness::ProviderRegistry& harness,
+                                            const std::vector<std::string>& names,
+                                            const BuildOptions& options = {});
+
 /// Constructs one provider from a single entry, or nullptr with `reason` set.
 ///
 /// Adding a backend type is a case here plus a row in `kBackendTypeNames`
