@@ -168,9 +168,12 @@ public:
         MlxModelInfo info;
         /// Cap on generated tokens when the request sets none.
         std::int64_t max_tokens = 2048;
-        /// The window, when the entry sets one; 0 says nothing (27b reads the
-        /// real one from `config.json`).
+        /// The window, when the entry sets one; 0 leaves it to the model.
         std::int64_t context_size = 0;
+        /// What `config.json` says the model was trained for (27b), 0 when it
+        /// declares nothing; and whether it could be read at all.
+        std::int64_t trained_window = 0;
+        bool config_read = false;
         /// The config's rung of the sampling ladder, and its seed (26h).
         SamplingRung sampling;
         std::optional<std::uint32_t> seed;
@@ -246,8 +249,11 @@ public:
 
     // --- ContextWindowReporting ---------------------------------------------
 
-    /// `context_size` when the entry sets one, else 0: the window is read
-    /// from `config.json` by 27b, never guessed here.
+    /// `context_size` when the entry sets one, else 26a's default over the
+    /// window `config.json` declares (27b): 32,768, or the trained window
+    /// when smaller -- the window a GGUF chat of the model would get, so
+    /// warnings and compaction fire at the same place. 0 when `config.json`
+    /// cannot be read.
     [[nodiscard]] std::int64_t context_window() const override;
 
     // --- VisionCapable --------------------------------------------------------

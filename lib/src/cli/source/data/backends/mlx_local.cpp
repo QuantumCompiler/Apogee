@@ -17,6 +17,7 @@
 #include "contracts/errors.h"
 #include "contracts/paths.h"
 #include "logger/operational.h"
+#include "modelstore/mlx_info.h"
 #include "platform/platform.h"
 
 namespace apogee::backends {
@@ -368,6 +369,11 @@ MlxLocalProvider::Options MlxLocalProvider::options_from(const std::string& back
     if (config.context_size.has_value()) {
         options.context_size = *config.context_size;
     }
+    // The configuration alone, no shard opened: this runs for every entry at
+    // every startup.
+    const models::MlxInfo facts = models::read_mlx_config(options.model_dir);
+    options.trained_window = facts.context_length;
+    options.config_read = facts.config_read;
     if (config.idle_unload_seconds.has_value() && *config.idle_unload_seconds > 0) {
         options.idle_unload = std::chrono::seconds{*config.idle_unload_seconds};
     }
@@ -443,7 +449,15 @@ ResolvedSampling MlxLocalProvider::sampling_for(const harness::ChatRequest& requ
 }
 
 std::int64_t MlxLocalProvider::context_window() const {
-    return options_.context_size;
+    models::MlxInfo facts;
+    facts.config_read = options_.config_read;
+    facts.context_length = options_.trained_window;
+    harness::BackendConfig configured;
+    if (options_.context_size > 0) {
+        configured.context_size = options_.context_size;
+    }
+    // The one rule `models info` and `check` state the window by.
+    return models::mlx_window(facts, configured).window;
 }
 
 harness::StatusEvent MlxLocalProvider::model_status() const {

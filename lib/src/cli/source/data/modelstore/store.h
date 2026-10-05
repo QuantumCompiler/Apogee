@@ -17,6 +17,8 @@
 /// ```
 /// <models>/<model>/gguf/<id>/<file>.gguf          (+ <file>.json, + <file>-mmproj.gguf)
 /// <safetensors root>/<model>/safetensors/<id>/     (config.json, shards, apogee-snapshot.json)
+/// <models>/<model>/mlx/<id>/                        (config.json, tokenizer, shards,
+/// apogee-snapshot.json)
 /// ```
 ///
 /// **Declared once, here.** Every command that writes, finds, lists or removes
@@ -36,11 +38,19 @@ namespace apogee::models {
 
 inline constexpr std::string_view kGgufFormat = "gguf";
 inline constexpr std::string_view kSafetensorsFormat = "safetensors";
+/// An MLX model (27b): a directory the `mlx` backend runs -- `config.json`,
+/// the tokenizer, SafeTensors shards in `mlx-lm`'s format, usually
+/// quantized -- pulled from an `mlx-community` build or made by `models
+/// convert --mlx`. Runnable like a GGUF, so under the models directory like
+/// one, never under `paths.hf_dir`; its id is the SafeTensors rule's, a
+/// digest over every shard's sha256.
+inline constexpr std::string_view kMlxFormat = "mlx";
 inline constexpr std::size_t kWeightIdLength = 12;
 
 /// Where each format's model directories are rooted. SafeTensors sets can be
 /// tens of gigabytes, so `paths.hf_dir` may put them on another disk; GGUFs
-/// always live under the models directory.
+/// and MLX models -- what a backend runs -- always live under the models
+/// directory.
 struct StoreRoots {
     std::filesystem::path models;
     std::filesystem::path safetensors;
@@ -242,10 +252,61 @@ struct StoredSnapshot {
                                                          std::string_view stem);
 
 /// The backend type a stored format runs as, in the config's spelling --
-/// `llamacpp` for `gguf` -- or empty for one no backend type runs directly
-/// yet. One row per format, beside the formats themselves, so a format that
-/// gains a runtime (MLX's `mlx/`, 31b) is one more row (M7).
+/// `llamacpp` for `gguf`, `mlx` for `mlx` (27b) -- or empty for one no
+/// backend type runs directly. One row per format, beside the formats
+/// themselves (M7).
 [[nodiscard]] std::string_view backend_type_for_format(std::string_view format) noexcept;
+
+/// One stored MLX model (27b): a whole directory, the shards never apart.
+struct StoredMlx {
+    std::string model;
+    std::string id;
+    std::filesystem::path dir;
+    /// The record's `pulled_at`, when it has a record. For display.
+    std::string arrived;
+};
+
+/// Every stored MLX model, by model then id -- every directory under a
+/// model's `mlx/`, whole or not, so one that cannot load is listed and said
+/// rather than hidden. `model` narrows to one.
+[[nodiscard]] std::vector<StoredMlx> list_store_mlx(const StoreRoots& roots,
+                                                    std::string_view model = {});
+
+/// The stored MLX model whose directory is `dir` -- an `mlx` backend's
+/// `model_path`, expanded -- compared as normal paths; nullopt when none is.
+[[nodiscard]] std::optional<StoredMlx> stored_mlx_at(const std::vector<StoredMlx>& stored,
+                                                     const std::filesystem::path& dir);
+
+/// The name a backend over `stored` would carry, as `config add-backend`
+/// fills it (M7's rule, 27b's row): the repository part of its model's name,
+/// with its precision appended unless the name already ends with it --
+/// `Llama-3.2-1B-Instruct-4bit` for an `mlx-community` build of that name,
+/// `Llama-3.2-1B-Instruct-8bit` for an 8-bit conversion of Meta's.
+[[nodiscard]] std::string stored_mlx_name(const StoredMlx& stored);
+
+/// The stored MLX models whose name (`stored_mlx_name`) is `name`.
+[[nodiscard]] std::vector<StoredMlx> stored_mlx_named(const std::vector<StoredMlx>& stored,
+                                                      std::string_view name);
+
+struct StoredDirectory {
+    std::filesystem::path dir;
+    /// Identical weights were already stored: the staged copy was dropped.
+    bool existed = false;
+    std::string error;
+};
+
+/// An MLX directory just written into `staging` (from `incoming_path`),
+/// committed (27b): every file in `record` with its size and sha256 -- one
+/// it already lists with a digest of that size (what a download verified) is
+/// not hashed again -- the record written into the directory as
+/// `apogee-snapshot.json`, and the directory renamed to its id, a digest over
+/// every shard's sha256 (`snapshot_weight_id`), so identical weights find the
+/// directory they already occupy. `progress` hears the bytes hashed across
+/// every file and can stop it (`kStopped`), leaving `staging` for the caller
+/// to remove.
+[[nodiscard]] StoredDirectory commit_mlx(const StoreRoots& roots, std::string_view model,
+                                         const std::filesystem::path& staging, Snapshot record,
+                                         const HashProgress& progress = {});
 
 /// Every stored SafeTensors set, by model then id, from both roots (new sets
 /// go under `paths.hf_dir`; ones pulled before it was set stay where they

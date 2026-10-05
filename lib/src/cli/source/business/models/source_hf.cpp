@@ -2,8 +2,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <functional>
+
+#include "contracts/errors.h"
 
 namespace apogee::models {
 namespace {
@@ -186,6 +189,14 @@ HfListing list_gguf_files(backends::HttpClient& client, const HfRef& ref, std::s
         return listing;
     }
 
+    listing.library_name = root.value("library_name", std::string{});
+    if (const auto tags = root.find("tags"); tags != root.end() && tags->is_array()) {
+        for (const nlohmann::json& tag : *tags) {
+            if (tag.is_string()) {
+                listing.tags.push_back(tag.get<std::string>());
+            }
+        }
+    }
     if (const auto siblings = root.find("siblings");
         siblings != root.end() && siblings->is_array()) {
         for (const nlohmann::json& sibling : *siblings) {
@@ -207,6 +218,11 @@ HfListing list_gguf_files(backends::HttpClient& client, const HfRef& ref, std::s
     return listing;
 }
 
+bool HfListing::mlx() const {
+    return has_safetensors &&
+           (library_name == "mlx" || std::ranges::find(tags, "mlx") != tags.end());
+}
+
 bool resolve_file(backends::HttpClient& client, HfRef& ref, std::string_view token,
                   const harness::CancellationToken& cancellation, std::string& error) {
     if (!ref.file.empty()) {
@@ -214,6 +230,13 @@ bool resolve_file(backends::HttpClient& client, HfRef& ref, std::string_view tok
     }
 
     const HfListing listing = list_gguf_files(client, ref, token, cancellation);
+    return choose_file(listing, ref, error);
+}
+
+bool choose_file(const HfListing& listing, HfRef& ref, std::string& error) {
+    if (!ref.file.empty()) {
+        return true;
+    }
     if (!listing.ok) {
         error = listing.error;
         return false;
@@ -291,6 +314,12 @@ ByteSource http_source(backends::HttpClient& client, const HfRef& ref, HfRepoKin
         } catch (const backends::HttpError& e) {
             error = std::string{"the download failed: "} + e.what();
             return false;
+        } catch (const harness::CancelledError&) {
+            // A failure like any other to the ladder, which then removes
+            // what it staged: an exception would skip its cleanup (27b,
+            // the first pull a Ctrl-C can reach).
+            error = "cancelled";
+            return false;
         }
         if (response.status == 401 || response.status == 403) {
             error =
@@ -339,6 +368,12 @@ ByteSource http_source(backends::HttpClient& client, const HfRef& ref, std::stri
                 request, [&write](std::string_view chunk) { return write(chunk); }, cancellation);
         } catch (const backends::HttpError& e) {
             error = std::string{"the download failed: "} + e.what();
+            return false;
+        } catch (const harness::CancelledError&) {
+            // A failure like any other to the ladder, which then removes
+            // what it staged: an exception would skip its cleanup (27b,
+            // the first pull a Ctrl-C can reach).
+            error = "cancelled";
             return false;
         }
 

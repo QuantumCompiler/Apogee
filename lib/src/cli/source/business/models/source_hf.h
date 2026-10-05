@@ -60,6 +60,17 @@ struct HfListing {
     bool has_safetensors = false;
     /// Every `.safetensors` path in the repo, in the order the API returned.
     std::vector<std::string> safetensors_files;
+
+    /// What the repository says it is for: its `library_name` and its tags,
+    /// as its model card declares them (27b). `mlx-lm` writes `mlx` into
+    /// both for every model it converts or uploads.
+    std::string library_name;
+    std::vector<std::string> tags;
+
+    /// The repository declares itself an MLX model -- `library_name: mlx`,
+    /// or the `mlx` tag -- and holds SafeTensors weights to pull whole. A
+    /// fact the repository states, never a guess from its name.
+    [[nodiscard]] bool mlx() const;
 };
 
 /// Which kind of repository a ref names. Models and datasets live under
@@ -115,6 +126,10 @@ struct HfTree {
 /// so. Never guesses.
 [[nodiscard]] bool resolve_file(backends::HttpClient& client, HfRef& ref, std::string_view token,
                                 const harness::CancellationToken& cancellation, std::string& error);
+
+/// `resolve_file`'s decision over a listing already in hand -- what `models
+/// pull` asks after looking whether the repository is an MLX one (27b).
+[[nodiscard]] bool choose_file(const HfListing& listing, HfRef& ref, std::string& error);
 
 /// A `ByteSource` that streams the file over `client`.
 ///

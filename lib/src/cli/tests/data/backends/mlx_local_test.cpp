@@ -910,6 +910,39 @@ TEST_CASE("a model directory says its type, its template and its authors' sampli
     CHECK(apogee::backends::inspect_mlx_model(dir.path()).chat_template);
 }
 
+TEST_CASE("the window is config.json's under 26a's default, the entry's when it sets one",
+          "[backends][mlx][window]") {
+    // 27b: read from the model directory, never guessed -- the same window a
+    // GGUF chat of the model would get, so warnings and compaction agree.
+    Runtime runtime;
+    std::ofstream{runtime.dir.path() / "model" / "config.json"}
+        << R"({"model_type":"llama","max_position_embeddings":131072})";
+    const auto window_of = [&runtime]() {
+        Fixture fixture{DriverState{},
+                        MlxLocalProvider::options_from("local", runtime.entry, runtime.host)};
+        return fixture.provider->context_window();
+    };
+    const MlxLocalProvider::Options options =
+        MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    CHECK(options.trained_window == 131072);
+    CHECK(options.config_read);
+    CHECK(window_of() == 32768);
+
+    // Trained for less than the default: the trained window.
+    std::ofstream{runtime.dir.path() / "model" / "config.json"}
+        << R"({"model_type":"llama","text_config":{"max_position_embeddings":4096}})";
+    CHECK(window_of() == 4096);
+
+    // The entry's own, over anything the model says.
+    runtime.entry.context_size = 2048;
+    CHECK(window_of() == 2048);
+
+    // A directory with no configuration says nothing.
+    runtime.entry.context_size.reset();
+    std::filesystem::remove(runtime.dir.path() / "model" / "config.json");
+    CHECK(window_of() == 0);
+}
+
 TEST_CASE("an entry's fields map onto the provider's options", "[backends][mlx][config]") {
     Runtime runtime;
     runtime.entry.model = "llama-3b";

@@ -8,6 +8,7 @@
 
 #include "contracts/cancellation.h"
 #include "modelstore/gguf_inspect.h"
+#include "modelstore/mlx_info.h"
 
 /// A SafeTensors snapshot turned into a GGUF -- `apogee models convert`.
 ///
@@ -98,5 +99,49 @@ struct Encoders {
                                              const std::filesystem::path& output,
                                              const ConvertFn& convert,
                                              const harness::CancellationToken& cancellation);
+
+// --- into MLX (27b) --------------------------------------------------------------------
+
+/// Writes an MLX model directory at `out` from the snapshot directory --
+/// `mlx_lm.convert` in the owned environment, or a test's stand-in. The
+/// error, or empty; "cancelled" when the token fired.
+using MlxConvertFn = std::function<std::string(const std::filesystem::path& snapshot,
+                                               const std::filesystem::path& out,
+                                               const harness::CancellationToken& cancellation)>;
+
+struct MlxConvertResult {
+    bool ok = false;
+    bool cancelled = false;
+    /// Why not. Always set when `ok` is false.
+    std::string error;
+    /// What the finished directory says: its window, its quantization, its
+    /// shards and size.
+    MlxInfo info;
+};
+
+/// Roughly what an MLX model of `elements` weighs at `bits` a weight -- a
+/// 16-bit scale and bias for every group of 64 on top -- or at two bytes an
+/// element unquantized. An estimate for a progress line, never a check.
+[[nodiscard]] std::int64_t estimated_mlx_bytes(std::int64_t elements, int bits);
+
+/// Why the MLX ladder's first rungs refuse, or empty -- before anything is
+/// announced: not a snapshot, a damaged one, one already quantized by
+/// `mlx-lm` (an MLX model runs as it is), or something already at `out`.
+[[nodiscard]] std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
+                                                 const std::filesystem::path& out);
+
+/// The ladder, in order:
+///   1. `snapshot` is one, intact, and not already quantized by `mlx-lm`
+///   2. nothing exists at `out` -- the converter writes the directory itself
+///      and a conversion never replaces anything
+///   3. convert into `out`
+///   4. what landed reads as a whole MLX model (`read_mlx_info`), quantized
+///      to `bits` when `bits` is set -- a directory that cannot load, or one
+///      the converter did not quantize as asked, is never committed
+/// A failure at any rung, cancellation included, removes `out`. Committing
+/// it under its id is the store's (`commit_mlx`).
+[[nodiscard]] MlxConvertResult convert_snapshot_to_mlx(
+    const std::filesystem::path& snapshot, const std::filesystem::path& out, int bits,
+    const MlxConvertFn& convert, const harness::CancellationToken& cancellation);
 
 }  // namespace apogee::models

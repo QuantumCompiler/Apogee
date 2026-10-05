@@ -44,7 +44,16 @@ no_driver_left() {
 mlx_fake_runtime "$WORK_DIR" "$MLX_STUBS"
 "$APOGEE_BIN" check --fix >/dev/null 2>&1 || true
 [ -f "$WORK_DIR/training/scripts/mlx_generate.py" ] || fail "check --fix did not seed the driver"
-"$APOGEE_BIN" config add-backend mlx --type mlx --model-path "$MLX_MODEL" >/dev/null \
+# The fixture directory, given the one shard a whole model has: since 27b
+# the doctor reads an entry's files whole, and the stub never loads it.
+cp -R "$MLX_MODEL" "$WORK_DIR/model" || fail "could not copy the fixture model"
+python3 - "$WORK_DIR/model/model.safetensors" <<'EOF' || fail "could not write the fixture shard"
+import json, struct, sys
+header = json.dumps({"__metadata__": {"format": "mlx"},
+                     "w": {"dtype": "F16", "shape": [8], "data_offsets": [0, 16]}}).encode()
+open(sys.argv[1], "wb").write(struct.pack("<Q", len(header)) + header + b"\0" * 16)
+EOF
+"$APOGEE_BIN" config add-backend mlx --type mlx --model-path "$WORK_DIR/model" >/dev/null \
     || fail "add-backend"
 "$APOGEE_BIN" config set-default mlx >/dev/null || fail "set-default"
 
@@ -55,7 +64,11 @@ grep -q "mlx-lm 0.0-stub is present" "$WORK_DIR/check.txt" \
 grep -q "mlx_generate.py matches the shipped copy" "$WORK_DIR/check.txt" \
     || fail "check did not report the driver"
 grep -q "backend: mlx.*llama model directory" "$WORK_DIR/check.txt" \
-    || fail "check did not report the entry"
+    || fail "check did not report the entry: $(cat "$WORK_DIR/check.txt")"
+# Its window, read from config.json under 26a's default (27b).
+perl -0pe 's/\n  (?! )//g' "$WORK_DIR/check.txt" \
+    | grep -q "32768-token window (the default; trained for 131072)" \
+    || fail "check did not report the entry's window"
 
 # --- complete: one shot, byte-clean, the library's noise on neither stream ----
 export STUB_MLX_REPLIES="$WORK_DIR/replies.json"

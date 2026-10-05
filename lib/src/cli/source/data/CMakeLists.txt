@@ -54,6 +54,8 @@ apogee_add_module(modelstore
     modelstore/gguf_inspect.cpp
     modelstore/kv_cache.h
     modelstore/kv_cache.cpp
+    modelstore/mlx_info.h
+    modelstore/mlx_info.cpp
     modelstore/sidecar.h
     modelstore/sidecar.cpp
     modelstore/snapshot.h

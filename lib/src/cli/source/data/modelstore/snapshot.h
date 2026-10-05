@@ -32,6 +32,10 @@ struct Snapshot {
     std::string revision;
     std::string source;
     std::string pulled_at;
+    /// How the files were made from `ref`, when a verb made them rather than
+    /// a download -- `mlx_lm.convert 4bit` for an MLX model `models convert
+    /// --mlx` wrote (27b). Empty for a pull, and then not written.
+    std::string transform;
     std::vector<SnapshotFile> files;
 };
 

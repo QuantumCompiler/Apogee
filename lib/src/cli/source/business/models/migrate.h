@@ -19,15 +19,18 @@ namespace apogee::models {
 
 /// One thing the flat layout left, and where it goes.
 struct MigrationItem {
-    enum class Kind : std::uint8_t { Gguf, Snapshot };
+    /// `Mlx` (27b): a flat directory in `mlx-lm`'s own format -- quantized
+    /// by it, or saved with its mark -- which goes to `mlx/`, where the
+    /// backend that runs it finds it, rather than to `safetensors/`.
+    enum class Kind : std::uint8_t { Gguf, Snapshot, Mlx };
     Kind kind = Kind::Gguf;
     std::string model;
     std::string id;
     /// The `<id>` directory it lands in.
     std::filesystem::path destination;
     /// Each file or directory that moves, and where to. A GGUF brings its
-    /// record, its projector and the projector's record; a snapshot is one
-    /// directory.
+    /// record, its projector and the projector's record; a snapshot or an
+    /// MLX model is one directory.
     std::vector<std::pair<std::filesystem::path, std::filesystem::path>> moves;
     /// Identical weights are already stored under this id: nothing moves, and
     /// the old copy is left for the user to remove -- never deleted here.

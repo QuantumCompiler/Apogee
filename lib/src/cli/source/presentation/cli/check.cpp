@@ -37,6 +37,7 @@
 #include "knowledge/store.h"
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/kv_cache.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "platform/child_process.h"
@@ -273,11 +274,30 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
             if (readiness.ready()) {
                 const backends::MlxModelInfo info =
                     backends::inspect_mlx_model(readiness.model_dir);
+                // Its files read whole, as a GGUF's header is: a shard cut
+                // short fails here, not at the first turn (27b).
+                const models::MlxInfo files = models::read_mlx_info(readiness.model_dir);
+                if (!files.complete) {
+                    // A stored model is repaired by its handle; one placed
+                    // by hand has nothing to be fetched from.
+                    const std::optional<models::StoredMlx> stored = models::stored_mlx_at(
+                        models::list_store_mlx(models::StoreRoots::at(inputs.home / "models")),
+                        readiness.model_dir);
+                    add(report, Status::Fail, "Config", label,
+                        std::string{type} + " -- " + files.problem,
+                        stored.has_value() ? "apogee models repair " +
+                                                 models::weights_handle(
+                                                     stored->model, models::kMlxFormat, stored->id)
+                                           : std::string{});
+                    continue;
+                }
                 add(report, Status::Ok, "Config", label,
                     std::string{type} + " -- " +
                         (info.model_type.empty() ? std::string{"a"} : info.model_type) +
                         " model directory" +
-                        (info.chat_template ? "" : " with no chat template (a base model)") +
+                        (info.chat_template ? "" : " with no chat template (a base model)") + ", " +
+                        files.quantization.describe() + "; " +
+                        models::describe(models::mlx_window(files, backend)) +
                         "; its runtime is present");
                 continue;
             }
@@ -438,7 +458,8 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
     int found = 0;
     const std::vector<models::StoredGguf> ggufs = models::list_store_ggufs(roots);
     const std::vector<models::StoredSnapshot> snapshots = models::list_store_snapshots(roots);
-    const std::size_t total = ggufs.size() + snapshots.size();
+    const std::vector<models::StoredMlx> mlx = models::list_store_mlx(roots);
+    const std::size_t total = ggufs.size() + snapshots.size() + mlx.size();
     std::size_t read = 0;
     for (const models::StoredGguf& stored : ggufs) {
         ++found;
@@ -468,6 +489,24 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
                 "apogee models repair " + name);
         } else {
             add(report, Status::Ok, "Models", name, "SafeTensors weights");
+        }
+    }
+    // An MLX model's files read whole -- the configuration the model's, a
+    // tokenizer, every shard the index names and each within its file --
+    // never "loads", which only a load can say (27b).
+    for (const models::StoredMlx& stored : mlx) {
+        ++found;
+        const std::string name =
+            models::weights_handle(stored.model, models::kMlxFormat, stored.id);
+        say(inputs, "checking models: " + name, ++read, total);
+        const models::MlxInfo info = models::read_mlx_info(stored.dir);
+        if (!info.complete) {
+            add(report, Status::Fail, "Models", name, "MLX model that " + info.problem,
+                "apogee models repair " + name);
+        } else {
+            add(report, Status::Ok, "Models", name,
+                (info.model_type.empty() ? std::string{} : info.model_type + ", ") + "MLX, " +
+                    info.quantization.describe() + ", files whole");
         }
     }
 
@@ -1251,19 +1290,24 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
             break;  // the runtime's rungs never answer these
     }
 
-    std::error_code code;
-    const std::string driver = std::string{backends::kMlxDriverName};
-    if (!std::filesystem::is_regular_file(host.driver, code)) {
-        add(report, Status::Warn, "MLX", "driver",
-            driver + " is missing from " + host.driver.parent_path().string(),
-            "apogee check --fix");
-    } else if (harness::is_unmodified_bundled_asset(inputs.home, host.driver)) {
-        add(report, Status::Ok, "MLX", "driver", driver + " matches the shipped copy");
-    } else {
-        add(report, Status::Warn, "MLX", "driver",
-            driver +
-                " differs from the shipped copy -- your edit is kept and runs; delete the file "
-                "and run 'apogee check --fix' to restore the shipped one");
+    // The two seeded drivers: the backend's, and `convert --mlx`'s (27b).
+    for (const auto& [label, file] :
+         {std::pair<std::string, std::filesystem::path>{"driver", host.driver},
+          std::pair<std::string, std::filesystem::path>{
+              "conversion driver", inputs.home / harness::bundled_mlx_converter_relative_path()}}) {
+        std::error_code code;
+        const std::string script = file.filename().string();
+        if (!std::filesystem::is_regular_file(file, code)) {
+            add(report, Status::Warn, "MLX", label,
+                script + " is missing from " + file.parent_path().string(), "apogee check --fix");
+        } else if (harness::is_unmodified_bundled_asset(inputs.home, file)) {
+            add(report, Status::Ok, "MLX", label, script + " matches the shipped copy");
+        } else {
+            add(report, Status::Warn, "MLX", label,
+                script +
+                    " differs from the shipped copy -- your edit is kept and runs; delete the "
+                    "file and run 'apogee check --fix' to restore the shipped one");
+        }
     }
 }
 

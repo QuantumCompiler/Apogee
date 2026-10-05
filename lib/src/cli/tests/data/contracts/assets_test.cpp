@@ -61,11 +61,11 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     const apogee::testing::TempDir root{"assets-seed-" + std::to_string(std::random_device{}())};
     const apogee::harness::AssetSeedResult first = seed_bundled_assets(root.path());
     REQUIRE(first.ok());
-    // Six agent files, four kits, three training drivers, the mlx backend's
-    // driver, the vendored converter.
+    // Six agent files, four kits, three training drivers, the two mlx
+    // drivers, the vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
     CHECK(first.created.size() ==
-          6 + 4 + 3 + 1 + apogee::harness::bundled_converter_files().size());
+          6 + 4 + 3 + 2 + apogee::harness::bundled_converter_files().size());
     const std::filesystem::path prompt = root.path() / "prompts" / "security-review.txt";
     REQUIRE(std::filesystem::exists(prompt));
     CHECK(read(prompt) == find_bundled_agent("security-review")->prompt);
@@ -190,16 +190,22 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          6 + 4 + 3 + 1 + apogee::harness::bundled_converter_files().size());
+          6 + 4 + 3 + 2 + apogee::harness::bundled_converter_files().size());
 }
 
-TEST_CASE("the compiled-in mlx driver byte-matches the shipped file and seeds beside the trainers",
+TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",
           "[harness][assets][mlx]") {
-    // The mlx backend's driver (27a), held to the training drivers' rule:
-    // the file is the source of truth, and this literal never drifts from it.
+    // The mlx backend's driver (27a) and the converter's (27b), held to the
+    // training drivers' rule: the file is the source of truth, and the
+    // literal never drifts from it.
     const std::filesystem::path assets{APOGEE_ASSETS_DIR};
-    REQUIRE(apogee::harness::bundled_mlx_scripts().size() == 1);
-    const apogee::harness::BundledScript& driver = apogee::harness::bundled_mlx_scripts()[0];
+    REQUIRE(apogee::harness::bundled_mlx_scripts().size() == 2);
+    const apogee::harness::BundledScript& converter = apogee::harness::bundled_mlx_scripts()[0];
+    CHECK(converter.name == "mlx_convert.py");
+    CHECK(read(assets / "mlx" / "mlx_convert.py") == converter.text);
+    CHECK(apogee::harness::bundled_mlx_converter_relative_path() ==
+          "training/scripts/mlx_convert.py");
+    const apogee::harness::BundledScript& driver = apogee::harness::bundled_mlx_scripts()[1];
     CHECK(driver.name == "mlx_generate.py");
     CHECK(read(assets / "mlx" / "mlx_generate.py") == driver.text);
     CHECK(apogee::harness::bundled_mlx_driver_relative_path() ==

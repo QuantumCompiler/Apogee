@@ -32,6 +32,7 @@ add_library(apogee_tests_infrastructure OBJECT
     support/fake_child.h
     support/fake_ffmpeg.h
     support/gguf_builder.h
+    support/mlx_model.h
     support/terminal_model.h
     support/terminal_model.cpp
     support/embedding_fixtures.h
@@ -71,6 +72,7 @@ add_library(apogee_tests_data OBJECT
     data/backends/mlx_driver_test.cpp
     data/modelstore/gguf_inspect_test.cpp
     data/modelstore/kv_cache_test.cpp
+    data/modelstore/mlx_info_test.cpp
     data/contracts/sha256_test.cpp
     data/modelstore/store_test.cpp
     data/modelstore/sidecar_test.cpp
@@ -178,6 +180,7 @@ add_library(apogee_tests_business OBJECT
     business/training/eval_test.cpp
     business/training/promote_test.cpp
     business/training/convert_test.cpp
+    business/training/mlx_convert_test.cpp
     business/training/pipeline_test.cpp
     business/training/regime_test.cpp
     business/training/cycle_test.cpp
@@ -193,6 +196,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/models_pull_test.cpp
     presentation/cli/models_migrate_test.cpp
     presentation/cli/models_convert_test.cpp
+    presentation/cli/models_mlx_test.cpp
     presentation/cli/model_chain_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp
@@ -557,6 +561,18 @@ if(UNIX)
             ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mlx/model
     )
     set_tests_properties(cli.mlx_lifecycle PROPERTIES TIMEOUT 120)
+
+    # MLX model operations (27b) on the real binary: `models convert --mlx`
+    # through the seeded driver under the stub mlx packages -- the set landed
+    # by its hash, listed and checked, a REAL Ctrl-C mid-conversion leaving the
+    # store as it was, and the set deleted whole. Apple silicon only.
+    add_test(NAME cli.mlx_models_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/mlx_models_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/mlx-models-e2e-home
+            ${CMAKE_CURRENT_SOURCE_DIR}/data/backends/scripts
+    )
+    set_tests_properties(cli.mlx_models_lifecycle PROPERTIES TIMEOUT 120)
 
     # The other half of that boundary: serve DOES hold a port, fails closed on a
     # non-loopback bind, streams to a real client, mints sessions the terminal

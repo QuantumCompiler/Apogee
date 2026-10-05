@@ -13,6 +13,7 @@
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "support/env_guard.h"
+#include "support/mlx_model.h"
 
 namespace {
 
@@ -112,6 +113,31 @@ TEST_CASE("a flat snapshot moves inside a model directory of its own name", "[mo
     const auto newest = apogee::models::newest_snapshot(flat.roots, "Qwen--Qwen3-8B");
     REQUIRE(newest.has_value());
     CHECK(newest->id == item.id);
+}
+
+TEST_CASE("a flat MLX model moves into mlx/, where the backend that runs it looks",
+          "[models][migrate][mlx]") {
+    // Told from a full-weight snapshot by mlx-lm's own marks (27b): the
+    // flat-layout refusal names the migration, and the migration knows where
+    // an MLX model goes.
+    const Flat flat;
+    const std::filesystem::path old_dir = flat.roots.models / "mlx-community--M-4bit";
+    apogee::testing::write_mlx_model(old_dir);
+
+    const apogee::models::MigrationPlan plan = apogee::models::plan_migration(flat.roots);
+    REQUIRE(plan.items.size() == 1);
+    const apogee::models::MigrationItem& item = plan.items.front();
+    CHECK(item.kind == apogee::models::MigrationItem::Kind::Mlx);
+    CHECK(item.destination == old_dir / "mlx" / item.id);
+    CHECK(apogee::models::is_weight_id(item.id));
+
+    REQUIRE(apogee::models::apply_migration(item).empty());
+    const std::vector<apogee::models::StoredMlx> stored =
+        apogee::models::list_store_mlx(flat.roots, "mlx-community--M-4bit");
+    REQUIRE(stored.size() == 1);
+    CHECK(stored.front().dir == item.destination);
+    CHECK(apogee::models::list_store_snapshots(flat.roots).empty());
+    CHECK(apogee::models::find_legacy(flat.roots).empty());
 }
 
 TEST_CASE("snapshots move before GGUFs of the same model", "[models][migrate]") {

@@ -72,6 +72,14 @@ struct ModelRow {
     /// unreadable header's reason. Never fatal on its own.
     std::string note;
 
+    /// What a local model is stored as -- `gguf`, `safetensors`, `mlx` --
+    /// empty for a cloud backend. For an MLX model (27b) also its
+    /// quantization and the window an entry over it gets, read from its
+    /// `config.json`; the table carries them in the note, the JSONL as fields.
+    std::string format;
+    std::string quant;
+    std::string window;
+
     /// A `backends:` entry, rather than something on disk no backend points at.
     bool configured = false;
     /// Something about it needs fixing -- a missing or unreadable file, no API

@@ -13,7 +13,7 @@
 - `assets/mlx/mlx_generate.py`: the vision extension (image parts in the request protocol, `mlx-vlm` loading when the model carries it); the stub-module suite grows the image cases.
 - `backends/mlx_local.cpp`: image-capability answer from the model directory's own markers; the capability probe stays a harness question.
 - `httpserver/`: nothing structural — a conformance case proving an `mlx` entry serves `/v1/chat/completions` streamed, and the type-refusal test updated to assert it is *not* refused.
-- `training/promote` plan + `cli/train.cpp`: the MLX registration target (`--target mlx`), fused-SafeTensors path through [27b](mlx-model-operations.md)'s store row, the version ledger unchanged.
+- `training/promote` plan + `cli/train.cpp`: the MLX registration target (`--target mlx`), fused-SafeTensors path through [27b](../../assistant/MILESTONES.md#milestone-ab--mlx-inference)'s store row (`mlx/`, shipped 2026-10-04), the version ledger unchanged.
 - Tests: fake-driver image round-trip; promote-plan table gains the MLX branch (closure-tested like the GGUF one); the served-stream conformance case; `check` rows.
 
 **Reference.** The in-house precedents consumed: local multimodal (Milestone O), the serve plane's refusal semantics (Milestone T), and the promote plan (Milestone Z).
@@ -25,6 +25,7 @@
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): `mlx-vlm` installs on demand via the setup path; absent, vision answers "no" and `check` says why.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): only still images go native for MLX in this cut; video/audio stay on the 26e timeline/transcript path.
 - 2026-10-04 — What 27a left for this item: the `mlx` type is not on the vendor-CLI predicate, so `serve` already routes an `mlx` entry -- unexercised, which this item's conformance case makes structural; the provider serialises its requests with a mutex, the child being one conversation. `MlxLocalProvider` answers `VisionCapable` false today; the driver protocol (`backends/mlx_protocol.h`, `assets/mlx/mlx_generate.py`) is at version 1, and an image part is a protocol addition.
+- 2026-10-04 — What 27b left for this item: the store's `mlx/` row (`models::kMlxFormat`, under the models directory, never `paths.hf_dir`) and `models::commit_mlx(roots, model, staging, record)` -- every file hashed into an `apogee-snapshot.json` record (a `transform` field saying how it was made), the directory committed under the digest over its shards -- which is the natural landing for a fused model under `--target mlx`; `models::read_mlx_info` (`modelstore/mlx_info.h`) reads a directory whole and is what verifies one before it is committed; `stored_mlx_name` and `config add-backend <name>` fill an `mlx` entry from a stored set, the shape a promote's registration can reuse; an `mlx` entry's window is 26a's default over `config.json`'s trained one, `context_size` still winning.
 
 **Guardrail(s).**
 - The image round-trip against the fake driver, plus the capability answer flipping with the model directory's markers.
@@ -38,4 +39,4 @@
 - [ ] `apogee train promote --target mlx` registers the tuned model as a runnable `mlx` entry through the one config editor, versioned in the ledger, with rollback intact — and no GGUF conversion ran.
 - [ ] `check` reports the vision dependency honestly on installs with and without it.
 
-**Scope note.** Item **27c**, earmarked for **v0.1.4**; build after [27a](../../assistant/MILESTONES.md#milestone-ab--mlx-inference) (shipped 2026-10-04) and [27b](mlx-model-operations.md). Out of scope: MLX embeddings; audio/video native paths; distillation changes beyond the promote target; any second serve plane.
+**Scope note.** Item **27c**, earmarked for **v0.1.4**; build after [27a](../../assistant/MILESTONES.md#milestone-ab--mlx-inference) (shipped 2026-10-04) and [27b](../../assistant/MILESTONES.md#milestone-ab--mlx-inference) (shipped 2026-10-04). Out of scope: MLX embeddings; audio/video native paths; distillation changes beyond the promote target; any second serve plane.

@@ -1,6 +1,7 @@
 #include "modelstore/store.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstdint>
@@ -13,6 +14,7 @@
 
 #include "contracts/sha256.h"
 #include "modelstore/hf_ref.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/sidecar.h"
 #include "platform/platform.h"
 
@@ -27,8 +29,11 @@ constexpr std::string_view kIncomingPrefix = ".incoming-";
 }
 
 [[nodiscard]] bool is_format(std::string_view text) noexcept {
-    return text == kGgufFormat || text == kSafetensorsFormat;
+    return text == kGgufFormat || text == kSafetensorsFormat || text == kMlxFormat;
 }
+
+/// Every format, in the order a listing names them.
+constexpr std::array<std::string_view, 3> kFormats{kGgufFormat, kSafetensorsFormat, kMlxFormat};
 
 /// The visible subdirectories of `dir`, sorted.
 [[nodiscard]] std::vector<std::filesystem::path> subdirectories(const std::filesystem::path& dir) {
@@ -459,7 +464,138 @@ std::string_view backend_type_for_format(std::string_view format) noexcept {
     if (format == kGgufFormat) {
         return "llamacpp";
     }
+    if (format == kMlxFormat) {
+        return "mlx";
+    }
     return {};
+}
+
+std::vector<StoredMlx> list_store_mlx(const StoreRoots& roots, std::string_view model) {
+    std::vector<StoredMlx> out;
+    for (const std::filesystem::path& model_path : subdirectories(roots.models)) {
+        const std::string name = model_path.filename().string();
+        if (!model.empty() && name != model) {
+            continue;
+        }
+        for (const std::filesystem::path& id_dir :
+             subdirectories(model_path / std::string{kMlxFormat})) {
+            StoredMlx stored;
+            stored.model = name;
+            stored.id = id_dir.filename().string();
+            stored.dir = id_dir;
+            if (const std::optional<Snapshot> record = load_snapshot(id_dir)) {
+                stored.arrived = record->pulled_at;
+            }
+            out.push_back(std::move(stored));
+        }
+    }
+    return out;
+}
+
+std::optional<StoredMlx> stored_mlx_at(const std::vector<StoredMlx>& stored,
+                                       const std::filesystem::path& dir) {
+    // A trailing separator names the same directory.
+    const auto normal = [](const std::filesystem::path& path) {
+        const std::filesystem::path out = path.lexically_normal();
+        return out.has_filename() ? out : out.parent_path();
+    };
+    const std::filesystem::path wanted = normal(dir);
+    for (const StoredMlx& candidate : stored) {
+        if (normal(candidate.dir) == wanted) {
+            return candidate;
+        }
+    }
+    return std::nullopt;
+}
+
+std::string stored_mlx_name(const StoredMlx& stored) {
+    const std::size_t separator = stored.model.rfind("--");
+    std::string name =
+        separator == std::string::npos ? stored.model : stored.model.substr(separator + 2);
+    const std::string label = read_mlx_config(stored.dir).quantization.label();
+    const auto lower = [](std::string text) {
+        std::ranges::transform(text, text.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return text;
+    };
+    if (!label.empty() && !lower(name).ends_with("-" + lower(label))) {
+        name += "-" + label;
+    }
+    return name;
+}
+
+std::vector<StoredMlx> stored_mlx_named(const std::vector<StoredMlx>& stored,
+                                        std::string_view name) {
+    std::vector<StoredMlx> out;
+    for (const StoredMlx& candidate : stored) {
+        if (stored_mlx_name(candidate) == name) {
+            out.push_back(candidate);
+        }
+    }
+    return out;
+}
+
+StoredDirectory commit_mlx(const StoreRoots& roots, std::string_view model,
+                           const std::filesystem::path& staging, Snapshot record,
+                           const HashProgress& progress) {
+    StoredDirectory stored;
+    std::error_code code;
+    std::vector<std::filesystem::path> files;
+    for (auto it = std::filesystem::recursive_directory_iterator(staging, code);
+         !code && it != std::filesystem::recursive_directory_iterator(); it.increment(code)) {
+        if (it->is_regular_file(code) && it->path() != snapshot_record_path(staging)) {
+            files.push_back(it->path());
+        }
+    }
+    if (code) {
+        stored.error = "could not read " + staging.string() + ": " + code.message();
+        return stored;
+    }
+    std::ranges::sort(files);
+    std::vector<SnapshotFile> listed;
+    std::int64_t hashed_before = 0;
+    for (const std::filesystem::path& file : files) {
+        SnapshotFile entry;
+        entry.path = file.lexically_relative(staging).generic_string();
+        entry.size = static_cast<std::int64_t>(std::filesystem::file_size(file, code));
+        const auto known = std::ranges::find(record.files, entry.path, &SnapshotFile::path);
+        if (known != record.files.end() && !known->sha256.empty() && known->size == entry.size) {
+            entry.sha256 = known->sha256;  // what the download already verified
+        } else {
+            bool stopped = false;
+            entry.sha256 = file_sha256(file, [&](std::int64_t hashed) {
+                stopped = progress && !progress(hashed_before + hashed);
+                return !stopped;
+            });
+            if (stopped) {
+                stored.error = std::string{kStopped};
+                return stored;
+            }
+            if (entry.sha256.empty()) {
+                stored.error = "could not read " + file.string() + " to record it";
+                return stored;
+            }
+        }
+        hashed_before += entry.size;
+        listed.push_back(std::move(entry));
+    }
+    record.files = std::move(listed);
+    if (record.pulled_at.empty()) {
+        record.pulled_at = now_rfc3339();
+    }
+    std::string id = snapshot_weight_id(record.files);
+    if (id.empty()) {
+        id = random_weight_id();
+    }
+    if (!write_snapshot(staging, record)) {
+        stored.error = "could not write the record into " + staging.string();
+        return stored;
+    }
+    const Commit commit = commit_weights(staging, weights_dir(roots, kMlxFormat, model, id));
+    stored.dir = commit.dir;
+    stored.existed = commit.existed;
+    stored.error = commit.error;
+    return stored;
 }
 
 std::vector<StoredSnapshot> list_store_snapshots(const StoreRoots& roots, std::string_view model) {
@@ -516,8 +652,9 @@ std::vector<std::string> list_store_models(const StoreRoots& roots) {
     for (const std::filesystem::path& root : {roots.models, roots.safetensors}) {
         for (const std::filesystem::path& model_path : subdirectories(root)) {
             std::error_code code;
-            if (std::filesystem::is_directory(model_path / std::string{kGgufFormat}, code) ||
-                std::filesystem::is_directory(model_path / std::string{kSafetensorsFormat}, code)) {
+            if (std::ranges::any_of(kFormats, [&model_path, &code](std::string_view format) {
+                    return std::filesystem::is_directory(model_path / std::string{format}, code);
+                })) {
                 out.push_back(model_path.filename().string());
             }
         }
@@ -555,11 +692,24 @@ namespace {
     return total;
 }
 
+/// The owner marker that claims `staging`: its own, or -- for the
+/// `<name>.staging` tree a download fills before renaming it to `<name>`
+/// (`acquire_tree`) -- `<name>`'s, written when the name was claimed.
+[[nodiscard]] std::filesystem::path claiming_marker(const std::filesystem::path& staging) {
+    const std::string name = staging.filename().string();
+    constexpr std::string_view tree_suffix = ".staging";
+    if (name.ends_with(tree_suffix)) {
+        return staging_owner_path(staging.parent_path() /
+                                  name.substr(0, name.size() - tree_suffix.size()));
+    }
+    return staging_owner_path(staging);
+}
+
 /// Whether nothing owns `staging` any more: its marker names a process that
 /// is gone, or it has none and an hour has passed without a change -- well
 /// past any live writer, which grows a partial file or a download as it goes.
 [[nodiscard]] bool abandoned(const std::filesystem::path& staging) {
-    std::ifstream owner{staging_owner_path(staging)};
+    std::ifstream owner{claiming_marker(staging)};
     long pid = 0;
     if (owner >> pid) {
         return !platform::process_running(pid);
@@ -575,7 +725,7 @@ std::vector<AbandonedStaging> find_abandoned_staging(const StoreRoots& roots) {
     std::set<std::filesystem::path> seen;  // the two roots are often one
     for (const std::filesystem::path& root : {roots.models, roots.safetensors}) {
         for (const std::filesystem::path& model_path : subdirectories(root)) {
-            for (const std::string_view format : {kGgufFormat, kSafetensorsFormat}) {
+            for (const std::string_view format : kFormats) {
                 std::error_code code;
                 for (const auto& entry :
                      std::filesystem::directory_iterator(model_path / std::string{format}, code)) {
@@ -641,6 +791,14 @@ StoreTarget resolve_store_target(const StoreRoots& roots, std::string_view given
                     {snapshot.model, std::string{kSafetensorsFormat}, snapshot.id, snapshot.dir});
             }
         }
+        for (const StoredMlx& mlx : list_store_mlx(roots)) {
+            if (mlx.id == given) {
+                matches.push_back({.model = mlx.model,
+                                   .format = std::string{kMlxFormat},
+                                   .id = mlx.id,
+                                   .path = mlx.dir});
+            }
+        }
         if (matches.size() == 1) {
             return matches.front();
         }
@@ -695,9 +853,9 @@ StoreTarget resolve_store_target(const StoreRoots& roots, std::string_view given
     if (!name.empty() && name.find("..") == std::string::npos &&
         name.find_first_of("/\\") == std::string::npos) {
         for (const std::filesystem::path& root : {roots.models, roots.safetensors}) {
-            if (std::filesystem::is_directory(root / name / std::string{kGgufFormat}, code) ||
-                std::filesystem::is_directory(root / name / std::string{kSafetensorsFormat},
-                                              code)) {
+            if (std::ranges::any_of(kFormats, [&](std::string_view format) {
+                    return std::filesystem::is_directory(root / name / std::string{format}, code);
+                })) {
                 target.model = name;
                 target.path = root / name;
                 return target;
@@ -716,6 +874,7 @@ std::string remove_weights(const std::filesystem::path& weights_dir) {
         return "could not remove " + weights_dir.string() + ": " + code.message();
     }
     if (weights_dir.filename().string().starts_with(kIncomingPrefix)) {
+        std::filesystem::remove(claiming_marker(weights_dir), code);
         std::filesystem::remove(staging_owner_path(weights_dir), code);
     }
     // Tidy upward: an emptied format directory, then an emptied model one.

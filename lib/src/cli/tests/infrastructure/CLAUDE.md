@@ -4,7 +4,7 @@
 
 **Compiles as** `apogee_tests_infrastructure`, an OBJECT library linking the Infrastructure modules only: a test that includes a header from above this layer does not compile, and the link policy refuses the library a link above it. A behavior spanning layers is tested in the highest layer it touches -- nothing here drives a contract, a backend or the Harness.
 
-**Support** (`tests/support/`, each file with the lowest layer whose headers it includes): `env_guard`, `file_time`, `terminal_model`, `gguf_builder`, `fake_child`, `fake_ffmpeg`, `embedding_fixtures`.
+**Support** (`tests/support/`, each file with the lowest layer whose headers it includes): `env_guard`, `file_time`, `terminal_model`, `gguf_builder`, `mlx_model` (27b: MLX model directories with real SafeTensors headers), `fake_child`, `fake_ffmpeg`, `embedding_fixtures`.
 
 **Conventions:** hermetic -- no network, no models, nothing written outside the test's own temporary directory, named with a random draw because ctest runs cases as parallel processes, and never the real home directory (guard `HOME`). A test name never starts with a dash or holds a double quote (`cli.test_names`). One `apogee_tests` binary runs every layer's suites.
 

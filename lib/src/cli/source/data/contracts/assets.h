@@ -115,15 +115,19 @@ struct BundledScript {
 /// The three drivers, in listing order.
 [[nodiscard]] std::span<const BundledScript> bundled_training_scripts();
 
-/// The mlx backend's driver (27a) -- `mlx_generate.py` -- compiled in from
-/// `assets/mlx/`, byte-identical to it by test, and seeded skip-if-present
-/// beside the trainers under `training/scripts/`: it runs under the same
-/// Python environment, a user's edit survives an update, and `check` shows
-/// the drift. The backend runs the seeded copy.
+/// The MLX drivers -- the backend's `mlx_generate.py` (27a) and `models
+/// convert --mlx`'s `mlx_convert.py` (27b) -- compiled in from `assets/mlx/`,
+/// byte-identical to it by test, and seeded skip-if-present beside the
+/// trainers under `training/scripts/`: they run under the same Python
+/// environment, a user's edit survives an update, and `check` shows the
+/// drift. What runs is the seeded copy.
 [[nodiscard]] std::span<const BundledScript> bundled_mlx_scripts();
 
 /// `training/scripts/mlx_generate.py`, relative to the data directory.
 [[nodiscard]] std::string bundled_mlx_driver_relative_path();
+
+/// `training/scripts/mlx_convert.py`, relative to the data directory.
+[[nodiscard]] std::string bundled_mlx_converter_relative_path();
 
 /// llama.cpp's HuggingFace -> GGUF converter, vendored verbatim at the
 /// pinned revision (`third_party/llama.cpp-convert/`, its README naming

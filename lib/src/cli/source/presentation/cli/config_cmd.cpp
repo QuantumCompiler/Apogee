@@ -448,27 +448,57 @@ struct AddBackendFlags {
 };
 
 /// A name the model store knows fills what the flags leave open (M7): a
-/// stored GGUF named `<name>.gguf` gives the type its format runs as, its
-/// file and its projector -- the arguments a hand-typed `add-backend` would
-/// carry, said as such. A flag given always wins; a model path given means
-/// nothing is filled. Two stored GGUFs of that name are refused, listed.
+/// stored GGUF named `<name>.gguf`, or a stored MLX model of that name
+/// (`stored_mlx_name`, 27b), gives the type its format runs as, its file or
+/// directory and its projector -- the arguments a hand-typed `add-backend`
+/// would carry, said as such. A flag given always wins; a model path given
+/// means nothing is filled. Two stored models of that name are refused,
+/// listed.
 void fill_from_store(AddBackendFlags& flags) {
     const std::string_view type{models::backend_type_for_format(models::kGgufFormat)};
-    if (!flags.model_path.empty() || (flags.type_option->count() > 0 && flags.type != type)) {
+    const std::string_view mlx_type{models::backend_type_for_format(models::kMlxFormat)};
+    const bool typed = flags.type_option->count() > 0;
+    if (!flags.model_path.empty() || (typed && flags.type != type && flags.type != mlx_type)) {
         return;
     }
-    const std::vector<models::StoredGguf> named = models::stored_ggufs_named(
-        models::list_store_ggufs(models::StoreRoots::at(harness::models_dir())), flags.name);
-    if (named.empty()) {
-        return;
+    const models::StoreRoots roots = models::StoreRoots::at(harness::models_dir());
+    std::vector<models::StoredGguf> named;
+    if (!typed || flags.type == type) {
+        named = models::stored_ggufs_named(models::list_store_ggufs(roots), flags.name);
     }
-    if (named.size() > 1) {
+    std::vector<models::StoredMlx> named_mlx;
+    if (!typed || flags.type == mlx_type) {
+        named_mlx = models::stored_mlx_named(models::list_store_mlx(roots), flags.name);
+    }
+    if (named.size() + named_mlx.size() > 1) {
         std::string files;
         for (const models::StoredGguf& stored : named) {
             files += "\n  " + stored.file.string();
         }
-        fail("'" + flags.name + "' is the name of " + std::to_string(named.size()) +
-             " stored GGUFs -- pass --model-path with one of:" + files);
+        for (const models::StoredMlx& stored : named_mlx) {
+            files += "\n  " + stored.dir.string();
+        }
+        std::string kind = " stored models";
+        if (named_mlx.empty()) {
+            kind = " stored GGUFs";
+        } else if (named.empty()) {
+            kind = " stored MLX models";
+        }
+        fail("'" + flags.name + "' is the name of " +
+             std::to_string(named.size() + named_mlx.size()) + kind +
+             " -- pass --model-path with one of:" + files);
+    }
+    if (!named_mlx.empty()) {
+        const models::StoredMlx& stored = named_mlx.front();
+        flags.type = mlx_type;
+        flags.model_path = stored.dir.string();
+        std::cout << "filled from the store: "
+                  << models::weights_handle(stored.model, models::kMlxFormat, stored.id)
+                  << "\n  --type " << flags.type << " --model-path " << flags.model_path << "\n";
+        return;
+    }
+    if (named.empty()) {
+        return;
     }
     const models::StoredGguf& stored = named.front();
     flags.type = type;

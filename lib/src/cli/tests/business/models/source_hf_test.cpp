@@ -301,3 +301,77 @@ TEST_CASE("a GGUF-less SafeTensors repository names the pull and the convert tha
     REQUIRE(listing.ok);
     CHECK(listing.safetensors_files == std::vector<std::string>{"a.safetensors", "b.safetensors"});
 }
+
+TEST_CASE("an MLX repository is the one its model card says it is, never its name",
+          "[models][hf][mlx]") {
+    // 27b: mlx-lm writes `library_name: mlx` and the `mlx` tag for every
+    // model it converts; the listing reads both, and only with SafeTensors to
+    // pull is it an MLX model to land whole.
+    const auto listing_of = [](const std::string& body) {
+        const auto client = client_for({{.status = 200, .body = body}});
+        const auto ref = parse_hf_ref("mlx-community/Llama-3.2-1B-Instruct-4bit");
+        REQUIRE(ref.has_value());
+        return apogee::models::list_gguf_files(*client, *ref, "", {});
+    };
+    const apogee::models::HfListing by_library = listing_of(
+        R"({"library_name":"mlx","tags":["transformers","safetensors"],"siblings":[
+            {"rfilename":"config.json"},{"rfilename":"model.safetensors"}]})");
+    REQUIRE(by_library.ok);
+    CHECK(by_library.library_name == "mlx");
+    CHECK(by_library.mlx());
+
+    const apogee::models::HfListing by_tag = listing_of(
+        R"({"library_name":"transformers","tags":["mlx","text-generation"],"siblings":[
+            {"rfilename":"model.safetensors"}]})");
+    CHECK(by_tag.tags == std::vector<std::string>{"mlx", "text-generation"});
+    CHECK(by_tag.mlx());
+
+    // A full-weight repository is not one, whatever its name says.
+    CHECK_FALSE(listing_of(R"({"library_name":"transformers","tags":["safetensors"],"siblings":[
+                              {"rfilename":"model.safetensors"}]})")
+                    .mlx());
+    // Nor a card saying mlx over nothing to pull.
+    CHECK_FALSE(
+        listing_of(R"({"library_name":"mlx","siblings":[{"rfilename":"README.md"}]})").mlx());
+}
+
+TEST_CASE("choosing a file from a listing in hand is resolve_file's decision",
+          "[models][hf][mlx]") {
+    apogee::models::HfListing listing;
+    listing.ok = true;
+    listing.gguf_files = {"m.Q4_K_M.gguf"};
+    HfRef ref = *parse_hf_ref("owner/repo");
+    std::string error;
+    REQUIRE(apogee::models::choose_file(listing, ref, error));
+    CHECK(ref.file == "m.Q4_K_M.gguf");
+
+    listing.gguf_files = {"a.gguf", "b.gguf"};
+    HfRef several = *parse_hf_ref("owner/repo");
+    CHECK_FALSE(apogee::models::choose_file(listing, several, error));
+    CHECK(error.find("contains 2 GGUF files") != std::string::npos);
+
+    listing.ok = false;
+    listing.error = "no such repository: 'owner/repo'";
+    HfRef failed = *parse_hf_ref("owner/repo");
+    CHECK_FALSE(apogee::models::choose_file(listing, failed, error));
+    CHECK(error == listing.error);
+}
+
+TEST_CASE("a cancelled download is a failure the ladder cleans up after, never an escape",
+          "[models][hf][cancel]") {
+    // A Ctrl-C reaches a pull's transport as CancelledError (27b's pull is the
+    // first to pass a live token); thrown past the ladder it would skip the
+    // cleanup that removes the partial and the staging tree.
+    const auto client = client_for({{.status = 200, .body = "bytes"}});
+    const auto ref = parse_hf_ref("owner/repo");
+    REQUIRE(ref.has_value());
+    const apogee::harness::CancellationToken token = apogee::harness::CancellationToken::create();
+    token.cancel();
+    apogee::models::SourcePromise promise;
+    const apogee::models::ByteSource source = apogee::models::http_source(
+        *client, *ref, apogee::models::HfRepoKind::Model,
+        apogee::models::HfFile{.path = "model.safetensors"}, "", token, promise);
+    std::string error;
+    CHECK_FALSE(source([](std::string_view) { return true; }, error));
+    CHECK(error == "cancelled");
+}

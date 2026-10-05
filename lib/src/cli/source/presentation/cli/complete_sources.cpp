@@ -61,10 +61,16 @@ namespace {
 }
 
 /// Models in the store, and each set of their weights by handle
-/// (`<model>/<format>/<id>`), for one format or both.
+/// (`<model>/<format>/<id>`), for the formats asked.
 [[nodiscard]] std::vector<std::string> stored_models(const models::StoreRoots& roots, bool ggufs,
-                                                     bool snapshots) {
+                                                     bool snapshots, bool mlx = false) {
     std::vector<std::string> out;
+    if (mlx) {
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+            out.push_back(stored.model);
+            out.push_back(models::weights_handle(stored.model, models::kMlxFormat, stored.id));
+        }
+    }
     if (ggufs) {
         for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
             out.push_back(stored.model);
@@ -103,6 +109,20 @@ namespace {
             [&stored](const models::StoredGguf& other) { return other.dir == stored.dir; });
         if (!registered && std::ranges::find(taken, stem) == taken.end()) {
             out.push_back(stem);
+        }
+    }
+    // The stored MLX models the same way, by the name add-backend fills (27b).
+    const std::vector<models::StoredMlx> mlx = models::list_store_mlx(store_roots(config));
+    for (const models::StoredMlx& stored : mlx) {
+        const bool registered = std::ranges::any_of(config.backends, [&stored](const auto& entry) {
+            return !entry.second.model_path.empty() &&
+                   models::stored_mlx_at({stored},
+                                         harness::expand_env_and_home(entry.second.model_path))
+                       .has_value();
+        });
+        const std::string name = models::stored_mlx_name(stored);
+        if (!registered && std::ranges::find(taken, name) == taken.end()) {
+            out.push_back(name);
         }
     }
     return out;
@@ -247,7 +267,7 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         }
         list.paths = true;
     } else if (kind == kModelValue) {
-        list.names = stored_models(store_roots(config), true, true);
+        list.names = stored_models(store_roots(config), true, true, true);
         list.none = "the model store is empty -- 'apogee models pull'";
     } else if (kind == kSnapshotValue) {
         list.names = stored_models(store_roots(config), false, true);
@@ -266,15 +286,23 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(
                 models::weights_handle(stored.model, models::kSafetensorsFormat, stored.id));
         }
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+            list.names.push_back(
+                models::weights_handle(stored.model, models::kMlxFormat, stored.id));
+        }
         list.none = "no backends configured and the model store is empty";
     } else if (kind == kModelOrBackendValue) {
         const models::StoreRoots roots = store_roots(config);
-        list.names = stored_models(roots, true, true);
+        list.names = stored_models(roots, true, true, true);
         const std::vector<models::StoredGguf> ggufs = models::list_store_ggufs(roots);
+        const std::vector<models::StoredMlx> mlx = models::list_store_mlx(roots);
         for (const auto& [name, backend] : config.backends) {
-            if (!backend.model_path.empty() &&
-                models::stored_gguf_at(ggufs, harness::expand_env_and_home(backend.model_path))
-                    .has_value()) {
+            if (backend.model_path.empty()) {
+                continue;
+            }
+            const std::string path = harness::expand_env_and_home(backend.model_path);
+            if (models::stored_gguf_at(ggufs, path).has_value() ||
+                models::stored_mlx_at(mlx, path).has_value()) {
                 list.names.push_back(name);
             }
         }

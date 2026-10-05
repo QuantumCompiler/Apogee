@@ -26,11 +26,13 @@
 #include "models/lineage.h"
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/kv_cache.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
+#include "views/download_progress.h"
 
 namespace apogee::commands {
 namespace {
@@ -105,6 +107,71 @@ void pad(std::ostringstream& out, const std::string& value, std::size_t width, b
     // "no record" rather than "unverified": a model placed by hand is
     // legitimate, it simply has nothing to be rechecked against.
     return sidecar.has_value() ? sidecar->verification.summary() : "no record";
+}
+
+/// A path as a comparison wants it: normal, and a directory written with its
+/// trailing separator the same as one without.
+[[nodiscard]] std::filesystem::path comparable(const std::filesystem::path& path) {
+    const std::filesystem::path normal = path.lexically_normal();
+    return normal.has_filename() ? normal : normal.parent_path();
+}
+
+/// What a stored MLX model's record says about where it came from (27b) --
+/// a pull from its repository, or `convert --mlx` of a SafeTensors set --
+/// and whether that set is still on disk.
+[[nodiscard]] std::string mlx_origin(const std::optional<models::Snapshot>& record,
+                                     const models::StoreRoots& roots) {
+    if (!record.has_value() || record->source.empty()) {
+        return "unknown -- no record says where it came from";
+    }
+    if (record->source == "convert") {
+        std::string line = "converted from " + record->ref + " (recorded" +
+                           (record->transform.empty() ? "" : ", " + record->transform) + ")";
+        const models::StoreTarget target = models::resolve_store_target(roots, record->ref);
+        if (!target.error.empty()) {
+            line += " -- source snapshot no longer on disk";
+        }
+        return line;
+    }
+    std::string ref = record->ref;
+    if (!record->revision.empty() && record->revision != "main") {
+        ref += "@" + record->revision;
+    }
+    return "pulled from " + ref +
+           (record->source == "huggingface" ? " (Hugging Face)" : " (" + record->source + ")");
+}
+
+/// `info`'s lines for an MLX model directory (27b): whether its files are
+/// whole, how its weights are stored, the window `backend` gives it, and
+/// its size -- all from its files.
+void render_mlx_files(std::ostream& out, const models::MlxInfo& info,
+                      const harness::BackendConfig& backend) {
+    out << "files:        "
+        << (info.complete
+                ? "whole -- config.json, a tokenizer and " + std::to_string(info.shards.size()) +
+                      " shard(s), each holding every byte its header lists"
+                : info.problem)
+        << "\n";
+    if (info.config_read) {
+        out << "quantization: " << info.quantization.describe()
+            << (info.mlx_format
+                    ? ""
+                    : "; not in mlx-lm's own format -- it converts the weights as it loads them")
+            << "\n";
+    }
+    const models::MlxWindow window = models::mlx_window(info, backend);
+    out << "window:       ";
+    if (window.window <= 0) {
+        out << "unknown -- config.json could not be read; set context_size\n";
+    } else {
+        out << window.window << " tokens (" << (window.configured ? "context_size" : "the default");
+        if (window.trained > 0) {
+            out << "; trained for " << window.trained;
+        }
+        out << ")\n";
+    }
+    out << "size:         " << format_progress_size(static_cast<std::int64_t>(info.bytes))
+        << " on disk\n";
 }
 
 /// The store `models_dir` and the config's `paths.hf_dir` make.
@@ -208,19 +275,19 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     std::vector<std::filesystem::path> configured;
     for (const auto& [key, backend] : config.backends) {
         if (!backend.model_path.empty()) {
-            configured.push_back(
-                std::filesystem::path{harness::expand_env_and_home(backend.model_path)}
-                    .lexically_normal());
+            configured.push_back(comparable(
+                std::filesystem::path{harness::expand_env_and_home(backend.model_path)}));
         }
     }
     const auto is_configured = [&configured](const std::filesystem::path& path) {
-        return std::ranges::find(configured, path.lexically_normal()) != configured.end();
+        return std::ranges::find(configured, comparable(path)) != configured.end();
     };
     // Every stored file, its record filled in by the sweep as it reads each
     // one -- within that file's counted step, as before -- so the lineage
     // (M4), applied once everything is read, adds no read of its own.
     std::vector<models::RecordedGguf> recorded_ggufs;
     std::vector<models::RecordedSnapshot> stored_snapshots;
+    std::vector<models::StoredMlx> stored_mlx;
     if (!models_dir.empty()) {
         for (models::StoredGguf& stored : models::list_store_ggufs(roots)) {
             recorded_ggufs.push_back({.stored = std::move(stored), .record = std::nullopt});
@@ -228,7 +295,11 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         for (models::StoredSnapshot& stored : models::list_store_snapshots(roots)) {
             stored_snapshots.push_back({.stored = std::move(stored), .record = std::nullopt});
         }
+        stored_mlx = models::list_store_mlx(roots);
     }
+    // The SafeTensors sets `convert --mlx` made an MLX model of, by handle --
+    // a conversion consumes its source as a GGUF's does (27b).
+    std::vector<std::string> mlx_sources;
     std::vector<std::size_t> stored_ggufs;
     for (std::size_t at = 0; at < recorded_ggufs.size(); ++at) {
         if (!is_configured(recorded_ggufs[at].stored.file)) {
@@ -260,8 +331,12 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     std::vector<GgufRow> gguf_rows;
     std::vector<std::pair<std::size_t, std::filesystem::path>> snapshot_rows;
     std::size_t reads = stored_ggufs.size() + stored_snapshots.size();
+    for (const models::StoredMlx& stored : stored_mlx) {
+        reads += is_configured(stored.dir) ? 0 : 1;
+    }
     for (const auto& [key, backend] : config.backends) {
-        if (is_local(backend.type) && !harness::expand_env(backend.model_path).empty()) {
+        if ((is_local(backend.type) || backend.type == harness::BackendType::Mlx) &&
+            !harness::expand_env(backend.model_path).empty()) {
             ++reads;
         }
     }
@@ -292,21 +367,45 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         if (backend.type == harness::BackendType::Mlx) {
             // A model directory and a Python runtime (27a): what the
             // directory says, and whether the ladder lets it run -- read from
-            // files, never by starting the driver. 27b reads its window.
+            // files, never by starting the driver -- and since 27b its files
+            // read whole, its quantization and the window it gets.
             const backends::MlxReadiness readiness =
                 backends::probe_mlx_backend(key, backend, backends::MlxHost::current());
             const std::filesystem::path dir{harness::expand_env_and_home(backend.model_path)};
             row.model = backend.model.empty() ? dir.filename().string() : backend.model;
             row.provenance = "local";
+            row.format = std::string{models::kMlxFormat};
+            const std::optional<models::StoredMlx> stored = models::stored_mlx_at(stored_mlx, dir);
+            if (stored.has_value() && backend.model.empty()) {
+                row.model = models::weights_handle(stored->model, models::kMlxFormat, stored->id);
+            }
             const backends::MlxModelInfo info = backends::inspect_mlx_model(dir);
             row.architecture = info.model_type.empty() ? "-" : info.model_type;
             if (const backends::ModelProfile* family =
                     backends::resolve_mlx_profile(info, backend.model + " " + dir.string())) {
                 row.profile = family->name;
             }
-            row.verified = "-";
+            const std::optional<models::Snapshot> record = models::load_snapshot(dir);
+            row.verified = record.has_value()
+                               ? std::to_string(record->files.size()) + " file(s) on record"
+                               : "-";
             row.state =
                 readiness.ready() ? "ready" : std::string{backends::to_string(readiness.refusal)};
+            if (!backend.model_path.empty()) {
+                reading("reading MLX models: ", row.model);
+                const models::MlxInfo files = models::read_mlx_info(dir);
+                if (files.config_read) {
+                    row.quant = files.quantization.describe();
+                }
+                row.window = models::describe(models::mlx_window(files, backend));
+                if (readiness.ready() && !files.complete) {
+                    row.state = "cannot load";
+                    row.attention = true;
+                    row.note = files.problem;
+                } else if (readiness.ready()) {
+                    row.note = mlx_summary(files, backend);
+                }
+            }
             if (!readiness.ready()) {
                 row.attention = true;
                 row.note = readiness.message();
@@ -362,6 +461,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
 
         const std::filesystem::path path{expanded};
         row.model = path.filename().string();
+        row.format = std::string{models::kGgufFormat};
         reading("reading model headers: ", row.model);
         const std::optional<models::Sidecar> record = record_for(path);
         row.verified = describe_record(record);
@@ -404,6 +504,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             row.backend = "(not configured)";
             row.type = "-";
             row.model = models::weights_handle(stored.model, models::kGgufFormat, stored.id);
+            row.format = std::string{models::kGgufFormat};
             const std::optional<models::Sidecar> record = record_for(stored.file);
             row.provenance =
                 record.has_value() && !record->source.empty() ? record->source : "local";
@@ -439,6 +540,7 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             row.backend = "(not configured)";
             row.type = "-";
             row.model = models::weights_handle(stored.model, models::kSafetensorsFormat, stored.id);
+            row.format = std::string{models::kSafetensorsFormat};
             recorded.record = models::load_snapshot(stored.dir);
             const std::optional<models::Snapshot>& record = recorded.record;
             row.provenance =
@@ -458,6 +560,45 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                            "/safetensors/" + stored.id + "'";
             }
             snapshot_rows.emplace_back(rows.size(), stored.dir);
+            rows.push_back(std::move(row));
+        }
+
+        // MLX models (27b) -- runnable on an mlx backend, so listed with what
+        // a user picks one by: its quantization and the window it gets --
+        // the directory read whole, or said why it cannot load.
+        for (const models::StoredMlx& stored : stored_mlx) {
+            const std::optional<models::Snapshot> record = models::load_snapshot(stored.dir);
+            if (record.has_value() && record->source == "convert") {
+                mlx_sources.push_back(record->ref);
+            }
+            if (is_configured(stored.dir)) {
+                continue;  // its backend's row says everything
+            }
+            reading("reading MLX models: ", stored.model);
+            ModelRow row;
+            row.backend = "(not configured)";
+            row.type = "-";
+            row.model = models::weights_handle(stored.model, models::kMlxFormat, stored.id);
+            row.format = std::string{models::kMlxFormat};
+            row.provenance = "local";
+            if (record.has_value() && !record->source.empty()) {
+                row.provenance = record->source == "convert" ? "converted" : record->source;
+            }
+            const models::MlxInfo info = models::read_mlx_info(stored.dir);
+            row.architecture = info.model_type.empty() ? "-" : info.model_type;
+            const backends::ModelProfile* family = backends::resolve_mlx_profile(
+                backends::inspect_mlx_model(stored.dir), stored.model);
+            row.profile = family == nullptr ? "unprofiled" : family->name;
+            row.state = info.complete ? "mlx" : "cannot load";
+            row.verified = record.has_value()
+                               ? std::to_string(record->files.size()) + " file(s) on record"
+                               : "no record";
+            if (info.config_read) {
+                row.quant = info.quantization.describe();
+            }
+            row.window = models::describe(models::mlx_window(info, {}));
+            row.attention = !info.complete;
+            row.note = info.complete ? mlx_summary(info) : info.problem;
             rows.push_back(std::move(row));
         }
 
@@ -505,8 +646,9 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
     }
     for (const auto& [at, dir] : snapshot_rows) {
         ModelRow& row = rows[at];
-        row.consumed =
-            !row.attention && !is_configured(dir) && lineage.consumed(row.model).has_value();
+        row.consumed = !row.attention && !is_configured(dir) &&
+                       (lineage.consumed(row.model).has_value() ||
+                        std::ranges::find(mlx_sources, row.model) != mlx_sources.end());
     }
 
     std::ranges::sort(rows,
@@ -601,6 +743,14 @@ std::string render_model_jsonl(const std::vector<ModelRow>& rows) {
         object["verified"] = row.verified;
         if (!row.note.empty()) {
             object["note"] = row.note;
+        }
+        for (const auto& [key, value] :
+             {std::pair<const char*, const std::string&>{"format", row.format},
+              std::pair<const char*, const std::string&>{"quant", row.quant},
+              std::pair<const char*, const std::string&>{"window", row.window}}) {
+            if (!value.empty()) {
+                object[key] = value;
+            }
         }
         out << object.dump() << "\n";
     }
@@ -776,8 +926,8 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     std::string out;
     for (const auto& [key, backend] : config.backends) {
         if (!backend.model_path.empty() &&
-            std::filesystem::path{harness::expand_env_and_home(backend.model_path)}
-                    .lexically_normal() == path.lexically_normal()) {
+            comparable(std::filesystem::path{harness::expand_env_and_home(backend.model_path)}) ==
+                comparable(path)) {
             out += (out.empty() ? "" : ", ") + key;
         }
     }
@@ -812,7 +962,8 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
 /// of it, and whether the listing folds it (M4).
 [[nodiscard]] std::string render_snapshot(const harness::Config& config,
                                           const models::StoredSnapshot& stored,
-                                          const models::Lineage& lineage) {
+                                          const models::Lineage& lineage,
+                                          const models::StoreRoots& roots) {
     const std::string handle =
         models::weights_handle(stored.model, models::kSafetensorsFormat, stored.id);
     std::ostringstream out;
@@ -828,22 +979,70 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
                                : "none")
         << "\n";
     const std::optional<models::Consumption> consumed = lineage.consumed(handle);
-    if (!consumed.has_value()) {
+    // An MLX model made of it consumed it too (27b): its record says so.
+    std::vector<std::string> mlx_made;
+    for (const models::StoredMlx& mlx : models::list_store_mlx(roots, stored.model)) {
+        const std::optional<models::Snapshot> made = models::load_snapshot(mlx.dir);
+        if (made.has_value() && made->source == "convert" && made->ref == handle) {
+            mlx_made.push_back(models::weights_handle(mlx.model, models::kMlxFormat, mlx.id));
+        }
+    }
+    if (!consumed.has_value() && mlx_made.empty()) {
         out << "made from it: nothing yet -- 'apogee models convert " << handle
-            << "' makes a GGUF of it\n";
+            << "' makes a GGUF of it (--mlx an MLX model)\n";
     } else {
         bool first = true;
-        for (const std::string& gguf : consumed->by) {
-            out << (first ? "made from it: " : "              ") << gguf
-                << (consumed->inferred ? " (inferred)" : " (recorded)") << "\n";
+        if (consumed.has_value()) {
+            for (const std::string& gguf : consumed->by) {
+                out << (first ? "made from it: " : "              ") << gguf
+                    << (consumed->inferred ? " (inferred)" : " (recorded)") << "\n";
+                first = false;
+            }
+        }
+        for (const std::string& mlx : mlx_made) {
+            out << (first ? "made from it: " : "              ") << mlx << " (recorded)\n";
             first = false;
         }
     }
     if (models::config_is_download_record(stored.dir)) {
         out << "repair:       apogee models repair " << handle << "\n";
-    } else if (consumed.has_value() && backends_on(config, stored.dir).empty()) {
+    } else if ((consumed.has_value() || !mlx_made.empty()) &&
+               backends_on(config, stored.dir).empty()) {
         out << "listing:      folded -- a conversion consumed it; 'apogee models list --all' "
                "shows it\n";
+    }
+    return out.str();
+}
+
+/// `info` on one stored MLX model (27b): where it came from, what a backend
+/// over it gets, and its files read whole -- for a model no backend points
+/// at yet, the one command that changes that.
+[[nodiscard]] std::string render_stored_mlx(const harness::Config& config,
+                                            const models::StoredMlx& stored,
+                                            const models::StoreRoots& roots) {
+    std::ostringstream out;
+    out << "weights:      " << models::weights_handle(stored.model, models::kMlxFormat, stored.id)
+        << "\n";
+    const std::string backends = backends_on(config, stored.dir);
+    out << "backends:     "
+        << (backends.empty()
+                ? "none -- 'apogee config add-backend " + models::stored_mlx_name(stored) +
+                      " --type mlx --model-path <the path below>'"
+                : backends)
+        << "\n";
+    out << "model_path:   " << stored.dir.string() << "\n";
+    out << "format:       MLX -- runs on an mlx backend (Apple silicon)\n";
+    out << "lineage:      " << mlx_origin(models::load_snapshot(stored.dir), roots) << "\n";
+    const models::MlxInfo info = models::read_mlx_info(stored.dir);
+    out << "model_type:   " << (info.model_type.empty() ? "-" : info.model_type) << "\n";
+    const backends::MlxModelInfo facts = backends::inspect_mlx_model(stored.dir);
+    out << "template:     "
+        << (facts.chat_template ? "ships with the model" : "none -- a base model, offered no tools")
+        << "\n";
+    render_mlx_files(out, info, harness::BackendConfig{});
+    if (!info.complete) {
+        out << "repair:       apogee models repair "
+            << models::weights_handle(stored.model, models::kMlxFormat, stored.id) << "\n";
     }
     return out.str();
 }
@@ -870,9 +1069,17 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         }
         return {};
     }
+    if (target.format == models::kMlxFormat) {
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots, target.model)) {
+            if (stored.id == target.id) {
+                return render_stored_mlx(config, stored, roots);
+            }
+        }
+        return {};
+    }
     for (const models::StoredSnapshot& stored : models::list_store_snapshots(roots, target.model)) {
         if (stored.id == target.id) {
-            return render_snapshot(config, stored, lineage);
+            return render_snapshot(config, stored, lineage, roots);
         }
     }
     return {};
@@ -916,8 +1123,24 @@ std::string render_model_info(const harness::Config& config, std::string_view na
                     : "cannot run -- " + readiness.message())
             << "\n";
         if (!value.model_path.empty()) {
+            if (!models_dir.empty()) {
+                // Where it came from, when it is stored (27b).
+                const models::StoreRoots roots = store_roots_for(config, models_dir);
+                if (const std::optional<models::StoredMlx> stored =
+                        models::stored_mlx_at(models::list_store_mlx(roots), dir)) {
+                    out << "weights:      "
+                        << models::weights_handle(stored->model, models::kMlxFormat, stored->id)
+                        << "\n"
+                        << "lineage:      " << mlx_origin(models::load_snapshot(dir), roots)
+                        << "\n";
+                }
+            }
             const backends::MlxModelInfo info = backends::inspect_mlx_model(dir);
             out << "model_type:   " << (info.model_type.empty() ? "-" : info.model_type) << "\n";
+            if (progress) {
+                progress("reading " + dir.filename().string(), 0, 0);
+            }
+            render_mlx_files(out, models::read_mlx_info(dir), value);
             out << "template:     "
                 << (info.chat_template ? "ships with the model"
                                        : "none -- a base model, offered no tools")
@@ -1120,6 +1343,13 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
                     if (target.format.empty() || target.format == models::kSafetensorsFormat) {
                         sets += "\n  " + models::weights_handle(
                                              stored.model, models::kSafetensorsFormat, stored.id);
+                    }
+                }
+                for (const models::StoredMlx& stored :
+                     models::list_store_mlx(roots, target.model)) {
+                    if (target.format.empty() || target.format == models::kMlxFormat) {
+                        sets += "\n  " +
+                                models::weights_handle(stored.model, models::kMlxFormat, stored.id);
                     }
                 }
                 fail("'" + *info_name + "' is a model -- name one set of its weights:" + sets);

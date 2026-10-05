@@ -199,6 +199,8 @@ apogee_add_module(training
     training/promote.cpp
     training/convert.h
     training/convert.cpp
+    training/mlx_convert.h
+    training/mlx_convert.cpp
     training/pipeline.h
     training/pipeline.cpp
     training/regime.h

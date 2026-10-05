@@ -2,6 +2,7 @@
 
 #include <system_error>
 
+#include "modelstore/mlx_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 
@@ -62,10 +63,14 @@ MigrationPlan plan_migration(const StoreRoots& roots,
     std::error_code code;
     for (const LegacySnapshot& snapshot : legacy.snapshots) {
         MigrationItem item;
-        item.kind = MigrationItem::Kind::Snapshot;
+        // An MLX model is told from a full-weight snapshot by mlx-lm's own
+        // marks, read from its files: the backend that runs it looks in mlx/.
+        const bool mlx = is_mlx_model_dir(snapshot.dir);
+        item.kind = mlx ? MigrationItem::Kind::Mlx : MigrationItem::Kind::Snapshot;
         item.model = snapshot.model;
         item.id = snapshot_id(snapshot.dir, on_hash);
-        item.destination = weights_dir(roots, kSafetensorsFormat, item.model, item.id);
+        item.destination =
+            weights_dir(roots, mlx ? kMlxFormat : kSafetensorsFormat, item.model, item.id);
         item.duplicate = std::filesystem::exists(item.destination, code);
         item.moves.emplace_back(snapshot.dir, item.destination);
         plan.items.push_back(std::move(item));
@@ -95,8 +100,9 @@ std::string apply_migration(const MigrationItem& item) {
     std::error_code code;
     for (const auto& [from, to] : item.moves) {
         std::filesystem::path source = from;
-        if (item.kind == MigrationItem::Kind::Snapshot && inside(to, from)) {
-            // `<models>/<name>` becomes `<models>/<name>/safetensors/<id>`:
+        if (item.kind != MigrationItem::Kind::Gguf && inside(to, from)) {
+            // `<models>/<name>` becomes `<models>/<name>/safetensors/<id>`
+            // (or `mlx/<id>`):
             // move it aside, so the model directory can be made where it was.
             source = from.parent_path() /
                      ("." + from.filename().string() + ".migrating-" + random_weight_id());

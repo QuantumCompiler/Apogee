@@ -16,6 +16,7 @@
 #include "platform/platform.h"
 #include "support/env_guard.h"
 #include "support/file_time.h"
+#include "support/mlx_model.h"
 
 using apogee::models::StoreRoots;
 using apogee::models::StoreTarget;
@@ -530,4 +531,204 @@ TEST_CASE("a commit whose hash is stopped leaves its staging to the caller",
     CHECK(stored.error == apogee::models::kStopped);
     CHECK(std::filesystem::exists(staging / "m.gguf"));
     CHECK(apogee::models::list_store_ggufs(store.roots).empty());
+}
+
+// ---- the mlx/ row (27b) -------------------------------------------------------------
+
+TEST_CASE("an MLX model lands under its model's mlx/ by id, beside the other formats",
+          "[models][store][mlx]") {
+    // Runnable like a GGUF, so under the models directory like one -- never
+    // under paths.hf_dir, where full-weight sets go.
+    const Store store;
+    StoreRoots split = store.roots;
+    split.safetensors = store.root.path() / "hf";
+    const std::filesystem::path dir = apogee::models::weights_dir(split, apogee::models::kMlxFormat,
+                                                                  "org--m-4bit", "cccccccccccc");
+    CHECK(dir == split.models / "org--m-4bit" / "mlx" / "cccccccccccc");
+    apogee::testing::write_mlx_model(dir);
+    write_file(split.models / "org--m-4bit" / "mlx" / ".incoming-0123456789ab" / "config.json");
+
+    const std::vector<apogee::models::StoredMlx> stored = apogee::models::list_store_mlx(split);
+    REQUIRE(stored.size() == 1);  // work in progress is never listed
+    CHECK(stored.front().model == "org--m-4bit");
+    CHECK(stored.front().id == "cccccccccccc");
+    CHECK(stored.front().dir == dir);
+    CHECK(apogee::models::list_store_mlx(split, "other").empty());
+    CHECK(apogee::models::list_store_models(split) == std::vector<std::string>{"org--m-4bit"});
+    CHECK(apogee::models::backend_type_for_format(apogee::models::kMlxFormat) == "mlx");
+    CHECK(apogee::models::backend_type_for_format(apogee::models::kGgufFormat) == "llamacpp");
+    CHECK(apogee::models::backend_type_for_format(apogee::models::kSafetensorsFormat).empty());
+
+    // A backend's model_path names the directory, with or without a slash.
+    CHECK(apogee::models::stored_mlx_at(stored, dir).has_value());
+    CHECK(apogee::models::stored_mlx_at(stored, std::filesystem::path{dir.string() + "/"})
+              .has_value());
+    CHECK_FALSE(apogee::models::stored_mlx_at(stored, dir.parent_path()).has_value());
+
+    // Its handle parses like any other format's.
+    const std::optional<apogee::models::WeightsHandle> handle =
+        apogee::models::parse_weights_handle("org--m-4bit/mlx/cccccccccccc");
+    REQUIRE(handle.has_value());
+    CHECK(handle->format == "mlx");
+}
+
+TEST_CASE("an MLX model is named like every other weights: by model, handle, id or path",
+          "[models][store][mlx]") {
+    const Store store;
+    const std::filesystem::path model = store.roots.models / "mlx-community--M-4bit";
+    apogee::testing::write_mlx_model(model / "mlx" / "cccccccccccc");
+    using apogee::models::resolve_store_target;
+
+    const StoreTarget by_name = resolve_store_target(store.roots, "mlx-community/M-4bit");
+    CHECK(by_name.error.empty());
+    CHECK(by_name.model == "mlx-community--M-4bit");
+    CHECK(by_name.path == model);
+
+    const StoreTarget by_id = resolve_store_target(store.roots, "cccccccccccc");
+    CHECK(by_id.format == "mlx");
+    CHECK(by_id.path == model / "mlx" / "cccccccccccc");
+
+    const StoreTarget by_handle =
+        resolve_store_target(store.roots, "mlx-community--M-4bit/mlx/cccccccccccc");
+    CHECK(by_handle.format == "mlx");
+    CHECK(by_handle.id == "cccccccccccc");
+    CHECK(resolve_store_target(store.roots, "mlx-community--M-4bit/mlx").format == "mlx");
+
+    const StoreTarget by_path = resolve_store_target(
+        store.roots, (model / "mlx" / "cccccccccccc" / "model.safetensors").string());
+    CHECK(by_path.format == "mlx");
+    CHECK(by_path.id == "cccccccccccc");
+}
+
+TEST_CASE("an MLX model is removed whole, never a shard alone", "[models][store][mlx]") {
+    const Store store;
+    const std::filesystem::path model = store.roots.models / "org--m";
+    const std::filesystem::path dir = model / "mlx" / "cccccccccccc";
+    apogee::testing::write_mlx_model(dir, apogee::testing::MlxModelSpec{.shards = 3});
+    write_file(model / "gguf" / "111111111111" / "m.gguf");
+
+    REQUIRE(apogee::models::remove_weights(dir).empty());
+    CHECK_FALSE(std::filesystem::exists(dir));
+    CHECK_FALSE(std::filesystem::exists(model / "mlx"));  // emptied: tidied
+    CHECK(std::filesystem::exists(model / "gguf"));       // another format stays
+}
+
+TEST_CASE("an interrupted MLX download or conversion is found as leftovers, by its owner",
+          "[models][store][mlx][staging]") {
+    const Store store;
+    const std::filesystem::path formats = store.roots.models / "org--m" / "mlx";
+    // A conversion killed mid-run: its staging directory, its owner gone.
+    const std::filesystem::path dead = formats / ".incoming-222222222222";
+    write_file(dead / "model.safetensors", std::string(100, 'x'));
+    std::ofstream{apogee::models::staging_owner_path(dead)} << 999999999 << "\n";
+    // A download killed mid-tree: `acquire_tree` fills `<name>.staging`, and
+    // the name's marker claims it -- this process is alive, so it is live.
+    const std::filesystem::path name = formats / ".incoming-333333333333";
+    const std::filesystem::path tree = formats / ".incoming-333333333333.staging";
+    write_file(tree / "config.json");
+    std::ofstream{apogee::models::staging_owner_path(name)}
+        << apogee::platform::current_process_id() << "\n";
+
+    std::vector<std::filesystem::path> found;
+    for (const apogee::models::AbandonedStaging& leftover :
+         apogee::models::find_abandoned_staging(store.roots)) {
+        found.push_back(leftover.dir);
+    }
+    CHECK(found == std::vector<std::filesystem::path>{dead});
+
+    // Once its owner is gone, the tree is a leftover too, and removing it
+    // takes the marker that claimed it.
+    std::ofstream{apogee::models::staging_owner_path(name)} << 999999999 << "\n";
+    found.clear();
+    for (const apogee::models::AbandonedStaging& leftover :
+         apogee::models::find_abandoned_staging(store.roots)) {
+        found.push_back(leftover.dir);
+    }
+    std::ranges::sort(found);
+    CHECK(found == std::vector<std::filesystem::path>{dead, tree});
+    REQUIRE(apogee::models::remove_weights(tree).empty());
+    CHECK_FALSE(std::filesystem::exists(apogee::models::staging_owner_path(name)));
+}
+
+TEST_CASE("an MLX directory in the flat layout is refused, naming the migration",
+          "[models][store][mlx][legacy]") {
+    const Store store;
+    apogee::testing::write_mlx_model(store.roots.models / "mlx-community--M-4bit");
+    const apogee::models::LegacyLayout legacy = apogee::models::find_legacy(store.roots);
+    REQUIRE(legacy.snapshots.size() == 1);
+    CHECK(apogee::models::legacy_refusal(store.roots, "mlx-community/M-4bit")
+              .find("run 'apogee models migrate'") != std::string::npos);
+}
+
+TEST_CASE("an MLX directory is committed by its shards' digests, with every file on record",
+          "[models][store][mlx]") {
+    const Store store;
+    const auto stage = [&store]() {
+        const std::filesystem::path staging =
+            apogee::models::incoming_path(store.roots, apogee::models::kMlxFormat, "org--m");
+        apogee::testing::write_mlx_model(staging, apogee::testing::MlxModelSpec{.shards = 2});
+        return staging;
+    };
+    const std::filesystem::path staging = stage();
+    // A download already verified one file: it is not hashed again.
+    apogee::models::Snapshot record;
+    record.ref = "org--m/safetensors/aaaaaaaaaaaa";
+    record.source = "convert";
+    record.transform = "mlx_lm.convert 4bit";
+    const std::string config_digest = apogee::models::file_sha256(staging / "config.json");
+    record.files.push_back(
+        {"config.json",
+         static_cast<std::int64_t>(std::filesystem::file_size(staging / "config.json")),
+         "recorded-digest"});
+    std::int64_t heard = 0;
+    const apogee::models::StoredDirectory stored = apogee::models::commit_mlx(
+        store.roots, "org--m", staging, record, [&heard](std::int64_t hashed) {
+            heard = hashed;
+            return true;
+        });
+    REQUIRE(stored.error.empty());
+    CHECK_FALSE(stored.existed);
+    CHECK_FALSE(std::filesystem::exists(staging));
+    CHECK_FALSE(std::filesystem::exists(apogee::models::staging_owner_path(staging)));
+    CHECK(stored.dir.parent_path() == store.roots.models / "org--m" / "mlx");
+    CHECK(heard > 0);
+
+    const std::optional<apogee::models::Snapshot> written =
+        apogee::models::load_snapshot(stored.dir);
+    REQUIRE(written.has_value());
+    CHECK(written->ref == "org--m/safetensors/aaaaaaaaaaaa");
+    CHECK(written->transform == "mlx_lm.convert 4bit");
+    CHECK_FALSE(written->pulled_at.empty());
+    std::vector<std::string> paths;
+    for (const apogee::models::SnapshotFile& file : written->files) {
+        paths.push_back(file.path);
+        if (file.path == "config.json") {
+            CHECK(file.sha256 == "recorded-digest");
+        } else {
+            CHECK(file.sha256 == apogee::models::file_sha256(stored.dir / file.path));
+        }
+    }
+    CHECK(paths == std::vector<std::string>{"config.json", "model-00001-of-00002.safetensors",
+                                            "model-00002-of-00002.safetensors",
+                                            "model.safetensors.index.json", "tokenizer.json",
+                                            "tokenizer_config.json"});
+    CHECK(stored.dir.filename() == apogee::models::snapshot_weight_id(written->files));
+    (void)config_digest;
+
+    // The same weights again find the directory they occupy.
+    const std::filesystem::path again = stage();
+    const apogee::models::StoredDirectory twice =
+        apogee::models::commit_mlx(store.roots, "org--m", again, apogee::models::Snapshot{});
+    CHECK(twice.existed);
+    CHECK(twice.dir == stored.dir);
+    CHECK_FALSE(std::filesystem::exists(again));
+    CHECK(apogee::models::list_store_mlx(store.roots).size() == 1);
+
+    // A hash that is stopped leaves its staging to the caller.
+    const std::filesystem::path stopped = stage();
+    const apogee::models::StoredDirectory halted =
+        apogee::models::commit_mlx(store.roots, "org--m", stopped, apogee::models::Snapshot{},
+                                   [](std::int64_t) { return false; });
+    CHECK(halted.error == apogee::models::kStopped);
+    CHECK(std::filesystem::exists(stopped / "config.json"));
 }

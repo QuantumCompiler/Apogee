@@ -20,10 +20,12 @@
 #include "httpserver/admin_auth.h"
 #include "knowledge/record.h"
 #include "knowledge/store.h"
+#include "modelstore/store.h"
 #include "platform/platform.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
+#include "support/mlx_model.h"
 #include "training/python_env.h"
 
 /// The doctor, against a matrix of deliberately broken installs.
@@ -1832,8 +1834,8 @@ void write_fake_mlx_runtime(const Install& install) {
     install.write("training/venv/lib/python3.14/site-packages/mlx_lm/__init__.py", "");
     install.write("training/venv/lib/python3.14/site-packages/mlx_lm/_version.py",
                   "__version__ = '0.32.0'\n");
-    install.write("mlx-model/config.json", R"({"model_type":"llama"})");
-    install.write("mlx-model/tokenizer_config.json", R"({"chat_template":"{{ x }}"})");
+    // A whole model (27b reads its files): a 4-bit llama, trained for 131072.
+    apogee::testing::write_mlx_model(install.root / "mlx-model");
 }
 
 std::string mlx_entry(const Install& install, const std::string& path = {}) {
@@ -1930,6 +1932,13 @@ TEST_CASE("a ready MLX install passes on what its files show, and an edited driv
         REQUIRE(entry != nullptr);
         CHECK(entry->status == Status::Ok);
         CHECK(entry->detail.find("llama model directory") != std::string::npos);
+        // Its window and quantization, read from config.json (27b).
+        CHECK(entry->detail.find("4-bit (affine, group 64); 32768-token window (the default; "
+                                 "trained for 131072)") != std::string::npos);
+        const apogee::commands::CheckRow* converter = row_with(report, "conversion driver");
+        REQUIRE(converter != nullptr);
+        CHECK(converter->status == Status::Ok);
+        CHECK(converter->detail == "mlx_convert.py matches the shipped copy");
     }
     install.write("training/scripts/mlx_generate.py", "# mine\n");
     {
@@ -1967,4 +1976,57 @@ TEST_CASE("an mlx entry naming no model directory fails, as a dangling GGUF does
     CHECK(entry->detail.find("model_path does not exist") != std::string::npos);
     CHECK(entry->remedy.find("--type mlx --model-path") != std::string::npos);
     CHECK_FALSE(report.passed());
+}
+
+TEST_CASE("stored MLX models are validated by their files, and a broken one names its repair",
+          "[commands][check][mlx][store]") {
+    // 27b: the store's mlx/ row in the doctor -- whole files pass, a shard
+    // cut short fails with the handle to repair, an entry over it fails
+    // too, and an interrupted conversion's staging is a leftover --fix takes.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    const std::filesystem::path whole =
+        install.root / "models" / "mlx-community--M-4bit" / "mlx" / "aaaaaaaaaaaa";
+    const std::filesystem::path broken =
+        install.root / "models" / "org--n" / "mlx" / "bbbbbbbbbbbb";
+    apogee::testing::write_mlx_model(whole);
+    apogee::testing::write_mlx_model(broken);
+    std::filesystem::resize_file(broken / "model.safetensors", 30);
+    const std::filesystem::path staging =
+        install.root / "models" / "org--n" / "mlx" / ".incoming-cccccccccccc";
+    apogee::testing::write_mlx_model(staging);
+    std::ofstream{apogee::models::staging_owner_path(staging)} << 999999999 << "\n";
+
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", mlx_entry(install, broken.string()));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+
+    const apogee::commands::CheckRow* ok =
+        row_with(report, "mlx-community--M-4bit/mlx/aaaaaaaaaaaa");
+    REQUIRE(ok != nullptr);
+    CHECK(ok->status == Status::Ok);
+    CHECK(ok->detail == "llama, MLX, 4-bit (affine, group 64), files whole");
+    const apogee::commands::CheckRow* bad = row_with(report, "org--n/mlx/bbbbbbbbbbbb");
+    REQUIRE(bad != nullptr);
+    CHECK(bad->status == Status::Fail);
+    CHECK(bad->detail.find("model.safetensors is truncated") != std::string::npos);
+    CHECK(bad->remedy == "apogee models repair org--n/mlx/bbbbbbbbbbbb");
+    const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+    REQUIRE(entry != nullptr);
+    CHECK(entry->status == Status::Fail);
+    CHECK(entry->remedy == "apogee models repair org--n/mlx/bbbbbbbbbbbb");
+    const apogee::commands::CheckRow* leftovers = row_with(report, "leftovers");
+    REQUIRE(leftovers != nullptr);
+    CHECK(leftovers->status == Status::Warn);
+
+    // --fix removes the staging and nothing it does not own.
+    (void)apply_fixes(inputs);
+    CHECK_FALSE(std::filesystem::exists(staging));
+    CHECK(std::filesystem::exists(broken / "config.json"));
+    CHECK(std::filesystem::exists(whole / "model.safetensors"));
 }

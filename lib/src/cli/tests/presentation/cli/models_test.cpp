@@ -1024,8 +1024,8 @@ TEST_CASE("info on a snapshot says what was made of it and whether the listing f
 
     const std::string waiting = store.info("org--e2b/safetensors/cccccccccccc");
     CHECK(waiting.find("made from it: nothing yet -- 'apogee models convert "
-                       "org--e2b/safetensors/cccccccccccc' makes a GGUF of it\n") !=
-          std::string::npos);
+                       "org--e2b/safetensors/cccccccccccc' makes a GGUF of it (--mlx an MLX "
+                       "model)\n") != std::string::npos);
     CHECK(waiting.find("listing:") == std::string::npos);
     // A bare id names the same weights.
     CHECK(store.info("cccccccccccc") == waiting);

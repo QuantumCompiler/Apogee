@@ -8,10 +8,14 @@
 #include <vector>
 
 #include "cli/command.h"
+#include "contracts/cancellation.h"
 #include "contracts/config.h"
 #include "models/quantize.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/store.h"
+#include "training/mlx_convert.h"
+#include "transport/http_client.h"
 
 namespace CLI {
 class App;
@@ -137,6 +141,57 @@ struct GgufChoice {
 /// its record says it came, checked against the recorded size and sha256 --
 /// saying what it did on stdout. False when it could not.
 [[nodiscard]] bool repair_snapshot_in_place(const std::filesystem::path& dir);
+
+// --- MLX models (27b) ------------------------------------------------------------------
+
+/// One line for an MLX model: its quantization, the window an entry over it
+/// gets, and its size on disk -- "4-bit (affine, group 64), 32768-token
+/// window (the default; trained for 131072), 703 MiB". What `pull`,
+/// `convert --mlx`, `list`, `info` and `check` all say it as.
+[[nodiscard]] std::string mlx_summary(const models::MlxInfo& info,
+                                      const harness::BackendConfig& backend = {});
+
+/// What `models pull` of an MLX repository stored, or found stored.
+struct PulledMlx {
+    std::string model;
+    std::filesystem::path dir;
+    bool existed = false;
+    models::MlxInfo info;
+};
+
+/// `models pull <owner>/<repo>` for a repository whose model card says it is
+/// an MLX model (`HfListing::mlx`), with no GGUF in it: every file the
+/// snapshot rule wants, through the tree ladder over `client` -- each checked
+/// against the size and the sha256 the repository publishes, where it
+/// publishes one -- into a staging directory this process claims; then the
+/// directory read as a whole MLX model (`read_mlx_info`: `config.json`, a
+/// tokenizer, every shard whole) before it is committed as
+/// `<model>/mlx/<id>`. A failure at any rung, a cancel (Ctrl-C) included,
+/// leaves nothing under an id and no staging behind. Says which checks ran.
+/// The client is a parameter so a test serves a fixture source.
+[[nodiscard]] PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
+                                 backends::HttpClient& client,
+                                 const harness::CancellationToken& cancellation);
+
+/// What `models convert --mlx` stored, or found stored.
+struct ConvertedMlx {
+    std::string model;
+    std::filesystem::path dir;
+    bool existed = false;
+    models::MlxInfo info;
+};
+
+/// `models convert <model> --mlx`: an MLX model of a full-weight SafeTensors
+/// set at `precision`, made by `converter` (`mlx_lm.convert` in the owned
+/// environment, or a test's stand-in) into a staging directory and
+/// committed under the model's `mlx/` by its shards' hash, with a record
+/// naming the set it was made from. The same set at the same precision is
+/// recognised before anything runs. Ctrl-C mid-run, or mid-hash, removes the
+/// staging: the store is untouched.
+[[nodiscard]] ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots,
+                                                std::string_view given, std::string_view from,
+                                                const training::MlxPrecision& precision,
+                                                const training::MlxConverter& converter);
 
 /// Where a SafeTensors snapshot lands and is looked for: `paths.hf_dir`
 /// when the config sets it, else the models directory. The template

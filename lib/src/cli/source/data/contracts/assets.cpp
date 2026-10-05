@@ -759,6 +759,10 @@ std::string bundled_mlx_driver_relative_path() {
     return bundled_script_relative_path("mlx_generate.py");
 }
 
+std::string bundled_mlx_converter_relative_path() {
+    return bundled_script_relative_path("mlx_convert.py");
+}
+
 std::string bundled_converter_relative_dir() {
     return "training/scripts/convert";
 }
