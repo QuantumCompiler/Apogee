@@ -96,8 +96,11 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
         }
     }
     CHECK(public_rows == 8);
-    CHECK(admin_rows == 74);
+    CHECK(admin_rows == 76);
     CHECK(has("POST", "/v1/admin/backends/default-vision"));
+    // The tasks slice (27j): two reads, no control.
+    CHECK(has("GET", "/v1/admin/tasks"));
+    CHECK(has("GET", "/v1/admin/tasks/{id}"));
     // The suites slice (27d).
     CHECK(has("GET", "/v1/admin/suites"));
     CHECK(has("POST", "/v1/admin/suites"));

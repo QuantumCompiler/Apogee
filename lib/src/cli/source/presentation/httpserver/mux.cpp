@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 82> kRoutes{{
+constexpr std::array<Route, 84> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -321,6 +321,17 @@ constexpr std::array<Route, 82> kRoutes{{
     {"GET", "/v1/admin/training/cycle", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
          return a->training_cycle(r);
+     }},
+    // The tasks slice (27j): reads only, the training split. `task run`,
+    // `resume`, `halt` and `cancel` have no route -- task control is
+    // CLI-only.
+    {"GET", "/v1/admin/tasks", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_tasks(r);
+     }},
+    {"GET", "/v1/admin/tasks/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->get_task(r, id);
      }},
     {"GET", "/v1/admin/permissions", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {

@@ -111,6 +111,11 @@ struct Fixture {
     std::filesystem::path root = home.path() / "tasks";
     Scripted scripted;
     std::vector<std::string> said;
+    /// Each transition the run told of (27j) -- `event round:status` -- and
+    /// whether the ledger on disk already held it then; each grant used.
+    std::vector<std::string> told;
+    std::vector<bool> told_on_disk;
+    std::vector<std::string> grants;
 
     Fixture() {
         scripted.root = root;
@@ -139,7 +144,24 @@ struct Fixture {
             .turn = [this](const t::TurnRequest& request) { return scripted(request); },
             .say = [this](std::string_view line) { said.emplace_back(line); },
             .interrupt = std::move(interrupt),
-            .poll = std::chrono::milliseconds{5}});
+            .poll = std::chrono::milliseconds{5},
+            .on_transition =
+                [this](const t::Task& written, std::size_t index) {
+                    const t::Transition& transition = written.transitions.at(index);
+                    told.push_back(transition.event + " " + std::to_string(transition.round) + ":" +
+                                   transition.status);
+                    std::string error;
+                    const std::optional<t::Task> disk =
+                        t::load_task(root, "task-20261004-120000", error);
+                    told_on_disk.push_back(disk.has_value() && disk->transitions.size() > index &&
+                                           t::transition_to_json(disk->transitions[index]) ==
+                                               t::transition_to_json(transition));
+                },
+            .on_grant =
+                [this](const t::Task& /*running*/, int round, const t::Permit& permit) {
+                    grants.push_back(std::to_string(round) + " " + permit.tool + " " +
+                                     permit.target + " " + permit.by);
+                }});
     }
 
     [[nodiscard]] t::Task on_disk() const {
@@ -519,6 +541,61 @@ TEST_CASE("a ledger that cannot be written stops the run and says so", "[tasks][
     const t::RunOutcome outcome = fixture.run(fixture.task(kAnswer42));
     CHECK(outcome.error.starts_with("the task's ledger could not be written"));
     CHECK(fixture.scripted.seen.empty());
+    // A transition the ledger did not take is never told (27j).
+    CHECK(fixture.told.empty());
+}
+
+TEST_CASE("each transition is told once the ledger holds it, in its order; each grant used",
+          "[tasks][runner][surfaces]") {
+    Fixture fixture;
+    fixture.scripted.steps = {
+        {.answer = "plan"},
+        {.answer = "Not yet.\nTASK STATUS: NOT DONE",
+         .allowed = {{.tool = "write_file", .target = "a.txt", .by = std::string{t::kByGrant}},
+                     {.tool = "edit_file", .target = "b.txt", .by = std::string{t::kByConfig}}}},
+        {.answer = "42\nTASK STATUS: DONE",
+         .allowed = {{.tool = "write_file", .target = "c.txt", .by = std::string{t::kByGrant}},
+                     {.tool = "delete_file", .target = "d.txt", .by = std::string{t::kByPerson}}}}};
+    t::Task created = fixture.task(kAnswer42);
+    // The command records `created` before the run, as `task run` does: it is
+    // the run's history, never told by it.
+    t::record_transition(created, t::kCreatedEvent, "2026-10-04T12:00:00Z", 0, created.goal);
+    const t::RunOutcome outcome = fixture.run(created);
+    REQUIRE(outcome.task.status == t::kDone);
+    // One for one: every transition after the history, once, in order.
+    std::vector<std::string> expected;
+    for (std::size_t index = 1; index < outcome.task.transitions.size(); ++index) {
+        const t::Transition& transition = outcome.task.transitions[index];
+        expected.push_back(transition.event + " " + std::to_string(transition.round) + ":" +
+                           transition.status);
+    }
+    CHECK(fixture.told == expected);
+    CHECK(expected.size() == 8);
+    // Each told only once the ledger on disk held it.
+    CHECK(std::ranges::all_of(fixture.told_on_disk, [](bool held) { return held; }));
+    // A grant's use, and nothing the config or the person allowed.
+    CHECK(fixture.grants ==
+          std::vector<std::string>{"1 write_file a.txt grant", "2 write_file c.txt grant"});
+
+    // A halted task resumed: its earlier transitions are history; the run
+    // tells from `resumed` on.
+    Fixture halted;
+    halted.scripted.steps = {
+        {.answer = "plan"},
+        {.answer = "not yet", .before = [&halted] {
+             REQUIRE(
+                 t::write_request(halted.root, "task-20261004-120000", t::Request::Halt).empty());
+         }}};
+    const t::RunOutcome stopped = halted.run(halted.task(kAnswer42));
+    REQUIRE(stopped.task.status == t::kHalted);
+    const std::size_t before = stopped.task.transitions.size();
+    halted.told.clear();
+    halted.scripted.steps.push_back({.answer = "42\nTASK STATUS: DONE"});
+    const t::RunOutcome resumed = halted.run(stopped.task, true);
+    REQUIRE(resumed.task.status == t::kDone);
+    REQUIRE_FALSE(halted.told.empty());
+    CHECK(halted.told.front() == "resumed 0:running");
+    CHECK(halted.told.size() == resumed.task.transitions.size() - before);
 }
 
 TEST_CASE("a turn's answer is found in the session only where that turn finished",

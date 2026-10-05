@@ -304,6 +304,11 @@ void conclude_round(Task& task, std::string_view answer);
 /// and the self-report when it was not `done`.
 [[nodiscard]] std::string shortfall(const Task& task);
 
+/// One transition as the ledger writes it: `at`, `event`, `status`, and
+/// `round` and `detail` when they say something. Machine mode's task events
+/// carry exactly this (27j), so a driver's transitions are the ledger's.
+[[nodiscard]] nlohmann::json transition_to_json(const Transition& transition);
+
 [[nodiscard]] nlohmann::json task_to_json(const Task& task);
 /// Throws std::runtime_error on a wrong shape or a missing id.
 [[nodiscard]] Task task_from_json(const nlohmann::json& json);

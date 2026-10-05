@@ -5,6 +5,8 @@
 #include <istream>
 #include <stdexcept>
 
+#include "tasks/view.h"
+
 namespace apogee::commands {
 namespace {
 
@@ -199,6 +201,78 @@ void JsonReporter::emit_error(std::string_view message) {
     write(object.dump());
 }
 
+void JsonReporter::emit_task_transition(const tasks::Task& task, std::size_t index,
+                                        const std::optional<tasks::LockHolder>& holder) {
+    if (index >= task.transitions.size()) {
+        return;
+    }
+    const tasks::Transition& transition = task.transitions[index];
+    const std::string& name = transition.event;
+    // The turn a plan or round transition is about: the plan, or the newest
+    // round of that number -- a round run again after a restart is the same
+    // round, as the ledger keeps it.
+    const auto turn = [&task, &transition](bool plan) -> nlohmann::json {
+        for (auto round = task.rounds.rbegin(); round != task.rounds.rend(); ++round) {
+            if ((round->kind == tasks::kPlanRound) == plan &&
+                (plan || round->index == transition.round)) {
+                return tasks::to_json(tasks::make_turn_view(*round));
+            }
+        }
+        return nullptr;
+    };
+    nlohmann::json object;
+    if (name == tasks::kStartedEvent || name == tasks::kResumedEvent) {
+        object = event("task_started");
+        object["resumed"] = name == tasks::kResumedEvent;
+        nlohmann::json history = nlohmann::json::array();
+        for (std::size_t earlier = 0; earlier < index; ++earlier) {
+            history.push_back(tasks::transition_to_json(task.transitions[earlier]));
+        }
+        object["history"] = std::move(history);
+        object["task"] = tasks::to_json(tasks::make_task_view(task, holder));
+    } else if (name == tasks::kPlanStartedEvent || name == tasks::kPlanRecordedEvent) {
+        object = event("task_plan");
+        object["round"] = turn(true);
+        if (name == tasks::kPlanRecordedEvent) {
+            object["plan"] = task.plan;
+        }
+    } else if (name == tasks::kRoundStartedEvent || name == tasks::kRoundEndedEvent) {
+        object = event("task_round");
+        object["round"] = turn(false);
+        if (name == tasks::kRoundEndedEvent) {
+            nlohmann::json checks = nlohmann::json::array();
+            for (const tasks::CheckView& check : tasks::make_check_views(task)) {
+                checks.push_back(tasks::to_json(check));
+            }
+            object["checks"] = std::move(checks);
+            object["rounds_used"] = tasks::rounds_used(task);
+        }
+    } else if (name == tasks::kFinishedEvent) {
+        object = event("task_finished");
+        object["status"] = transition.status;
+        object["reason"] = task.reason;
+        object["task"] = tasks::to_json(tasks::make_task_view(task, holder));
+    } else {
+        // `created` is written before any run, and reaches a driver as the
+        // history `task_started` carries.
+        return;
+    }
+    object["task_id"] = task.id;
+    object["transition"] = tasks::transition_to_json(transition);
+    write(object.dump());
+}
+
+void JsonReporter::emit_task_grant(const tasks::Task& task, int round,
+                                   const tasks::Permit& permit) {
+    nlohmann::json object = event("task_grant");
+    object["task_id"] = task.id;
+    object["round"] = round;
+    object["tool"] = permit.tool;
+    object["target"] = permit.target;
+    object["by"] = permit.by;
+    write(object.dump());
+}
+
 bool JsonReporter::wrote_answer() const noexcept {
     return wrote_answer_;
 }
@@ -223,6 +297,29 @@ std::optional<InputFormat> input_format_from_string(std::string_view name) noexc
 
 std::vector<std::string_view> format_names() {
     return {to_string(OutputFormat::Text), to_string(OutputFormat::StreamJson)};
+}
+
+std::string_view to_string(ReadFormat format) noexcept {
+    return format == ReadFormat::Json ? "json" : "text";
+}
+
+std::optional<ReadFormat> read_format_from_string(std::string_view name) noexcept {
+    if (name == "text" || name.empty()) {
+        return ReadFormat::Text;
+    }
+    if (name == "json") {
+        return ReadFormat::Json;
+    }
+    return std::nullopt;
+}
+
+std::vector<std::string_view> read_format_names() {
+    return {to_string(ReadFormat::Text), to_string(ReadFormat::Json)};
+}
+
+void write_document(std::ostream& out, const nlohmann::json& document) {
+    out << document.dump() << "\n";
+    out.flush();
 }
 
 std::optional<OutputFormat> output_format_from_string(std::string_view name) noexcept {

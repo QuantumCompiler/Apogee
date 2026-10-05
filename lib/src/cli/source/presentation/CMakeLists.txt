@@ -48,7 +48,7 @@ apogee_add_module(machine
     machine/json_reporter.h
     machine/json_reporter.cpp
 )
-target_link_libraries(apogee_presentation_machine PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(apogee_presentation_machine PUBLIC nlohmann_json::nlohmann_json)
 
 apogee_add_module(operations
     operations/backend_names.h
@@ -108,6 +108,8 @@ apogee_add_module(httpserver
     httpserver/admin_datasets.cpp
     httpserver/admin_training.h
     httpserver/admin_training.cpp
+    httpserver/admin_tasks.h
+    httpserver/admin_tasks.cpp
     httpserver/admin.h
     httpserver/admin.cpp
     httpserver/admin_auth_routes.h

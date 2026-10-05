@@ -198,6 +198,7 @@ add_library(apogee_tests_business OBJECT
     business/tasks/policy_test.cpp
     business/tasks/unattended_test.cpp
     business/tasks/runner_test.cpp
+    business/tasks/view_test.cpp
     support/fake_mcp_server.cpp
     support/fake_mcp_server.h
 )
@@ -264,6 +265,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/task_test.cpp
     presentation/httpserver/admin_datasets_test.cpp
     presentation/httpserver/admin_training_test.cpp
+    presentation/httpserver/admin_tasks_test.cpp
     support/fake_command.h
     support/fake_command.cpp
     support/cli_home.h
@@ -579,7 +581,12 @@ if(UNIX)
     # policy too: a granted write run unprompted and recorded with its
     # target, a declared answer consumed and recorded (and without one, the
     # task failing naming the question), and a grant wider than the config
-    # or the agent refused naming the rule, no task made.
+    # or the agent refused naming the rule, no task made. Since 27j the
+    # surfaces: a run under --output-format stream-json whose task events --
+    # task_started's history, then one per transition -- are the ledger's
+    # transition sequence one for one, a driver's reconstruction from the
+    # stream equal to `task status --output-format json`, and a halted task
+    # resumed in machine mode opening with its whole history.
     add_test(NAME cli.task_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/task_e2e.sh"
             $<TARGET_FILE:apogee>
@@ -629,7 +636,9 @@ if(UNIX)
 
     # The other half of that boundary: serve DOES hold a port, fails closed on a
     # non-loopback bind, streams to a real client, mints sessions the terminal
-    # can resume, and stops on SIGTERM. Properties of the process, not a class.
+    # can resume, serves the task reads as the CLI prints them while no task
+    # control answers (27j), and stops on SIGTERM. Properties of the process,
+    # not a class.
     add_test(NAME cli.serve_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/serve_e2e.sh"
             $<TARGET_FILE:apogee>

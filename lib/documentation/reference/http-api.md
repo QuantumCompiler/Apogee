@@ -1018,6 +1018,45 @@ anchor_score, promoted_version[, note]}], active: bool}`; `404` until the
 first `train cycle run` has written it. `cycle run`, `halt` and `resume`
 have no route.
 
+### `GET /v1/admin/tasks`
+
+The tasks under `tasks/`, newest first, as `apogee task list` shows them: `200
+{"object": "list", "data": [{id, status, rounds_used, rounds_budget, goal}],
+"total": N}` -- the newest 50, or with `?all=true` every one (any other value of
+`all` but `false` is `400`); `total` counts every task, and `data` is `[]` and
+never null. A ledger that cannot be read is left out. The body is byte for byte
+what `apogee task list --output-format json` prints.
+
+**Task control is CLI-only** -- the training track's split. `apogee task run`,
+`resume`, `halt` and `cancel` have no route: a task is an unattended run of the
+host's own session and tools under its lock, not a control surface a remote
+client should hold. Each is a documented parity carve-out; what a remote client
+may do is read.
+
+### `GET /v1/admin/tasks/{id}`
+
+One task's view, as `apogee task status <id> --output-format json` prints it,
+byte for byte: `200 {id, status, process, interrupted, goal, conversation, folder,
+tools, policy: {agent, grants, on_question} | null, rounds_used, rounds_budget,
+created_at, updated_at, reason, checks: [{kind, value, description, ran, passed,
+detail}], self_report, plan, turns: [{round, kind, outcome, adopted,
+checks_passed, self_report, tools, allowed: [{tool, target, by}], denied: [{tool,
+target, by}], answered: [{question, by}], tokens, tokens_estimated, started_at,
+ended_at}]}`. `status` is the ledger's -- `planning`, `running`, `halted`,
+`cancelled`, `done`, `exhausted`, `stalled` or `failed` -- with `process` the
+process running it now (`null` otherwise) and `interrupted` true for a task whose
+ledger says it is planning or running with no process left to run it (`task
+resume` continues it on the host). `checks` are each acceptance check as the
+newest completed round left it, and `self_report` that round's (`done`,
+`not_done`, `unreported`); a turn's `outcome` is `completed`, `interrupted` or
+`in_flight`. **A declared answer is never served:** `policy.on_question` is
+`answer` when the task was handed one and an answered question says `by:
+"declared"`, never what it said -- `task status` at the host's terminal shows
+it. Nor is a path into the private layout: `folder` and a `require_file` check's
+`value` are the user's own. `404` when there is no such task, `400` for an id
+that is not one, `500` when its ledger cannot be read (the message never names
+its path).
+
 ### `GET /v1/admin/permissions`
 
 What the permission gate does for each destructive native tool — `ask`,

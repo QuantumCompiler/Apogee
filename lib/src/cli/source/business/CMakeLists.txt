@@ -232,6 +232,8 @@ apogee_add_module(tasks
     tasks/unattended.cpp
     tasks/runner.h
     tasks/runner.cpp
+    tasks/view.h
+    tasks/view.cpp
 )
 target_link_libraries(apogee_business_tasks PUBLIC nlohmann_json::nlohmann_json)
 

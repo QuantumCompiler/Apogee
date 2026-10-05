@@ -246,6 +246,14 @@ HttpResponse AdminHandler::training_cycle(const HttpRequest& /*request*/) {
     return admin_training_cycle(config_context());
 }
 
+HttpResponse AdminHandler::list_tasks(const HttpRequest& request) {
+    return admin_list_tasks(request);
+}
+
+HttpResponse AdminHandler::get_task(const HttpRequest& /*request*/, std::string_view id) {
+    return admin_get_task(id);
+}
+
 HttpResponse AdminHandler::list_communities(const HttpRequest& request, std::string_view name) {
     return admin_list_communities(config_context(), name, request);
 }

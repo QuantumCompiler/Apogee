@@ -523,6 +523,18 @@ void conclude_round(Task& task, std::string_view answer) {
     task.reason.clear();
 }
 
+nlohmann::json transition_to_json(const Transition& transition) {
+    nlohmann::json row{
+        {"at", transition.at}, {"event", transition.event}, {"status", transition.status}};
+    if (transition.round > 0) {
+        row["round"] = transition.round;
+    }
+    if (!transition.detail.empty()) {
+        row["detail"] = transition.detail;
+    }
+    return row;
+}
+
 nlohmann::json task_to_json(const Task& task) {
     nlohmann::json checks = nlohmann::json::array();
     for (const Check& check : task.checks) {
@@ -534,15 +546,7 @@ nlohmann::json task_to_json(const Task& task) {
     }
     nlohmann::json transitions = nlohmann::json::array();
     for (const Transition& transition : task.transitions) {
-        nlohmann::json row{
-            {"at", transition.at}, {"event", transition.event}, {"status", transition.status}};
-        if (transition.round > 0) {
-            row["round"] = transition.round;
-        }
-        if (!transition.detail.empty()) {
-            row["detail"] = transition.detail;
-        }
-        transitions.push_back(std::move(row));
+        transitions.push_back(transition_to_json(transition));
     }
     return nlohmann::json{{"schema_version", task.schema_version},
                           {"id", task.id},

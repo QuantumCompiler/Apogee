@@ -2,7 +2,9 @@
 
 #include <CLI/CLI.hpp>
 
+#include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -31,6 +33,7 @@
 #include "harness/roles.h"
 #include "logger/operational.h"
 #include "logger/session.h"
+#include "machine/json_reporter.h"
 #include "modelstore/footprint.h"
 #include "operations/suites.h"
 #include "platform/platform.h"
@@ -39,6 +42,7 @@
 #include "tasks/runner.h"
 #include "tasks/task.h"
 #include "tasks/unattended.h"
+#include "tasks/view.h"
 #include "tools/consult.h"
 #include "views/ask_prompt.h"
 #include "views/cli_reporter.h"
@@ -53,10 +57,6 @@ namespace fs = std::filesystem;
     std::cerr << "apogee task: " << message << "\n";
     throw CLI::RuntimeError(kUserError);
 }
-
-/// `task list` shows this many unless `--all` (27j's confirmed default,
-/// taken here where the list is first built).
-constexpr std::size_t kListLimit = 50;
 
 struct TaskFlags {
     std::string goal;
@@ -81,6 +81,11 @@ struct TaskFlags {
     /// running or the newest one.
     std::string id;
     bool all = false;
+    /// `run` and `resume`: the terminal's rendering, or machine mode's event
+    /// stream with the task's lifecycle in it (27j).
+    OutputFormat output_format = OutputFormat::Text;
+    /// `status` and `list`: the human view, or one JSON document (27j).
+    ReadFormat read_format = ReadFormat::Text;
 };
 
 /// The folder as a comparison sees it: its real path when it has one.
@@ -137,47 +142,42 @@ struct TaskFlags {
 
 /// The status as a person reads it: a task whose process died mid-turn says
 /// so, and one running now says where.
-[[nodiscard]] std::string status_words(const tasks::Task& task, const fs::path& root) {
-    if (task.status != tasks::kPlanning && task.status != tasks::kRunning) {
-        return task.status;
+[[nodiscard]] std::string status_words(const tasks::TaskView& view) {
+    if (view.process.has_value()) {
+        return view.status + " (now, process " + std::to_string(*view.process) + ")";
     }
-    if (const std::optional<tasks::LockHolder> holder = tasks::lock_holder(root);
-        holder.has_value() && holder->running && holder->task_id == task.id) {
-        return task.status + " (now, process " + std::to_string(holder->pid) + ")";
+    if (view.interrupted) {
+        return view.status + " (interrupted -- its process is gone; 'apogee task resume " +
+               view.id + "' continues it)";
     }
-    return task.status + " (interrupted -- its process is gone; 'apogee task resume " + task.id +
-           "' continues it)";
+    return view.status;
 }
 
-[[nodiscard]] std::string round_row(const tasks::Task& task, const tasks::Round& round) {
+[[nodiscard]] std::string round_row(const tasks::TaskView& view, const tasks::TurnView& turn) {
     std::ostringstream out;
     out << "  "
-        << (round.kind == tasks::kPlanRound ? std::string{"plan"} : std::to_string(round.index))
-        << "  " << round.kind << "  "
-        << (round.outcome.empty() ? std::string{"in flight"} : round.outcome);
-    if (round.outcome == tasks::kCompleted && round.kind != tasks::kPlanRound) {
-        int passed = 0;
-        for (const tasks::CheckResult& result : round.checks) {
-            passed += result.passed ? 1 : 0;
-        }
-        out << "  " << passed << "/" << task.checks.size() << " checks, "
-            << tasks::report_words(tasks::self_report_from_string(round.self_report));
+        << (turn.kind == tasks::kPlanRound ? std::string{"plan"} : std::to_string(turn.round))
+        << "  " << turn.kind << "  "
+        << (turn.outcome == "in_flight" ? std::string{"in flight"} : turn.outcome);
+    if (turn.outcome == tasks::kCompleted && turn.kind != tasks::kPlanRound) {
+        out << "  " << turn.checks_passed << "/" << view.checks.size() << " checks, "
+            << tasks::report_words(tasks::self_report_from_string(turn.self_report));
     }
-    if (round.adopted) {
+    if (turn.adopted) {
         out << "  (taken from the conversation after a restart)";
     }
-    out << "  tools: " << round.tools.size() << " ran";
-    if (!round.denied.empty()) {
-        out << ", " << round.denied.size() << " denied";
+    out << "  tools: " << turn.tools << " ran";
+    if (!turn.denied.empty()) {
+        out << ", " << turn.denied.size() << " denied";
     }
-    out << "  tokens: " << round.tokens << (round.tokens_estimated ? " (estimated)" : "");
+    out << "  tokens: " << turn.tokens << (turn.tokens_estimated ? " (estimated)" : "");
     return out.str();
 }
 
-/// A round as the status's sections name it.
-[[nodiscard]] std::string round_name(const tasks::Round& round) {
-    return round.kind == tasks::kPlanRound ? std::string{"plan"}
-                                           : "round " + std::to_string(round.index);
+/// A turn as the status's sections name it.
+[[nodiscard]] std::string round_name(const tasks::TurnView& turn) {
+    return turn.kind == tasks::kPlanRound ? std::string{"plan"}
+                                          : "round " + std::to_string(turn.round);
 }
 
 /// On whose authority a gated call ran.
@@ -209,12 +209,14 @@ struct TaskFlags {
 }
 
 /// The task's autonomy policy, as `status` shows it (27i): what it was
-/// handed, including the declared answer -- the ledger's own field.
-void print_policy(const tasks::Task& task) {
-    if (!task.tools) {
+/// handed -- the view's, and the declared answer, which the view never
+/// carries, from the ledger: a person at this machine reads it here, and no
+/// served view or event does.
+void print_policy(const tasks::TaskView& view, const tasks::Task& task) {
+    if (!view.policy.has_value()) {
         return;
     }
-    const tasks::AutonomyPolicy& policy = task.policy;
+    const tasks::PolicyView& policy = *view.policy;
     if (!policy.agent.empty()) {
         std::cout << "agent:         " << policy.agent << " -- the task runs under its policy\n";
     }
@@ -228,26 +230,26 @@ void print_policy(const tasks::Task& task) {
                                  : grants)
               << "\n";
     std::cout << "on question:   "
-              << (policy.on_question == tasks::OnQuestion::Answer
-                      ? "answer \"" + policy.answer +
+              << (policy.on_question == tasks::to_string(tasks::OnQuestion::Answer)
+                      ? "answer \"" + task.policy.answer +
                             "\" -- every question gets this declared answer"
                       : std::string{"fail -- a question nobody answers ends the task"})
               << "\n";
 }
 
 /// One section of `task status`: `heading`, then a row per record across
-/// the rounds -- nothing at all when there is none.
+/// the turns -- nothing at all when there is none.
 template <typename Record, typename Row>
-void print_section(const tasks::Task& task, std::string_view heading,
-                   std::vector<Record> tasks::Round::* records, const Row& row) {
+void print_section(const tasks::TaskView& view, std::string_view heading,
+                   std::vector<Record> tasks::TurnView::* records, const Row& row) {
     bool any = false;
-    for (const tasks::Round& round : task.rounds) {
-        for (const Record& record : round.*records) {
+    for (const tasks::TurnView& turn : view.turns) {
+        for (const Record& record : turn.*records) {
             if (!any) {
                 std::cout << heading << ":\n";
                 any = true;
             }
-            std::cout << "  " << round_name(round) << ": " << row(record) << "\n";
+            std::cout << "  " << round_name(turn) << ": " << row(record) << "\n";
         }
     }
 }
@@ -257,62 +259,72 @@ void print_section(const tasks::Task& task, std::string_view heading,
 }
 
 /// Every gated call let through, every refusal, every question answered.
-void print_uses(const tasks::Task& task) {
-    print_section(task, "allowed", &tasks::Round::allowed, [](const tasks::Permit& permit) {
-        return on_target(permit.tool, permit.target) + " -- " + authority_words(permit.by);
+void print_uses(const tasks::TaskView& view, const tasks::Task& task) {
+    print_section(view, "allowed", &tasks::TurnView::allowed, [](const tasks::UseView& use) {
+        return on_target(use.tool, use.target) + " -- " + authority_words(use.by);
     });
-    print_section(task, "denied", &tasks::Round::denied, [](const tasks::Denial& denial) {
-        const std::string why = refusal_words(denial.by);
-        return on_target(denial.tool, denial.target) + (why.empty() ? std::string{} : " -- " + why);
+    print_section(view, "denied", &tasks::TurnView::denied, [](const tasks::UseView& use) {
+        const std::string why = refusal_words(use.by);
+        return on_target(use.tool, use.target) + (why.empty() ? std::string{} : " -- " + why);
     });
-    print_section(task, "answered", &tasks::Round::answered, [](const tasks::Answered& question) {
-        return question.question + " -- \"" + question.answer + "\", " +
-               (question.by == tasks::kByDeclared ? "the declared answer"
-                                                  : "the person at the terminal");
-    });
+    // The view says who answered each question and never what; the answers
+    // are the ledger's, in the view's own order -- every round's, in turn.
+    std::vector<std::string> answers;
+    for (const tasks::Round& round : task.rounds) {
+        for (const tasks::Answered& question : round.answered) {
+            answers.push_back(question.answer);
+        }
+    }
+    std::size_t next = 0;
+    print_section(view, "answered", &tasks::TurnView::answered,
+                  [&answers, &next](const tasks::QuestionView& question) {
+                      const std::string answer = next < answers.size() ? answers[next] : "";
+                      ++next;
+                      return question.question + " -- \"" + answer + "\", " +
+                             (question.by == tasks::kByDeclared ? "the declared answer"
+                                                                : "the person at the terminal");
+                  });
 }
 
-void print_status(const tasks::Task& task, const fs::path& root) {
-    std::cout << "task " << task.id << "  " << status_words(task, root) << "\n"
-              << "goal:          " << task.goal << "\n"
-              << "conversation:  " << task.session_id << "\n"
-              << "folder:        " << task.working_directory << "\n"
-              << "tools:         " << (task.tools ? "on" : "off") << "\n";
-    print_policy(task);
-    std::cout << "rounds:        " << tasks::rounds_used(task) << " of " << task.rounds_budget
-              << " used\n"
-              << "started:       " << task.created_at << "\n"
-              << "updated:       " << task.updated_at << "\n";
-    if (!task.reason.empty()) {
-        std::cout << "reason:        " << task.reason << "\n";
+/// `task status`, for a person: the task's view -- what every surface shows
+/// -- and the declared answer beside it, which only this one does.
+void print_status(const tasks::Task& task, const tasks::TaskView& view) {
+    std::cout << "task " << view.id << "  " << status_words(view) << "\n"
+              << "goal:          " << view.goal << "\n"
+              << "conversation:  " << view.conversation << "\n"
+              << "folder:        " << view.folder << "\n"
+              << "tools:         " << (view.tools ? "on" : "off") << "\n";
+    print_policy(view, task);
+    std::cout << "rounds:        " << view.rounds_used << " of " << view.rounds_budget << " used\n"
+              << "started:       " << view.created_at << "\n"
+              << "updated:       " << view.updated_at << "\n";
+    if (!view.reason.empty()) {
+        std::cout << "reason:        " << view.reason << "\n";
     }
     // Each check's state as the newest completed round left it.
-    const tasks::Round* last = tasks::last_completed_round(task);
     std::cout << "checks:\n";
-    for (std::size_t index = 0; index < task.checks.size(); ++index) {
-        const bool ran = last != nullptr && index < last->checks.size();
-        const bool passed = ran && last->checks[index].passed;
-        std::cout << "  [" << (passed ? "x" : " ") << "] " << tasks::describe(task.checks[index])
-                  << (ran ? " -- " + last->checks[index].detail : std::string{" -- not run yet"})
-                  << "\n";
+    for (const tasks::CheckView& check : view.checks) {
+        std::cout << "  [" << (check.passed ? "x" : " ") << "] " << check.description
+                  << (check.ran ? " -- " + check.detail : std::string{" -- not run yet"}) << "\n";
     }
-    const bool reported = last != nullptr && last->self_report == "done";
-    std::cout << "  [" << (reported ? "x" : " ") << "] the model reports the task done\n";
-    std::cout << "plan:" << (task.plan.empty() ? " (not recorded yet)\n" : "\n");
-    if (!task.plan.empty()) {
-        std::istringstream lines{task.plan};
+    std::cout << "  ["
+              << (view.self_report == tasks::to_string(tasks::SelfReport::Done) ? "x" : " ")
+              << "] the model reports the task done\n";
+    std::cout << "plan:" << (view.plan.empty() ? " (not recorded yet)\n" : "\n");
+    if (!view.plan.empty()) {
+        std::istringstream lines{view.plan};
         std::string line;
         while (std::getline(lines, line)) {
             std::cout << "  " << line << "\n";
         }
     }
-    if (!task.rounds.empty()) {
+    if (!view.turns.empty()) {
         std::cout << "turns:\n";
-        for (const tasks::Round& round : task.rounds) {
-            std::cout << round_row(task, round) << "\n";
+        for (const tasks::TurnView& turn : view.turns) {
+            std::cout << round_row(view, turn) << "\n";
         }
     }
-    print_uses(task);
+    print_uses(view, task);
 }
 
 /// The task a command names, or the running one, or the newest one.
@@ -408,7 +420,11 @@ struct Drive {
 /// one, with nobody to ask, and the runner driven over its turns.
 void drive(const RootContext& context, const MachineBudgetSource& machine, const TaskFlags& flags,
            const Drive& what) {
-    const bool decorate = platform::is_terminal(platform::StandardStream::Out);
+    // Machine mode (27j): stdout carries the event stream and nothing else --
+    // the turns' events and the task's lifecycle around them -- and nobody is
+    // asked anything: the run reads no input, so there is no one to answer.
+    const bool machine_mode = flags.output_format == OutputFormat::StreamJson;
+    const bool decorate = !machine_mode && platform::is_terminal(platform::StandardStream::Out);
     const fs::path root = harness::tasks_dir();
 
     harness::Config config;
@@ -547,10 +563,14 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     reporter_options.hyperlinks = ansi::hyperlinks_supported();
     CliReporter reporter{status_writer, reporter_options};
     const ansi::Style& style = reporter_options.style;
-    harness.listen_for_loads(
-        [&reporter](std::string_view backend, const harness::StatusEvent& event) {
-            reporter.on_model_load(backend, event);
-        });
+    // A model loading says so on the spinner -- never into machine mode's
+    // stream, as `chat`'s.
+    if (!machine_mode) {
+        harness.listen_for_loads(
+            [&reporter](std::string_view backend, const harness::StatusEvent& event) {
+                reporter.on_model_load(backend, event);
+            });
+    }
 
     // The suite: the flag on a new task, the session's on a resumed one, else
     // the config's default -- as `chat` chooses it.
@@ -640,10 +660,15 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     // The person at the terminal, when there is one: policy adds to the human
     // path, never replaces it -- anything not granted is asked about, as a
     // chat asks. With nobody there the prompt is null and `ask` denies.
-    const PersonPrompt person = [&reporter, &style,
-                                 &config_path](std::shared_ptr<SessionApprovals> approvals) {
-        return terminal_confirm_fn(reporter.status(), style, config_path, std::move(approvals));
-    };
+    // In machine mode nobody is: stdin is not the person's, and a prompt on
+    // the terminal would be an input channel the protocol does not have.
+    const PersonPrompt person =
+        machine_mode ? PersonPrompt{}
+                     : PersonPrompt{[&reporter, &style,
+                                     &config_path](std::shared_ptr<SessionApprovals> approvals) {
+                           return terminal_confirm_fn(reporter.status(), style, config_path,
+                                                      std::move(approvals));
+                       }};
     TaskGate composed = compose_task_gate(
         config, available, task.policy, agent_entry.has_value() ? &*agent_entry : nullptr, person);
     if (!composed.refusal.empty()) {
@@ -682,7 +707,10 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     if (task.tools && (!agent_entry.has_value() || agent_entry->questions)) {
         if (task.policy.on_question == tasks::OnQuestion::Answer) {
             ask = recorder.declared_answer(task.policy.answer);
-        } else if (agentloop::AskFn there = terminal_ask_fn(reporter.status(), style); there) {
+        } else if (agentloop::AskFn there = machine_mode
+                                                ? agentloop::AskFn{}
+                                                : terminal_ask_fn(reporter.status(), style);
+                   there) {
             ask = recorder.person(std::move(there));
         } else {
             ask = tasks::fail_on_question();
@@ -719,7 +747,19 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
 
     const RagSettings rag{
         .flag_given = false, .flag_value = {}, .limit = 4, .config_path = config_path};
-    const auto notice = [&reporter, &style](const std::string& message) {
+    // The task's events and the turns' events on stdout, in machine mode; a
+    // person's rendering otherwise.
+    const std::unique_ptr<JsonReporter> machine_reporter =
+        machine_mode ? std::make_unique<JsonReporter>(std::cout) : nullptr;
+    agentloop::Reporter& turn_reporter =
+        machine_mode ? static_cast<agentloop::Reporter&>(*machine_reporter) : reporter;
+    const auto notice = [&reporter, &style, machine_mode](const std::string& message) {
+        if (machine_mode) {
+            // stdout carries only protocol events, so a diagnostic goes to
+            // stderr -- machine mode's rule, as `chat`'s.
+            std::cerr << "apogee: " << message << "\n";
+            return;
+        }
         reporter.keep_line(style.tag(ansi::Role::Warning) + " " + message);
     };
 
@@ -740,8 +780,8 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
         try {
             const ChatTurnResult chat =
                 run_chat_turn(harness, session, request.message, task.tools ? &observed : nullptr,
-                              selection.get(), member_calls.get(), ask, gate, reporter, notice, rag,
-                              {}, nullptr, &recall, request.cancellation);
+                              selection.get(), member_calls.get(), ask, gate, turn_reporter, notice,
+                              rag, {}, nullptr, &recall, request.cancellation);
             result.completed = chat.completed;
             result.cancelled = chat.cancelled;
             result.error = chat.error;
@@ -756,19 +796,58 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
         result.denied = recorder.take_denials();
         result.allowed = recorder.take_allowed();
         result.answered = recorder.take_answered();
+        if (machine_mode) {
+            // The turn ends as a machine-mode turn ends: its `result`, or the
+            // machine-readable half of why it did not finish.
+            if (result.completed) {
+                harness::ChatResponse response;
+                response.message = session.messages.empty() ? harness::ChatMessage::assistant("")
+                                                            : session.messages.back();
+                response.model = session.backend;
+                machine_reporter->emit_result(response);
+            } else if (!result.question.empty()) {
+                machine_reporter->emit_error(
+                    "the model asked a question and no one is present to answer it: " +
+                    result.question);
+            } else if (!result.error.empty()) {
+                machine_reporter->emit_error(result.error);
+            } else {
+                machine_reporter->emit_error("cancelled");
+            }
+        }
         if (!result.completed) {
             session = before;
             logger::save(session);
         }
         if (session.compactions != saved_compactions) {
             saved_compactions = session.compactions;
-            harness.save_conversation(session.backend, session.chat_id, progress_sink(reporter));
+            harness.save_conversation(session.backend, session.chat_id,
+                                      progress_sink(turn_reporter));
         }
         if (decorate) {
             reporter.status().print_line("");
         }
         return result;
     };
+
+    if (machine_mode) {
+        // Once, first -- the protocol's rule -- then the task's lifecycle.
+        machine_reporter->begin_session(session.backend);
+    }
+
+    // One task event per transition the ledger holds, and one per grant used:
+    // machine mode's view of the run.
+    std::function<void(const tasks::Task&, std::size_t)> on_transition;
+    std::function<void(const tasks::Task&, int, const tasks::Permit&)> on_grant;
+    if (machine_mode) {
+        on_transition = [&machine_reporter, &root](const tasks::Task& written, std::size_t index) {
+            machine_reporter->emit_task_transition(written, index, tasks::lock_holder(root));
+        };
+        on_grant = [&machine_reporter](const tasks::Task& running, int round,
+                                       const tasks::Permit& permit) {
+            machine_reporter->emit_task_grant(running, round, permit);
+        };
+    }
 
     const InterruptScope interrupt;
     const tasks::RunOutcome outcome = tasks::run_task(
@@ -781,7 +860,9 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
                                   reporter.status().print_line(style.dim(std::string{line}));
                               },
                           .interrupt = InterruptScope::token(),
-                          .poll = std::chrono::milliseconds{200}});
+                          .poll = std::chrono::milliseconds{200},
+                          .on_transition = on_transition,
+                          .on_grant = on_grant});
 
     // A clean end of the session, as `chat`'s clean exit: its summary for
     // recall and the model's saved state -- not after a cancel, which asked
@@ -790,22 +871,28 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
         if (const std::string said = recall.finish({}); !said.empty()) {
             reporter.status().print_line(style.dim("[memory] " + said));
         }
-        harness.save_conversation(session.backend, session.chat_id, progress_sink(reporter));
+        harness.save_conversation(session.backend, session.chat_id, progress_sink(turn_reporter));
     }
     lock->release();
 
     if (!outcome.error.empty()) {
+        if (machine_mode) {
+            machine_reporter->emit_error(outcome.error);
+        }
         fail_user(outcome.error);
     }
     const tasks::Task& ended = outcome.task;
-    std::cout << "task " << ended.id << " " << ended.status << " -- " << ended.reason << "\n"
-              << "  conversation: " << ended.session_id << "\n";
+    // The outcome, for a person; in machine mode `task_finished` says it on
+    // stdout, and this goes to stderr with the other diagnostics.
+    std::ostream& told = machine_mode ? std::cerr : std::cout;
+    told << "task " << ended.id << " " << ended.status << " -- " << ended.reason << "\n"
+         << "  conversation: " << ended.session_id << "\n";
     if (ended.status != tasks::kDone) {
-        std::cout << "  'apogee task status " << ended.id << "' shows each round";
+        told << "  'apogee task status " << ended.id << "' shows each round";
         if (tasks::resume_refusal(ended).empty()) {
-            std::cout << "; 'apogee task resume " << ended.id << "' continues it";
+            told << "; 'apogee task resume " << ended.id << "' continues it";
         }
-        std::cout << "\n";
+        told << "\n";
     }
     if (const int code = exit_code_for(ended, provider_failed); code != kSuccess) {
         throw CLI::RuntimeError(code);
@@ -871,6 +958,42 @@ void stop_task(const TaskFlags& flags, tasks::Request request) {
         fail_user("the task's ledger could not be written: " + failure);
     }
     std::cout << "task " << task.id << " " << task.status << "\n";
+}
+
+/// `--output-format` on `run` and `resume`: the terminal's rendering, or
+/// machine mode's event stream (27j).
+void add_run_format(CLI::App* command, const std::shared_ptr<TaskFlags>& flags) {
+    command
+        ->add_option_function<std::string>(
+            "--output-format",
+            [flags](const std::string& value) {
+                const std::optional<OutputFormat> parsed = output_format_from_string(value);
+                if (!parsed.has_value()) {
+                    throw CLI::ValidationError("--output-format",
+                                               "expected 'text' or 'stream-json'");
+                }
+                flags->output_format = *parsed;
+            },
+            "Output format: text (default) or stream-json -- the turns' events and the task's "
+            "lifecycle, one JSON object per line, for a machine driver")
+        ->type_name(words_value(format_names()));
+}
+
+/// `--output-format` on `status` and `list`: the human view, or one JSON
+/// document of the same facts (27j, the read convention).
+void add_read_format(CLI::App* command, const std::shared_ptr<TaskFlags>& flags) {
+    command
+        ->add_option_function<std::string>(
+            "--output-format",
+            [flags](const std::string& value) {
+                const std::optional<ReadFormat> parsed = read_format_from_string(value);
+                if (!parsed.has_value()) {
+                    throw CLI::ValidationError("--output-format", "expected 'text' or 'json'");
+                }
+                flags->read_format = *parsed;
+            },
+            "Output format: text (default) or json -- one JSON document of the same facts")
+        ->type_name(words_value(read_format_names()));
 }
 
 }  // namespace
@@ -947,6 +1070,7 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
     run->add_flag("--no-color", run_flags->no_color, "Disable ANSI colour output");
     run->add_flag("--raw", run_flags->raw,
                   "Show answers' Markdown as written instead of rendering it on the terminal");
+    add_run_format(run, run_flags);
     run->callback([&context, run_flags, machine = machine_]() {
         drive(context, machine, *run_flags, Drive{});
     });
@@ -967,6 +1091,7 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
     resume->add_flag("--no-color", resume_flags->no_color, "Disable ANSI colour output");
     resume->add_flag("--raw", resume_flags->raw,
                      "Show answers' Markdown as written instead of rendering it on the terminal");
+    add_run_format(resume, resume_flags);
     resume->callback([&context, resume_flags, machine = machine_]() {
         const fs::path root = harness::tasks_dir();
         const tasks::Task task = resolve_task(root, resume_flags->id, /*prefer_running=*/false);
@@ -980,16 +1105,26 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
         "A task's plan, rounds, checks and conversation (default: the running one, "
         "else the newest)");
     status->add_option("task", status_flags->id, "The task")->type_name(kTaskValue);
+    add_read_format(status, status_flags);
     status->callback([status_flags]() {
         const fs::path root = harness::tasks_dir();
-        print_status(resolve_task(root, status_flags->id, /*prefer_running=*/true), root);
+        const tasks::Task task = resolve_task(root, status_flags->id, /*prefer_running=*/true);
+        // One view, rendered for a person or as the document a host reads --
+        // the body `GET /v1/admin/tasks/{id}` serves.
+        const tasks::TaskView view = tasks::make_task_view(task, tasks::lock_holder(root));
+        if (status_flags->read_format == ReadFormat::Json) {
+            write_document(std::cout, tasks::to_json(view));
+            return;
+        }
+        print_status(task, view);
     });
 
     // ---- list --------------------------------------------------------------------
     auto list_flags = std::make_shared<TaskFlags>();
     CLI::App* list = cmd->add_subcommand("list", "Tasks and their outcomes, newest first");
     list->add_flag("--all", list_flags->all,
-                   "Every task, not only the newest " + std::to_string(kListLimit));
+                   "Every task, not only the newest " + std::to_string(tasks::kListLimit));
+    add_read_format(list, list_flags);
     list->callback([list_flags]() {
         const fs::path root = harness::tasks_dir();
         std::vector<std::string> problems;
@@ -997,18 +1132,24 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
         for (const std::string& problem : problems) {
             std::cerr << "[task] skipped: " << problem << "\n";
         }
-        if (all.empty()) {
+        // One listing, for a person or as the document a host reads -- the
+        // body `GET /v1/admin/tasks` serves.
+        const tasks::TaskListView listed = tasks::make_task_list(all, list_flags->all);
+        if (list_flags->read_format == ReadFormat::Json) {
+            write_document(std::cout, tasks::to_json(listed));
+            return;
+        }
+        if (listed.total == 0) {
             std::cout << "no tasks yet -- 'apogee task run \"<goal>\"' starts one\n";
             return;
         }
-        const std::size_t shown = list_flags->all ? all.size() : std::min(all.size(), kListLimit);
-        for (std::size_t index = 0; index < shown; ++index) {
-            const tasks::Task& task = all[index];
-            std::cout << task.id << "  " << task.status << "  " << tasks::rounds_used(task) << "/"
-                      << task.rounds_budget << " rounds  " << one_line(task.goal, 60) << "\n";
+        for (const tasks::TaskSummary& row : listed.shown) {
+            std::cout << row.id << "  " << row.status << "  " << row.rounds_used << "/"
+                      << row.rounds_budget << " rounds  " << one_line(row.goal, 60) << "\n";
         }
-        if (shown < all.size()) {
-            std::cout << "... " << all.size() - shown << " more -- --all lists them\n";
+        if (listed.shown.size() < listed.total) {
+            std::cout << "... " << listed.total - listed.shown.size()
+                      << " more -- --all lists them\n";
         }
     });
 

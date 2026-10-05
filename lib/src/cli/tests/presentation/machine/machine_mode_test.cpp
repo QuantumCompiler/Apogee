@@ -2,12 +2,17 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "machine/json_reporter.h"
+#include "tasks/ledger.h"
+#include "tasks/task.h"
+#include "tasks/view.h"
 #include "transport/jsonl_framer.h"
 
 /// Machine mode: the JSONL protocol a GUI drives Apogee over.
@@ -483,4 +488,143 @@ TEST_CASE("a driver attaches a file with an attach line", "[machine][attachments
         apogee::commands::parse_driver_line(R"({"type":"attach","path":"docs/report.pdf"})");
     CHECK(attach.kind == DriverMessage::Kind::Attach);
     CHECK(attach.text == "docs/report.pdf");
+}
+
+namespace {
+
+namespace t = apogee::tasks;
+
+constexpr std::string_view kTaskAnswer = "TASK-ANSWER-PROBE-31e8";
+
+/// A task as its run writes it: every transition kind in the ledger, a
+/// round with a grant used and a question answered by the declared answer.
+[[nodiscard]] t::Task lived_task() {
+    t::Task task;
+    task.id = "task-20261004-120000";
+    task.goal = "Find the answer";
+    task.checks = {{t::CheckKind::Require, "42"}};
+    task.session_id = "20261004-120000-abcd";
+    task.tools = true;
+    task.policy.on_question = t::OnQuestion::Answer;
+    task.policy.answer = std::string{kTaskAnswer};
+    task.policy.grants = {"write_file"};
+    t::record_transition(task, t::kCreatedEvent, "t0", 0, task.goal);
+    t::record_transition(task, t::kStartedEvent, "t1");
+    task.rounds.push_back(t::Round{.index = 0, .kind = std::string{t::kPlanRound}});
+    t::record_transition(task, t::kPlanStartedEvent, "t2", 0, "plan");
+    task.rounds.back().outcome = std::string{t::kCompleted};
+    task.plan = "1. Answer.";
+    task.status = std::string{t::kRunning};
+    t::record_transition(task, t::kPlanRecordedEvent, "t3");
+    task.rounds.push_back(t::Round{.index = 1, .kind = std::string{t::kExecuteRound}});
+    t::record_transition(task, t::kRoundStartedEvent, "t4", 1, "execute");
+    task.rounds.back().allowed = {{.tool = "write_file", .target = "out.txt", .by = "grant"}};
+    task.rounds.back().answered = {
+        {.question = "Which colour?", .answer = std::string{kTaskAnswer}, .by = "declared"}};
+    t::conclude_round(task, "It is 42.\nTASK STATUS: DONE");
+    t::record_transition(task, t::kRoundEndedEvent, "t5", 1, "1 of 1 check passed");
+    task.reason = "every check passed";
+    t::record_transition(task, t::kFinishedEvent, "t6", 0, task.reason);
+    return task;
+}
+
+}  // namespace
+
+TEST_CASE("each ledger transition is one task event carrying it as the ledger wrote it",
+          "[commands][machine][task]") {
+    const t::Task task = lived_task();
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    for (std::size_t index = 0; index < task.transitions.size(); ++index) {
+        reporter.emit_task_transition(task, index, std::nullopt);
+    }
+    const std::vector<nlohmann::json> seen = events(out.str());
+    // `created` precedes any run: it reaches a driver as history.
+    CHECK(types(out.str()) == std::vector<std::string>{"task_started", "task_plan", "task_plan",
+                                                       "task_round", "task_round",
+                                                       "task_finished"});
+    REQUIRE(seen.size() == task.transitions.size() - 1);
+    for (std::size_t index = 0; index < seen.size(); ++index) {
+        CHECK(seen[index]["task_id"] == task.id);
+        CHECK(seen[index]["transition"] == t::transition_to_json(task.transitions[index + 1]));
+    }
+    // Started: not resumed, its history the transitions before it, and the
+    // task's whole view.
+    CHECK(seen[0]["resumed"] == false);
+    CHECK(seen[0]["history"] ==
+          nlohmann::json::array({t::transition_to_json(task.transitions[0])}));
+    CHECK(seen[0]["task"] == t::to_json(t::make_task_view(task, std::nullopt)));
+    // The plan turn, and once recorded the plan.
+    CHECK(seen[1]["round"]["kind"] == "plan");
+    CHECK_FALSE(seen[1].contains("plan"));
+    CHECK(seen[2]["plan"] == "1. Answer.");
+    // A round, and once ended each check's state and the rounds used.
+    CHECK(seen[3]["round"]["round"] == 1);
+    CHECK_FALSE(seen[3].contains("checks"));
+    CHECK(seen[4]["checks"][0]["passed"] == true);
+    CHECK(seen[4]["rounds_used"] == 1);
+    CHECK(seen[4]["round"]["allowed"][0]["by"] == "grant");
+    // Finished: the outcome and the final view.
+    CHECK(seen[5]["status"] == task.status);
+    CHECK(seen[5]["reason"] == "every check passed");
+    CHECK(seen[5]["task"]["status"] == task.status);
+}
+
+TEST_CASE("a resumed task's first event is task_started with resumed and its whole history",
+          "[commands][machine][task]") {
+    t::Task task = lived_task();
+    task.transitions.pop_back();  // as if halted before it finished
+    task.status = std::string{t::kRunning};
+    t::record_transition(task, t::kResumedEvent, "t7");
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    const t::LockHolder ours{.pid = 4153, .task_id = task.id, .running = true};
+    reporter.emit_task_transition(task, task.transitions.size() - 1, ours);
+    const nlohmann::json started = events(out.str()).front();
+    CHECK(started["type"] == "task_started");
+    CHECK(started["resumed"] == true);
+    CHECK(started["history"].size() == task.transitions.size() - 1);
+    CHECK(started["task"]["process"] == 4153);
+    CHECK(started["task"]["rounds_used"] == 1);
+}
+
+TEST_CASE("a grant used is a task_grant event", "[commands][machine][task]") {
+    const t::Task task = lived_task();
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.emit_task_grant(task, 1, task.rounds.back().allowed.front());
+    CHECK(events(out.str()).front() == nlohmann::json::parse(R"({"type": "task_grant",
+        "task_id": "task-20261004-120000", "round": 1, "tool": "write_file",
+        "target": "out.txt", "by": "grant"})"));
+}
+
+TEST_CASE("a declared answer reaches no task event", "[commands][machine][task][leak]") {
+    const t::Task task = lived_task();
+    REQUIRE(t::task_to_json(task).dump().find(kTaskAnswer) != std::string::npos);
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    for (std::size_t index = 0; index < task.transitions.size(); ++index) {
+        reporter.emit_task_transition(task, index, std::nullopt);
+    }
+    for (const t::Permit& permit : task.rounds.back().allowed) {
+        reporter.emit_task_grant(task, 1, permit);
+    }
+    REQUIRE_FALSE(out.str().empty());
+    CHECK(out.str().find(kTaskAnswer) == std::string::npos);
+    // The question was answered, and by the declared answer: said, never what.
+    CHECK(out.str().find("Which colour?") != std::string::npos);
+}
+
+TEST_CASE("a read's format is text or one JSON document, never a stream",
+          "[commands][machine][read]") {
+    using apogee::commands::read_format_from_string;
+    using apogee::commands::ReadFormat;
+    CHECK(read_format_from_string("text") == ReadFormat::Text);
+    CHECK(read_format_from_string("") == ReadFormat::Text);
+    CHECK(read_format_from_string("json") == ReadFormat::Json);
+    CHECK_FALSE(read_format_from_string("stream-json").has_value());
+    CHECK(apogee::commands::read_format_names() == std::vector<std::string_view>{"text", "json"});
+    std::ostringstream out;
+    apogee::commands::write_document(out, nlohmann::json{{"a", 1}, {"b", "two"}});
+    CHECK(out.str() == "{\"a\":1,\"b\":\"two\"}\n");
 }

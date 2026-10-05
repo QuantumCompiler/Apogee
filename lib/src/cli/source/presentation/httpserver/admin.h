@@ -14,6 +14,7 @@
 #include "httpserver/admin_graphs.h"
 #include "httpserver/admin_knowledge.h"
 #include "httpserver/admin_suites.h"
+#include "httpserver/admin_tasks.h"
 #include "httpserver/admin_training.h"
 #include "httpserver/http_types.h"
 #include "httpserver/jobs.h"
@@ -137,6 +138,12 @@ public:
     [[nodiscard]] HttpResponse get_training_run(const HttpRequest& request, std::string_view id);
     [[nodiscard]] HttpResponse list_training_versions(const HttpRequest& request);
     [[nodiscard]] HttpResponse training_cycle(const HttpRequest& request);
+
+    /// The tasks slice (27j) -- reads only; `task run|resume|halt|cancel` are
+    /// parity carve-outs with no route. Off the ledgers alone: nothing of the
+    /// handler's is read.
+    [[nodiscard]] static HttpResponse list_tasks(const HttpRequest& request);
+    [[nodiscard]] static HttpResponse get_task(const HttpRequest& request, std::string_view id);
 
     [[nodiscard]] HttpResponse list_permissions(const HttpRequest& request);
     [[nodiscard]] HttpResponse put_permission(const HttpRequest& request, std::string_view tool);

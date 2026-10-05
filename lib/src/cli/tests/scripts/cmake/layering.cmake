@@ -413,10 +413,11 @@ endif()
 # `markdown/`, `platform/`, `contracts/` and `agentloop/` (the Reporter seam
 # and `ask_user` its adapters implement), never `cli/`, `machine/` or CLI11.
 # `machine/` is the machine-mode adapter and never paints: itself,
-# `agentloop/`, `agent/` and `contracts/` -- never `views/`, `ansi/` or
-# `markdown/`. `cli/`, the composition root, assembles both.
+# `agentloop/`, `agent/`, `contracts/` and, since 27j, `tasks/` -- the task
+# events render a task's ledger through its one view -- never `views/`,
+# `ansi/` or `markdown/`. `cli/`, the composition root, assembles both.
 foreach(rule "views:views|ansi|markdown|platform|contracts|agentloop"
-             "machine:machine|agentloop|agent|contracts")
+             "machine:machine|agentloop|agent|contracts|tasks")
     string(REPLACE ":" ";" parts "${rule}")
     list(GET parts 0 package)
     list(GET parts 1 allowed)
@@ -443,7 +444,7 @@ if(NOT VIOLATIONS STREQUAL "")
     message(FATAL_ERROR "a presentation module reaches past its rule:\n${pretty}\n"
                         "views/ paints and never parses argv: views/, ansi/, markdown/, "
                         "platform/, contracts/, agentloop/ only. machine/ never paints: "
-                        "machine/, agentloop/, agent/, contracts/ only.")
+                        "machine/, agentloop/, agent/, contracts/, tasks/ only.")
 endif()
 
 # `serve` never recalls (26l): one client's history must never reach another's

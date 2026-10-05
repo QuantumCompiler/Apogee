@@ -25,7 +25,16 @@
 #     done, the question and the answer recorded -- and without it, the task
 #     failing naming the question; a grant wider than the config or the
 #     agent refused at `task run` naming the rule, with no task made; and the
-#     repeatable flags taken whole.
+#     repeatable flags taken whole;
+#   * the surfaces (27j): a task run under `--output-format stream-json`
+#     emitting its lifecycle around the turns' own events -- every stdout line
+#     JSON, the `task_started` history and one event per transition after it
+#     equal to the ledger's transition sequence, one for one, the grant's use
+#     a `task_grant`, and the task's state rebuilt by a driver from the stream
+#     alone equal to `task status --output-format json`, which `task_finished`
+#     carries; `task list --output-format json` naming the same tasks as the
+#     human list; and a halted task resumed in machine mode opening with
+#     `task_started`, `resumed: true` and its whole history.
 #
 # Recall is off in the config so no summary spends a scripted turn. POSIX
 # only, like the other .sh checks here (CLAUDE.md -> Platforms).
@@ -48,13 +57,13 @@ script() {  # script <backend> <json turns>
     printf '{"turns": [%s]}\n' "$2" > "$WORK_DIR/scripts/$1.json"
 }
 
-for name in cycle denied granted asked stalled killed cancelled halted; do
+for name in cycle denied granted asked machine stalled killed cancelled halted; do
     script "$name" '{"text": "placeholder"}'
 done
 mkdir -p "$APOGEE_HOME/config"
 {
     echo "backends:"
-    for name in cycle denied granted asked stalled killed cancelled halted; do
+    for name in cycle denied granted asked machine stalled killed cancelled halted; do
         echo "  $name:"
         echo "    type: mock"
         echo "    model_path: $WORK_DIR/scripts/$name.json"
@@ -81,6 +90,53 @@ wait_for() {  # wait_for <task-or-glob> <grep pattern>: up to 20 s
     return 1
 }
 session_of() { echo "$APOGEE_HOME/sessions/$(field "$1" "t['session_id']").json"; }
+# What a driver checks of a machine-mode task stream (27j): every line JSON,
+# `session` first, the history `task_started` carries then one event per
+# transition equal to the ledger's sequence from <first> on, and the state a
+# driver rebuilds from the events alone equal to the status document.
+#   stream_check <stream.jsonl> <ledger> <status.json> <resumed: 0|1>
+stream_check() {
+    python3 - "$@" <<'EOF'
+import json, sys
+lines = open(sys.argv[1]).read().splitlines()
+events = [json.loads(line) for line in lines]   # every line on stdout is JSON
+ledger = json.load(open(sys.argv[2]))
+status = json.load(open(sys.argv[3]))
+resumed = sys.argv[4] == "1"
+assert events and events[0]["type"] == "session", events[:1]
+lifecycle = [e for e in events if e["type"].startswith("task_") and e["type"] != "task_grant"]
+assert lifecycle[0]["type"] == "task_started", lifecycle[0]
+assert lifecycle[0]["resumed"] is resumed, lifecycle[0]
+assert all(e["task_id"] == ledger["id"] for e in lifecycle)
+seen = lifecycle[0]["history"] + [e["transition"] for e in lifecycle]
+assert seen == ledger["transitions"], (seen, ledger["transitions"])
+assert lifecycle[-1]["type"] == "task_finished" and lifecycle[-1]["task"] == status
+# A driver's reconstruction, from task_started's view and the events alone.
+state = None
+for e in events:
+    if e["type"] == "task_started":
+        state = e["task"]
+    if state is None or e not in lifecycle:
+        continue
+    t = e["transition"]
+    state["status"], state["updated_at"] = t["status"], t["at"]
+    turn = e.get("round")
+    if isinstance(turn, dict):
+        state["turns"] = [x for x in state["turns"] if x["round"] != turn["round"]] + [turn]
+        state["turns"].sort(key=lambda x: x["round"])
+        if t["event"] == "round_ended" and turn["outcome"] == "completed":
+            state["self_report"] = turn["self_report"]
+    if "plan" in e:
+        state["plan"] = e["plan"]
+    if "checks" in e:
+        state["checks"], state["rounds_used"] = e["checks"], e["rounds_used"]
+    if e["type"] == "task_finished":
+        state["reason"] = e["reason"]
+    if state["status"] not in ("planning", "running"):
+        state["process"], state["interrupted"] = None, False
+assert state == status, (state, status)
+EOF
+}
 started_after() {  # started_after <previous newest>: the task a background run made
     local i id
     for i in $(seq 1 200); do
@@ -226,6 +282,50 @@ grep -q "the agent 'security-review' runs with tools: read-only, which leaves ou
     "$WORK_DIR/wide.out" || fail "the agent's refusal: $(cat "$WORK_DIR/wide.out")"
 [ "$(newest)" = "$BEFORE" ] || fail "a refused grant made a task"
 
+# --- 27j: machine mode -- the task's lifecycle on stdout, one event per transition ---
+script machine '{"text": "1. Write the report.\n2. Say 42."},
+                {"text": "", "tool_calls": [{"name": "write_file", "arguments": {"path": "machine.txt", "content": "the report"}}]},
+                {"text": "Not yet.\nTASK STATUS: NOT DONE"},
+                {"text": "It is 42.\nTASK STATUS: DONE"}'
+"$APOGEE_BIN" task run "Write and say" -m machine --tools --allow write_file --require 42 \
+    --output-format stream-json </dev/null >"$WORK_DIR/machine.jsonl" 2>"$WORK_DIR/machine.err" \
+    || fail "the machine-mode task did not finish done: $(cat "$WORK_DIR/machine.err")"
+MACHINE=$(newest)
+grep -q "task $MACHINE done" "$WORK_DIR/machine.err" || fail "the outcome did not go to stderr"
+grep -q '\[task\]' "$WORK_DIR/machine.jsonl" && fail "a person's line reached machine mode's stdout"
+"$APOGEE_BIN" task status "$MACHINE" --output-format json </dev/null >"$WORK_DIR/machine-status.json" \
+    2>"$WORK_DIR/machine-status.err" || fail "task status --output-format json: $(cat "$WORK_DIR/machine-status.err")"
+[ -s "$WORK_DIR/machine-status.err" ] && fail "task status --output-format json wrote to stderr"
+stream_check "$WORK_DIR/machine.jsonl" "$(ledger "$MACHINE")" "$WORK_DIR/machine-status.json" 0 \
+    || fail "the machine-mode stream does not match the ledger"
+python3 - "$WORK_DIR/machine.jsonl" "$MACHINE" <<'EOF' || fail "the stream's turns or grant"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1])]
+kinds = [e["type"] for e in events]
+# Three turns -- the plan and two rounds -- each ended in its result.
+assert kinds.count("result") == 3, kinds
+assert "answer_delta" in kinds, kinds
+grants = [e for e in events if e["type"] == "task_grant"]
+assert grants == [{"type": "task_grant", "task_id": sys.argv[2], "round": 1,
+                   "tool": "write_file", "target": "machine.txt", "by": "grant"}], grants
+# The grant's event before the round it was used in ended.
+ended = next(i for i, e in enumerate(events) if e["type"] == "task_round"
+             and e["transition"]["event"] == "round_ended")
+assert kinds.index("task_grant") < ended
+EOF
+# The listing as a document: the human list's rows, newest first.
+"$APOGEE_BIN" task list --output-format json </dev/null >"$WORK_DIR/list.json" 2>/dev/null \
+    || fail "task list --output-format json"
+"$APOGEE_BIN" task list </dev/null >"$WORK_DIR/list.txt" 2>/dev/null || fail "task list"
+python3 - "$WORK_DIR/list.json" "$WORK_DIR/list.txt" <<'EOF' || fail "task list's document and rows differ"
+import json, sys
+document = json.load(open(sys.argv[1]))
+rows = [line.split("  ")[:3] for line in open(sys.argv[2]).read().splitlines()]
+assert document["object"] == "list" and document["total"] == len(document["data"])
+assert [[d["id"], d["status"], "%d/%d rounds" % (d["rounds_used"], d["rounds_budget"])]
+        for d in document["data"]] == rows, (document, rows)
+EOF
+
 # --- the breaker ----------------------------------------------------------------
 script stalled '{"text": "1. Try."}, {"text": "No luck."}, {"text": "Still no luck."}'
 "$APOGEE_BIN" task run "Find the word" -m stalled --require "eureka" --require "found" --rounds 5 \
@@ -318,9 +418,17 @@ HALTED_CHAT=$(field "$HALTED" "t['session_id']")
     && fail "a live task's conversation was deleted"
 grep -q "is the conversation of task $HALTED, which is halted" "$WORK_DIR/delete.txt" \
     || fail "chats delete did not name the task: $(cat "$WORK_DIR/delete.txt")"
+# Resumed in machine mode (27j): the stream opens with task_started, resumed,
+# carrying everything the ledger held before -- a reconnecting front-end
+# needs no other source.
 script halted '{"text": "It is 42.\nTASK STATUS: DONE"}'
-"$APOGEE_BIN" task resume "$HALTED" </dev/null >"$WORK_DIR/unhalted.txt" 2>&1 \
+"$APOGEE_BIN" task resume "$HALTED" --output-format stream-json </dev/null \
+    >"$WORK_DIR/unhalted.jsonl" 2>"$WORK_DIR/unhalted.txt" \
     || fail "the halted task did not resume to done: $(cat "$WORK_DIR/unhalted.txt")"
+"$APOGEE_BIN" task status "$HALTED" --output-format json </dev/null >"$WORK_DIR/unhalted-status.json" \
+    2>/dev/null || fail "task status --output-format json of the resumed task"
+stream_check "$WORK_DIR/unhalted.jsonl" "$(ledger "$HALTED")" "$WORK_DIR/unhalted-status.json" 1 \
+    || fail "the resumed task's stream does not open with its whole history"
 
 # --- completion offers the tasks -----------------------------------------------------
 OFFERED=$("$APOGEE_BIN" __complete task status "" </dev/null 2>/dev/null)

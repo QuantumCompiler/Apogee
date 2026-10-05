@@ -27,9 +27,10 @@
 /// actions is correct only on the day each row is written. This test
 /// walks the CLI's whole subcommand tree and requires EVERY subcommand to be
 /// classified below -- as a twin (with its admin route), a backfill (with the
-/// area that owns it), a carve-out (with the reason), or read-only. Adding a
-/// subcommand without placing it here fails the build, which is the only way a
-/// parity table stays true.
+/// area that owns it), a carve-out (with the reason), a read served (with the
+/// admin route that serves it), or read-only. Adding a subcommand without
+/// placing it here fails the build, which is the only way a parity table stays
+/// true.
 namespace {
 
 using apogee::httpserver::HttpRequest;
@@ -37,11 +38,12 @@ using apogee::httpserver::HttpResponse;
 using apogee::httpserver::Mux;
 using apogee::httpserver::RouteSpec;
 
-enum class Kind { Twin, Backfill, CarveOut, ReadOnly };
+enum class Kind { Twin, Backfill, CarveOut, Served, ReadOnly };
 
 struct Classification {
     Kind kind;
-    /// Twin: the admin route. Backfill: the owning area. Carve-out: the reason.
+    /// Twin and served: the admin route. Backfill: the owning area. Carve-out:
+    /// the reason.
     std::string method;
     std::string path;
     std::string note;
@@ -57,6 +59,12 @@ Classification backfill(std::string area) {
 
 Classification carve_out(std::string reason) {
     return Classification{Kind::CarveOut, {}, {}, std::move(reason)};
+}
+
+/// A read the admin plane serves (27j): the route a remote client reads the
+/// same facts from -- a GET, checked as a twin's route is.
+Classification served(std::string path) {
+    return Classification{Kind::Served, "GET", std::move(path), {}};
 }
 
 Classification read_only() {
@@ -158,13 +166,16 @@ const std::map<std::string, Classification>& table() {
          carve_out("an MCP server on this process's own stdio, spawned by another client")},
         {"task run",
          carve_out("an unattended run of the host's own session and tools, under its lock; task "
-                   "control is CLI-only -- 27j serves the reads, never control")},
+                   "control is CLI-only -- the reads are served under /v1/admin/tasks*")},
         {"task resume",
          carve_out("continues a task on the host, in the folder it was started in; task control "
                    "is CLI-only")},
         {"task halt", carve_out("steers the task running on the host; task control is CLI-only")},
         {"task cancel",
          carve_out("ends the turn of the task running on the host; task control is CLI-only")},
+        // --- reads served: the same view, over the admin plane ------------------
+        {"task status", served("/v1/admin/tasks/{id}")},
+        {"task list", served("/v1/admin/tasks")},
         // --- read-only / interactive ------------------------------------------
         {"chat", read_only()},
         {"complete", read_only()},
@@ -198,8 +209,6 @@ const std::map<std::string, Classification>& table() {
         {"train status", read_only()},
         {"train pipeline status", read_only()},
         {"train cycle status", read_only()},
-        {"task status", read_only()},
-        {"task list", read_only()},
     };
     return rows;
 }
@@ -263,10 +272,11 @@ TEST_CASE("every CLI subcommand is classified, and every twin's route is registe
     const std::vector<RouteSpec> routes = Mux::routes();
 
     for (const auto& [name, classification] : table()) {
-        if (classification.kind != Kind::Twin) {
+        if (classification.kind != Kind::Twin && classification.kind != Kind::Served) {
             continue;
         }
-        INFO("twin of " << name << ": " << classification.method << " " << classification.path);
+        INFO((classification.kind == Kind::Twin ? "twin of " : "read served for ")
+             << name << ": " << classification.method << " " << classification.path);
         bool registered = false;
         for (const RouteSpec& route : routes) {
             if (route.method == classification.method && route.pattern == classification.path) {
@@ -325,6 +335,54 @@ TEST_CASE(
             CHECK(route.method == "GET");
         }
     }
+}
+
+TEST_CASE(
+    "no task control action has a route: a mutating request to any task path is not 200, and "
+    "every task route is a GET",
+    "[httpserver][parity][tasks]") {
+    const apogee::harness::Config config;
+    apogee::harness::Harness harness{config};
+    apogee::httpserver::Handler handler{harness, {}, nullptr};
+    apogee::events::Bus bus;
+    apogee::httpserver::JobRegistry jobs{bus};
+    apogee::httpserver::AdminHandler admin{{}, jobs, bus};
+    const Mux mux{handler, admin, "secret"};
+    // Every task verb the table carves out, at every path a client might try.
+    std::vector<std::string> verbs;
+    for (const auto& [name, classification] : table()) {
+        if (name.starts_with("task ") && classification.kind == Kind::CarveOut) {
+            verbs.push_back(name.substr(5));
+        }
+    }
+    CHECK(verbs == std::vector<std::string>{"cancel", "halt", "resume", "run"});
+    for (const char* method : {"POST", "PUT", "PATCH", "DELETE"}) {
+        std::vector<std::string> paths{"/v1/admin/tasks", "/v1/admin/tasks/task-1"};
+        for (const std::string& verb : verbs) {
+            paths.push_back("/v1/admin/tasks/" + verb);
+            paths.push_back("/v1/admin/tasks/task-1/" + verb);
+        }
+        for (const std::string& path : paths) {
+            HttpRequest request;
+            request.method = method;
+            request.path = path;
+            request.headers["authorization"] = "Bearer secret";
+            INFO(method << " " << path);
+            const int status = mux.dispatch(request).status;
+            CHECK(status != 200);
+            CHECK(status != 202);
+        }
+    }
+    std::size_t task_routes = 0;
+    for (const RouteSpec& route : Mux::routes()) {
+        if (route.pattern.starts_with("/v1/admin/tasks")) {
+            INFO(route.method << " " << route.pattern);
+            CHECK(route.method == "GET");
+            CHECK(route.admin);
+            ++task_routes;
+        }
+    }
+    CHECK(task_routes == 2);
 }
 
 TEST_CASE("the admin prefix is gated before routing, and mounted only when given",

@@ -32,6 +32,11 @@ public:
     /// stdout then stderr into `out`.
     int run(const std::vector<std::string>& args, std::string* out) const;
 
+    /// The same, with stdout in `out` and stderr in `err` apart -- for a
+    /// command whose stdout must carry one thing only (a JSON document,
+    /// machine mode's events).
+    int run(const std::vector<std::string>& args, std::string* out, std::string* err) const;
+
 private:
     TempDir root_{"cli-home-" + std::to_string(std::random_device{}())};
     EnvGuard guard_{"APOGEE_HOME", root_.path().string()};

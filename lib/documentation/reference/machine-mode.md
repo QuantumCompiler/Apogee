@@ -19,11 +19,17 @@ apogee complete --output-format stream-json "what is 2+2?"
 apogee chat --output-format stream-json --input-format stream-json
 ```
 
+```bash
+apogee task run "Write the report" --require-file report.txt --output-format stream-json
+```
+
 `--output-format` selects the event stream on stdout. `--input-format` selects
 JSONL user turns on stdin, which is what makes one `chat` child serve a whole
 conversation. It defaults to whatever `--output-format` is, so a driver may pass
 one flag; on `chat` the two directions **must agree**, and disagreeing is an
-error rather than a silently ignored flag.
+error rather than a silently ignored flag. `task run` and `task resume` take
+`--output-format` alone: a task reads nothing from its driver (see
+[A task's run](#a-tasks-run)).
 
 ## Reading the stream
 
@@ -77,6 +83,70 @@ puts prose in the middle of your parser's input.
 Currently `1`. It is bumped **only when an existing event's meaning changes** —
 a field changing sense under a name a driver already reads. Additions are
 compatible by construction under rule 1.
+
+## A task's run
+
+`apogee task run "<goal>" … --output-format stream-json` (and `task resume …
+--output-format stream-json`) drives a task as it always does — a plan turn,
+then rounds, each an ordinary chat turn checked against the acceptance the task
+was given — and streams it: each turn's ordinary events, from `answer_start` to
+its `result`, with the task's own lifecycle around them. A front-end that wants a
+progress panel for a long-running goal spawns the task this way; its events
+arrive on the stdout of the `task run` it invoked, never from anywhere else.
+
+```jsonl
+{"type":"session","protocol_version":1,"model":"local"}
+{"type":"task_started","task_id":"task-20261004-120000","resumed":false,"transition":{"at":"2026-10-04T12:00:00Z","event":"started","status":"planning"},"history":[{"at":"2026-10-04T12:00:00Z","detail":"Write the report","event":"created","status":"planning"}],"task":{…}}
+{"type":"task_plan","task_id":"task-20261004-120000","transition":{"at":"…","detail":"plan","event":"plan_started","status":"planning"},"round":{"round":0,"kind":"plan","outcome":"in_flight",…}}
+{"type":"answer_start"}
+…
+{"type":"result","text":"1. Write it.\n2. Check it.","model":"local","finish_reason":"stop"}
+{"type":"task_plan","task_id":"…","transition":{"event":"plan_recorded","status":"running",…},"round":{…},"plan":"1. Write it.\n2. Check it."}
+{"type":"task_round","task_id":"…","transition":{"event":"round_started","round":1,"status":"running","detail":"execute",…},"round":{"round":1,"kind":"execute","outcome":"in_flight",…}}
+…
+{"type":"task_grant","task_id":"…","round":1,"tool":"write_file","target":"report.txt","by":"grant"}
+{"type":"task_round","task_id":"…","transition":{"event":"round_ended","round":1,"status":"done",…},"round":{…},"checks":[{"kind":"require_file","value":"/work/report.txt","description":"the file /work/report.txt exists and is not empty","ran":true,"passed":true,"detail":"10 bytes"}],"rounds_used":1}
+{"type":"task_finished","task_id":"…","transition":{"event":"finished","status":"done",…},"status":"done","reason":"every check passed and the model reported the task done, in 1 of 8 rounds","task":{…}}
+```
+
+| Event | Meaning |
+|---|---|
+| `task_started` | The run began: `started`, or `resumed` (`"resumed": true`) for `task resume`. Carries `history` — every transition the ledger held before this one — and `task`, the task's whole view as it stands, so a front-end joining at a resume needs no other source. |
+| `task_plan` | The plan turn began (`plan_started`) or its plan was recorded (`plan_recorded`, with `plan`); `round` is the plan turn. |
+| `task_round` | A round began (`round_started`) or ended (`round_ended`); `round` is that round — its outcome, the checks it passed, the model's self-report, what it let through, refused and answered, its tokens. Once it has ended, `checks` is each acceptance check's state and `rounds_used` the budget spent. |
+| `task_grant` | A tool call the task's own grant (`task run --allow`) let through: `round`, `tool`, `target`, `by: "grant"`. Sent after the round's turn, before its `round_ended`. |
+| `task_finished` | The run stopped: `status` (`done`, `exhausted`, `stalled`, `failed`, `halted`, `cancelled`), `reason` naming what did not pass, and `task`, the final view. |
+
+**One event per ledger transition, carrying it.** Every event but `task_grant`
+has `transition` — the transition exactly as the task's ledger wrote it (`at`,
+`event`, `status`, and `round` and `detail` when they say something) — and is
+sent only once the ledger holds it. So `task_started`'s `history`, followed by
+each later event's `transition`, *is* the ledger's transition sequence, one for
+one; `created`, written before the run began, arrives in that history. A
+`task_*` event carries `task_id`.
+
+**The view is the read's.** `task` (on `task_started` and `task_finished`) is
+the same document `apogee task status <id> --output-format json` prints and
+`GET /v1/admin/tasks/{id}` serves: `id`, `status`, `process` (the process running
+it, or `null`) and `interrupted`, `goal`, `conversation` (the chat's id),
+`folder`, `tools`, `policy` (`agent`, `grants`, `on_question`; `null` without
+tools), `rounds_used`, `rounds_budget`, `created_at`, `updated_at`, `reason`,
+`checks`, `self_report`, `plan` and `turns`. A driver that applies each event to
+the view `task_started` gave it — the transition's `status` and `at`, the turn
+each event carries, the `plan`, the `checks` — holds, at `task_finished`, exactly
+the final view. **A declared answer (`--on-question answer:…`) is in no event:**
+`policy.on_question` says `answer` and an answered question says `by:
+"declared"`, never what the answer said; `task status` at the terminal shows it.
+
+**Nothing is asked.** A task in machine mode reads no input — not even when a
+terminal is attached — so `ask` with no grant denies (the denial is the tool's
+result, recorded with `by: "nobody"`), and a question with no declared answer
+ends the task. A turn that does not finish ends in an `error` event instead of
+its `result` — the provider's message, `cancelled`, or the question nobody was
+present to answer — and `task_finished` follows. Every `[task]` line a person
+would read goes to stderr, with the outcome; the exit code is the task's (`0`
+done, `130` cancelled, `2` a provider's failure, `1` anything else short of
+done).
 
 ## Writing to the child
 
@@ -189,10 +259,27 @@ localhost control plane for local front-ends. Because the GUI performs its own
 mutations, it already knows when it changed something and can re-read; there is
 no push channel in v1.
 
+A read a host renders takes `--output-format json` and prints **one JSON
+document** of the same facts as the human view — never a stream, and stdout
+carries nothing else (diagnostics to stderr, exit codes as ever). Today that is
+the tasks:
+
+```bash
+apogee task status task-20261004-120000 --output-format json
+apogee task list --output-format json        # {"object":"list","data":[…],"total":N}; --all for every one
+```
+
+`task status`'s document is the view above, byte for byte the body of `GET
+/v1/admin/tasks/{id}`; `task list`'s is `GET /v1/admin/tasks`'s — `data` the
+newest 50 (`id`, `status`, `rounds_used`, `rounds_budget`, `goal`), `total` every
+task. A read given `stream-json`, or any word but `text` and `json`, is refused.
+
 ## What machine mode does not do
 
 - **It opens no sockets.** Not one, ever — asserted in CI with `lsof`. Only
   `apogee serve` owns a port.
-- **It does not push.** Events arrive in response to turns, never unprompted.
+- **It does not push.** Events arrive in response to turns, never unprompted —
+  and a task's events only on the stdout of the `task run` or `task resume`
+  that runs it: a `chat` child never narrates a task it did not start.
 - **It does not represent slash commands.** `/model`, `/compact` and the rest are
   terminal-REPL affordances; a driver uses the CLI commands and its own UI.

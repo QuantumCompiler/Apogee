@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -77,6 +78,15 @@ struct RunRequest {
     harness::CancellationToken interrupt;
     /// How often a halt or cancel left by another process is looked for.
     std::chrono::milliseconds poll{200};
+    /// Each transition once the ledger on disk holds it, in the ledger's
+    /// order -- the task as written, and where in `task.transitions` that
+    /// transition is (27j). Machine mode renders each as one task event, so
+    /// a driver's sequence is the ledger's, one for one; one the ledger
+    /// failed to take is never said.
+    std::function<void(const Task& task, std::size_t index)> on_transition;
+    /// Each call this task's grant let through, in round `round`, as the run
+    /// says it (27j).
+    std::function<void(const Task& task, int round, const Permit& permit)> on_grant;
 };
 
 struct RunOutcome {

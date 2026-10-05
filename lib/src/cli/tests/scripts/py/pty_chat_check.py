@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Chat behaviours that only reproduce against a real terminal, or a real kill.
 
-Ten checks:
+Eleven checks:
 
   typeahead   Text typed BEFORE the first prompt is discarded once; text typed
               after it is honoured.  Only reproducible on a PTY -- `tcflush`
@@ -44,6 +44,12 @@ Ten checks:
               terminal -- policy adds to the human path, never replaces it --
               and a question with no declared answer is put to the person
               there; each answer is recorded in the ledger as the person's.
+
+  task-machine
+              The same task in machine mode (27j), on the same terminal: a
+              machine-mode run reads no input, so nothing is asked -- the
+              ungranted tool is denied by nobody, the question ends the task
+              -- and the run ends by itself, its lifecycle on the stream.
 
 POSIX only -- `pty` and SIGKILL have no portable Windows equivalent.  Recorded
 as a per-item skip in CLAUDE.md -> Platforms.
@@ -438,6 +444,53 @@ def check_task_attended(binary, home, env):
     return failures
 
 
+def check_task_machine(binary, home, env):
+    """A task in machine mode at a terminal: nobody is asked anything (27j)."""
+    work = os.path.join(home, "work")
+    os.makedirs(work)
+    scripted(binary, env, home, [
+        {"text": "1. Write, run, ask."},
+        {"tool_calls": [{"name": "write_file",
+                         "arguments": {"path": "out.txt", "content": "hello"}}]},
+        {"tool_calls": [{"name": "run_command", "arguments": {"command": "echo hi"}}]},
+        {"tool_calls": [{"name": "ask_user", "arguments": {"questions": [
+            {"header": "Colour", "question": "Which colour?",
+             "options": [{"label": "Red"}, {"label": "Green"}]}]}}]},
+        {"text": "Done.\nTASK STATUS: DONE"},
+    ])
+    term = Pty(binary, env, ("Do the work", "--tools", "--allow", "write_file", "--rounds", "1",
+                             "--output-format", "stream-json"),
+               cwd=work, command=("task", "run"))
+    # Nothing is typed: a prompt would wait here until the close kills it.
+    term.wait_for(b'"type":"task_finished"', 15.0)
+    term.drain(1.0)
+    term.close()
+    text = term.text()
+    failures = []
+    if term.process.returncode != 1:
+        failures.append(f"the task did not end failed on its own ({term.process.returncode}): "
+                        f"{text!r}")
+    if b"Allow? [y]es" in text or b"Choose a number" in text:
+        failures.append(f"machine mode asked at the terminal: {text!r}")
+    if b'"type":"task_started"' not in text:
+        failures.append(f"no task events on the stream: {text!r}")
+    tasks = os.path.join(home, "tasks")
+    ledgers = [os.path.join(tasks, name, "task.json") for name in os.listdir(tasks)
+               if os.path.isfile(os.path.join(tasks, name, "task.json"))] \
+        if os.path.isdir(tasks) else []
+    if len(ledgers) != 1:
+        return failures + [f"expected one task ledger, found {ledgers}"]
+    with open(ledgers[0], encoding="utf-8") as handle:
+        task = json.load(handle)
+    round_ = task["rounds"][-1]
+    if round_.get("denied") != [{"by": "nobody", "target": "echo hi", "tool": "run_command"}]:
+        failures.append(f"run_command was not denied by nobody: {round_.get('denied')}")
+    if task.get("status") != "failed" or "Which colour?" not in task.get("reason", ""):
+        failures.append(f"the question did not end the task: {task.get('status')} "
+                        f"{task.get('reason')}")
+    return failures
+
+
 def check_base_model(binary, home, env):
     """A base model's chat: `base model` in the banner and the spinner, and
     `tools off` said once (26r)."""
@@ -589,6 +642,7 @@ def main():
                         ("side-calls", check_side_calls),
                         ("presets", check_presets),
                         ("task-attended", check_task_attended),
+                        ("task-machine", check_task_machine),
                         ("base-model", check_base_model),
                         ("interrupt", check_interrupt)):
         home = tempfile.mkdtemp(prefix=f"apogee-chat-{name}-")
@@ -608,7 +662,7 @@ def main():
 
     print("typeahead discarded once; completed turns survive a kill -9; "
           "the banner and each question stand apart; answers render, raw with --raw; "
-          "typing mid-reply waits for the prompt; side calls are narrated in the block; a preset is the session answer given early; an attended task asks for what it was not granted; a base model is said and its tools are off; "
+          "typing mid-reply waits for the prompt; side calls are narrated in the block; a preset is the session answer given early; an attended task asks for what it was not granted, and one in machine mode asks nothing; a base model is said and its tools are off; "
           "Ctrl-C restores echo - OK")
     return 0
 

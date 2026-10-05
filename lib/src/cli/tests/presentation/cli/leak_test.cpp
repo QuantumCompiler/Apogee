@@ -18,6 +18,7 @@
 #include "harness/harness.h"
 #include "httpserver/admin_auth_routes.h"
 #include "httpserver/admin_config.h"
+#include "httpserver/admin_tasks.h"
 #include "logger/operational.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
@@ -196,8 +197,11 @@ TEST_CASE("a stored key reaches no listing, report, response, event or log", "[s
 /// It belongs in the ledger, in `task status` (which shows what the task was
 /// handed), and in the conversation, as the tool result the model read; and
 /// nowhere else: not the run's own lines, not `task list` or `chats list`,
-/// not the operational log, not the event bus. No route serves a ledger yet;
-/// 27j's served view says an answer existed, never what it said.
+/// not the operational log, not the event bus -- and, since 27j, none of the
+/// surfaces a host or a remote client reads: `task status` and `task list`
+/// as JSON, the admin plane's task routes, and machine mode's stream of a
+/// task's run, each of which says an answer existed and never what it said.
+/// Nor does any of those name the ledger's path.
 TEST_CASE("a task's declared answer is found only where it belongs", "[tasks][leak][policy]") {
     apogee::testing::CliHome home{""};
     const std::filesystem::path script = home.home() / "script.json";
@@ -264,4 +268,37 @@ TEST_CASE("a task's declared answer is found only where it belongs", "[tasks][le
     clean("chats list", listed);
     clean("event bus", drain(subscription));
     clean("operational log", logs_under(home.home() / "logs"));
+
+    // The surfaces a host or a remote client reads (27j): the same task, and
+    // a second run of it in machine mode. None carries the answer, nor the
+    // private layout's path to the ledger.
+    const std::string ledgers = (home.home() / "tasks").string();
+    const auto served = [&clean, &ledgers](const std::string& surface, const std::string& text) {
+        clean(surface, text);
+        INFO(surface << ":\n" << text);
+        CHECK(text.find(ledgers) == std::string::npos);
+        CHECK(text.find("task.json") == std::string::npos);
+    };
+    std::string err;
+    REQUIRE(home.run({"task", "status", task.id, "--output-format", "json"}, &listed, &err) == 0);
+    CHECK(listed.find("\"on_question\":\"answer\"") != std::string::npos);  // it existed
+    served("task status --output-format json", listed);
+    REQUIRE(home.run({"task", "list", "--output-format", "json"}, &listed, &err) == 0);
+    served("task list --output-format json", listed);
+    {
+        const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.home().string()};
+        apogee::httpserver::HttpRequest request;
+        request.method = "GET";
+        request.path = "/v1/admin/tasks";
+        served("GET /v1/admin/tasks", apogee::httpserver::admin_list_tasks(request).body);
+        served("GET /v1/admin/tasks/{id}", apogee::httpserver::admin_get_task(task.id).body);
+    }
+    std::string stream;
+    REQUIRE(home.run({"task", "run", "Pick a colour", "--tools", "--on-question",
+                      "answer:" + std::string{kAnswerProbe}, "--output-format", "stream-json"},
+                     &stream, &err) == 0);
+    CHECK(stream.find("\"task_finished\"") != std::string::npos);
+    served("task run --output-format stream-json (stdout)", stream);
+    clean("task run --output-format stream-json (stderr)", err);
+    clean("event bus, after the surfaces", drain(subscription));
 }

@@ -131,7 +131,8 @@ public:
     explicit Runner(const RunRequest& request)
         : request_{request},
           task_{request.task},
-          turn_token_{harness::CancellationToken::create()} {}
+          turn_token_{harness::CancellationToken::create()},
+          announced_{request.task.transitions.size()} {}
 
     RunOutcome run() {
         if (const std::string refused = resume_refusal(task_); !refused.empty()) {
@@ -191,6 +192,13 @@ private:
         if (const std::string failure = save_task(request_.root, task_); !failure.empty()) {
             error_ = "the task's ledger could not be written: " + failure;
             return false;
+        }
+        // What the ledger now holds that nobody was told of: each transition
+        // once, in order, and only once it is on disk (27j).
+        for (; announced_ < task_.transitions.size(); ++announced_) {
+            if (request_.on_transition) {
+                request_.on_transition(task_, announced_);
+            }
         }
         return true;
     }
@@ -267,6 +275,9 @@ private:
                 say("[task] " + permit.tool +
                     (permit.target.empty() ? std::string{} : " on " + permit.target) +
                     " -- allowed by this task's grant");
+                if (request_.on_grant) {
+                    request_.on_grant(task_, round_index, permit);
+                }
             }
         }
         for (const Denial& denial : result.denied) {
@@ -405,6 +416,9 @@ private:
     const RequestWatcher* watcher_ = nullptr;
     int session_turns_ = 0;
     std::string error_;
+    /// The transitions `on_transition` has been told of -- those the task
+    /// came in with are its history, not this run's.
+    std::size_t announced_ = 0;
 };
 
 }  // namespace
