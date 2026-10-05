@@ -1,6 +1,7 @@
 #include "harness/harness.h"
 
 #include <algorithm>
+#include <exception>
 #include <utility>
 
 #include "contracts/errors.h"
@@ -146,7 +147,28 @@ Harness::Harness(Harness&&) noexcept = default;
 Harness& Harness::operator=(Harness&&) noexcept = default;
 
 void Harness::register_provider(std::string name, std::shared_ptr<LLMProvider> provider) {
+    if (provider != nullptr) {
+        // A rebuilt backend keeps the session's hold and its listener (27e).
+        attach_residency(name, *provider);
+    }
     providers_[std::move(name)] = std::move(provider);
+}
+
+void Harness::attach_residency(const std::string& name, LLMProvider& provider) const {
+    if (auto* holding = dynamic_cast<ResidencyHolding*>(&provider); holding != nullptr) {
+        holding->hold_resident(held_.contains(name));
+    }
+    if (auto* reporting = dynamic_cast<StatusReporting*>(&provider); reporting != nullptr) {
+        if (load_listener_) {
+            // The name shared, not copied: a listener is copied wherever a
+            // provider keeps it.
+            reporting->set_load_listener(
+                [listener = load_listener_, backend = std::make_shared<const std::string>(name)](
+                    const StatusEvent& event) { listener(*backend, event); });
+        } else {
+            reporting->set_load_listener({});
+        }
+    }
 }
 
 void Harness::use_default_router() {
@@ -189,6 +211,9 @@ const std::string& Harness::default_model() const noexcept {
 
 void Harness::set_active_suite(std::string suite) {
     config_.models.default_suite = std::move(suite);
+    if (holding_suite_) {
+        hold_suite_members();
+    }
 }
 
 ChatResponse Harness::chat(const ChatRequest& request,
@@ -402,6 +427,110 @@ bool Harness::preload_model(std::string_view backend_name, const StatusSink& on_
     return true;
 }
 
+void Harness::hold_in_use(const std::vector<std::string>& backends) {
+    held_.clear();
+    for (const std::string& name : backends) {
+        // A provider is registered under the config's key, which a member
+        // names as backend names are matched: case aside.
+        const auto entry = config_.backends.find(name);
+        held_.insert(entry != config_.backends.end() ? entry->first : name);
+    }
+    for (const auto& [name, provider] : providers_) {
+        if (auto* holding = dynamic_cast<ResidencyHolding*>(provider.get()); holding != nullptr) {
+            holding->hold_resident(held_.contains(name));
+        }
+    }
+}
+
+std::vector<std::string> Harness::held() const {
+    return {held_.begin(), held_.end()};
+}
+
+void Harness::hold_active_suite(bool on) {
+    if (!on) {
+        release_holds();
+        return;
+    }
+    holding_suite_ = true;
+    hold_suite_members();
+}
+
+void Harness::release_holds() noexcept {
+    holding_suite_ = false;
+    held_.clear();
+    for (const auto& [name, provider] : providers_) {
+        if (auto* holding = dynamic_cast<ResidencyHolding*>(provider.get()); holding != nullptr) {
+            holding->hold_resident(false);
+        }
+    }
+}
+
+void Harness::hold_suite_members() {
+    std::vector<std::string> backends;
+    if (const SuiteConfig* suite = active_suite(config_); suite != nullptr) {
+        for (const SuiteBackend& member : suite_backends(*suite)) {
+            backends.push_back(member.backend);
+        }
+    }
+    hold_in_use(backends);
+}
+
+void Harness::listen_for_loads(LoadListener listener) {
+    load_listener_ = std::move(listener);
+    for (const auto& [name, provider] : providers_) {
+        if (provider != nullptr) {
+            attach_residency(name, *provider);
+        }
+    }
+}
+
+std::optional<bool> Harness::resident(std::string_view backend) const {
+    const auto it = providers_.find(std::string{backend});
+    if (it == providers_.end() || it->second == nullptr) {
+        return std::nullopt;
+    }
+    // Only a model this process holds has a residency to report: a vendor
+    // CLI says "ready" with nothing of its own in memory.
+    if (dynamic_cast<const ResidencyHolding*>(it->second.get()) == nullptr) {
+        return std::nullopt;
+    }
+    const auto* reporter = dynamic_cast<const StatusReporting*>(it->second.get());
+    if (reporter == nullptr) {
+        return std::nullopt;
+    }
+    return reporter->model_status().type == StatusEvent::Type::ModelReady;
+}
+
+WarmResult Harness::warm(const std::vector<std::string>& backends,
+                         const WarmProgress& progress) const {
+    WarmResult result;
+    std::vector<std::string> to_load;
+    for (const std::string& name : backends) {
+        const std::optional<bool> loaded = resident(name);
+        if (!loaded.has_value()) {
+            continue;  // nothing of its own to load: never a request to warm it
+        }
+        if (*loaded) {
+            result.resident.push_back(name);
+        } else {
+            to_load.push_back(name);
+        }
+    }
+    for (std::size_t i = 0; i < to_load.size(); ++i) {
+        const std::string& name = to_load[i];
+        if (progress) {
+            progress(name, i + 1, to_load.size());
+        }
+        try {
+            (void)preload_model(name, {});
+            result.loaded.push_back(name);
+        } catch (const std::exception& e) {
+            result.failed.emplace_back(name, e.what());
+        }
+    }
+    return result;
+}
+
 std::int64_t Harness::context_window_for_model(std::string_view model) const {
     const std::string resolved = resolve_chat_backend(config_, model);
     const std::string_view name{resolved};
@@ -438,6 +567,18 @@ std::int64_t Harness::context_window_for_model(std::string_view model) const {
     const std::string_view model_name =
         backend != nullptr && !backend->model.empty() ? std::string_view{backend->model} : name;
     return resolve_context_window(configured, model_name);
+}
+
+// ---------------------------------------------------------------------------
+// SessionHold
+// ---------------------------------------------------------------------------
+
+SessionHold::SessionHold(Harness& harness) : harness_{harness} {
+    harness_.hold_active_suite(true);
+}
+
+SessionHold::~SessionHold() {
+    harness_.release_holds();
 }
 
 }  // namespace apogee::harness

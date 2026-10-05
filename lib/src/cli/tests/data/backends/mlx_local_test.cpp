@@ -598,6 +598,48 @@ TEST_CASE("an idle spell ends the child, and the next turn starts another",
     CHECK(fixture.drivers.front()->stdin_closed);
 }
 
+TEST_CASE("a held child outlasts its idle spell, and the clock rules again once let go",
+          "[backends][mlx][session][residency]") {
+    // 27e: a session using this model holds it; the idle clock is not
+    // consulted until the hold goes, and then from the last use.
+    DriverState state;
+    state.replies = {numbered(text("x")) + done()};
+    MlxLocalProvider::Options options = Fixture::defaults();
+    auto now = std::chrono::steady_clock::time_point{} + std::chrono::hours{1};
+    options.clock = [&now] { return now; };
+    options.idle_unload = std::chrono::seconds{60};
+    Fixture fixture{state, options};
+    fixture.provider->hold_resident(true);
+    CHECK(fixture.provider->held_resident());
+    (void)fixture.provider->chat(ask("hi"), {});
+    now += std::chrono::seconds{120};
+    (void)fixture.provider->chat(ask("hi"), {});
+    CHECK(fixture.provider->spawn_count() == 1);
+
+    fixture.provider->hold_resident(false);
+    now += std::chrono::seconds{61};
+    (void)fixture.provider->chat(ask("hi"), {});
+    CHECK(fixture.provider->spawn_count() == 2);
+}
+
+TEST_CASE("every start of the driver is heard by the load listener",
+          "[backends][mlx][session][residency]") {
+    DriverState state;
+    state.replies = {numbered(text("x")) + done()};
+    Fixture fixture{state};
+    std::vector<apogee::harness::StatusEvent> heard;
+    fixture.provider->set_load_listener(
+        [&heard](const apogee::harness::StatusEvent& event) { heard.push_back(event); });
+    // A request streaming no status of its own: heard all the same.
+    (void)fixture.provider->chat(ask("hi"), {});
+    REQUIRE(heard.size() == 2);
+    CHECK(heard[0].type == apogee::harness::StatusEvent::Type::ModelLoading);
+    CHECK(heard[0].phase == apogee::harness::StatusEvent::Phase::Start);
+    CHECK(heard[1].type == apogee::harness::StatusEvent::Type::ModelReady);
+    (void)fixture.provider->chat(ask("again"), {});
+    CHECK(heard.size() == 2);
+}
+
 // ---------------------------------------------------------------------------
 // What it answers about itself
 // ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/permissions.h"
+#include "cli/suite_residency.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "contracts/paths.h"
@@ -37,6 +38,7 @@
 #include "logger/operational.h"
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
+#include "modelstore/footprint.h"
 #include "operations/knowledge_core.h"
 #include "operations/suites.h"
 #include "platform/platform.h"
@@ -103,6 +105,12 @@ struct ChatFlags {
     /// The suite the chat runs under (27d), or `off`; empty leaves it to what
     /// the chat last had, else the config's default suite.
     std::string suite;
+    /// Load the suite's members up front, on the busy line (27e).
+    bool warm = false;
+    /// Run the suite even when its footprint is over the machine's budget.
+    bool force = false;
+    /// No busy line while the members load.
+    bool quiet = false;
     /// The arbitrary-branch review: the git tools' defaults and a system
     /// note, from flags -- and re-pointed by `/branch` mid-session.
     std::string branch;
@@ -520,6 +528,8 @@ private:
 
 }  // namespace
 
+ChatCommand::ChatCommand(MachineBudgetSource machine) : machine_{std::move(machine)} {}
+
 std::string_view ChatCommand::name() const noexcept {
     return "chat";
 }
@@ -627,6 +637,11 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                     "Run under this suite -- its members answer for the roles it names -- or off "
                     "for none")
         ->type_name(kModelSuiteValue);
+    cmd->add_flag("--warm", flags->warm,
+                  "Load the suite's members now, on the progress line, rather than at first use");
+    cmd->add_flag("--force", flags->force,
+                  "Run the suite even when what it takes is over this machine's memory");
+    cmd->add_flag("-q,--quiet", flags->quiet, "No progress line while the suite's members load");
     cmd->add_flag("-c,--continue", flags->cont, "Resume the most recent conversation");
     cmd->add_option("--branch", flags->branch,
                     "Branch under review for the git tools (the head); never checked out")
@@ -638,7 +653,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->add_flag("--fetch", flags->fetch, "Always fetch the refs before diffing");
     cmd->add_flag("--no-fetch", flags->no_fetch, "Never fetch; refuse a ref that is absent");
 
-    cmd->callback([&context, flags]() {
+    cmd->callback([&context, flags, machine = machine_]() {
         const bool decorate = platform::is_terminal(platform::StandardStream::Out);
 
         harness::Config config;
@@ -688,6 +703,17 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         reporter_options.hyperlinks = ansi::hyperlinks_supported();
         CliReporter reporter{status_writer, reporter_options};
         const ansi::Style& style = reporter_options.style;
+        // A model loading for any reason -- the chat's first turn, a
+        // helper's first chore, an embedding -- says so on the spinner rather
+        // than in silence (27e). Never into machine mode's stream. Every model
+        // call that could load is over before the reporter goes: the title
+        // and the attachments settle first, and both are declared after it.
+        if (flags->output_format != OutputFormat::StreamJson) {
+            harness.listen_for_loads(
+                [&reporter](std::string_view backend, const harness::StatusEvent& event) {
+                    reporter.on_model_load(backend, event);
+                });
+        }
 
         // --- resume ---------------------------------------------------------
         logger::Session session;
@@ -753,6 +779,27 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         if (const std::string refused = validate_active_suite(config); !refused.empty()) {
             fail_user(refused);
         }
+        // Admission (27e): the set the session runs under, priced against
+        // this machine. Over budget it is refused here, before anything is
+        // loaded or a turn could start, unless --force says to go ahead.
+        std::optional<models::SuiteFootprint> footprint;
+        if (!config.models.default_suite.empty()) {
+            footprint = price_suite(config, config.models.default_suite, machine);
+            if (const std::string refused = admission_refusal(*footprint, "--force");
+                !refused.empty() && !flags->force) {
+                fail_user(refused);
+            }
+        } else if (flags->warm) {
+            fail_user(
+                "--warm loads a suite's members, and this chat runs under none -- --suite "
+                "<name> names one");
+        }
+        const bool forced =
+            footprint.has_value() && footprint->admission() == models::Admission::OverBudget;
+        // The members this session uses stay resident between its turns,
+        // however far apart, the hold following the suite as /suite moves
+        // it; it goes with the session.
+        const harness::SessionHold hold{harness};
         if (!config.models.default_suite.empty()) {
             session.suite = config.models.default_suite;
         } else if (chosen_suite.has_value()) {
@@ -925,11 +972,28 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             // (26r) -- never on an answer.
             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + model +
                                          (is_base_model(harness, model) ? "  ·  base model" : "") +
-                                         (config.models.default_suite.empty()
-                                              ? ""
-                                              : "  ·  suite " + config.models.default_suite) +
+                                         banner_suite(config.models.default_suite, forced) +
                                          "  ·  chat " + session.chat_id +
                                          "  ·  /help for commands");
+        }
+        // What the suite takes of this machine, stated where the session
+        // starts -- on a pipe too, on stderr -- and, asked for, its members
+        // loaded now on the busy line rather than at their first use (27e).
+        if (footprint.has_value()) {
+            reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " +
+                                         admission_line(*footprint, forced));
+        }
+        if (flags->warm) {
+            std::vector<std::string> unwarmed;
+            {
+                BusyLine busy{
+                    std::cerr, "warming suite " + config.models.default_suite,
+                    busy_options(flags->quiet || flags->output_format == OutputFormat::StreamJson)};
+                unwarmed = warm_suite(harness, config, busy);
+            }
+            for (const std::string& line : unwarmed) {
+                reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + line);
+            }
         }
         // Tools withheld from a base model are said once, at the start, on a
         // terminal and a pipe alike -- never into machine mode's stream.
@@ -1380,12 +1444,39 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                         if (argument.empty()) {
                             reporter.status().print_line(style.tag(ansi::Role::Apogee) +
                                                          " suite: " + active_suite_summary(config));
+                            // The session's own status (27e): each member
+                            // resident or not, and the set's total.
+                            if (!config.models.default_suite.empty()) {
+                                for (const std::string& row : footprint_lines(
+                                         price_suite(config, config.models.default_suite, machine),
+                                         [&harness](std::string_view backend) {
+                                             return harness.resident(backend);
+                                         })) {
+                                    reporter.status().print_line(row);
+                                }
+                            }
                             break;
                         }
+                        const SuiteArgument asked = parse_suite_argument(argument);
                         harness::Config probe = config;
-                        std::string refused = select_suite(probe, argument);
+                        std::string refused = asked.error;
+                        if (refused.empty()) {
+                            refused = select_suite(probe, asked.suite);
+                        }
                         if (refused.empty()) {
                             refused = validate_active_suite(probe);
+                        }
+                        // Admission (27e), before anything is rebuilt.
+                        std::optional<models::SuiteFootprint> priced;
+                        if (refused.empty() && !probe.models.default_suite.empty()) {
+                            priced = price_suite(probe, probe.models.default_suite, machine);
+                            if (!asked.force) {
+                                refused = admission_refusal(
+                                    *priced, "/suite " + probe.models.default_suite + " --force");
+                            }
+                        }
+                        if (refused.empty() && asked.warm && probe.models.default_suite.empty()) {
+                            refused = "--warm loads a suite's members; off has none";
                         }
                         if (!refused.empty()) {
                             reporter.status().print_line(style.tag(ansi::Role::Error) + " " +
@@ -1424,10 +1515,29 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                         } else {
                             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " suite " +
                                                          active_suite_summary(config));
+                            if (priced.has_value()) {
+                                reporter.status().print_line(
+                                    style.tag(ansi::Role::Apogee) + " " +
+                                    admission_line(*priced, priced->admission() ==
+                                                                models::Admission::OverBudget));
+                            }
                             if (!moved.empty()) {
                                 reporter.status().print_line(
                                     style.tag(ansi::Role::Apogee) + " switched to " + moved +
                                     (is_base_model(harness, moved) ? " -- a base model" : ""));
+                            }
+                            if (asked.warm) {
+                                std::vector<std::string> unwarmed;
+                                {
+                                    BusyLine busy{std::cerr,
+                                                  "warming suite " + config.models.default_suite,
+                                                  busy_options(flags->quiet)};
+                                    unwarmed = warm_suite(harness, config, busy);
+                                }
+                                for (const std::string& said : unwarmed) {
+                                    reporter.status().print_line(style.tag(ansi::Role::Warning) +
+                                                                 " " + said);
+                                }
                             }
                         }
                         break;

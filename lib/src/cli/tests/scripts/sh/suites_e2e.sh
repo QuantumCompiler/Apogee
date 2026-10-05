@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Suites (27d) on the real binary: the config unit written through the one
 # editor, a chat run under one, the bundle switched mid-chat, and both
-# surviving a resume -- with the run's own records as the evidence:
+# surviving a resume -- and, since 27e, the set's footprint stated, a suite
+# that cannot fit refused until --force, and --warm silent on a pipe -- with
+# the run's own records as the evidence:
 #
 #   * who titled the chat: the utility role does, so a title from the helper's
 #     script proves `--suite research` resolved utility to `helper` (and the
@@ -163,5 +165,64 @@ grep -q '"suite": "research"' "$DEFAULTED" || fail "the default suite was not us
 grep -q '"title": "HELPER-SAYS"' "$DEFAULTED" || fail "the default suite's utility did not title"
 # The default cannot be deleted from under the config.
 "$APOGEE_BIN" config delete-suite research >/dev/null 2>&1 && fail "the default suite was deleted"
+
+# --- residency (27e): the set stated, refused when it cannot fit, warmed ----
+# Mock members hold nothing on this machine: said, and the chat went ahead.
+grep -q "suite research: no member holds memory on this machine" "$WORK_DIR/research.txt" \
+    || fail "selecting a suite did not state its footprint: $(cat "$WORK_DIR/research.txt")"
+PRICED=$("$APOGEE_BIN" models status --suite research -q 2>&1) || fail "models status: $PRICED"
+echo "$PRICED" | grep -qx "footprint: suite research" || fail "status has no footprint: $PRICED"
+echo "$PRICED" | grep -qx "  helper (utility): nothing held here" \
+    || fail "status does not price the members: $PRICED"
+"$APOGEE_BIN" models status -q --suite off 2>&1 | grep -q "footprint" \
+    && fail "status priced a suite with none active"
+
+# Warming: refused with no suite to warm; on a pipe it paints nothing.
+"$APOGEE_BIN" chat --suite off --warm </dev/null >"$WORK_DIR/warm-none.txt" 2>&1 \
+    && fail "--warm ran with no suite"
+grep -q "warm loads a suite's members, and this chat runs under none" "$WORK_DIR/warm-none.txt" \
+    || fail "--warm with no suite was not refused: $(cat "$WORK_DIR/warm-none.txt")"
+echo "warm question" | "$APOGEE_BIN" chat --suite research --warm >"$WORK_DIR/warm.txt" 2>&1 \
+    || fail "chat --warm failed: $(cat "$WORK_DIR/warm.txt")"
+grep -q "ROOT-SAYS" "$WORK_DIR/warm.txt" || fail "the warmed chat did not answer"
+LC_ALL=C grep -q "$(printf '\033')" "$WORK_DIR/warm.txt" && fail "--warm painted on a pipe"
+
+# A local member whose record claims a pebibyte: no machine fits it. With
+# llama.cpp built in, the machine's budget is known and the suite is refused
+# with its numbers until --force; without it the budget is unknown, said so,
+# and the chat runs. Its role (extraction) is never asked in a chat, so no
+# model is loaded either way.
+python3 - "$WORK_DIR/vast.gguf" <<'PY'
+import struct, sys
+def text(value):
+    raw = value.encode()
+    return struct.pack("<Q", len(raw)) + raw
+out = b"GGUF" + struct.pack("<IQQ", 3, 1, 6)
+out += text("general.architecture") + struct.pack("<I", 8) + text("llama")
+for key, value in [("llama.block_count", 16), ("llama.context_length", 131072),
+                   ("llama.embedding_length", 2048), ("llama.attention.head_count", 32),
+                   ("llama.attention.head_count_kv", 8)]:
+    out += text(key) + struct.pack("<II", 4, value)
+out += text("token_embd.weight") + struct.pack("<IQQIQ", 2, 16, 16, 0, 0)
+open(sys.argv[1], "wb").write(out)
+PY
+printf '{"file": "vast.gguf", "file_size": 1125899906842624}\n' >"$WORK_DIR/vast.json"
+"$APOGEE_BIN" config add-backend vast --type llamacpp --model-path "$WORK_DIR/vast.gguf" \
+    >/dev/null || fail "add-backend vast"
+"$APOGEE_BIN" config add-suite vast --chat root --extraction vast >/dev/null || fail "add-suite vast"
+VAST="vast 1073742368 + 1024 margin"
+if echo "vast question" | "$APOGEE_BIN" chat --suite vast >"$WORK_DIR/vast.txt" 2>&1; then
+    grep -q "suite vast needs 1073743392 MiB: $VAST -- this machine's budget is not known here" \
+        "$WORK_DIR/vast.txt" || fail "an unknown budget was not said: $(cat "$WORK_DIR/vast.txt")"
+else
+    grep -q "suite vast needs 1073743392 MiB of this machine's [0-9]* MiB: $VAST -- it does not fit; --force runs it anyway" \
+        "$WORK_DIR/vast.txt" || fail "the refusal does not name the numbers: $(cat "$WORK_DIR/vast.txt")"
+    grep -q "SAYS" "$WORK_DIR/vast.txt" && fail "a model answered under a refused suite"
+    echo "vast question" | "$APOGEE_BIN" chat --suite vast --force >"$WORK_DIR/forced.txt" 2>&1 \
+        || fail "--force did not run the suite: $(cat "$WORK_DIR/forced.txt")"
+    grep -q "$VAST -- over budget, run anyway (--force)" "$WORK_DIR/forced.txt" \
+        || fail "the forced run does not say so: $(cat "$WORK_DIR/forced.txt")"
+    grep -q "ROOT-SAYS" "$WORK_DIR/forced.txt" || fail "the forced chat did not answer"
+fi
 
 echo "suites: OK"

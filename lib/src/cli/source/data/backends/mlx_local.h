@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <deque>
@@ -191,7 +192,8 @@ class MlxLocalProvider final : public harness::LLMProvider,
                                public harness::ModelBehaviorReporting,
                                public harness::StatusReporting,
                                public harness::ContextWindowReporting,
-                               public harness::VisionCapable {
+                               public harness::VisionCapable,
+                               public harness::ResidencyHolding {
 public:
     /// Starts the driver. Injected so the provider is tested over a scripted
     /// child: a driver that dies mid-turn, a stream cut between any two bytes,
@@ -294,6 +296,16 @@ public:
 
     /// Starts the driver and waits for its model to load.
     void preload(const harness::StatusSink& on_status) override;
+
+    /// Every load from now on is said to `listener` too (27e).
+    void set_load_listener(const harness::StatusSink& listener) override;
+
+    // --- ResidencyHolding (27e) ----------------------------------------------
+
+    /// While held, `idle_unload` never ends the driver; let go, the clock
+    /// rules again from the last use.
+    void hold_resident(bool held) noexcept override;
+    [[nodiscard]] bool held_resident() const noexcept override;
 
     // --- ContextWindowReporting ---------------------------------------------
 
@@ -411,6 +423,10 @@ private:
     bool budget_noticed_ = false;
     std::chrono::steady_clock::time_point last_use_;
     bool used_ = false;
+    /// A session's in-use hold (27e).
+    std::atomic<bool> held_{false};
+    /// Hears every load (27e); set before first use.
+    harness::StatusSink load_listener_;
 };
 
 }  // namespace apogee::backends

@@ -7,6 +7,7 @@
 
 #include "ansi/ansi.h"
 #include "cli/command.h"
+#include "cli/suite_residency.h"
 #include "contracts/config.h"
 #include "modelstore/gguf_inspect.h"
 #include "secrets/resolve.h"
@@ -156,8 +157,14 @@ struct ModelRow {
 /// Every line here comes from `harness::resolve_backend_key`, never from a
 /// local reimplementation of the chain. This command is the visible proof that
 /// the resolver answers the same way the run path does.
+///
+/// With a suite active, the suite's footprint follows (27e): each member's
+/// weights and cache at its window, or why unknown, and the set's total
+/// against `machine` -- unknown when none is given. Nothing is loaded to say
+/// it, so residency is a session's to tell (`/suite`).
 [[nodiscard]] std::string render_role_status(const harness::Config& config,
-                                             const BusyProgress& progress = {});
+                                             const BusyProgress& progress = {},
+                                             const MachineBudgetSource& machine = {});
 
 class ModelsCommand final : public Command {
 public:

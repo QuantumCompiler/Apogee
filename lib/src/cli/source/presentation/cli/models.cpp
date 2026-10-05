@@ -1205,7 +1205,8 @@ std::string render_model_info(const harness::Config& config, std::string_view na
     return out.str();
 }
 
-std::string render_role_status(const harness::Config& config, const BusyProgress& progress) {
+std::string render_role_status(const harness::Config& config, const BusyProgress& progress,
+                               const MachineBudgetSource& machine) {
     std::ostringstream out;
     // The suite every role below resolves under, when one is active (27d).
     // With none, nothing here changes from before suites.
@@ -1316,6 +1317,15 @@ std::string render_role_status(const harness::Config& config, const BusyProgress
             }
         }
         out << "\n";
+    }
+    // The suite as a set (27e): what its members take of this machine.
+    if (suite != nullptr) {
+        if (progress) {
+            progress("pricing suite " + suite_name, 0, 0);
+        }
+        for (const std::string& line : footprint_lines(price_suite(config, suite_name, machine))) {
+            out << line << "\n";
+        }
     }
     return out.str();
 }
@@ -1441,7 +1451,7 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
         std::string body;
         {
             BusyLine busy{std::cerr, "resolving the roles", busy_options(*status_quiet)};
-            body = render_role_status(config, busy.sink());
+            body = render_role_status(config, busy.sink(), machine_budget);
         }
         std::cout << body;
     });

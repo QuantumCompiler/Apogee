@@ -73,6 +73,7 @@ add_library(apogee_tests_data OBJECT
     data/backends/mlx_driver_test.cpp
     data/modelstore/gguf_inspect_test.cpp
     data/modelstore/kv_cache_test.cpp
+    data/modelstore/footprint_test.cpp
     data/modelstore/mlx_info_test.cpp
     data/contracts/sha256_test.cpp
     data/modelstore/store_test.cpp
@@ -111,6 +112,7 @@ add_library(apogee_tests_business OBJECT
     business/harness/provider_capability_test.cpp
     business/harness/llamacpp_harness_test.cpp
     business/harness/roles_test.cpp
+    business/harness/residency_test.cpp
     business/models/lineage_test.cpp
     business/models/acquire_test.cpp
     business/models/convert_test.cpp
@@ -202,6 +204,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/model_chain_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp
+    presentation/cli/suite_residency_test.cpp
     presentation/cli/config_cmd_test.cpp
     presentation/cli/attachment_guard_test.cpp
     presentation/operations/retrieval_test.cpp

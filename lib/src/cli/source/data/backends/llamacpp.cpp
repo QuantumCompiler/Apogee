@@ -862,8 +862,22 @@ void LlamaCppProvider::preload(const harness::StatusSink& on_status) {
     ensure_model(on_status);
 }
 
+void LlamaCppProvider::set_load_listener(const harness::StatusSink& listener) {
+    load_listener_ = listener;
+}
+
+void LlamaCppProvider::hold_resident(bool held) noexcept {
+    held_.store(held);
+}
+
+bool LlamaCppProvider::held_resident() const noexcept {
+    return held_.load();
+}
+
 void LlamaCppProvider::expire_if_idle() {
-    if (options_.idle_unload.count() <= 0 || model_ == nullptr || !used_) {
+    // A session using this model holds it (27e): the clock is not consulted
+    // until the hold is let go, and then from the last use as ever.
+    if (options_.idle_unload.count() <= 0 || model_ == nullptr || !used_ || held_.load()) {
         return;
     }
     if (options_.clock() - last_use_ >= options_.idle_unload) {
@@ -881,12 +895,22 @@ void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
     events::emit(events::kModelLoadStarted,
                  nlohmann::json{{"backend", options_.backend_name}, {"model", options_.model}});
 
-    if (on_status) {
+    // Said to the request that caused the load, when it streams status, and
+    // to the session's listener, whichever request it was (27e).
+    const auto say = [&on_status, this](const harness::StatusEvent& event) {
+        if (on_status) {
+            on_status(event);
+        }
+        if (load_listener_) {
+            load_listener_(event);
+        }
+    };
+    {
         harness::StatusEvent event;
         event.type = harness::StatusEvent::Type::ModelLoading;
         event.phase = harness::StatusEvent::Phase::Start;
         event.name = options_.model;
-        on_status(event);
+        say(event);
     }
 
     ModelLoad load;
@@ -901,25 +925,25 @@ void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
     std::string error;
     model_ = runtime_->load(load, error);
     if (model_ == nullptr) {
-        if (on_status) {
+        {
             harness::StatusEvent failed;
             failed.type = harness::StatusEvent::Type::ModelLoading;
             failed.phase = harness::StatusEvent::Phase::Error;
             failed.name = options_.model;
             failed.detail = error;
-            on_status(failed);
+            say(failed);
         }
         // A clear message naming the file, never a crash -- the acceptance
         // criterion for this path.
         throw harness::ProviderError(options_.backend_name, error);
     }
 
-    if (on_status) {
+    {
         harness::StatusEvent ready;
         ready.type = harness::StatusEvent::Type::ModelReady;
         ready.phase = harness::StatusEvent::Phase::Done;
         ready.name = options_.model;
-        on_status(ready);
+        say(ready);
     }
     events::emit(events::kModelLoadCompleted,
                  nlohmann::json{{"backend", options_.backend_name}, {"model", options_.model}});

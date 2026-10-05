@@ -863,6 +863,22 @@ struct MemberPins {
 /// so a pin cannot hold on one of them and not another.
 [[nodiscard]] MemberPins suite_pins(const Config& config, std::string_view backend);
 
+/// One backend a suite puts to use, and the roles it answers for there (27e)
+/// -- one model, one window, one residency, however many roles it serves.
+struct SuiteBackend {
+    /// As the first member naming it spells it.
+    std::string backend;
+    /// Role names (`suite_role_names()`), in that order.
+    std::vector<std::string> roles;
+
+    bool operator==(const SuiteBackend&) const = default;
+};
+
+/// The backends `suite`'s members name, each once (matched as backend names
+/// are), in the order of their first role in `suite_role_names()`. What a
+/// suite holds resident, warms, and is measured by (27e).
+[[nodiscard]] std::vector<SuiteBackend> suite_backends(const SuiteConfig& suite);
+
 /// `backends.<name>` as it runs under the active suite: the entry as written,
 /// its `context_size` replaced by the suite's pin when there is one. What the
 /// provider factory constructs from. A default entry when there is no such

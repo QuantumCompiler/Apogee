@@ -144,6 +144,8 @@ apogee_add_module(cli
     cli/config_cmd.cpp
     cli/config_suites.h
     cli/config_suites.cpp
+    cli/suite_residency.h
+    cli/suite_residency.cpp
     cli/check.h
     cli/complete_protocol.h
     cli/complete_protocol.cpp

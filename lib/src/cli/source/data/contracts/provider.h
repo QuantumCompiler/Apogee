@@ -126,6 +126,44 @@ public:
     virtual void preload(const StatusSink& on_status) {
         (void)on_status;
     }
+
+    /// Hears every load this provider makes from now on -- its `ModelLoading`
+    /// start, its `ModelReady` or its error -- whichever request caused it: an
+    /// embedding, a helper's side call, a preload, a turn (27e). A load is
+    /// otherwise said only to a request that streams status, and most of a
+    /// helper's do not, so a first use paid its load in silence. Set before
+    /// the provider is first used; the default hears nothing, for a provider
+    /// with nothing to load.
+    virtual void set_load_listener(const StatusSink& listener) {
+        (void)listener;
+    }
+};
+
+/// Implemented by a provider that gives its model back after an idle spell
+/// -- `idle_unload_seconds`, a local model -- and that a session can hold
+/// against that clock (27e).
+///
+/// The idle clock is per backend and stays so: a hold only says "a session is
+/// using this", so a model the session has used is not unloaded between two
+/// of its turns, however far apart -- an embedder idling out mid-conversation
+/// pays its whole load back on the next question. Let go, the clock rules
+/// again from the model's last use. A hold is this process's memory and dies
+/// with it: nothing is persisted, and nothing runs in the background.
+class ResidencyHolding {
+public:
+    ResidencyHolding() = default;
+    virtual ~ResidencyHolding() = default;
+    ResidencyHolding(const ResidencyHolding&) = delete;
+    ResidencyHolding& operator=(const ResidencyHolding&) = delete;
+    ResidencyHolding(ResidencyHolding&&) = delete;
+    ResidencyHolding& operator=(ResidencyHolding&&) = delete;
+
+    /// Holds the model against its idle clock, or lets it go. Safe from any
+    /// thread; a request already deciding sees one value or the other.
+    virtual void hold_resident(bool held) noexcept = 0;
+
+    /// Whether it is held now.
+    [[nodiscard]] virtual bool held_resident() const noexcept = 0;
 };
 
 /// Implemented by a provider that embeds tool calls inside the text stream

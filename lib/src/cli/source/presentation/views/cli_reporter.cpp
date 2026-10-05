@@ -143,6 +143,26 @@ void CliReporter::on_side_call(const agentloop::SideCall& call) {
     thinking_.side_call(label);
 }
 
+void CliReporter::on_model_load(std::string_view backend, const harness::StatusEvent& event) {
+    const std::scoped_lock lock{load_mutex_};
+    if (event.type == harness::StatusEvent::Type::ModelLoading &&
+        event.phase == harness::StatusEvent::Phase::Start) {
+        if (!status_.spinner_running()) {
+            return;  // nothing on the line to say it on
+        }
+        if (!label_before_load_.has_value()) {
+            label_before_load_ = status_.spinner_label();
+        }
+        status_.set_spinner_label("loading " + std::string{backend} + "…");
+        return;
+    }
+    // Done, or failed: the line goes back to what it said.
+    if (label_before_load_.has_value()) {
+        status_.set_spinner_label(std::move(*label_before_load_));
+        label_before_load_.reset();
+    }
+}
+
 void CliReporter::on_recall(int chats, int decisions) {
     if (chats <= 0 && decisions <= 0) {
         return;

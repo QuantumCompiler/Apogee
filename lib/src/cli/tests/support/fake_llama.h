@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -15,6 +16,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "backends/llama_runtime.h"
@@ -828,6 +830,10 @@ public:
     /// How many times a model was loaded — the idle-unload assertion.
     int loads = 0;
 
+    /// How long a load takes: a load slow enough for a busy line to paint
+    /// (27e's warmup narration).
+    std::chrono::milliseconds load_delay{0};
+
     /// The most recently loaded model. Non-owning.
     FakeLlamaModel* model = nullptr;
 
@@ -874,6 +880,9 @@ public:
         last_mmproj_path = request.mmproj_path;
         last_path = request.path;
         last_load = request;
+        if (load_delay.count() > 0) {
+            std::this_thread::sleep_for(load_delay);
+        }
         if (!load_error.empty()) {
             error = load_error;
             return nullptr;

@@ -1262,7 +1262,13 @@ TEST_CASE("status with a suite active names the suite rung where it answered",
           "extraction: root   (via models.default)\n"
           "vision: (unset -- the chat's own backend)\n"
           "transcription: (unset -- the chat's own backend)\n"
-          "utility: helper   (via suite research)   [suite pins window 4096 · toolset fs,git]\n");
+          "utility: helper   (via suite research)   [suite pins window 4096 · toolset fs,git]\n"
+          // The suite as a set (27e): mocks hold nothing on this machine.
+          "footprint: suite research\n"
+          "  root (chat): nothing held here\n"
+          "  embedder (embedding): nothing held here\n"
+          "  helper (utility): nothing held here\n"
+          "  total: suite research: no member holds memory on this machine\n");
 
     // `--suite off` is the session's view with none: the global pointers.
     std::string refused = apogee::commands::select_suite(config, "off");

@@ -8,7 +8,8 @@
 # streams, a tool-using chat whose call the driver parses in the model's own
 # format and the one loop dispatches, both turns served by ONE driver that
 # kept its cache, 27a's own driver brought up to this build's by check --fix
-# and an edit of it kept, a plain chat ended by /exit taking its driver with it, a
+# and an edit of it kept, a plain chat ended by /exit taking its driver with it,
+# a suite's member held past its idle window between two turns (27e), a
 # vision model's picture read as it is through mlx-vlm -- and, without it,
 # the doctor saying so and the picture refused naming the way (27c) -- a
 # text model's picture described by the vision role instead, a run promoted
@@ -152,6 +153,43 @@ printf '["hello back"]' >"$STUB_MLX_REPLIES"
 printf 'hello\n/exit\n' | "$APOGEE_BIN" chat -m mlx >"$WORK_DIR/plain.txt" 2>&1 \
     || fail "a plain chat failed: $(cat "$WORK_DIR/plain.txt")"
 grep -q "hello back" "$WORK_DIR/plain.txt" || fail "the plain chat never answered"
+no_driver_left
+
+# --- residency (27e): a suite's member outlasts its idle window between turns -
+# The member's backend idles out after one second, and the two questions are
+# three apart. Under the suite the session holds it -- one driver load for the
+# whole chat; the control, the same chat with no suite, pays the load again.
+cat >"$WORK_DIR/config/residency.yaml" <<EOF
+models:
+  default: idle
+backends:
+  idle:
+    type: mlx
+    model_path: $WORK_DIR/model
+    idle_unload_seconds: 1
+suites:
+  held:
+    members:
+      chat: idle
+EOF
+for mode in held off; do
+    : >"$STUB_MLX_RECORD"
+    { echo "first question"; sleep 3; echo "second question"; } \
+        | "$APOGEE_BIN" --config "$WORK_DIR/config/residency.yaml" chat --suite "$mode" \
+            >"$WORK_DIR/residency-$mode.txt" 2>&1 \
+        || fail "the $mode chat failed: $(cat "$WORK_DIR/residency-$mode.txt")"
+    LOADS=$(grep -c '^load ' "$STUB_MLX_RECORD")
+    if [ "$mode" = held ]; then
+        [ "$LOADS" -eq 1 ] || fail "a held member was idle-unloaded between turns: $LOADS loads"
+    else
+        [ "$LOADS" -eq 2 ] || fail "the control did not idle out between turns: $LOADS loads"
+    fi
+done
+grep -q "suite held: no member holds memory on this machine" "$WORK_DIR/residency-held.txt" \
+    && fail "an mlx member was priced as holding nothing"
+grep -q "suite held needs at least 1024 MiB.*idle unknown (an MLX model's footprint is not stated yet)" \
+    "$WORK_DIR/residency-held.txt" \
+    || fail "the mlx member was not said unknown: $(cat "$WORK_DIR/residency-held.txt")"
 no_driver_left
 
 # --- vision (27c): a picture read as it is, or honestly not --------------------

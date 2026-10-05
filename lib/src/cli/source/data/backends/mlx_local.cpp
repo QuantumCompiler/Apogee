@@ -603,8 +603,21 @@ void MlxLocalProvider::end_session() {
     vision_child_ = false;
 }
 
+void MlxLocalProvider::set_load_listener(const harness::StatusSink& listener) {
+    load_listener_ = listener;
+}
+
+void MlxLocalProvider::hold_resident(bool held) noexcept {
+    held_.store(held);
+}
+
+bool MlxLocalProvider::held_resident() const noexcept {
+    return held_.load();
+}
+
 void MlxLocalProvider::expire_if_idle() {
-    if (options_.idle_unload.count() <= 0 || !used_ || child_ == nullptr) {
+    // Held by a session using it (27e): the clock waits for the hold to go.
+    if (options_.idle_unload.count() <= 0 || !used_ || child_ == nullptr || held_.load()) {
         return;
     }
     if (options_.clock() - last_use_ >= options_.idle_unload) {
@@ -767,7 +780,7 @@ void MlxLocalProvider::report_cache(const mlx::Event& done,
 
 void MlxLocalProvider::say(const harness::StreamOptions& options, harness::StatusEvent::Type type,
                            harness::StatusEvent::Phase phase, std::string detail) const {
-    if (!options.on_status) {
+    if (!options.on_status && !load_listener_) {
         return;
     }
     harness::StatusEvent event;
@@ -775,7 +788,13 @@ void MlxLocalProvider::say(const harness::StreamOptions& options, harness::Statu
     event.phase = phase;
     event.name = options_.model;
     event.detail = std::move(detail);
-    options.on_status(event);
+    if (options.on_status) {
+        options.on_status(event);
+    }
+    // The session's listener hears every load, whatever request made it (27e).
+    if (load_listener_) {
+        load_listener_(event);
+    }
 }
 
 void MlxLocalProvider::cancel_request(std::int64_t id) {

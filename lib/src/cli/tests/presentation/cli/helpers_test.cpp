@@ -527,4 +527,17 @@ suites:
     helper = identity("helper");
     CHECK(apogee::commands::activate_suite(harness, config, "", {}).empty());
     CHECK(identity("helper") == helper);
+
+    // 27e: with a session holding its suite, the one switch moves the hold
+    // too -- members that leave are let go, the new ones held -- and the
+    // hold ends with the session.
+    {
+        const apogee::harness::SessionHold hold{harness};
+        CHECK(harness.held().empty());
+        CHECK(apogee::commands::activate_suite(harness, config, "roomy", {}).empty());
+        CHECK(harness.held() == std::vector<std::string>{"helper", "root"});
+        CHECK(apogee::commands::activate_suite(harness, config, "small", {}).empty());
+        CHECK(harness.held() == std::vector<std::string>{"helper"});
+    }
+    CHECK(harness.held().empty());
 }

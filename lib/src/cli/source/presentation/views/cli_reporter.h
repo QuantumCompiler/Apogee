@@ -1,12 +1,15 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ostream>
 #include <string>
+#include <string_view>
 
 #include "agentloop/reporter.h"
 #include "ansi/ansi.h"
+#include "contracts/types.h"
 #include "views/answer_view.h"
 #include "views/status_line.h"
 #include "views/terminal.h"
@@ -84,6 +87,13 @@ public:
     void on_answer_token(std::string_view chunk) override;
     void on_answer_end() override;
 
+    /// A model loading for `backend` (27e), heard from the harness whatever
+    /// request caused it: while the spinner is up, it says `loading
+    /// <backend>…` until the load is done, then what it said before. A load
+    /// with nothing on the line -- a title between turns, a side call's own
+    /// row -- paints nothing; a pipe never paints. Safe from any thread.
+    void on_model_load(std::string_view backend, const harness::StatusEvent& event);
+
     /// Whether any answer text was emitted. A caller uses this to decide
     /// whether to print a fallback.
     [[nodiscard]] bool emitted_answer() const noexcept {
@@ -121,6 +131,10 @@ private:
     /// dropped at the end, so an answer neither starts nor ends with blank
     /// lines.
     std::string held_;
+    /// What the spinner said before a load took its label (27e), while one
+    /// has; guarded, since a load is heard on whatever thread made it.
+    std::mutex load_mutex_;
+    std::optional<std::string> label_before_load_;
 };
 
 }  // namespace apogee::commands

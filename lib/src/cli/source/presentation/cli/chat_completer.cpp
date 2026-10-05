@@ -20,7 +20,8 @@ constexpr std::array kCommands{
                     "Show the backend answering, or switch to another", ArgumentValues::Backends},
     ChatCommandSpec{"models", ChatVerb::Models, "", "List the configured backends"},
     ChatCommandSpec{"suite", ChatVerb::Suite, "[name|off]",
-                    "Show the suite the chat runs under, switch to another, or off",
+                    "Show the suite and what its members hold, or switch to another (then "
+                    "--force, --warm) or off",
                     ArgumentValues::Suites},
     ChatCommandSpec{"system", ChatVerb::System, "<text>", "Replace the system prompt"},
     ChatCommandSpec{"temperature", ChatVerb::Temperature, "<number>",

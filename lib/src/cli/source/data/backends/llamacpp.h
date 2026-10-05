@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -56,7 +57,8 @@ class LlamaCppProvider final : public harness::LLMProvider,
                                public harness::ContextWindowReporting,
                                public harness::AudioCapable,
                                public harness::VideoCapable,
-                               public harness::ConversationCaching {
+                               public harness::ConversationCaching,
+                               public harness::ResidencyHolding {
 public:
     /// Reads the wall clock. Injected so the idle-unload policy is testable
     /// without a test that sleeps.
@@ -272,6 +274,19 @@ public:
     /// window does not start until a request actually runs.
     void preload(const harness::StatusSink& on_status) override;
 
+    /// Every load from now on is said to `listener` too (27e), whatever
+    /// request made it -- an embedding or a helper's call streams no status
+    /// of its own.
+    void set_load_listener(const harness::StatusSink& listener) override;
+
+    // --- ResidencyHolding (27e) ----------------------------------------------
+
+    /// While held, `idle_unload` never fires: a session using this model
+    /// keeps it between turns however far apart. Let go, the clock rules
+    /// again from the last use, at the next request as ever.
+    void hold_resident(bool held) noexcept override;
+    [[nodiscard]] bool held_resident() const noexcept override;
+
     /// Whether the model is resident right now. For tests and diagnostics.
     [[nodiscard]] bool model_loaded() const noexcept;
 
@@ -473,6 +488,10 @@ private:
 
     std::chrono::steady_clock::time_point last_use_{};
     bool used_ = false;
+    /// A session's in-use hold (27e): `expire_if_idle` stands down while set.
+    std::atomic<bool> held_{false};
+    /// Hears every load (27e); set before first use.
+    harness::StatusSink load_listener_;
 
     /// The prompt cache on disk (26j), made on first use; the model file it
     /// is keyed to, read once a load; the conversation named by

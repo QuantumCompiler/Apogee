@@ -775,6 +775,26 @@ MemberPins suite_pins(const Config& config, std::string_view backend) {
     return pins;
 }
 
+std::vector<SuiteBackend> suite_backends(const SuiteConfig& suite) {
+    std::vector<SuiteBackend> out;
+    for (const std::string_view role : suite_role_names()) {
+        const auto member = suite.members.find(role);
+        if (member == suite.members.end() || member->second.backend.empty()) {
+            continue;
+        }
+        const auto seen = std::ranges::find_if(out, [&member](const SuiteBackend& backend) {
+            return same_folded(backend.backend, member->second.backend);
+        });
+        if (seen != out.end()) {
+            seen->roles.emplace_back(role);
+            continue;
+        }
+        out.push_back(
+            SuiteBackend{.backend = member->second.backend, .roles = {std::string{role}}});
+    }
+    return out;
+}
+
 BackendConfig backend_as_run(const Config& config, std::string_view name) {
     const BackendConfig* entry = config.find_backend(name);
     BackendConfig run = entry != nullptr ? *entry : BackendConfig{};

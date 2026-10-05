@@ -10,6 +10,8 @@
 /// custom deleter at this boundary and never escapes it -- the Code Style rule
 /// for C APIs, and the reason a `throw` from a decode cannot leak a context.
 
+#include <cstdint>
+#include <optional>
 #include <string>
 
 #include "backends/llama_runtime.h"
@@ -30,7 +32,6 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -1192,13 +1193,18 @@ private:
     mutable bool templates_loaded_ = false;
 };
 
-/// Free memory across the devices a model offloads to; 0 when it runs on
-/// the CPU, or no device says.
-[[nodiscard]] std::int64_t free_device_memory(std::int64_t gpu_layers) {
-    if (gpu_layers <= 0) {
-        return 0;
-    }
+/// The memory of the devices a model offloads to -- every GPU, integrated
+/// or not -- free and in all, as each reports it. On Apple silicon the one
+/// device's total is Metal's recommended working set, the share of the
+/// machine's memory it may use, and what is free is that less what this
+/// process has allocated on it.
+struct DeviceMemory {
+    std::int64_t free = 0;
     std::int64_t total = 0;
+};
+
+[[nodiscard]] DeviceMemory device_memory() {
+    DeviceMemory memory;
     for (std::size_t index = 0; index < ggml_backend_dev_count(); ++index) {
         ggml_backend_dev_t device = ggml_backend_dev_get(index);
         const enum ggml_backend_dev_type type = ggml_backend_dev_type(device);
@@ -1208,9 +1214,19 @@ private:
         std::size_t free = 0;
         std::size_t size = 0;
         ggml_backend_dev_memory(device, &free, &size);
-        total += static_cast<std::int64_t>(free);
+        memory.free += static_cast<std::int64_t>(free);
+        memory.total += static_cast<std::int64_t>(size);
     }
-    return total;
+    return memory;
+}
+
+/// Free memory across the devices a model offloads to; 0 when it runs on
+/// the CPU, or no device says.
+[[nodiscard]] std::int64_t free_device_memory(std::int64_t gpu_layers) {
+    if (gpu_layers <= 0) {
+        return 0;
+    }
+    return device_memory().free;
 }
 
 /// The smallest window the fitter may lower one to: the side contexts'
@@ -1320,6 +1336,15 @@ bool llama_available() noexcept {
     return true;
 }
 
+std::optional<std::int64_t> offload_memory_total() {
+    ensure_backend_init();
+    const std::int64_t total = device_memory().total;
+    if (total <= 0) {
+        return std::nullopt;
+    }
+    return total;
+}
+
 }  // namespace apogee::backends
 
 #else  // APOGEE_ENABLE_LLAMA
@@ -1338,6 +1363,11 @@ std::unique_ptr<LlamaRuntime> make_llama_runtime(std::string& reason) {
 
 bool llama_available() noexcept {
     return false;
+}
+
+std::optional<std::int64_t> offload_memory_total() {
+    // No llama.cpp, no devices to ask: unknown, never a guess.
+    return std::nullopt;
 }
 
 }  // namespace apogee::backends
