@@ -18,7 +18,7 @@
 - [DEVELOPER.md](../../assistant/DEVELOPER.md): the workflows tree row, **Changing the pipeline** (the matrix-coupling bullet retires), **Cutting a release** (the manual path re-described as the dispatch; the re-run-failed Windows caveat retires with `continue-on-error`).
 - Consumes: the pipeline decisions recorded in `ci.yml`'s header (2026-09-19…2026-10-04) — this item extends 2026-09-25's "the everyday release is not release.yml" to its conclusion.
 
-**Reference (Ommi).** No analog — Ommi has no CI workflows at all (`~/Data/Development/Projects/Ommi` carries no `.github/workflows/`); Apogee's pipeline is house-grown, and its own recorded decisions (the workflow headers, DEVELOPER.md → Changing the pipeline) are the precedent this item builds on.
+**Reference.** Apogee's pipeline is house-grown, and its own recorded decisions (the workflow headers, DEVELOPER.md → Changing the pipeline) are the precedent this item builds on.
 
 **Decisions made** (dated):
 - 2026-10-04 — Asked for by the user: one pipeline, publish only on merge, the extra Actions title dropped. Placed in **Maintenance** (their call), M8 by the ever-assigned rule (M1–M7 spent).

@@ -80,8 +80,8 @@ Release-agnostic upkeep — polish, performance and ergonomics claimable at any 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
 | M8 | One CI pipeline — `release.yml` deleted (title, `v*` trigger and duplicated matrix with it); publish only on merge by construction; the re-cut as a `publish` dispatch input on CI; `make release` rewired; required checks unchanged | Maintenance | [`ci-single-pipeline.md`](maintenance/ci-single-pipeline.md) | 🟢 |
-| M9 | Selective reset — `apogee reset [--keep <row>]`: the data directory to a verified first-run state from the layout's one declaration, `--keep models` the carve-out, uninstall's plan/confirm discipline, skeleton via `check --fix`; `make reinstall KEEP="models …"` chains build → install → reset keeping exactly the named rows | Maintenance | [`reset-keep-models.md`](maintenance/reset-keep-models.md) | 🟢 |
-| M10 | Install channels — release/dev/test roots (`~/.apogee`, `~/.apogee-dev`, `~/.apogee-test`) baked at `make install MODE=<channel>`; suffixed coexisting binaries; channel-aware uninstall; one resolution chain with global `--dev`/`--test`/`--release` and `--custom <config file>` re-rooting the whole layout | Maintenance | [`install-channels.md`](maintenance/install-channels.md) | 🟢 |
+| M9 | Selective reset — `apogee reset [--keep <row>]`: the data directory to a verified first-run state from the layout's one declaration, `--keep models` the carve-out, uninstall's plan/confirm discipline, skeleton via `check --fix`; `make reinstall KEEP="models …"` chains build → install → reset keeping exactly the named rows | Maintenance | [`reset-keep-models.md`](maintenance/reset-keep-models.md) | 🚧 |
+| M10 | Install channels — release/dev/test roots (`~/.apogee`, `~/.apogee-dev`, `~/.apogee-test`) baked at `make install MODE=<channel>`; suffixed coexisting binaries; channel-aware uninstall; one resolution chain with global `--dev`/`--test`/`--release` and `--custom <config file>` re-rooting the whole layout | Maintenance | [`install-channels.md`](maintenance/install-channels.md) | 🚧 |
 
 ### v0.1.4
 
@@ -120,4 +120,12 @@ Release-agnostic upkeep — polish, performance and ergonomics claimable at any 
 | 28g | The schema artifact — `apogee __machine-schema` prints the protocol as JSON Schema, conformance-pinned to the code, shipped in the release archives | v0.1.5 | [`machine-schema-artifact.md`](v0.1.5/machine-schema-artifact.md) | 🔒 28d, 28f |
 | 28h | Machine-readable reads — `--output-format json` on `models`/`chats`/`agents`/`mcp`/`check`, the same facts as the human view | v0.1.5 | [`machine-readable-reads.md`](v0.1.5/machine-readable-reads.md) | 🟢 |
 | 28i | The config file moves to JSON — `config.yaml` → `config.json` on the one editor, format-preserving contract intact; **JSONC, comments preserved** (the user's call, 2026-10-03) through edits, migration and the teaching template; existing YAML reads compatibly with a notice, `config migrate` converts losslessly with a backup; `config upgrade` appends missing newer options with their template comments (explicit, additive, never installer-run) and `check` says when the file is behind (extended 2026-10-03, the user's call) | v0.1.5 | [`config-json.md`](v0.1.5/config-json.md) | 🟢 |
+
+### v0.1.6
+
+**32, system insight**, opened 2026-10-04 (the user's call) with one item: the machine, read honestly. The track takes **32** by the ever-assigned rule — 29, 30 and 31 were assigned 2026-10-03 and vacated the same day by the merges and migration, so they stay spent (the M5/M6 precedent at track scale). **32a** gives Apogee a resource surface: `apogee system` — CPU, memory, GPU and the store's disk in one snapshot, human table and one JSON document — built as composition over the one machine read the 26a window sizing already uses (27e's no-second-estimator rule), with every unanswerable field an explicit `unknown`, never a guess; GPU's first cut is what the OS answers cheaply (Apple silicon's unified-memory story; `unknown`, said, elsewhere), vendor tooling deferred. No **[user]** call blocks it.
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 32a | System resources — `apogee system`: CPU (model, cores, load, sampled utilization), memory (system + Apogee's own + resident models), GPU (honest per platform), store disk footprint; one machine read shared with the 26a sizing; JSON as one document | v0.1.6 | [`system-resources.md`](v0.1.6/system-resources.md) | 🟢 |
 
