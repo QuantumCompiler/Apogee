@@ -16,7 +16,7 @@
 - Tests: `tests/business/symphony/` — composition tables (nesting depths, mixed role/play stages, output threading across the boundary), cycle refusals (direct, transitive, self), the depth cap at both refusal points, aggregate-budget stops with position goldens.
 - Consumes: [27q](symphonies.md) (everything — this is a delta on its definition and runner).
 
-**Reference (Ommi).** No analog — composition of inference-time processes doesn't exist there. The in-house precedent is the training pipeline's staged manifest (one walk, resumable positions), minus persistence: a chain play is one process invocation, not a resumable run.
+**Reference.** The in-house precedent is the training pipeline's staged manifest (one walk, resumable positions), minus persistence: a chain play is one process invocation, not a resumable run.
 
 **Decisions made** (dated):
 - 2026-10-04 — Asked for by the user with the vision; split from 27q so the definition/runner item stays one focused session and composition's rules get their own tests.

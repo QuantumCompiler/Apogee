@@ -14,11 +14,10 @@
 ///
 /// **Why a verb rather than static completion files.** The interesting things
 /// to complete are not fixed: backend names come from the user's config, and a
-/// completion file generated at build time cannot know them. Ommi's completions
-/// worked this way (cobra's protocol) for exactly that reason, and the small
-/// per-shell stubs Apogee installs do nothing but call back into the binary —
-/// so `apogee complete -m <TAB>` offers the backends this user actually has,
-/// and keeps working after they add one.
+/// completion file generated at build time cannot know them. So the small
+/// per-shell stubs Apogee installs (cobra's protocol) do nothing but call back
+/// into the binary — and `apogee complete -m <TAB>` offers the backends this
+/// user actually has, and keeps working after they add one.
 ///
 /// **Output contract.** One candidate per line on stdout, nothing else. Errors
 /// are silent and produce no candidates: a completion handler that prints a

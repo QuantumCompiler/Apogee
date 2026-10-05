@@ -15,7 +15,7 @@
 /// opposite intent: it is a bare marker with an identifier after it, carries no
 /// content of its own, and must be removed for every model regardless of
 /// tuning. Shoehorning headers into `ThinkFilter` would make it wrong about
-/// both -- Ommi's recorded reason for two files, and it still holds.
+/// both, which is why they are two files.
 ///
 /// ## The grammar, verified against real output
 ///
@@ -34,9 +34,9 @@
 /// are handled: `<|channel|>NAME<|message|>` closes, `<|start|>NAME` does not.
 ///
 /// **The close is optional because the identifier run is what actually bounds a
-/// header.** Ommi found models emit the close inconsistently, so binding to it
-/// would let one dropped token swallow a paragraph of answer. Bounding by the
-/// identifier costs a single word in the worst case.
+/// header.** Models emit the close inconsistently, so binding to it would let
+/// one dropped token swallow a paragraph of answer. Bounding by the identifier
+/// costs a single word in the worst case.
 ///
 /// ## Streaming
 ///

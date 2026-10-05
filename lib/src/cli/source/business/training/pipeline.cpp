@@ -563,8 +563,7 @@ std::string mix_datasets(const std::filesystem::path& primary,
             continue;
         }
         // A sample without replacement, seeded from the sizes alone so the
-        // same inputs mix the same way on every run (the reference's
-        // `len*1000+n` seed).
+        // same inputs mix the same way on every run (a `len*1000+n` seed).
         std::vector<std::size_t> order(lines->size());
         for (std::size_t i = 0; i < order.size(); ++i) {
             order[i] = i;

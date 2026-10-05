@@ -44,7 +44,7 @@ public:
 /// one should not get "no such backend" because the file spells it another.
 [[nodiscard]] std::string normalize_route_key(std::string_view value);
 
-/// The three-rung router, carrying Ommi's precedence exactly.
+/// The three-rung router.
 ///
 ///   1. exact backend key         — `backends:` map key
 ///   2. a backend entry's `model:` field
@@ -55,11 +55,11 @@ public:
 /// another entry's model field, or two entries pointing at the same model make
 /// `-m <key>` ambiguous.
 ///
-/// Ommi has a fourth rung — "if exactly one backend is registered, use it" —
-/// deliberately not ported (2026-08-25). It papers over an unset
-/// `models.default` in a way that stops working the moment a second backend is
-/// added, which is precisely when a user has the least idea why routing
-/// changed. A clear "set models.default" is the better failure.
+/// A fourth rung — "if exactly one backend is registered, use it" — is
+/// deliberately absent (2026-08-25). It papers over an unset `models.default`
+/// in a way that stops working the moment a second backend is added, which is
+/// precisely when a user has the least idea why routing changed. A clear "set
+/// models.default" is the better failure.
 class SimpleRouter final : public ModelRouter {
 public:
     /// `providers` maps a backend key to its provider. Entries in `config`
@@ -159,7 +159,7 @@ public:
     // The Harness performs the discovery so callers ask a plain typed question.
     // No `dynamic_cast` at a call site: an acceptance criterion of this item,
     // and what stops "can this embed?" from becoming a switch over backend
-    // types the way it did in Ommi.
+    // types.
 
     /// Whether the backend serving `model` can produce embeddings.
     /// False for an unroutable model — an unknown backend cannot embed either.

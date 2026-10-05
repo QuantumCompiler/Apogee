@@ -20,8 +20,7 @@
 /// The reason to be this strict is that the failure it prevents is silent and
 /// delayed. A half-downloaded model has a plausible name and a plausible size;
 /// it fails much later, inside llama.cpp, as an error about the *model* rather
-/// than about the download. Ommi's recorded version of this lesson is why
-/// `models repair` exists there at all.
+/// than about the download.
 ///
 /// ## Verification protects integrity; it does not gate choice
 ///
@@ -34,11 +33,10 @@
 ///
 /// ## Source-agnostic on purpose
 ///
-/// Ommi had one source (Ollama) and its acquisition logic lived inside the
-/// Ollama package. Apogee has two, and a second entry point bolted onto the
-/// first is how the `.partial` discipline ends up implemented once carefully
-/// and once carelessly. So the ladder lives here, takes bytes from a
-/// `ByteSource` callback, and knows nothing about where they came from.
+/// Apogee has two sources, Ollama and Hugging Face, and a second entry point
+/// bolted onto the first is how the `.partial` discipline ends up implemented
+/// once carefully and once carelessly. So the ladder lives here, takes bytes
+/// from a `ByteSource` callback, and knows nothing about where they came from.
 namespace apogee::models {
 
 /// What a source promises about the bytes before they arrive.

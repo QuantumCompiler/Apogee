@@ -16,7 +16,7 @@
 - `tasks/ledger.*`, `commands/`: the per-use records and their rendering in `task status`.
 - Tests: `tests/tasks/policy_test.cpp` — the composition table (config × agent policy × task grants), exhaustively; e2e: a granted tool runs unprompted and is recorded, an ungranted one denies, a declared answer is consumed and recorded.
 
-**Reference (Ommi).** No analog (Ommi's tools ran ungated; Apogee's gate — Milestone V — deliberately diverged, and its "a surface with nobody to ask denies" rule is the floor this item builds on). In-house precedents: the `permissions:` schema and `[y]es/[n]o/[a]lways/[s]ession` ladder (Milestone V), and the per-agent tool policy filter (Milestone X).
+**Reference.** Apogee's gate (Milestone V) and its "a surface with nobody to ask denies" rule are the floor this item builds on. In-house precedents: the `permissions:` schema and `[y]es/[n]o/[a]lways/[s]ession` ladder (Milestone V), and the per-agent tool policy filter (Milestone X).
 
 **Decisions made** (dated):
 - 2026-09-25 — Split from the v0.1.6 task work: 27h stays deny-by-default with fail-on-question so autonomy widening is a deliberate, reviewable step — this document — never an accident of the runner shipping.

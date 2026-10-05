@@ -89,10 +89,9 @@ struct UpsertResult {
 /// chunks -- always raises the highest id even when the count is unchanged.
 /// Without that half of the fingerprint the reconcile pass would prune the
 /// source's dead mentions while the planner still read it as up to date, and
-/// its entities would not return until a forced rebuild (Ommi's recorded
-/// bug). `max_chunk_id` is 0 on a row stamped before it was recorded; the
-/// planner then compares the count only, so an upgrade never forces a
-/// rebuild.
+/// its entities would not return until a forced rebuild. `max_chunk_id` is 0
+/// on a row stamped before it was recorded; the planner then compares the
+/// count only, so an upgrade never forces a rebuild.
 struct SourceState {
     std::string source;
     std::int64_t chunk_count = 0;

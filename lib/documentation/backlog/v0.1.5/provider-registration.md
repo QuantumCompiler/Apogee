@@ -18,7 +18,7 @@
 - Tests: `tests/presentation/commands/` — register-pass tables (none detected / some / all registered already / name collision), the once-ever offer lifecycle, the pipe/machine/serve suppression, config byte-comparison for the declined path.
 - Consumes: [provider-detection.md](provider-detection.md) (tiers, cache, knowledge table); the shipped `config add-backend` and editor; 26o's precedent that session-scoped consent never loosens config.
 
-**Reference (Ommi).** No analog — Ommi never offered registration; its backends were always hand-configured. The consent shape follows Apogee's own recorded spirit (nothing spent or changed at scale on Apogee's initiative — the 26e rule, applied to config).
+**Reference.** The consent shape follows Apogee's own recorded spirit (nothing spent or changed at scale on Apogee's initiative — the 26e rule, applied to config).
 
 **Decisions made** (dated):
 - 2026-10-03 — Split from the provider-detection spike; gated on 28a because offers without detection are guesses.

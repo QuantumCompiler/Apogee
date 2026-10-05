@@ -33,7 +33,7 @@ For each item, in order:
 
 This skill is chosen precisely when successive items should complete with nobody watching:
 
-- **Issues are yours to solve.** A failing test, a surprising seam, a doc ambiguity — debug it, consult the Ommi reference the document cites, re-read the assistant docs, adapt. Never stop to ask what step 1 could have asked.
+- **Issues are yours to solve.** A failing test, a surprising seam, a doc ambiguity — debug it, consult the references the document cites, re-read the assistant docs, adapt. Never stop to ask what step 1 could have asked.
 - **Unforeseen judgment calls** get the most conservative choice consistent with SPEC and the invariants, recorded as a dated decision in the item's document *before* it ships (so the decision lands in the MILESTONES record), and flagged in the final report for veto.
 - **A genuinely stuck item** — not buildable to its acceptance criteria after real effort — does not ship broken and does not poison the run: revert the working tree to the last commit boundary (the previous item's commit), restore the item's row from 🚧 with a dated note of what blocked it in its document, skip anything gated on it, and continue with the rest. The run ends with the truth, not with a plausible-looking pile.
 - Report outcomes faithfully at each boundary line of the final report: tests that passed, families skipped and said, anything deferred.

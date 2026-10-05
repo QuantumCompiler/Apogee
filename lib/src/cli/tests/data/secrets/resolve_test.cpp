@@ -124,7 +124,7 @@ TEST_CASE("the precedence table: config, then store, then environment, exhaustiv
 }
 
 TEST_CASE("a snapshot never moves after it is taken", "[secrets][resolve][snapshot]") {
-    // Two writers on one process race (Ommi's OMMI-9). A snapshot taken before
+    // Two writers on one process race. A snapshot taken before
     // anything resolves cannot be moved by a later change.
     std::map<std::string, std::string> values{{"OPENAI_API_KEY", "first"}};
     const EnvSnapshot snapshot = EnvSnapshot::capture([&values](std::string_view name) {

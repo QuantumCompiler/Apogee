@@ -19,14 +19,13 @@
 /// the same split `graph/` and `knowledge/` keep, and the reason the CLI and
 /// the admin job cannot synthesise differently.
 ///
-/// Ommi's rules, kept exactly: the teacher is asked for `per_seed` examples
-/// per call with the kit's seeds cycled for diversity; the reply is parsed
-/// as a JSON array tolerating prose, fences and the common field aliases;
-/// prompts are de-duplicated case-insensitively; and total calls are bounded
-/// so a model that keeps returning junk cannot spin. Two upgrades: batches
-/// may run in parallel (an API teacher, not a local one), and a failed batch
-/// is retried with backoff before it is skipped -- the rate-limit handling
-/// the placeholder promised over the reference's sequential `claude -p`.
+/// The rules: the teacher is asked for `per_seed` examples per call with the
+/// kit's seeds cycled for diversity; the reply is parsed as a JSON array
+/// tolerating prose, fences and the common field aliases; prompts are
+/// de-duplicated case-insensitively; and total calls are bounded so a model
+/// that keeps returning junk cannot spin. Batches may run in parallel (an API
+/// teacher, not a local one), and a failed batch is retried with backoff before
+/// it is skipped -- the rate-limit handling the placeholder promised.
 namespace apogee::training {
 
 struct SynthExample {

@@ -34,10 +34,10 @@ namespace apogee::graph {
 inline constexpr std::size_t kMaxEntitiesPerChunk = 12;
 inline constexpr std::size_t kMaxRelationsPerChunk = 16;
 
-/// Extraction, not creativity: Ommi's numbers. The generation cap exists
-/// because an untuned local model that misses its stop token would otherwise
-/// decode toward its context limit on a single chunk -- a minutes-long stall
-/// per chunk that reads as a hang. A capped extraction fits comfortably.
+/// Extraction, not creativity. The generation cap exists because an untuned
+/// local model that misses its stop token would otherwise decode toward its
+/// context limit on a single chunk -- a minutes-long stall per chunk that reads
+/// as a hang. A capped extraction fits comfortably.
 inline constexpr double kExtractTemperature = 0.2;
 inline constexpr std::int64_t kExtractMaxTokens = 2048;
 

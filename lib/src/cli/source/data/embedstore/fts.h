@@ -20,9 +20,6 @@ namespace apogee::embedstore {
 /// the result can express only "find documents containing these words" — which
 /// is exactly what a natural-language query means.
 ///
-/// Ommi arrived at the same rule; this carries it over rather than
-/// rediscovering it through a bug report.
-///
 /// Terms are joined with **OR**, not FTS5's implicit AND. A question is not a
 /// keyword list: "what is the capital of France" under AND requires the
 /// document to contain the word *what*, so a corpus that plainly answers it
@@ -37,10 +34,10 @@ namespace apogee::embedstore {
 
 /// Maps a raw BM25 relevance to (0, 1].
 ///
-/// `s / (1 + s)`, carried from Ommi. Raw BM25 is unbounded and corpus-relative,
-/// so a bare number is meaningless to a user comparing collections and to any
-/// threshold written in a config. This is monotonic, so it never reorders
-/// results — it only makes them comparable to a human.
+/// `s / (1 + s)`. Raw BM25 is unbounded and corpus-relative, so a bare number
+/// is meaningless to a user comparing collections and to any threshold written
+/// in a config. This is monotonic, so it never reorders results — it only
+/// makes them comparable to a human.
 ///
 /// SQLite's `bm25()` returns a **negative** number where more relevant is more
 /// negative, so the sign is flipped before scaling. Forgetting that inverts the

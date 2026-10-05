@@ -19,8 +19,8 @@
 # it runs `apogee check --fix`, and the binary creates the layout from the one
 # declaration in `source/data/contracts/layout.h`. `make install` finishes with the
 # same call. That is why the two paths cannot drift: neither of them holds a
-# list that could go stale. Ommi's dominant early bug class was exactly that
-# drift, with each install path seeding a slightly different tree.
+# list that could go stale. That drift, with each install path seeding a
+# slightly different tree, is the bug class this rule guards against.
 set -euo pipefail
 
 REPO="${APOGEE_REPO:-QuantumCompiler/Apogee}"

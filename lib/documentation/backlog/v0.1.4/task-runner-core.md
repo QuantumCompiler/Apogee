@@ -16,7 +16,7 @@
 - `contracts/layout.h`: the `tasks/` row. `logger/`: the session linkage.
 - Tests: `tests/tasks/` mirroring the package (transitions table-tested against a scripted mock); an e2e over the real binary — goal → plan → incomplete round → corrective round → done — plus a kill-and-resume check.
 
-**Reference (Ommi).** No analog for a goal-driven task runner. The nearest shapes are in-house and Ommi-derived: the **training cycle** (Milestone Z) — scheduler-invoked autonomous work under a PID lock, a circuit breaker, `halt`/`resume` replacing hand-edited state — and the **pipeline** — staged work, the manifest rewritten on every transition, resume from the first unpassed stage. Precedents to reuse, not ports.
+**Reference.** The nearest shapes are in-house: the **training cycle** (Milestone Z) — scheduler-invoked autonomous work under a PID lock, a circuit breaker, `halt`/`resume` replacing hand-edited state — and the **pipeline** — staged work, the manifest rewritten on every transition, resume from the first unpassed stage. Precedents to reuse.
 
 **Decisions made** (dated):
 - 2026-09-25 — Asked for by the user, targeted **v0.1.6**: the user states the goal; the application composes and drives every turn after it.

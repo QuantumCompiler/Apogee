@@ -123,9 +123,9 @@ struct Session {
     /// cleanliness test locks that property from this end.
     std::vector<harness::ChatMessage> messages;
 
-    /// A provider-side session id, when the backend keeps one. Generalizes
-    /// Ommi's Claude-specific field: for every backend Apogee's transcript is
-    /// authoritative and this is only a resume optimization.
+    /// A provider-side session id, when the backend keeps one. For every
+    /// backend Apogee's transcript is authoritative and this is only a resume
+    /// optimization.
     std::string provider_session_id;
 
     std::string started_at;

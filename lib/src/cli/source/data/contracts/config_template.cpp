@@ -14,8 +14,8 @@
 // so the shipped sample and `apogee config init` can never drift apart. If you
 // edit one, regenerate the other -- CI fails otherwise.
 //
-// Ported from Ommi's template-drift test, which caught exactly this class of
-// bug: a documented option that `config init` had quietly stopped writing.
+// The drift test guards exactly this class of bug: a documented option that
+// `config init` has quietly stopped writing.
 
 namespace apogee::harness {
 namespace {

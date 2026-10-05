@@ -30,9 +30,9 @@ class Harness;
 /// `make_structured_clerk` over their Harness.
 namespace apogee::knowledge {
 
-/// Extraction, not creativity: Ommi's numbers. The generation cap is what
-/// keeps an untuned local model that misses its stop token from decoding
-/// toward its context limit -- a stall that reads as a hang.
+/// Extraction, not creativity. The generation cap is what keeps an untuned
+/// local model that misses its stop token from decoding toward its context
+/// limit -- a stall that reads as a hang.
 inline constexpr double kClerkTemperature = 0.2;
 inline constexpr std::int64_t kClerkMaxTokens = 2048;
 

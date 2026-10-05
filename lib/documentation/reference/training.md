@@ -245,7 +245,7 @@ A kit is one YAML file bundling a teacher **synthesis spec** and an inline
 | `summarization` | condense a passage into a faithful, concise summary |
 | `reasoning` | solve arithmetic and logic problems with a correct final answer |
 
-The reference implementation's `tool-use` and `web-search` kits are
+The `tool-use` and `web-search` kits are
 deferred: today a local model is shown no tool definitions and only one
 family's native tool tokens are parsed, so a kit teaching a prose tool-call
 line would tune a student into lines nobody dispatches. They arrive with the
@@ -272,9 +272,7 @@ eval:                  # gates the trained model (at least one item)
 ```
 
 Drop a `<name>.yaml` of the same shape beside the bundled ones; `apogee
-check` validates every installed kit. The format is the reference
-implementation's byte for byte, so a kit written for either project runs on
-both.
+check` validates every installed kit.
 
 ## The run
 
@@ -316,8 +314,8 @@ hyperparameters, the final loss, `status` (`running` while it runs, then
 `complete`, `failed` or `cancelled`) and the timestamps. **A crashed driver
 is a failed run, never a silent success**: an `{"error"}` line is its own
 event, a non-JSON line (a stack trace) is kept as a message, and the exit
-code is carried -- three silent gaps in the reference implementation, closed
-by the protocol.
+code is carried -- three gaps that would otherwise be silent, closed by the
+protocol.
 
 | Flag | Default | Description |
 |---|---|---|
@@ -330,7 +328,7 @@ by the protocol.
 | `--mask-prompt` | off | completion-only loss: the prompt tokens are excluded |
 | `--trainer` | `training.trainer`, else `auto` | `auto`, `mlx`, `peft`, `mock` |
 
-Two things the drivers do that the reference implementation's did not:
+Two details the drivers get right:
 `train_mlx.py` lays out the `{train,valid}.jsonl` directory `mlx_lm.lora`
 actually wants (every example trains; validation is a copy of the first
 tenth, so nothing is held back from a small dataset), and `train_peft.py`
@@ -550,17 +548,17 @@ lets tiny regressions accumulate into drift. Under the default hard gate
 every stage of a complete pipeline scored 100%, so the dual gate is a
 formality there; it is under `training.gate_mode: soft`, where the
 per-stage gate is advisory and a stage may complete below 100%, that the
-dual gate is the one holding the line. (The reference implementation read
-the score from the last *passed* stage -- 100% by the gate's own
-definition -- so its anchor gate could never fail.) **Pass** promotes into
+dual gate is the one holding the line. (Reading the score from the last
+*passed* stage instead -- 100% by the gate's own definition -- would leave
+an anchor gate that could never fail.) **Pass** promotes into
 `training.cycle.backend` through the same path `train promote` takes (its
 own gate runs again), moves the consumed queue files to `consumed/`,
 advances the sessions watermark and resets the failure count; **fail**
 discards the candidate -- **nothing reaches inference** -- counts toward
 the breaker, and at `k` halts the loop with the reason in the record. The
 history is `cycle/history.json`, written atomically at every outcome, and
-`cycle halt` / `cycle resume` are the two edits to it (the reference
-implementation had you edit the file by hand). A failed or refused pass
+`cycle halt` / `cycle resume` are the two edits to it, so nobody edits the
+file by hand. A failed or refused pass
 exits non-zero, so a scheduler's log shows it.
 
 Schedule it with launchd:

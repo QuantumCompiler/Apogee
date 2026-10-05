@@ -2,9 +2,9 @@
 #
 # The install-parity gate.
 #
-# Ommi's dominant early bug class was *silent install drift*: `make install`
-# seeded one tree, the install script another, and nothing failed -- a fresh
-# install simply lacked a directory some command needed months later. The fix
+# *Silent install drift* is the bug class this guards against: `make install`
+# seeds one tree, the install script another, and nothing fails -- a fresh
+# install simply lacks a directory some command needs months later. The fix
 # adopted here is structural (one layout declaration, in source/data/contracts/layout.h)
 # and this is the check that keeps it honest.
 #

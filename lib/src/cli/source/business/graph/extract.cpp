@@ -25,7 +25,7 @@
 //
 // Compiled in rather than seeded under the data directory on purpose: the
 // extractor is a fixed system concern, not a user-editable agent, and so it
-// adds no install-parity surface (Ommi's rule, kept).
+// adds no install-parity surface.
 
 namespace apogee::graph {
 namespace {

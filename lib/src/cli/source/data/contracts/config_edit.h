@@ -18,9 +18,8 @@
 /// on parse and reorders keys on emit. Load-modify-save would silently delete
 /// the user's file contents. So Apogee never marshals a Config back to disk:
 /// it locates the affected lines and splices them, leaving every other byte
-/// exactly as it was. (Ommi reached the same conclusion and for the same
-/// reason; toml++ would not have helped -- comment preservation there is an
-/// open, unimplemented request.)
+/// exactly as it was. (toml++ would not have helped either -- comment
+/// preservation there is an open, unimplemented request.)
 ///
 /// # The Core constraint this exists to satisfy
 ///
@@ -31,11 +30,10 @@
 ///
 /// # Shape
 ///
-/// The transforms are PURE: text in, text out, no filesystem. That is a
-/// deliberate divergence from Ommi, where each helper read, edited, and wrote
-/// in one function. Separating them is what lets the golden-file suite run
-/// with no filesystem at all, and it is what makes the two guarantees below
-/// implementable:
+/// The transforms are PURE: text in, text out, no filesystem -- deliberately,
+/// rather than each helper reading, editing, and writing in one function.
+/// Separating them is what lets the golden-file suite run with no filesystem
+/// at all, and it is what makes the two guarantees below implementable:
 ///
 ///   * every edit is validated by RE-PARSING its own output before it lands;
 ///   * a failed edit leaves the file untouched (write-temp-then-rename).
@@ -66,9 +64,9 @@ public:
 /// An existing name that case-insensitively equals `candidate` without being
 /// byte-identical to it, or nullopt.
 ///
-/// This is Ommi's Viper-lowercasing lesson made explicit: there, adding
-/// "Qwen3" beside an existing "qwen3" silently merged the two into one backend
-/// at load. Apogee rejects the add and names the conflict instead.
+/// Names are compared case-insensitively, so adding "Qwen3" beside an existing
+/// "qwen3" would make two entries that name one backend. Apogee rejects the
+/// add and names the conflict instead.
 [[nodiscard]] std::optional<std::string> fold_collision(const std::vector<std::string>& existing,
                                                         std::string_view candidate);
 
@@ -179,9 +177,9 @@ public:
 /// Appends an `agents:` entry (creating the section), fields alphabetical
 /// after the name; a string or list is written only when set and a boolean
 /// only when true, so an existing entry stays byte-identical across a
-/// re-append of the same data -- Ommi's `formatAgentEntry` rule. `tools` is
-/// always written: it is the permission model, and an entry that left it
-/// implicit would read as "whatever the default is this release".
+/// re-append of the same data. `tools` is always written: it is the
+/// permission model, and an entry that left it implicit would read as
+/// "whatever the default is this release".
 /// Same collision and `force` rules as `append_backend`.
 [[nodiscard]] std::string append_agent(std::string_view content, std::string_view name,
                                        const AgentConfig& agent, bool force);
@@ -234,10 +232,9 @@ public:
 /// runs of blank lines down to one, and ends the file with exactly one
 /// newline.
 ///
-/// Narrower than Ommi's FormatConfig, which also sorted the fields inside each
-/// entry. Sorting was dropped on purpose: moving a field line moves it out
-/// from under the comment that explains it, which is precisely the damage this
-/// whole module exists to prevent.
+/// It deliberately does not sort the fields inside each entry: moving a field
+/// line moves it out from under the comment that explains it, which is
+/// precisely the damage this whole module exists to prevent.
 [[nodiscard]] std::string format_config(std::string_view content);
 
 // ---------------------------------------------------------------------------

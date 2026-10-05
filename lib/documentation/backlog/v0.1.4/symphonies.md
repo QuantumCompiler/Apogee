@@ -21,7 +21,7 @@
 - Tests: `tests/business/symphony/` — parse/validation tables, runner over scripted mock providers (stage order, output threading, call counts), template goldens; scaffold byte-identity; the asset-parity check in the install suite.
 - Consumes: [27d](model-suites.md) (roles and the suite), [27f](suite-consult.md) (the call core), 26f (shipped — grammars), 26n (shipped — narration), M1 (shipped — the busy line for long plays).
 
-**Reference (Ommi).** No analog — Ommi's models never composed at inference time. The nearest shapes are its training pipelines and regimes (staged multi-model work: teacher distilling, eval-gated stages — ported as Apogee's training track) and prompts-as-assets; the in-house precedent this item actually follows is **agents** (named, user-addable, scaffold-created workflow definitions), which is Apogee's own.
+**Reference.** The nearest shapes are the training track's pipelines and regimes (staged multi-model work: teacher distilling, eval-gated stages); the in-house precedent this item actually follows is **agents** (named, user-addable, scaffold-created workflow definitions).
 
 **Decisions made** (dated):
 - 2026-10-04 — Asked for by the user (the suites long-term vision); placed in **v0.1.4** with the suites foundation at their direction, taking 27q–27t per the release-prefix rule. Feasibility grounded by mapping onto shipped shapes (agents, training pipelines, consult) rather than a new spike — the 2026-10-03 suites spike's evidence carries.

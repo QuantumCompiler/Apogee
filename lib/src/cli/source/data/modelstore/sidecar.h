@@ -12,19 +12,18 @@
 /// **Provenance and integrity are separate facts, and this struct keeps them
 /// apart on purpose.** What the source *claimed* (the ref, the URL, a published
 /// digest, a size) and what is *actually on disk* are different things, and a
-/// post-download transform makes them differ for real. Ommi learned this the
-/// expensive way: it shipped the sidecar first, added a vision-stripping
-/// transform later, and had to retrofit `FileSHA256`/`FileSize` beside the
-/// original pin — with every previously written sidecar now ambiguous about
-/// which digest it meant. Apogee writes both from the first version.
+/// post-download transform makes them differ for real. Apogee writes both from
+/// the first version: retrofitting an on-disk digest and size beside the
+/// original pin later would leave every previously written sidecar ambiguous
+/// about which digest it meant.
 ///
 /// ## The digest is often absent, and that is not a failure
 ///
-/// Ommi could always compare against a pinned digest because it chose the
-/// models — a curated allowlist with a sha256 per entry. Apogee has no
-/// allowlist by policy, so it downloads whatever the user names, and most
-/// sources publish no digest for the file. The record therefore has to
-/// distinguish three states that a single boolean would flatten into a lie:
+/// A curated allowlist with a sha256 per entry can always compare against a
+/// pinned digest. Apogee has no allowlist by policy, so it downloads whatever
+/// the user names, and most sources publish no digest for the file. The record
+/// therefore has to distinguish three states that a single boolean would
+/// flatten into a lie:
 ///
 ///   * a digest was published and matched,
 ///   * a digest was published and did NOT match,

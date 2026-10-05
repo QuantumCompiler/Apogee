@@ -7,8 +7,8 @@
 # when the loop landed (CLAUDE.md said it would). The dependency runs one way
 # — backends include harness — and `harness::ModelBehavior` exists as plain
 # data precisely so the loop can ask about a model family without reaching
-# back. Ommi has the same seam for the same reason: in Go the compiler enforces
-# it, because the reverse edge is an import cycle and the build simply fails.
+# back. In Go the compiler would enforce this seam, because the reverse edge
+# is an import cycle and the build simply fails.
 #
 # The loop matters as much as the harness here. A loop that includes a backend
 # starts special-casing one vendor's tool dialect, and "one shared loop for all

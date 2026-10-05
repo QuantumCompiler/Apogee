@@ -32,7 +32,7 @@ TEST_CASE("run_command renders stdout, stderr and the exit status, and is gated"
     apogee::tools::register_shell_tool(registry, temp.path(), std::chrono::seconds{10});
     const apogee::agent::Tool* tool = registry.find("run_command");
     REQUIRE(tool != nullptr);
-    CHECK(tool->writes);  // the divergence from Ommi: the shell goes through the gate
+    CHECK(tool->writes);  // the shell goes through the gate
     CHECK(tool->describe_target(R"({"command":"echo hi"})") == "echo hi");
 
     const ToolOutcome ok = tool->run(R"({"command":"echo out; echo err 1>&2; exit 3"})");

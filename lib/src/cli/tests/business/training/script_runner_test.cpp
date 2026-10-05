@@ -167,7 +167,7 @@ TEST_CASE("an error line is the outcome's error and the run is not ok", "[traini
 
 TEST_CASE("a bad exit with no error line is named with its code and the stderr tail",
           "[training][scripts]") {
-    // Ommi discarded the exit status: a crashed trainer read as success. Here
+    // Discarding the exit status would read a crashed trainer as success. Here
     // the crash is the outcome, with what the script said on stderr.
     const ScriptOutcome outcome =
         run_script(request(), {}, {}, spawning("", 2, "Traceback\nValueError: bad\n"));

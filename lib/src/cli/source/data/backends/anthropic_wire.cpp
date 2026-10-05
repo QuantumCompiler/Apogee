@@ -251,8 +251,7 @@ nlohmann::json build_request(const harness::ChatRequest& request, const RequestO
     }
     if (options.web_search) {
         // A server-side tool: Anthropic runs the search itself, so nothing has
-        // to be dispatched locally. This is what replaces Ommi's dependence on
-        // the claude CLI for web search.
+        // to be dispatched locally, and web search needs no claude CLI.
         nlohmann::json search{{"type", "web_search_20250305"}, {"name", "web_search"}};
         if (options.web_search_max_uses > 0) {
             search["max_uses"] = options.web_search_max_uses;

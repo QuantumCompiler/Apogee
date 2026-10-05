@@ -7,11 +7,11 @@
 /// The one piece of embedding plumbing every client shares: splitting a list of
 /// inputs into request-sized batches.
 ///
-/// Batch-first is a Core constraint of the embedding items, and it was earned:
-/// Ommi's graph item recorded per-chunk embedding calls as its cost trap -- a
-/// corpus of ten thousand chunks is ten thousand round trips at one per call,
-/// and a few dozen at a provider's documented maximum. Every client here takes
-/// a whole list and asks this function where the request boundaries fall.
+/// Batch-first is a Core constraint of the embedding items, because per-chunk
+/// embedding calls are a cost trap: a corpus of ten thousand chunks is ten
+/// thousand round trips at one per call, and a few dozen at a provider's
+/// documented maximum. Every client here takes a whole list and asks this
+/// function where the request boundaries fall.
 namespace apogee::backends {
 
 /// Half-open `[begin, end)` index ranges covering `count` inputs, each at most

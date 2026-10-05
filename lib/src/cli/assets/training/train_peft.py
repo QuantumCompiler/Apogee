@@ -21,7 +21,7 @@ Requires the `peft` requirement set:  apogee train setup --trainer peft
 The trainer is transformers' own `Trainer` over a tokenised dataset with the
 prompt masked EXACTLY (the prompt's token count, from the chat template with
 the generation prompt appended) rather than trl's SFTTrainer with the
-response-template collator the reference driver used: that collator was
+response-template collator: that collator was
 removed from trl, and the template heuristic it needed was a guess.
 """
 

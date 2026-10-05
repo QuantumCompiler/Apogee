@@ -18,7 +18,7 @@
 - Tests: `tests/business/agentloop/validate` — pipeline tables (structural catches → no model call, asserted by call counts; model disagreement → one round → surface), the budget interplay with 27f, goldens for the surfaced-disagreement rendering.
 - Consumes: [27d](model-suites.md) (the suite, the verifier member), [27f](suite-consult.md) (the call mechanics and caps — this item adds *policy*, not a second model-calling path); 26f (shipped — the structural floor); the rerank judge's degradation honesty (shipped) as the reporting model.
 
-**Reference (Ommi).** The judge shape is the analog — Ommi's training eval gate and rerank judge (both ported) are models scoring models, harness-wired; a *configurable* validation policy at interaction seams has no analog there.
+**Reference.** The judge shape is the in-house precedent — the training eval gate and the rerank judge are models scoring models, harness-wired; a *configurable* validation policy at interaction seams is what this item adds.
 
 **Decisions made** (dated):
 - 2026-10-03 — Split from the suites spike as the policy layer over 27f's mechanics; one model-calling path (consult), two uses (delegation, validation).

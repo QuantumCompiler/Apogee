@@ -15,7 +15,7 @@
 - [machine-mode.md](../../reference/machine-mode.md): the `hello` line, the `capabilities` field, and a new **"The stability promise"** section (guarantees, additivity of types *and* fields, deprecation policy).
 - `tests/scripts/py/schema_conformance.py` + the machine-mode e2e: pin both additions; `tests/scripts/py/naive_host_driver.py` grows a hello-aware path proving old-binary compatibility semantics stay.
 
-**Reference (Ommi).** No analog — machine mode is Apogee's divergence. Prior art: MCP's `initialize` (capability negotiation between peer processes) and LSP's `initialize`, both of which put capabilities in the *reply* to a client hello; Apogee inverts it (child announces, host refines) to stay compatible with drivers that predate the handshake.
+**Reference.** Prior art: MCP's `initialize` (capability negotiation between peer processes) and LSP's `initialize`, both of which put capabilities in the *reply* to a client hello; Apogee inverts it (child announces, host refines) to stay compatible with drivers that predate the handshake.
 
 **Decisions made** (dated):
 - 2026-09-25 — Split from the integration spike (item 27): wall W1, with the compatibility mechanism verified live (unknown inbound lines ignored by v0.1.2).

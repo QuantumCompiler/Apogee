@@ -32,16 +32,16 @@
 /// resolves them. The buffer is bounded by the longest marker, so the delay is
 /// a few characters and never a sentence.
 ///
-/// ## Two rules earned elsewhere
+/// ## Two edge-case rules
 ///
 /// **A partial marker at end of stream was never a marker.** `flush` emits it
 /// verbatim rather than eating it: a model that legitimately ends a sentence
 /// with `<` should not have it silently removed.
 ///
-/// **An empty pair list must not underflow the hold-back.** Ommi's version
-/// computed the hold-back from the longest marker and panicked on a negative
-/// slice when there were no markers at all. Here the empty case is a
-/// pass-through with no arithmetic, and a test pins it.
+/// **An empty pair list must not underflow the hold-back.** The hold-back is
+/// computed from the longest marker, and there is no longest marker when there
+/// are no markers at all. Here the empty case is a pass-through with no
+/// arithmetic, and a test pins it.
 namespace apogee::backends {
 
 /// One open/close reasoning-block pair.
@@ -53,9 +53,9 @@ struct TagPair {
 /// The pairs seen in the wild, and the default when a profile says nothing.
 ///
 /// `<think>` is Qwen and DeepSeek-R1 — **verified here against Qwen 3.6**.
-/// `<thinking>` and `<reasoning>` are carried from Ommi's list; they cost
-/// nothing to recognise and the permissive-unknown rule says an uncharacterised
-/// model should have every format it might emit recognised.
+/// `<thinking>` and `<reasoning>` are included too; they cost nothing to
+/// recognise and the permissive-unknown rule says an uncharacterised model
+/// should have every format it might emit recognised.
 ///
 /// Channel-marker formats (`<|channel|>analysis<|message|>`) are deliberately
 /// NOT here: they are not open/close pairs and shoehorning them in would make

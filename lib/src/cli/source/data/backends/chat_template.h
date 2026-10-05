@@ -12,16 +12,16 @@
 /// A cloud API takes a structured message list and applies the model's template
 /// server-side. A local model takes **one string**, and getting its framing
 /// wrong does not fail loudly -- it produces fluent nonsense, or a model that
-/// never stops. Ommi learned this the expensive way: `gemma4` matched a
-/// `gemma` substring, got Gemma 2/3's `<start_of_turn>` markers, and emitted
-/// token soup, because those markers are not in Gemma 4's vocabulary at all.
+/// never stops. The concrete hazard: `gemma4` matches a `gemma` substring, gets
+/// Gemma 2/3's `<start_of_turn>` markers, and emits token soup, because those
+/// markers are not in Gemma 4's vocabulary at all.
 ///
 /// Two consequences shape this file. First, **a template the model ships with
 /// always wins** -- the GGUF's own `tokenizer.chat_template` is the model's
 /// statement about itself, and llama.cpp applies it for us. Second, the
 /// name-matching fallback is deliberately **small and conservative** here: the
 /// per-family profile layer (dialects, filters, tool markup) is item 14's, and
-/// a generous guesser that ships early is exactly what produced the Ommi bug.
+/// a generous guesser that ships early is exactly what produces that failure.
 /// An unrecognised model gets ChatML, which is the closest thing to a lingua
 /// franca, and the caller is told the fallback was used.
 namespace apogee::backends {

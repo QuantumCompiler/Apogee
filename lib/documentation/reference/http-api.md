@@ -809,7 +809,7 @@ The twin of `apogee datasets synth`, as an **async job** (`datasets-synth`):
 `{"name", "teacher", "kit", "count"?, "topic"?, "temperature"?,
 "max_tokens"?, "parallel"?, "force"?}`. Synth is teacher inference, not
 training -- the distinction the training track's carve-out rests on -- so it
-is exposed exactly as the reference implementation exposed it. The teacher is
+is exposed here. The teacher is
 named explicitly (never resolved from a role), must be served by this plane,
 and is never a vendor CLI; an API backend runs `parallel` batches in flight
 (default 4), a local one runs one. `202 {"job_id"}`; progress `synthesising
@@ -856,8 +856,8 @@ rollback|setup`, `train pipeline run|resume`, `train regime run` and
 `train cycle run|halt|resume` have no route: an expensive GPU job with
 live progress is not a control surface a remote client should be able to
 start, and a promotion changes what this server chats with. Each is a
-documented parity carve-out (the reference implementation's
-`POST .../cycle/halt` is deliberately not ported); what a remote client may
+documented parity carve-out (there is deliberately no
+`POST .../cycle/halt`); what a remote client may
 do is read.
 
 ### `GET /v1/admin/training/runs`

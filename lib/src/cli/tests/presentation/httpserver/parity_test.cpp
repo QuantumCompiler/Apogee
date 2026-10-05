@@ -23,8 +23,8 @@
 /// The CLI↔HTTP parity table -- and its completeness.
 ///
 /// "Parity is the product" means every mutating CLI action reaches a remote
-/// client through the control plane. Ommi kept a hand-maintained list of such
-/// actions; the list was correct on the day each row was written. This test
+/// client through the control plane. A hand-maintained list of such
+/// actions is correct only on the day each row is written. This test
 /// walks the CLI's whole subcommand tree and requires EVERY subcommand to be
 /// classified below -- as a twin (with its admin route), a backfill (with the
 /// area that owns it), a carve-out (with the reason), or read-only. Adding a
@@ -143,8 +143,8 @@ const std::map<std::string, Classification>& table() {
          carve_out("the scheduler-invoked pass; a promotion changes what a served backend "
                    "runs; training control is CLI-only")},
         {"train cycle halt",
-         carve_out("edits the cycle's state on the host; training control is CLI-only -- the "
-                   "reference's POST .../cycle/halt is deliberately not ported")},
+         carve_out("edits the cycle's state on the host; training control is CLI-only -- "
+                   "there is deliberately no POST .../cycle/halt")},
         {"train cycle resume",
          carve_out("edits the cycle's state on the host; training control is CLI-only")},
         {"__mcp-tools",

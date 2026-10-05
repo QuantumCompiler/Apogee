@@ -1586,8 +1586,8 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
 
     // A side request -- a background title summary, a one-off clerk call -- is
     // not a turn of this conversation. It runs on its own throwaway context so
-    // the session's KV is untouched: Ommi's SideRequest lesson, where an async
-    // titler's cache write clobbered the session it was titling.
+    // the session's KV is untouched -- otherwise an async titler's cache write
+    // could clobber the session it is titling.
     const bool side_request = request.transient.side_request;
 
     LlamaContext* context = nullptr;

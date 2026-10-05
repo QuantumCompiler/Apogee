@@ -6,10 +6,8 @@
 /// The compiled model → context-window fallback table.
 ///
 /// **Single owner.** Apogee tracks context usage for every backend, including
-/// cloud ones — a divergence from Ommi, where the claude CLI managed its own
-/// context and Ommi stayed out of the way. That means every backend needs a
-/// window size, and a config entry that omits `context_size` needs a sensible
-/// answer from somewhere.
+/// cloud ones. That means every backend needs a window size, and a config
+/// entry that omits `context_size` needs a sensible answer from somewhere.
 ///
 /// That somewhere is here, and only here. The config engine, the cloud
 /// backends, and the chat layer all consume this rather than growing their own

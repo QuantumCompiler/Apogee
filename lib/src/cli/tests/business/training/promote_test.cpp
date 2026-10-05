@@ -146,7 +146,7 @@ TEST_CASE(
     CHECK(apogee::training::gate_mode_from_string("") == GateMode::Hard);
 }
 
-TEST_CASE("version numbers are max + 1, never the count -- the reference's regression pinned",
+TEST_CASE("version numbers are max + 1, never the count, so a prune cannot regress them",
           "[training][promote][version]") {
     const apogee::testing::TempDir root{"version-" + std::to_string(std::random_device{}())};
     VersionLedger ledger;

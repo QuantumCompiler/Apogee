@@ -154,8 +154,8 @@ TEST_CASE("a missing type is an error, not a silent default", "[config]") {
 }
 
 TEST_CASE("names differing only by case are rejected at load, never merged", "[config]") {
-    // Ommi's Viper-lowercasing bug, made explicit: there these became ONE
-    // backend and one of the two definitions silently won.
+    // The hazard, made explicit: a loader that lowercases keys makes these ONE
+    // backend, and one of the two definitions silently wins.
     try {
         load_text("backends:\n  Qwen:\n    type: mock\n  qwen:\n    type: mock\n");
         FAIL("expected a ConfigError");
@@ -288,7 +288,7 @@ TEST_CASE("a local backend's cache_type parses, and anything else is refused by 
 }
 
 TEST_CASE("the shipped sample config byte-matches the embedded template", "[config][template]") {
-    // Ommi's template-drift test, ported. It exists because the failure it
+    // The template-drift test. It exists because the failure it
     // catches is invisible: `config init` quietly stops writing an option the
     // docs still describe, and nobody notices until a user asks why the key
     // they read about does nothing.

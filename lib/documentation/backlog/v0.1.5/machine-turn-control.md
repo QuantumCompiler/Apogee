@@ -16,7 +16,7 @@
 - [machine-mode.md](../../reference/machine-mode.md): both additions, plus the turn-accounting rule stated for drivers.
 - Tests: `tests/scripts/py/schema_conformance.py`, the machine-mode e2e (a cancelled long turn: `result` arrives, session survives, next turn works), `tests/scripts/py/naive_host_driver.py` re-run — W3 and W4 close.
 
-**Reference (Ommi).** No analog (Ommi had no machine mode). Prior art: JSON-RPC's `id` (what correlation buys) and LSP's `$/cancelRequest` (cancel as a notification against an id) — adopted here in the JSONL idiom the spike recommended over reframing: the id is a field, the cancel is a typed line, and both arrive without breaking a v1 driver.
+**Reference.** Prior art: JSON-RPC's `id` (what correlation buys) and LSP's `$/cancelRequest` (cancel as a notification against an id) — adopted here in the JSONL idiom the spike recommended over reframing: the id is a field, the cancel is a typed line, and both arrive without breaking a v1 driver.
 
 **Decisions made** (dated):
 - 2026-09-25 — Split from the integration spike (item 27), walls W3 and W4.

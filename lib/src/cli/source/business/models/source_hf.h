@@ -13,9 +13,8 @@
 
 /// Downloading a model file directly from Hugging Face.
 ///
-/// **Entirely new — Ommi had no such path.** Ommi acquired models only through
-/// Ollama, from a curated allowlist. Apogee's open-model policy means a user
-/// can name any repository, so this is written from the API rather than ported.
+/// Apogee's open-model policy means a user can name any repository -- there is
+/// no curated allowlist -- so this is written against the Hugging Face API.
 ///
 /// ## The ref grammar
 ///

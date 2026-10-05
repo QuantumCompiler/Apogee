@@ -49,7 +49,7 @@ std::string first_string(const nlohmann::json& object, std::initializer_list<con
 std::string synth_system_prompt(std::string_view kit_system) {
     // The contract appended to the kit's prompt, so every teacher --
     // whatever its native output habits -- returns a machine-parseable
-    // array. Ommi's wording, kept.
+    // array.
     constexpr std::string_view kContract =
         "\n\nYou are generating a synthetic supervised fine-tuning dataset. Each example must "
         "be realistic, self-contained, and correct. Vary phrasing, length, and difficulty across "

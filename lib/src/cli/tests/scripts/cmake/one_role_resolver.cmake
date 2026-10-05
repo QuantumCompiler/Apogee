@@ -1,11 +1,11 @@
 # There is exactly one role-resolution chain, and it lives in harness/roles.cpp.
 #
-# **Ommi shipped this logic twice and the copies disagreed.** Its CLI and its
-# HTTP admin plane each grew their own chain, so a request ran on one backend
-# from the terminal and another over HTTP. The fix there was one exported
-# function both call. Apogee starts from that fix — and this check is what keeps
-# it true, because the duplicate is never written deliberately: it appears as
-# one innocent-looking line inside whatever command needs a backend name.
+# **Two copies of this logic come to disagree.** A CLI and an HTTP admin plane
+# that each grow their own chain run a request on one backend from the terminal
+# and another over HTTP. The fix is one exported function both call. Apogee
+# starts from that fix — and this check is what keeps it true, because the
+# duplicate is never written deliberately: it appears as one innocent-looking
+# line inside whatever command needs a backend name.
 #
 # So the shape of that line is what is banned. Reading `models.default_backend`
 # (or either role pointer) anywhere outside the resolver, the config engine, and
@@ -99,8 +99,8 @@ if(offenders)
     string(REPLACE ";" "\n  " pretty "${offenders}")
     message(FATAL_ERROR
         "A second role-resolution chain is starting:\n  ${pretty}\n"
-        "Reading models.default_* directly is how the CLI and the HTTP plane came to disagree in "
-        "Ommi. Call harness::resolve_backend_key() (or resolve_chat_backend()) instead -- it takes "
+        "Reading models.default_* directly is how the CLI and the HTTP plane come to disagree. "
+        "Call harness::resolve_backend_key() (or resolve_chat_backend()) instead -- it takes "
         "the override and any per-feature pin and applies the whole chain. If this file genuinely "
         "needs the raw value, add it to the allowlist in this file WITH a reason.")
 endif()

@@ -85,8 +85,8 @@ build:
 # `~/.apogee/` contains. `apogee check --fix` creates it from the single
 # declaration in source/data/contracts/layout.h, and install.sh / install.ps1 end with
 # the same call -- so no install path holds a list of directories that could go
-# stale against the others. Ommi's dominant early bug class was exactly that
-# drift; the CI parity gate diffs two installs to keep it closed.
+# stale against the others. That drift is the bug class this guards against;
+# the CI parity gate diffs two installs to keep it closed.
 install: build
 	@cmake --install $(BUILD_DIR) --prefix "$(PREFIX)" --component apogee
 	@$(MAKE) --no-print-directory install-completions PREFIX="$(PREFIX)"

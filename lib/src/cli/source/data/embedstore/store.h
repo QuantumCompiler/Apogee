@@ -19,10 +19,10 @@
 ///
 /// **The permanent retrieval floor.** Lexical BM25 needs no embedding model, no
 /// API key, and no network — which is why it is built first and why it stays
-/// even though Apogee has cloud embedders. Ommi's recorded history is the
-/// argument: its RAG survived an embedding-model freeze *only* because the
-/// lexical path was model-free. A retrieval story whose floor depends on a
-/// model is a story that stops working when the model does.
+/// even though Apogee has cloud embedders: retrieval survives an
+/// embedding-model freeze *only* if the lexical path is model-free. A retrieval
+/// story whose floor depends on a model is a story that stops working when the
+/// model does.
 ///
 /// ## What a caller can rely on
 ///
@@ -62,9 +62,9 @@ struct SearchHit {
     Chunk chunk;
 
     /// **Normalised to (0, 1] as `s/(1+s)`**, where `s` is the raw BM25
-    /// relevance. Carried from Ommi, and the reason matters: raw BM25 is
-    /// unbounded and corpus-dependent, so a raw score means nothing to a user
-    /// comparing two collections and nothing to a threshold in a config file.
+    /// relevance. The reason matters: raw BM25 is unbounded and
+    /// corpus-dependent, so a raw score means nothing to a user comparing two
+    /// collections and nothing to a threshold in a config file.
     double score = 0.0;
 
     /// Which retriever produced `score`.

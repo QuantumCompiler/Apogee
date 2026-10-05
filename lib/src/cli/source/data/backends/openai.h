@@ -19,8 +19,7 @@ namespace apogee::backends {
 /// It also embeds. OpenAI serves chat and embeddings from different models
 /// behind one key, so one entry does both: `model` answers, `embedding_model`
 /// vectorises. That is the per-provider capability the harness discovers; a
-/// type allowlist would have had to be edited to learn this, which is the
-/// Ommi gate that did not transfer.
+/// type allowlist would have had to be edited to learn this.
 class OpenAIProvider final : public harness::LLMProvider, public harness::EmbeddingCapable {
 public:
     struct Options {

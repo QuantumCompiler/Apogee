@@ -19,7 +19,7 @@
 - Tests: `tests/business/agentloop/` for the attachment-turn expansion (budget, seeding, lexical-only); `tests/presentation/commands/` for toolset registration/deregistration; golden: the same question over the same fixture graph yields identical payloads via CLI verb and scoped tool (27l's one-core assertion extended).
 - Consumes: [27n](attachment-code-graph.md) (the graph exists), [27l](graph-navigation.md) (verbs, toolset, caps, addressing), [27k](code-graph-extraction.md) (what the graph contains); 26g (shipped) governs how the added tools rank in selection — no special pleading.
 
-**Reference (Ommi).** The expansion half has the Ommi analog already ported (Milestone Y's retrieval-time expansion; Ommi's `knowledge query --graph`, `lib/cli/documentation/internal/KNOWLEDGE.md` — collection-scoped there too). The toolset-over-attachments half has **no analog**: Ommi models were never handed graph tools.
+**Reference.** The expansion half builds on Milestone Y's shipped retrieval-time expansion (collection-scoped there).
 
 **Decisions made** (dated):
 - 2026-10-03 — Split from the attachment-representation spike as the payoff item: the spike's central design judgment — the stress test failed on *passive injection*, so the graph's value must arrive through tools the model calls — is this item's shape. Expansion rides along because the plumbing is one seam away, but the toolset is the point.

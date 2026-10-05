@@ -151,7 +151,7 @@ TEST_CASE("a truncated download is reported, not accepted", "[models][gguf]") {
 }
 
 TEST_CASE("a Git LFS pointer is reported as not a GGUF", "[models][gguf]") {
-    // The other failure Ommi recorded: the pointer file gets committed and the
+    // The other download failure: the pointer file gets committed and the
     // model never arrives.
     const GgufInfo info = inspect_bytes(
         "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 123\n", "lfs");

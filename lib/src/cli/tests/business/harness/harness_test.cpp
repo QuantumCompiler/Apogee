@@ -179,7 +179,7 @@ TEST_CASE("with no backends at all the error names the fix", "[harness][router]"
 }
 
 TEST_CASE("a single registered backend is NOT routed to implicitly", "[harness][router]") {
-    // Ommi's fourth rung, deliberately not ported: it papers over an unset
+    // An implicit sole-backend rung, deliberately absent: it papers over an unset
     // models.default in a way that stops working the moment a second backend
     // is added -- exactly when the user has least idea why routing changed.
     const Config config = config_from("backends:\n  only:\n    type: mock\n");

@@ -17,7 +17,7 @@
 - Tests: `tests/presentation/cli/` — the refusal and default-suite paths, banner goldens, `/play` end-to-end over scripted providers, chat-unchanged byte-equivalence; machine-mode transcript goldens for a played symphony.
 - Consumes: [27q](symphonies.md) (symphonies to play), [27d](model-suites.md) (the suite, via 27q's gate), 27e's admission/warmup (shipped by then or riding the same seam), 26o (shipped — permission presets), M1 (shipped — the busy line).
 
-**Reference (Ommi).** No analog — Ommi had one interactive surface and no suites. The in-house precedent is chat itself, deliberately generalized rather than copied; the SPEC's no-TUI lesson is untouched (execute is a CLI surface like chat, not a second front-end in the non-goal's sense).
+**Reference.** The in-house precedent is chat itself, deliberately generalized rather than copied; the SPEC's no-TUI lesson is untouched (execute is a CLI surface like chat, not a second front-end in the non-goal's sense).
 
 **Decisions made** (dated):
 - 2026-10-04 — Asked for by the user (the vision's surface); placed in **v0.1.4** with the set at their direction.

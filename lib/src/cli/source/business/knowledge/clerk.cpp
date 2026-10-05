@@ -20,7 +20,7 @@
 //
 // Compiled in rather than seeded under the data directory on purpose: the
 // clerk is a fixed system concern, not a user-editable agent, and so it adds
-// no install-parity surface (Ommi's rule, kept).
+// no install-parity surface.
 
 namespace apogee::knowledge {
 namespace {

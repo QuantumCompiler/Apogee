@@ -287,7 +287,7 @@ import os
 import csv
 
 # Environment guards, BEFORE any ML import. Skipping them causes silent
-# SIGABRT crashes that mask the real error (Ommi's recorded lesson).
+# SIGABRT crashes that mask the real error.
 #
 # Must be set before `datasets` imports its Rust tokenizer extension, which
 # spawns fork-based workers that can deadlock on macOS.
@@ -652,9 +652,9 @@ def main():
             if not pair:
                 continue
             if "=" not in pair:
+                fail("Invalid --map entry %r. Expected format: dest=src_column" % pair)
 )PY",
-    R"PY(                fail("Invalid --map entry %r. Expected format: dest=src_column" % pair)
-            dest, src = pair.split("=", 1)
+    R"PY(            dest, src = pair.split("=", 1)
             col_map[dest.strip()] = src.strip()
 
     emit({"message": "Loading dataset from %s (split: %r)..." % (args.source, args.split)})
@@ -730,11 +730,11 @@ Modes (--mode):
 
 Requires the `mlx` requirement set:  apogee train setup --trainer mlx
 
-Two departures from the reference driver, both found by reading mlx_lm:
+Two details, both found by reading mlx_lm:
 `mlx_lm.lora --data` wants a DIRECTORY holding train.jsonl and valid.jsonl,
 not a file (a file path fails with "training set not found"), so train mode
-lays that directory out from the dataset; and `--mask-prompt` is forwarded,
-where the reference script rejected the flag its own orchestrator passed.
+lays that directory out from the dataset; and `--mask-prompt` is accepted
+and forwarded, since the orchestrator passes it.
 """
 
 import argparse
@@ -941,7 +941,7 @@ const std::string& script_train_mlx_py() {
     return text;
 }
 
-constexpr std::array<std::string_view, 2> kScriptTrainPeftPy{{
+constexpr std::array<std::string_view, 1> kScriptTrainPeftPy{{
     R"PY(#!/usr/bin/env python3
 """PEFT/CUDA training driver for Apogee.
 
@@ -965,7 +965,7 @@ Requires the `peft` requirement set:  apogee train setup --trainer peft
 The trainer is transformers' own `Trainer` over a tokenised dataset with the
 prompt masked EXACTLY (the prompt's token count, from the chat template with
 the generation prompt appended) rather than trl's SFTTrainer with the
-response-template collator the reference driver used: that collator was
+response-template collator: that collator was
 removed from trl, and the template heuristic it needed was a guess.
 """
 
@@ -1322,8 +1322,7 @@ def main():
         run_infer(args)
 
 
-)PY",
-    R"PY(if __name__ == "__main__":
+if __name__ == "__main__":
     main()
 )PY",
 }};

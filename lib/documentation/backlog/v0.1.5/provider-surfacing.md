@@ -16,7 +16,7 @@
 - Tests: `tests/presentation/commands/` — the check section against scripted cache states (including no cache); PATH-stripped sandbox check warns (the spike's probe, inverted into a test); `models list` golden rows per tier; the verified write exercised through the mock-shaped completion seam.
 - Consumes: [provider-detection.md](provider-detection.md) (tiers, cache, cheap-check rules); the use-time error text (shipped) as the remediation source; [28h](../v0.1.5/machine-readable-reads.md) output conventions (adopted early, consumed decision).
 
-**Reference (Ommi).** The doctor precedent is Ommi's `check` (its models doctor read GGUF headers so "a model that would die on its first turn is caught by the doctor rather than a user" — MODELS.md; the exact failure-shape this item ports to providers). No analog for provider tiers or a verified record.
+**Reference.** The doctor precedent is `check` (its per-backend validation catches an unloadable GGUF, so a model that would die on its first turn is caught by the doctor rather than a user — the exact failure-shape this item ports to providers).
 
 **Decisions made** (dated):
 - 2026-10-03 — Split from the provider-detection spike as the surfacing half; gated on 28a only, parallel to [provider-registration.md](provider-registration.md) — the doctor should tell the truth even for hand-registered backends on a machine that never runs a scan.

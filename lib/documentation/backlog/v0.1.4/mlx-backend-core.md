@@ -16,7 +16,7 @@
 - `harness/` config surface: the `mlx` entry type (`model_path` pointing at an MLX model directory, sampling fields as llamacpp's); `cli/check.cpp`: the availability row.
 - Tests: `tests/data/backends/mlx_local_test.cpp` over a scripted fake driver (the vendor-CLI fixture pattern — golden JSONL both directions, dead-child-fails-fast, stderr tail folded into failures); the driver's stub-module suite; the no-listen check extended over a live driver run.
 
-**Reference (Ommi).** The analog is Ommi's own design: **process-routed local inference** was how Ommi ran every local model (a per-turn `ommi-completion` spawn with an on-disk prompt cache, CHAT.md) — Apogee diverged to in-process llama.cpp, and this item brings the process-routed pattern back for a *second* runtime beside the first, with one deliberate divergence from Ommi's shape: a **persistent** child holding the cache in memory rather than per-turn spawns with cache files (the claude-cli backend proved the persistent shape against a real peer). The driver discipline ports from Apogee's own training track (Milestone Z), not from Ommi.
+**Reference.** The design is **process-routed local inference** as a *second* runtime beside in-process llama.cpp, in one deliberate shape: a **persistent** child over pipes holding the cache in memory rather than per-turn spawns with cache files (the claude-cli backend proved the persistent shape against a real peer). The driver discipline ports from Apogee's own training track (Milestone Z).
 
 **Decisions made** (dated):
 - 2026-10-03 — Asked for by the user, targeted **v0.1.8**, specced as track 30 (the renumber freed the number; nothing shipped under it).

@@ -20,9 +20,9 @@ nlohmann::json status_event_json(const harness::StatusEvent& event) {
         out["detail"] = event.detail;
     }
     if (event.rag.has_value()) {
-        // Flattened beside the other fields, the way Ommi's frames read, and
-        // always with the retriever: a score shown without its scale invites a
-        // comparison that cannot be made.
+        // Flattened beside the other fields, and always with the retriever: a
+        // score shown without its scale invites a comparison that cannot be
+        // made.
         out["collection"] = event.rag->db;
         out["chunks_found"] = event.rag->chunks_found;
         out["top_score"] = event.rag->top_score;

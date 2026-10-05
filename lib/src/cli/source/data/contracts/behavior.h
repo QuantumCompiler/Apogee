@@ -11,9 +11,8 @@
 /// layer, which includes this header; declaring the shared shape here is what
 /// lets the agent loop ask "how does this model behave?" without the harness
 /// ever including backends. That is the layering seam, and it is a Core
-/// constraint of this item, not a style preference -- in Ommi the same
-/// structure exists for the same reason, because the obvious alternative is an
-/// import cycle.
+/// constraint of this item, not a style preference: the obvious alternative is
+/// an include cycle.
 namespace apogee::harness {
 
 struct ModelBehavior {

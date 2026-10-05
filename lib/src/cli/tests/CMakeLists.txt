@@ -451,7 +451,7 @@ add_test(NAME cli.no_vendor_credentials
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/no_vendor_credentials.cmake"
 )
 
-# One role-resolution chain, and only one. See the file for the Ommi bug class.
+# One role-resolution chain, and only one. See the file for the bug class.
 add_test(NAME cli.one_role_resolver
     COMMAND "${CMAKE_COMMAND}"
         -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
@@ -622,7 +622,7 @@ if(UNIX)
         # in a unit test.
         # A noisy, dying MCP server under a PTY: its stderr never paints the
         # terminal, the failure carries its tail, and startup does not wait
-        # out the connect timeout. Ommi's Milestone P postmortem, locked.
+        # out the connect timeout.
         add_test(NAME cli.mcp_server_stderr_stays_off_the_terminal
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_mcp_check.py"

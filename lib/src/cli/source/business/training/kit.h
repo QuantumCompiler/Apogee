@@ -13,9 +13,6 @@
 /// suite (`{prompt, expected}` items) that gates a model trained on that
 /// skill. Four ship compiled in and are seeded under `training/kits/`; a
 /// user drops a `<name>.yaml` of the same shape beside them.
-///
-/// The format is Ommi's, byte for byte in the bundled four, so a kit written
-/// for either project runs on both.
 namespace apogee::training {
 
 inline constexpr int kDefaultSynthCount = 200;

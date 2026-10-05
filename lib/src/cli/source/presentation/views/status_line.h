@@ -21,9 +21,8 @@
 ///
 /// **Startup speaks on one line.** No construction-time notice may write raw
 /// stderr on an interactive path — a backend loading, a subprocess starting, a
-/// config warning. Ommi retrofitted that rule (OMMI-14) after the fact; here it
-/// is the reason `set()` exists, and why every surface takes a `StatusLine`
-/// rather than reaching for `std::cerr`.
+/// config warning. That rule is the reason `set()` exists, and why every
+/// surface takes a `StatusLine` rather than reaching for `std::cerr`.
 ///
 /// **And every slow command speaks on it too** (M1). A conversation always had
 /// a line; an ordinary command had none, so `apogee models list` read forty

@@ -182,7 +182,7 @@ TEST_CASE("ids are kr-<UTC second>-<6 hex>, sortable by time, and unique within 
     CHECK(apogee::knowledge::timestamp_for(when + std::chrono::microseconds{5}) > stamp);
 }
 
-TEST_CASE("the JSON shape is Ommi's: optional fields omitted when empty, and it round-trips",
+TEST_CASE("the JSON shape omits optional fields when empty, and it round-trips",
           "[knowledge][record][json]") {
     const Record record = sample();
     const nlohmann::json json = record;

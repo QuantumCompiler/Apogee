@@ -128,7 +128,7 @@ private:
 
 TEST_CASE("the roles column comes from the shared resolver", "[commands][models][roles]") {
     // If this column were computed from config.models.* directly it could drift
-    // from what a run does -- which is the exact Ommi bug the resolver exists
+    // from what a run does -- which is the exact bug the resolver exists
     // to prevent, reproduced one layer up in the display.
     const Config config = sample_config();
     const std::vector<ModelRow> rows = build_model_rows(config);

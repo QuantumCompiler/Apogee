@@ -13,8 +13,8 @@ namespace apogee::commands {
 ///
 /// Held separately from the root command so tests can assemble a registry of
 /// their own -- the injectable-seam discipline, starting at the first
-/// interface. Retrofitting that later in C++ is far more painful than in Go,
-/// which is why it is here on day one rather than when it is first needed.
+/// interface. Retrofitting that later is far more painful, which is why it is
+/// here on day one rather than when it is first needed.
 class CommandRegistry {
 public:
     CommandRegistry() = default;

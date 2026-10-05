@@ -8,11 +8,11 @@
 
 /// The one resolver for `models:` role pointers.
 ///
-/// **This file exists because Ommi shipped the same logic twice and the copies
-/// disagreed.** Its CLI and its HTTP admin plane each grew their own resolution
-/// chain, and a request that ran on one backend from the terminal ran on
-/// another over HTTP. The fix there was a single exported function both call;
-/// Apogee starts from that fix instead of earning it again.
+/// **This file exists so the same logic is never shipped twice.** A CLI and an
+/// HTTP admin plane that each grow their own resolution chain drift apart,
+/// until a request that runs on one backend from the terminal runs on another
+/// over HTTP. The fix is a single function both call, and Apogee starts from
+/// it.
 ///
 /// Apogee has no HTTP plane yet, and that is precisely why this lands **now**:
 /// a resolver written as a private helper inside `complete.cpp` is a resolver
@@ -45,7 +45,7 @@
 /// configured backend is the caller's question, answered in the caller's idiom
 /// — a fatal message on the CLI, a 400 over HTTP, a `Fail` row in `check`.
 /// Folding validation in here would force one error shape on all three, and
-/// that is the seam that made Ommi's two chains diverge in the first place.
+/// that is the seam along which per-surface copies of the chain diverge.
 namespace apogee::harness {
 
 /// Which role a backend is being resolved for.

@@ -16,10 +16,10 @@
 ///
 /// **Read the appendix on the terminal-ux-layer backlog item before changing
 /// this.** The obvious implementation — print a header, stream the reasoning
-/// under it, then print the answer — is what Ommi shipped first. It reads fine
-/// for one turn and is unusable by the third: every turn leaves a ten-line
-/// internal monologue above a two-line answer, and scrolling back to find what
-/// was actually *said* is miserable. A real user report triggered the rewrite.
+/// under it, then print the answer — reads fine for one turn and is unusable
+/// by the third: every turn leaves a ten-line internal monologue above a
+/// two-line answer, and scrolling back to find what was actually *said* is
+/// miserable.
 ///
 /// What this does instead: while a block streams, a header plus a rolling
 /// window of the last two wrapped lines, repainted in place. When the block

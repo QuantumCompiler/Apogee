@@ -13,11 +13,10 @@
 /// `apogee check` — the install doctor.
 ///
 /// It answers one question: *is this installation in a state where the things
-/// you ask of it will work?* Ommi's recorded reason for having it is that its
-/// dominant early bug class was silent install drift — a fresh install missing
-/// a directory, a config naming a model that moved, a backend with no key — and
-/// every one of those surfaces later as a confusing failure in some unrelated
-/// command rather than as an install problem.
+/// you ask of it will work?* The reason for having it is silent install drift —
+/// a fresh install missing a directory, a config naming a model that moved, a
+/// backend with no key — every one of which surfaces later as a confusing
+/// failure in some unrelated command rather than as an install problem.
 ///
 /// Two rules shape the whole file:
 ///

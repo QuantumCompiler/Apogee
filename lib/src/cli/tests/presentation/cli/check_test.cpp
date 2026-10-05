@@ -222,8 +222,8 @@ TEST_CASE("a dangling model_path fails and names the command to fix it", "[comma
 }
 
 TEST_CASE("a present but unloadable GGUF fails", "[commands][check]") {
-    // Ommi's recorded lesson, and the reason this reads bytes rather than
-    // calling exists(): a Git LFS pointer or a truncated download is PRESENT,
+    // The reason this reads bytes rather than calling exists(): a Git LFS
+    // pointer or a truncated download is PRESENT,
     // the right name, and completely unusable. Checking presence alone reports
     // healthy and the failure surfaces much later, inside llama.cpp.
     Install install;

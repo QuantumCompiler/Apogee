@@ -65,7 +65,7 @@ TEST_CASE("a second turn decodes only the new tokens", "[backends][llamacpp][kv]
     // THE acceptance criterion for this item: two successive calls against one
     // session process only new prompt tokens. Without a warm KV cache, turn two
     // re-decodes the entire conversation, and the whole in-process argument
-    // over Ommi's spawn-per-turn model collapses.
+    // over a spawn-per-turn model collapses.
     Fixture fixture;
 
     const auto first = fixture.provider->chat(turn({ChatMessage::user("alpha beta")}), {});
@@ -106,9 +106,9 @@ TEST_CASE("a second turn decodes only the new tokens", "[backends][llamacpp][kv]
 }
 
 TEST_CASE("a side request never touches the session KV", "[backends][llamacpp][kv]") {
-    // Ommi's SideRequest lesson, ported: its async titler ran with the session's
-    // prompt-cache flags and could clobber the KV state of the very conversation
-    // it was summarising -- and write the same file concurrently with the next
+    // The side-request hazard: an async titler that runs with the session's
+    // prompt-cache flags can clobber the KV state of the very conversation
+    // it is summarising -- and write the same file concurrently with the next
     // turn. Here a side request must run somewhere else entirely.
     Fixture fixture;
 

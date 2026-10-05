@@ -13,9 +13,8 @@
 ///
 /// The knowledge layer captures the *why* behind a decision at the moment the
 /// idea is formed, before it evaporates into a ticket or a commit with the
-/// rationale stripped out. Three principles from Ommi's originating brief
-/// shape this type, and each is enforced by a function here rather than by a
-/// convention:
+/// rationale stripped out. Three principles shape this type, and each is
+/// enforced by a function here rather than by a convention:
 ///
 ///   - **Write-time linking.** `downstream_link` is recorded when ideation
 ///     becomes an artifact, not reconstructed weeks later.
@@ -114,8 +113,8 @@ void normalize(Record& record);
 /// A copy with the attribution stripped and every chain field kept.
 [[nodiscard]] Record anonymize(Record record);
 
-/// JSON, found by ADL. The shape is Ommi's, so an export reads the same:
-/// `attribution`, `raw_ref` and `supersedes` are omitted when empty.
+/// JSON, found by ADL. `attribution`, `raw_ref` and `supersedes` are omitted
+/// when empty.
 void to_json(nlohmann::json& out, const Record& record);
 void from_json(const nlohmann::json& in, Record& record);
 

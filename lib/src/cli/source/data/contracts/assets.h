@@ -23,7 +23,7 @@
 /// **Seeded skip-if-present.** `seed_bundled_assets` writes each file only
 /// when it is absent, which is what makes the on-disk copy the user's: an
 /// edited prompt is read back on the next run and never overwritten by a
-/// re-seed (Ommi's `refreshAssets` rule, kept).
+/// re-seed.
 ///
 /// **A config entry of the same name wins.** The bundled definition is the
 /// default the file may override -- to pin a model, say -- and a bundled

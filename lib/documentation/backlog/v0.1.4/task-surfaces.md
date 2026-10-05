@@ -15,7 +15,7 @@
 - [machine-mode.md](../../reference/machine-mode.md): the task events section; [http-api.md](../../reference/http-api.md): the two routes — both under their existing conformance pins.
 - Tests: golden JSON for status/list; an e2e that runs a scripted-mock task under `--output-format stream-json` and asserts the event sequence matches the ledger's transition sequence one for one; the admin-route tests and the leak sweep over served views.
 
-**Reference (Ommi).** No analog (no machine mode, no task runner). In-house precedents: the third Reporter adapter pattern (Milestone T — loop events as SSE frames), 28h's read-contract conventions, and the training track's reads-served/control-local split (Milestone Z).
+**Reference.** In-house precedents: the third Reporter adapter pattern (Milestone T — loop events as SSE frames), 28h's read-contract conventions, and the training track's reads-served/control-local split (Milestone Z).
 
 **Decisions made** (dated):
 - 2026-09-25 — Split from the v0.1.6 task work: surfaces after the runner, so the event vocabulary describes a ledger that exists rather than one being designed underneath it.

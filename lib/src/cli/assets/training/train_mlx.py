@@ -18,11 +18,11 @@ Modes (--mode):
 
 Requires the `mlx` requirement set:  apogee train setup --trainer mlx
 
-Two departures from the reference driver, both found by reading mlx_lm:
+Two details, both found by reading mlx_lm:
 `mlx_lm.lora --data` wants a DIRECTORY holding train.jsonl and valid.jsonl,
 not a file (a file path fails with "training set not found"), so train mode
-lays that directory out from the dataset; and `--mask-prompt` is forwarded,
-where the reference script rejected the flag its own orchestrator passed.
+lays that directory out from the dataset; and `--mask-prompt` is accepted
+and forwarded, since the orchestrator passes it.
 """
 
 import argparse

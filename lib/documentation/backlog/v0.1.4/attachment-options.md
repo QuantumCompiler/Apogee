@@ -19,7 +19,7 @@
 - Tests: `tests/data/contracts/config` round-trips of the block (comments preserved); `tests/presentation/commands/` parse tables for `/attach` (paths with spaces, bad values refused with the valid set named); the precedence table.
 - Consumes: [27n](attachment-code-graph.md) (the method the option selects — including its `complete`-skips-graph default, which `--graph=code` overrides); 24 (shipped: completion); 26o (shipped: the flag-completion precedent).
 
-**Reference (Ommi).** No analog — Ommi has neither chat attachments nor per-command option completion of this shape; the config-block-plus-editor pattern is Apogee's own standing mechanism.
+**Reference.** The config-block-plus-editor pattern is Apogee's own standing mechanism.
 
 **Decisions made** (dated):
 - 2026-10-03 — Split from the attachment-representation spike; gated on 27n because an option with nothing to select is dead weight, and kept apart from it so the build/wiring items stay single-session sized.

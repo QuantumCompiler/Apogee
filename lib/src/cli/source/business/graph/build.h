@@ -36,15 +36,14 @@
 ///
 /// ## Incremental and resumable by construction
 ///
-/// A source is re-extracted only when it is **stale**: no state row, its
-/// chunk count changed, its highest chunk id moved (a same-count re-ingest
-/// is still caught -- the fingerprint Ommi added after one silently lost
-/// every decision node), or the extraction model changed. A file's state
-/// row is written only after every one of its chunks finished, so an
-/// interrupted build resumes without re-extracting finished files. Per-chunk
-/// failures are soft: one retry, then counted, and the file left unstamped
-/// so the next build retries it. Every build starts by reconciling rows
-/// whose chunks no longer exist.
+/// A source is re-extracted only when it is **stale**: no state row, its chunk
+/// count changed, its highest chunk id moved (a same-count re-ingest is still
+/// caught, which the count alone would miss), or the extraction model changed.
+/// A file's state row is written only after every one of its chunks finished,
+/// so an interrupted build resumes without re-extracting finished files.
+/// Per-chunk failures are soft: one retry, then counted, and the file left
+/// unstamped so the next build retries it. Every build starts by reconciling
+/// rows whose chunks no longer exist.
 ///
 /// ## Records as nodes
 ///

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """A noisy, dying MCP server must not paint the terminal, under a real PTY.
 
-Ommi's postmortem (its Milestone P): `chat` came up behind a wall of output
-because a stdio MCP server inherited stderr and narrated its whole handshake
-onto the terminal, and a server that died mid-handshake held the status line
+Two failures this guards against: `chat` coming up behind a wall of output
+because a stdio MCP server inherits stderr and narrates its whole handshake
+onto the terminal, and a server that dies mid-handshake holding the status line
 for the full connect timeout.  Both are locked here on the real binary:
 
   * every row of the startup region is Apogee's own -- `[mcp]`, `[apogee]`,

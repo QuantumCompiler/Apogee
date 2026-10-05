@@ -51,7 +51,7 @@ TEST_CASE("a sidecar round-trips through JSON", "[models][sidecar]") {
 }
 
 TEST_CASE("expected_digest prefers the on-disk value after a transform", "[models][sidecar]") {
-    // The distinction Ommi had to retrofit: after a transform the file no
+    // The distinction that is easy to miss: after a transform the file no
     // longer matches what the source published, and an integrity check that
     // compared against the pin would report every transformed model as corrupt.
     Sidecar sidecar;

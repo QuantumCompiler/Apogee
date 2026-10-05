@@ -18,8 +18,8 @@
 /// The model→tool→model loop.
 ///
 /// **Extracted before the surfaces multiply, not after.** That ordering is
-/// Ommi's most load-bearing sequencing lesson: the loop behind a Reporter is
-/// what kept its four front-ends consistent, and what made deleting one a local
+/// the most load-bearing sequencing rule here: the loop behind a Reporter is
+/// what keeps every front-end consistent, and what makes deleting one a local
 /// change. `apogee complete --tools` is the first consumer; chat and serve are
 /// thin adapters over the same `run()`.
 ///

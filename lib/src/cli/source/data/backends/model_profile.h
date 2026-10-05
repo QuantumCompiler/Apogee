@@ -13,11 +13,10 @@
 /// What Apogee knows about how one **family** of local model behaves.
 ///
 /// A bundle rather than five per-concern lists, and that is the whole point.
-/// These behaviours are not independent: Ommi discovered as much across four
-/// separate bug reports on one model, each fixing a different symptom of the
-/// same uncharacterised family. Bundling them makes adding a family one
-/// reviewable entry, and makes a half-characterised family a visible gap rather
-/// than a runtime surprise.
+/// These behaviours are not independent: separate bug reports on one model can
+/// each be a different symptom of the same uncharacterised family. Bundling
+/// them makes adding a family one reviewable entry, and makes a
+/// half-characterised family a visible gap rather than a runtime surprise.
 ///
 /// Cloud backends need none of this — a vendor API returns typed blocks — so
 /// the layer is local-only and reaches the rest of the system as
@@ -34,10 +33,10 @@
 /// | `qwen3` | yes | **Emits `<think>…</think>` into the answer.** |
 /// | `llama3` | **no** | Degenerate on the files available here (see below). |
 ///
-/// That table also **contradicts the assumption this item was written under**,
-/// which came from Ommi's Gemma 4: that Gemma ships no chat template and needs
-/// a bespoke one. Gemma 3 ships a perfectly good template and works without
-/// help; the family that needed help was Llama.
+/// That table also **contradicts the assumption this item was written under**:
+/// that Gemma ships no chat template and needs a bespoke one. Gemma 3 ships a
+/// perfectly good template and works without help; the family that needed help
+/// was Llama.
 ///
 /// ## What `verified` means, and why most entries are not
 ///

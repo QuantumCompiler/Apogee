@@ -550,8 +550,8 @@ Lines format_mcp_server_entry(std::string_view name, const McpServerConfig& serv
     };
     out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
                   std::string{terminator});
-    // Alphabetical after the name, as Ommi's formatter was, so two entries
-    // written by two surfaces read alike.
+    // Alphabetical after the name, so two entries written by two surfaces
+    // read alike.
     if (!server.args.empty()) {
         list("args", server.args);
     }

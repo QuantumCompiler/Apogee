@@ -7,9 +7,9 @@
 #include <string_view>
 
 /// Renders a schema-conforming JSON report as Markdown or plain text,
-/// **in-process** -- no second model call, ever (decided 2026-09-13). Ommi's
-/// reason holds: a second call to prettify a report costs money, time and
-/// fidelity for a transformation a hundred lines of code do deterministically.
+/// **in-process** -- no second model call, ever (decided 2026-09-13). A
+/// second call to prettify a report costs money, time and fidelity for a
+/// transformation a hundred lines of code do deterministically.
 ///
 /// Top-level keys are alphabetised, except the reserved `human_summary`,
 /// which is always rendered LAST: it is the copy-paste-ready section every

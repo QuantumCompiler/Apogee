@@ -111,7 +111,7 @@ ToolCallResult parse_tool_call(const nlohmann::json& result) {
             if (block.is_object() && block.value("type", std::string{}) == "text" &&
                 block.contains("text") && block["text"].is_string()) {
                 // Text blocks only; image and resource blocks are preserved
-                // on the wire and skipped here, as Ommi's client did.
+                // on the wire and skipped here.
                 out.text += block["text"].get<std::string>();
             }
         }

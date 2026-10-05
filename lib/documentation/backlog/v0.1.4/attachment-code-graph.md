@@ -17,7 +17,7 @@
 - Tests: `tests/presentation/commands/` chat-attachment tests over the fixture mini-repo 27k commits; the byte-equivalence check against a direct build; the cancel case.
 - Consumes: [27k](code-graph-extraction.md) (the extractor, and the language set — answered 2026-10-03, the broad set from day one: whatever grammars 27k vendors are what attachments parse); 26d (shipped: the walk, the worker, the store).
 
-**Reference (Ommi).** No analog: Ommi has neither chat attachments nor code-AST extraction (both recorded already — 26d and [27k](code-graph-extraction.md)). External prior art is Graphify's, inherited through 27k.
+**Reference.** External prior art is Graphify's, inherited through [27k](code-graph-extraction.md).
 
 **Decisions made** (dated):
 - 2026-10-03 — Split from the attachment-representation spike: the spike found the graph machinery collection-keyed and the attachment store outside it, with the store schema already shared — so attach-triggered building is wiring, not architecture. Targeted v0.1.7 with its track.

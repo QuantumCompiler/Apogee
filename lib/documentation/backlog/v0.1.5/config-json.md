@@ -24,7 +24,7 @@ The same day's propagation question extended the item (the user's call, 2026-10-
 - Tests: `tests/data/contracts/` — editor byte-stability mutation tests re-pointed at JSON fixtures; migration goldens (a commented, env-referencing, multi-backend `config.yaml` fixture → exact expected output + backup); dual-read notice; CLI↔HTTP byte-identity on the new format.
 - Consumes: the layout contract (shipped), the editor's callers as A1 carved them (shipped, Milestone AA); [ADR backwards-compatibility](../../adrs/cli/backwards-compatibility.md) and [mode-parity](../../adrs/cli/mode-parity.md) as the governing rules.
 
-**Reference (Ommi).** Ommi's config is YAML too (`lib/cli/config.yaml`) — Apogee inherited the format with the shape. The deliberate divergence is this item; the thing **not** diverging is the lesson behind the editor: config edits that rewrite the user's file lose the user's trust, so the format-preserving contract survives the format.
+**Reference.** The in-house precedent is the YAML editor this item reimplements; the thing **not** diverging is the lesson behind it: config edits that rewrite the user's file lose the user's trust, so the format-preserving contract survives the format.
 
 **Decisions made** (dated):
 - 2026-10-03 — Asked for by the user, placed in **v0.1.5** (their call), at the table's end as 28i.

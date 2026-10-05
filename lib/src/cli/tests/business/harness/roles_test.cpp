@@ -7,8 +7,8 @@
 
 /// The role-resolution chain, table-tested rung by rung.
 ///
-/// This exists because Ommi shipped the chain twice and the copies disagreed:
-/// a request ran on one backend from the CLI and another over HTTP. The table
+/// This exists because two copies of the chain come to disagree: a request
+/// runs on one backend from the CLI and another over HTTP. The table
 /// below is the contract that makes a second copy detectable — if someone
 /// reorders the four rungs in `roles.cpp`, exactly one row here goes red and
 /// names which precedence broke.

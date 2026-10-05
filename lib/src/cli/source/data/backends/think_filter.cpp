@@ -42,8 +42,7 @@ std::size_t ThinkFilter::longest_marker() const noexcept {
 std::string ThinkFilter::write(std::string_view chunk) {
     if (pairs_.empty()) {
         // A verified-none profile. No arithmetic at all here, which is what
-        // keeps the empty case from underflowing the hold-back -- the bug
-        // Ommi hit as a negative-slice panic.
+        // keeps the empty case from underflowing the hold-back.
         return std::string{chunk};
     }
     if (chunk.empty()) {

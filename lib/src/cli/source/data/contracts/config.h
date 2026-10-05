@@ -134,11 +134,10 @@ struct BackendConfig {
 
     std::string system_prompt;
 
-    /// Context window in tokens. Unlike Ommi -- whose claude entries omitted
-    /// this because the claude CLI managed its own context -- Apogee owns
-    /// context tracking for every backend, so cloud entries carry a window
-    /// too. The model->window fallback table is harness-core's, not this
-    /// item's: unset here means "ask the fallback", not "unlimited".
+    /// Context window in tokens. Apogee owns context tracking for every
+    /// backend, so cloud entries carry a window too. The model->window fallback
+    /// table is harness-core's, not this item's: unset here means "ask the
+    /// fallback", not "unlimited".
     std::optional<std::int64_t> context_size;
 
     /// A local backend's attention cache (26a). Unset is `q8_0`, and a model
@@ -204,7 +203,7 @@ struct BackendConfig {
 ///
 /// Each names a key in `backends`, and they are resolved through ONE shared
 /// resolver -- `harness/roles.h` -- because CLI and HTTP must never grow
-/// independent resolution chains, which is a real Ommi bug class. Read them
+/// independent resolution chains, which is a real bug class. Read them
 /// directly only to display or validate the raw value; to decide which backend
 /// to RUN, call `resolve_backend_key()`. `cli.one_role_resolver` enforces it.
 struct ModelsConfig {
@@ -251,10 +250,10 @@ struct GraphConfig {
 /// per-collection backend here; that field is deliberately not declared until
 /// something consumes it.
 ///
-/// Keyed by name in a map, like `backends:`, rather than Ommi's list of
-/// `- name:` items: the edit helpers, the loader's collision check, and
-/// `config get`'s dotted keys are all map-shaped, and a list would have needed
-/// a second copy of every one of them.
+/// Keyed by name in a map, like `backends:`, rather than a list of `- name:`
+/// items: the edit helpers, the loader's collision check, and `config get`'s
+/// dotted keys are all map-shaped, and a list would have needed a second copy
+/// of every one of them.
 struct EmbeddingConfig {
     /// Codepoints per chunk. Unset means the ingest default.
     std::optional<std::int64_t> chunk_size;
@@ -310,8 +309,8 @@ struct NamedGraphConfig {
 /// Keyed by name in a map like `backends:` and `embeddings:`, so the edit
 /// helpers, the loader's collision check and `config get` all work the same
 /// way. `command`, `args` and `env` have `${ENV_VAR}` and a leading `~`
-/// expanded at load -- Ommi expanded only the former while its documentation
-/// showed the latter, which is the trap this closes.
+/// expanded at load -- both, because expanding only the former while the
+/// documentation shows the latter is a trap.
 struct McpServerConfig {
     /// The executable, or a bare program name found on PATH.
     std::string command;
@@ -440,11 +439,11 @@ struct PathsConfig {
 
 /// What the permission gate does before a destructive tool runs.
 ///
-/// Three words, from Ommi's `fs_permissions`: `ask` prompts the user every
-/// time and is the default when a tool is not listed; `allow` never prompts;
-/// `deny` never runs. Kept as an enum in the harness rather than a string so
-/// an unrecognised value fails at load -- a typo that read as "not allow" and
-/// silently meant ask would be the wrong kind of forgiving.
+/// Three words: `ask` prompts the user every time and is the default when a
+/// tool is not listed; `allow` never prompts; `deny` never runs. Kept as an
+/// enum in the harness rather than a string so an unrecognised value fails at
+/// load -- a typo that read as "not allow" and silently meant ask would be the
+/// wrong kind of forgiving.
 enum class PermissionLevel : std::uint8_t { Ask, Allow, Deny };
 
 [[nodiscard]] std::string_view to_string(PermissionLevel level) noexcept;
@@ -453,8 +452,8 @@ enum class PermissionLevel : std::uint8_t { Ask, Allow, Deny };
 
 /// The `permissions:` section: one level per **tool name**.
 ///
-/// Keyed by tool name rather than by a fixed pair of fields (Ommi gated
-/// exactly `write_file` and `delete_file`) so the shell tool, the notes tools,
+/// Keyed by tool name rather than by a fixed pair of fields (one for
+/// `write_file`, one for `delete_file`) so the shell tool, the notes tools,
 /// and a namespaced MCP tool all fit the same schema without a new key each.
 /// Every destructive tool consults it through one checker; a read-only tool
 /// never does, because prompting for reads trains the user to say yes.
@@ -663,9 +662,10 @@ enum class StatusMode : std::uint8_t { Line, Verbose, Quiet };
 /// Case-insensitive ordering for backend names.
 ///
 /// Transparent, so a `std::string_view` looks up without allocating. Making
-/// the MAP itself case-insensitive is what turns Ommi's silent-merge bug into
-/// a detectable one: a second key differing only by case fails to insert, and
-/// the loader reports the collision by name instead of dropping an entry.
+/// the MAP itself case-insensitive is what makes a case-only duplicate
+/// detectable rather than a silent merge: a second key differing only by case
+/// fails to insert, and the loader reports the collision by name instead of
+/// dropping an entry.
 struct CaseInsensitiveLess {
     using is_transparent = void;
     [[nodiscard]] bool operator()(std::string_view lhs, std::string_view rhs) const noexcept;
@@ -677,8 +677,7 @@ struct Config {
     ///
     /// Ordered by the case-folded name so iteration is deterministic across
     /// platforms. Two names differing only by case are rejected at load rather
-    /// than merged -- Ommi's Viper-lowercasing lesson, made explicit: there,
-    /// "Qwen3" and "qwen3" silently became one entry.
+    /// than merged, so "Qwen3" and "qwen3" can never silently become one entry.
     std::map<std::string, BackendConfig, CaseInsensitiveLess> backends;
 
     ModelsConfig models;
@@ -765,10 +764,10 @@ struct Config {
 
 /// Expands `${VAR}` references against the process environment.
 ///
-/// An undefined variable expands to the empty string, matching Ommi and the
-/// shell: a config referencing ${ANTHROPIC_API_KEY} on a machine that has none
-/// must still LOAD -- "local by default, cloud by choice" means a missing key
-/// is a runtime message from the backend, not a parse error here. `$$` is a
+/// An undefined variable expands to the empty string, matching the shell: a
+/// config referencing ${ANTHROPIC_API_KEY} on a machine that has none must
+/// still LOAD -- "local by default, cloud by choice" means a missing key is a
+/// runtime message from the backend, not a parse error here. `$$` is a
 /// literal `$`; a `${` with no closing brace is left untouched.
 [[nodiscard]] std::string expand_env(std::string_view input);
 
@@ -798,8 +797,7 @@ struct Config {
 /// The starter config shipped by `apogee config init`, as bytes.
 ///
 /// The checked-in sample at `lib/src/cli/assets/config.yaml` must byte-match
-/// this exactly; a test enforces it, so the two can never drift (Ommi's
-/// template-drift test, ported).
+/// this exactly; a test enforces it, so the two can never drift.
 [[nodiscard]] std::string_view config_template() noexcept;
 
 /// Writes config_template() to `path`, creating parent directories.

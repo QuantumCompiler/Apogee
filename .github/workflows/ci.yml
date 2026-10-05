@@ -85,8 +85,8 @@
 # 2026-09-22: "we should only be testing the source code"). What that drops,
 # named because it is a real loss rather than a tidy-up: the 18 ctest entries
 # that spawn the binary, `cli.install_parity` among them -- the case that
-# keeps install drift closed, which MILESTONES records as Ommi's dominant
-# early bug class. They remain in tests/CMakeLists.txt and still run under
+# keeps install drift closed, the bug class the parity rule exists to
+# prevent. They remain in tests/CMakeLists.txt and still run under
 # `make test`; they are simply not a gate here.
 #
 # Shape (user decisions, 2026-09-19, 2026-09-20, 2026-09-22 and 2026-09-25):

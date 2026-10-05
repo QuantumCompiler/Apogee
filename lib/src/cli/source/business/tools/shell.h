@@ -11,11 +11,10 @@
 
 /// The shell toolset: one tool, `run_command`.
 ///
-/// Ported from Ommi's `ommi-mcp-shell`, with one divergence: Ommi shipped it
-/// with a docstring warning and no gate; here `run_command` declares `writes`
-/// and goes through the permission gate like `write_file`, default `ask`.
-/// `permissions.run_command: allow` is one line away for a user who trusts
-/// the model.
+/// `run_command` declares `writes` and goes through the permission gate like
+/// `write_file`, default `ask`: a shell command can change anything a file
+/// write can, and more. `permissions.run_command: allow` is one line away for
+/// a user who trusts the model.
 namespace apogee::tools {
 
 /// How much of a command's output reaches the model: its first and its last

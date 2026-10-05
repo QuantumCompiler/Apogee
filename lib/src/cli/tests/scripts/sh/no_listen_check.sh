@@ -2,8 +2,8 @@
 # The interactive-never-listens invariant, test-locked.
 #
 # SPEC.md -> Principles: "No interactive turn on any backend opens a listening
-# socket; only `serve` owns a port." Ommi retrofitted this check after the fact
-# (OMMI-11); Apogee locks it the day the first interactive command exists,
+# socket; only `serve` owns a port." Apogee locks it the day the first
+# interactive command exists rather than retrofitting it after the fact,
 # because the failure it prevents is silent -- a backend that quietly starts a
 # local server still answers correctly, so nothing looks wrong until someone
 # notices a port open on a shared machine.

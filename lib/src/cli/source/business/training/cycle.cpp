@@ -620,10 +620,10 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     // The candidate is the FINAL stage, and its cumulative score is the
     // cycle's. Not the last *passed* stage: a passed stage scored 100% by
     // the gate's own definition, so a score read from there can never
-    // regress and the dual gate below would be dead code -- as it was in
-    // the reference. Under the hard gate a complete pipeline has every
-    // stage passed and the two readings agree; under `gate_mode: soft` the
-    // per-stage gate is advisory and THIS gate is the one that holds.
+    // regress and the dual gate below would be dead code. Under the hard
+    // gate a complete pipeline has every stage passed and the two readings
+    // agree; under `gate_mode: soft` the per-stage gate is advisory and THIS
+    // gate is the one that holds.
     if (ran.manifest.stages.empty() || !ran.manifest.stages.back().eval.has_value()) {
         return fail("the pipeline completed without evaluating its final stage");
     }

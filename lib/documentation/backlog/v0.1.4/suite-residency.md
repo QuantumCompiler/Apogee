@@ -18,8 +18,6 @@
 - Tests: admission tables over scripted stores and fake machine budgets (fits / doesn't / unknown-size member); the hold's lifecycle (fires after session end, never during); busy-line goldens for warmup.
 - Consumes: [model-suites.md](model-suites.md) (27d — the unit this manages); 26a/26m (shipped — window and cache math); M1 (shipped — the line).
 
-**Reference (Ommi).** No analog — Ommi's single-model-at-a-time usage never needed set admission; its nearest relative is `autoDetectTrainer`'s hardware-based selection (detection feeding choice), the same spirit one level up.
-
 **Decisions made** (dated):
 - 2026-10-03 — Split from the suites spike as its own item: residency is policy over shipped machinery (the spike found every input already existing), and bundling it into 27d would make the config item balloon.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): admission reuses the 26a machine RAM share — one notion of what fits.

@@ -18,7 +18,7 @@
 - Tests: `tests/business/symphony/` — projection goldens (definition → tool schema), registration lifecycle (on/off × suite × definitions present), the metered-reachability refusal, budget interplay with 27f/27g over scripted providers.
 - Consumes: [27q](symphonies.md) (definitions, the runner), [27s](execute-mode.md) (the session), [27r](symphony-chaining.md)'s aggregate budgets where a chosen symphony chains; 26g, 26n, 26p (all shipped).
 
-**Reference (Ommi).** No analog — Ommi's models chose among tools, never among model-processes. The in-house chain of precedent is complete, which is the feasibility argument: tools-as-registry (shipped), selection by relevance (26g), constrained calls (26f/the loop), bounded model-initiated model calls (27f).
+**Reference.** The in-house chain of precedent is complete, which is the feasibility argument: tools-as-registry (shipped), selection by relevance (26g), constrained calls (26f/the loop), bounded model-initiated model calls (27f).
 
 **Decisions made** (dated):
 - 2026-10-04 — Asked for by the user (the vision's keystone); placed in **v0.1.4** with the set at their direction, last in the build order — it composes everything before it.

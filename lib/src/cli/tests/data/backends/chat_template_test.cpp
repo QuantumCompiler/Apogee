@@ -10,9 +10,9 @@
 
 /// Prompt framing for local models.
 ///
-/// The stakes are set by an Ommi bug worth restating: `gemma4` matched a
-/// `gemma` substring, was rendered with Gemma 2/3's `<start_of_turn>` markers,
-/// and produced token soup -- because those markers are not in Gemma 4's
+/// The stakes, by example: a `gemma4` that matches a `gemma` substring is
+/// rendered with Gemma 2/3's `<start_of_turn>` markers and produces token
+/// soup -- because those markers are not in Gemma 4's
 /// vocabulary at all. Getting framing wrong does not raise an error; it makes
 /// the model answer badly, which is much harder to notice.
 namespace {
@@ -50,7 +50,7 @@ TEST_CASE("llama3 uses header ids, not chatml markers", "[backends][template]") 
     CHECK(out.find("<|begin_of_text|>") == 0);
     CHECK(out.find("<|start_header_id|>user<|end_header_id|>") != std::string::npos);
     CHECK(out.find("<|eot_id|>") != std::string::npos);
-    // The Ommi lesson in assertion form: one family's markers must never
+    // The lesson above in assertion form: one family's markers must never
     // appear in another's rendering.
     CHECK(out.find("<|im_start|>") == std::string::npos);
 }

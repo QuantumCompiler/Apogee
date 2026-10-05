@@ -18,7 +18,7 @@
 - Tests: `tests/data/backends/provider_probe_test.cpp` — fake PATH trees and scripted runners covering the state matrix (absent / installed-only / evidence-present / status-command variants / hung probe); fingerprint tests (touch the binary → one re-probe); the no-hot-path pin (the chat/complete startup path contains no probe call — asserted the way the layering greps assert).
 - Consumes: the key resolver (shipped, Milestones T–U); the fingerprint pattern (shipped with the M2 work). The exclusion-list rule is untouched — detection never implies routing.
 
-**Reference (Ommi).** No provider-detection analog. The adjacent precedents are Ommi's `check --fix` as the local-machine doctor (its CLAUDE.md records the rationale) and `autoDetectTrainer`'s hardware-based backend selection — detection feeding choice, which this track adopts for providers.
+**Reference.** The adjacent in-house precedents are `check --fix` as the local-machine doctor and `train setup`'s trainer detection (hardware-based backend selection) — detection feeding choice, which this track adopts for providers.
 
 **Decisions made** (dated):
 - 2026-10-03 — Asked for by the user, targeted **v0.1.4**, slotted ahead of the queued releases (the 27–30 → 28–31 renumber). The spike's measurements (probe costs, evidence heterogeneity, the blind doctor) are this document's What/why.

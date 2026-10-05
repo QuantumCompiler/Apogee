@@ -33,10 +33,10 @@ const std::vector<ModelProfile>& model_profiles() {
         // Gemma 3. Runs clean: its GGUF carries a chat template, llama.cpp
         // applies it, and the answer arrives with no framing to strip.
         //
-        // Note this CONTRADICTS the assumption this item inherited from Ommi's
-        // Gemma 4 -- that Gemma ships no template and needs a bespoke one.
+        // Note this CONTRADICTS the assumption this item was written under --
+        // that Gemma ships no template and needs a bespoke one.
         // Gemma 3 needs no help at all. Recording the contradiction is the
-        // point of characterizing rather than porting.
+        // point of characterizing against real output.
         list.push_back({.name = "gemma3",
                         .architectures = {"gemma3", "gemma2", "gemma"},
                         .name_hints = {"gemma"},
@@ -91,10 +91,6 @@ const std::vector<ModelProfile>& model_profiles() {
         // `<|channel|>final<|message|>` -- is pure framing, and that is the
         // markup filter's half. Two mechanisms, composed, each doing the thing
         // it is right about.
-        //
-        // Ommi carries this same framing, transcribed from a manifest and
-        // marked unverified because the GGUF it had would not load. It was
-        // right; this is the run that says so.
         list.push_back(
             {.name = "gpt-oss",
              .architectures = {"gpt-oss", "openai-moe", "gptoss"},

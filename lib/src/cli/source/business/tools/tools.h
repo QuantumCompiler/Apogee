@@ -5,7 +5,6 @@
 /// Filled by the `native-toolsets` item (Milestone V): the filesystem, shell,
 /// git, notes and RAG-query tools, each registered into the agent loop's own
 /// `ToolRegistry` and each destructive one declared into the permission gate.
-/// What Ommi ran as five Python MCP servers, in `apogee_core`.
 ///
 /// The package includes `agent/`, `agentloop/`, `embedstore/`, `platform/`
 /// and `harness/`, and never `backends/` or `commands/`; `harness.layering`

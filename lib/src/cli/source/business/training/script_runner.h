@@ -26,22 +26,21 @@
 /// record (`{"rows_written", ...}`). This file runs a script under the
 /// environment's interpreter and turns that stream into events.
 ///
-/// Three rules, each a closed gap from the reference implementation:
+/// Three rules:
 ///
 /// **stdout is framed by the one framer.** A pipe hands bytes over in
 /// whatever sizes the kernel felt like; `backends/jsonl_framer.h` has been
 /// tested against every chunk boundary, and a second splitter would be a
 /// second copy of that bug class -- the same allowance `mcp/` has.
 ///
-/// **A non-JSON line is a message, never dropped.** Ommi's reader silently
-/// `continue`d on a parse error, so a driver's stack trace vanished. Here it
+/// **A non-JSON line is a message, never dropped.** A reader that silently
+/// skips a line it cannot parse makes a driver's stack trace vanish. Here it
 /// reaches the caller as text.
 ///
-/// **The exit code is carried, and `{"error"}` is its own event.** Ommi
-/// discarded `cmd.Wait()`'s status and its progress struct had no `error`
-/// field, so an error line decoded as a blank progress tick and a crashed
-/// trainer was indistinguishable from success. A crashed script is a failed
-/// run here, with the code and the stderr tail on the outcome.
+/// **The exit code is carried, and `{"error"}` is its own event.** Without
+/// both, an error line decodes as a blank progress tick and a crashed trainer
+/// is indistinguishable from success. A crashed script is a failed run here,
+/// with the code and the stderr tail on the outcome.
 ///
 /// stderr is captured as a bounded tail and never inherited: a driver's
 /// warnings must not land on the user's terminal mid-status-line, and they

@@ -17,7 +17,7 @@
 - Tests: `tests/business/tools/consult` — registration lifecycle (suite with/without consultables), the brief's isolation (wire-recorded: the member's request contains exactly the brief), caps enforced with honest refusals ("consult budget spent this turn"), serial execution asserted; a metered member refused at config time.
 - Consumes: [27d](model-suites.md) (the suite, member windows); 26g (shipped — ranking); 26b's resolver seams (shipped); 26n (narration conventions, adopted early).
 
-**Reference (Ommi).** No analog — Ommi's models never called models; the harness-initiated judge/teacher calls in its training track (`initSingleBackend`) are the closest shape and were never a tool. The isolation contract (brief-only context) follows the utility seams' existing practice, made explicit.
+**Reference.** The isolation contract (brief-only context) follows the utility seams' existing practice, made explicit.
 
 **Decisions made** (dated):
 - 2026-10-03 — Split from the suites spike; the spike's inventory (nineteen tools, none model-reaching) is the wall this closes. Placed in v0.1.8 with its track, gated on the suite unit only — not on MLX.

@@ -15,7 +15,7 @@
 - `cli/graph.cpp`: `graph report [--out <file>]`, `graph export html|graphml|mermaid --out <file>`, both honoring `--graph`/`--collection`.
 - Tests: `tests/business/graph/report_test.cpp` (golden report over the fixture graph; the no-summaries case; cap behavior), `export_test.cpp` (GraphML round-trips through a reference parser; the HTML contains its data block, its cap note, and no external reference; Mermaid output parses).
 
-**Reference (Ommi).** No analog — Ommi's knowledge layer exported records (`knowledge export`), never graph artifacts. External prior art: Graphify's `graph.html`, `GRAPH_REPORT.md` (god nodes, surprising connections, suggested questions) and its Mermaid/GraphML/Neo4j exports. Divergences: no wiki/Obsidian publishing in the first cut; no Neo4j-specific format (GraphML covers the import path); the report reuses paid-for community summaries instead of generating fresh prose.
+**Reference.** External prior art: Graphify's `graph.html`, `GRAPH_REPORT.md` (god nodes, surprising connections, suggested questions) and its Mermaid/GraphML/Neo4j exports. Divergences: no wiki/Obsidian publishing in the first cut; no Neo4j-specific format (GraphML covers the import path); the report reuses paid-for community summaries instead of generating fresh prose.
 
 **Decisions made** (dated):
 - 2026-09-30 — Split from the v0.1.7 code-graph work, third in build order: the artifacts are designed against [27l](graph-navigation.md)'s payloads and shine brightest once [27k](code-graph-extraction.md)'s code nodes and origin tags exist.

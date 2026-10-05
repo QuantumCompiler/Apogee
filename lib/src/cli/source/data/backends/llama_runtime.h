@@ -232,8 +232,9 @@ void forget_checkpoints_after(std::vector<Checkpoint>& held, std::int64_t positi
 /// One KV cache -- llama.cpp's `llama_context`.
 ///
 /// A context IS the conversation's warm state. Keeping one alive across turns
-/// is the whole architectural payoff over Ommi, which re-ingested through an
-/// on-disk prompt cache and paid ~1s of weight re-mapping per spawned turn.
+/// is the whole architectural payoff of running in-process, over a child per
+/// turn that re-ingests through an on-disk prompt cache and pays ~1s of weight
+/// re-mapping every time.
 class LlamaContext {
 public:
     LlamaContext() = default;

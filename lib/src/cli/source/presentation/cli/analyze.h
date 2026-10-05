@@ -25,7 +25,7 @@ namespace apogee::commands {
 [[nodiscard]] bool should_print_report(bool show, bool json, bool stdout_is_tty, bool will_save);
 
 /// `<base>-YYYYMMDD-HHMMSS.<extension>` in local time. No colon: Windows is
-/// a target, and Ommi's `HH-MM-SS:MM-DD-YYYY` put one in every filename.
+/// a target, and a Windows filename cannot contain one.
 [[nodiscard]] std::string report_filename(std::string_view base, std::string_view extension,
                                           std::chrono::system_clock::time_point when);
 

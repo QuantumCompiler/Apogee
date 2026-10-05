@@ -16,7 +16,7 @@
 - `training/promote` plan + `cli/train.cpp`: the MLX registration target (`--target mlx`), fused-SafeTensors path through [27b](mlx-model-operations.md)'s store row, the version ledger unchanged.
 - Tests: fake-driver image round-trip; promote-plan table gains the MLX branch (closure-tested like the GGUF one); the served-stream conformance case; `check` rows.
 
-**Reference (Ommi).** No analog for any of the three: Ommi had no second runtime, no vision on local models, and its training promoted into its one format. The in-house precedents consumed: local multimodal (Milestone O), the serve plane's refusal semantics (Milestone T), and the promote plan (Milestone Z).
+**Reference.** The in-house precedents consumed: local multimodal (Milestone O), the serve plane's refusal semantics (Milestone T), and the promote plan (Milestone Z).
 
 **Decisions made** (dated):
 - 2026-10-03 — Split from the MLX track as its closer: each piece needs 27a's child protocol and 27b's store row to exist first.

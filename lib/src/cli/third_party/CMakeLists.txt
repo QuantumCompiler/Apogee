@@ -60,8 +60,8 @@ endif()
 
 include(FetchContent)
 
-# Pinned to release b11151 (2026-09-23). It started at 549b9d84, the revision
-# Ommi's local-inference path built against; moved for Gemma 4's "unified"
+# Pinned to release b11151 (2026-09-23). It started at 549b9d84 and was moved
+# for Gemma 4's "unified"
 # checkpoints, which that revision's converter refused and whose image and
 # audio projectors (gemma4uv/gemma4ua) its mtmd could not load. Updating this
 # pin is a DELIBERATE event: it gets its own commit, the message says what

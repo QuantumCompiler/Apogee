@@ -817,8 +817,8 @@ Config parse_config(std::string_view content, std::string_view origin) {
             BackendConfig backend = parse_backend(entry.second, origin, name);
             const auto [it, inserted] = config.backends.emplace(name, std::move(backend));
             if (!inserted) {
-                // Reached only when two keys fold to the same name. Ommi
-                // merged them (Viper lowercased keys); Apogee names both.
+                // Reached only when two keys fold to the same name. Name both
+                // rather than silently merging them.
                 fail(origin, "backends: '" + name + "' collides with '" + it->first +
                                  "' -- backend names are compared case-insensitively, so these "
                                  "would be the same backend; rename one");

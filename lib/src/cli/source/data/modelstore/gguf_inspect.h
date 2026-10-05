@@ -39,12 +39,12 @@
 ///
 /// ## Why a header read and not a full load
 ///
-/// Ommi's recorded lesson, and the reason this reads structure rather than
-/// calling `exists()`: **a model can be present, the right size, and match a
-/// recorded digest while still being unloadable** — a truncated download, or a
-/// Git LFS pointer file committed instead of the model. Checking presence
-/// alone reports healthy, and the failure surfaces much later inside
-/// llama.cpp, where it looks like a different bug.
+/// The reason this reads structure rather than calling `exists()`: **a model
+/// can be present, the right size, and match a recorded digest while still
+/// being unloadable** — a truncated download, or a Git LFS pointer file
+/// committed instead of the model. Checking presence alone reports healthy,
+/// and the failure surfaces much later inside llama.cpp, where it looks like a
+/// different bug.
 ///
 /// Checking the four magic bytes is barely better, and was what `apogee check`
 /// did until this landed: a half-finished download has perfectly valid magic,

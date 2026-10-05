@@ -100,7 +100,7 @@ TEST_CASE("examples are read through the field aliases and blank halves are drop
     CHECK(parse_synth_examples("prose only").empty());
 }
 
-TEST_CASE("the call bound is Ommi's", "[training][synth]") {
+TEST_CASE("the call bound is three calls per needed batch plus one per seed", "[training][synth]") {
     CHECK(max_synth_calls(200, 8, 8) == (200 / 8 + 1) * 3 + 8);
     CHECK(max_synth_calls(4, 0, 1) == (4 / 8 + 1) * 3 + 1);
 }

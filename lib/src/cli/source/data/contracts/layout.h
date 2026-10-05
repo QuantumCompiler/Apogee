@@ -9,11 +9,11 @@
 /// **The on-disk contract.** One declaration of what `~/.apogee/` contains,
 /// read by every path that creates it and by the one that validates it.
 ///
-/// This exists because Ommi's dominant early bug class was *silent install
-/// drift*: `make install` seeded one thing, `install.sh` seeded another, the
-/// updater a third, and `check` validated a fourth list — each correct when
-/// written, and diverging one commit at a time. Nothing failed loudly; a fresh
-/// install simply lacked a directory some command needed months later.
+/// This exists to prevent *silent install drift*: `make install` seeding one
+/// thing, `install.sh` another, the updater a third, and `check` validating a
+/// fourth list — each correct when written, and diverging one commit at a
+/// time. Nothing fails loudly; a fresh install simply lacks a directory some
+/// command needs months later.
 ///
 /// The fix is structural rather than procedural. The layout is declared **once,
 /// here**, and every consumer enumerates it instead of restating it:

@@ -11,8 +11,8 @@
 
 /// `ask_user` — the model asking the user a multiple-choice question mid-turn.
 ///
-/// Unlike Ommi, this works uniformly on every provider, because Apogee owns the
-/// loop everywhere rather than delegating it to a vendor CLI on one backend.
+/// This works uniformly on every provider, because Apogee owns the loop
+/// everywhere rather than delegating it to a vendor CLI on any backend.
 ///
 /// The availability rule is the important part: the tool is advertised **if and
 /// only if there is someone to answer it**. A model told it can ask questions,

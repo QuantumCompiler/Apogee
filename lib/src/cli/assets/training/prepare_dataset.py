@@ -28,7 +28,7 @@ import os
 import csv
 
 # Environment guards, BEFORE any ML import. Skipping them causes silent
-# SIGABRT crashes that mask the real error (Ommi's recorded lesson).
+# SIGABRT crashes that mask the real error.
 #
 # Must be set before `datasets` imports its Rust tokenizer extension, which
 # spawns fork-based workers that can deadlock on macOS.

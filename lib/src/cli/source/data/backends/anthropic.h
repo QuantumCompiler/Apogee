@@ -16,8 +16,8 @@
 /// CLI the user is already logged into) is a separate backend arriving after
 /// v0.1.0; the two coexist and are chosen per config entry.
 ///
-/// Everything Ommi rented from the `claude` CLI — the thinking stream, native
-/// tool use, web search — is re-sourced here from native API features:
+/// The thinking stream, native tool use, and web search come from native API
+/// features here rather than from the `claude` CLI:
 /// `thinking_delta` events instead of demuxing `<thinking>` out of text,
 /// structured `tool_use` blocks instead of a text protocol, and Anthropic's
 /// server-side `web_search` tool instead of a shelled-out search.

@@ -22,12 +22,12 @@
 
 /// Local inference: llama.cpp linked into this process.
 ///
-/// **The architectural payoff over Ommi**, and the reason it is worth the
-/// crash-model trade recorded on this item. Ommi spawned a child per turn and
-/// carried an entire on-disk prompt-cache apparatus to keep multi-turn chat
-/// warm -- cache files, fingerprinting, an M-RoPE replay self-heal, and rules
-/// about what must never be written into a cache. All of it existed to move KV
-/// state between processes that could not share memory. Linking in-process
+/// **The architectural payoff of linking in-process**, and the reason it is
+/// worth the crash-model trade recorded on this item. Spawning a child per turn
+/// means carrying an entire on-disk prompt-cache apparatus to keep multi-turn
+/// chat warm -- cache files, fingerprinting, an M-RoPE replay self-heal, and
+/// rules about what must never be written into a cache. All of it exists to
+/// move KV state between processes that cannot share memory. Linking in-process
 /// deletes the whole category: the KV cache is a live `llama_context` that
 /// simply stays alive between turns, and the correctness rules it enforced
 /// become arithmetic over a token prefix (`llamacpp_tokens.h`).

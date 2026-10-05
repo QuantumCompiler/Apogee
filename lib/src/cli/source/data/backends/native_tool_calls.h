@@ -29,10 +29,7 @@
 /// So: the opener, a function name under a `functions.` namespace, an optional
 /// `<|constrain|>FORMAT` hint, `<|message|>`, then a JSON object. The turn ends
 /// there -- `<|call|>` is an end-of-generation token, so generation stops and
-/// the marker itself never reaches the text. This is the format Ommi
-/// transcribed from a manifest and marked **unverified against generation**
-/// because the GGUF it had would not load; it now is verified, and the
-/// transcription was right.
+/// the marker itself never reaches the text.
 ///
 /// ## One list, two consumers
 ///
