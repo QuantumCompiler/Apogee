@@ -133,6 +133,9 @@ std::string serialize(const Session& session) {
     if (session.suite.has_value()) {
         out["suite"] = *session.suite;
     }
+    if (!session.task.empty()) {
+        out["task"] = session.task;
+    }
     if (!session.title.empty()) {
         out["title"] = session.title;
     }
@@ -238,6 +241,7 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
                                        "config's default suite, if it has one"});
         session.suite.reset();
     }
+    session.task = string_field(parsed, "task", loaded.warnings);
     session.provider_session_id = string_field(parsed, "provider_session_id", loaded.warnings);
     session.started_at = string_field(parsed, "started_at", loaded.warnings);
     session.updated_at = string_field(parsed, "updated_at", loaded.warnings);

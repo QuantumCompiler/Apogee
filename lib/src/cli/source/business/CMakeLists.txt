@@ -1,5 +1,5 @@
 # The Business layer (ADR 0001): what Apogee does -- the harness, the loop,
-# tools, knowledge, the graph, models, training.
+# tools, knowledge, the graph, models, training, tasks.
 #
 # One static library per module -- apogee_business_<module> -- linked to
 # exactly the modules cmake/modules.cmake declares for it (apogee_add_module,
@@ -216,6 +216,21 @@ apogee_add_module(training
 )
 target_link_libraries(apogee_business_training PUBLIC nlohmann_json::nlohmann_json
                       PRIVATE yaml-cpp::yaml-cpp)
+
+# The task runner (27h): the record and its transitions, the ledger and the
+# one-task lock, what a turn does with nobody present, and the outer loop --
+# a turn arrives as a closure, so it never names a backend or a surface.
+apogee_add_module(tasks
+    tasks/task.h
+    tasks/task.cpp
+    tasks/ledger.h
+    tasks/ledger.cpp
+    tasks/unattended.h
+    tasks/unattended.cpp
+    tasks/runner.h
+    tasks/runner.cpp
+)
+target_link_libraries(apogee_business_tasks PUBLIC nlohmann_json::nlohmann_json)
 
 apogee_add_module(scaffold
     scaffold/mcp_server.h

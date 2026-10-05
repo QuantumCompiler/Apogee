@@ -11,7 +11,7 @@
 #include <utility>
 
 #include "contracts/config_edit.h"
-#include "platform/platform.h"
+#include "platform/pid_lock.h"
 
 namespace apogee::training {
 namespace {
@@ -163,58 +163,23 @@ std::string save_history(const std::filesystem::path& cycle_dir, const CycleHist
 
 // --- the lock -----------------------------------------------------------------
 
-CycleLock::CycleLock(std::filesystem::path path) : path_{std::move(path)} {}
-
-CycleLock::~CycleLock() {
-    release();
-}
-
-CycleLock::CycleLock(CycleLock&& other) noexcept : path_{std::move(other.path_)} {
-    other.path_.clear();
-}
-
-CycleLock& CycleLock::operator=(CycleLock&& other) noexcept {
-    if (this != &other) {
-        release();
-        path_ = std::move(other.path_);
-        other.path_.clear();
-    }
-    return *this;
-}
-
 std::optional<CycleLock> CycleLock::acquire(const std::filesystem::path& cycle_dir,
                                             std::string& error) {
     error.clear();
-    std::error_code code;
-    std::filesystem::create_directories(cycle_dir, code);
-    if (code) {
-        error = "could not create " + cycle_dir.string() + ": " + code.message();
-        return std::nullopt;
-    }
-    const std::filesystem::path path = cycle_dir / kLockFileName;
     // One atomic create-or-fail through the platform seam, so two schedulers
     // firing at once cannot both win.
-    bool exists = false;
-    if (!platform::create_exclusive_file(
-            path, std::to_string(platform::current_process_id()) + "\n", exists)) {
-        if (exists) {
-            error = "another cycle is already running (lock: " + path.string() +
-                    "). If none is, remove the file and run again";
-        } else {
-            error = "could not create the lock " + path.string();
-        }
+    const std::filesystem::path path = cycle_dir / kLockFileName;
+    platform::PidLock::Refusal refusal;
+    std::optional<platform::PidLock> lock =
+        platform::PidLock::acquire(path, {}, /*take_stale=*/false, refusal);
+    if (!lock.has_value()) {
+        error = refusal.holder.has_value()
+                    ? "another cycle is already running (lock: " + path.string() +
+                          "). If none is, remove the file and run again"
+                    : refusal.error;
         return std::nullopt;
     }
-    return CycleLock{path};
-}
-
-void CycleLock::release() noexcept {
-    if (path_.empty()) {
-        return;
-    }
-    std::error_code code;
-    std::filesystem::remove(path_, code);
-    path_.clear();
+    return CycleLock{std::move(*lock)};
 }
 
 bool cycle_lock_held(const std::filesystem::path& cycle_dir) {

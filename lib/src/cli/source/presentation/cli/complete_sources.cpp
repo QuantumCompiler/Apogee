@@ -21,6 +21,8 @@
 #include "modelstore/store.h"
 #include "operations/knowledge_core.h"
 #include "platform/child_process.h"
+#include "tasks/ledger.h"
+#include "tasks/task.h"
 #include "tools/toolsets.h"
 #include "training/datasets.h"
 #include "training/kit.h"
@@ -259,6 +261,11 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(run.id);
         }
         list.none = "no pipeline runs yet -- 'apogee train pipeline run'";
+    } else if (kind == kTaskValue) {
+        for (const tasks::Task& task : tasks::list_tasks(harness::tasks_dir())) {
+            list.names.push_back(task.id);
+        }
+        list.none = "no tasks yet -- 'apogee task run'";
     } else if (kind == kPipelineValue) {
         for (const auto& [name, spec] : config.training.pipelines) {
             list.names.push_back(name);

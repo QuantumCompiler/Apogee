@@ -137,6 +137,12 @@ struct LayoutEntry {
 /// `consumed/`), and `work/` for the merged dataset. Created by the first
 /// `train cycle run`.
 [[nodiscard]] std::filesystem::path training_cycle_dir();
+/// `<APOGEE_HOME>/tasks` -- the task runner's state (27h): one directory
+/// per task holding its ledger, `task.json`, rewritten on every transition,
+/// and a halt or cancel request another process left for the running one;
+/// `task.lock`, the PID lock one running task holds. Private: a ledger
+/// names the goal and the plan.
+[[nodiscard]] std::filesystem::path tasks_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 /// `cache/prompt` -- a local model's attention cache kept between processes
 /// (26j): `models/<model>/` holds each model's prefix files (the state after

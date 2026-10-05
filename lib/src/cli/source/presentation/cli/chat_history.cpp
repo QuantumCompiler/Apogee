@@ -9,6 +9,7 @@
 
 #include "cli/chat_attachments.h"
 #include "cli/chat_recall.h"
+#include "cli/task_cmd.h"
 #include "contracts/errors.h"
 
 namespace apogee::commands {
@@ -218,6 +219,11 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
     remove->callback([delete_name]() {
         try {
             const logger::Session session = logger::load(*delete_name, {}).session;
+            // A live task writes this chat every round, and resumes into it
+            // (27h): it is not deleted under the task.
+            if (const std::string held = task_holds_chat(session); !held.empty()) {
+                fail(held);
+            }
             std::error_code ec;
             std::filesystem::remove(logger::session_path(session.chat_id), ec);
             if (ec) {

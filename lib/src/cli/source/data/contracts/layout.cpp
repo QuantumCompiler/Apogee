@@ -14,7 +14,7 @@ namespace {
 /// Order matters only for readability -- `create_directories` handles nesting
 /// -- but keeping it stable keeps `apogee check` output stable, and diffing
 /// two installs is easier when both enumerate in the same order.
-constexpr std::array<LayoutEntry, 15> kDirectories{{
+constexpr std::array<LayoutEntry, 16> kDirectories{{
     // `config` is a row like any other, even though `config_dir()` is the
     // accessor callers use. Leaving it out was the first version, and it
     // immediately produced the bug this whole file exists to prevent: seeding
@@ -44,6 +44,11 @@ constexpr std::array<LayoutEntry, 15> kDirectories{{
      "training datasets, kits, scripts and the Python environment ('apogee datasets' / 'apogee "
      "train')",
      true, true},
+    // A task's ledger names its goal, its plan and its checks -- the user's
+    // own words, and the model's -- so it is as private as the chat it
+    // drives (27h).
+    {"tasks", "task ledgers ('apogee task'), one directory per task, and the one-task lock", true,
+     true},
     {"cache", "downloads and scratch state, safe to delete", false, false},
 }};
 
@@ -143,6 +148,10 @@ std::filesystem::path training_regime_dir() {
 
 std::filesystem::path training_cycle_dir() {
     return training_dir() / "cycle";
+}
+
+std::filesystem::path tasks_dir() {
+    return apogee_home() / "tasks";
 }
 
 std::filesystem::path prompts_dir() {

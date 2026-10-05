@@ -974,7 +974,9 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "mcp test arguments",
                                          "models convert --base-name",
                                          "models pull --base-name",
-                                         "serve --bind"};
+                                         "serve --bind",
+                                         "task run goal",
+                                         "task run --require"};
 
 }  // namespace
 

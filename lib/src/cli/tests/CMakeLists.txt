@@ -21,6 +21,7 @@ include(Catch)
 
 add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/platform_test.cpp
+    infrastructure/platform/pid_lock_test.cpp
     infrastructure/platform/child_process_test.cpp
     infrastructure/platform/ffmpeg_test.cpp
     infrastructure/ansi/ansi_test.cpp
@@ -192,6 +193,10 @@ add_library(apogee_tests_business OBJECT
     business/training/pipeline_test.cpp
     business/training/regime_test.cpp
     business/training/cycle_test.cpp
+    business/tasks/task_test.cpp
+    business/tasks/ledger_test.cpp
+    business/tasks/unattended_test.cpp
+    business/tasks/runner_test.cpp
     support/fake_mcp_server.cpp
     support/fake_mcp_server.h
 )
@@ -255,6 +260,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/httpserver/admin_suites_test.cpp
     presentation/cli/datasets_test.cpp
     presentation/cli/train_test.cpp
+    presentation/cli/task_test.cpp
     presentation/httpserver/admin_datasets_test.cpp
     presentation/httpserver/admin_training_test.cpp
     support/fake_command.h
@@ -560,6 +566,21 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/suites
     )
     set_tests_properties(cli.suites_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The task runner (27h) on the real binary, scripted mocks and no input:
+    # goal -> plan -> an incomplete round -> the corrective round -> done,
+    # with the ledger's transition sequence; status and list; an ask-level
+    # tool denied and recorded with stdin held open (a prompt would hang);
+    # the budget and the breaker each naming the unpassed checks; the lock
+    # refusing a second run by name; a task killed mid-round resumed to done
+    # with no turn said twice; cancel and halt across processes; and chats
+    # delete refusing a live task's conversation.
+    add_test(NAME cli.task_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/task_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/task-e2e
+    )
+    set_tests_properties(cli.task_lifecycle PROPERTIES TIMEOUT 180)
 
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_listen_check.sh"

@@ -156,6 +156,15 @@ const std::map<std::string, Classification>& table() {
          carve_out("edits the cycle's state on the host; training control is CLI-only")},
         {"__mcp-tools",
          carve_out("an MCP server on this process's own stdio, spawned by another client")},
+        {"task run",
+         carve_out("an unattended run of the host's own session and tools, under its lock; task "
+                   "control is CLI-only -- 27j serves the reads, never control")},
+        {"task resume",
+         carve_out("continues a task on the host, in the folder it was started in; task control "
+                   "is CLI-only")},
+        {"task halt", carve_out("steers the task running on the host; task control is CLI-only")},
+        {"task cancel",
+         carve_out("ends the turn of the task running on the host; task control is CLI-only")},
         // --- read-only / interactive ------------------------------------------
         {"chat", read_only()},
         {"complete", read_only()},
@@ -189,6 +198,8 @@ const std::map<std::string, Classification>& table() {
         {"train status", read_only()},
         {"train pipeline status", read_only()},
         {"train cycle status", read_only()},
+        {"task status", read_only()},
+        {"task list", read_only()},
     };
     return rows;
 }

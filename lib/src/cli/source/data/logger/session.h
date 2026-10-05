@@ -160,6 +160,11 @@ struct Session {
     /// had one -- which follows the config's default suite, and writes
     /// nothing, so a chat with no suite saves exactly as it did before.
     std::optional<std::string> suite;
+    /// The task that drives this chat (27h): its id, or empty for a chat a
+    /// person drives -- which writes nothing, so it saves exactly as before.
+    /// The ledger names the chat and the chat names its task; `chats delete`
+    /// refuses a chat whose task is live.
+    std::string task;
     /// What is attached to this chat, in the order attached (26d). Its index
     /// is `attachments/<chat_id>.db`, deleted with the chat.
     std::vector<Attachment> attachments;

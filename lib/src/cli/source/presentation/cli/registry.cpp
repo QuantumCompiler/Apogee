@@ -22,6 +22,7 @@
 #include "cli/models.h"
 #include "cli/reset.h"
 #include "cli/serve_cmd.h"
+#include "cli/task_cmd.h"
 #include "cli/train.h"
 #include "cli/uninstall.h"
 #include "cli/version_command.h"
@@ -86,6 +87,7 @@ CommandRegistry default_registry() {
     registry.add(std::make_unique<ModelsCommand>());
     registry.add(std::make_unique<ResetCommand>());
     registry.add(std::make_unique<ServeCommand>());
+    registry.add(std::make_unique<TaskCommand>());
     registry.add(std::make_unique<UninstallCommand>());
     registry.add(std::make_unique<VersionCommand>());
     // Hidden: the shell-completion protocol, not a user-facing command.

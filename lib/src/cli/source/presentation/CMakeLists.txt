@@ -193,6 +193,10 @@ apogee_add_module(cli
     cli/chat_history.cpp
     cli/chat_recall.h
     cli/chat_recall.cpp
+    cli/chat_turn.h
+    cli/chat_turn.cpp
+    cli/task_cmd.h
+    cli/task_cmd.cpp
     cli/complete_sources.h
 )
 target_link_libraries(apogee_presentation_cli PUBLIC CLI11::CLI11 nlohmann_json::nlohmann_json)

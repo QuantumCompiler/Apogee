@@ -147,6 +147,21 @@ LocalDate local_date(std::chrono::system_clock::time_point when) {
     return date;
 }
 
+std::string utc_time(std::chrono::system_clock::time_point when, const char* format) {
+    const std::time_t seconds = std::chrono::system_clock::to_time_t(when);
+    std::tm utc{};
+#if defined(_WIN32)
+    gmtime_s(&utc, &seconds);
+#else
+    gmtime_r(&seconds, &utc);
+#endif
+    std::array<char, 64> buffer{};
+    if (std::strftime(buffer.data(), buffer.size(), format, &utc) == 0) {
+        return {};
+    }
+    return buffer.data();
+}
+
 long current_process_id() noexcept {
 #if defined(_WIN32)
     return static_cast<long>(GetCurrentProcessId());

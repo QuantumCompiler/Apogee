@@ -145,7 +145,7 @@ endif()
 
 # ---- The named rules ------------------------------------------------------------
 
-set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph training)
+set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph training tasks)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
@@ -341,6 +341,34 @@ if(NOT VIOLATIONS STREQUAL "")
     message(FATAL_ERROR "the training package includes a surface:\n${pretty}\n"
                         "training/ may include only harness/, contracts/, platform/, agentloop/, "
                         "agent/, transport/jsonl_framer.h and itself.")
+endif()
+
+# `tasks/` is a domain core like `training/` (27h): the record, the ledger and
+# its lock, the outer loop over the agent loop. It may include the loop (for
+# `ask_user`'s types), the tool registry and its gate (to watch them, never to
+# widen them), the harness, the session linkage in `logger/`, the contracts,
+# the platform seam and itself -- never a surface, and never a backend: a turn
+# arrives as a closure, so the runner the CLI drives names neither.
+file(GLOB_RECURSE tasks_sources "${PACKAGE_DIR_tasks}/*.h"
+                                "${PACKAGE_DIR_tasks}/*.cpp")
+if(tasks_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_tasks} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS tasks_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(tasks|agentloop|agent|harness|logger|contracts|platform)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  tasks/${name} reaches a surface: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the tasks package includes a surface:\n${pretty}\n"
+                        "tasks/ may include only agentloop/, agent/, harness/, logger/, "
+                        "contracts/, platform/ and itself.")
 endif()
 
 # The packages A1 carved, each held to the floor it was carved for.
