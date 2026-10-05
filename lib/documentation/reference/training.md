@@ -21,7 +21,7 @@ environment under its data directory**:
 
 ```
 ~/.apogee/training/venv/          the environment (never the system Python)
-~/.apogee/training/scripts/       the shipped Python drivers, seeded by `apogee check --fix`
+~/.apogee/training/scripts/       the shipped Python drivers, seeded by `apogee check --fix` (the trainers', and the mlx backend's mlx_generate.py)
 ~/.apogee/training/scripts/convert/  llama.cpp's converter, vendored at the pinned revision
 ~/.apogee/training/kits/          the bundled training kits, seeded the same way
 ~/.apogee/training/datasets/      trainer-ready datasets, one .jsonl per dataset
@@ -56,7 +56,7 @@ terminal, and on a pipe refuses naming this command.
 | Set | Packages | Needed by |
 |---|---|---|
 | `prepare` | `datasets` | Parquet in `datasets prepare` (JSON, JSONL and CSV need nothing) |
-| `mlx` | `mlx-lm` | `train run --trainer mlx`, the Apple Silicon trainer |
+| `mlx` | `mlx-lm` | `train run --trainer mlx`, the Apple Silicon trainer; and an `mlx` backend, which runs a model directory through it for chat and `complete` |
 | `peft` | `torch`, `transformers`, `peft`, `bitsandbytes`, `accelerate` | `train run --trainer peft`, the CUDA trainer |
 | `convert` | `torch`, `transformers`, `gguf`, `numpy`, `sentencepiece`, `protobuf` | `train promote`'s GGUF conversion |
 

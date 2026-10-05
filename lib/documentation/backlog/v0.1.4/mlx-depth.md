@@ -24,6 +24,7 @@
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): promote registers the fused model; unfused adapter-over-base is a later convenience if `mlx-lm` keeps it stable.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): `mlx-vlm` installs on demand via the setup path; absent, vision answers "no" and `check` says why.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): only still images go native for MLX in this cut; video/audio stay on the 26e timeline/transcript path.
+- 2026-10-04 — What 27a left for this item: the `mlx` type is not on the vendor-CLI predicate, so `serve` already routes an `mlx` entry -- unexercised, which this item's conformance case makes structural; the provider serialises its requests with a mutex, the child being one conversation. `MlxLocalProvider` answers `VisionCapable` false today; the driver protocol (`backends/mlx_protocol.h`, `assets/mlx/mlx_generate.py`) is at version 1, and an image part is a protocol addition.
 
 **Guardrail(s).**
 - The image round-trip against the fake driver, plus the capability answer flipping with the model directory's markers.
@@ -37,4 +38,4 @@
 - [ ] `apogee train promote --target mlx` registers the tuned model as a runnable `mlx` entry through the one config editor, versioned in the ledger, with rollback intact — and no GGUF conversion ran.
 - [ ] `check` reports the vision dependency honestly on installs with and without it.
 
-**Scope note.** Item **27c**, earmarked for **v0.1.4**; build after [27a](mlx-backend-core.md) and [27b](mlx-model-operations.md). Out of scope: MLX embeddings; audio/video native paths; distillation changes beyond the promote target; any second serve plane.
+**Scope note.** Item **27c**, earmarked for **v0.1.4**; build after [27a](../../assistant/MILESTONES.md#milestone-ab--mlx-inference) (shipped 2026-10-04) and [27b](mlx-model-operations.md). Out of scope: MLX embeddings; audio/video native paths; distillation changes beyond the promote target; any second serve plane.

@@ -66,6 +66,9 @@ add_library(apogee_tests_data OBJECT
     data/backends/ollama_cli_test.cpp
     data/backends/codex_cli_test.cpp
     data/backends/gemini_cli_test.cpp
+    data/backends/mlx_protocol_test.cpp
+    data/backends/mlx_local_test.cpp
+    data/backends/mlx_driver_test.cpp
     data/modelstore/gguf_inspect_test.cpp
     data/modelstore/kv_cache_test.cpp
     data/contracts/sha256_test.cpp
@@ -536,8 +539,24 @@ if(UNIX)
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_listen_check.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/no-listen-home
+            # The mlx backend's phase (27a): its real driver under stubs, the
+            # whole process tree sampled.
+            ${CMAKE_CURRENT_SOURCE_DIR}/data/backends/scripts
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mlx/model
     )
     set_tests_properties(cli.complete_opens_no_listening_socket PROPERTIES TIMEOUT 60)
+
+    # The mlx backend (27a) on the real binary with its real driver under stub
+    # mlx packages: check, a byte-clean complete, a tool-using chat on one
+    # driver, /exit, and a refusal naming its fix. Apple silicon only.
+    add_test(NAME cli.mlx_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/mlx_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/mlx-e2e-home
+            ${CMAKE_CURRENT_SOURCE_DIR}/data/backends/scripts
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mlx/model
+    )
+    set_tests_properties(cli.mlx_lifecycle PROPERTIES TIMEOUT 120)
 
     # The other half of that boundary: serve DOES hold a port, fails closed on a
     # non-loopback bind, streams to a real client, mints sessions the terminal

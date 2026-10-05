@@ -22,6 +22,7 @@
 #include "agentloop/retriever.h"
 #include "agentloop/structured.h"
 #include "ansi/ansi.h"
+#include "backends/mlx_local.h"
 #include "backends/prompt_cache.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
@@ -75,6 +76,16 @@ void say(const CheckInputs& inputs, const std::string& label, std::size_t done =
     if (inputs.progress) {
         inputs.progress(label, done, total);
     }
+}
+
+/// The MLX ladder's view of this install (27a): the data directory checked,
+/// and the target -- this build's, unless a test names another.
+[[nodiscard]] backends::MlxHost mlx_host(const CheckInputs& inputs) {
+    backends::MlxHost host = backends::MlxHost::at(inputs.home);
+    if (!inputs.host_target.empty()) {
+        host.target = inputs.host_target;
+    }
+    return host;
 }
 
 void check_version(CheckReport& report, const CheckInputs& inputs) {
@@ -251,6 +262,31 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                 std::string{type} + " -- GGUF header ok" +
                     (info.architecture.empty() ? "" : " (" + info.architecture + ")") + "; " +
                     models::describe(models::local_window(info, backend)));
+            continue;
+        }
+
+        if (backend.type == harness::BackendType::Mlx) {
+            // The same ladder construction runs (27a), so the doctor and a
+            // build cannot disagree about whether this entry can run.
+            const backends::MlxReadiness readiness =
+                backends::probe_mlx_backend(name, backend, mlx_host(inputs));
+            if (readiness.ready()) {
+                const backends::MlxModelInfo info =
+                    backends::inspect_mlx_model(readiness.model_dir);
+                add(report, Status::Ok, "Config", label,
+                    std::string{type} + " -- " +
+                        (info.model_type.empty() ? std::string{"a"} : info.model_type) +
+                        " model directory" +
+                        (info.chat_template ? "" : " with no chat template (a base model)") +
+                        "; its runtime is present");
+                continue;
+            }
+            // A directory that is not there is a real failure, as a dangling
+            // GGUF is; a runtime not set up yet is a warning with its fix.
+            const bool broken = readiness.refusal == backends::MlxRefusal::ModelMissing ||
+                                readiness.refusal == backends::MlxRefusal::NotAModelDirectory;
+            add(report, broken ? Status::Fail : Status::Warn, "Config", label,
+                std::string{type} + " -- " + readiness.reason, readiness.remedy);
             continue;
         }
 
@@ -1174,6 +1210,63 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
+/// The MLX runtime (27a): whether this host can run an `mlx` backend at all,
+/// and the seeded driver against its compiled-in copy. Off Apple silicon it
+/// is skipped, never passed; an environment without mlx-lm is a warning only
+/// where an `mlx` entry needs it. A pass says what was found -- the package's
+/// files, never an import -- and nothing more.
+void check_mlx(CheckReport& report, const CheckInputs& inputs) {
+    const backends::MlxHost host = mlx_host(inputs);
+    if (host.target != backends::kMlxTarget) {
+        add(report, Status::Skipped, "MLX", "runtime",
+            "MLX runs on Apple silicon macOS only (this build is " + host.target +
+                ") -- llama.cpp is the local runtime here");
+        return;
+    }
+    const bool wanted = !inputs.config_missing && inputs.config_error.empty() &&
+                        std::ranges::any_of(inputs.config.backends, [](const auto& entry) {
+                            return entry.second.type == harness::BackendType::Mlx;
+                        });
+    const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
+    switch (runtime.refusal) {
+        case backends::MlxRefusal::NoEnvironment:
+        case backends::MlxRefusal::NoMlxLm:
+            add(report, wanted ? Status::Warn : Status::Skipped, "MLX", "runtime",
+                wanted ? runtime.reason
+                       : "not set up -- only an mlx backend needs it (" + runtime.reason + ")",
+                runtime.remedy);
+            break;
+        case backends::MlxRefusal::None:
+        case backends::MlxRefusal::NoDriver:
+            add(report, Status::Ok, "MLX", "runtime",
+                "mlx-lm " +
+                    (runtime.version.empty() ? std::string{"(version unstated)"}
+                                             : runtime.version) +
+                    " is present in " + host.venv.string() + " (its files, not imported by check)");
+            break;
+        case backends::MlxRefusal::Platform:
+        case backends::MlxRefusal::NoModelPath:
+        case backends::MlxRefusal::ModelMissing:
+        case backends::MlxRefusal::NotAModelDirectory:
+            break;  // the runtime's rungs never answer these
+    }
+
+    std::error_code code;
+    const std::string driver = std::string{backends::kMlxDriverName};
+    if (!std::filesystem::is_regular_file(host.driver, code)) {
+        add(report, Status::Warn, "MLX", "driver",
+            driver + " is missing from " + host.driver.parent_path().string(),
+            "apogee check --fix");
+    } else if (harness::is_unmodified_bundled_asset(inputs.home, host.driver)) {
+        add(report, Status::Ok, "MLX", "driver", driver + " matches the shipped copy");
+    } else {
+        add(report, Status::Warn, "MLX", "driver",
+            driver +
+                " differs from the shipped copy -- your edit is kept and runs; delete the file "
+                "and run 'apogee check --fix' to restore the shipped one");
+    }
+}
+
 /// The training track's install: the Python environment (created only on
 /// request, so its absence is a warning with the command that creates it),
 /// every seeded script against its compiled-in copy (a user's edit is kept
@@ -1489,6 +1582,8 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_graphs(report, inputs);
     say(inputs, "checking training");
     check_training(report, inputs);
+    say(inputs, "checking MLX");
+    check_mlx(report, inputs);
     say(inputs, "checking the data directory");
     check_filesystem(report, inputs);
     say(inputs, "checking secrets");

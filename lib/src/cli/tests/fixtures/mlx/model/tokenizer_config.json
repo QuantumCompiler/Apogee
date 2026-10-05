@@ -1,0 +1,4 @@
+{
+  "bos_token": "<|begin_of_text|>",
+  "chat_template": "{% for message in messages %}{{ message['role'] }}: {{ message['content'] }}\n{% endfor %}"
+}

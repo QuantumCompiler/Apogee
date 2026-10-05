@@ -1822,3 +1822,149 @@ TEST_CASE("check names the channel, the root and the rung that chose it",
                                               .home_directory = "/h"};
     CHECK(rows_for(ambient).second == install.root.string() + " -- set by APOGEE_HOME");
 }
+
+namespace {
+
+/// A fake MLX runtime in the install (27a): mlx-lm's package files in the
+/// environment, and a model directory -- files only, as the doctor reads them.
+void write_fake_mlx_runtime(const Install& install) {
+    write_fake_interpreter(install);
+    install.write("training/venv/lib/python3.14/site-packages/mlx_lm/__init__.py", "");
+    install.write("training/venv/lib/python3.14/site-packages/mlx_lm/_version.py",
+                  "__version__ = '0.32.0'\n");
+    install.write("mlx-model/config.json", R"({"model_type":"llama"})");
+    install.write("mlx-model/tokenizer_config.json", R"({"chat_template":"{{ x }}"})");
+}
+
+std::string mlx_entry(const Install& install, const std::string& path = {}) {
+    return "backends:\n  local:\n    type: mlx\n    model_path: " +
+           (path.empty() ? (install.root / "mlx-model").string() : path) + "\n";
+}
+
+}  // namespace
+
+TEST_CASE("off Apple silicon the MLX runtime is skipped, never passed, and an entry warns",
+          "[commands][check][mlx]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "linux-x64";
+
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    const apogee::commands::CheckRow* runtime = row_with(report, "runtime");
+    REQUIRE(runtime != nullptr);
+    CHECK(runtime->status == Status::Skipped);
+    CHECK(runtime->detail.find("Apple silicon macOS only") != std::string::npos);
+    const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+    REQUIRE(entry != nullptr);
+    CHECK(entry->status == Status::Warn);
+    CHECK(entry->detail.find("linux-x64") != std::string::npos);
+    CHECK(report.passed());
+}
+
+TEST_CASE(
+    "the MLX row says what it found: not set up is skipped until an entry needs it, then a "
+    "warning with the fix",
+    "[commands][check][mlx]") {
+    const Install install;
+    install.seed();
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", "backends:\n  m:\n    type: mock\n");
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* runtime = row_with(report, "runtime");
+        REQUIRE(runtime != nullptr);
+        CHECK(runtime->status == Status::Skipped);
+        CHECK(runtime->detail.find("only an mlx backend needs it") != std::string::npos);
+        CHECK(report.passed());
+    }
+    install.write("config/config.yaml", mlx_entry(install));
+    load_into(inputs);
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* runtime = row_with(report, "runtime");
+        REQUIRE(runtime != nullptr);
+        CHECK(runtime->status == Status::Warn);
+        CHECK(runtime->remedy == "apogee train setup --with mlx");
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Warn);
+        CHECK(entry->remedy == "apogee train setup --with mlx");
+        CHECK(report.passed());
+    }
+}
+
+TEST_CASE("a ready MLX install passes on what its files show, and an edited driver is shown",
+          "[commands][check][mlx]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* runtime = row_with(report, "runtime");
+        REQUIRE(runtime != nullptr);
+        CHECK(runtime->status == Status::Ok);
+        CHECK(runtime->detail.find("mlx-lm 0.32.0 is present") != std::string::npos);
+        // What was verified, said as such: files, not an import.
+        CHECK(runtime->detail.find("not imported") != std::string::npos);
+        const apogee::commands::CheckRow* driver = row_with(report, "driver");
+        REQUIRE(driver != nullptr);
+        CHECK(driver->status == Status::Ok);
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Ok);
+        CHECK(entry->detail.find("llama model directory") != std::string::npos);
+    }
+    install.write("training/scripts/mlx_generate.py", "# mine\n");
+    {
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* driver = row_with(report, "driver");
+        REQUIRE(driver != nullptr);
+        CHECK(driver->status == Status::Warn);
+        CHECK(driver->detail.find("your edit is kept") != std::string::npos);
+    }
+    std::filesystem::remove(install.root / "training" / "scripts" / "mlx_generate.py");
+    {
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* driver = row_with(report, "driver");
+        REQUIRE(driver != nullptr);
+        CHECK(driver->status == Status::Warn);
+        CHECK(driver->remedy == "apogee check --fix");
+    }
+}
+
+TEST_CASE("an mlx entry naming no model directory fails, as a dangling GGUF does",
+          "[commands][check][mlx]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", mlx_entry(install, (install.root / "gone").string()));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+    REQUIRE(entry != nullptr);
+    CHECK(entry->status == Status::Fail);
+    CHECK(entry->detail.find("model_path does not exist") != std::string::npos);
+    CHECK(entry->remedy.find("--type mlx --model-path") != std::string::npos);
+    CHECK_FALSE(report.passed());
+}

@@ -52,6 +52,9 @@ enum class BackendType : std::uint8_t {
     CodexCli,
     GeminiCli,
     OllamaCli,
+    /// Apple's MLX through a persistent Python child (27a): opt-in, Apple
+    /// silicon only, refused at construction where its runtime is absent.
+    Mlx,
     Mock
 };
 

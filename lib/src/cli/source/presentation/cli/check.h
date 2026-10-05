@@ -92,6 +92,10 @@ struct CheckInputs {
     /// Hears each section as it starts, and each model header as it is read
     /// -- numbered where a section reads several (M1). Null: nothing is said.
     BusyProgress progress;
+
+    /// The release target the MLX rows judge (27a); empty is this build's
+    /// own. Set by a test, so the off-platform answer is checked on any host.
+    std::string host_target;
 };
 
 /// Runs every check and returns the report. Pure with respect to the machine

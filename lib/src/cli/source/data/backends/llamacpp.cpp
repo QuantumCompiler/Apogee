@@ -13,6 +13,7 @@
 
 #include "backends/llamacpp_embed.h"
 #include "backends/llamacpp_tokens.h"
+#include "backends/local_prompt.h"
 #include "backends/markup_filter.h"
 #include "backends/native_tool_calls.h"
 #include "contracts/errors.h"
@@ -23,80 +24,6 @@
 
 namespace apogee::backends {
 namespace {
-
-/// The prompt-level form of structured output, now the fallback (26f): a
-/// grammar holds a local answer to its schema wherever the model's template
-/// can take one, and only where it cannot -- no template, a format with no
-/// place for a schema, a schema the converter cannot express, a turn with
-/// tools -- is the schema stated in the system block, the caller validating
-/// either way. Skipped when a system message already carries the schema
-/// text -- every structured caller states it once itself -- so the model
-/// never reads it twice.
-std::vector<harness::ChatMessage> messages_with_schema(const harness::ChatRequest& request) {
-    const std::string& schema = request.transient.response_schema;
-    if (schema.empty()) {
-        return request.messages;
-    }
-    const nlohmann::json parsed = nlohmann::json::parse(schema, nullptr, false);
-    const std::string text = parsed.is_discarded() ? schema : parsed.dump(2);
-    for (const harness::ChatMessage& message : request.messages) {
-        if (message.role == harness::Role::System &&
-            message.content.plain_text().find("OUTPUT FORMAT") != std::string::npos) {
-            return request.messages;
-        }
-    }
-    std::vector<harness::ChatMessage> out = request.messages;
-    const std::string instruction =
-        "OUTPUT FORMAT\nYour response MUST be valid JSON conforming to the following JSON "
-        "Schema. Output only the JSON object -- no surrounding text or markdown code "
-        "blocks.\n\n" +
-        text;
-    // Beside an existing system message when there is one, else first.
-    std::size_t at = 0;
-    for (std::size_t i = 0; i < out.size(); ++i) {
-        if (out[i].role == harness::Role::System) {
-            at = i + 1;
-        }
-    }
-    out.insert(out.begin() + static_cast<std::ptrdiff_t>(at),
-               harness::ChatMessage::system(instruction));
-    return out;
-}
-
-/// The messages a local prompt is rendered from: the schema instruction
-/// where one is asked for and `state_schema` -- false when a grammar holds
-/// the answer, so the schema is not stated twice -- and the system messages
-/// that open the conversation joined into one, a blank line apart.
-///
-/// A template may take one system message, and only first: Qwen3.5 and
-/// 3.8's raise "System message must be at the beginning" on a second, and
-/// the render failing drops the model to the fallback template -- and its
-/// tools with it. A second is the ordinary case: the environment note
-/// (25d), a retrieval block or a review note ahead of a chat's own system
-/// prompt. The Anthropic and Google wires join theirs the same way.
-std::vector<harness::ChatMessage> prompt_messages(const harness::ChatRequest& request,
-                                                  bool state_schema) {
-    std::vector<harness::ChatMessage> messages =
-        state_schema ? messages_with_schema(request) : request.messages;
-    std::size_t leading = 0;
-    while (leading < messages.size() && messages[leading].role == harness::Role::System) {
-        ++leading;
-    }
-    if (leading < 2) {
-        return messages;
-    }
-    std::string joined;
-    for (std::size_t i = 0; i < leading; ++i) {
-        const std::string text = messages[i].content.plain_text();
-        if (text.empty()) {
-            continue;
-        }
-        joined += (joined.empty() ? "" : "\n\n") + text;
-    }
-    messages.erase(messages.begin() + 1, messages.begin() + static_cast<std::ptrdiff_t>(leading));
-    messages.front() = harness::ChatMessage::system(joined);
-    return messages;
-}
 
 /// A context has to hold at least one token whose logits we can sample from.
 ///

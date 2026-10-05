@@ -29,7 +29,7 @@ char fold(char c) noexcept {
 ///
 /// Widening the enum is a row here plus a case in the switch below -- the
 /// loader dispatches through this table, so no other file learns the new name.
-constexpr std::array<std::pair<std::string_view, BackendType>, 9> kBackendTypeNames{{
+constexpr std::array<std::pair<std::string_view, BackendType>, 10> kBackendTypeNames{{
     {"anthropic", BackendType::Anthropic},
     {"openai", BackendType::OpenAI},
     {"google", BackendType::Google},
@@ -38,6 +38,7 @@ constexpr std::array<std::pair<std::string_view, BackendType>, 9> kBackendTypeNa
     {"codex-cli", BackendType::CodexCli},
     {"gemini-cli", BackendType::GeminiCli},
     {"ollama-cli", BackendType::OllamaCli},
+    {"mlx", BackendType::Mlx},
     {"mock", BackendType::Mock},
 }};
 
@@ -526,6 +527,7 @@ bool is_vendor_cli(BackendType type) noexcept {
         case BackendType::OpenAI:
         case BackendType::Google:
         case BackendType::LlamaCpp:
+        case BackendType::Mlx:
         case BackendType::Mock:
             return false;
     }

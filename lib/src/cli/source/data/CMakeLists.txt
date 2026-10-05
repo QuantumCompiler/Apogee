@@ -24,6 +24,7 @@ apogee_add_module(contracts
     contracts/assets.cpp
     contracts/assets_training.cpp
     contracts/assets_converter.cpp
+    contracts/assets_mlx.cpp
     contracts/errors.h
     contracts/errors.cpp
     contracts/cancellation.h
@@ -167,8 +168,14 @@ apogee_add_module(backends
     backends/google_embed.cpp
     backends/llamacpp_embed.h
     backends/llamacpp_embed.cpp
+    backends/local_prompt.h
+    backends/local_prompt.cpp
     backends/llamacpp.h
     backends/llamacpp.cpp
+    backends/mlx_protocol.h
+    backends/mlx_protocol.cpp
+    backends/mlx_local.h
+    backends/mlx_local.cpp
     backends/factory.h
     backends/factory.cpp
 )

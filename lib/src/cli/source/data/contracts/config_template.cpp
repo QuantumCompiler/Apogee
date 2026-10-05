@@ -290,6 +290,27 @@ backends:
   #   model_path: "${HOME}/.cache/llms/SmolVLM-500M-Instruct-Q8_0.gguf"
   #   mmproj_path: "${HOME}/.cache/llms/mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
 
+  # ── Local inference via MLX (Apple silicon) ─────────────────────────────────
+  # Opt-in, beside llama.cpp -- which stays the default local runtime on every
+  # platform. Apple's MLX runs a Hugging Face model directory (config.json, the
+  # tokenizer files and SafeTensors weights: an mlx-community build, or a
+  # snapshot you already hold) in a Python child over pipes. One child per chat
+  # holds the model and its cache across turns; it never opens a port, and its
+  # warnings stay off your screen. Tools go through the model's own chat
+  # template. It needs mlx-lm in the environment Apogee owns, never the system
+  # Python:
+  #   apogee train setup --with mlx
+  # Off Apple silicon, or without that environment, the entry is refused with
+  # the fix named, and `apogee check` has an MLX row saying what it found.
+  # Sampling, thinking and max_tokens work as on a llamacpp entry -- the
+  # model's generation_config.json is its authors' recommendation -- and
+  # context_size is the window Apogee warns and compacts at.
+  # mlx:
+  #   type: mlx
+  #   model_path: "${HOME}/models/Llama-3.2-3B-Instruct-4bit"
+  #   # temperature: 0.6
+  #   # idle_unload_seconds: 900
+
   # ── User-supplied embedding backend (vector RAG) ────────────────────────────
   # No embedding model ships with Apogee. To enable vector retrieval, point
   # model_path at a local GGUF -- a dedicated embedding model is best, though a

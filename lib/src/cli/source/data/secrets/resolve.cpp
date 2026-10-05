@@ -44,6 +44,7 @@ std::span<const std::string_view> conventional_variables(harness::BackendType ty
         case harness::BackendType::Google:
             return kGoogleVariables;
         case harness::BackendType::LlamaCpp:
+        case harness::BackendType::Mlx:
         case harness::BackendType::ClaudeCli:
         case harness::BackendType::CodexCli:
         case harness::BackendType::GeminiCli:

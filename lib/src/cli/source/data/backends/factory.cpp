@@ -9,6 +9,7 @@
 #include "backends/gemini_cli.h"
 #include "backends/google.h"
 #include "backends/llamacpp.h"
+#include "backends/mlx_local.h"
 #include "backends/mock.h"
 #include "backends/ollama_cli.h"
 #include "backends/openai.h"
@@ -179,6 +180,16 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
         case harness::BackendType::LlamaCpp: {
             try {
                 return LlamaCppProvider::from_config(name, config);
+            } catch (const harness::ProviderError& e) {
+                reason = e.what();
+                return nullptr;
+            }
+        }
+        case harness::BackendType::Mlx: {
+            // Opt-in and loud (27a): the whole refusal ladder runs here, so an
+            // entry that cannot run is skipped with its rung and its fix.
+            try {
+                return MlxLocalProvider::from_config(name, config);
             } catch (const harness::ProviderError& e) {
                 reason = e.what();
                 return nullptr;

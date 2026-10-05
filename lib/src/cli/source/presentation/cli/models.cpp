@@ -13,6 +13,7 @@
 #include "backends/anthropic_wire.h"
 #include "backends/google.h"
 #include "backends/google_wire.h"
+#include "backends/mlx_local.h"
 #include "backends/model_profile.h"
 #include "backends/openai.h"
 #include "backends/openai_wire.h"
@@ -287,6 +288,32 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
         // permissive-unknown rule means an unprofiled model is handled, not
         // broken.
         row.profile = "unprofiled";
+
+        if (backend.type == harness::BackendType::Mlx) {
+            // A model directory and a Python runtime (27a): what the
+            // directory says, and whether the ladder lets it run -- read from
+            // files, never by starting the driver. 27b reads its window.
+            const backends::MlxReadiness readiness =
+                backends::probe_mlx_backend(key, backend, backends::MlxHost::current());
+            const std::filesystem::path dir{harness::expand_env_and_home(backend.model_path)};
+            row.model = backend.model.empty() ? dir.filename().string() : backend.model;
+            row.provenance = "local";
+            const backends::MlxModelInfo info = backends::inspect_mlx_model(dir);
+            row.architecture = info.model_type.empty() ? "-" : info.model_type;
+            if (const backends::ModelProfile* family =
+                    backends::resolve_mlx_profile(info, backend.model + " " + dir.string())) {
+                row.profile = family->name;
+            }
+            row.verified = "-";
+            row.state =
+                readiness.ready() ? "ready" : std::string{backends::to_string(readiness.refusal)};
+            if (!readiness.ready()) {
+                row.attention = true;
+                row.note = readiness.message();
+            }
+            rows.push_back(std::move(row));
+            continue;
+        }
 
         if (!is_local(backend.type)) {
             row.model = backend.model;
@@ -646,6 +673,12 @@ void render_sampling(std::ostream& out, const models::GgufInfo& info,
                        ? line + " -- sent as Gemini's thinking budget; off asks for the least"
                        : line + " -- " + model + " does not think, so nothing is sent";
         }
+        case harness::BackendType::Mlx:
+            // The driver hands the switch to the model's own template (27a);
+            // there is no sampler to count a budget with.
+            return line +
+                   " -- off renders the template's own switch, where it has one; a budget is "
+                   "not applied (the mlx backend has no budget sampler)";
         case harness::BackendType::ClaudeCli:
         case harness::BackendType::CodexCli:
         case harness::BackendType::GeminiCli:
@@ -866,6 +899,44 @@ std::string render_model_info(const harness::Config& config, std::string_view na
     }
     const std::string roles = roles_for(config, std::string{name});
     out << "roles:        " << (roles.empty() ? "-" : roles) << "\n";
+
+    if (value.type == harness::BackendType::Mlx) {
+        // A model directory run by the MLX driver (27a): the ladder's answer,
+        // what the directory says, and how it samples -- all from files.
+        const backends::MlxReadiness readiness =
+            backends::probe_mlx_backend(name, value, backends::MlxHost::current());
+        const std::filesystem::path dir{harness::expand_env_and_home(value.model_path)};
+        out << "model_path:   " << (value.model_path.empty() ? "(unset)" : dir.string()) << "\n";
+        out << "runtime:      "
+            << (readiness.ready()
+                    ? "ready -- mlx-lm " +
+                          (readiness.version.empty() ? std::string{"(version unknown)"}
+                                                     : readiness.version) +
+                          " in " + readiness.interpreter.parent_path().parent_path().string()
+                    : "cannot run -- " + readiness.message())
+            << "\n";
+        if (!value.model_path.empty()) {
+            const backends::MlxModelInfo info = backends::inspect_mlx_model(dir);
+            out << "model_type:   " << (info.model_type.empty() ? "-" : info.model_type) << "\n";
+            out << "template:     "
+                << (info.chat_template ? "ships with the model"
+                                       : "none -- a base model, offered no tools")
+                << "\n";
+            const backends::ModelProfile* family =
+                backends::resolve_mlx_profile(info, value.model + " " + dir.string());
+            out << "profile:      " << (family == nullptr ? "unprofiled" : family->name) << "\n";
+            const backends::ResolvedSampling resolved =
+                backends::resolve_sampling(backends::SamplingLadder{
+                    .config = backends::config_rung(value),
+                    .model_file = info.sampling,
+                    .family = backends::family_rung(family, true),
+                    .family_source = family == nullptr ? std::string{} : family->sampling_source,
+                    .seed = backends::config_seed(value)});
+            out << "sampling:     " << backends::describe_sampling(resolved) << "\n";
+        }
+        out << "thinking:     " << describe_thinking(value) << "\n";
+        return out.str();
+    }
 
     if (!is_local(value.type)) {
         // A cloud backend has no file to inspect, and saying so beats printing

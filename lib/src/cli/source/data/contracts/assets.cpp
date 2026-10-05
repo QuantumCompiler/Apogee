@@ -755,6 +755,10 @@ void refresh_converter_tree(const std::filesystem::path& root, const std::filesy
     }
 }
 
+std::string bundled_mlx_driver_relative_path() {
+    return bundled_script_relative_path("mlx_generate.py");
+}
+
 std::string bundled_converter_relative_dir() {
     return "training/scripts/convert";
 }
@@ -769,6 +773,9 @@ std::vector<BundledFile> bundled_files() {
         files.push_back({bundled_kit_relative_path(kit.name), kit.text});
     }
     for (const BundledScript& script : bundled_training_scripts()) {
+        files.push_back({bundled_script_relative_path(script.name), script.text});
+    }
+    for (const BundledScript& script : bundled_mlx_scripts()) {
         files.push_back({bundled_script_relative_path(script.name), script.text});
     }
     for (const BundledScript& file : bundled_converter_files()) {
