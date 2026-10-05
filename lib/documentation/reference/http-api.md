@@ -890,9 +890,11 @@ neither, `400` for an id that is not a plain name.
 The version ledgers under `training/versions/`: `200 {"object": "list",
 "data": [ledger]}`, or with `?backend=<name>` that backend's ledger alone
 (`404` when it has none). A ledger is `{backend_name, active_version,
-versions: [{version, run_id, gguf_path, promoted_at[, eval_score,
-eval_passed, pruned_at]}]}` -- a pruned entry stays as history with the
-time retention removed its file.
+versions: [{version, run_id, gguf_path | mlx_path, promoted_at[,
+eval_score, eval_passed, pruned_at, fused_path]}]}` -- a GGUF version names
+its `gguf_path`, an MLX one (`train promote --target mlx`) its `mlx_path`
+directory; a pruned entry stays as history with the time retention removed
+its file.
 
 ### `GET /v1/admin/training/cycle`
 
@@ -1036,6 +1038,8 @@ after a successful ingest, the twin of `apogee embed ingest --graph`.
   puts its own access control in front. Only the admin plane takes a bearer.
 - **It does not terminate TLS.** Plain HTTP, behind a reverse proxy that does.
 - **It does not serve subscription backends.** A vendor-CLI entry is refused by
-  type, with a 400 that says why.
+  type, with a 400 that says why. The refusal is about credentials, not
+  runtimes: a local `mlx` entry is served like a `llamacpp` one, its driver a
+  child of the server over pipes that holds no socket.
 - **It does not run tools the client defines.** The loop is the server's; a
   request with `tools` is refused rather than silently ignored.

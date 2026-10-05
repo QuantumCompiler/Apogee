@@ -133,9 +133,52 @@ struct MlxModelInfo {
     std::string text_model_type;
     bool chat_template = false;
     SamplingRung sampling;
+    /// A vision model (27c): `config.json` declares a `vision_config`, and an
+    /// image processor's configuration (`preprocessor_config.json` or
+    /// `processor_config.json`) ships beside it -- what mlx-vlm needs to
+    /// read a picture. A fact of the files, never of the name.
+    bool vision = false;
 };
 
 [[nodiscard]] MlxModelInfo inspect_mlx_model(const std::filesystem::path& dir);
+
+/// The fix that installs the vision dependency (27c).
+inline constexpr std::string_view kMlxVisionRemedy = "apogee train setup --with mlx-vlm";
+
+/// mlx-vlm as installed in the environment (27c): its package directory
+/// and the version its distribution record names -- read from files, never
+/// imported, so asking costs a directory listing.
+struct MlxVlmPackage {
+    std::filesystem::path dir;
+    std::string version;
+
+    [[nodiscard]] bool installed() const noexcept {
+        return !dir.empty();
+    }
+};
+
+[[nodiscard]] MlxVlmPackage find_mlx_vlm(const MlxHost& host);
+
+/// Whether an MLX model reads images natively (27c), from file facts alone:
+/// the directory is a vision model (`MlxModelInfo::vision`) and mlx-vlm is
+/// installed in the environment. The provider's `accepts_images`, `check`
+/// and `models info/status` all ask this, so no surface claims a capability
+/// another denies.
+struct MlxVision {
+    /// The directory is a vision model.
+    bool model = false;
+    MlxVlmPackage vlm;
+    /// Why it does not read images, in a sentence; and the fix, when one
+    /// command is it (mlx-vlm missing). Both empty when it does.
+    std::string reason;
+    std::string remedy;
+
+    [[nodiscard]] bool reads_images() const noexcept {
+        return model && vlm.installed();
+    }
+};
+
+[[nodiscard]] MlxVision probe_mlx_vision(const MlxModelInfo& info, const MlxHost& host);
 
 /// The family profile for a model directory: its `model_type` (and a
 /// vision-language model's text model's) in each spelling the profiles list
@@ -166,6 +209,11 @@ public:
         std::filesystem::path driver;
         /// What the model directory says (`inspect_mlx_model`).
         MlxModelInfo info;
+        /// Whether it reads images natively, and why not (`probe_mlx_vision`):
+        /// a turn carrying a picture is answered by a driver loaded through
+        /// mlx-vlm (27c).
+        bool vision = false;
+        std::string vision_gap;
         /// Cap on generated tokens when the request sets none.
         std::int64_t max_tokens = 2048;
         /// The window, when the entry sets one; 0 leaves it to the model.
@@ -258,11 +306,12 @@ public:
 
     // --- VisionCapable --------------------------------------------------------
 
-    /// False: images through MLX are 27c's (`mlx-vlm`). Answered rather than
-    /// absent, so every surface refuses or routes an image with the one
-    /// shared message instead of sending one this driver would drop.
+    /// True for a vision model with mlx-vlm installed (27c), from the files
+    /// alone -- asked before a turn, never at the cost of a load. Otherwise
+    /// false, so every surface routes the image through the vision role with
+    /// the one shared message instead of sending one this model cannot read.
     [[nodiscard]] bool accepts_images() const noexcept override {
-        return false;
+        return options_.vision;
     }
 
     /// How many children this provider has started: "one per session" is a
@@ -271,6 +320,9 @@ public:
 
     /// Whether a driver is running now.
     [[nodiscard]] bool has_live_child() const noexcept;
+
+    /// Whether the running driver loaded the model through mlx-vlm (27c).
+    [[nodiscard]] bool has_vision_child() const noexcept;
 
     /// What the driver said when it was ready, once it has.
     [[nodiscard]] const std::optional<mlx::Event>& driver_ready() const noexcept {
@@ -282,8 +334,15 @@ public:
 
 private:
     /// Starts the driver if none is running and waits for `ready`. Throws
-    /// ProviderError with the driver's own words when it cannot.
-    void ensure_child(const harness::StreamOptions& options);
+    /// ProviderError with the driver's own words when it cannot. `vision`
+    /// asks for one loaded through mlx-vlm: a running text driver is ended
+    /// and the model loaded again that way (27c); a running vision driver
+    /// answers text turns too, so it is never swapped back.
+    void ensure_child(const harness::StreamOptions& options, bool vision = false);
+
+    /// Refuses a request carrying what this model cannot read: an image
+    /// when it reads none, one that is not a data: URI, any audio.
+    void check_media(const harness::ChatRequest& request) const;
 
     /// Reads the driver's startup: `ready`, or the error that ends it.
     void await_ready(const harness::CancellationToken& cancellation);
@@ -341,6 +400,8 @@ private:
     JsonlFramer framer_;
     std::deque<std::string> lines_;
     std::optional<mlx::Event> ready_;
+    /// The running driver was started with `--vision`.
+    bool vision_child_ = false;
     std::string stderr_tail_;
     std::int64_t next_id_ = 0;
     int spawns_ = 0;

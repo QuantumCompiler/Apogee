@@ -684,7 +684,7 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     record_cycle_run(history, record);
     save("the pass");
     say("[cycle] complete -- " + request.config.backend + " promoted to v" +
-        std::to_string(promoted.version) + " (" + promoted.gguf_path + ")");
+        std::to_string(promoted.version) + " (" + promoted.weights_path + ")");
     outcome.ok = true;
     outcome.record = record;
     outcome.history = history;

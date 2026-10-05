@@ -23,6 +23,13 @@
 /// conversation in the shapes a Hugging Face chat template takes -- roles,
 /// content, OpenAI-style tool calls and tool specs -- and the driver hands
 /// them to the model's own template. Nothing here formats a prompt.
+///
+/// **Images are an addition, not a new version** (27c): a message with an
+/// image carries its content as parts -- `{"type": "image", "image": <data
+/// URI>}` and `{"type": "text", "text": ...}`, the content-part shape a
+/// vision model's template places images by -- and only to a driver whose
+/// `ready` said `vision`. A driver from before 27c never says it, so it is
+/// never sent one.
 namespace apogee::backends::mlx {
 
 /// The protocol version this build speaks; the driver's `ready` names its.
@@ -93,6 +100,10 @@ struct Event {
     std::string tool_parser;
     bool thinking = false;
     std::string mlx_lm_version;
+    /// Ready: the model was loaded through mlx-vlm and reads images (27c),
+    /// and that package's version.
+    bool vision = false;
+    std::string mlx_vlm_version;
 };
 
 /// Parses one line, or nullopt for one that is not a protocol object -- a

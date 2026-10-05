@@ -1145,6 +1145,18 @@ std::string render_model_info(const harness::Config& config, std::string_view na
                 << (info.chat_template ? "ships with the model"
                                        : "none -- a base model, offered no tools")
                 << "\n";
+            // Whether a picture is read as it is (27c): the same file facts
+            // the provider answers by, so neither claims what the other denies.
+            const backends::MlxVision vision =
+                backends::probe_mlx_vision(info, backends::MlxHost::current());
+            out << "vision:       "
+                << (vision.reads_images()
+                        ? "reads images as they are -- mlx-vlm " +
+                              (vision.vlm.version.empty() ? std::string{"(version unstated)"}
+                                                          : vision.vlm.version)
+                        : "no -- " + vision.reason +
+                              (vision.remedy.empty() ? std::string{} : " (" + vision.remedy + ")"))
+                << "\n";
             const backends::ModelProfile* family =
                 backends::resolve_mlx_profile(info, value.model + " " + dir.string());
             out << "profile:      " << (family == nullptr ? "unprofiled" : family->name) << "\n";
@@ -1231,6 +1243,18 @@ std::string render_role_status(const harness::Config& config, const BusyProgress
         const auto entry = config.backends.find(key);
         if (entry == config.backends.end()) {
             out << "   [not configured]";
+        } else if (role == harness::ModelRole::Vision &&
+                   entry->second.type == harness::BackendType::Mlx) {
+            // Whether this vision model can read a picture at all (27c): a
+            // vision role that cannot is a gap the attachment meets later.
+            const backends::MlxVision vision = backends::probe_mlx_vision(
+                backends::inspect_mlx_model(
+                    std::filesystem::path{harness::expand_env_and_home(entry->second.model_path)}),
+                backends::MlxHost::current());
+            out << (vision.reads_images()
+                        ? "   [mlx: reads images as they are]"
+                        : "   [mlx: cannot read images -- " + vision.reason +
+                              (vision.remedy.empty() ? std::string{} : "; " + vision.remedy) + "]");
         } else if (entry->second.type == harness::BackendType::LlamaCpp &&
                    !entry->second.model_path.empty()) {
             // What loading it costs: a helper is a second model resident

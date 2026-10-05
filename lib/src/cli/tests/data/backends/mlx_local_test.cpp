@@ -18,6 +18,7 @@
 #include "backends/factory.h"
 #include "contracts/errors.h"
 #include "support/env_guard.h"
+#include "support/fake_mlx_driver.h"
 
 /// The mlx backend (27a) over a scripted driver, and its refusal ladder.
 ///
@@ -36,122 +37,9 @@ using apogee::backends::MlxReadiness;
 using apogee::backends::MlxRefusal;
 using apogee::harness::ChatMessage;
 using apogee::harness::ChatRequest;
+using apogee::testing::DriverState;
+using apogee::testing::FakeDriver;
 using nlohmann::json;
-
-/// What a fake driver does, and what was done to it.
-struct DriverState {
-    /// Written at spawn: `ready`, or a fatal error.
-    std::string startup = R"({"type":"ready","protocol":1,"model_type":"llama",)"
-                          R"("chat_template":true,"tool_parser":null,"thinking":false,)"
-                          R"("mlx_lm":"0.32.0"})"
-                          "\n";
-    /// One per `generate`, `{id}` replaced by its id; the last repeats.
-    std::vector<std::string> replies;
-    std::string stderr_text;
-    std::size_t chunk = 0;
-    /// End of file once everything written so far has been read.
-    bool die_after_startup = false;
-    bool die_after_reply = false;
-    /// Never answer a cancel.
-    bool deaf = false;
-
-    std::string out;
-    std::size_t offset = 0;
-    bool stderr_read = false;
-    std::vector<std::string> writes;
-    std::size_t replied = 0;
-    bool dying = false;
-    bool stdin_closed = false;
-    bool terminated = false;
-};
-
-class FakeDriver final : public apogee::platform::ChildProcess {
-public:
-    explicit FakeDriver(std::shared_ptr<DriverState> state) : state_{std::move(state)} {
-        state_->out += state_->startup;
-        state_->dying = state_->die_after_startup;
-    }
-
-    [[nodiscard]] bool write_stdin(std::string_view bytes) override {
-        if (state_->stdin_closed || state_->terminated) {
-            return false;
-        }
-        const std::string text{bytes};
-        std::size_t start = 0;
-        for (std::size_t end = text.find('\n'); end != std::string::npos;
-             start = end + 1, end = text.find('\n', start)) {
-            const std::string line = text.substr(start, end - start);
-            state_->writes.push_back(line);
-            const json request = json::parse(line, nullptr, false);
-            const std::string id = request.is_object() ? request.value("id", json{}).dump() : "0";
-            if (request.value("type", "") == "generate" && !state_->replies.empty()) {
-                std::string reply =
-                    state_->replies[std::min(state_->replied, state_->replies.size() - 1)];
-                ++state_->replied;
-                for (std::size_t at = reply.find("{id}"); at != std::string::npos;
-                     at = reply.find("{id}", at)) {
-                    reply.replace(at, 4, id);
-                }
-                state_->out += reply;
-                state_->dying = state_->dying || state_->die_after_reply;
-            } else if (request.value("type", "") == "cancel" && !state_->deaf) {
-                state_->out += R"({"type":"done","id":)" + id +
-                               R"(,"finish":"cancelled","prompt_tokens":5,"cached_tokens":0,)"
-                               R"("completion_tokens":1})"
-                               "\n";
-            }
-        }
-        return true;
-    }
-
-    void close_stdin() override {
-        state_->stdin_closed = true;
-    }
-
-    [[nodiscard]] apogee::platform::ReadStatus read_stdout(
-        std::string& out, std::chrono::milliseconds timeout) override {
-        out.clear();
-        if (state_->offset < state_->out.size()) {
-            const std::size_t left = state_->out.size() - state_->offset;
-            const std::size_t take = state_->chunk == 0 ? left : std::min(state_->chunk, left);
-            out = state_->out.substr(state_->offset, take);
-            state_->offset += take;
-            return apogee::platform::ReadStatus::Data;
-        }
-        if (state_->dying || state_->stdin_closed || state_->terminated) {
-            return apogee::platform::ReadStatus::Eof;
-        }
-        std::this_thread::sleep_for(std::min(timeout, std::chrono::milliseconds{2}));
-        return apogee::platform::ReadStatus::Timeout;
-    }
-
-    [[nodiscard]] apogee::platform::ReadStatus read_stderr(
-        std::string& out, std::chrono::milliseconds /*timeout*/) override {
-        out.clear();
-        if (state_->stderr_read || state_->stderr_text.empty()) {
-            return apogee::platform::ReadStatus::Eof;
-        }
-        state_->stderr_read = true;
-        out = state_->stderr_text;
-        return apogee::platform::ReadStatus::Data;
-    }
-
-    [[nodiscard]] bool exited() override {
-        return state_->terminated || state_->stdin_closed ||
-               (state_->dying && state_->offset >= state_->out.size());
-    }
-
-    [[nodiscard]] std::optional<int> wait_for_exit(std::chrono::milliseconds /*timeout*/) override {
-        return 0;
-    }
-
-    void terminate() override {
-        state_->terminated = true;
-    }
-
-private:
-    std::shared_ptr<DriverState> state_;
-};
 
 /// A provider over fake drivers, each spawn handed the next state.
 struct Fixture {
@@ -181,6 +69,8 @@ struct Fixture {
                     next.terminated = false;
                     drivers.push_back(std::make_shared<DriverState>(std::move(next)));
                 }
+                drivers[commands.size() - 1]->vision_spawn =
+                    std::ranges::find(command.arguments, "--vision") != command.arguments.end();
                 return std::make_unique<FakeDriver>(drivers[commands.size() - 1]);
             });
     }
@@ -755,6 +645,224 @@ TEST_CASE("a directory with no chat template is a base model; images are refused
     REQUIRE(models.size() == 1);
     CHECK(models[0].provider == "mlx");
     CHECK(models[0].backend == "local");
+}
+
+// ---------------------------------------------------------------------------
+// Images (27c)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr std::string_view kPicture = "data:image/png;base64,iVBORw0KGgo=";
+
+ChatRequest look(std::string_view uri = kPicture) {
+    ChatRequest request;
+    request.messages.push_back(
+        ChatMessage{.role = apogee::harness::Role::User,
+                    .content = apogee::harness::MessageContent::from_parts(
+                        {apogee::harness::ContentPart::from_image_url(std::string{uri}),
+                         apogee::harness::ContentPart::from_text("what is this?")})});
+    return request;
+}
+
+MlxLocalProvider::Options seeing() {
+    MlxLocalProvider::Options options = Fixture::defaults();
+    options.vision = true;
+    return options;
+}
+
+bool asked_for_vision(const apogee::platform::ChildCommand& command) {
+    return std::ranges::find(command.arguments, "--vision") != command.arguments.end();
+}
+
+}  // namespace
+
+TEST_CASE(
+    "a model reads images natively only as a vision model with mlx-vlm installed: the answer "
+    "flips with the directory's markers and the environment's package",
+    "[backends][mlx][vision]") {
+    Runtime runtime;
+    const std::filesystem::path model = runtime.dir.path() / "model";
+    const auto options = [&runtime] {
+        return MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    };
+    const auto vision = [&runtime, &model] {
+        return apogee::backends::probe_mlx_vision(apogee::backends::inspect_mlx_model(model),
+                                                  runtime.host);
+    };
+    // A text model: no.
+    CHECK_FALSE(options().vision);
+    CHECK(vision().reason.find("not a vision model") != std::string::npos);
+    CHECK(vision().remedy.empty());
+
+    // A vision tower but no processor to feed it: still no.
+    std::ofstream{model / "config.json"}
+        << R"({"model_type":"qwen3_vl","vision_config":{"depth":27},)"
+           R"("text_config":{"model_type":"qwen3_vl_text"}})";
+    CHECK_FALSE(apogee::backends::inspect_mlx_model(model).vision);
+    CHECK_FALSE(options().vision);
+
+    // Both: a vision model -- but mlx-vlm is not installed, and the fix is named.
+    std::ofstream{model / "preprocessor_config.json"} << "{}";
+    CHECK(apogee::backends::inspect_mlx_model(model).vision);
+    CHECK(vision().model);
+    CHECK_FALSE(vision().reads_images());
+    CHECK(vision().reason.find("mlx-vlm is not installed in the Python environment at " +
+                               runtime.host.venv.string()) != std::string::npos);
+    CHECK(vision().remedy == "apogee train setup --with mlx-vlm");
+    CHECK_FALSE(options().vision);
+    CHECK(options().vision_gap.find("apogee train setup --with mlx-vlm") != std::string::npos);
+
+    // Gemma 4's spelling of the processor's file counts the same.
+    std::filesystem::remove(model / "preprocessor_config.json");
+    std::ofstream{model / "processor_config.json"} << "{}";
+    CHECK(apogee::backends::inspect_mlx_model(model).vision);
+
+    // mlx-vlm installed: yes, its version from its distribution record --
+    // asked of the files, before any turn, with no driver started.
+    const std::filesystem::path site = runtime.host.venv / "lib" / "python3.14" / "site-packages";
+    Runtime::touch(site / "mlx_vlm" / "__init__.py");
+    std::filesystem::create_directories(site / "mlx_vlm-0.3.9.dist-info");
+    CHECK(vision().reads_images());
+    CHECK(vision().vlm.version == "0.3.9");
+    CHECK(vision().reason.empty());
+    CHECK(options().vision);
+    Fixture fixture{DriverState{}, options()};
+    CHECK(fixture.provider->accepts_images());
+    CHECK(fixture.provider->spawn_count() == 0);
+
+    // With no record, the version the package declares.
+    std::filesystem::remove_all(site / "mlx_vlm-0.3.9.dist-info");
+    std::ofstream{site / "mlx_vlm" / "version.py"} << "__version__ = \"0.3.1\"\n";
+    CHECK(vision().vlm.version == "0.3.1");
+
+    // A vision_config that is not one is no tower.
+    std::ofstream{model / "config.json"} << R"({"model_type":"llama","vision_config":null})";
+    CHECK_FALSE(vision().model);
+}
+
+TEST_CASE("an image travels in place to a driver loaded through mlx-vlm, and the answer streams",
+          "[backends][mlx][vision]") {
+    DriverState state;
+    state.vision_startup = std::string{apogee::testing::kVisionReady};
+    state.replies = {numbered(text("A red ")) + numbered(text("square.")) + done("stop", 300)};
+    Fixture fixture{std::move(state), seeing()};
+    Streamed streamed;
+    const apogee::harness::ChatResponse response =
+        fixture.provider->stream_chat(look(), streamed.options);
+    CHECK(streamed.tokens == "A red square.");
+    CHECK(response.message.content.plain_text() == "A red square.");
+
+    REQUIRE(fixture.commands.size() == 1);
+    CHECK(asked_for_vision(fixture.commands[0]));
+    CHECK(fixture.provider->has_vision_child());
+    REQUIRE(fixture.provider->driver_ready().has_value());
+    CHECK(fixture.provider->driver_ready()->vision);
+    // The picture where it sat, as the data: URI it arrived as.
+    const json sent = fixture.written(0, 0);
+    CHECK(sent["messages"][0]["content"] ==
+          json::array({{{"type", "image"}, {"image", std::string{kPicture}}},
+                       {{"type", "text"}, {"text", "what is this?"}}}));
+    // Said: the load through mlx-vlm, and a cache line that does not claim one.
+    const apogee::harness::StatusEvent* loading =
+        streamed.status(apogee::harness::StatusEvent::Type::ModelLoading);
+    REQUIRE(loading != nullptr);
+    CHECK(loading->detail.find("mlx-vlm") != std::string::npos);
+    const apogee::harness::StatusEvent* ready =
+        streamed.status(apogee::harness::StatusEvent::Type::ModelReady);
+    REQUIRE(ready != nullptr);
+    CHECK(ready->detail.find("mlx-vlm 0.3.9") != std::string::npos);
+    const apogee::harness::StatusEvent* cache =
+        streamed.status(apogee::harness::StatusEvent::Type::PromptCache);
+    REQUIRE(cache != nullptr);
+    CHECK(cache->detail.find("read whole each turn") != std::string::npos);
+}
+
+TEST_CASE(
+    "a text driver gives way to a vision one when a picture arrives, and the vision one answers "
+    "every turn after",
+    "[backends][mlx][vision][session]") {
+    DriverState state;
+    state.vision_startup = std::string{apogee::testing::kVisionReady};
+    state.replies = {numbered(text("ok")) + done()};
+    Fixture fixture{std::move(state), seeing()};
+
+    (void)fixture.provider->chat(ask("hello"), {});
+    REQUIRE(fixture.commands.size() == 1);
+    CHECK_FALSE(asked_for_vision(fixture.commands[0]));
+    CHECK_FALSE(fixture.provider->has_vision_child());
+
+    (void)fixture.provider->chat(look(), {});
+    CHECK(fixture.provider->spawn_count() == 2);
+    REQUIRE(fixture.commands.size() == 2);
+    CHECK(asked_for_vision(fixture.commands[1]));
+    // The text driver was ended the ordinary way: its stdin closed.
+    CHECK(fixture.drivers[0]->stdin_closed);
+    CHECK(fixture.provider->has_vision_child());
+
+    // Text turns stay on it: one model resident, never loaded back and forth.
+    (void)fixture.provider->chat(ask("and now?"), {});
+    CHECK(fixture.provider->spawn_count() == 2);
+    CHECK(fixture.drivers[1]->writes.size() == 2);
+}
+
+TEST_CASE("a driver from before 27c is never sent a picture: it is refused, the fix named",
+          "[backends][mlx][vision]") {
+    // An older seeded copy ignores --vision and says nothing of it.
+    DriverState state;
+    state.replies = {numbered(text("never")) + done()};
+    Fixture fixture{std::move(state), seeing()};
+    try {
+        (void)fixture.provider->chat(look(), {});
+        FAIL("an older driver must not be sent an image");
+    } catch (const apogee::harness::ProviderError& e) {
+        const std::string message = e.what();
+        CHECK(message.find("does not read images") != std::string::npos);
+        CHECK(message.find("apogee check --fix") != std::string::npos);
+    }
+    CHECK_FALSE(fixture.provider->has_live_child());
+    CHECK(fixture.drivers[0]->writes.empty());
+}
+
+TEST_CASE(
+    "what a model cannot read is refused before anything is sent: a picture to a model that "
+    "reads none, a remote image, audio",
+    "[backends][mlx][vision]") {
+    MlxLocalProvider::Options blind = Fixture::defaults();
+    blind.vision_gap =
+        "it is a vision model, but mlx-vlm is not installed in the Python environment at /venv "
+        "-- apogee train setup --with mlx-vlm";
+    Fixture text_only{DriverState{}, blind};
+    CHECK_FALSE(text_only.provider->accepts_images());
+    try {
+        (void)text_only.provider->chat(look(), {});
+        FAIL("a model that reads no images was sent one");
+    } catch (const apogee::harness::ProviderError& e) {
+        const std::string message = e.what();
+        CHECK(message.find("cannot read images") != std::string::npos);
+        CHECK(message.find("apogee train setup --with mlx-vlm") != std::string::npos);
+    }
+    CHECK(text_only.provider->spawn_count() == 0);
+
+    Fixture sighted{DriverState{}, seeing()};
+    try {
+        (void)sighted.provider->chat(look("https://example.com/cat.png"), {});
+        FAIL("a remote image was accepted");
+    } catch (const apogee::harness::ProviderError& e) {
+        CHECK(std::string{e.what()}.find("never fetched") != std::string::npos);
+    }
+    ChatRequest audio;
+    audio.messages.push_back(
+        ChatMessage{.role = apogee::harness::Role::User,
+                    .content = apogee::harness::MessageContent::from_parts(
+                        {apogee::harness::ContentPart::from_audio("UklGRg==", "wav")})});
+    try {
+        (void)sighted.provider->chat(audio, {});
+        FAIL("audio was accepted");
+    } catch (const apogee::harness::ProviderError& e) {
+        CHECK(std::string{e.what()}.find("cannot hear audio") != std::string::npos);
+    }
+    CHECK(sighted.provider->spawn_count() == 0);
 }
 
 TEST_CASE("preload starts the driver and waits for its model", "[backends][mlx][session]") {

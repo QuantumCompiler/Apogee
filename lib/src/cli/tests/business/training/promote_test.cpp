@@ -76,6 +76,21 @@ VersionEntry entry(int version, const std::filesystem::path& dir, bool pruned = 
     return e;
 }
 
+/// An MLX version (27c): a stored directory with a file in it.
+VersionEntry mlx_entry(int version, const std::filesystem::path& dir, bool pruned = false) {
+    VersionEntry e;
+    e.version = version;
+    e.run_id = "r" + std::to_string(version);
+    e.mlx_path = (dir / ("mlx-v" + std::to_string(version))).string();
+    e.promoted_at = "2026-10-04T12:00:0" + std::to_string(version) + "Z";
+    if (pruned) {
+        e.pruned_at = "2026-10-04T13:00:00Z";
+    } else {
+        write(std::filesystem::path{e.mlx_path} / "model.safetensors", "w");
+    }
+    return e;
+}
+
 apogee::training::Converter mock_convert(int& calls, std::filesystem::path* fused_seen = nullptr) {
     return [&calls, fused_seen](
                const std::filesystem::path& fused, const std::filesystem::path& gguf,
@@ -200,7 +215,7 @@ TEST_CASE(
     CHECK(converts == 1);
     CHECK(fused_seen == plan.fused_dir);
     CHECK(std::filesystem::is_regular_file(plan.gguf_path));
-    CHECK(built.gguf_bytes > 0);
+    CHECK(built.bytes > 0);
     CHECK_FALSE(std::filesystem::exists(plan.fused_dir));
     bool fused_message = false;
     for (const std::string& message : messages) {
@@ -460,4 +475,206 @@ TEST_CASE("retention removes through the store's remover, and never a file anoth
     REQUIRE(failed.failed.size() == 1);
     CHECK(failed.failed.front().find("permission denied") != std::string::npos);
     CHECK_FALSE(ledger.find(3)->pruned());
+}
+
+// ---------------------------------------------------------------------------
+// The MLX target (27c)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the targets are named for the store's formats, and say what a version is",
+          "[training][promote][mlx]") {
+    using apogee::training::PromoteTarget;
+    CHECK(apogee::training::to_string(PromoteTarget::Gguf) == "gguf");
+    CHECK(apogee::training::to_string(PromoteTarget::Mlx) == "mlx");
+    CHECK(apogee::training::promote_target_from_string("mlx") == PromoteTarget::Mlx);
+    CHECK(apogee::training::promote_target_from_string("gguf") == PromoteTarget::Gguf);
+    CHECK_FALSE(apogee::training::promote_target_from_string("safetensors").has_value());
+    CHECK(apogee::training::promote_target_names().size() == 2);
+    const apogee::testing::TempDir root{"targets-" + std::to_string(std::random_device{}())};
+    CHECK(apogee::training::target_of(entry(1, root.path())) == PromoteTarget::Gguf);
+    CHECK(apogee::training::target_of(mlx_entry(1, root.path())) == PromoteTarget::Mlx);
+    CHECK(mlx_entry(2, root.path()).weights() == (root.path() / "mlx-v2").string());
+    CHECK(entry(3, root.path()).weights() == (root.path() / "v3.gguf").string());
+}
+
+TEST_CASE(
+    "an MLX promotion fuses straight into the store's staging, reads it whole, and never "
+    "converts or quantizes",
+    "[training][promote][mlx][artifacts]") {
+    const apogee::testing::TempDir root{"mlx-artifacts-" + std::to_string(std::random_device{}())};
+    const RunManifest manifest = complete_run(root.path());
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    const std::filesystem::path staging = root.path() / "store" / "m" / "mlx" / ".incoming-x";
+    // A quantize type and --keep-fused mean nothing here: the fused weights
+    // are the version, kept by being it.
+    const PromotePlan plan =
+        apogee::training::plan_promotion(ledger, root.path() / "runs" / "r1", staging, "tuned", "",
+                                         false, apogee::training::PromoteTarget::Mlx);
+    CHECK(plan.version == 1);
+    CHECK(plan.target == apogee::training::PromoteTarget::Mlx);
+    CHECK(plan.fused_dir == staging);
+    CHECK(plan.artifact() == staging);
+    CHECK(plan.gguf_path.empty());
+    CHECK(plan.quantize_type.empty());
+    CHECK(plan.keep_fused);
+
+    MockTrainer trainer;
+    int converts = 0;
+    std::filesystem::path verified;
+    std::vector<std::string> messages;
+    const apogee::training::ArtifactsResult built = build_promotion_artifacts(
+        manifest, plan, trainer, mock_convert(converts),
+        [&verified](const std::filesystem::path& dir) {
+            verified = dir;
+            return std::string{};
+        },
+        no_quantize(), [&messages](std::string_view text) { messages.emplace_back(text); }, {});
+    INFO(built.error);
+    REQUIRE(built.ok);
+    // No conversion ran -- the acceptance's own words -- and the reader was
+    // handed the fused directory itself.
+    CHECK(converts == 0);
+    CHECK(verified == staging);
+    CHECK(std::filesystem::exists(staging / "config.json"));
+    CHECK(std::filesystem::exists(staging / "model.safetensors"));
+    CHECK(built.bytes > 0);
+    CHECK_FALSE(std::filesystem::exists(root.path() / "runs" / "r1" / "fused"));
+    CHECK(std::ranges::any_of(messages, [](const std::string& message) {
+        return message.find("no GGUF conversion") != std::string::npos;
+    }));
+
+    // The version path is taken: a second build into it refuses.
+    const apogee::training::ArtifactsResult again = build_promotion_artifacts(
+        manifest, plan, trainer, mock_convert(converts), accept(), no_quantize(), {}, {});
+    CHECK_FALSE(again.ok);
+    CHECK(again.error.find("already exists") != std::string::npos);
+
+    const VersionEntry recorded = apogee::training::promotion_entry(manifest, plan, "now");
+    CHECK(recorded.mlx_path == staging.string());
+    CHECK(recorded.gguf_path.empty());
+    CHECK(recorded.mlx());
+    CHECK(recorded.version == 1);
+    CHECK(recorded.eval_passed == true);
+}
+
+TEST_CASE(
+    "an MLX promotion that fails at any step leaves nothing: fuse, a directory that does not "
+    "read whole, cancellation",
+    "[training][promote][mlx][artifacts]") {
+    const apogee::testing::TempDir root{"mlx-fail-" + std::to_string(std::random_device{}())};
+    const RunManifest manifest = complete_run(root.path());
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    const std::filesystem::path staging = root.path() / "store" / "m" / "mlx" / ".incoming-y";
+    const PromotePlan plan =
+        apogee::training::plan_promotion(ledger, root.path() / "runs" / "r1", staging, "tuned", "",
+                                         false, apogee::training::PromoteTarget::Mlx);
+    int converts = 0;
+
+    MockTrainer no_fuse{MockTrainerOptions{.fuse_error = "GPU busy"}};
+    const apogee::training::ArtifactsResult fuse_failed = build_promotion_artifacts(
+        manifest, plan, no_fuse, mock_convert(converts), accept(), no_quantize(), {}, {});
+    CHECK(fuse_failed.error == "fuse: GPU busy");
+    CHECK_FALSE(std::filesystem::exists(staging));
+
+    MockTrainer trainer;
+    const apogee::training::ArtifactsResult unreadable = build_promotion_artifacts(
+        manifest, plan, trainer, mock_convert(converts),
+        [](const std::filesystem::path&) {
+            return std::string{"cannot load: no tokenizer in the directory"};
+        },
+        no_quantize(), {}, {});
+    CHECK_FALSE(unreadable.ok);
+    CHECK(unreadable.error ==
+          "the fused model is not a whole model directory: cannot load: no tokenizer in the "
+          "directory");
+    // It must not be registered, so it must not exist.
+    CHECK_FALSE(std::filesystem::exists(staging));
+
+    const apogee::harness::CancellationToken token = apogee::harness::CancellationToken::create();
+    token.cancel();
+    const apogee::training::ArtifactsResult cancelled = build_promotion_artifacts(
+        manifest, plan, trainer, mock_convert(converts), accept(), no_quantize(), {}, token);
+    CHECK(cancelled.cancelled);
+    CHECK_FALSE(std::filesystem::exists(staging));
+    CHECK(converts == 0);
+}
+
+TEST_CASE(
+    "an MLX version is numbered, retained and rolled back as a GGUF one is, and a backend's "
+    "versions never mix",
+    "[training][promote][mlx][retain][rollback]") {
+    const apogee::testing::TempDir root{"mlx-ledger-" + std::to_string(std::random_device{}())};
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    ledger.versions = {mlx_entry(1, root.path(), true), mlx_entry(2, root.path()),
+                       mlx_entry(3, root.path())};
+    ledger.active_version = 3;
+    // max + 1, a pruned number never reissued.
+    CHECK(apogee::training::plan_promotion(ledger, root.path() / "runs" / "r9",
+                                           root.path() / "stage", "tuned", "", false,
+                                           apogee::training::PromoteTarget::Mlx)
+              .version == 4);
+
+    // Retention: the oldest kept directory goes whole, the active one never;
+    // the entry is marked, not erased.
+    const apogee::training::PruneResult pruned = apogee::training::record_promotion(
+        ledger, mlx_entry(4, root.path()), 2, "2026-10-04T15:00:00Z");
+    CHECK(ledger.active_version == 4);
+    CHECK(pruned.removed == std::vector<std::string>{(root.path() / "mlx-v2").string()});
+    CHECK_FALSE(std::filesystem::exists(root.path() / "mlx-v2"));
+    CHECK(std::filesystem::exists(root.path() / "mlx-v3" / "model.safetensors"));
+    CHECK(ledger.find(2)->pruned());
+    CHECK(ledger.kept() == 2);
+
+    // Rollback: the highest below, its directory there; deletes nothing.
+    const apogee::training::RollbackTarget back = apogee::training::rollback_target(ledger);
+    REQUIRE(back.entry != nullptr);
+    CHECK(back.entry->version == 3);
+    CHECK(std::filesystem::exists(root.path() / "mlx-v4"));
+    ledger.active_version = 3;
+    const apogee::training::RollbackTarget gone = apogee::training::rollback_target(ledger);
+    CHECK(gone.entry == nullptr);
+    CHECK(gone.error.find("its MLX model is gone") != std::string::npos);
+    ledger.active_version = 4;
+    std::filesystem::remove_all(root.path() / "mlx-v3");
+    const apogee::training::RollbackTarget missing = apogee::training::rollback_target(ledger);
+    CHECK(missing.entry == nullptr);
+    CHECK(missing.error.find("the MLX model for v3 of 'tuned' is not at") != std::string::npos);
+
+    // Identical weights promoted twice share one stored directory: never
+    // removed while a kept version records it.
+    VersionLedger shared;
+    shared.backend = "same";
+    shared.versions = {mlx_entry(1, root.path() / "s"), mlx_entry(2, root.path() / "s")};
+    shared.versions[1].mlx_path = shared.versions[0].mlx_path;
+    shared.active_version = 2;
+    const apogee::training::PruneResult kept =
+        apogee::training::record_promotion(shared, mlx_entry(3, root.path() / "s"), 2, "t");
+    CHECK(shared.find(1)->pruned());
+    CHECK(std::filesystem::exists(shared.versions[0].mlx_path));
+    CHECK(kept.failed.empty());
+
+    // One kind per backend: a promote of the other kind is refused before
+    // anything is built, and a rollback never crosses.
+    VersionLedger gguf;
+    gguf.backend = "tuned";
+    CHECK(apogee::training::target_conflict(gguf, apogee::training::PromoteTarget::Mlx).empty());
+    gguf.versions = {entry(1, root.path()), entry(2, root.path())};
+    gguf.active_version = 2;
+    CHECK(apogee::training::target_conflict(gguf, apogee::training::PromoteTarget::Gguf).empty());
+    const std::string conflict =
+        apogee::training::target_conflict(gguf, apogee::training::PromoteTarget::Mlx);
+    CHECK(conflict.find("'tuned' holds GGUFs (active v2)") != std::string::npos);
+    CHECK(conflict.find("promote --target mlx under a new name") != std::string::npos);
+    VersionLedger mixed;
+    mixed.backend = "mixed";
+    mixed.versions = {entry(1, root.path()), mlx_entry(2, root.path() / "m")};
+    mixed.active_version = 2;
+    CHECK(apogee::training::target_conflict(mixed, apogee::training::PromoteTarget::Gguf)
+              .find("holds MLX models") != std::string::npos);
+    const apogee::training::RollbackTarget across = apogee::training::rollback_target(mixed);
+    CHECK(across.entry == nullptr);
+    CHECK(across.error.find("never changes a backend's type") != std::string::npos);
 }

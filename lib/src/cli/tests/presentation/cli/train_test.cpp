@@ -14,6 +14,7 @@
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "contracts/config_edit.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "support/env_guard.h"
@@ -627,6 +628,144 @@ TEST_CASE(
     REQUIRE(fixture.run({"config", "delete-backend", "tuned"}, &out, &err) == 0);
     CHECK(fixture.run({"train", "rollback", "tuned"}, &out, &err) == 1);
     CHECK(err.find("not in the config") != std::string::npos);
+}
+
+TEST_CASE(
+    "train promote --target mlx registers the fused model as an mlx entry through the one "
+    "editor -- versioned, rolled back, retained -- and no GGUF conversion runs",
+    "[commands][train][promote][mlx]") {
+    // 27c, the training shortcut: the fused SafeTensors run as they are.
+    const RunFixture fixture;
+    const std::string id = fixture.trained();
+    (void)fixture.evaluated(id);
+    std::string out;
+    std::string err;
+    const auto scalar = [](const std::filesystem::path& path) {
+        return apogee::harness::yaml_scalar(path.string());
+    };
+    const auto ledger = [&fixture] {
+        const std::optional<apogee::training::VersionLedger> found =
+            apogee::training::TrainingStore{fixture.training}.list_versions("fast");
+        REQUIRE(found.has_value());
+        return *found;
+    };
+
+    // Refused before anything is built: a target nobody knows, and
+    // --quantize, which makes a GGUF.
+    CHECK(fixture.run({"train", "promote", id, "--as", "fast", "--target", "onnx"}, &out, &err) ==
+          1);
+    CHECK(err.find("--target must be gguf or mlx") != std::string::npos);
+    CHECK(fixture.run(
+              {"train", "promote", id, "--as", "fast", "--target", "mlx", "--quantize", "Q4_K_M"},
+              &out, &err) == 1);
+    CHECK(err.find("--quantize makes a quantized GGUF") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
+
+    const std::string before = read_file(fixture.base.config_path);
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "fast", "--target", "mlx"}, &out, &err) ==
+            0);
+    INFO(out << err);
+    CHECK(out.find("promoted to new backend fast -> v1") != std::string::npos);
+    CHECK(out.find("no GGUF conversion ran") != std::string::npos);
+    CHECK(err.find("no GGUF conversion: the fused model is registered as it is") !=
+          std::string::npos);
+    const apogee::training::VersionLedger first = ledger();
+    REQUIRE(first.find(1) != nullptr);
+    const std::filesystem::path v1{first.find(1)->mlx_path};
+    CHECK(first.find(1)->gguf_path.empty());
+    CHECK(first.find(1)->run_id == id);
+    CHECK(first.find(1)->eval_passed == true);
+    // In the model store's mlx/ row, beside the model it was trained from,
+    // under the id its weights hash to -- read whole, with its record.
+    CHECK(v1.parent_path() == fixture.home / "models" / "tiny" / "mlx");
+    CHECK(apogee::models::read_mlx_info(v1).complete);
+    const std::optional<apogee::models::Snapshot> record = apogee::models::load_snapshot(v1);
+    REQUIRE(record.has_value());
+    CHECK(record->source == "train");
+    CHECK(record->ref == "fast v1");
+    CHECK(record->transform == "promote run " + id);
+    // No conversion: no GGUF anywhere for this model, and the run's fused
+    // directory was never made (the fuse wrote into the store).
+    CHECK_FALSE(std::filesystem::exists(fixture.home / "models" / "tiny" / "gguf"));
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "runs" / id / "fused"));
+    // Registered through the one editor: exactly one entry appended.
+    CHECK(read_file(fixture.base.config_path) ==
+          before + "\n  fast:\n    type: mlx\n    model_path: " + scalar(v1) + "\n");
+
+    // Into the existing entry, its type saying the target: only the path changes.
+    const std::string id2 = fixture.trained(3);
+    (void)fixture.evaluated(id2);
+    CHECK(fixture.run({"train", "promote", id2, "--as", "fast", "--target", "gguf"}, &out, &err) ==
+          1);
+    CHECK(err.find("'fast' is a mlx backend, and --target gguf makes something else") !=
+          std::string::npos);
+    const std::string registered = read_file(fixture.base.config_path);
+    REQUIRE(fixture.run({"train", "promote", id2, "--as", "fast"}, &out, &err) == 0);
+    CHECK(out.find("updated backend fast -> v2") != std::string::npos);
+    const std::filesystem::path v2{ledger().find(2)->mlx_path};
+    CHECK(v2 != v1);
+    std::string expected = registered;
+    REQUIRE(expected.find(scalar(v1)) != std::string::npos);
+    expected.replace(expected.find(scalar(v1)), scalar(v1).size(), scalar(v2));
+    CHECK(read_file(fixture.base.config_path) == expected);
+
+    // A llamacpp entry takes no MLX version, and a backend's versions never
+    // mix: an entry deleted, its GGUF ledger still refuses an MLX promote.
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "tuned"}, &out, &err) == 0);
+    CHECK(fixture.run({"train", "promote", id2, "--as", "tuned", "--target", "mlx"}, &out, &err) ==
+          1);
+    CHECK(err.find("'tuned' is a llamacpp backend") != std::string::npos);
+    REQUIRE(fixture.run({"config", "delete-backend", "tuned"}, &out, &err) == 0);
+    CHECK(fixture.run({"train", "promote", id2, "--as", "tuned", "--target", "mlx"}, &out, &err) ==
+          1);
+    CHECK(err.find("'tuned' holds GGUFs (active v1)") != std::string::npos);
+
+    // An entry edited to another type since is never pointed at weights it
+    // cannot run: refused, nothing repointed.
+    const std::string typed = read_file(fixture.base.config_path);
+    std::string edited = typed;
+    const std::string mlx_type = "  fast:\n    type: mlx\n";
+    REQUIRE(edited.find(mlx_type) != std::string::npos);
+    edited.replace(edited.find(mlx_type), mlx_type.size(), "  fast:\n    type: llamacpp\n");
+    write_file(fixture.base.config_path, edited);
+    CHECK(fixture.run({"train", "rollback", "fast"}, &out, &err) == 1);
+    CHECK(err.find("backend 'fast' is a llamacpp backend, and v1 runs on a mlx one") !=
+          std::string::npos);
+    CHECK(read_file(fixture.base.config_path) == edited);
+    write_file(fixture.base.config_path, typed);
+
+    // Rollback: repointed, nothing deleted.
+    REQUIRE(fixture.run({"train", "rollback", "fast"}, &out, &err) == 0);
+    CHECK(out.find("rolled back fast: v2 -> v1") != std::string::npos);
+    CHECK(out.find("mlx:  " + v1.string()) != std::string::npos);
+    CHECK(read_file(fixture.base.config_path) == registered);
+    CHECK(std::filesystem::exists(v2));
+    REQUIRE(fixture.run({"train", "versions", "fast"}, &out, &err) == 0);
+    CHECK(out.find("WEIGHTS") != std::string::npos);
+    CHECK(out.find("mlx/" + v1.filename().string() + "  <- active") != std::string::npos);
+
+    // Retention: retain 1 keeps the active version alone, the others removed
+    // whole from the store and kept in the ledger as history.
+    write_file(fixture.base.config_path,
+               read_file(fixture.base.config_path) + "training:\n  retain_versions: 1\n");
+    const std::string id3 = fixture.trained(4);
+    (void)fixture.evaluated(id3);
+    REQUIRE(fixture.run({"train", "promote", id3, "--as", "fast"}, &out, &err) == 0);
+    CHECK(out.find("updated backend fast -> v3") != std::string::npos);
+    const apogee::training::VersionLedger retained = ledger();
+    CHECK(retained.active_version == 3);
+    CHECK(retained.find(1)->pruned());
+    CHECK(retained.find(2)->pruned());
+    CHECK_FALSE(std::filesystem::exists(v1));
+    CHECK_FALSE(std::filesystem::exists(v2));
+    const std::filesystem::path v3{retained.find(3)->mlx_path};
+    CHECK(std::filesystem::exists(v3 / "config.json"));
+    CHECK(fixture.run({"train", "rollback", "fast"}, &out, &err) == 1);
+    CHECK(err.find("its MLX model is gone") != std::string::npos);
+
+    // The doctor reads the MLX ledger as it reads a GGUF one.
+    (void)fixture.run({"check", "--no-color"}, &out, &err);
+    CHECK(out.find("active v3 of 3, and the backend points at it") != std::string::npos);
 }
 
 TEST_CASE(

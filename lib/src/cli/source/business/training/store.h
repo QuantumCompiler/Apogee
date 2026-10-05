@@ -22,7 +22,13 @@ namespace apogee::training {
 struct VersionEntry {
     int version = 0;
     std::string run_id;
+    /// The GGUF a llamacpp backend runs: set for a GGUF version, empty for
+    /// an MLX one.
     std::string gguf_path;
+    /// The MLX model directory an mlx backend runs (27c): the fused weights
+    /// themselves, registered with no conversion. Set for an MLX version,
+    /// empty for a GGUF one -- never both.
+    std::string mlx_path;
     std::string promoted_at;
     /// Absent when no eval ran before the promotion (`--force`).
     std::optional<double> eval_score;
@@ -37,6 +43,16 @@ struct VersionEntry {
 
     [[nodiscard]] bool pruned() const noexcept {
         return !pruned_at.empty();
+    }
+
+    /// An MLX version (27c), its backend an `mlx` one.
+    [[nodiscard]] bool mlx() const noexcept {
+        return !mlx_path.empty();
+    }
+
+    /// What the version's backend points at: its MLX directory, else its GGUF.
+    [[nodiscard]] const std::string& weights() const noexcept {
+        return mlx() ? mlx_path : gguf_path;
     }
 };
 

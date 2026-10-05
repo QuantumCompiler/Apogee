@@ -1353,6 +1353,16 @@ std::span<const BundledScript> bundled_training_scripts() {
     return scripts;
 }
 
+std::span<const std::string_view> bundled_scripts_retired() {
+    static constexpr std::array<std::string_view, 4> retired{{
+        "mlx_generate.py 4676e348595cdbfdb4a23191f7b008e718c29b097da45b5f563c75091e8c2335",
+        "prepare_dataset.py 868db898b9bb043399a4f57b2ee5f1ad4bf6e614022b0d0249f1b118ec0de41f",
+        "train_mlx.py 7f5b206c455094c5d63b72dd804f9ba49a0647d84cf87b723be6192db4ddc478",
+        "train_peft.py 8663c7508fb6630ed0d63bbbb856c55ca817196e05178ea71a1621d77199f508",
+    }};
+    return retired;
+}
+
 // clang-format on
 
 }  // namespace apogee::harness

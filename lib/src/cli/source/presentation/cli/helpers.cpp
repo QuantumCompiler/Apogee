@@ -296,7 +296,8 @@ std::string media_refusal_message(const std::string& model, harness::Medium medi
     // backend, a missing mmproj_path, and a build without llama.cpp.
     const std::string local =
         " -- a local model reads one with an mmproj_path on its backend, in a build with "
-        "-DAPOGEE_ENABLE_LLAMA=ON";
+        "-DAPOGEE_ENABLE_LLAMA=ON, or as an mlx backend over a vision model with mlx-vlm "
+        "installed";
     const auto role = [&](std::string_view noun, std::string_view command) {
         if (!helper.empty()) {
             return "and neither can the " + std::string{noun} + " model, '" + std::string{helper} +

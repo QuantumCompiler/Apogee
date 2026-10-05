@@ -14,10 +14,13 @@
 namespace apogee::training {
 namespace {
 
-constexpr std::array<std::string_view, 4> kSetNames{"prepare", "mlx", "peft", "convert"};
+constexpr std::array<std::string_view, 5> kSetNames{"prepare", "mlx", "peft", "convert", "mlx-vlm"};
 
 constexpr std::array<std::string_view, 1> kPrepare{"datasets>=3.0"};
 constexpr std::array<std::string_view, 1> kMlx{"mlx-lm>=0.21"};
+// The mlx backend's vision path (27c): `load`, `stream_generate` and the
+// step's sampler, which the driver asks for by name.
+constexpr std::array<std::string_view, 1> kMlxVlm{"mlx-vlm>=0.3"};
 // `train_peft.py` drives transformers' own Trainer, so trl is not here: trl's
 // response-template collator has been removed, and the exact prompt mask
 // needs no library.
@@ -92,6 +95,8 @@ std::span<const std::string_view> packages_for(RequirementSet set) noexcept {
             return kPeft;
         case RequirementSet::Convert:
             return kConvert;
+        case RequirementSet::MlxVlm:
+            return kMlxVlm;
     }
     return {};
 }

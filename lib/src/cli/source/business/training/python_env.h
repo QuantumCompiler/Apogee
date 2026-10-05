@@ -45,6 +45,10 @@ enum class RequirementSet : std::uint8_t {
     Peft,
     /// The GGUF converter's stack (the run item).
     Convert,
+    /// `mlx-vlm`: an `mlx` backend over a vision model reads images through
+    /// it (27c). Installed on demand, never with `mlx`: only a vision model
+    /// needs it, and without it such a model's images go to the vision role.
+    MlxVlm,
 };
 
 [[nodiscard]] std::string_view to_string(RequirementSet set) noexcept;

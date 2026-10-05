@@ -1,6 +1,7 @@
 #include "cli/chat_attachments.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -13,11 +14,13 @@
 #include <vector>
 
 #include "agentloop/media.h"
+#include "backends/mlx_local.h"
 #include "backends/mock.h"
 #include "contracts/config.h"
 #include "harness/harness.h"
 #include "platform/child_process.h"
 #include "support/env_guard.h"
+#include "support/fake_mlx_driver.h"
 #include "support/media_fakes.h"
 
 using apogee::commands::ChatAttachments;
@@ -580,6 +583,144 @@ TEST_CASE("a chat model that cannot see has its images described by the vision r
     REQUIRE(turn.inlined.size() == 1);
     CHECK(turn.inlined.front().parts.empty());
     CHECK(turn.inlined.front().text.find("1,284.50 EUR") != std::string::npos);
+}
+
+namespace {
+
+/// A chat on an `mlx` entry (27c): the real provider over a scripted
+/// driver, so what the attachments decide is what the backend is asked.
+struct MlxMediaChat {
+    apogee::testing::TempDir home{"chat-mlx-media-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    std::filesystem::path work = home.path() / "work";
+    std::shared_ptr<apogee::testing::DriverState> driver =
+        std::make_shared<apogee::testing::DriverState>();
+    std::vector<apogee::platform::ChildCommand> commands;
+    std::shared_ptr<apogee::backends::MlxLocalProvider> chat;
+    std::shared_ptr<apogee::testing::MediaProvider> eyes =
+        std::make_shared<apogee::testing::MediaProvider>();
+    std::unique_ptr<apogee::harness::Harness> harness;
+    apogee::logger::Session session;
+    std::vector<std::string> said;
+
+    MlxMediaChat(bool vision, const std::string& roles) {
+        std::filesystem::create_directories(work);
+        driver->vision_startup = std::string{apogee::testing::kVisionReady};
+        driver->replies = {R"({"type":"text","id":{id},"text":"A red sign that says STOP."})"
+                           "\n"
+                           R"({"type":"done","id":{id},"finish":"stop","prompt_tokens":9,)"
+                           R"("cached_tokens":0,"completion_tokens":7})"
+                           "\n"};
+        apogee::backends::MlxLocalProvider::Options options;
+        options.backend_name = "chat";
+        options.model = "qwen3-vl";
+        options.model_dir = home.path() / "model";
+        options.info.model_type = "qwen3_vl";
+        options.info.chat_template = true;
+        options.info.vision = vision;
+        options.vision = vision;
+        options.vision_gap = vision ? "" : "it is not a vision model";
+        options.context_size = 8000;
+        chat = std::make_shared<apogee::backends::MlxLocalProvider>(
+            std::move(options),
+            [this](const apogee::platform::ChildCommand& command,
+                   std::string&) -> std::unique_ptr<apogee::testing::FakeDriver> {
+                commands.push_back(command);
+                driver->vision_spawn =
+                    std::ranges::find(command.arguments, "--vision") != command.arguments.end();
+                return std::make_unique<apogee::testing::FakeDriver>(driver);
+            });
+        const apogee::harness::Config config = apogee::harness::parse_config(
+            "models:\n  default: chat\n" + roles +
+                "backends:\n  chat:\n    type: mlx\n    model_path: " +
+                (home.path() / "model").string() + "\n  eyes:\n    type: mock\n",
+            "<test>");
+        harness = std::make_unique<apogee::harness::Harness>(config);
+        harness->register_provider("chat", chat);
+        harness->register_provider("eyes", eyes);
+        harness->use_default_router();
+        session.chat_id = "chat-mlx-media";
+        session.backend = "chat";
+        std::ofstream{work / "stop.png", std::ios::binary} << "PNGBYTES";
+    }
+
+    [[nodiscard]] ChatAttachments::Hooks hooks() {
+        return ChatAttachments::Hooks{
+            .say = [this](const std::string& line, bool) { said.push_back(line); },
+            .progress = {},
+            .confirm_large = {},
+            .save = false};
+    }
+
+    [[nodiscard]] bool heard(std::string_view needle) const {
+        return std::ranges::any_of(
+            said, [&](const std::string& line) { return line.find(needle) != std::string::npos; });
+    }
+};
+
+}  // namespace
+
+TEST_CASE(
+    "an mlx vision model reads a picture as it is, through the one image pipeline; an mlx text "
+    "model has it described by the vision role instead",
+    "[commands][attachments][media][mlx]") {
+    SECTION("a vision model: read as it is, and described by itself for the turns after") {
+        MlxMediaChat fixture{true, ""};
+        CHECK(fixture.harness->can_read("chat", apogee::harness::Medium::Image));
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-mlx-media"), fixture.hooks()};
+        REQUIRE(attached.attach("stop.png", fixture.work));
+        attached.settle();
+        CHECK(fixture.heard("attached stop.png: 1 file, 1 chunk, described by chat, "));
+        CHECK(fixture.heard("read as it is with your next message"));
+        // The description went to the driver as a picture, loaded through mlx-vlm.
+        REQUIRE(fixture.commands.size() == 1);
+        CHECK(std::ranges::find(fixture.commands[0].arguments, "--vision") !=
+              fixture.commands[0].arguments.end());
+        const nlohmann::json sent = nlohmann::json::parse(fixture.driver->writes.at(0));
+        CHECK(sent["session"] == false);
+        CHECK(sent["messages"][0]["content"][0]["type"] == "image");
+        CHECK(sent["messages"][0]["content"][0]["image"] ==
+              "data:image/png;base64," + apogee::agentloop::base64_encode("PNGBYTES"));
+
+        const ChatAttachments::Turn first = attached.for_turn(
+            0, "what is it?",
+            apogee::agentloop::turn_budget(*fixture.harness, "chat", std::nullopt), 4, {});
+        REQUIRE(first.inlined.size() == 1);
+        CHECK(first.inlined.front().name == "stop.png (as it is)");
+        REQUIRE(first.inlined.front().parts.size() == 1);
+        CHECK(fixture.eyes->requests().empty());
+    }
+    SECTION("a text model: the vision role describes it, and the chat model is never sent it") {
+        MlxMediaChat fixture{false, "  default_vision: eyes\n"};
+        fixture.eyes->sees = true;
+        fixture.eyes->reply = [](const apogee::harness::ChatRequest&) {
+            return std::string{"A red sign that says STOP."};
+        };
+        CHECK_FALSE(fixture.harness->can_read("chat", apogee::harness::Medium::Image));
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-mlx-media"), fixture.hooks()};
+        REQUIRE(attached.attach("stop.png", fixture.work));
+        attached.settle();
+        CHECK(fixture.heard("attached stop.png: 1 file, 1 chunk, described by eyes, "));
+        CHECK_FALSE(fixture.heard("read as it is"));
+        const ChatAttachments::Turn turn = attached.for_turn(
+            0, "what is it?",
+            apogee::agentloop::turn_budget(*fixture.harness, "chat", std::nullopt), 4, {});
+        REQUIRE(turn.inlined.size() == 1);
+        CHECK(turn.inlined.front().parts.empty());
+        CHECK(turn.inlined.front().text.find("STOP") != std::string::npos);
+        CHECK(fixture.commands.empty());
+    }
+    SECTION("a text model and no vision role: refused, naming the role and the mlx way to see") {
+        MlxMediaChat fixture{false, ""};
+        ChatAttachments attached{*fixture.harness, fixture.session,
+                                 ChatAttachments::index_for("chat-mlx-media"), fixture.hooks()};
+        CHECK_FALSE(attached.attach("stop.png", fixture.work));
+        CHECK(fixture.heard("backend 'chat' cannot read images"));
+        CHECK(fixture.heard("an mlx backend over a vision model with mlx-vlm installed"));
+        CHECK(fixture.commands.empty());
+    }
 }
 
 TEST_CASE("media nothing here can read is refused, naming the role that would",

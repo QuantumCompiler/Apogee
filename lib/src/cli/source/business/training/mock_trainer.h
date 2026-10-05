@@ -10,7 +10,9 @@
 /// An in-process trainer with no Python behind it, shipped in the binary as
 /// `--trainer mock` -- the `mock` backend type's precedent. Scripted
 /// iterations with a falling loss, a token adapter directory, a fuse that
-/// copies, an echoing candidate, and at promote a minimal valid GGUF, so
+/// copies into a whole model directory (configuration, tokenizer, weights a
+/// reader takes whole -- what an MLX promotion registers, 27c), an echoing
+/// candidate, and at promote a minimal valid GGUF, so
 /// the whole chain -- run, eval, promote, rollback -- runs on the real
 /// binary in the lifecycle test with nothing installed. Every orchestration
 /// test drives it too; the real drivers are proven separately under stub

@@ -2,11 +2,13 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "cli/command.h"
+#include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/paths.h"
 #include "views/status_line.h"
@@ -96,6 +98,11 @@ struct CheckInputs {
     /// The release target the MLX rows judge (27a); empty is this build's
     /// own. Set by a test, so the off-platform answer is checked on any host.
     std::string host_target;
+
+    /// The drivers' earlier versions the script rows know (27c): this
+    /// build's list, unless a test names its own, so a stale copy is
+    /// checked without one in the repository.
+    std::span<const std::string_view> retired_scripts = harness::bundled_scripts_retired();
 };
 
 /// Runs every check and returns the report. Pure with respect to the machine

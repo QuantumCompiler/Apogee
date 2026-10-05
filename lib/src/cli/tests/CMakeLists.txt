@@ -30,6 +30,7 @@ add_library(apogee_tests_infrastructure OBJECT
     support/file_time.h
     support/file_time.cpp
     support/fake_child.h
+    support/fake_mlx_driver.h
     support/fake_ffmpeg.h
     support/gguf_builder.h
     support/mlx_model.h
@@ -544,7 +545,8 @@ if(UNIX)
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/no-listen-home
             # The mlx backend's phase (27a): its real driver under stubs, the
-            # whole process tree sampled.
+            # whole process tree sampled -- and since 27c a served mlx turn,
+            # serve's own pid the only listener, its driver never one.
             ${CMAKE_CURRENT_SOURCE_DIR}/data/backends/scripts
             ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mlx/model
     )
@@ -552,7 +554,11 @@ if(UNIX)
 
     # The mlx backend (27a) on the real binary with its real driver under stub
     # mlx packages: check, a byte-clean complete, a tool-using chat on one
-    # driver, /exit, and a refusal naming its fix. Apple silicon only.
+    # driver, /exit, and a refusal naming its fix -- and since 27c a vision
+    # model's picture read as it is through a stub mlx-vlm (and, without it,
+    # the doctor's warning and the refusal), a text model's picture described
+    # by the vision role, and a run promoted with --target mlx then asked.
+    # Apple silicon only.
     add_test(NAME cli.mlx_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/mlx_e2e.sh"
             $<TARGET_FILE:apogee>

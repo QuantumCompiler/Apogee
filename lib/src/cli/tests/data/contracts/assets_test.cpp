@@ -378,3 +378,169 @@ TEST_CASE("the compiled-in retired list names earlier versions, never this build
         CHECK_FALSE(std::ranges::binary_search(retired, std::string_view{current}));
     }
 }
+
+// ---------------------------------------------------------------------------
+// The drivers an earlier Apogee seeded (27c)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The seeded driver `name` under `root`.
+std::filesystem::path seeded_script(const std::filesystem::path& root, std::string_view name) {
+    return root / apogee::harness::bundled_script_relative_path(name);
+}
+
+/// This build's text of the seeded driver `name`.
+std::string bundled_text(std::string_view name) {
+    for (const std::span<const apogee::harness::BundledScript> scripts :
+         {apogee::harness::bundled_training_scripts(), apogee::harness::bundled_mlx_scripts()}) {
+        for (const apogee::harness::BundledScript& script : scripts) {
+            if (script.name == name) {
+                return std::string{script.text};
+            }
+        }
+    }
+    FAIL("no bundled driver " << name);
+    return {};
+}
+
+}  // namespace
+
+TEST_CASE("an earlier Apogee's drivers are brought up to this build's; an edit is kept",
+          "[harness][assets][scripts][refresh]") {
+    // Seeding is skip-if-present, so without this an install keeps the
+    // driver an earlier Apogee seeded: 27a's mlx_generate.py, which never
+    // reads a picture, on the install that upgraded to read them.
+    using apogee::harness::SeededScript;
+    const apogee::testing::TempDir root{"scripts-refresh-" +
+                                        std::to_string(std::random_device{}())};
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    const auto write = [&root](std::string_view name, const std::string& bytes) {
+        std::ofstream{seeded_script(root.path(), name), std::ios::binary} << bytes;
+    };
+    // Two an earlier Apogee shipped, one the user edited, one never seeded.
+    write("mlx_generate.py", "# 27a's driver\n");
+    write("train_mlx.py", "# v0.1.0's trainer\n");
+    write("train_peft.py", "# the user's own change\n");
+    std::filesystem::remove(seeded_script(root.path(), "prepare_dataset.py"));
+    std::vector<std::string> retired{
+        "mlx_generate.py " + apogee::models::sha256_hex("# 27a's driver\n"),
+        "train_mlx.py " + apogee::models::sha256_hex("# v0.1.0's trainer\n"),
+    };
+    std::ranges::sort(retired);
+    const std::vector<std::string_view> list{retired.begin(), retired.end()};
+
+    const auto state = [&root, &list](std::string_view name) {
+        return apogee::harness::inspect_seeded_script(root.path(), name, list);
+    };
+    CHECK(state("mlx_generate.py") == SeededScript::Stale);
+    CHECK(state("train_mlx.py") == SeededScript::Stale);
+    CHECK(state("train_peft.py") == SeededScript::Edited);
+    CHECK(state("prepare_dataset.py") == SeededScript::Missing);
+    CHECK(state("mlx_convert.py") == SeededScript::Current);
+    // Under another list, the same bytes are an edit: never guessed.
+    CHECK(apogee::harness::inspect_seeded_script(root.path(), "mlx_generate.py", {}) ==
+          SeededScript::Edited);
+
+    apogee::harness::AssetSeedResult result;
+    apogee::harness::refresh_seeded_scripts(root.path(), result, list);
+    REQUIRE(result.ok());
+    CHECK(result.updated == std::vector<std::string>{"training/scripts/train_mlx.py",
+                                                     "training/scripts/mlx_generate.py"});
+    CHECK(result.created.empty());
+    CHECK(read(seeded_script(root.path(), "mlx_generate.py")) == bundled_text("mlx_generate.py"));
+    CHECK(read(seeded_script(root.path(), "train_mlx.py")) == bundled_text("train_mlx.py"));
+    // The edit is exactly as the user left it; the missing one is seeding's.
+    CHECK(read(seeded_script(root.path(), "train_peft.py")) == "# the user's own change\n");
+    CHECK_FALSE(std::filesystem::exists(seeded_script(root.path(), "prepare_dataset.py")));
+    CHECK(state("mlx_generate.py") == SeededScript::Current);
+    CHECK(state("train_peft.py") == SeededScript::Edited);
+
+    // Run again: nothing left to update.
+    apogee::harness::AssetSeedResult again;
+    apogee::harness::refresh_seeded_scripts(root.path(), again, list);
+    CHECK(again.updated.empty());
+}
+
+TEST_CASE("27a's own mlx_generate.py is refreshed by the one seeding path, as check --fix runs it",
+          "[harness][assets][scripts][refresh]") {
+    // The real file an install that ran 27a holds (its bytes pinned as a
+    // fixture, from commit ad5124c), through the compiled-in list.
+    const apogee::testing::TempDir root{"scripts-27a-" + std::to_string(std::random_device{}())};
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    const std::string earlier =
+        read(std::filesystem::path{APOGEE_TEST_FIXTURES} / "mlx" / "mlx_generate-27a.py");
+    REQUIRE(earlier.find("PROTOCOL = 1") != std::string::npos);
+    REQUIRE(earlier != bundled_text("mlx_generate.py"));
+    std::ofstream{seeded_script(root.path(), "mlx_generate.py"), std::ios::binary} << earlier;
+    CHECK(apogee::harness::inspect_seeded_script(root.path(), "mlx_generate.py") ==
+          apogee::harness::SeededScript::Stale);
+    // Still Apogee's, not the user's: `uninstall` takes it as seeded.
+    CHECK(apogee::harness::is_unmodified_bundled_asset(
+        root.path(), seeded_script(root.path(), "mlx_generate.py")));
+
+    const apogee::harness::SeedResult seeded = apogee::harness::seed_data_directory(root.path());
+    REQUIRE(seeded.ok());
+    CHECK(seeded.updated == std::vector<std::string>{"training/scripts/mlx_generate.py"});
+    CHECK(read(seeded_script(root.path(), "mlx_generate.py")) == bundled_text("mlx_generate.py"));
+    CHECK(apogee::harness::inspect_seeded_script(root.path(), "mlx_generate.py") ==
+          apogee::harness::SeededScript::Current);
+    // An edit of it is never "an earlier Apogee's".
+    std::ofstream{seeded_script(root.path(), "mlx_generate.py"), std::ios::binary} << earlier
+                                                                                   << "# mine\n";
+    CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(
+        root.path(), seeded_script(root.path(), "mlx_generate.py")));
+    CHECK(apogee::harness::seed_data_directory(root.path()).updated.empty());
+    CHECK(read(seeded_script(root.path(), "mlx_generate.py")) == earlier + "# mine\n");
+}
+
+TEST_CASE("the compiled-in driver list names earlier versions, never this build's",
+          "[harness][assets][scripts][refresh]") {
+    const std::span<const std::string_view> retired = apogee::harness::bundled_scripts_retired();
+    CHECK(std::ranges::is_sorted(retired));
+    std::vector<std::string> names;
+    std::vector<std::string> currents;
+    for (const std::span<const apogee::harness::BundledScript> scripts :
+         {apogee::harness::bundled_training_scripts(), apogee::harness::bundled_mlx_scripts()}) {
+        for (const apogee::harness::BundledScript& script : scripts) {
+            names.emplace_back(script.name);
+            // A driver this build ships unchanged is not "retired": the
+            // refresh would rewrite it for nothing and check would call a
+            // current install stale.
+            const std::string current =
+                std::string{script.name} + " " + apogee::models::sha256_hex(script.text);
+            CHECK_FALSE(std::ranges::binary_search(retired, std::string_view{current}));
+            currents.push_back(current);
+        }
+    }
+    for (const std::string_view entry : retired) {
+        INFO(entry);
+        const std::size_t space = entry.rfind(' ');
+        REQUIRE(space != std::string_view::npos);
+        CHECK(entry.size() - space - 1 == 64);
+        CHECK(std::ranges::find(names, entry.substr(0, space)) != names.end());
+    }
+    // The list is the file's, regenerated: an entry added to
+    // assets/retired-scripts.txt and never compiled in would refresh nothing.
+    std::vector<std::string> recorded;
+    std::istringstream file{read(std::filesystem::path{APOGEE_ASSETS_DIR} / "retired-scripts.txt")};
+    for (std::string line; std::getline(file, line);) {
+        // Less this build's own bytes, as the generator leaves them out.
+        if (!line.empty() && !line.starts_with("#") &&
+            std::ranges::find(currents, line) == currents.end()) {
+            recorded.push_back(line);
+        }
+    }
+    std::ranges::sort(recorded);
+    CHECK(std::vector<std::string>{retired.begin(), retired.end()} == recorded);
+    // Every version an earlier Apogee seeded: 27a's driver, and v0.1.0's
+    // trainers and preparer before their 2026-10-04 edits.
+    for (const std::string_view earlier :
+         {"mlx_generate.py 4676e348595cdbfdb4a23191f7b008e718c29b097da45b5f563c75091e8c2335",
+          "prepare_dataset.py 868db898b9bb043399a4f57b2ee5f1ad4bf6e614022b0d0249f1b118ec0de41f",
+          "train_mlx.py 7f5b206c455094c5d63b72dd804f9ba49a0647d84cf87b723be6192db4ddc478",
+          "train_peft.py 8663c7508fb6630ed0d63bbbb856c55ca817196e05178ea71a1621d77199f508"}) {
+        INFO(earlier);
+        CHECK(std::ranges::binary_search(retired, earlier));
+    }
+}

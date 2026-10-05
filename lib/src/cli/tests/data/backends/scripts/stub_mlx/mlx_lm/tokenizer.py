@@ -53,7 +53,13 @@ class Tokenizer:
             if message["role"] == "refused":
                 # What a real template does with a turn it cannot render.
                 raise ValueError("the template refuses role 'refused'")
-            line = f"<|{message['role']}|>{message.get('content') or ''}"
+            content = message.get("content") or ""
+            if isinstance(content, list):
+                # A vision model's parts (27c): its image marker where each
+                # picture sits, as a real template places them.
+                content = "".join("<|image|>" if part.get("type") == "image"
+                                  else part.get("text", "") for part in content)
+            line = f"<|{message['role']}|>{content}"
             if message.get("tool_calls"):
                 line += json.dumps(message["tool_calls"], sort_keys=True)
             if message.get("tool_call_id"):

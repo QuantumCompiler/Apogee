@@ -1,6 +1,7 @@
 #include "backends/mlx_protocol.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -143,6 +144,23 @@ TEST_CASE("a ready line says what the driver found", "[backends][mlx][protocol]"
     CHECK(ready->thinking);
     CHECK(ready->mlx_lm_version == "0.32.0");
     CHECK_FALSE(ready->id.has_value());
+    // A driver from before 27c says nothing of vision: it reads no images.
+    CHECK_FALSE(ready->vision);
+    CHECK(ready->mlx_vlm_version.empty());
+
+    const auto vision = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"model_type":"qwen3_vl","chat_template":true,)"
+        R"("tool_parser":null,"thinking":false,"mlx_lm":"0.32.0","vision":true,)"
+        R"("mlx_vlm":"0.3.9"})");
+    REQUIRE(vision.has_value());
+    CHECK(vision->vision);
+    CHECK(vision->mlx_vlm_version == "0.3.9");
+    // A text driver's own word, null and false, reads as no.
+    const auto text = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"vision":false,"mlx_vlm":null})");
+    REQUIRE(text.has_value());
+    CHECK_FALSE(text->vision);
+    CHECK(text->mlx_vlm_version.empty());
 
     CHECK_FALSE(apogee::backends::mlx::parse_event("[1,2]").has_value());
     CHECK_FALSE(apogee::backends::mlx::parse_event("").has_value());
@@ -156,4 +174,36 @@ TEST_CASE("a done line's finish maps onto the IR's reasons", "[backends][mlx][pr
     CHECK(finish_reason("tool_calls") == FinishReason::ToolCalls);
     CHECK(finish_reason("cancelled") == FinishReason::Cancelled);
     CHECK(finish_reason("something newer") == FinishReason::Stop);
+}
+
+TEST_CASE(
+    "a message carrying a picture crosses as its parts in order, the image a data: URI where it "
+    "sat; a text message stays a string",
+    "[backends][mlx][protocol][vision]") {
+    // 27c: the content-part shape a vision model's template places images
+    // by. The image's bytes are never decoded or fetched on this side.
+    GenerateRequest request;
+    request.messages.push_back(apogee::harness::ChatMessage::system("Look closely."));
+    request.messages.push_back(apogee::harness::ChatMessage{
+        .role = apogee::harness::Role::User,
+        .content = apogee::harness::MessageContent::from_parts(
+            {apogee::harness::ContentPart::from_image_url("data:image/png;base64,iVBORw0KGgo="),
+             apogee::harness::ContentPart::from_text("What is this?"),
+             apogee::harness::ContentPart::from_image_url("data:image/jpeg;base64,/9j/4AAQ")})});
+    // Text parts alone are not rich: they stay one string.
+    request.messages.push_back(
+        apogee::harness::ChatMessage{.role = apogee::harness::Role::User,
+                                     .content = apogee::harness::MessageContent::from_parts(
+                                         {apogee::harness::ContentPart::from_text("and "),
+                                          apogee::harness::ContentPart::from_text("this")})});
+    const nlohmann::json line =
+        nlohmann::json::parse(apogee::backends::mlx::generate_line(request));
+    const nlohmann::json& messages = line["messages"];
+    CHECK(messages[0]["content"] == "Look closely.");
+    CHECK(
+        messages[1]["content"] ==
+        nlohmann::json::array({{{"type", "image"}, {"image", "data:image/png;base64,iVBORw0KGgo="}},
+                               {{"type", "text"}, {"text", "What is this?"}},
+                               {{"type", "image"}, {"image", "data:image/jpeg;base64,/9j/4AAQ"}}}));
+    CHECK(messages[2]["content"] == "and this");
 }

@@ -101,7 +101,7 @@ struct Fixture {
         request.promote = [this](std::string_view run_id) {
             promoted.emplace_back(run_id);
             return apogee::training::CyclePromotion{
-                .ok = true, .version = next_version++, .gguf_path = "/v.gguf"};
+                .ok = true, .version = next_version++, .weights_path = "/v.gguf"};
         };
         return request;
     }

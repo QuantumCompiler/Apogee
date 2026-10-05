@@ -28,6 +28,14 @@ EOF
     chmod +x "$home/training/venv/bin/python"
 }
 
+# mlx_fake_vlm <apogee-home> <stub-scripts-dir>: lays the stub `mlx_vlm`
+# (27c) beside the stub `mlx_lm` -- what `train setup --with mlx-vlm` would
+# install -- so a vision model's turns load through it.
+mlx_fake_vlm() {
+    local home="$1" stubs="$2"
+    cp -R "$stubs/stub_mlx_vlm/." "$home/training/venv/lib/python3.99/site-packages/"
+}
+
 # mlx_descendants <pid>: every process below <pid>, one per line.
 mlx_descendants() {
     local child

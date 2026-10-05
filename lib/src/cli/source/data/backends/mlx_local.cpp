@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <fstream>
 #include <random>
@@ -51,10 +52,11 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
     return parsed.is_discarded() ? nlohmann::json{} : parsed;
 }
 
-/// `<venv>/lib/python3.*/site-packages/mlx_lm`, when its `__init__.py` is
+/// `<venv>/lib/python3.*/site-packages/<name>`, when its `__init__.py` is
 /// there -- a fact about files, asked without starting an interpreter, so a
 /// probe at every startup costs a directory listing.
-[[nodiscard]] std::filesystem::path find_mlx_lm(const std::filesystem::path& venv) {
+[[nodiscard]] std::filesystem::path find_package(const std::filesystem::path& venv,
+                                                 std::string_view name) {
     std::error_code code;
     const std::filesystem::path lib = venv / "lib";
     if (!std::filesystem::is_directory(lib, code)) {
@@ -64,7 +66,7 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
         if (!entry.path().filename().string().starts_with("python")) {
             continue;
         }
-        const std::filesystem::path package = entry.path() / "site-packages" / "mlx_lm";
+        const std::filesystem::path package = entry.path() / "site-packages" / std::string{name};
         if (std::filesystem::is_regular_file(package / "__init__.py", code)) {
             return package;
         }
@@ -72,10 +74,11 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
     return {};
 }
 
-/// The version `mlx_lm/_version.py` declares (`__version__ = '0.32.0'`), or
+/// The version `<package>/<file>` declares (`__version__ = '0.32.0'`), or
 /// empty when it says none.
-[[nodiscard]] std::string mlx_lm_version(const std::filesystem::path& package) {
-    const std::optional<std::string> text = read_file(package / "_version.py");
+[[nodiscard]] std::string declared_version(const std::filesystem::path& package,
+                                           std::string_view file) {
+    const std::optional<std::string> text = read_file(package / std::string{file});
     if (!text.has_value()) {
         return {};
     }
@@ -88,6 +91,28 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
     }
     const std::size_t close = text->find((*text)[open], open + 1);
     return close == std::string::npos ? std::string{} : text->substr(open + 1, close - open - 1);
+}
+
+/// The version a package's distribution record names in its directory's
+/// own name -- `mlx_vlm-0.3.9.dist-info` beside `mlx_vlm/` -- or, failing
+/// that, what the package's `version.py` or `_version.py` declares.
+[[nodiscard]] std::string installed_version(const std::filesystem::path& package) {
+    const std::string prefix = package.filename().string() + "-";
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(package.parent_path(), code)) {
+        const std::string name = entry.path().filename().string();
+        const std::string_view suffix = ".dist-info";
+        if (name.starts_with(prefix) && name.ends_with(suffix) &&
+            name.size() > prefix.size() + suffix.size()) {
+            return name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
+        }
+    }
+    for (const std::string_view file : {"version.py", "_version.py"}) {
+        if (std::string version = declared_version(package, file); !version.empty()) {
+            return version;
+        }
+    }
+    return {};
 }
 
 /// The platform, the environment and `mlx-lm`: the rungs an entry shares
@@ -110,7 +135,7 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
         readiness.remedy = std::string{kSetupRemedy};
         return readiness;
     }
-    readiness.package = find_mlx_lm(host.venv);
+    readiness.package = find_package(host.venv, "mlx_lm");
     if (readiness.package.empty()) {
         readiness.refusal = MlxRefusal::NoMlxLm;
         readiness.reason =
@@ -118,7 +143,7 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
         readiness.remedy = std::string{kSetupRemedy};
         return readiness;
     }
-    readiness.version = mlx_lm_version(readiness.package);
+    readiness.version = declared_version(readiness.package, "_version.py");
     return readiness;
 }
 
@@ -295,14 +320,20 @@ MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConf
 MlxModelInfo inspect_mlx_model(const std::filesystem::path& dir) {
     MlxModelInfo info;
     const nlohmann::json config = read_json(dir / "config.json");
+    std::error_code code;
     if (config.is_object()) {
         info.model_type = config.value("model_type", std::string{});
         if (const auto text = config.find("text_config");
             text != config.end() && text->is_object()) {
             info.text_model_type = text->value("model_type", std::string{});
         }
+        // A vision tower in the configuration, and the processor that
+        // turns a picture into its input beside it (27c).
+        const auto tower = config.find("vision_config");
+        info.vision = tower != config.end() && tower->is_object() &&
+                      (std::filesystem::is_regular_file(dir / "preprocessor_config.json", code) ||
+                       std::filesystem::is_regular_file(dir / "processor_config.json", code));
     }
-    std::error_code code;
     if (std::filesystem::is_regular_file(dir / "chat_template.jinja", code) ||
         std::filesystem::is_regular_file(dir / "chat_template.json", code)) {
         info.chat_template = true;
@@ -338,6 +369,35 @@ MlxModelInfo inspect_mlx_model(const std::filesystem::path& dir) {
     return info;
 }
 
+MlxVlmPackage find_mlx_vlm(const MlxHost& host) {
+    MlxVlmPackage found;
+    found.dir = find_package(host.venv, "mlx_vlm");
+    if (found.installed()) {
+        found.version = installed_version(found.dir);
+    }
+    return found;
+}
+
+MlxVision probe_mlx_vision(const MlxModelInfo& info, const MlxHost& host) {
+    MlxVision vision;
+    vision.model = info.vision;
+    if (!vision.model) {
+        vision.reason =
+            "it is not a vision model: its config.json declares no vision_config, or no image "
+            "processor (preprocessor_config.json or processor_config.json) ships with it";
+        return vision;
+    }
+    vision.vlm = find_mlx_vlm(host);
+    if (!vision.vlm.installed()) {
+        vision.reason =
+            "it is a vision model, but mlx-vlm is not installed in the Python "
+            "environment at " +
+            host.venv.string();
+        vision.remedy = std::string{kMlxVisionRemedy};
+    }
+    return vision;
+}
+
 // ---------------------------------------------------------------------------
 // The provider
 // ---------------------------------------------------------------------------
@@ -363,6 +423,10 @@ MlxLocalProvider::Options MlxLocalProvider::options_from(const std::string& back
     options.interpreter = host.venv / "bin" / "python";
     options.driver = host.driver;
     options.info = inspect_mlx_model(options.model_dir);
+    const MlxVision vision = probe_mlx_vision(options.info, host);
+    options.vision = vision.reads_images();
+    options.vision_gap =
+        vision.remedy.empty() ? vision.reason : vision.reason + " -- " + vision.remedy;
     if (config.max_tokens.has_value()) {
         options.max_tokens = *config.max_tokens;
     }
@@ -405,6 +469,10 @@ int MlxLocalProvider::spawn_count() const noexcept {
 
 bool MlxLocalProvider::has_live_child() const noexcept {
     return child_ != nullptr;
+}
+
+bool MlxLocalProvider::has_vision_child() const noexcept {
+    return child_ != nullptr && vision_child_;
 }
 
 const ModelProfile* resolve_mlx_profile(const MlxModelInfo& info, std::string_view name_hint) {
@@ -514,6 +582,7 @@ void MlxLocalProvider::drop_child() {
     framer_.reset();
     lines_.clear();
     ready_.reset();
+    vision_child_ = false;
 }
 
 void MlxLocalProvider::end_session() {
@@ -531,6 +600,7 @@ void MlxLocalProvider::end_session() {
     framer_.reset();
     lines_.clear();
     ready_.reset();
+    vision_child_ = false;
 }
 
 void MlxLocalProvider::expire_if_idle() {
@@ -581,19 +651,28 @@ std::optional<mlx::Event> MlxLocalProvider::next_event(std::chrono::milliseconds
     }
 }
 
-void MlxLocalProvider::ensure_child(const harness::StreamOptions& options) {
+void MlxLocalProvider::ensure_child(const harness::StreamOptions& options, bool vision) {
     if (child_ != nullptr && ready_.has_value() && !child_->exited()) {
-        return;
+        if (!vision || vision_child_) {
+            return;
+        }
+        // A text driver, and this turn carries a picture: the model is loaded
+        // again through mlx-vlm, which then answers every turn after (27c).
+        end_session();
     }
     if (child_ != nullptr) {
         drop_child();  // it died between turns; a fresh one reloads the model
     }
     stderr_tail_.clear();
-    say(options, harness::StatusEvent::Type::ModelLoading, harness::StatusEvent::Phase::Start, {});
+    say(options, harness::StatusEvent::Type::ModelLoading, harness::StatusEvent::Phase::Start,
+        vision ? "through mlx-vlm, to read images" : std::string{});
 
     platform::ChildCommand command;
     command.program = options_.interpreter.string();
     command.arguments = {options_.driver.string(), "--model", options_.model_dir.string()};
+    if (vision) {
+        command.arguments.emplace_back("--vision");
+    }
     ++spawns_;
     std::string error;
     child_ = spawner_(command, error);
@@ -602,12 +681,25 @@ void MlxLocalProvider::ensure_child(const harness::StreamOptions& options) {
             options_.backend_name,
             "could not start the MLX driver" + (error.empty() ? std::string{} : ": " + error));
     }
+    vision_child_ = vision;
 
     await_ready(options.cancellation);
     const mlx::Event& ready = ready_.value();
+    if (vision && !ready.vision) {
+        // A driver from before 27c: it ignores --vision and loads text only,
+        // and a picture sent to it would never be seen.
+        drop_child();
+        throw harness::ProviderError(
+            options_.backend_name,
+            "the MLX driver at " + options_.driver.string() +
+                " does not read images -- it is an older copy: 'apogee check --fix' brings an "
+                "earlier Apogee's up to this build's, and an edited one is kept, so delete it "
+                "first");
+    }
     say(options, harness::StatusEvent::Type::ModelReady, harness::StatusEvent::Phase::Done,
         "mlx-lm " + ready.mlx_lm_version + ", " +
-            (ready.model_type.empty() ? std::string{"unknown"} : ready.model_type));
+            (ready.model_type.empty() ? std::string{"unknown"} : ready.model_type) +
+            (ready.vision ? ", mlx-vlm " + ready.mlx_vlm_version : std::string{}));
 }
 
 void MlxLocalProvider::await_ready(const harness::CancellationToken& cancellation) {
@@ -668,7 +760,8 @@ void MlxLocalProvider::report_cache(const mlx::Event& done,
     event.detail = "prompt " + std::to_string(done.prompt_tokens) +
                    " tokens: " + std::to_string(done.cached_tokens) + " from the cache, " +
                    std::to_string(done.prompt_tokens - done.cached_tokens) +
-                   " read · mlx, held in the driver";
+                   (vision_child_ ? " read · mlx-vlm, read whole each turn"
+                                  : " read · mlx, held in the driver");
     options.on_status(event);
 }
 
@@ -859,14 +952,48 @@ private:
 
 }  // namespace
 
+void MlxLocalProvider::check_media(const harness::ChatRequest& request) const {
+    for (const harness::ChatMessage& message : request.messages) {
+        for (const harness::ContentPart& part : message.content.parts()) {
+            if (part.kind == harness::ContentPart::Kind::InputAudio) {
+                throw harness::ProviderError(options_.backend_name,
+                                             options_.model +
+                                                 " cannot hear audio on the mlx "
+                                                 "backend");
+            }
+            if (part.kind != harness::ContentPart::Kind::ImageUrl) {
+                continue;
+            }
+            if (!options_.vision) {
+                // Never silently dropped: every surface asks first, so this
+                // is a caller that did not.
+                throw harness::ProviderError(
+                    options_.backend_name,
+                    options_.model + " cannot read images: " +
+                        (options_.vision_gap.empty() ? std::string{"it is not a vision model"}
+                                                     : options_.vision_gap));
+            }
+            if (!part.image_url.starts_with("data:")) {
+                throw harness::ProviderError(
+                    options_.backend_name,
+                    "the mlx backend reads an image given as a data: URI -- a remote image is "
+                    "never fetched");
+            }
+        }
+    }
+}
+
 harness::ChatResponse MlxLocalProvider::run(const harness::ChatRequest& request,
                                             const harness::StreamOptions& options) {
     if (request.messages.empty()) {
         throw harness::ProviderError(options_.backend_name, "a request needs at least one message");
     }
     options.cancellation.throw_if_cancelled();
+    check_media(request);
+    const bool images = std::ranges::any_of(
+        request.messages, [](const harness::ChatMessage& m) { return m.content.is_rich(); });
     expire_if_idle();
-    ensure_child(options);
+    ensure_child(options, images);
     used_ = true;
     last_use_ = options_.clock();
 

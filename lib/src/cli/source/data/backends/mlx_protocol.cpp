@@ -17,10 +17,28 @@ namespace {
     return parsed;
 }
 
+/// A message's content: its text, or -- once it carries a picture -- its
+/// parts in order, each image where it sits (27c). Audio is never sent: no
+/// MLX provider declares it.
+[[nodiscard]] nlohmann::json template_content(const harness::MessageContent& content) {
+    if (!content.is_rich()) {
+        return content.plain_text();
+    }
+    nlohmann::json parts = nlohmann::json::array();
+    for (const harness::ContentPart& part : content.parts()) {
+        if (part.kind == harness::ContentPart::Kind::Text) {
+            parts.push_back({{"type", "text"}, {"text", part.text}});
+        } else if (part.kind == harness::ContentPart::Kind::ImageUrl) {
+            parts.push_back({{"type", "image"}, {"image", part.image_url}});
+        }
+    }
+    return parts;
+}
+
 /// One IR message in the shape a Hugging Face chat template takes.
 [[nodiscard]] nlohmann::json template_message(const harness::ChatMessage& message) {
     nlohmann::json out{{"role", std::string{harness::to_string(message.role)}},
-                       {"content", message.content.plain_text()}};
+                       {"content", template_content(message.content)}};
     if (message.role == harness::Role::Assistant && !message.tool_calls.empty()) {
         nlohmann::json calls = nlohmann::json::array();
         for (const harness::ToolCall& call : message.tool_calls) {
@@ -149,12 +167,14 @@ std::optional<Event> parse_event(std::string_view line) {
         event.model_type = string_field(object, "model_type");
         event.tool_parser = string_field(object, "tool_parser");
         event.mlx_lm_version = string_field(object, "mlx_lm");
+        event.mlx_vlm_version = string_field(object, "mlx_vlm");
         const auto boolean = [&object](const char* key) {
             const auto it = object.find(key);
             return it != object.end() && it->is_boolean() && it->get<bool>();
         };
         event.chat_template = boolean("chat_template");
         event.thinking = boolean("thinking");
+        event.vision = boolean("vision");
         return event;
     }
     // An unknown type is a newer driver's, and carries nothing this side reads.

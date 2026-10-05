@@ -8,9 +8,9 @@ distil a teacher across kits in one command, and the unattended,
 scheduler-invoked **cycle** with its anchor gate and circuit breaker.
 
 Apogee fine-tunes **full-weight SafeTensors snapshots** and promotes the
-result to a GGUF a `llamacpp` backend runs. It infers from GGUF only, so a
-snapshot is trainable and never runnable, and a promoted GGUF is runnable and
-never trainable.
+result to a GGUF a `llamacpp` backend runs -- or, on Apple silicon with
+`--target mlx`, registers the fused SafeTensors themselves as an `mlx`
+backend, with no conversion at all (see `train promote`).
 
 ## The Python boundary
 
@@ -58,7 +58,8 @@ terminal, and on a pipe refuses naming this command.
 | `prepare` | `datasets` | Parquet in `datasets prepare` (JSON, JSONL and CSV need nothing) |
 | `mlx` | `mlx-lm` | `train run --trainer mlx`, the Apple Silicon trainer; and an `mlx` backend, which runs a model directory through it for chat and `complete` |
 | `peft` | `torch`, `transformers`, `peft`, `bitsandbytes`, `accelerate` | `train run --trainer peft`, the CUDA trainer |
-| `convert` | `torch`, `transformers`, `gguf`, `numpy`, `sentencepiece`, `protobuf` | `train promote`'s GGUF conversion |
+| `convert` | `torch`, `transformers`, `gguf`, `numpy`, `sentencepiece`, `protobuf` | `train promote`'s GGUF conversion (not `--target mlx`, which converts nothing) |
+| `mlx-vlm` | `mlx-vlm` | an `mlx` backend over a vision model reading pictures as they are; without it such a model's pictures go to the `vision` role, and `apogee check` says so |
 
 `--trainer auto` picks `mlx` on macOS/arm64, `peft` where `nvidia-smi` is on
 PATH, and says so when neither fits. Versions are floors, not exact pins.
@@ -78,7 +79,8 @@ training:
 
 `apogee check` reports the environment and its sets, every seeded script
 against the shipped copy (an edit is kept and shown; a missing file is
-repaired by `--fix`), the vendored converter tree as one row, the trainer
+repaired by `--fix`, and so is an earlier Apogee's unedited copy, which
+`--fix` brings up to this build's -- the converter tree's rule), the vendored converter tree as one row, the trainer
 this host would use and whether its set is installed, the `convert` set,
 every installed kit, every version ledger's consistency (the active
 version's GGUF exists and the backend points at it), every named
@@ -363,6 +365,7 @@ and re-runs only with `--force`.
 
 ```bash
 apogee train promote <run-id> --as <backend> [--force] [--quantize TYPE] [--keep-fused]
+apogee train promote <run-id> --as <backend> --target mlx [--force]
 ```
 
 The only path from a run to inference, in order: the **eval gate** (hard by
@@ -386,17 +389,39 @@ entries as history. The fused checkpoint is removed after a successful
 conversion unless `--keep-fused`. **A failure at any step leaves the config
 and the ledger unchanged.**
 
+**`--target mlx`** (Apple silicon, the `mlx` backend): the same plan with the
+conversion taken out -- the gate, then the **fuse straight into the model
+store** (`models/<model>/mlx/<id>/`, claimed while it is written), the
+directory **read whole** (configuration, tokenizer, every shard within its
+header -- the store's MLX check), committed under the id its weights hash to
+with an `apogee-snapshot.json` record (`source: train`, `ref: <backend>
+v<N>`, `transform: promote run <id>`), and only then the config: a new
+`type: mlx` entry, or an existing `mlx` entry's `model_path` replaced in
+place. No GGUF is written and the `convert` set is never asked for. The
+ledger records the version's `mlx_path` where a GGUF version records its
+`gguf_path`; numbering, retention (a pruned MLX version's directory removed
+whole) and rollback are the same. Without `--target`, a promote into an
+existing entry makes what that entry runs (`mlx` for an `mlx` entry), and a
+new name makes a GGUF. Refused before anything is built: a `--target` an
+existing entry does not run, `--quantize` with `--target mlx` (it makes a
+GGUF), and a promote of one kind into a backend whose versions are the other
+-- a rollback repoints `model_path` and never changes a backend's type.
+`--keep-fused` is a note: the fused weights are the version. Registered on a
+machine that cannot run it (off Apple silicon, no `mlx-lm`), the entry is
+kept and the reason said. The regime and the cycle still promote GGUFs.
+
 ### `train rollback`, `versions`, `status`
 
 ```bash
 apogee train rollback <backend>      # repoint model_path at the previous version
-apogee train versions [<backend>]    # the ledger(s): version, time, run, eval, GGUF, active
+apogee train versions [<backend>]    # the ledger(s): version, time, run, eval, weights (a GGUF, or mlx/<id>), active
 apogee train status                  # the runs (newest first, running ones counted) and the active versions
 ```
 
 `rollback` repoints the backend at the highest version below the active
 one (not "active minus one": numbers have gaps after a prune) and **deletes
-nothing**; a pruned target, or one whose file is gone, is refused by name.
+nothing**; a pruned target, one whose file (or MLX directory) is gone, or an
+entry whose type is no longer the version's, is refused by name.
 The filesystem is the source of truth for all three: nothing is cached.
 `status` also rolls up the cycle (idle, running now, or halted with the
 reason; the anchor) and the pipelines (the running one, else the latest).

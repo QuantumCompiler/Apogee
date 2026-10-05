@@ -755,6 +755,57 @@ void refresh_converter_tree(const std::filesystem::path& root, const std::filesy
     }
 }
 
+namespace {
+
+/// The seeded driver named `name` -- a trainer's or an MLX one -- or null.
+[[nodiscard]] const BundledScript* find_seeded_script(std::string_view name) {
+    for (const std::span<const BundledScript> scripts :
+         {bundled_training_scripts(), bundled_mlx_scripts()}) {
+        for (const BundledScript& script : scripts) {
+            if (script.name == name) {
+                return &script;
+            }
+        }
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+SeededScript inspect_seeded_script(const std::filesystem::path& root, std::string_view name,
+                                   std::span<const std::string_view> retired) {
+    const std::optional<std::string> bytes = read_bytes(root / bundled_script_relative_path(name));
+    if (!bytes.has_value()) {
+        return SeededScript::Missing;
+    }
+    const BundledScript* bundled = find_seeded_script(name);
+    if (bundled != nullptr && *bytes == bundled->text) {
+        return SeededScript::Current;
+    }
+    return is_retired(retired, std::string{name}, *bytes) ? SeededScript::Stale
+                                                          : SeededScript::Edited;
+}
+
+void refresh_seeded_scripts(const std::filesystem::path& root, AssetSeedResult& result,
+                            std::span<const std::string_view> retired) {
+    for (const std::span<const BundledScript> scripts :
+         {bundled_training_scripts(), bundled_mlx_scripts()}) {
+        for (const BundledScript& script : scripts) {
+            if (inspect_seeded_script(root, script.name, retired) != SeededScript::Stale) {
+                continue;  // current, the user's, or seeding's to write
+            }
+            const std::string relative = bundled_script_relative_path(script.name);
+            try {
+                write_file_atomically(root / relative, script.text);
+            } catch (const std::exception& e) {
+                result.error = e.what();
+                return;
+            }
+            result.updated.push_back(relative);
+        }
+    }
+}
+
 std::string bundled_mlx_driver_relative_path() {
     return bundled_script_relative_path("mlx_generate.py");
 }
@@ -819,6 +870,13 @@ bool is_unmodified_bundled_asset(const std::filesystem::path& root,
         }
         break;  // this build's file, changed: an edit -- unless an earlier Apogee shipped it
     }
+    // An earlier Apogee's unedited driver is still Apogee's (27c).
+    const std::filesystem::path scripts =
+        (root / bundled_script_relative_path("driver")).parent_path();
+    if (file.parent_path().lexically_normal() == scripts.lexically_normal() &&
+        inspect_seeded_script(root, file.filename().string()) == SeededScript::Stale) {
+        return true;
+    }
     // An earlier Apogee's unedited converter file is still Apogee's.
     const std::filesystem::path converter = root / bundled_converter_relative_dir();
     const std::filesystem::path relative = file.lexically_relative(converter);
@@ -834,14 +892,18 @@ bool is_unmodified_bundled_asset(const std::filesystem::path& root,
 
 AssetSeedResult seed_bundled_assets(const std::filesystem::path& root) {
     AssetSeedResult result;
-    // Before the skip-if-present pass: an earlier Apogee's converter would
-    // otherwise be "present" and skipped for good.
+    // Before the skip-if-present pass: an earlier Apogee's converter, or
+    // driver, would otherwise be "present" and skipped for good.
     if (const std::filesystem::path converter = root / bundled_converter_relative_dir();
         std::filesystem::is_directory(converter)) {
         refresh_converter_tree(root, converter, result);
         if (!result.ok()) {
             return result;
         }
+    }
+    refresh_seeded_scripts(root, result);
+    if (!result.ok()) {
+        return result;
     }
     for (const BundledFile& bundled : bundled_files()) {
         const std::filesystem::path path = root / bundled.relative_path;

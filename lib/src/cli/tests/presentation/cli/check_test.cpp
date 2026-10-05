@@ -16,6 +16,7 @@
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
+#include "contracts/sha256.h"
 #include "embedstore/store.h"
 #include "httpserver/admin_auth.h"
 #include "knowledge/record.h"
@@ -1956,6 +1957,221 @@ TEST_CASE("a ready MLX install passes on what its files show, and an edited driv
         CHECK(driver->status == Status::Warn);
         CHECK(driver->remedy == "apogee check --fix");
     }
+}
+
+namespace {
+
+/// The row `name` in `section`, matched whole: "vision" is also part of
+/// "default_vision".
+[[nodiscard]] const apogee::commands::CheckRow* row_in(const CheckReport& report,
+                                                       std::string_view section,
+                                                       std::string_view name) {
+    for (const apogee::commands::CheckRow& row : report.rows) {
+        if (row.section == section && row.name == name) {
+            return &row;
+        }
+    }
+    return nullptr;
+}
+
+/// The fixture model made a vision model (27c): a vision tower in its
+/// configuration, and the image processor's file beside it.
+void make_vision_model(const Install& install) {
+    install.write("mlx-model/config.json",
+                  R"({"architectures": ["Qwen3VLForConditionalGeneration"], )"
+                  R"("model_type": "qwen3_vl", "vision_config": {"depth": 27}, )"
+                  R"("text_config": {"model_type": "qwen3_vl_text", )"
+                  R"("max_position_embeddings": 262144}})");
+    install.write("mlx-model/preprocessor_config.json", "{}");
+}
+
+void install_mlx_vlm(const Install& install) {
+    install.write("training/venv/lib/python3.14/site-packages/mlx_vlm/__init__.py", "");
+    std::filesystem::create_directories(install.root /
+                                        "training/venv/lib/python3.14/site-packages/"
+                                        "mlx_vlm-0.3.9.dist-info");
+}
+
+}  // namespace
+
+TEST_CASE(
+    "the MLX vision row says what it found: mlx-vlm present passes on its files, absent is "
+    "skipped until a vision model needs it, then a warning with the fix",
+    "[commands][check][mlx][vision]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", "models:\n  default: local\n" + mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    {
+        // A text model: nothing here needs mlx-vlm, and nothing claims sight.
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* vision = row_in(report, "MLX", "vision");
+        REQUIRE(vision != nullptr);
+        CHECK(vision->status == Status::Skipped);
+        CHECK(vision->detail.find("only an MLX vision model needs it") != std::string::npos);
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->detail.find("vision") == std::string::npos);
+        const apogee::commands::CheckRow* images = row_in(report, "Attachments", "images");
+        REQUIRE(images != nullptr);
+        CHECK(images->detail.find("sees them") == std::string::npos);
+        CHECK(report.passed());
+    }
+    make_vision_model(install);
+    {
+        // A vision model without mlx-vlm: a warning naming it and the fix, and
+        // its images said to go elsewhere -- never claimed.
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* vision = row_in(report, "MLX", "vision");
+        REQUIRE(vision != nullptr);
+        CHECK(vision->status == Status::Warn);
+        CHECK(vision->detail.find("mlx-vlm is not installed") != std::string::npos);
+        CHECK(vision->detail.find("so local cannot read images") != std::string::npos);
+        CHECK(vision->remedy == "apogee train setup --with mlx-vlm");
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Ok);
+        CHECK(entry->detail.find("a vision model, but mlx-vlm is not installed") !=
+              std::string::npos);
+        const apogee::commands::CheckRow* images = row_in(report, "Attachments", "images");
+        REQUIRE(images != nullptr);
+        CHECK(images->detail.find("local sees them") == std::string::npos);
+        CHECK(report.passed());
+    }
+    install_mlx_vlm(install);
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* vision = row_in(report, "MLX", "vision");
+        REQUIRE(vision != nullptr);
+        CHECK(vision->status == Status::Ok);
+        CHECK(vision->detail.find("mlx-vlm 0.3.9 is present") != std::string::npos);
+        CHECK(vision->detail.find("not imported") != std::string::npos);
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->detail.find("a vision model, reading images through mlx-vlm") !=
+              std::string::npos);
+        const apogee::commands::CheckRow* images = row_in(report, "Attachments", "images");
+        REQUIRE(images != nullptr);
+        CHECK(images->detail.find("local sees them as they are") != std::string::npos);
+        // Still not a clip reader: only still images go native on MLX.
+        const apogee::commands::CheckRow* video = row_in(report, "Attachments", "video");
+        REQUIRE(video != nullptr);
+        CHECK(video->detail.find("reads up to a minute") == std::string::npos);
+    }
+    {
+        // Off Apple silicon the section is skipped whole, sight included.
+        CheckInputs elsewhere = inputs;
+        elsewhere.host_target = "linux-x64";
+        const CheckReport report = run_checks(elsewhere);
+        CHECK(row_in(report, "MLX", "vision") == nullptr);
+    }
+}
+
+TEST_CASE(
+    "a vision role pointed at an mlx entry warns exactly as it does elsewhere: a text model, a "
+    "vision model without mlx-vlm",
+    "[commands][check][mlx][vision][roles]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", "models:\n  default: chat\n  default_vision: local\n" +
+                                            mlx_entry(install) + "  chat:\n    type: mock\n");
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    const auto pointer = [&inputs] {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* row = row_in(report, "Config", "default_vision");
+        REQUIRE(row != nullptr);
+        return *row;
+    };
+    const apogee::commands::CheckRow text = pointer();
+    CHECK(text.status == Status::Warn);
+    CHECK(text.detail.find("local -- it is not a vision model") != std::string::npos);
+    CHECK(text.remedy.find("an mlx backend over a vision model") != std::string::npos);
+
+    make_vision_model(install);
+    const apogee::commands::CheckRow blind = pointer();
+    CHECK(blind.status == Status::Warn);
+    CHECK(blind.detail.find("mlx-vlm is not installed") != std::string::npos);
+    CHECK(blind.remedy == "apogee train setup --with mlx-vlm");
+
+    install_mlx_vlm(install);
+    CHECK(pointer().status == Status::Ok);
+    // Off Apple silicon nothing on the mlx backend sees, whatever is installed.
+    inputs.host_target = "linux-x64";
+    const apogee::commands::CheckRow elsewhere = pointer();
+    CHECK(elsewhere.status == Status::Warn);
+    CHECK(elsewhere.detail.find("Apple silicon macOS only") != std::string::npos);
+    inputs.host_target = "macos-arm64";
+
+    // A transcription role on an mlx entry: no audio here, said as such.
+    install.write("config/config.yaml",
+                  "models:\n  default: chat\n  default_transcription: local\n" +
+                      mlx_entry(install) + "  chat:\n    type: mock\n");
+    load_into(inputs);
+    const CheckReport report = run_checks(inputs);
+    const apogee::commands::CheckRow* deaf = row_in(report, "Config", "default_transcription");
+    REQUIRE(deaf != nullptr);
+    CHECK(deaf->status == Status::Warn);
+    CHECK(deaf->detail.find("an mlx backend hears no audio") != std::string::npos);
+}
+
+TEST_CASE(
+    "a driver an earlier Apogee seeded is said to be one, and named for check --fix; an edit "
+    "is the user's",
+    "[commands][check][mlx][scripts]") {
+    // 27c: skip-if-present seeding kept 27a's mlx_generate.py on an upgraded
+    // install. The row must not call it "matches", nor "your edit".
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    install.write("training/scripts/mlx_generate.py", "# 27a's driver\n");
+    install.write("training/scripts/train_mlx.py", "# v0.1.0's trainer\n");
+    std::vector<std::string> retired{
+        "mlx_generate.py " + apogee::models::sha256_hex("# 27a's driver\n"),
+        "train_mlx.py " + apogee::models::sha256_hex("# v0.1.0's trainer\n"),
+    };
+    std::ranges::sort(retired);
+    const std::vector<std::string_view> list{retired.begin(), retired.end()};
+    inputs.retired_scripts = list;
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* driver = row_in(report, "MLX", "driver");
+        REQUIRE(driver != nullptr);
+        CHECK(driver->status == Status::Warn);
+        CHECK(driver->detail ==
+              "mlx_generate.py is an earlier Apogee's copy, unedited -- 'apogee check --fix' "
+              "brings it up to this build's");
+        CHECK(driver->remedy == "apogee check --fix");
+        const apogee::commands::CheckRow* trainer =
+            row_in(report, "Training", "script: train_mlx.py");
+        REQUIRE(trainer != nullptr);
+        CHECK(trainer->status == Status::Warn);
+        CHECK(trainer->detail.find("earlier Apogee's copy") != std::string::npos);
+        CHECK(trainer->remedy == "apogee check --fix");
+    }
+    // Under this build's own list the same bytes are an edit, kept and said.
+    inputs.retired_scripts = apogee::harness::bundled_scripts_retired();
+    const CheckReport report = run_checks(inputs);
+    const apogee::commands::CheckRow* driver = row_in(report, "MLX", "driver");
+    REQUIRE(driver != nullptr);
+    CHECK(driver->detail.find("your edit is kept") != std::string::npos);
 }
 
 TEST_CASE("an mlx entry naming no model directory fails, as a dangling GGUF does",

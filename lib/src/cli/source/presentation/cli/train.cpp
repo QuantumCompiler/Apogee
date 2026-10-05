@@ -20,6 +20,7 @@
 #include "agentloop/loop.h"
 #include "agentloop/reporter.h"
 #include "backends/factory.h"
+#include "backends/mlx_local.h"
 #include "cli/datasets.h"
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
@@ -30,6 +31,7 @@
 #include "contracts/paths.h"
 #include "models/quantize.h"
 #include "modelstore/gguf_inspect.h"
+#include "modelstore/mlx_info.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
@@ -43,6 +45,7 @@
 #include "training/mock_trainer.h"
 #include "training/peft_trainer.h"
 #include "training/pipeline.h"
+#include "training/promote.h"
 #include "training/regime.h"
 #include "training/script_runner.h"
 #include "training/store.h"
@@ -214,6 +217,16 @@ struct Providers {
     };
 }
 
+/// An MLX promotion's check (27c): the fused directory read whole -- the
+/// store's MLX rung, what every pull and conversion is held to before it is
+/// committed.
+[[nodiscard]] training::Verifier mlx_verifier() {
+    return [](const std::filesystem::path& dir) {
+        const models::MlxInfo info = models::read_mlx_info(dir);
+        return info.complete ? std::string{} : info.problem;
+    };
+}
+
 [[nodiscard]] training::Quantizer in_process_quantizer() {
     return [](const std::filesystem::path& input, const std::filesystem::path& output,
               std::string_view type) {
@@ -283,6 +296,9 @@ struct PromoteRequest {
     bool force = false;
     std::string quantize;
     bool keep_fused = false;
+    /// What to make runnable (27c): asked for, else what an existing entry
+    /// runs, else a GGUF.
+    std::optional<training::PromoteTarget> target;
 };
 
 struct PromoteChecks {
@@ -290,7 +306,16 @@ struct PromoteChecks {
     std::string warning;
     /// The configured entry's key when `backend` names one.
     std::string existing_key;
+    /// The target, resolved.
+    training::PromoteTarget target = training::PromoteTarget::Gguf;
 };
+
+/// The backend type a promotion's target registers: llamacpp runs a GGUF,
+/// mlx an MLX model directory -- the store's own map (`backend_type_for_format`).
+[[nodiscard]] harness::BackendType backend_type_for(training::PromoteTarget target) {
+    return target == training::PromoteTarget::Mlx ? harness::BackendType::Mlx
+                                                  : harness::BackendType::LlamaCpp;
+}
 
 /// Every refusal before the expensive part.
 [[nodiscard]] PromoteChecks precheck_promotion(const harness::Config& config,
@@ -312,10 +337,38 @@ struct PromoteChecks {
     checks.existing_key = configured_backend_key(config, request.backend);
     const harness::BackendConfig* existing =
         checks.existing_key.empty() ? nullptr : config.find_backend(checks.existing_key);
-    if (existing != nullptr && existing->type != harness::BackendType::LlamaCpp) {
-        checks.error = "'" + checks.existing_key + "' is a " +
-                       std::string{harness::to_string(existing->type)} +
-                       " backend -- promote into an existing llamacpp entry, or a new name";
+    checks.target = request.target.value_or(training::PromoteTarget::Gguf);
+    if (existing != nullptr) {
+        // An existing entry says what it runs (27c), and an asked-for target
+        // must agree: a version never changes a backend's type.
+        std::optional<training::PromoteTarget> runs;
+        if (existing->type == harness::BackendType::LlamaCpp) {
+            runs = training::PromoteTarget::Gguf;
+        } else if (existing->type == harness::BackendType::Mlx) {
+            runs = training::PromoteTarget::Mlx;
+        }
+        const std::string type{harness::to_string(existing->type)};
+        if (!runs.has_value()) {
+            checks.error = "'" + checks.existing_key + "' is a " + type +
+                           " backend -- promote into an existing llamacpp or mlx entry, or a new "
+                           "name";
+            return checks;
+        }
+        if (request.target.has_value() && *request.target != *runs) {
+            checks.error =
+                "'" + checks.existing_key + "' is a " + type + " backend, and --target " +
+                std::string{training::to_string(*request.target)} +
+                " makes something else -- promote --target " +
+                std::string{training::to_string(*runs)} + " into it, or name a new backend";
+            return checks;
+        }
+        checks.target = *runs;
+    }
+    if (!request.quantize.empty() && checks.target == training::PromoteTarget::Mlx) {
+        checks.error =
+            "--quantize makes a quantized GGUF, and an MLX promotion registers the "
+            "fused weights as they are -- drop --quantize, or promote --target gguf "
+            "under another name";
         return checks;
     }
     if (!request.quantize.empty()) {
@@ -347,7 +400,10 @@ struct PromoteOutcome {
     bool refused = false;
     std::string error;
     int version = 0;
-    std::string gguf_path;
+    training::PromoteTarget target = training::PromoteTarget::Gguf;
+    /// What the backend now points at: the stored GGUF, or the stored MLX
+    /// model directory.
+    std::string weights_path;
     std::string backend_key;
     /// An existing entry repointed rather than a new one appended.
     bool updated = false;
@@ -401,8 +457,12 @@ struct PromoteOutcome {
 
 /// What retention removes for a pruned version: its whole stored GGUF
 /// directory (file, record) and its kept fine-tune, if any. A GGUF outside the
-/// store -- a version promoted before the store existed -- goes alone.
+/// store -- a version promoted before the store existed -- goes alone. An
+/// MLX version is its stored directory, whole (27c).
 [[nodiscard]] std::string remove_promoted(const training::VersionEntry& entry) {
+    if (entry.mlx()) {
+        return models::remove_weights(entry.mlx_path);
+    }
     const std::filesystem::path file{entry.gguf_path};
     const std::filesystem::path dir = file.parent_path();
     std::string error;
@@ -444,26 +504,36 @@ struct PromoteOutcome {
         return outcome;
     }
     ledger.backend = checks.existing_key.empty() ? request.backend : checks.existing_key;
+    if (const std::string conflict = training::target_conflict(ledger, checks.target);
+        !conflict.empty()) {
+        outcome.refused = true;
+        outcome.error = conflict;
+        return outcome;
+    }
+    const bool mlx = checks.target == training::PromoteTarget::Mlx;
+    outcome.target = checks.target;
     outcome.backend_key = ledger.backend;
     outcome.updated = !checks.existing_key.empty();
-    // Built in a staging directory beside the base model's GGUFs and
-    // committed into the model store under the weights' own id once verified:
-    // a later promotion can never overwrite an earlier one's file.
+    // Built in a staging directory beside the base model's GGUFs -- or, for
+    // an MLX target, fused straight into one beside its MLX models (27c) --
+    // and committed into the model store under the weights' own id once
+    // verified: a later promotion can never overwrite an earlier one's.
     const models::StoreRoots roots = promotion_roots(config);
     const std::string model = base_model_name(roots, store, manifest);
     const std::filesystem::path staging =
-        models::make_incoming_dir(roots, models::kGgufFormat, model);
+        mlx ? models::incoming_path(roots, models::kMlxFormat, model)
+            : models::make_incoming_dir(roots, models::kGgufFormat, model);
     const training::PromotePlan plan =
         training::plan_promotion(ledger, store.run_dir(manifest.run_id), staging, ledger.backend,
-                                 request.quantize, request.keep_fused);
+                                 request.quantize, request.keep_fused, checks.target);
     outcome.version = plan.version;
     if (on_message) {
         on_message("run " + manifest.run_id + " -> " + ledger.backend + " v" +
-                   std::to_string(plan.version));
+                   std::to_string(plan.version) + (mlx ? " (mlx)" : ""));
     }
-    const training::ArtifactsResult built =
-        training::build_promotion_artifacts(manifest, plan, trainer, convert, header_verifier(),
-                                            in_process_quantizer(), on_message, cancellation);
+    const training::ArtifactsResult built = training::build_promotion_artifacts(
+        manifest, plan, trainer, convert, mlx ? mlx_verifier() : header_verifier(),
+        in_process_quantizer(), on_message, cancellation);
     std::error_code code;
     if (built.cancelled) {
         (void)models::remove_weights(staging);
@@ -477,59 +547,88 @@ struct PromoteOutcome {
         return outcome;
     }
 
-    models::Sidecar record;
-    record.ref = ledger.backend + " v" + std::to_string(plan.version);
-    record.source = "train";
-    record.transform = "promote";
-    record.transform_note =
-        "run " + manifest.run_id + (plan.quantize_type.empty() ? "" : ", " + plan.quantize_type);
-    record.verification.header_checked = true;
-    record.verification.header_parsed = true;
-    const models::StoredFile stored =
-        models::commit_gguf(roots, model, staging, plan.gguf_path, record);
-    if (!stored.error.empty()) {
-        (void)models::remove_weights(staging);
-        outcome.error = stored.error + " -- the config and the version ledger are unchanged";
-        return outcome;
+    // Into the store under the weights' own id, with the record every stored
+    // set has; `stored_dir` is what to remove should the config refuse it.
+    std::filesystem::path stored_dir;
+    bool already_stored = false;
+    if (mlx) {
+        models::Snapshot record;
+        record.ref = ledger.backend + " v" + std::to_string(plan.version);
+        record.source = "train";
+        record.transform = "promote run " + manifest.run_id;
+        const models::StoredDirectory stored = models::commit_mlx(roots, model, staging, record);
+        if (!stored.error.empty()) {
+            (void)models::remove_weights(staging);
+            outcome.error = stored.error + " -- the config and the version ledger are unchanged";
+            return outcome;
+        }
+        outcome.weights_path = stored.dir.string();
+        stored_dir = stored.dir;
+        already_stored = stored.existed;
+    } else {
+        models::Sidecar record;
+        record.ref = ledger.backend + " v" + std::to_string(plan.version);
+        record.source = "train";
+        record.transform = "promote";
+        record.transform_note = "run " + manifest.run_id +
+                                (plan.quantize_type.empty() ? "" : ", " + plan.quantize_type);
+        record.verification.header_checked = true;
+        record.verification.header_parsed = true;
+        const models::StoredFile stored =
+            models::commit_gguf(roots, model, staging, plan.gguf_path, record);
+        if (!stored.error.empty()) {
+            (void)models::remove_weights(staging);
+            outcome.error = stored.error + " -- the config and the version ledger are unchanged";
+            return outcome;
+        }
+        outcome.weights_path = stored.file.string();
+        stored_dir = stored.file.parent_path();
+        already_stored = stored.existed;
     }
-    outcome.gguf_path = stored.file.string();
     // Removes what this promotion stored, should the config refuse it.
-    const auto unstore = [&stored] {
-        if (!stored.existed) {
-            (void)models::remove_weights(stored.file.parent_path());
+    const auto unstore = [&stored_dir, already_stored] {
+        if (!already_stored) {
+            (void)models::remove_weights(stored_dir);
         }
     };
+    const std::string what = mlx ? "the MLX model" : "the GGUF";
 
-    // The GGUF exists and parses: now, and only now, the config.
+    // The artifact exists and reads whole: now, and only now, the config --
+    // through the one editor, the entry's type the target's (27c).
     try {
         if (outcome.updated) {
             harness::edit_config_file(config_path, [&](std::string_view content) {
-                return harness::set_backend_model_path(content, ledger.backend, outcome.gguf_path);
+                return harness::set_backend_model_path(content, ledger.backend,
+                                                       outcome.weights_path);
             });
         } else {
             harness::BackendConfig entry;
-            entry.type = harness::BackendType::LlamaCpp;
-            entry.model_path = outcome.gguf_path;
+            entry.type = backend_type_for(checks.target);
+            entry.model_path = outcome.weights_path;
             harness::edit_config_file(config_path, [&](std::string_view content) {
                 return harness::append_backend(content, ledger.backend, entry, false);
             });
         }
     } catch (const harness::ConfigEditError& e) {
         unstore();
-        outcome.error = std::string{"registering the backend: "} + e.what() +
-                        " -- the GGUF was removed and the ledger is unchanged";
+        outcome.error = std::string{"registering the backend: "} + e.what() + " -- " + what +
+                        " was removed and the ledger is unchanged";
         return outcome;
     } catch (const harness::ConfigError& e) {
         unstore();
-        outcome.error = std::string{"registering the backend: "} + e.what() +
-                        " -- the GGUF was removed and the ledger is unchanged";
+        outcome.error = std::string{"registering the backend: "} + e.what() + " -- " + what +
+                        " was removed and the ledger is unchanged";
         return outcome;
     }
 
     training::VersionEntry entry =
         training::promotion_entry(manifest, plan, training::rfc3339_now());
-    entry.gguf_path = outcome.gguf_path;
-    if (plan.keep_fused) {
+    if (mlx) {
+        entry.mlx_path = outcome.weights_path;
+    } else {
+        entry.gguf_path = outcome.weights_path;
+    }
+    if (plan.keep_fused && !mlx) {
         // The fine-tuned weights themselves, kept: into the store beside the
         // base model's own SafeTensors, under their own id.
         entry.fused_path = keep_fused_weights(roots, model, plan.fused_dir, manifest.run_id);
@@ -1090,7 +1189,8 @@ void run_train_setup(const harness::Config& config, const SetupRequest& request)
         std::cout << "\nNothing installed yet. Add a requirement set when a command needs it:\n"
                   << "  apogee train setup --with prepare     # Parquet in 'datasets prepare'\n"
                   << "  apogee train setup --trainer auto     # the trainer stack for this host\n"
-                  << "  apogee train setup --with convert     # the GGUF converter, for promote\n";
+                  << "  apogee train setup --with convert     # the GGUF converter, for promote\n"
+                  << "  apogee train setup --with mlx-vlm     # images, for an mlx vision model\n";
     }
 }
 
@@ -1463,12 +1563,23 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto promote_quantize = std::make_shared<std::string>();
     auto promote_keep = std::make_shared<bool>(false);
     auto promote_trainer = std::make_shared<std::string>();
+    auto promote_target = std::make_shared<std::string>();
     CLI::App* promote = cmd->add_subcommand(
-        "promote", "Fuse, convert to GGUF, verify, and register the run as a llamacpp backend");
+        "promote",
+        "Fuse, verify, and register the run: a GGUF on a llamacpp backend, or with --target mlx "
+        "the fused model itself on an mlx backend");
     promote->add_option("run", *promote_id, "The run id")->type_name(kRunValue)->required();
-    promote->add_option("--as", *promote_as, "The backend name: new, or an existing llamacpp entry")
+    promote
+        ->add_option("--as", *promote_as,
+                     "The backend name: new, or an existing llamacpp or mlx entry")
         ->type_name(kBackendValue)
         ->required();
+    promote
+        ->add_option("--target", *promote_target,
+                     "gguf: convert for a llamacpp backend; mlx: register the fused weights as "
+                     "they are, for an mlx backend -- no conversion (default: what --as already "
+                     "runs, else gguf)")
+        ->type_name(words_value(training::promote_target_names()));
     promote->add_flag("-f,--force", *promote_force, "Skip the eval gate");
     promote
         ->add_option("--quantize", *promote_quantize,
@@ -1479,7 +1590,7 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     promote->add_option("--trainer", *promote_trainer, "Override the run's recorded trainer")
         ->type_name(words_value(training::trainer_names()));
     promote->callback([&context, promote_id, promote_as, promote_force, promote_quantize,
-                       promote_keep, promote_trainer]() {
+                       promote_keep, promote_trainer, promote_target]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
         const training::TrainingStore store{harness::training_dir()};
@@ -1489,6 +1600,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         request.force = *promote_force;
         request.quantize = *promote_quantize;
         request.keep_fused = *promote_keep;
+        if (!promote_target->empty()) {
+            request.target = training::promote_target_from_string(*promote_target);
+            if (!request.target.has_value()) {
+                fail_user("--target must be gguf or mlx (got '" + *promote_target + "')");
+            }
+        }
 
         // Everything that can refuse does so BEFORE the expensive part.
         const PromoteChecks checks = precheck_promotion(config, manifest, request);
@@ -1501,7 +1618,15 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         const std::string trainer_name = choose_trainer(config, *promote_trainer, manifest.trainer);
         const std::unique_ptr<training::Trainer> trainer =
             make_trainer(config, trainer_name, "train promote");
-        const training::Converter convert = make_converter(config, trainer_name);
+        const bool mlx = checks.target == training::PromoteTarget::Mlx;
+        // An MLX version runs as it is fused: no converter is asked for, so
+        // none need be installed (27c).
+        const training::Converter convert =
+            mlx ? training::Converter{} : make_converter(config, trainer_name);
+        if (mlx && request.keep_fused) {
+            std::cerr << "apogee train: note: --keep-fused has nothing more to keep -- the fused "
+                         "weights are the MLX version itself\n";
+        }
 
         const InterruptScope interrupt;
         const PromoteOutcome result = promote_run(
@@ -1520,8 +1645,21 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         }
         std::cout << (result.updated ? "updated backend " : "promoted to new backend ")
                   << result.backend_key << " -> v" << result.version << "\n"
-                  << "  gguf:   " << result.gguf_path << "\n"
+                  << (mlx ? "  mlx:    " : "  gguf:   ") << result.weights_path << "\n"
                   << "  config: " << config_path.string() << "\n";
+        if (mlx) {
+            std::cout << "  type:   mlx -- the fused model as it is; no GGUF conversion ran\n";
+            // Registered either way; said when this machine cannot run it.
+            if (const harness::Config after = load_config_strict(context, config_path);
+                const harness::BackendConfig* entry = after.find_backend(result.backend_key)) {
+                const backends::MlxReadiness readiness = backends::probe_mlx_backend(
+                    result.backend_key, *entry, backends::MlxHost::current());
+                if (!readiness.ready()) {
+                    std::cerr << "apogee train: note: " << result.backend_key
+                              << " cannot run here yet: " << readiness.message() << "\n";
+                }
+            }
+        }
         if (manifest.eval.has_value()) {
             std::cout << "  eval:   " << percent(manifest.eval->score) << " ("
                       << manifest.eval->num_passed << "/" << manifest.eval->total << ")\n";
@@ -1573,12 +1711,22 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user("backend '" + *rollback_backend +
                       "' is not in the config, so there is nothing to repoint");
         }
+        // A version never changes a backend's type (27c): an entry edited to
+        // another type since is refused rather than pointed at weights it
+        // cannot run.
+        const harness::BackendType runs = backend_type_for(training::target_of(*target.entry));
+        if (const harness::BackendConfig* entry = config.find_backend(key);
+            entry != nullptr && entry->type != runs) {
+            fail_user("backend '" + key + "' is a " + std::string{harness::to_string(entry->type)} +
+                      " backend, and v" + std::to_string(target.entry->version) + " runs on a " +
+                      std::string{harness::to_string(runs)} + " one -- nothing was repointed");
+        }
         const int from = ledger->active_version;
         const int to = target.entry->version;
-        const std::string gguf = target.entry->gguf_path;
+        const std::string weights = target.entry->weights();
         try {
             harness::edit_config_file(config_path, [&](std::string_view content) {
-                return harness::set_backend_model_path(content, key, gguf);
+                return harness::set_backend_model_path(content, key, weights);
             });
         } catch (const harness::ConfigEditError& e) {
             fail_user(e.what());
@@ -1591,8 +1739,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user("the config is repointed, but the ledger could not be saved: " + failure);
         }
         std::cout << "rolled back " << key << ": v" << from << " -> v" << to << "\n"
-                  << "  gguf: " << gguf << "\n  nothing was deleted; v" << from
-                  << " stays on disk\n";
+                  << (target.entry->mlx() ? "  mlx:  " : "  gguf: ") << weights
+                  << "\n  nothing was deleted; v" << from << " stays on disk\n";
     });
 
     // ---- versions ----------------------------------------------------------
@@ -1625,7 +1773,7 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             std::cout << "versions of " << ledger.backend << " (active v" << ledger.active_version
                       << ")\n"
                       << "  " << pad("VERSION", 9) << pad("PROMOTED AT", 22) << pad("RUN", 20)
-                      << pad("EVAL", 11) << "GGUF\n";
+                      << pad("EVAL", 11) << "WEIGHTS\n";
             for (const training::VersionEntry& entry : ledger.versions) {
                 std::string promoted = entry.promoted_at;
                 if (promoted.size() > 19) {
@@ -1634,7 +1782,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                 std::cout << "  " << pad("v" + std::to_string(entry.version), 9)
                           << pad(promoted, 22) << pad(entry.run_id, 20)
                           << pad(eval_glyph(entry.eval_passed, entry.eval_score), 11)
-                          << std::filesystem::path{entry.gguf_path}.filename().string();
+                          // A GGUF by its file's name; an MLX version by its
+                          // stored directory, the id its weights hash to (27c).
+                          << (entry.mlx() ? "mlx/" : "")
+                          << std::filesystem::path{entry.weights()}.filename().string();
                 if (entry.pruned()) {
                     std::cout << "  (pruned)";
                 }
@@ -2139,8 +2290,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             throw CLI::RuntimeError(result.refused ? kUserError : kBackendError);
         }
         std::cout << "\nregime " << spec.name << " complete -- " << result.backend_key
-                  << " is now v" << result.version << "\n  gguf: " << result.gguf_path
-                  << "\n\nChat with it:\n  apogee chat -m " << result.backend_key << "\n";
+                  << " is now v" << result.version
+                  << (result.target == training::PromoteTarget::Mlx ? "\n  mlx: " : "\n  gguf: ")
+                  << result.weights_path << "\n\nChat with it:\n  apogee chat -m "
+                  << result.backend_key << "\n";
     });
 
     // ---- cycle -------------------------------------------------------------
@@ -2238,7 +2391,7 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             promotion.ok = result.ok;
             promotion.error = result.error;
             promotion.version = result.version;
-            promotion.gguf_path = result.gguf_path;
+            promotion.weights_path = result.weights_path;
             return promotion;
         };
         PipelineConsole console{spec.stages.size()};

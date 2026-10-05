@@ -2,8 +2,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <chrono>
 #include <string>
+
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 /// The child-process seam, against real processes.
 ///
@@ -221,4 +227,41 @@ TEST_CASE("a large stream survives the pipe in whatever chunks it arrives", "[pl
     const std::string all = drain(*child, std::chrono::seconds{10});
     CHECK(all.find("line-1\n") != std::string::npos);
     CHECK(all.find("line-2000\n") != std::string::npos);
+}
+
+TEST_CASE("a child inherits its three pipes and nothing else the parent holds",
+          "[platform][child]") {
+    // 27c: a served mlx turn's driver was found holding the client's
+    // connection -- spawned while serve had it open, with no CLOEXEC on it.
+    // A descriptor opened without CLOEXEC stands in for that socket here,
+    // moved high so no shell's own descriptors can be mistaken for it.
+#if defined(_WIN32)
+    SUCCEED("descriptor inheritance is a POSIX question");
+#else
+    if (!apogee::platform::supports_child_processes()) {
+        SUCCEED("no child-process support on this platform");
+        return;
+    }
+    std::array<int, 2> held{-1, -1};
+    REQUIRE(::pipe(held.data()) == 0);
+    const int high = ::fcntl(held[0], F_DUPFD, 213);
+    REQUIRE(high >= 213);
+    REQUIRE((::fcntl(high, F_GETFD) & FD_CLOEXEC) == 0);
+
+    ChildCommand command;
+    command.program = "sh";
+    command.arguments = {"-c", "if [ -e /dev/fd/" + std::to_string(high) +
+                                   " ]; then echo inherited; else echo closed; fi; "
+                                   "[ -e /dev/fd/2 ] && echo stderr"};
+    std::string error;
+    auto child = apogee::platform::start_child(command, error);
+    INFO(error);
+    REQUIRE(child != nullptr);
+    child->close_stdin();
+    // Its own three are there; the parent's other one is not.
+    CHECK(drain(*child, std::chrono::seconds{3}) == "closed\nstderr\n");
+    ::close(high);
+    ::close(held[0]);
+    ::close(held[1]);
+#endif
 }

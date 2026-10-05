@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -129,6 +130,38 @@ struct BundledScript {
 /// `training/scripts/mlx_convert.py`, relative to the data directory.
 [[nodiscard]] std::string bundled_mlx_converter_relative_path();
 
+/// Every version of a seeded driver -- the trainers' and the MLX ones -- an
+/// earlier Apogee shipped and this one does not, as `<name> <sha256>` with
+/// the name as in `BundledScript::name`, sorted. From
+/// `assets/retired-scripts.txt`, which `scripts/generate_training_assets.py`
+/// extends with the committed copy of every driver it finds changed (27c).
+///
+/// Why it exists, the converter tree's reason one level up: seeding is
+/// skip-if-present, so without it an install keeps the driver an earlier
+/// Apogee seeded -- 27a's `mlx_generate.py`, which cannot read a picture, on
+/// the very install that upgraded to read them. A seeded driver matching an
+/// entry is that Apogee's copy, not the user's edit, and is safe to replace.
+[[nodiscard]] std::span<const std::string_view> bundled_scripts_retired();
+
+/// How a seeded driver stands against this build's copy.
+enum class SeededScript : std::uint8_t {
+    /// Byte-identical to this build's.
+    Current,
+    /// An earlier Apogee's copy, unedited: `check --fix` updates it.
+    Stale,
+    /// Anything else: the user's, kept, and reported as drift.
+    Edited,
+    /// Not seeded.
+    Missing,
+};
+
+/// The driver `name` (a `bundled_training_scripts` or `bundled_mlx_scripts`
+/// name) under `root`'s `training/scripts/`. `retired` is
+/// `bundled_scripts_retired()` but for tests.
+[[nodiscard]] SeededScript inspect_seeded_script(
+    const std::filesystem::path& root, std::string_view name,
+    std::span<const std::string_view> retired = bundled_scripts_retired());
+
 /// llama.cpp's HuggingFace -> GGUF converter, vendored verbatim at the
 /// pinned revision (`third_party/llama.cpp-convert/`, its README naming
 /// the revision): the entry script, its `conversion/` package and the chat
@@ -193,7 +226,8 @@ struct BundledFile {
 struct AssetSeedResult {
     /// Files written, relative to the root. Absent files only.
     std::vector<std::string> created;
-    /// Converter files an earlier Apogee seeded, replaced by this build's.
+    /// Converter files and drivers an earlier Apogee seeded, replaced by
+    /// this build's.
     std::vector<std::string> updated;
     /// Converter files an earlier Apogee seeded that this build no longer ships.
     std::vector<std::string> removed;
@@ -208,9 +242,10 @@ struct AssetSeedResult {
 /// there. Called by `seed_data_directory`, so `apogee check --fix` -- and
 /// through it both installers -- is the only path that materialises them.
 ///
-/// The converter tree first has its stale files brought up to this build
-/// (`refresh_converter_tree`): skip-if-present protects an edit, and an
-/// earlier Apogee's unedited copy is not one.
+/// The converter tree and the drivers first have their stale files brought
+/// up to this build (`refresh_converter_tree`, `refresh_seeded_scripts`):
+/// skip-if-present protects an edit, and an earlier Apogee's unedited copy
+/// is not one.
 [[nodiscard]] AssetSeedResult seed_bundled_assets(const std::filesystem::path& root);
 
 /// Replaces each stale file under the converter tree `dir` (see
@@ -222,5 +257,12 @@ struct AssetSeedResult {
 void refresh_converter_tree(
     const std::filesystem::path& root, const std::filesystem::path& dir, AssetSeedResult& result,
     std::span<const std::string_view> retired = bundled_converter_retired());
+
+/// Replaces every stale seeded driver under `root` (see `SeededScript`) with
+/// this build's copy, recording each under `result.updated` relative to
+/// `root`. An edited one is left exactly as it is, a missing one to seeding.
+/// `retired` is `bundled_scripts_retired()` but for tests.
+void refresh_seeded_scripts(const std::filesystem::path& root, AssetSeedResult& result,
+                            std::span<const std::string_view> retired = bundled_scripts_retired());
 
 }  // namespace apogee::harness

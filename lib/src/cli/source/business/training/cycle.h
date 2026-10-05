@@ -193,12 +193,13 @@ void record_cycle_run(CycleHistory& history, CycleRunRecord record);
 /// Halts when `k > 0` and the failures have reached it. Whether it did.
 bool trip_breaker(CycleHistory& history, int k);
 
-/// What promotion answered: the version and the file, or why not.
+/// What promotion answered: the version and its weights -- the GGUF, or an
+/// MLX version's directory -- or why not.
 struct CyclePromotion {
     bool ok = false;
     std::string error;
     int version = 0;
-    std::string gguf_path;
+    std::string weights_path;
 };
 
 /// The promote path, arriving as a closure: it edits the config, which

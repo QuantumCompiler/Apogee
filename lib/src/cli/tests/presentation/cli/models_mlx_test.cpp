@@ -610,6 +610,53 @@ TEST_CASE("a stored MLX model's name fills add-backend, as a stored GGUF's does"
           converted.string());
 }
 
+TEST_CASE(
+    "models info and status say whether an mlx entry reads images, from the same file facts the "
+    "backend answers by",
+    "[commands][models][mlx][vision]") {
+    // 27c: a vision model and mlx-vlm in the environment, or why not.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    const std::filesystem::path text = home.home() / "text-model";
+    write_mlx_model(text);
+    const std::filesystem::path sighted = home.home() / "vision-model";
+    write_mlx_model(sighted, {.model_type = "qwen3_vl"});
+    apogee::testing::write_fixture_file(
+        sighted / "config.json",
+        R"({"model_type": "qwen3_vl", "vision_config": {"depth": 27}, )"
+        R"("text_config": {"model_type": "qwen3_vl_text", "max_position_embeddings": 262144}})");
+    apogee::testing::write_fixture_file(sighted / "preprocessor_config.json", "{}");
+    std::string out;
+    REQUIRE(
+        home.run({"config", "add-backend", "words", "--type", "mlx", "--model-path", text.string()},
+                 &out) == 0);
+    REQUIRE(home.run({"config", "add-backend", "eyes", "--type", "mlx", "--model-path",
+                      sighted.string()},
+                     &out) == 0);
+    REQUIRE(home.run({"config", "set-default-vision", "eyes"}, &out) == 0);
+
+    REQUIRE(home.run({"models", "info", "words", "-q"}, &out) == 0);
+    CHECK(out.find("vision:       no -- it is not a vision model") != std::string::npos);
+    REQUIRE(home.run({"models", "info", "eyes", "-q"}, &out) == 0);
+    CHECK(out.find("vision:       no -- it is a vision model, but mlx-vlm is not installed") !=
+          std::string::npos);
+    CHECK(out.find("(apogee train setup --with mlx-vlm)") != std::string::npos);
+    REQUIRE(home.run({"models", "status", "-q"}, &out) == 0);
+    CHECK(out.find("vision: eyes   [mlx: cannot read images -- it is a vision model, but mlx-vlm "
+                   "is not installed") != std::string::npos);
+
+    const std::filesystem::path site =
+        home.home() / "training" / "venv" / "lib" / "python3.14" / "site-packages";
+    apogee::testing::write_fixture_file(site / "mlx_vlm" / "__init__.py", "");
+    std::filesystem::create_directories(site / "mlx_vlm-0.3.9.dist-info");
+    REQUIRE(home.run({"models", "info", "eyes", "-q"}, &out) == 0);
+    CHECK(out.find("vision:       reads images as they are -- mlx-vlm 0.3.9") != std::string::npos);
+    REQUIRE(home.run({"models", "status", "-q"}, &out) == 0);
+    CHECK(out.find("vision: eyes   [mlx: reads images as they are]") != std::string::npos);
+    // A text model stays one, whatever is installed.
+    REQUIRE(home.run({"models", "info", "words", "-q"}, &out) == 0);
+    CHECK(out.find("vision:       no -- it is not a vision model") != std::string::npos);
+}
+
 // ---- the command line, over the real driver ------------------------------------------
 
 namespace {

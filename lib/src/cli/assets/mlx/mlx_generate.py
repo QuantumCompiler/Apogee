@@ -11,6 +11,15 @@ backend tells it everything it needs, one request at a time.
 Runs under the Python environment Apogee owns, never the system Python.
 Requires `mlx-lm` there:  apogee train setup --with mlx
 
+    mlx_generate.py --model <model directory> [--vision]
+
+`--vision` loads the model through `mlx-vlm` instead, so a request may carry
+images (27c): a vision model's own processor reads them, and the reply is
+read exactly as a text model's is -- the format's markers and call parser
+are `mlx_lm`'s, from the same model directory. A vision model answers every
+turn whole, with no cache kept between turns. Requires `mlx-vlm` too:
+  apogee train setup --with mlx-vlm
+
 The protocol, one JSON object per line.
 
 In, on stdin:
@@ -21,7 +30,11 @@ In, on stdin:
    "session": true|false}
       `messages` and `tools` are the chat-template shapes Hugging Face
       tokenizers take. `session: false` is a side request: it is answered on
-      a cache of its own and leaves the conversation's untouched.
+      a cache of its own and leaves the conversation's untouched. Under
+      `--vision` a message's content may be a list of parts --
+      {"type": "text", "text": "..."} and {"type": "image", "image":
+      "data:image/png;base64,..."} -- an image always a data: URI, never
+      fetched from anywhere.
   {"type": "cancel", "id": N}
       Ends request N's generation; its `done` says "cancelled".
   Closing stdin ends the driver: a generation in flight stops (its `done`
@@ -29,9 +42,11 @@ In, on stdin:
 
 Out, on stdout:
   {"type": "ready", "protocol": 1, "model_type": "...", "chat_template": B,
-   "tool_parser": "..."|null, "thinking": B, "mlx_lm": "..."}
+   "tool_parser": "..."|null, "thinking": B, "mlx_lm": "...",
+   "vision": B, "mlx_vlm": "..."|null}
       Once, after the model loads. `tool_parser` names mlx_lm's parser for
-      the model's call format, or null when it has none.
+      the model's call format, or null when it has none. `vision` says the
+      model was loaded through mlx-vlm and reads images.
   {"type": "text", "id": N, "text": "..."}        answer text, as generated
   {"type": "reasoning", "id": N, "text": "..."}   the model's reasoning
   {"type": "tool_call", "id": N, "name": "...", "arguments": {...}}
@@ -54,12 +69,18 @@ protocol's stdout is a duplicate of the original descriptor, and descriptor 1
 itself is pointed at stderr before anything is imported.
 """
 
+import base64
+import binascii
 import copy
+import inspect
 import json
 import os
 import select
+import shutil
 import signal
 import sys
+import tempfile
+from pathlib import Path
 
 # ── Protective environment, before any ML import ─────────────────────────────
 # KMP_DUPLICATE_LIB_OK: two bundled libomp copies in one process abort without it.
@@ -376,6 +397,9 @@ class Reader:
 
 
 class Driver:
+    # Loaded through mlx-vlm, reading images: VisionDriver's.
+    vision = False
+
     def __init__(self, mx, model, tokenizer, api, model_type):
         self.mx = mx
         self.model = model
@@ -392,7 +416,7 @@ class Driver:
         self.checkpoint = None
         self.input = Input()
 
-    def ready(self, version):
+    def ready(self, version, vlm_version=None):
         tokenizer = self.tokenizer
         tool_parser = None
         if getattr(tokenizer, "has_tool_calling", False):
@@ -407,6 +431,8 @@ class Driver:
             "tool_parser": tool_parser,
             "thinking": bool(getattr(tokenizer, "has_thinking", False)),
             "mlx_lm": version,
+            "vision": self.vision,
+            "mlx_vlm": vlm_version,
         })
 
     def has_template(self):
@@ -519,16 +545,10 @@ class Driver:
                 self.input.queued.append(line)
         return self.input.eof
 
-    def generate(self, request):
-        rid = request.get("id")
-        session = request.get("session", True) is not False
-        tokenizer = self.tokenizer
-        text, prompt, boundary = self.render(request)
-        if not prompt:
-            error("request", "the rendered prompt is empty", rid)
-            return
-        cache, suffix, shared = self.prepare(prompt, session)
-
+    def sampler(self, request):
+        """mlx_lm's sampler and logits processors for the values the request
+        carries -- the ladder Apogee resolved, nothing guessed here -- with
+        its seed set."""
         sampling = request.get("sampling") or {}
         make_sampler, make_logits_processors = self.api["sampling"]
         sampler = make_sampler(
@@ -545,7 +565,13 @@ class Driver:
         )
         if sampling.get("seed") is not None:
             self.mx.random.seed(int(sampling["seed"]))
+        return sampler, processors
 
+    def reader(self, request, text, rid):
+        """The reply's reader for a prompt rendered as `text`: the format's
+        reasoning markers, its call markers and parser when tools are
+        offered, the stop strings."""
+        tokenizer = self.tokenizer
         tools = request.get("tools") or []
         think = None
         if getattr(tokenizer, "has_thinking", False):
@@ -562,9 +588,21 @@ class Driver:
         stops = list(request.get("stop") or [])
         if not self.has_template():
             stops.append("\nUser:")
-        reader = Reader(rid, think, tool, parser, tools,
-                        bool(tools) and tool is None and self.has_template(),
-                        stops, reasoning)
+        return Reader(rid, think, tool, parser, tools,
+                      bool(tools) and tool is None and self.has_template(),
+                      stops, reasoning)
+
+    def generate(self, request):
+        rid = request.get("id")
+        session = request.get("session", True) is not False
+        tokenizer = self.tokenizer
+        text, prompt, boundary = self.render(request)
+        if not prompt:
+            error("request", "the rendered prompt is empty", rid)
+            return
+        cache, suffix, shared = self.prepare(prompt, session)
+        sampler, processors = self.sampler(request)
+        reader = self.reader(request, text, rid)
 
         eos = set(getattr(tokenizer, "eos_token_ids", None) or [])
         detokenizer = tokenizer.detokenizer
@@ -634,6 +672,159 @@ class Driver:
                 error("protocol", f"unknown request: {line[:200]}", request.get("id"))
 
 
+# ── Images (27c) ─────────────────────────────────────────────────────────────
+
+IMAGE_SUFFIXES = {"image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg",
+                  "image/webp": ".webp", "image/gif": ".gif", "image/bmp": ".bmp"}
+
+
+def image_file(uri, directory, index):
+    """A data: URI's bytes, written into `directory` for the processor to
+    open. Anything else is refused: an image is never fetched from anywhere."""
+    if not isinstance(uri, str) or not uri.startswith("data:"):
+        raise ValueError("an image must arrive as a data: URI -- a remote image is never fetched")
+    header, sep, payload = uri.partition(",")
+    if not sep or not header.endswith(";base64"):
+        raise ValueError("an image's data: URI must be base64")
+    try:
+        data = base64.b64decode(payload, validate=False)
+    except (binascii.Error, ValueError) as e:
+        raise ValueError(f"an image's data: URI does not decode: {e}") from None
+    if not data:
+        raise ValueError("an image's data: URI is empty")
+    media = header[len("data:"):-len(";base64")].lower()
+    path = os.path.join(directory, f"image-{index}{IMAGE_SUFFIXES.get(media, '.img')}")
+    with open(path, "wb") as out:
+        out.write(data)
+    return path
+
+
+def with_images(messages, directory):
+    """The messages with each image part pointing at its file, in the
+    content-part shape a vision model's template places images by, and the
+    files in prompt order."""
+    out = []
+    images = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            out.append(message)
+            continue
+        parts = []
+        for part in content:
+            kind = part.get("type") if isinstance(part, dict) else None
+            if kind == "image":
+                path = image_file(part.get("image"), directory, len(images))
+                images.append(path)
+                parts.append({"type": "image", "image": path})
+            elif kind == "text":
+                parts.append({"type": "text", "text": part.get("text") or ""})
+            else:
+                raise ValueError(f"a content part of type {kind!r} cannot be read here")
+        out.append(dict(message, content=parts))
+    return out, images
+
+
+class VisionDriver(Driver):
+    """A model loaded through mlx-vlm: its own processor reads the images,
+    and mlx_lm's tokenizer over the same directory supplies the format --
+    the template, the reasoning markers, the call parser -- so a reply is
+    read exactly as a text model's is. Every turn is answered whole: no cache
+    is kept between turns."""
+
+    vision = True
+
+    def __init__(self, mx, model, tokenizer, api, model_type, processor):
+        super().__init__(mx, model, tokenizer, api, model_type)
+        self.processor = processor
+
+    def options(self, request):
+        """The sampling, in the form this mlx-vlm takes it: mlx_lm's sampler
+        where its step accepts one, its own knobs otherwise."""
+        accepted = self.api["vision_parameters"]
+        if accepted is None or "sampler" in accepted:
+            sampler, processors = self.sampler(request)
+            return {"sampler": sampler, "logits_processors": processors}
+        sampling = request.get("sampling") or {}
+        if sampling.get("seed") is not None:
+            self.mx.random.seed(int(sampling["seed"]))
+        temperature = float(sampling.get("temperature", 0.0) or 0.0)
+        options = {"temp" if "temp" in accepted else "temperature": temperature}
+        if sampling.get("top_p") is not None:
+            options["top_p"] = float(sampling["top_p"])
+        repetition = sampling.get("repetition_penalty")
+        if repetition not in (None, 1.0, 1):
+            options["repetition_penalty"] = float(repetition)
+        return options
+
+    def generate(self, request):
+        rid = request.get("id")
+        directory = tempfile.mkdtemp(prefix="apogee-mlx-images-")
+        try:
+            self.generate_in(request, rid, directory)
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def generate_in(self, request, rid, directory):
+        try:
+            messages, images = with_images(request.get("messages") or [], directory)
+        except ValueError as e:
+            error("request", str(e), rid)
+            return
+        if not self.has_template():
+            error("request", "the model ships no chat template to place a turn in", rid)
+            return
+        rendered = dict(request, messages=messages)
+        kwargs = {"add_generation_prompt": True, "tokenize": False}
+        if request.get("tools"):
+            kwargs["tools"] = request["tools"]
+        if request.get("thinking") is not None:
+            kwargs["enable_thinking"] = bool(request["thinking"])
+        text = self.tokenizer.apply_chat_template(messages, **kwargs)
+        reader = self.reader(rendered, text, rid)
+        max_tokens = int(request.get("max_tokens") or 2048)
+        results = self.api["vision"](self.model, self.processor, text,
+                                     image=images or None, max_tokens=max_tokens,
+                                     **self.options(request))
+        prompt_tokens = 0
+        produced = 0
+        finish = None
+        try:
+            for result in results:
+                prompt_tokens = int(getattr(result, "prompt_tokens", 0) or prompt_tokens)
+                produced = int(getattr(result, "generation_tokens", 0) or produced)
+                if reader.feed(getattr(result, "text", "") or ""):
+                    finish = "stop"
+                    break
+                if self.cancelled(rid):
+                    finish = "cancelled"
+                    break
+        finally:
+            close = getattr(results, "close", None)
+            if close is not None:
+                close()
+        if finish is None:
+            # The step ended it: the model's end of turn, or the cap.
+            finish = "length" if produced >= max_tokens else "stop"
+        reader.finish()
+        if reader.calls and finish != "cancelled":
+            finish = "tool_calls"
+        emit({"type": "done", "id": rid, "finish": finish, "prompt_tokens": prompt_tokens,
+              "cached_tokens": 0, "completion_tokens": produced})
+
+
+def vision_parameters():
+    """What this mlx-vlm's step takes -- where its versions keep it -- or None
+    when that cannot be told."""
+    for module in ("mlx_vlm.generate", "mlx_vlm.utils"):
+        try:
+            step = getattr(__import__(module, fromlist=["generate_step"]), "generate_step")
+            return set(inspect.signature(step).parameters)
+        except (ImportError, AttributeError, TypeError, ValueError):
+            continue
+    return None
+
+
 def model_type_of(model_dir):
     try:
         with open(os.path.join(model_dir, "config.json"), encoding="utf-8") as f:
@@ -648,8 +839,9 @@ def main(argv):
     if len(argv) >= 3 and argv[1] == "--model":
         model_dir = argv[2]
     if not model_dir:
-        error("protocol", "usage: mlx_generate.py --model <model directory>")
+        error("protocol", "usage: mlx_generate.py --model <model directory> [--vision]")
         return 2
+    vision = "--vision" in argv[3:]
 
     try:
         import mlx.core as mx
@@ -668,20 +860,59 @@ def main(argv):
         error("load", f"{model_dir} is not a model directory: it has no config.json")
         return 4
     model_type = model_type_of(model_dir)
+    api = {
+        "generate_step": generate_step,
+        "sampling": (make_sampler, make_logits_processors),
+        "cache": (make_prompt_cache, can_trim_prompt_cache, trim_prompt_cache),
+    }
+    version = getattr(mlx_lm, "__version__", "unknown")
+    if vision:
+        return serve_vision(mx, api, model_dir, model_type, version)
     try:
         model, tokenizer = load(model_dir)
     except Exception as e:  # noqa: BLE001 -- the reason is the message
         error("load", f"could not load {model_dir}: {type(e).__name__}: {e}")
         return 4
 
-    api = {
-        "generate_step": generate_step,
-        "sampling": (make_sampler, make_logits_processors),
-        "cache": (make_prompt_cache, can_trim_prompt_cache, trim_prompt_cache),
-    }
     driver = Driver(mx, model, tokenizer, api, model_type)
-    driver.ready(getattr(mlx_lm, "__version__", "unknown"))
+    driver.ready(version)
     return driver.serve()
+
+
+def serve_vision(mx, api, model_dir, model_type, version):
+    """The model through mlx-vlm, so its turns may carry images (27c)."""
+    try:
+        import mlx_vlm
+        from mlx_lm.utils import load_tokenizer
+        from mlx_vlm import load as load_vision
+        from mlx_vlm import stream_generate
+    except ImportError as e:
+        error("missing_dependency",
+              f"mlx-vlm is not installed in the Python environment ({e}), so this model's "
+              "images cannot be read. Run: apogee train setup --with mlx-vlm")
+        return 3
+    try:
+        model, processor = load_vision(model_dir)
+        # The format -- template, reasoning markers, call parser -- as mlx_lm
+        # reads it from the same directory, so a reply reads as a text one does.
+        tokenizer = load_tokenizer(Path(model_dir))
+    except Exception as e:  # noqa: BLE001 -- the reason is the message
+        error("load", f"could not load {model_dir} through mlx-vlm: {type(e).__name__}: {e}")
+        return 4
+    api = dict(api, vision=stream_generate, vision_parameters=vision_parameters())
+    driver = VisionDriver(mx, model, tokenizer, api, model_type, processor)
+    driver.ready(version, vlm_version_of(mlx_vlm))
+    return driver.serve()
+
+
+def vlm_version_of(module):
+    version = getattr(module, "__version__", None)
+    if version is None:
+        try:
+            from mlx_vlm.version import __version__ as version
+        except ImportError:
+            version = "unknown"
+    return str(version)
 
 
 if __name__ == "__main__":

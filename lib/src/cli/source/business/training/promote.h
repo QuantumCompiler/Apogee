@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,6 +20,12 @@
 /// reaches inference.** The gate runs first; the GGUF is written and its
 /// header verified before the config is touched; a failure at any step
 /// leaves the config and the ledger exactly as they were.
+///
+/// **Two targets, one plan** (27c): a GGUF for a llamacpp backend, or --
+/// with MLX inference in the house -- the fused SafeTensors themselves,
+/// verified as a whole model directory, for an mlx backend: gate → fuse →
+/// verify → version, the conversion never run. Everything else -- the
+/// gate, `max + 1`, retention, the rollback target -- is the same code.
 ///
 /// Nothing here edits the config or knows a backend type: the conversion,
 /// the header check and the quantizer arrive as closures, and the config
@@ -47,8 +55,9 @@ struct GateVerdict {
 using Converter = std::function<std::string(
     const std::filesystem::path& fused_dir, const std::filesystem::path& gguf,
     const MessageSink& on_message, const harness::CancellationToken& cancellation)>;
-/// The GGUF's header parses. The error text, or empty.
-using Verifier = std::function<std::string(const std::filesystem::path& gguf)>;
+/// The artifact reads whole: a GGUF's header parses, or an MLX directory's
+/// files are all there (27c). The error text, or empty.
+using Verifier = std::function<std::string(const std::filesystem::path& artifact)>;
 /// `input` → `output` at `type`. The error text, or empty.
 using Quantizer =
     std::function<std::string(const std::filesystem::path& input,
@@ -58,9 +67,35 @@ using Quantizer =
 /// their numbers are taken and must never be reissued.
 [[nodiscard]] int next_version(const VersionLedger& ledger);
 
+/// What a promotion makes runnable (27c). Named for the store's formats,
+/// never a backend: which backend type runs which is the command's to say.
+enum class PromoteTarget : std::uint8_t {
+    /// A GGUF: fused, converted, verified, quantized when asked.
+    Gguf,
+    /// The fused SafeTensors themselves, verified as a whole model directory
+    /// -- no conversion runs.
+    Mlx,
+};
+
+[[nodiscard]] std::string_view to_string(PromoteTarget target) noexcept;
+/// "gguf" or "mlx"; nullopt for anything else.
+[[nodiscard]] std::optional<PromoteTarget> promote_target_from_string(
+    std::string_view name) noexcept;
+/// Every target's spelling, for a flag's completion.
+[[nodiscard]] std::span<const std::string_view> promote_target_names() noexcept;
+/// What a recorded version is.
+[[nodiscard]] PromoteTarget target_of(const VersionEntry& entry) noexcept;
+
+/// Why `ledger` cannot take a `target` version, or empty when it can: a
+/// backend's versions are all of one kind, since a rollback repoints the
+/// entry's `model_path` and never its type. Asked before anything is built.
+[[nodiscard]] std::string target_conflict(const VersionLedger& ledger, PromoteTarget target);
+
 struct PromotePlan {
     int version = 0;
-    /// `runs/<id>/fused`.
+    PromoteTarget target = PromoteTarget::Gguf;
+    /// `runs/<id>/fused` -- or, for an MLX target, the staging directory the
+    /// command names, which the fuse writes and which IS the version.
     std::filesystem::path fused_dir;
     /// `<output>/<backend>-v<N>.gguf`, built where the command says -- a
     /// staging directory in the model store, which the command commits.
@@ -72,25 +107,41 @@ struct PromotePlan {
     /// Empty means F16 is the artifact.
     std::string quantize_type;
     bool keep_fused = false;
+
+    /// What the version is: the GGUF, or for an MLX target the fused
+    /// directory.
+    [[nodiscard]] const std::filesystem::path& artifact() const noexcept {
+        return target == PromoteTarget::Mlx ? fused_dir : gguf_path;
+    }
 };
 
+/// The plan for the next version. A GGUF target builds `<backend>-v<N>.gguf`
+/// under `output_dir`; an MLX target fuses straight into `output_dir` -- a
+/// staging directory in the model store that the command commits -- with no
+/// GGUF, no quantization and nothing to keep or drop.
 [[nodiscard]] PromotePlan plan_promotion(const VersionLedger& ledger,
                                          const std::filesystem::path& run_dir,
                                          const std::filesystem::path& output_dir,
                                          std::string_view backend, std::string_view quantize_type,
-                                         bool keep_fused);
+                                         bool keep_fused,
+                                         PromoteTarget target = PromoteTarget::Gguf);
 
 struct ArtifactsResult {
     bool ok = false;
     bool cancelled = false;
     std::string error;
-    std::int64_t gguf_bytes = 0;
+    /// The artifact's size: the GGUF, or every file of the MLX directory.
+    std::int64_t bytes = 0;
 };
 
 /// Fuse, convert, verify, quantize (when asked) and verify again, then drop
 /// the fused checkpoint unless kept. A failure at any step removes what the
 /// failed step left and reports it; the run directory is otherwise as it
 /// was. The config is not touched here.
+///
+/// For an MLX target: fuse, then `verify` the fused directory -- the
+/// command hands it a reader of whole model directories -- and nothing
+/// else: `convert` and `quantize` are never called (27c).
 [[nodiscard]] ArtifactsResult build_promotion_artifacts(
     const RunManifest& manifest, const PromotePlan& plan, Trainer& trainer,
     const Converter& convert, const Verifier& verify, const Quantizer& quantize,
@@ -116,10 +167,11 @@ struct PruneResult {
 using ArtifactRemover = std::function<std::string(const VersionEntry& entry)>;
 
 /// Appends `entry`, makes it active, and prunes per `retain`: each pruned
-/// entry's artifacts are removed (`remove`; by default its GGUF file) and the
-/// entry marked, never erased -- the ledger is history, and a rollback can
-/// name what is gone. A GGUF another kept version still records -- identical
-/// weights promoted twice share one stored file -- is never removed.
+/// entry's artifacts are removed (`remove`; by default its GGUF file, or its
+/// MLX directory) and the entry marked, never erased -- the ledger is
+/// history, and a rollback can name what is gone. Weights another kept
+/// version still records -- identical weights promoted twice share one
+/// stored file -- are never removed.
 [[nodiscard]] PruneResult record_promotion(VersionLedger& ledger, VersionEntry entry, int retain,
                                            std::string pruned_at,
                                            const ArtifactRemover& remove = {});
@@ -131,8 +183,9 @@ struct RollbackTarget {
 };
 
 /// The highest version below the active one -- not `active - 1`, since
-/// numbers have gaps after a prune -- refused by name when it was pruned or
-/// its file is gone. Deletes nothing.
+/// numbers have gaps after a prune -- refused by name when it was pruned,
+/// its file (or an MLX version's directory) is gone, or it is not the kind
+/// the active version is. Deletes nothing.
 [[nodiscard]] RollbackTarget rollback_target(const VersionLedger& ledger);
 
 }  // namespace apogee::training

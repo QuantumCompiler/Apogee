@@ -10,6 +10,14 @@ Reads the shipped files and rewrites the three generated translation units:
     assets/training/*.py                       -> source/data/contracts/assets_training.cpp
     third_party/llama.cpp-convert/**           -> source/data/contracts/assets_converter.cpp
     assets/mlx/*.py                            -> source/data/contracts/assets_mlx.cpp
+    assets/retired-scripts.txt                 -> bundled_scripts_retired(), in assets_training.cpp
+
+Before writing, every driver (assets/training/*.py, assets/mlx/*.py) that
+differs from its committed copy has that copy's digest appended to
+assets/retired-scripts.txt: seeding is skip-if-present, so without it an
+install keeps the driver an earlier Apogee seeded, and `check --fix` brings a
+copy matching a recorded digest up to this build's (27c; the converter tree's
+retired-digests.txt is the precedent).
 
 The FILES are the source of truth: edit them (or move the converter's pin),
 run this, and commit both. tests/data/contracts/assets_test.cpp fails the build
@@ -25,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -36,6 +45,7 @@ OUT_TRAINING = ROOT / "source" / "data" / "contracts" / "assets_training.cpp"
 OUT_CONVERTER = ROOT / "source" / "data" / "contracts" / "assets_converter.cpp"
 MLX = ROOT / "assets" / "mlx"
 OUT_MLX = ROOT / "source" / "data" / "contracts" / "assets_mlx.cpp"
+RETIRED_SCRIPTS = ROOT / "assets" / "retired-scripts.txt"
 
 CHUNK_BYTES = 15_000
 
@@ -105,6 +115,52 @@ def constant(path: str) -> str:
     return "k" + "".join(w[:1].upper() + w[1:] for w in identifier(path).split("_"))
 
 
+def drivers() -> list[Path]:
+    """Every seeded driver: the trainers' and the mlx backend's, seeded by
+    name side by side under training/scripts/."""
+    return sorted(ASSETS.glob("*.py")) + sorted(MLX.glob("*.py"))
+
+
+def record_retired_scripts() -> int:
+    """Appends the committed copy's digest of every driver the working tree
+    changes. What an earlier Apogee shipped is what was committed; an
+    uncommitted intermediate never shipped. Without git (a source tarball)
+    nothing is recorded, and the list is used as it stands."""
+    lines = RETIRED_SCRIPTS.read_text(encoding="utf-8").splitlines() if RETIRED_SCRIPTS.exists() else []
+    known = {line.strip() for line in lines if line.strip() and not line.startswith("#")}
+    added = []
+    for path in drivers():
+        relative = path.relative_to(ROOT.parent.parent.parent).as_posix()
+        try:
+            committed = subprocess.run(
+                ["git", "show", f"HEAD:{relative}"], cwd=ROOT, capture_output=True, check=False
+            )
+        except OSError:
+            return 0
+        if committed.returncode != 0 or committed.stdout == path.read_bytes():
+            continue
+        entry = f"{path.name} {hashlib.sha256(committed.stdout).hexdigest()}"
+        if entry not in known:
+            known.add(entry)
+            added.append(entry)
+    if added:
+        with RETIRED_SCRIPTS.open("a", encoding="utf-8") as out:
+            for entry in added:
+                out.write(entry + "\n")
+    return len(added)
+
+
+def retired_scripts() -> list[str]:
+    """The recorded digests, less any this build ships unchanged, sorted."""
+    current = {f"{path.name} {hashlib.sha256(path.read_bytes()).hexdigest()}" for path in drivers()}
+    if not RETIRED_SCRIPTS.exists():
+        return []
+    return sorted(
+        {line.strip() for line in RETIRED_SCRIPTS.read_text(encoding="utf-8").splitlines()
+         if line.strip() and not line.startswith("#")} - current
+    )
+
+
 def generate_training() -> str:
     kits = sorted(ASSETS.glob("kits/*.yaml"))
     scripts = sorted(ASSETS.glob("*.py"))
@@ -158,6 +214,17 @@ def generate_training() -> str:
         out.append(f'        {{.name = "{name}", .text = script_{identifier(name)}()}},')
     out.append("    }};")
     out.append("    return scripts;")
+    out.append("}")
+    out.append("")
+    # The drivers' earlier versions (assets/retired-scripts.txt), the trainers'
+    # and the mlx backend's alike: they seed side by side under training/scripts/.
+    retired = retired_scripts()
+    out.append("std::span<const std::string_view> bundled_scripts_retired() {")
+    out.append(f"    static constexpr std::array<std::string_view, {len(retired)}> retired{{{{")
+    for line in retired:
+        out.append(f'        "{line}",')
+    out.append("    }};")
+    out.append("    return retired;")
     out.append("}")
     out.append("")
     out.append("// clang-format on")
@@ -283,6 +350,8 @@ def generate_mlx() -> str:
 
 
 def main() -> int:
+    if added := record_retired_scripts():
+        print(f"recorded {added} retired driver digest(s) in {RETIRED_SCRIPTS.relative_to(ROOT)}")
     OUT_TRAINING.write_text(generate_training(), encoding="utf-8")
     OUT_CONVERTER.write_text(generate_converter(), encoding="utf-8")
     OUT_MLX.write_text(generate_mlx(), encoding="utf-8")
