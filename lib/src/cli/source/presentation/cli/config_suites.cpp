@@ -10,6 +10,7 @@
 #include <span>
 #include <utility>
 
+#include "cli/helpers.h"
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
 #include "operations/suites.h"
@@ -66,6 +67,14 @@ std::string joined(const std::vector<std::string>& names, std::string_view separ
     return out;
 }
 
+std::string trimmed_word(std::string_view word) {
+    const std::size_t first = word.find_first_not_of(" \t");
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    return std::string{word.substr(first, word.find_last_not_of(" \t") - first + 1)};
+}
+
 /// A member, one line: `root`, or `helper (window 4096, toolset fs,git)`.
 std::string describe_member(const SuiteMember& member) {
     std::string pins;
@@ -79,13 +88,43 @@ std::string describe_member(const SuiteMember& member) {
     return pins.empty() ? member.backend : member.backend + " (" + pins + ")";
 }
 
-/// The member flags every verb shares: one backend per role, and the knobs.
+/// The caps a suite's consults run under, each as it holds -- `per_turn 4,
+/// brief_tokens 1024, answer_tokens 512` -- marking the ones left at their
+/// default.
+std::string describe_caps(const SuiteConfig& suite) {
+    const harness::ConsultLimits limits = harness::consult_limits(suite.consult_caps);
+    const auto one = [](std::string_view name, std::int64_t value, bool set) {
+        return std::string{name} + " " + std::to_string(value) + (set ? "" : " (default)");
+    };
+    return one("per_turn", limits.per_turn, suite.consult_caps.per_turn.has_value()) + ", " +
+           one("brief_tokens", limits.brief_tokens, suite.consult_caps.brief_tokens.has_value()) +
+           ", " +
+           one("answer_tokens", limits.answer_tokens, suite.consult_caps.answer_tokens.has_value());
+}
+
+/// The member flags every verb shares: one backend per role, and the knobs --
+/// and the suite's consultable members and their caps (27f).
 struct MemberFlags {
     /// Role name -> the backend its flag gave; empty when not given.
     std::map<std::string, std::string, std::less<>> backends;
     std::vector<std::string> context_sizes;
     std::vector<std::string> toolsets;
+    /// `--consultable`, when given -- "" for none.
+    std::optional<std::string> consultable;
+    std::vector<std::string> consult_caps;
 };
+
+/// `per_turn=`, ...: what `--consult-cap` offers.
+const std::vector<std::string>& cap_prefixes() {
+    static const std::vector<std::string> prefixes = [] {
+        std::vector<std::string> out;
+        for (const std::string_view cap : harness::consult_cap_names()) {
+            out.push_back(std::string{cap} + "=");
+        }
+        return out;
+    }();
+    return prefixes;
+}
 
 /// `chat=`, `embedding=`, ...: what `--context-size` and `--toolset` offer,
 /// the role to type the value after.
@@ -118,6 +157,82 @@ void bind_member_flags(CLI::App& cmd, MemberFlags& flags) {
         ->type_name(words_value(role_prefixes()))
         ->expected(1)
         ->allow_extra_args(false);
+    cmd.add_option_function<std::string>(
+           "--consultable", [&flags](const std::string& value) { flags.consultable = value; },
+           "The members the chat model may consult through the consult tool: ROLE,ROLE -- "
+           "local, unmetered members only; \"\" for none")
+        ->type_name(words_value(harness::consultable_role_names()))
+        ->expected(1);
+    cmd.add_option("--consult-cap", flags.consult_caps,
+                   "Bound the consults: per_turn=N, brief_tokens=N, answer_tokens=N; NAME= for "
+                   "the default (repeatable)")
+        ->type_name(words_value(cap_prefixes()))
+        ->expected(1)
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
+}
+
+/// `--consultable`'s roles, as given: comma-separated, blanks dropped.
+std::vector<std::string> consultable_roles(std::string_view text) {
+    std::vector<std::string> out;
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const std::size_t comma = text.find(',', start);
+        const std::string word = trimmed_word(text.substr(
+            start, comma == std::string_view::npos ? std::string_view::npos : comma - start));
+        if (!word.empty()) {
+            out.push_back(word);
+        }
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return out;
+}
+
+/// The consult flags applied onto `suite` (27f).
+void apply_consult(SuiteConfig& suite, const MemberFlags& flags) {
+    if (flags.consultable.has_value()) {
+        suite.consultable = consultable_roles(*flags.consultable);
+    }
+    for (const std::string& text : flags.consult_caps) {
+        const std::size_t equals = text.find('=');
+        const std::string name = equals == std::string::npos ? text : text.substr(0, equals);
+        const std::span<const std::string_view> names = harness::consult_cap_names();
+        if (equals == std::string::npos || std::ranges::find(names, name) == names.end()) {
+            std::vector<std::string> accepted;
+            for (const std::string_view cap : names) {
+                accepted.emplace_back(cap);
+            }
+            fail("--consult-cap " + text + ": not NAME=N with NAME one of " + joined(accepted));
+        }
+        const std::string value = trimmed_word(text.substr(equals + 1));
+        std::optional<std::int64_t> parsed;
+        if (!value.empty()) {
+            std::int64_t number = 0;
+            try {
+                std::size_t used = 0;
+                number = std::stoll(value, &used);
+                if (used != value.size()) {
+                    number = 0;
+                }
+            } catch (const std::exception&) {
+                number = 0;
+            }
+            if (number < 1) {
+                fail("--consult-cap " + text + ": '" + value + "' is not a positive whole number");
+            }
+            parsed = number;
+        }
+        if (name == "per_turn") {
+            suite.consult_caps.per_turn = parsed;
+        } else if (name == "brief_tokens") {
+            suite.consult_caps.brief_tokens = parsed;
+        } else {
+            suite.consult_caps.answer_tokens = parsed;
+        }
+    }
 }
 
 /// The knobs the flags pin, applied onto `suite`'s members.
@@ -192,7 +307,9 @@ void bind_add_suite(CLI::App& parent, const RootContext& context) {
             }
         }
         apply_knobs(suite, flags->members);
-        if (const std::string refused = validate_suite(config, flags->name, suite);
+        apply_consult(suite, flags->members);
+        if (const std::string refused =
+                validate_suite(config, flags->name, suite, provider_metered_probe(path));
             !refused.empty()) {
             fail("add-suite: " + refused);
         }
@@ -261,14 +378,16 @@ void bind_set_suite(CLI::App& parent, const RootContext& context) {
             member->second.toolset.reset();
         }
         apply_knobs(after, flags->members);
-        if (const std::string refused = validate_suite(config, flags->name, after);
+        apply_consult(after, flags->members);
+        if (const std::string refused =
+                validate_suite(config, flags->name, after, provider_metered_probe(path));
             !refused.empty()) {
             fail("set-suite: " + refused);
         }
         if (after == before) {
             fail(
                 "set-suite: nothing to change -- name a member with --<role>, or pass "
-                "--context-size, --toolset, --unpin or --remove");
+                "--context-size, --toolset, --unpin, --remove, --consultable or --consult-cap");
         }
         // One member at a time, each in place: every other line of the
         // entry, its comments included, stays as it was.
@@ -284,6 +403,12 @@ void bind_set_suite(CLI::App& parent, const RootContext& context) {
                 if (old_member != new_member) {
                     edited = harness::set_suite_member(edited, flags->name, role, new_member);
                 }
+            }
+            if (after.consultable != before.consultable) {
+                edited = harness::set_suite_consultable(edited, flags->name, after.consultable);
+            }
+            if (after.consult_caps != before.consult_caps) {
+                edited = harness::set_suite_consult_caps(edited, flags->name, after.consult_caps);
             }
             return edited;
         });
@@ -407,18 +532,31 @@ std::optional<std::string> suite_lookup(const Config& config, std::string_view k
         return std::nullopt;
     }
     if (dot == std::string_view::npos) {
-        // The entry itself: its members, one per line, in role order.
+        // The entry itself: its members, one per line, in role order -- and
+        // whom the chat model may consult (27f).
         std::vector<std::string> lines;
         for (const std::string_view role : harness::suite_role_names()) {
             if (const auto it = suite->members.find(role); it != suite->members.end()) {
                 lines.push_back(std::string{role} + ": " + describe_member(it->second));
             }
         }
+        if (!suite->consultable.empty()) {
+            lines.push_back("consultable: " + joined(suite->consultable));
+        }
+        if (suite->consult_caps.any()) {
+            lines.push_back("consult_caps: " + describe_caps(*suite));
+        }
         return joined(lines, "\n");
     }
     const std::string_view field = rest.substr(dot + 1);
     if (field == "description") {
         return suite->description;
+    }
+    if (field == "consultable") {
+        return joined(suite->consultable);
+    }
+    if (field == "consult_caps") {
+        return describe_caps(*suite);
     }
     const std::span<const std::string_view> roles = harness::suite_role_names();
     if (std::ranges::find(roles, field) == roles.end()) {
@@ -450,6 +588,8 @@ void append_suite_keys(const Config& config, std::vector<std::string>& keys) {
         const std::string prefix = "suites." + name;
         keys.push_back(prefix);
         keys.push_back(prefix + ".description");
+        keys.push_back(prefix + ".consultable");
+        keys.push_back(prefix + ".consult_caps");
         for (const std::string_view role : harness::suite_role_names()) {
             keys.push_back(prefix + "." + std::string{role});
         }

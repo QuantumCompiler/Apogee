@@ -139,6 +139,15 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
     RunResult result;
     result.tokens.estimated = false;
 
+    // The turn's member calls (27f): counted from zero, said where this
+    // run's other model calls are said, and cancelled with the turn.
+    std::optional<MemberCalls::Turn> member_turn;
+    if (options.member_calls != nullptr) {
+        member_turn.emplace(options.member_calls->begin_turn(
+            [&reporter](const SideCall& call) { reporter.on_side_call(call); },
+            options.cancellation));
+    }
+
     const std::vector<harness::Tool> tools = advertised_tools(options);
 
     // The turn's tools, chosen once (26g): a step offers the same set, so a

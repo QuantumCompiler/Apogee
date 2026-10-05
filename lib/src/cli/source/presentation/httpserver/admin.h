@@ -39,6 +39,9 @@ struct AdminOptions {
     /// The environment the credential listing reports against; null means
     /// the process-wide snapshot.
     const secrets::EnvSnapshot* env = nullptr;
+    /// Whether a backend bills per call, for a suite's consultable members
+    /// (27f): `serve` hands down the CLI's probe.
+    commands::MeteredProbe metered;
 };
 
 class AdminHandler {
@@ -114,6 +117,7 @@ public:
     [[nodiscard]] HttpResponse put_suite(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse delete_suite(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse set_suite_member(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse set_suite_consult(const HttpRequest& request, std::string_view name);
 
     /// The datasets slice -- the twins of `apogee datasets`; synth is the
     /// plane's third job kind (teacher inference, not training).

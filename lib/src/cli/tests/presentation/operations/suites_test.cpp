@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "contracts/config.h"
 
@@ -74,4 +76,60 @@ TEST_CASE("the default suite cannot be deleted from under the config", "[operati
           std::string::npos);
     CHECK(validate_suite_delete(config, "fine").empty());
     CHECK(validate_suite_delete(config, "nope").empty());
+}
+
+TEST_CASE("a consultable member is written only when its provider says it is local and unmetered",
+          "[operations][suites][consult]") {
+    using apogee::commands::MeteredAnswer;
+    using apogee::commands::MeteredProbe;
+    using apogee::commands::validate_suite_consult;
+    const Config config = two_backends();
+    SuiteConfig suite;
+    suite.members["chat"] = {.backend = "root"};
+    suite.members["utility"] = {.backend = "helper"};
+    suite.consultable = {"utility"};
+    std::vector<std::string> asked;
+    const MeteredProbe local = [&asked](const Config&, std::string_view backend) {
+        asked.emplace_back(backend);
+        return MeteredAnswer{.metered = false};
+    };
+    const MeteredProbe billed = [](const Config&, std::string_view) {
+        return MeteredAnswer{.metered = true};
+    };
+    const MeteredProbe unknown = [](const Config&, std::string_view) {
+        return MeteredAnswer{.metered = false, .unknown = "no API key"};
+    };
+    CHECK(validate_suite(config, "s", suite, local).empty());
+    // The member's backend is what is asked about, never the role.
+    CHECK(asked == std::vector<std::string>{"helper"});
+    CHECK(validate_suite(config, "s", suite, billed) ==
+          "consultable utility: 'helper' is billed per call -- a consult runs on the model's "
+          "initiative, which never spends: only a local, unmetered member can be consulted");
+    CHECK(validate_suite_consult(config, suite, unknown) ==
+          "consultable utility: whether 'helper' is billed per call cannot be told (no API key) "
+          "-- unknown is metered, and only a local, unmetered member can be consulted");
+    // No probe tells nothing, and unknown is metered.
+    CHECK(validate_suite(config, "s", suite).find("cannot be told") != std::string::npos);
+    // Without consultable members, no probe is needed.
+    SuiteConfig plain = suite;
+    plain.consultable.clear();
+    CHECK(validate_suite(config, "s", plain).empty());
+
+    // The shape, as the loader holds it, in the write's words.
+    SuiteConfig shaped = suite;
+    shaped.consultable = {"chat"};
+    CHECK(validate_suite_consult(config, shaped, local).find("the root itself") !=
+          std::string::npos);
+    shaped.consultable = {"embedding"};
+    CHECK(validate_suite_consult(config, shaped, local).find("not a role a suite can consult") !=
+          std::string::npos);
+    shaped.consultable = {"vision"};
+    CHECK(validate_suite_consult(config, shaped, local) ==
+          "consultable vision: the suite has no vision member -- name its backend with --vision");
+    shaped.consultable = {"utility", "utility"};
+    CHECK(validate_suite_consult(config, shaped, local) == "consultable utility: listed twice");
+    shaped.consultable = {"utility"};
+    shaped.consult_caps.per_turn = 0;
+    CHECK(validate_suite_consult(config, shaped, local) ==
+          "consult caps must be positive whole numbers");
 }

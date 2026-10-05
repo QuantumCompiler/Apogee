@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <random>
 #include <span>
@@ -797,6 +798,35 @@ Lines format_suite_member(std::string_view role, const SuiteMember& member,
     return out;
 }
 
+/// `consultable: [utility, vision]` (27f) -- nothing for an empty list.
+Lines format_consultable(const std::vector<std::string>& roles, std::string_view terminator) {
+    if (roles.empty()) {
+        return {};
+    }
+    return {std::string(kFieldIndent, ' ') + "consultable: " + flow_list(roles) +
+            std::string{terminator}};
+}
+
+/// The `consult_caps:` block (27f), its caps in `consult_cap_names()` order --
+/// nothing when none is set.
+Lines format_consult_caps(const ConsultCaps& caps, std::string_view terminator) {
+    if (!caps.any()) {
+        return {};
+    }
+    const std::string end{terminator};
+    const std::string field(kMemberIndent, ' ');
+    Lines out{std::string(kFieldIndent, ' ') + "consult_caps:" + end};
+    const auto add = [&](std::string_view name, const std::optional<std::int64_t>& value) {
+        if (value.has_value()) {
+            out.push_back(field + std::string{name} + ": " + std::to_string(*value) + end);
+        }
+    };
+    add("per_turn", caps.per_turn);
+    add("brief_tokens", caps.brief_tokens);
+    add("answer_tokens", caps.answer_tokens);
+    return out;
+}
+
 Lines format_suite_entry(std::string_view name, const SuiteConfig& suite,
                          std::string_view terminator) {
     const std::string end{terminator};
@@ -805,17 +835,20 @@ Lines format_suite_entry(std::string_view name, const SuiteConfig& suite,
         out.push_back(std::string(kFieldIndent, ' ') +
                       "description: " + yaml_scalar(suite.description) + end);
     }
-    if (suite.members.empty()) {
-        return out;
-    }
-    out.push_back(std::string(kFieldIndent, ' ') + "members:" + end);
-    // In the order every listing shows the roles, not the map's.
-    for (const std::string_view role : suite_role_names()) {
-        if (const auto it = suite.members.find(role); it != suite.members.end()) {
-            const Lines member = format_suite_member(role, it->second, terminator);
-            out.insert(out.end(), member.begin(), member.end());
+    if (!suite.members.empty()) {
+        out.push_back(std::string(kFieldIndent, ' ') + "members:" + end);
+        // In the order every listing shows the roles, not the map's.
+        for (const std::string_view role : suite_role_names()) {
+            if (const auto it = suite.members.find(role); it != suite.members.end()) {
+                const Lines member = format_suite_member(role, it->second, terminator);
+                out.insert(out.end(), member.begin(), member.end());
+            }
         }
     }
+    const Lines consultable = format_consultable(suite.consultable, terminator);
+    out.insert(out.end(), consultable.begin(), consultable.end());
+    const Lines caps = format_consult_caps(suite.consult_caps, terminator);
+    out.insert(out.end(), caps.begin(), caps.end());
     return out;
 }
 
@@ -985,6 +1018,99 @@ std::string set_suite_member(std::string_view content, std::string_view suite,
     }
     insert_lines(lines, at, format_suite_member(role, *member, terminator), terminator);
     return join_lines(lines);
+}
+
+namespace {
+
+/// The lines a suite field at `key_index` owns: the key line, and after it
+/// every line indented deeper -- or, for a block list, a `- item` at the
+/// key's own indent -- with blank and comment lines kept only when such a
+/// line follows them.
+std::pair<std::size_t, std::size_t> suite_field_extent(const Lines& lines, std::size_t key_index,
+                                                       std::size_t limit) {
+    std::size_t last_content = key_index;
+    for (std::size_t i = key_index + 1; i < limit; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        const std::size_t indent = indent_of(line);
+        if (indent > kFieldIndent ||
+            (indent == kFieldIndent && line.substr(indent).starts_with("-"))) {
+            last_content = i;
+            continue;
+        }
+        break;
+    }
+    return {key_index, last_content + 1};
+}
+
+/// Replaces the suite field `key` of `suite` with `rendered` -- removing it
+/// when `rendered` is empty -- in place, every other line of the entry as it
+/// was. A field not yet written goes above `before` when the entry has that
+/// field (above the comment leading it), else at the entry's end.
+std::string set_suite_field(std::string_view content, std::string_view suite, std::string_view key,
+                            std::string_view before,
+                            const std::function<Lines(std::string_view)>& render) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange section = find_section(lines, "suites");
+    if (!section.found) {
+        throw ConfigEditError("no 'suites:' section in this config");
+    }
+    const std::optional<std::size_t> entry = find_entry_line(lines, section, suite);
+    if (!entry.has_value()) {
+        throw ConfigEditError("suite '" + std::string{suite} + "' not found in config");
+    }
+    const auto [entry_begin, entry_end] = entry_extent(lines, *entry, section.end);
+    std::optional<std::size_t> field_line;
+    std::optional<std::size_t> before_line;
+    for (std::size_t i = entry_begin + 1; i < entry_end; ++i) {
+        const std::optional<std::string_view> name = key_at(body(lines[i]), kFieldIndent);
+        if (name == std::optional<std::string_view>{key}) {
+            field_line = i;
+        } else if (!before.empty() && name == std::optional<std::string_view>{before}) {
+            before_line = i;
+        }
+    }
+    const Lines rendered = render(terminator);
+    if (field_line.has_value()) {
+        const auto [begin, end] = suite_field_extent(lines, *field_line, entry_end);
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
+                    lines.begin() + static_cast<std::ptrdiff_t>(end));
+        if (!rendered.empty()) {
+            insert_lines(lines, begin, rendered, terminator);
+        }
+        return join_lines(lines);
+    }
+    if (rendered.empty()) {
+        return std::string{content};  // nothing written, nothing to remove
+    }
+    std::size_t at = entry_end;
+    if (before_line.has_value()) {
+        at = *before_line;
+        while (at > entry_begin + 1 && is_comment(body(lines[at - 1]))) {
+            --at;
+        }
+    }
+    insert_lines(lines, at, rendered, terminator);
+    return join_lines(lines);
+}
+
+}  // namespace
+
+std::string set_suite_consultable(std::string_view content, std::string_view suite,
+                                  const std::vector<std::string>& roles) {
+    return set_suite_field(
+        content, suite, "consultable", "consult_caps",
+        [&roles](std::string_view terminator) { return format_consultable(roles, terminator); });
+}
+
+std::string set_suite_consult_caps(std::string_view content, std::string_view suite,
+                                   const ConsultCaps& caps) {
+    return set_suite_field(
+        content, suite, "consult_caps", "",
+        [&caps](std::string_view terminator) { return format_consult_caps(caps, terminator); });
 }
 
 std::vector<std::string_view> models_role_fields() {

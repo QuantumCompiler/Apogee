@@ -1,8 +1,9 @@
 # Tools
 
 The reference for setting up the tools a model reaches with `--tools` that
-need something outside Apogee. Today that is one: **web search**, answered by
-a SearXNG instance you run.
+need something set up first. Today that is two: **web search**, answered by
+a SearXNG instance you run, and **consult**, answered by a member of a model
+suite you configure.
 
 The native toolsets (files, the shell, git, notes, document search) and
 `fetch_url` need no setup. `apogee check` lists each one's permission level
@@ -143,3 +144,62 @@ again, in case the instance was fixed.
 Any backend with `--tools` gets `web_search`, cloud ones included. A cloud
 backend run with `--search` also has its provider's own server-side search,
 and the model may use either.
+
+## Consulting a suite member
+
+`consult` lets the chat model hand a sub-task to another model of its suite
+(27f) -- the small one beside it, say -- and read the answer back as the
+tool's result. It exists only while the session runs under a suite whose
+`consultable:` names members:
+
+```bash
+apogee config add-suite research --chat root --utility helper --consultable utility
+apogee chat --suite research --tools
+```
+
+```yaml
+suites:
+  research:
+    members:
+      chat: root
+      utility:
+        backend: helper
+        context_size: 4096
+    consultable: [utility]
+    consult_caps:          # optional; these are the defaults
+      per_turn: 4
+      brief_tokens: 1024
+      answer_tokens: 512
+```
+
+### What the member sees
+
+**The question, and nothing else**: no conversation, no system prompt, no
+retrieval, no attached files, no tools. The model is told so in the tool's
+description, which also names each member it can consult and its backend,
+so it puts every fact the member needs into the question. That is what lets
+a member with a 4K window help a root with a 32K one.
+
+### The bounds
+
+| Bound | Default | Over it |
+|---|---|---|
+| Consults per turn | 4 | `Not consulted: consult budget spent this turn: 4 of 4 member calls made -- answer with what you have.` |
+| A question's length | about 1,024 tokens | Refused, with its length: shorten it and ask again. |
+| An answer's length | 512 tokens | Cut there, and the result says so. |
+| The member's window | its own | A question and answer that would not fit are refused. |
+
+A refusal is a result the model reads, never an error that ends the turn.
+Consults run one at a time, each a line in the thinking block --
+`consult — asking utility (helper): …` -- and in machine mode a
+`tool_status`.
+
+### Local members only
+
+A consult runs on the model's initiative, so it never spends money: a member
+whose backend is billed per call -- every cloud API -- cannot be made
+consultable. `config add-suite`/`set-suite` (and their admin twins) ask the
+member's provider and refuse it with the reason; a config edited by hand to
+name one fails in `apogee check`, and the tool does not offer it. There is no
+permission prompt: a consult reads nothing and writes nothing.
+

@@ -25,6 +25,7 @@
 #include "operations/backend_names.h"
 #include "operations/retrieval.h"
 #include "operations/run_settings.h"
+#include "operations/suites.h"
 #include "tools/toolsets.h"
 #include "transport/http_client.h"
 #include "views/status_line.h"
@@ -189,6 +190,13 @@ inline constexpr std::size_t kFetchMaxBodyBytes = std::size_t{5} * 1024 * 1024;
 [[nodiscard]] agent::ToolRegistry pin_toolset(const agent::ToolRegistry& registry,
                                               const harness::Config& config,
                                               std::string_view backend);
+
+/// Whether generation on a backend of `config` is billed per call, asked of a
+/// provider built from its entry (`backends::make_provider`, a lazy load:
+/// nothing is loaded and nothing is sent) -- the probe the suite verbs, their
+/// admin twins and `check` hold a consultable member to (27f). A backend that
+/// cannot be built here is unknown, with the factory's reason.
+[[nodiscard]] MeteredProbe provider_metered_probe(std::filesystem::path config_path);
 
 /// Reads all of standard input. Used when no prompt argument was given.
 [[nodiscard]] std::string read_stdin();

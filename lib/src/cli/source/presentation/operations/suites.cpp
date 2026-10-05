@@ -58,8 +58,56 @@ std::string validate_suite_member(const harness::Config& config, std::string_vie
     return {};
 }
 
+std::string validate_suite_consult(const harness::Config& config, const harness::SuiteConfig& suite,
+                                   const MeteredProbe& metered) {
+    const std::span<const std::string_view> consultable = harness::consultable_role_names();
+    std::vector<std::string> seen;
+    for (const std::string& role : suite.consultable) {
+        const std::string where = "consultable " + role + ": ";
+        if (std::ranges::find(consultable, role) == consultable.end()) {
+            if (role == "chat") {
+                return where +
+                       "the chat model is the root itself -- it consults its members, "
+                       "never itself";
+            }
+            return where + "not a role a suite can consult (accepted: " + joined(consultable) + ")";
+        }
+        if (std::ranges::find(seen, role) != seen.end()) {
+            return where + "listed twice";
+        }
+        seen.push_back(role);
+        const auto member = suite.members.find(role);
+        if (member == suite.members.end()) {
+            return where + "the suite has no " + role + " member -- name its backend with --" +
+                   role;
+        }
+        const MeteredAnswer answer =
+            metered
+                ? metered(config, member->second.backend)
+                : MeteredAnswer{.metered = true, .unknown = "nothing here can ask its provider"};
+        if (!answer.unknown.empty()) {
+            return where + "whether '" + member->second.backend +
+                   "' is billed per call cannot be told (" + answer.unknown +
+                   ") -- unknown is metered, and only a local, unmetered member can be consulted";
+        }
+        if (answer.metered) {
+            return where + "'" + member->second.backend +
+                   "' is billed per call -- a consult runs on the model's initiative, which "
+                   "never spends: only a local, unmetered member can be consulted";
+        }
+    }
+    const auto positive = [](const std::optional<std::int64_t>& value) {
+        return !value.has_value() || *value >= 1;
+    };
+    if (!positive(suite.consult_caps.per_turn) || !positive(suite.consult_caps.brief_tokens) ||
+        !positive(suite.consult_caps.answer_tokens)) {
+        return "consult caps must be positive whole numbers";
+    }
+    return {};
+}
+
 std::string validate_suite(const harness::Config& config, std::string_view name,
-                           const harness::SuiteConfig& suite) {
+                           const harness::SuiteConfig& suite, const MeteredProbe& metered) {
     if (name.empty()) {
         return "a suite needs a name";
     }
@@ -77,7 +125,7 @@ std::string validate_suite(const harness::Config& config, std::string_view name,
             return refused;
         }
     }
-    return {};
+    return validate_suite_consult(config, suite, metered);
 }
 
 std::string validate_active_suite(const harness::Config& config) {

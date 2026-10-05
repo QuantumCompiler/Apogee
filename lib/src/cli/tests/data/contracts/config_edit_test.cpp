@@ -1354,3 +1354,93 @@ TEST_CASE("the default suite is set like a pointer, and the loader holds it to a
         apogee::harness::parse_config(apogee::harness::delete_suite(set, "fast"), "<test>"),
         apogee::harness::ConfigError);
 }
+
+TEST_CASE("a suite's consultable members and caps are written after its members, and round-trip",
+          "[config_edit][golden][suites]") {
+    using apogee::harness::append_suite;
+    apogee::harness::SuiteConfig suite = research_suite();
+    suite.consultable = {"utility"};
+    suite.consult_caps.per_turn = 2;
+    suite.consult_caps.answer_tokens = 256;
+    const std::string added = append_suite(kCommented, "research", suite, false);
+    require_parses(added);
+    CHECK(
+        added.ends_with("        toolset: [fs]\n    consultable: [utility]\n"
+                        "    consult_caps:\n      per_turn: 2\n      answer_tokens: 256\n"));
+    CHECK(*apogee::harness::parse_config(added, "<test>").find_suite("research") == suite);
+    // The inverse is the same entry's: everything it wrote goes.
+    CHECK(apogee::harness::delete_suite(added, "research") ==
+          std::string{kCommented} + "\nsuites:\n");
+}
+
+TEST_CASE("setting a suite's consultable members and caps leaves every other line as it was",
+          "[config_edit][golden][suites]") {
+    using apogee::harness::ConsultCaps;
+    using apogee::harness::set_suite_consult_caps;
+    using apogee::harness::set_suite_consultable;
+    const std::string hand{kHandSuite};
+
+    // Added at the entry's end -- after its members, before the next suite.
+    const std::string added = set_suite_consultable(hand, "research", {"utility"});
+    require_parses(added);
+    std::string expected = hand;
+    expected.insert(expected.find("  fast:\n"), "    consultable: [utility]\n");
+    CHECK(added == expected);
+    CHECK(apogee::harness::parse_config(added, "<test>").find_suite("research")->consultable ==
+          std::vector<std::string>{"utility"});
+
+    // Replaced where it stands, its neighbours untouched; a block list too.
+    const std::string widened = set_suite_consultable(added, "research", {"utility", "vision"});
+    expected = hand;
+    expected.insert(expected.find("  fast:\n"), "    consultable: [utility, vision]\n");
+    CHECK(widened == expected);
+    const std::string block = std::string{kHandSuite}.insert(
+        std::string{kHandSuite}.find("  fast:\n"),
+        "    consultable:   # who it asks\n      - utility\n    # caps follow\n    consult_caps:\n"
+        "      per_turn: 3\n");
+    require_parses(block);
+    const std::string reflowed = set_suite_consultable(block, "research", {"vision"});
+    CHECK(reflowed == std::string{kHandSuite}.insert(std::string{kHandSuite}.find("  fast:\n"),
+                                                     "    consultable: [vision]\n    # caps "
+                                                     "follow\n    consult_caps:\n      per_turn: "
+                                                     "3\n"));
+    // A block list whose items sit at the key's own indent -- legal YAML --
+    // goes with its key.
+    const std::string flush = std::string{kHandSuite}.insert(
+        std::string{kHandSuite}.find("  fast:\n"), "    consultable:\n    - utility\n");
+    require_parses(flush);
+    CHECK(set_suite_consultable(flush, "research", {"vision"}) ==
+          std::string{kHandSuite}.insert(std::string{kHandSuite}.find("  fast:\n"),
+                                         "    consultable: [vision]\n"));
+    // Removed: the key and its list go, nothing else.
+    CHECK(set_suite_consultable(widened, "research", {}) == hand);
+    CHECK(set_suite_consultable(hand, "research", {}) == hand);
+
+    // Caps: added at the end, replaced in place, removed when none is set.
+    ConsultCaps caps;
+    caps.brief_tokens = 512;
+    const std::string capped = set_suite_consult_caps(added, "research", caps);
+    expected = added;
+    expected.insert(expected.find("  fast:\n"), "    consult_caps:\n      brief_tokens: 512\n");
+    CHECK(capped == expected);
+    caps.per_turn = 1;
+    const std::string recapped = set_suite_consult_caps(capped, "research", caps);
+    expected = added;
+    expected.insert(expected.find("  fast:\n"),
+                    "    consult_caps:\n      per_turn: 1\n      brief_tokens: 512\n");
+    CHECK(recapped == expected);
+    CHECK(set_suite_consult_caps(recapped, "research", ConsultCaps{}) == added);
+    // A consultable list set on a suite with caps goes above them, and above
+    // the comment leading them.
+    const std::string caps_first = set_suite_consult_caps(hand, "fast", caps);
+    const std::string then_list = set_suite_consultable(
+        std::string{caps_first}.insert(caps_first.find("    consult_caps:"), "    # bounds\n"),
+        "fast", {"utility"});
+    CHECK(
+        then_list.ends_with("      chat: local\n    consultable: [utility]\n    # bounds\n"
+                            "    consult_caps:\n      per_turn: 1\n      brief_tokens: 512\n"));
+
+    // A suite that is not there is refused, as for a member.
+    CHECK_THROWS_AS((void)set_suite_consultable(hand, "nope", {"utility"}), ConfigEditError);
+    CHECK_THROWS_AS((void)set_suite_consult_caps(kCommented, "s", caps), ConfigEditError);
+}

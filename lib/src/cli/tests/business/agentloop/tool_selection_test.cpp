@@ -388,6 +388,31 @@ TEST_CASE("a turn offers the core, the question's top eight, and find_tools",
     CHECK_FALSE(offer.names.contains("mcp__calendar__book_meeting"));
 }
 
+TEST_CASE("a registered consult is in the core: offered whatever the question ranks",
+          "[agentloop][tool_selection][consult]") {
+    // 27f: a suite's `consultable:` is the user's opt-in, and a call ranked
+    // out of the offer cannot be parsed by a local model's grammar at all.
+    ToolRegistry registry = full_registry();
+    Tool consult;
+    consult.name = "consult";
+    consult.description = "Ask another model in your suite a question";
+    consult.run = [](std::string_view) { return ToolOutcome{"ok"}; };
+    registry.add(std::move(consult));
+    ToolSelection selection{words_ranker(registry), registry.size()};
+    // A question the ranking fills its eight with other tools for.
+    const ToolOffer offer = selection.begin_turn(
+        "read write edit delete list search files directory git log diff show notes commit "
+        "branch status",
+        {});
+    REQUIRE(offer.active);
+    REQUIRE(std::ranges::find(offer.ranked, "consult") == offer.ranked.end());
+    CHECK(offer.names.contains("consult"));
+    // Unregistered, the core never brings it in.
+    const ToolRegistry plain = full_registry();
+    ToolSelection without{words_ranker(plain), plain.size()};
+    CHECK_FALSE(without.begin_turn("show the commit history", {}).names.contains("consult"));
+}
+
 TEST_CASE("selection only narrows what the registry holds", "[agentloop][tool_selection]") {
     // A read-only policy's registry has no run_command: the core never
     // brings back what the policy dropped, and find_tools never finds it.

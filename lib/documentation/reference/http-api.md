@@ -779,10 +779,15 @@ The `suites:` entries -- named bundles of models, one backend per role a
 suite speaks for -- the twins of `apogee config add-suite`, `set-suite`,
 `delete-suite` and `set-default-suite`. `200 {"object": "list", "data":
 [{name, description?, members: {role: {backend, context_size?, toolset?}},
-default}]}`, `default` saying whether `models.default_suite` names it. The
-roles are `chat`, `embedding`, `extraction`, `vision`, `transcription` and
-`utility`; `toolset` words are `fs`, `shell`, `git`, `notes`, `rag`, `web`
-and `mcp`. A suite is resolution, not transport: the server resolves every
+consultable?, consult_caps?, default}]}`, `default` saying whether
+`models.default_suite` names it. The roles are `chat`, `embedding`,
+`extraction`, `vision`, `transcription` and `utility`; `toolset` words are
+`fs`, `shell`, `git`, `notes`, `rag`, `web` and `mcp`. `consultable` lists
+the roles whose members the suite's chat model may consult through the
+`consult` tool (27f) -- `extraction`, `vision`, `transcription` or `utility`
+-- and `consult_caps` the caps a turn's consults run under (`per_turn`,
+`brief_tokens`, `answer_tokens`; each absent one at its default, 4, 1024
+and 512). A suite is resolution, not transport: the server resolves every
 request under the suite it started with -- the config's default, never a
 request's -- and each write below answers `restart_required` when the file
 has moved on from it.
@@ -791,10 +796,15 @@ has moved on from it.
 
 Adds an entry through the same comment-preserving transform the CLI uses,
 byte-identical. Body: `name` and `members` (role -> a backend's name, or
-`{backend, context_size?, toolset?}`) required; `description` optional. The
-CLI's rules, answered as `400`: a name that is not `off` (`/suite off` means
-no suite), at least one member, every member a configured backend, a
-positive window, known toolset words, one backend pinned one way. `201
+`{backend, context_size?, toolset?}`) required; `description`,
+`consultable` (a list of roles) and `consult_caps` (`{per_turn?,
+brief_tokens?, answer_tokens?}`) optional. The CLI's rules, answered as
+`400`: a name that is not `off` (`/suite off` means no suite), at least one
+member, every member a configured backend, a positive window, known toolset
+words, one backend pinned one way -- and each consultable role one that
+answers, with a member in the suite whose backend's provider says it is not
+billed per call (asked as the CLI asks it: a consult runs on the model's
+initiative, which never spends), every cap positive. `201
 {"data": {…}, "restart_required"}`; `409` when the name exists -- `PUT`
 replaces.
 
@@ -829,6 +839,18 @@ global pointers. That member's lines are replaced in place, and every other
 line of the entry, its comments included, is left as it was. `200 {"data":
 {…}, "restart_required"}`; `404` when the suite is not configured, `400` under
 the CLI's rules.
+
+### `PUT /v1/admin/suites/{id}/consult`
+
+The twin of `apogee config set-suite --consultable`/`--consult-cap` (27f):
+whom the suite's chat model may consult, and the caps. Body
+`{"consultable"?: [role, …] | null, "consult_caps"?: {per_turn?,
+brief_tokens?, answer_tokens?} | null}` -- a key left out keeps what the
+entry has, `null` clears it, and a cap set to `null` goes back to its
+default. The two keys are replaced in place and every other line of the
+entry is left as it was. `200 {"data": {…}, "restart_required"}`; `404` when
+the suite is not configured, `400` under the CLI's rules -- a member billed
+per call among them.
 
 ### `POST /v1/admin/knowledge`
 

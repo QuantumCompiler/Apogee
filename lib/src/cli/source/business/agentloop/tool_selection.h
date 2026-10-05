@@ -60,7 +60,11 @@ inline constexpr std::string_view kFindToolsName = "find_tools";
 
 /// The tools offered whenever selection is on and the registry has them --
 /// the ones almost every task begins with -- and `find_tools` (26g, default
-/// taken).
+/// taken). And `consult` (27f): registered only where the session's suite
+/// designates members, the user's own opt-in, and a call a local model's
+/// grammar -- built over the offered tools -- cannot even parse while it is
+/// ranked out of the offer (Llama 3.1 8B named it from its history, and the
+/// call came back as text).
 [[nodiscard]] const std::vector<std::string>& core_tools();
 
 /// The most names `find_tools`'s description lists; past it, how many more.

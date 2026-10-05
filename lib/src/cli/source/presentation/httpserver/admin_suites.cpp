@@ -40,6 +40,20 @@ constexpr std::string_view kConflict = "conflict";
     return out;
 }
 
+[[nodiscard]] nlohmann::json caps_json(const harness::ConsultCaps& caps) {
+    nlohmann::json out = nlohmann::json::object();
+    if (caps.per_turn.has_value()) {
+        out["per_turn"] = *caps.per_turn;
+    }
+    if (caps.brief_tokens.has_value()) {
+        out["brief_tokens"] = *caps.brief_tokens;
+    }
+    if (caps.answer_tokens.has_value()) {
+        out["answer_tokens"] = *caps.answer_tokens;
+    }
+    return out;
+}
+
 [[nodiscard]] nlohmann::json suite_json(const harness::Config& config, std::string_view name,
                                         const harness::SuiteConfig& suite) {
     nlohmann::json members = nlohmann::json::object();
@@ -52,7 +66,64 @@ constexpr std::string_view kConflict = "conflict";
     if (!suite.description.empty()) {
         out["description"] = suite.description;
     }
+    if (!suite.consultable.empty()) {
+        out["consultable"] = suite.consultable;
+    }
+    if (suite.consult_caps.any()) {
+        out["consult_caps"] = caps_json(suite.consult_caps);
+    }
     return out;
+}
+
+/// `consultable` from a body: a list of role names (27f).
+[[nodiscard]] std::optional<std::vector<std::string>> parse_consultable(const nlohmann::json& in,
+                                                                        std::string& error) {
+    if (!in.is_array()) {
+        error = "consultable must be a list of roles";
+        return std::nullopt;
+    }
+    std::vector<std::string> roles;
+    for (const nlohmann::json& item : in) {
+        if (!item.is_string()) {
+            error = "consultable must be a list of roles";
+            return std::nullopt;
+        }
+        roles.push_back(item.get<std::string>());
+    }
+    return roles;
+}
+
+/// `consult_caps` from a body: an object of `consult_cap_names()` to a
+/// positive integer, null for the default (27f).
+[[nodiscard]] std::optional<harness::ConsultCaps> parse_caps(const nlohmann::json& in,
+                                                             std::string& error) {
+    if (!in.is_object()) {
+        error = "consult_caps must be an object of per_turn, brief_tokens, answer_tokens";
+        return std::nullopt;
+    }
+    harness::ConsultCaps caps;
+    for (const auto& [name, value] : in.items()) {
+        std::optional<std::int64_t>* slot = nullptr;
+        if (name == "per_turn") {
+            slot = &caps.per_turn;
+        } else if (name == "brief_tokens") {
+            slot = &caps.brief_tokens;
+        } else if (name == "answer_tokens") {
+            slot = &caps.answer_tokens;
+        } else {
+            error = "consult_caps." + name + ": not a cap (per_turn, brief_tokens, answer_tokens)";
+            return std::nullopt;
+        }
+        if (value.is_null()) {
+            continue;
+        }
+        if (!value.is_number_integer() || value.get<std::int64_t>() < 1) {
+            error = "consult_caps." + name + " must be a positive integer";
+            return std::nullopt;
+        }
+        *slot = value.get<std::int64_t>();
+    }
+    return caps;
 }
 
 /// A member from the body: a backend's name, or an object with `backend` and
@@ -149,6 +220,20 @@ struct Parsed {
             out.suite.members[role] = std::move(*member);
         }
     }
+    if (const auto it = body.find("consultable"); it != body.end() && !it->is_null()) {
+        std::optional<std::vector<std::string>> roles = parse_consultable(*it, out.error);
+        if (!roles.has_value()) {
+            return out;
+        }
+        out.suite.consultable = std::move(*roles);
+    }
+    if (const auto it = body.find("consult_caps"); it != body.end() && !it->is_null()) {
+        std::optional<harness::ConsultCaps> caps = parse_caps(*it, out.error);
+        if (!caps.has_value()) {
+            return out;
+        }
+        out.suite.consult_caps = *caps;
+    }
     return out;
 }
 
@@ -204,7 +289,8 @@ HttpResponse admin_create_suite(const AdminConfigContext& context, const HttpReq
     if (!config.has_value()) {
         return failure;
     }
-    if (const std::string refused = commands::validate_suite(*config, parsed.name, parsed.suite);
+    if (const std::string refused =
+            commands::validate_suite(*config, parsed.name, parsed.suite, context.metered);
         !refused.empty()) {
         return error_response(400, refused);
     }
@@ -249,7 +335,8 @@ HttpResponse admin_put_suite(const AdminConfigContext& context, std::string_view
         return error_response(404, "suite '" + std::string{name} + "' is not configured",
                               kNotFoundError);
     }
-    if (const std::string refused = commands::validate_suite(*config, parsed.name, parsed.suite);
+    if (const std::string refused =
+            commands::validate_suite(*config, parsed.name, parsed.suite, context.metered);
         !refused.empty()) {
         return error_response(400, refused);
     }
@@ -323,14 +410,90 @@ HttpResponse admin_set_suite_member(const AdminConfigContext& context, std::stri
     } else {
         after.members.erase(role);
     }
-    if (const std::string refused = member.has_value()
-                                        ? commands::validate_suite_member(*config, role, *member)
-                                        : commands::validate_suite(*config, found->first, after);
+    if (const std::string refused =
+            member.has_value()
+                ? commands::validate_suite_member(*config, role, *member)
+                : commands::validate_suite(*config, found->first, after, context.metered);
+        !refused.empty()) {
+        return error_response(400, refused);
+    }
+    // A consultable member moved to a backend that bills per call is refused
+    // here, as the CLI refuses it (27f).
+    if (const std::string refused =
+            commands::validate_suite_consult(*config, after, context.metered);
         !refused.empty()) {
         return error_response(400, refused);
     }
     return write(context, found->first, 200, [&](std::string_view content) {
         return harness::set_suite_member(content, found->first, role, member);
+    });
+}
+
+HttpResponse admin_set_suite_consult(const AdminConfigContext& context, std::string_view name,
+                                     const HttpRequest& request) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+    if (body.is_discarded() || !body.is_object()) {
+        return error_response(400, "the request body must be a JSON object");
+    }
+    HttpResponse failure;
+    const std::optional<harness::Config> config = load_now(context, failure);
+    if (!config.has_value()) {
+        return failure;
+    }
+    const auto found = config->suites.find(name);
+    if (found == config->suites.end()) {
+        return error_response(404, "suite '" + std::string{name} + "' is not configured",
+                              kNotFoundError);
+    }
+    const harness::SuiteConfig before = found->second;
+    harness::SuiteConfig after = before;
+    std::string error;
+    if (const auto it = body.find("consultable"); it != body.end()) {
+        if (it->is_null()) {
+            after.consultable.clear();
+        } else {
+            std::optional<std::vector<std::string>> roles = parse_consultable(*it, error);
+            if (!roles.has_value()) {
+                return error_response(400, error);
+            }
+            after.consultable = std::move(*roles);
+        }
+    }
+    if (const auto it = body.find("consult_caps"); it != body.end()) {
+        if (it->is_null()) {
+            after.consult_caps = {};
+        } else {
+            // Each cap named is set, or with null put back to its default;
+            // a cap not named keeps what it had -- as `--consult-cap` does.
+            std::optional<harness::ConsultCaps> caps = parse_caps(*it, error);
+            if (!caps.has_value()) {
+                return error_response(400, error);
+            }
+            for (const auto& [cap, value] : it->items()) {
+                if (cap == "per_turn") {
+                    after.consult_caps.per_turn = caps->per_turn;
+                } else if (cap == "brief_tokens") {
+                    after.consult_caps.brief_tokens = caps->brief_tokens;
+                } else {
+                    after.consult_caps.answer_tokens = caps->answer_tokens;
+                }
+            }
+        }
+    }
+    if (const std::string refused =
+            commands::validate_suite(*config, found->first, after, context.metered);
+        !refused.empty()) {
+        return error_response(400, refused);
+    }
+    return write(context, found->first, 200, [&](std::string_view content) {
+        std::string edited{content};
+        if (after.consultable != before.consultable) {
+            edited = harness::set_suite_consultable(edited, found->first, after.consultable);
+        }
+        if (after.consult_caps != before.consult_caps) {
+            edited = harness::set_suite_consult_caps(edited, found->first, after.consult_caps);
+        }
+        return edited;
     });
 }
 

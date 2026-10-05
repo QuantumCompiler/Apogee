@@ -217,9 +217,12 @@ void check_role_pointer(CheckReport& report, const harness::Config& config,
 
 /// One row per suite (27d): each member names a configured backend -- the
 /// row that says so before a session does -- and a vision or transcription
-/// member reads its medium, as a pointer at that role must.
-void check_suites(CheckReport& report, const harness::Config& config,
-                  const backends::MlxHost& host) {
+/// member reads its medium, as a pointer at that role must. Since 27f a
+/// consultable member's provider is asked whether it bills per call -- a
+/// hand-edited one that does fails here, where the config verbs would have
+/// refused it -- and the row names whom the root may consult.
+void check_suites(CheckReport& report, const harness::Config& config, const backends::MlxHost& host,
+                  const MeteredProbe& metered) {
     const harness::SuiteConfig* active = harness::active_suite(config);
     for (const auto& [name, suite] : config.suites) {
         const std::string label = "suite: " + name;
@@ -268,9 +271,41 @@ void check_suites(CheckReport& report, const harness::Config& config,
                 members += " (window " + std::to_string(*member.context_size) + ")";
             }
         }
+        for (const std::string& role : suite.consultable) {
+            if (reported) {
+                break;
+            }
+            const auto it = suite.members.find(role);
+            if (it == suite.members.end()) {
+                continue;  // the loader admits a consultable role with a member only
+            }
+            const MeteredAnswer answer = metered(config, it->second.backend);
+            const std::string fix = "apogee config set-suite " + name +
+                                    " --consultable <its local members>, or --" + role +
+                                    " <a local backend>";
+            if (!answer.unknown.empty()) {
+                add(report, Status::Warn, "Config", label,
+                    "consultable " + role + " -- whether '" + it->second.backend +
+                        "' is billed per call cannot be told (" + answer.unknown +
+                        "), so it is not offered to consult",
+                    fix);
+                reported = true;
+            } else if (answer.metered) {
+                add(report, Status::Fail, "Config", label,
+                    "consultable " + role + " -- '" + it->second.backend +
+                        "' is billed per call; a consult runs on the model's initiative, which "
+                        "never spends",
+                    fix);
+                reported = true;
+            }
+        }
         if (!reported) {
+            std::string consult;
+            for (const std::string& role : suite.consultable) {
+                consult += (consult.empty() ? "  · consult: " : ", ") + role;
+            }
             add(report, Status::Ok, "Config", label,
-                members + (active == &suite ? "  -- the default suite" : ""));
+                members + consult + (active == &suite ? "  -- the default suite" : ""));
         }
     }
 }
@@ -465,7 +500,8 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
     check_role_pointer(report, config, host, "default_transcription",
                        config.models.default_transcription, Medium::Audio);
     check_role_pointer(report, config, host, "default_utility", config.models.default_utility);
-    check_suites(report, config, host);
+    check_suites(report, config, host,
+                 inputs.metered ? inputs.metered : provider_metered_probe(inputs.config_path));
 
     // Collections: a typo in `retriever:` must never silently mean auto, and a
     // `rerank:` or `backend:` must name something that exists. The validator

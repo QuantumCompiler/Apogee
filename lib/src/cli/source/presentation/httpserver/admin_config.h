@@ -7,6 +7,7 @@
 
 #include "contracts/config.h"
 #include "httpserver/http_types.h"
+#include "operations/suites.h"
 
 /// The config-editing slice of the control plane: backends and the three role
 /// pointers, each the twin of an `apogee config` subcommand.
@@ -32,6 +33,11 @@ struct AdminConfigContext {
     std::filesystem::path config_path;
     /// The config this server started from, for `restart_required`.
     const harness::Config* startup = nullptr;
+    /// Asks a backend's provider whether it bills per call, for a suite's
+    /// consultable members (27f) -- the CLI's own probe, handed down by the
+    /// composition root, which can build providers. Null tells nothing, and
+    /// unknown is metered.
+    commands::MeteredProbe metered;
 };
 
 /// A backend entry as the plane serializes it: every field but the key.

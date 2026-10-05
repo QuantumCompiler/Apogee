@@ -63,6 +63,11 @@ models:
 # (context_size) and the tools it is offered (toolset: any of fs, shell, git,
 # notes, rag, web, mcp; [] for none). `apogee config add-suite` writes one and
 # `apogee models status --suite <name>` shows which roles it answers.
+# `consultable:` lets the chat model consult members through the consult tool
+# (with --tools): it asks one a self-contained question -- the member sees
+# that and nothing else -- and reads its answer. Local, unmetered members
+# only; `consult_caps:` bounds it (per_turn 4, brief_tokens 1024,
+# answer_tokens 512 unless set).
 #
 # suites:
 #   research:
@@ -73,6 +78,7 @@ models:
 #         backend: helper
 #         context_size: 4096
 #       embedding: embedder
+#     consultable: [utility]
 
 # Optional search roots that pre-fill path prompts. Each is optional; an empty
 # value simply means "no default". ${ENV_VAR} references are expanded.

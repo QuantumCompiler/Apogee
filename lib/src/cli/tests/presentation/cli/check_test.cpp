@@ -2288,3 +2288,55 @@ TEST_CASE("each suite has a row: its members named, a member at nothing failed",
     REQUIRE(row != nullptr);
     CHECK(row->status == Status::Warn);
 }
+
+TEST_CASE("a suite's row names whom its root may consult, and fails a member billed per call",
+          "[commands][check][suites][consult]") {
+    // 27f: the config verbs refuse a metered consultable member; one written
+    // by hand is found here, by asking its provider.
+    Install install;
+    install.seed();
+    const auto check = [&](const apogee::commands::MeteredProbe& metered) {
+        CheckInputs inputs = inputs_for(install);
+        install.write("config/config.yaml",
+                      "models:\n  default: root\nbackends:\n  root:\n    type: mock\n"
+                      "  helper:\n    type: mock\nsuites:\n  research:\n    members:\n"
+                      "      chat: root\n      utility: helper\n    consultable: [utility]\n");
+        load_into(inputs);
+        inputs.metered = metered;
+        return run_checks(inputs);
+    };
+    using apogee::commands::MeteredAnswer;
+    const CheckReport local = check([](const apogee::harness::Config&, std::string_view) {
+        return MeteredAnswer{.metered = false};
+    });
+    const auto* row = row_with(local, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+    CHECK(row->detail == "chat root · utility helper  · consult: utility");
+
+    const CheckReport billed = check([](const apogee::harness::Config&, std::string_view) {
+        return MeteredAnswer{.metered = true};
+    });
+    row = row_with(billed, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail ==
+          "consultable utility -- 'helper' is billed per call; a consult runs on the model's "
+          "initiative, which never spends");
+    CHECK(row->remedy ==
+          "apogee config set-suite research --consultable <its local members>, "
+          "or --utility <a local backend>");
+
+    const CheckReport unknown = check([](const apogee::harness::Config&, std::string_view) {
+        return MeteredAnswer{.metered = false, .unknown = "no API key"};
+    });
+    row = row_with(unknown, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Warn);
+
+    // Unset, the probe is the factory's: a mock backend bills nothing.
+    const CheckReport factory = check({});
+    row = row_with(factory, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+}

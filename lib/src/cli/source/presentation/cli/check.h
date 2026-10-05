@@ -11,6 +11,7 @@
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/paths.h"
+#include "operations/suites.h"
 #include "views/status_line.h"
 
 /// `apogee check` — the install doctor.
@@ -103,6 +104,10 @@ struct CheckInputs {
     /// build's list, unless a test names its own, so a stale copy is
     /// checked without one in the repository.
     std::span<const std::string_view> retired_scripts = harness::bundled_scripts_retired();
+
+    /// Asks whether a suite's consultable member bills per call (27f). Null
+    /// asks a provider built from the config (`provider_metered_probe`).
+    MeteredProbe metered;
 };
 
 /// Runs every check and returns the report. Pure with respect to the machine

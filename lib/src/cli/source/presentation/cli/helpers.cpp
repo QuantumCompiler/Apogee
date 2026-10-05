@@ -122,6 +122,29 @@ agent::ToolRegistry pin_toolset(const agent::ToolRegistry& registry, const harne
     return toolset.has_value() ? apply_toolset(registry, *toolset) : registry;
 }
 
+MeteredProbe provider_metered_probe(std::filesystem::path config_path) {
+    return [config_path = std::move(config_path)](const harness::Config& config,
+                                                  std::string_view backend) {
+        MeteredAnswer answer;
+        const auto entry = config.backends.find(backend);
+        if (entry == config.backends.end()) {
+            answer.unknown = "no backend of that name is configured";
+            return answer;
+        }
+        backends::BuildOptions options;
+        options.config_path = config_path;
+        std::string reason;
+        const std::shared_ptr<harness::LLMProvider> provider = backends::make_provider(
+            entry->first, harness::backend_as_run(config, entry->first), reason, options);
+        if (provider == nullptr) {
+            answer.unknown = reason.empty() ? "it could not be built here" : reason;
+            return answer;
+        }
+        answer.metered = provider->generation_is_metered();
+        return answer;
+    };
+}
+
 agent::UrlFetcher make_http_fetcher(std::shared_ptr<backends::HttpClient> client) {
     return [client = std::move(client)](std::string_view url) {
         agent::FetchResult result;

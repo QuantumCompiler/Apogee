@@ -2,8 +2,10 @@
 # Suites (27d) on the real binary: the config unit written through the one
 # editor, a chat run under one, the bundle switched mid-chat, and both
 # surviving a resume -- and, since 27e, the set's footprint stated, a suite
-# that cannot fit refused until --force, and --warm silent on a pipe -- with
-# the run's own records as the evidence:
+# that cannot fit refused until --force, and --warm silent on a pipe; since
+# 27f, the root consulting a member on exactly the brief, a metered member
+# refused at config time, and machine mode carrying the consult as any tool
+# call -- with the run's own records as the evidence:
 #
 #   * who titled the chat: the utility role does, so a title from the helper's
 #     script proves `--suite research` resolved utility to `helper` (and the
@@ -224,5 +226,77 @@ else
         || fail "the forced run does not say so: $(cat "$WORK_DIR/forced.txt")"
     grep -q "ROOT-SAYS" "$WORK_DIR/forced.txt" || fail "the forced chat did not answer"
 fi
+
+# --- consult (27f): the root delegates a brief to a member -------------------
+# The asking root calls consult once, then relays what came back; the oracle
+# answers with the brief it was sent and the system prompt it saw, so its
+# answer is the wire's own record: exactly the question, no system prompt.
+cat >"$WORK_DIR/scripts/asker.json" <<'JSON'
+{"turns": [{"text": "", "tool_calls": [{"name": "consult", "arguments": {"member": "utility", "question": "What is the codeword?"}}]},
+           {"text": "ROOT-RELAYS {{last_tool_result}}"}]}
+JSON
+printf '{"turns": [{"text": "CODEWORD-MARMALADE heard [{{last_user}}] system [{{system}}]"}]}\n' \
+    >"$WORK_DIR/scripts/oracle.json"
+printf '{"metered": true, "turns": [{"text": "PAID-SAYS"}]}\n' >"$WORK_DIR/scripts/paid.json"
+for name in asker oracle paid; do
+    "$APOGEE_BIN" config add-backend "$name" --type mock \
+        --model-path "$WORK_DIR/scripts/$name.json" >/dev/null || fail "add-backend $name"
+done
+# A member billed per call is refused at config time, by its provider's word.
+BEFORE_CONSULT=$(cat "$CONFIG")
+"$APOGEE_BIN" config add-suite billed --chat asker --utility paid --consultable utility \
+    >"$WORK_DIR/billed.txt" 2>&1 && fail "a metered consultable member was written"
+grep -q "consultable utility: 'paid' is billed per call" "$WORK_DIR/billed.txt" \
+    || fail "the metered member was not refused with the reason: $(cat "$WORK_DIR/billed.txt")"
+[ "$(cat "$CONFIG")" = "$BEFORE_CONSULT" ] || fail "a refused consult edit changed the file"
+"$APOGEE_BIN" config add-suite consult --chat asker --utility oracle --consultable utility \
+    >/dev/null || fail "add-suite consult"
+grep -q "    consultable: \[utility\]" "$CONFIG" || fail "consultable was not written: $(cat "$CONFIG")"
+
+echo "what is the codeword?" | "$APOGEE_BIN" chat --suite consult --tools >"$WORK_DIR/consult.txt" 2>&1 \
+    || fail "the consulting chat failed: $(cat "$WORK_DIR/consult.txt")"
+grep -q "ROOT-RELAYS utility (oracle) answered:" "$WORK_DIR/consult.txt" \
+    || fail "the root did not get the member's answer: $(cat "$WORK_DIR/consult.txt")"
+grep -q "CODEWORD-MARMALADE heard \[What is the codeword?\] system \[\]" "$WORK_DIR/consult.txt" \
+    || fail "the member saw more than the brief: $(cat "$WORK_DIR/consult.txt")"
+# The call and its result in history, as any tool's.
+CONSULTED=$(session_of "what is the codeword?")
+[ -n "$CONSULTED" ] || fail "the consulting chat was not saved"
+python3 - "$CONSULTED" <<'PY' || fail "the session does not hold the consult as a tool call and result"
+import json, sys
+messages = json.load(open(sys.argv[1]))["messages"]
+calls = [c for m in messages for c in (m.get("tool_calls") or [])
+         if c.get("function", {}).get("name") == "consult"]
+results = [m for m in messages if m.get("role") == "tool" and "CODEWORD-MARMALADE" in json.dumps(m)]
+sys.exit(0 if len(calls) == 1 and len(results) == 1 else 1)
+PY
+
+# Machine mode: the same exchange in the events a driver already reads --
+# no new type, the member's call said as a tool status.
+printf '{"type":"user","text":"what is the codeword?"}\n' \
+    | "$APOGEE_BIN" chat --suite consult --tools --output-format stream-json \
+    >"$WORK_DIR/consult.jsonl" 2>"$WORK_DIR/consult-machine.err" \
+    || fail "the driven consulting chat failed: $(cat "$WORK_DIR/consult-machine.err")"
+python3 - "$WORK_DIR/consult.jsonl" <<'PY' || fail "machine mode carried the consult unlike a tool call: $(cat "$WORK_DIR/consult.jsonl")"
+import json, sys
+known = {"session", "thinking", "thinking_delta", "memory", "tool_status", "notice",
+         "answer_start", "answer_delta", "answer_end", "result", "question", "error"}
+events = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+assert all(event["type"] in known for event in events), [e["type"] for e in events]
+statuses = [e["text"] for e in events if e["type"] == "tool_status"]
+assert "[tool] consult" in statuses, statuses
+assert "consult \u2014 asking utility (oracle): What is the codeword?" in statuses, statuses
+result = [e for e in events if e["type"] == "result"][-1]
+assert "CODEWORD-MARMALADE heard [What is the codeword?]" in result["text"], result
+PY
+
+# /suite moves the offer: under fast there is no consult; switched to the
+# consulting suite, its chat member finds the tool.
+printf 'first question\n/suite consult\nwhat is the codeword now?\n' \
+    | "$APOGEE_BIN" chat --suite fast --tools >"$WORK_DIR/consult-switch.txt" 2>&1 \
+    || fail "the switching consult chat failed: $(cat "$WORK_DIR/consult-switch.txt")"
+grep -q "FASTROOT-SAYS" "$WORK_DIR/consult-switch.txt" || fail "fast did not answer first"
+grep -q "ROOT-RELAYS utility (oracle) answered:" "$WORK_DIR/consult-switch.txt" \
+    || fail "/suite did not offer consult: $(cat "$WORK_DIR/consult-switch.txt")"
 
 echo "suites: OK"

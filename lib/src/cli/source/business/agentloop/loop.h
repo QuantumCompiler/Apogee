@@ -9,6 +9,7 @@
 #include "agent/tool.h"
 #include "agentloop/budget.h"
 #include "agentloop/content.h"
+#include "agentloop/member_call.h"
 #include "agentloop/question.h"
 #include "agentloop/reporter.h"
 #include "agentloop/tool_selection.h"
@@ -107,6 +108,12 @@ struct Options {
     /// default, and whenever no utility model is set -- leaves results as the
     /// tool returned them.
     std::string summary_model;
+
+    /// The conversation's member calls (27f): the run opens a turn on it --
+    /// the per-turn count starting over, a call narrated through this run's
+    /// Reporter and cancelled with it -- for as long as it runs. Set wherever
+    /// the `consult` tool is registered; null for none. The caller owns it.
+    MemberCalls* member_calls = nullptr;
 
     /// Hard ceiling on model→tool→model cycles.
     ///

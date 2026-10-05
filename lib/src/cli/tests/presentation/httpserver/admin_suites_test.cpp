@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "cli/helpers.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "contracts/config.h"
@@ -213,4 +214,84 @@ TEST_CASE("the suite twins answer the CLI's rules with a client's statuses",
         admin_set_default_suite(fixture.context(), with_body("POST", {{"name", "nope"}})).status ==
         400);
     CHECK(admin_delete_suite(fixture.context(), "nope").status == 404);
+}
+
+TEST_CASE("a suite's consultable members and caps over HTTP are byte-identical to the CLI's",
+          "[httpserver][admin][suites][parity][consult]") {
+    const Fixture fixture;
+    // The CLI's probe, handed down as `serve` hands it: mock backends bill
+    // nothing.
+    AdminConfigContext context = fixture.context();
+    context.metered = apogee::commands::provider_metered_probe(fixture.http_config);
+
+    // add-suite --consultable --consult-cap <-> POST with both.
+    REQUIRE(fixture.cli({"config", "add-suite", "research", "--chat", "root", "--utility", "helper",
+                         "--extraction", "embedder", "--consultable", "utility", "--consult-cap",
+                         "per_turn=2"}) == 0);
+    const HttpResponse created = admin_create_suite(
+        context,
+        with_body("POST", {{"name", "research"},
+                           {"members",
+                            {{"chat", "root"}, {"utility", "helper"}, {"extraction", "embedder"}}},
+                           {"consultable", {"utility"}},
+                           {"consult_caps", {{"per_turn", 2}}}}));
+    REQUIRE(created.status == 201);
+    CHECK(fixture.same());
+    CHECK(parsed(created)["data"]["consultable"] == nlohmann::json({"utility"}));
+    CHECK(parsed(created)["data"]["consult_caps"] == nlohmann::json({{"per_turn", 2}}));
+
+    // set-suite --consultable/--consult-cap <-> PUT consult, in place.
+    REQUIRE(fixture.cli({"config", "set-suite", "research", "--consultable", "utility,extraction",
+                         "--consult-cap", "answer_tokens=256", "--consult-cap", "per_turn="}) == 0);
+    const HttpResponse widened = apogee::httpserver::admin_set_suite_consult(
+        context, "research",
+        with_body("PUT", {{"consultable", {"utility", "extraction"}},
+                          {"consult_caps", {{"answer_tokens", 256}, {"per_turn", nullptr}}}}));
+    REQUIRE(widened.status == 200);
+    CHECK(fixture.same());
+    CHECK(parsed(widened)["data"]["consult_caps"] == nlohmann::json({{"answer_tokens", 256}}));
+    // Cleared alike.
+    REQUIRE(fixture.cli({"config", "set-suite", "research", "--consultable", ""}) == 0);
+    REQUIRE(apogee::httpserver::admin_set_suite_consult(
+                context, "research", with_body("PUT", {{"consultable", nullptr}}))
+                .status == 200);
+    CHECK(fixture.same());
+    CHECK_FALSE(parsed(admin_get_suite(context, "research"))["data"].contains("consultable"));
+
+    // Refused alike: a role that cannot be consulted, a member with no
+    // provider able to say it is unmetered (no probe), a missing suite.
+    const std::string before = Fixture::bytes(fixture.http_config);
+    CHECK(fixture.cli({"config", "set-suite", "research", "--consultable", "chat"}) != 0);
+    CHECK(apogee::httpserver::admin_set_suite_consult(context, "research",
+                                                      with_body("PUT", {{"consultable", {"chat"}}}))
+              .status == 400);
+    CHECK(apogee::httpserver::admin_set_suite_consult(
+              fixture.context(), "research", with_body("PUT", {{"consultable", {"utility"}}}))
+              .status == 400);
+    CHECK(apogee::httpserver::admin_set_suite_consult(
+              context, "nope", with_body("PUT", {{"consultable", {"utility"}}}))
+              .status == 404);
+    CHECK(apogee::httpserver::admin_set_suite_consult(
+              context, "research", with_body("PUT", {{"consult_caps", {{"per_turn", 0}}}}))
+              .status == 400);
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+
+    // A consultable member moved, by the member route, to a backend billed
+    // per call is refused as the CLI refuses it.
+    REQUIRE(apogee::httpserver::admin_set_suite_consult(
+                context, "research", with_body("PUT", {{"consultable", {"utility"}}}))
+                .status == 200);
+    AdminConfigContext billing = context;
+    billing.metered = [](const apogee::harness::Config&, std::string_view backend) {
+        return apogee::commands::MeteredAnswer{.metered = backend == "embedder"};
+    };
+    const std::string consultable = Fixture::bytes(fixture.http_config);
+    const HttpResponse moved = admin_set_suite_member(
+        billing, "research", with_body("PUT", {{"role", "utility"}, {"member", "embedder"}}));
+    CHECK(moved.status == 400);
+    CHECK(moved.body.find("'embedder' is billed per call") != std::string::npos);
+    CHECK(Fixture::bytes(fixture.http_config) == consultable);
+    CHECK(admin_set_suite_member(billing, "research",
+                                 with_body("PUT", {{"role", "chat"}, {"member", "embedder"}}))
+              .status == 200);
 }

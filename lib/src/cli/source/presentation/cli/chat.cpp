@@ -12,6 +12,7 @@
 
 #include "agentloop/content.h"
 #include "agentloop/loop.h"
+#include "agentloop/member_call.h"
 #include "agentloop/query_rewrite.h"
 #include "agentloop/rag.h"
 #include "agentloop/rerank.h"
@@ -42,6 +43,7 @@
 #include "operations/knowledge_core.h"
 #include "operations/suites.h"
 #include "platform/platform.h"
+#include "tools/consult.h"
 #include "tools/git.h"
 #include "views/ask_prompt.h"
 #include "views/cli_reporter.h"
@@ -194,8 +196,8 @@ struct RagSettings {
 
 void run_chat_turn(const harness::Harness& harness, logger::Session& session,
                    const std::string& input, const agent::ToolRegistry* tools,
-                   agentloop::ToolSelection* selection, const agentloop::AskFn& ask,
-                   const ToolGate& gate, agentloop::Reporter& reporter,
+                   agentloop::ToolSelection* selection, agentloop::MemberCalls* member_calls,
+                   const agentloop::AskFn& ask, const ToolGate& gate, agentloop::Reporter& reporter,
                    const std::function<void(const std::string&)>& notice, const RagSettings& rag,
                    const std::string& review_note, ChatAttachments* attached, ChatRecall* recall) {
     const std::vector<harness::ChatMessage> incoming = build_messages({}, {}, input, {});
@@ -260,6 +262,8 @@ void run_chat_turn(const harness::Harness& harness, logger::Session& session,
         // The tools each step offers, when there are many (26g): one
         // selection for the conversation, so a turn can keep the last one's.
         loop_options.tool_selection = selection;
+        // The consults a turn may make (27f), counted from zero each turn.
+        loop_options.member_calls = member_calls;
         loop_options.ask = ask;
         loop_options.permission = gate.permission;
         loop_options.confirm = gate.confirm;
@@ -910,18 +914,33 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                       : mcp::StderrTail::Sink{}});
         }
         // What the chat's backend is offered: every registered tool, or the
-        // toolset the active suite pins on that backend (27d) -- recomputed
-        // only when a switch moves the pin.
+        // toolset the active suite pins on that backend (27d), and the
+        // consult tool when the suite designates members (27f) -- recomputed
+        // only when a switch moves the pin or the members on offer.
         std::optional<agent::ToolRegistry> pinned_registry;
         std::optional<std::vector<std::string>> offered_pin;
+        std::string offered_consult;
         const agent::ToolRegistry* offered = &registry;
+        // The conversation's consults, counted per turn (27f).
+        const auto member_calls = std::make_shared<agentloop::MemberCalls>(harness);
         // Past a dozen and a half tools, each turn offers the ones its
         // question needs (26g); one selection for the whole conversation.
         std::unique_ptr<agentloop::ToolSelection> selection;
         const auto offer_tools = [&]() {
             offered_pin = harness::suite_pins(config, session.backend).toolset;
-            if (offered_pin.has_value()) {
-                pinned_registry = apply_toolset(registry, *offered_pin);
+            const tools::ConsultOffer consult = tools::consult_offer(harness);
+            if (consult.description != offered_consult) {
+                for (const std::string& note : consult.notes) {
+                    reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + note);
+                }
+            }
+            offered_consult = consult.description;
+            if (offered_pin.has_value() || !consult.description.empty()) {
+                // The consult tool joins after the pin: a suite's
+                // `consultable:` is its own switch, never a toolset's.
+                pinned_registry =
+                    offered_pin.has_value() ? apply_toolset(registry, *offered_pin) : registry;
+                (void)tools::register_consult_tool(*pinned_registry, harness, member_calls);
                 offered = &*pinned_registry;
             } else {
                 pinned_registry.reset();
@@ -938,7 +957,8 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         };
         const auto reoffer_tools = [&]() {
             if (flags->tools &&
-                harness::suite_pins(config, session.backend).toolset != offered_pin) {
+                (harness::suite_pins(config, session.backend).toolset != offered_pin ||
+                 tools::consult_offer(harness).description != offered_consult)) {
                 offer_tools();
             }
         };
@@ -1113,7 +1133,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 // answer a question -- the loop's "nil AskFn <=> never
                 // advertised" rule is satisfied rather than sidestepped.
                 run_chat_turn(harness, session, message.text, flags->tools ? offered : nullptr,
-                              selection.get(), driver_ask,
+                              selection.get(), member_calls.get(), driver_ask,
                               ToolGate{permission, flags->tools ? make_driver_confirm_fn(
                                                                       machine_reporter, std::cin,
                                                                       config_path, approvals)
@@ -1748,6 +1768,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 is_base_model(harness, session.backend) ? "Thinking… · base model" : "Thinking…");
             run_chat_turn(
                 harness, session, input, flags->tools ? offered : nullptr, selection.get(),
+                member_calls.get(),
                 flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
                 ToolGate{permission, flags->tools ? terminal_confirm_fn(reporter.status(), style,
                                                                         config_path, approvals)

@@ -13,6 +13,7 @@
 #include "agent/tool.h"
 #include "agentloop/loop.h"
 #include "agentloop/media.h"
+#include "agentloop/member_call.h"
 #include "agentloop/rag.h"
 #include "agentloop/reporter.h"
 #include "agentloop/retriever.h"
@@ -31,6 +32,7 @@
 #include "mcp/registry.h"
 #include "operations/suites.h"
 #include "platform/platform.h"
+#include "tools/consult.h"
 #include "views/ask_prompt.h"
 #include "views/cli_reporter.h"
 #include "views/terminal.h"
@@ -276,6 +278,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         agent::ToolRegistry machine_registry;
         std::unique_ptr<agentloop::ToolSelection> machine_selection;
         const auto machine_mcp = std::make_shared<mcp::Registry>();
+        const auto machine_consults = std::make_shared<agentloop::MemberCalls>(harness);
         if (flags.tools) {
             // stdout is the protocol: connection notes go to stderr.
             // The toolset the active suite pins on this backend, if any (27d).
@@ -286,6 +289,13 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                     .mcp = machine_mcp,
                     .mcp_status = [](std::string_view line) { std::cerr << line << "\n"; }}),
                 config, model);
+            // The consult tool when the suite designates members (27f), after
+            // the pin: `consultable:` is the suite's own switch.
+            for (const std::string& note :
+                 tools::register_consult_tool(machine_registry, harness, machine_consults).notes) {
+                std::cerr << "apogee: " << note << "\n";
+            }
+            machine_options.member_calls = machine_consults.get();
             machine_options.tools = &machine_registry;
             // Past a dozen and a half tools, the ones the question needs (26g).
             std::string ranked_by;
@@ -433,6 +443,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     agent::ToolRegistry registry;
     std::unique_ptr<agentloop::ToolSelection> selection;
     const auto mcp_registry = std::make_shared<mcp::Registry>();
+    const auto consults = std::make_shared<agentloop::MemberCalls>(harness);
     if (flags.tools) {
         // The toolset the active suite pins on this backend, if any (27d).
         registry = pin_toolset(
@@ -446,6 +457,14 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                 }}
                                                 : mcp::StderrTail::Sink{}}),
             config, model);
+        // The consult tool when the suite designates members (27f), after
+        // the pin: `consultable:` is the suite's own switch.
+        for (const std::string& note :
+             tools::register_consult_tool(registry, harness, consults).notes) {
+            reporter.status().print_line(reporter_options.style.tag(ansi::Role::Warning) + " " +
+                                         note);
+        }
+        loop_options.member_calls = consults.get();
         loop_options.tools = &registry;
         // Past a dozen and a half tools, the ones the question needs (26g).
         std::string ranked_by;

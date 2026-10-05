@@ -275,6 +275,48 @@ struct SuiteMember {
     bool operator==(const SuiteMember&) const = default;
 };
 
+/// How many member calls a turn may make, and how long a brief and an answer
+/// may be (27f) -- the defaults a suite's `consult_caps:` adjusts. Named
+/// constants, so every reader agrees on them.
+inline constexpr std::int64_t kConsultsPerTurn = 4;
+inline constexpr std::int64_t kConsultBriefTokens = 1024;
+inline constexpr std::int64_t kConsultAnswerTokens = 512;
+
+/// A suite's `consult_caps:` (27f): each unset takes its default above. The
+/// member's own window stays the hard ceiling whatever these say.
+struct ConsultCaps {
+    std::optional<std::int64_t> per_turn;
+    std::optional<std::int64_t> brief_tokens;
+    std::optional<std::int64_t> answer_tokens;
+
+    /// Whether any is set -- the block is written for it.
+    [[nodiscard]] bool any() const noexcept {
+        return per_turn.has_value() || brief_tokens.has_value() || answer_tokens.has_value();
+    }
+
+    bool operator==(const ConsultCaps&) const = default;
+};
+
+/// The caps as they hold: each set one, else its default.
+struct ConsultLimits {
+    std::int64_t per_turn = kConsultsPerTurn;
+    std::int64_t brief_tokens = kConsultBriefTokens;
+    std::int64_t answer_tokens = kConsultAnswerTokens;
+
+    bool operator==(const ConsultLimits&) const = default;
+};
+
+[[nodiscard]] ConsultLimits consult_limits(const ConsultCaps& caps) noexcept;
+
+/// The names `consult_caps:` takes, in the order it is written:
+/// `per_turn`, `brief_tokens`, `answer_tokens`.
+[[nodiscard]] std::span<const std::string_view> consult_cap_names() noexcept;
+
+/// The roles a suite may name `consultable:` (27f): every role but `chat` --
+/// the root does not consult itself -- and `embedding`, a model that turns
+/// text into vectors and answers nothing.
+[[nodiscard]] std::span<const std::string_view> consultable_role_names() noexcept;
+
 /// One entry under `suites:` -- a named bundle of models (27d): a member per
 /// role it speaks for, every other role falling through the existing chain.
 ///
@@ -287,6 +329,15 @@ struct SuiteConfig {
     /// Keyed by role name (`suite_role_names()`); a role absent here is not
     /// spoken for.
     std::map<std::string, SuiteMember, std::less<>> members;
+    /// The roles whose members the root may consult through the `consult`
+    /// tool (27f), each one of `consultable_role_names()` with a member in
+    /// this suite, as written. Empty offers no tool. Whether a member is local
+    /// and unmetered is its provider's to say, so that is held where a
+    /// provider can be asked -- the config verbs, and the tool at use.
+    std::vector<std::string> consultable;
+    /// What bounds them (27f) -- and, once 27g lands, validation too, which
+    /// spends from the same per-turn budget.
+    ConsultCaps consult_caps;
 
     bool operator==(const SuiteConfig&) const = default;
 };

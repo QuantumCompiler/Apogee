@@ -1199,3 +1199,90 @@ TEST_CASE("the suite vocabularies are the roles and the toolsets", "[config][sui
     CHECK(shipped.models.default_suite.empty());
     CHECK(std::string{apogee::harness::config_template()}.find("# suites:") != std::string::npos);
 }
+
+TEST_CASE("a suite names the members its root may consult, and the caps", "[config][suites]") {
+    const Config config = load_text(with_suites(R"YAML(  research:
+    members:
+      chat: root
+      utility:
+        backend: helper
+        context_size: 4096
+      extraction: embedder
+    consultable: [utility, extraction]
+    consult_caps:
+      per_turn: 2
+      answer_tokens: 256
+  plain:
+    members:
+      chat: root
+)YAML"));
+    const apogee::harness::SuiteConfig& research = *config.find_suite("research");
+    CHECK(research.consultable == std::vector<std::string>{"utility", "extraction"});
+    CHECK(research.consult_caps.per_turn == 2);
+    CHECK_FALSE(research.consult_caps.brief_tokens.has_value());
+    CHECK(research.consult_caps.answer_tokens == 256);
+    // Each cap unset takes its named default.
+    CHECK(
+        apogee::harness::consult_limits(research.consult_caps) ==
+        apogee::harness::ConsultLimits{.per_turn = 2, .brief_tokens = 1024, .answer_tokens = 256});
+    const apogee::harness::SuiteConfig& plain = *config.find_suite("plain");
+    CHECK(plain.consultable.empty());
+    CHECK_FALSE(plain.consult_caps.any());
+    CHECK(
+        apogee::harness::consult_limits(plain.consult_caps) ==
+        apogee::harness::ConsultLimits{.per_turn = 4, .brief_tokens = 1024, .answer_tokens = 512});
+    // A block list reads the same as a flow one.
+    const Config block = load_text(with_suites(
+        "  s:\n    members:\n      utility: helper\n    consultable:\n      - utility\n"));
+    CHECK(block.find_suite("s")->consultable == std::vector<std::string>{"utility"});
+}
+
+TEST_CASE("a consult that cannot hold is refused at load, by name", "[config][suites]") {
+    const std::string members = "  s:\n    members:\n      chat: root\n      utility: helper\n";
+    const std::vector<std::pair<std::string, std::string>> refused{
+        {members + "    consultable: [chat]\n", "suites.s.consultable: 'chat' is the root itself"},
+        {"  s:\n    members:\n      embedding: embedder\n    consultable: [embedding]\n",
+         "suites.s.consultable: 'embedding' turns text into vectors and answers nothing"},
+        {members + "    consultable: [helper]\n",
+         "suites.s.consultable: 'helper' is not a role a suite can consult (accepted: "
+         "extraction, vision, transcription, utility)"},
+        {members + "    consultable: [vision]\n",
+         "suites.s.consultable: 'vision' has no member in this suite"},
+        {members + "    consultable: [utility, utility]\n",
+         "suites.s.consultable: 'utility' is listed twice"},
+        {"  s:\n    consultable: [utility]\n", "'utility' has no member in this suite"},
+        {members + "    consultable: utility\n", "suites.s.consultable: expected a list"},
+        {members + "    consult_caps:\n      per_turn: 0\n",
+         "suites.s.consult_caps.per_turn: must be a positive whole number"},
+        {members + "    consult_caps:\n      brief_tokens: lots\n",
+         "suites.s.consult_caps.brief_tokens: expected a whole number"},
+        {members + "    consult_caps:\n      per_call: 3\n",
+         "suites.s.consult_caps.per_call: not a cap (accepted: per_turn, brief_tokens, "
+         "answer_tokens)"},
+        {members + "    consult_caps: 3\n", "suites.s.consult_caps: expected a mapping"},
+    };
+    for (const auto& [suites, said] : refused) {
+        INFO(suites);
+        try {
+            (void)load_text(with_suites(suites));
+            FAIL("expected a ConfigError");
+        } catch (const ConfigError& e) {
+            CHECK_THAT(std::string{e.what()}, Catch::Matchers::ContainsSubstring(said));
+        }
+    }
+    // Caps with no consultable member load: validation (27g) spends from them.
+    CHECK_NOTHROW(load_text(with_suites(members + "    consult_caps:\n      per_turn: 1\n")));
+}
+
+TEST_CASE("the consult vocabularies are the answering roles and the three caps",
+          "[config][suites]") {
+    const auto roles = apogee::harness::consultable_role_names();
+    CHECK(std::vector<std::string_view>(roles.begin(), roles.end()) ==
+          std::vector<std::string_view>{"extraction", "vision", "transcription", "utility"});
+    const auto caps = apogee::harness::consult_cap_names();
+    CHECK(std::vector<std::string_view>(caps.begin(), caps.end()) ==
+          std::vector<std::string_view>{"per_turn", "brief_tokens", "answer_tokens"});
+    CHECK(apogee::harness::kConsultsPerTurn == 4);
+    CHECK(apogee::harness::kConsultBriefTokens == 1024);
+    CHECK(apogee::harness::kConsultAnswerTokens == 512);
+}

@@ -8,6 +8,7 @@
 #include <exception>
 #include <utility>
 
+#include "agentloop/member_call.h"
 #include "contracts/errors.h"
 
 namespace apogee::agentloop {
@@ -70,6 +71,7 @@ void sort_ranking(std::vector<RankedTool>& ranking) {
 
 const std::vector<std::string>& core_tools() {
     static const std::vector<std::string> core{"read_file", "list_directory", "run_command",
+                                               std::string{kConsultToolName},
                                                std::string{kFindToolsName}};
     return core;
 }

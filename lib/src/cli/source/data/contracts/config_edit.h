@@ -204,8 +204,10 @@ public:
 /// Appends a `suites:` entry -- a named bundle of models (27d) -- creating the
 /// section when absent: `description` when set, then `members:` in role
 /// order, each `role: backend` alone or, when it pins a knob, the long form
-/// with `backend`, `context_size` and `toolset`. Same collision and `force`
-/// rules as `append_backend`; the name `off` is refused, being `/suite off`.
+/// with `backend`, `context_size` and `toolset`; then, when set, its
+/// `consultable:` flow list and `consult_caps:` block (27f). Same collision
+/// and `force` rules as `append_backend`; the name `off` is refused, being
+/// `/suite off`.
 [[nodiscard]] std::string append_suite(std::string_view content, std::string_view name,
                                        const SuiteConfig& suite, bool force);
 
@@ -222,6 +224,21 @@ public:
 [[nodiscard]] std::string set_suite_member(std::string_view content, std::string_view suite,
                                            std::string_view role,
                                            const std::optional<SuiteMember>& member);
+
+/// Sets an existing suite's `consultable:` (27f) to `roles`, written as a
+/// flow list as given -- an empty list removes the key -- in place: a list
+/// already written (flow or block) is replaced where it stands, a new one goes
+/// above `consult_caps:` when the entry has it, else at the entry's end, and
+/// every other line, its comments included, is left as it was. Throws
+/// ConfigEditError when the suite is missing; the re-parse refuses a role
+/// that cannot be consulted or has no member.
+[[nodiscard]] std::string set_suite_consultable(std::string_view content, std::string_view suite,
+                                                const std::vector<std::string>& roles);
+
+/// Sets an existing suite's `consult_caps:` block (27f) to the caps set in
+/// `caps` -- none set removes it -- in place, as `set_suite_consultable` does.
+[[nodiscard]] std::string set_suite_consult_caps(std::string_view content, std::string_view suite,
+                                                 const ConsultCaps& caps);
 
 /// Sets `models.default_suite` -- the suite every surface resolves under --
 /// as `set_models_role` sets a pointer; "" clears it. The re-parse refuses a

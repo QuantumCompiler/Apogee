@@ -1403,3 +1403,56 @@ TEST_CASE("an attachment with nothing relevant injects nothing, says so the same
         CHECK(chat.out.find("7731") == std::string::npos);
     }
 }
+
+TEST_CASE("chat and complete offer consult under a suite that designates a member",
+          "[chat][cli][consult]") {
+    // 27f: the root calls consult; the member answers with the brief it was
+    // sent -- so the relayed answer is the wire's own record -- on every
+    // surface that registers the tool, each opening the turn's budget.
+    const nlohmann::json chatty = nlohmann::json::array(
+        {{{"tool_calls",
+           {{{"name", "consult"},
+             {"arguments", {{"member", "utility"}, {"question", "What is the codeword?"}}}}}}},
+         {{"text", "relayed {{last_tool_result}}"}}});
+    HelperChat chat{chatty,
+                    {"MEMBER-ANSWER heard [{{last_user}}] system [{{system}}]"},
+                    {},
+                    "suites:\n  research:\n    members:\n      chat: chatty\n"
+                    "      utility: helper\n    consultable: [utility]\n"};
+    const std::string relayed =
+        "relayed utility (helper) answered:\nMEMBER-ANSWER heard [What is the codeword?] "
+        "system []";
+
+    // Under the suite as the config's default: complete, on a terminal's
+    // path and on machine mode's.
+    std::string text;
+    {
+        std::ifstream in{chat.config_path, std::ios::binary};
+        std::ostringstream read;
+        read << in.rdbuf();
+        text = read.str();
+    }
+    const std::string models = "models:\n  default: chatty\n";
+    text.replace(text.find(models), models.size(), models + "  default_suite: research\n");
+    std::ofstream{chat.config_path, std::ios::binary} << text;
+    REQUIRE(chat.run({"complete", "--tools", "what is the codeword?"}) == 0);
+    INFO(chat.err);
+    CHECK(chat.out.find(relayed) != std::string::npos);
+    REQUIRE(chat.run({"complete", "--tools", "--output-format", "stream-json",
+                      "what is the codeword?"}) == 0);
+    CHECK(chat.out.find("\"consult — asking utility (helper): What is the codeword?\"") !=
+          std::string::npos);
+    CHECK(chat.out.find("MEMBER-ANSWER heard [What is the codeword?] system []") !=
+          std::string::npos);
+    // Without --tools nothing is offered, as for every tool.
+    REQUIRE(chat.run({"complete", "what is the codeword?"}) == 0);
+    CHECK(chat.out.find("MEMBER-ANSWER") == std::string::npos);
+
+    // And chat.
+    REQUIRE(chat.run({"chat", "--tools"}, "what is the codeword?\n") == 0);
+    CHECK(chat.out.find(relayed) != std::string::npos);
+    // With the suite off, no consult: the call names a tool that is not there.
+    REQUIRE(chat.run({"chat", "--tools", "--suite", "off"}, "what is the codeword?\n") == 0);
+    CHECK(chat.out.find("MEMBER-ANSWER") == std::string::npos);
+    CHECK(chat.out.find("relayed Error: no tool named 'consult'") != std::string::npos);
+}

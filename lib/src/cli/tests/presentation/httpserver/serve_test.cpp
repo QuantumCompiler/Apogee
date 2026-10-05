@@ -96,7 +96,7 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
         }
     }
     CHECK(public_rows == 8);
-    CHECK(admin_rows == 72);
+    CHECK(admin_rows == 73);
     CHECK(has("POST", "/v1/admin/backends/default-vision"));
     // The suites slice (27d).
     CHECK(has("GET", "/v1/admin/suites"));
@@ -106,6 +106,8 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
     CHECK(has("PUT", "/v1/admin/suites/{id}"));
     CHECK(has("DELETE", "/v1/admin/suites/{id}"));
     CHECK(has("PUT", "/v1/admin/suites/{id}/members"));
+    // Whom a suite's chat model may consult, and the caps (27f).
+    CHECK(has("PUT", "/v1/admin/suites/{id}/consult"));
     CHECK(has("POST", "/v1/admin/backends/default-transcription"));
     CHECK(has("POST", "/v1/admin/backends/default-utility"));
     CHECK(has("GET", "/v1/admin/allowed-hosts"));

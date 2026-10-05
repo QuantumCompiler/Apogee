@@ -306,6 +306,9 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
         httpserver::AdminOptions admin_options;
         admin_options.config_path = config_path;
         admin_options.startup = config;
+        // A suite's consultable members are held to local, unmetered
+        // backends over HTTP as on the command line (27f).
+        admin_options.metered = provider_metered_probe(config_path);
         httpserver::AdminHandler admin{std::move(admin_options), jobs, events::default_bus()};
         httpserver::Mux mux{handler, admin, admin_token};
 

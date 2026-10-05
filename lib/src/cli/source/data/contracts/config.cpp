@@ -438,6 +438,14 @@ constexpr std::array<std::string_view, 6> kSuiteRoles{"chat",   "embedding",    
 constexpr std::array<std::string_view, 7> kSuiteToolsets{"fs",  "shell", "git", "notes",
                                                          "rag", "web",   "mcp"};
 
+/// The roles `consultable:` accepts (27f): not the root's own, not the
+/// embedder's.
+constexpr std::array<std::string_view, 4> kConsultableRoles{"extraction", "vision", "transcription",
+                                                            "utility"};
+
+/// The keys `consult_caps:` accepts (27f), in writing order.
+constexpr std::array<std::string_view, 3> kConsultCaps{"per_turn", "brief_tokens", "answer_tokens"};
+
 /// The accepted roles, joined for a message.
 std::string accepted_suite_roles() {
     std::string out;
@@ -492,6 +500,81 @@ SuiteMember parse_suite_member(const YAML::Node& node, std::string_view origin,
     return member;
 }
 
+/// `names` joined for a message.
+std::string joined_names(std::span<const std::string_view> names) {
+    std::string out;
+    for (const std::string_view name : names) {
+        out += out.empty() ? "" : ", ";
+        out += name;
+    }
+    return out;
+}
+
+/// A suite's `consultable:` and `consult_caps:` (27f), read into `suite`
+/// once its members are. A consultable role must be one that can answer and
+/// must have a member here -- config-internal facts, so a typo fails the load
+/// as a default suite naming nothing does; whether that member is local and
+/// unmetered is its provider's to say, asked where one can be built.
+void parse_consult(const YAML::Node& node, std::string_view origin, const std::string& where,
+                   SuiteConfig& suite) {
+    const std::string key = where + ".consultable";
+    for (std::string& role : string_list(node["consultable"], origin, key, false)) {
+        if (std::ranges::find(kConsultableRoles, std::string_view{role}) ==
+            kConsultableRoles.end()) {
+            if (role == "chat") {
+                fail(origin, key +
+                                 ": 'chat' is the root itself -- a suite's chat model "
+                                 "consults its members, never itself");
+            }
+            if (role == "embedding") {
+                fail(origin, key +
+                                 ": 'embedding' turns text into vectors and answers nothing "
+                                 "-- consult a member that generates (accepted: " +
+                                 joined_names(kConsultableRoles) + ")");
+            }
+            fail(origin, key + ": '" + role + "' is not a role a suite can consult (accepted: " +
+                             joined_names(kConsultableRoles) + ")");
+        }
+        if (std::ranges::find(suite.consultable, role) != suite.consultable.end()) {
+            fail(origin, key + ": '" + role + "' is listed twice");
+        }
+        if (!suite.members.contains(role)) {
+            fail(origin, key + ": '" + role +
+                             "' has no member in this suite -- name its "
+                             "backend under members: first");
+        }
+        suite.consultable.push_back(std::move(role));
+    }
+
+    const YAML::Node caps = node["consult_caps"];
+    if (!caps.IsDefined() || caps.IsNull()) {
+        return;
+    }
+    const std::string caps_key = where + ".consult_caps";
+    if (!caps.IsMap()) {
+        fail(origin, caps_key + ": expected a mapping of " + joined_names(kConsultCaps));
+    }
+    for (const auto& entry : caps) {
+        const std::string name = entry.first.Scalar();
+        if (std::ranges::find(kConsultCaps, std::string_view{name}) == kConsultCaps.end()) {
+            fail(origin, caps_key + "." + name +
+                             ": not a cap (accepted: " + joined_names(kConsultCaps) + ")");
+        }
+        const std::optional<std::int64_t> value =
+            integer(entry.second, origin, caps_key + "." + name);
+        if (!value.has_value() || *value < 1) {
+            fail(origin, caps_key + "." + name + ": must be a positive whole number");
+        }
+        if (name == "per_turn") {
+            suite.consult_caps.per_turn = value;
+        } else if (name == "brief_tokens") {
+            suite.consult_caps.brief_tokens = value;
+        } else {
+            suite.consult_caps.answer_tokens = value;
+        }
+    }
+}
+
 /// One `suites:` entry. Two members pinning one backend two ways fail: one
 /// backend is one model with one window, so the pins could not both hold.
 SuiteConfig parse_suite(const YAML::Node& node, std::string_view origin, const std::string& name) {
@@ -506,6 +589,7 @@ SuiteConfig parse_suite(const YAML::Node& node, std::string_view origin, const s
     suite.description = scalar(node["description"], origin, where + ".description");
     const YAML::Node members = node["members"];
     if (!members.IsDefined() || members.IsNull()) {
+        parse_consult(node, origin, where, suite);
         return suite;
     }
     if (!members.IsMap()) {
@@ -538,6 +622,7 @@ SuiteConfig parse_suite(const YAML::Node& node, std::string_view origin, const s
             }
         }
     }
+    parse_consult(node, origin, where, suite);
     return suite;
 }
 
@@ -741,6 +826,20 @@ std::span<const std::string_view> suite_role_names() noexcept {
 
 std::span<const std::string_view> suite_toolset_names() noexcept {
     return kSuiteToolsets;
+}
+
+std::span<const std::string_view> consultable_role_names() noexcept {
+    return kConsultableRoles;
+}
+
+std::span<const std::string_view> consult_cap_names() noexcept {
+    return kConsultCaps;
+}
+
+ConsultLimits consult_limits(const ConsultCaps& caps) noexcept {
+    return ConsultLimits{.per_turn = caps.per_turn.value_or(kConsultsPerTurn),
+                         .brief_tokens = caps.brief_tokens.value_or(kConsultBriefTokens),
+                         .answer_tokens = caps.answer_tokens.value_or(kConsultAnswerTokens)};
 }
 
 const SuiteConfig* active_suite(const Config& config) {

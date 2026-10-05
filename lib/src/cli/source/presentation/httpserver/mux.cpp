@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 80> kRoutes{{
+constexpr std::array<Route, 81> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -264,6 +264,10 @@ constexpr std::array<Route, 80> kRoutes{{
     {"PUT", "/v1/admin/suites/{id}/members", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->set_suite_member(r, id);
+     }},
+    {"PUT", "/v1/admin/suites/{id}/consult", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->set_suite_consult(r, id);
      }},
     // The datasets slice: the literal paths first, so `synth` and `kits`
     // are never read as dataset names.

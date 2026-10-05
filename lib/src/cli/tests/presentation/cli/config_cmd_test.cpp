@@ -304,3 +304,69 @@ TEST_CASE("set-suite edits one member in place; delete-suite and the default sui
     REQUIRE(home.run({"config", "delete-suite", "research"}, &out) == 0);
     CHECK(apogee::harness::parse_config(home.config_text(), "<test>").suites.empty());
 }
+
+TEST_CASE("the suite verbs name consultable members, refusing one billed per call",
+          "[commands][config][suites][consult]") {
+    const CliHome probe{""};
+    // A mock whose script says each call is billed: the provider's own word.
+    const std::filesystem::path script = probe.home() / "paid.json";
+    {
+        std::ofstream out{script};
+        out << R"({"metered": true, "turns": [{"text": "paid"}]})";
+    }
+    const CliHome home{std::string{kSuiteConfig} +
+                       "  paid:\n    type: mock\n    model_path: " + script.string() + "\n"};
+    std::string out;
+    REQUIRE(
+        home.run({"config", "add-suite", "research", "--chat", "root", "--utility", "helper",
+                  "--vision", "paid", "--consultable", "utility", "--consult-cap", "per_turn=2"},
+                 &out) == 0);
+    INFO(out);
+    CHECK(home.config_text().ends_with(
+        "\nsuites:\n  research:\n    members:\n      chat: root\n      vision: paid\n"
+        "      utility: helper\n    consultable: [utility]\n    consult_caps:\n"
+        "      per_turn: 2\n"));
+    REQUIRE(home.run({"config", "get", "suites.research.consultable"}, &out) == 0);
+    CHECK(out == "utility\n");
+    REQUIRE(home.run({"config", "get", "suites.research.consult_caps"}, &out) == 0);
+    CHECK(out == "per_turn 2, brief_tokens 1024 (default), answer_tokens 512 (default)\n");
+    REQUIRE(home.run({"config", "get", "suites.research"}, &out) == 0);
+    CHECK(out ==
+          "chat: root\nvision: paid\nutility: helper\nconsultable: utility\n"
+          "consult_caps: per_turn 2, brief_tokens 1024 (default), answer_tokens 512 (default)\n");
+
+    // At config time, through the one editor's verbs: a member billed per
+    // call is refused with the reason, and the file is left as it was.
+    const std::string before = home.config_text();
+    const std::vector<std::pair<std::vector<std::string>, std::string>> refused{
+        {{"config", "set-suite", "research", "--consultable", "utility,vision"},
+         "consultable vision: 'paid' is billed per call -- a consult runs on the model's "
+         "initiative, which never spends"},
+        {{"config", "set-suite", "research", "--utility", "paid"},
+         "consultable utility: 'paid' is billed per call"},
+        {{"config", "set-suite", "research", "--remove", "utility"},
+         "consultable utility: the suite has no utility member"},
+        {{"config", "set-suite", "research", "--consultable", "chat"}, "the root itself"},
+        {{"config", "set-suite", "research", "--consult-cap", "per_call=2"},
+         "--consult-cap per_call=2: not NAME=N with NAME one of per_turn, brief_tokens, "
+         "answer_tokens"},
+        {{"config", "set-suite", "research", "--consult-cap", "per_turn=0"},
+         "is not a positive whole number"},
+        {{"config", "add-suite", "x", "--chat", "root", "--consultable", "utility"},
+         "consultable utility: the suite has no utility member"},
+    };
+    for (const auto& [args, said] : refused) {
+        INFO(said);
+        CHECK(home.run(args, &out) != 0);
+        CHECK(out.find(said) != std::string::npos);
+        CHECK(home.config_text() == before);
+    }
+
+    // Changed in place, and cleared, every other line as it was.
+    REQUIRE(home.run({"config", "set-suite", "research", "--consult-cap", "per_turn="}, &out) == 0);
+    REQUIRE(home.run({"config", "set-suite", "research", "--consultable", ""}, &out) == 0);
+    CHECK(home.config_text().ends_with("      utility: helper\n"));
+    CHECK(apogee::harness::parse_config(home.config_text(), "<test>")
+              .find_suite("research")
+              ->consultable.empty());
+}

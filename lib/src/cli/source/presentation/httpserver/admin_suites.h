@@ -32,6 +32,15 @@ namespace apogee::httpserver {
 [[nodiscard]] HttpResponse admin_set_suite_member(const AdminConfigContext& context,
                                                   std::string_view name,
                                                   const HttpRequest& request);
+/// The twin of `config set-suite --consultable/--consult-cap` (27f): `{
+/// "consultable"?: [role, ...] | null, "consult_caps"?: {per_turn?,
+/// brief_tokens?, answer_tokens?} | null}` -- a key left out keeps what the
+/// entry has, `null` clears it, a cap set to `null` takes its default. The
+/// two keys are replaced in place, every other line of the entry as it was;
+/// a consultable member must be local and unmetered, as the CLI holds it.
+[[nodiscard]] HttpResponse admin_set_suite_consult(const AdminConfigContext& context,
+                                                   std::string_view name,
+                                                   const HttpRequest& request);
 /// The twin of `config set-default-suite`: `{"name"}`, `off` for none.
 [[nodiscard]] HttpResponse admin_set_default_suite(const AdminConfigContext& context,
                                                    const HttpRequest& request);

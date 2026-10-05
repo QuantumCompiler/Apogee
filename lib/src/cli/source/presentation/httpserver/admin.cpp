@@ -12,7 +12,9 @@ AdminHandler::AdminHandler(AdminOptions options, JobRegistry& jobs, events::Bus&
     : options_{std::move(options)}, jobs_{&jobs}, bus_{&bus} {}
 
 AdminConfigContext AdminHandler::config_context() const {
-    return AdminConfigContext{.config_path = options_.config_path, .startup = &options_.startup};
+    return AdminConfigContext{.config_path = options_.config_path,
+                              .startup = &options_.startup,
+                              .metered = options_.metered};
 }
 
 HttpResponse AdminHandler::list_backends(const HttpRequest& /*request*/) {
@@ -299,6 +301,10 @@ HttpResponse AdminHandler::delete_suite(const HttpRequest& /*request*/, std::str
 
 HttpResponse AdminHandler::set_suite_member(const HttpRequest& request, std::string_view name) {
     return admin_set_suite_member(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::set_suite_consult(const HttpRequest& request, std::string_view name) {
+    return admin_set_suite_consult(config_context(), name, request);
 }
 
 HttpResponse AdminHandler::list_jobs(const HttpRequest& /*request*/) {

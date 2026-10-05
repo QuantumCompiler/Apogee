@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -20,10 +21,35 @@ namespace apogee::commands {
                                                 std::string_view role,
                                                 const harness::SuiteMember& member);
 
+/// Whether generation on a backend is billed per call, as its provider states
+/// it (`LLMProvider::generation_is_metered`, never a list of types) -- asked
+/// of a provider the surface builds from the config being written, since
+/// nothing in this layer builds one. `unknown` says why it could not be
+/// asked; unknown is metered.
+struct MeteredAnswer {
+    bool metered = true;
+    std::string unknown;
+};
+
+using MeteredProbe =
+    std::function<MeteredAnswer(const harness::Config& config, std::string_view backend)>;
+
+/// Why `suite`'s `consultable:` and `consult_caps:` cannot be written (27f),
+/// or empty: each consultable role one that can answer
+/// (`harness::consultable_role_names()`), listed once, with a member in the
+/// suite whose backend `metered` says is local and unmetered -- a consult runs
+/// on the model's initiative, which never spends -- and every cap positive.
+/// A null probe can tell nothing, and unknown is metered.
+[[nodiscard]] std::string validate_suite_consult(const harness::Config& config,
+                                                 const harness::SuiteConfig& suite,
+                                                 const MeteredProbe& metered);
+
 /// Why `suite` cannot be written as `name`, or empty: a name that is not
-/// `off`, at least one member, and every member valid.
+/// `off`, at least one member, every member valid, and its consultable
+/// members and caps valid (`validate_suite_consult`, through `metered`).
 [[nodiscard]] std::string validate_suite(const harness::Config& config, std::string_view name,
-                                         const harness::SuiteConfig& suite);
+                                         const harness::SuiteConfig& suite,
+                                         const MeteredProbe& metered = {});
 
 /// Why a run cannot go ahead under `config`'s active suite, or empty: a member
 /// naming a backend the config does not have. The resolver returns that name

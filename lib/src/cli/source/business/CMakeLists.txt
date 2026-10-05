@@ -48,6 +48,8 @@ apogee_add_module(agentloop
     agentloop/recall.cpp
     agentloop/side_call.h
     agentloop/side_call.cpp
+    agentloop/member_call.h
+    agentloop/member_call.cpp
     agentloop/rag.h
     agentloop/rag.cpp
     agentloop/graph_context.h
@@ -124,6 +126,8 @@ apogee_add_module(tools
     tools/environment.cpp
     tools/toolsets.h
     tools/toolsets.cpp
+    tools/consult.h
+    tools/consult.cpp
 )
 target_link_libraries(apogee_business_tools PUBLIC nlohmann_json::nlohmann_json)
 
