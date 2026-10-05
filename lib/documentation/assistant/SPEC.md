@@ -23,16 +23,16 @@ Satellite scripts (training drivers, MCP servers) may be Python — "primarily C
 
 ## Core surfaces
 
-Apogee presents the same harness through four front-ends, in rough order of interactivity *(shape set 2026-08-24 as three, with no TUI; `execute` added 2026-10-04 — the suites vision)*:
+Apogee presents the same harness through four front-ends, in rough order of interactivity *(shape set 2026-08-24 as three, then with no TUI; `execute` added 2026-10-04 — the suites vision; the no-TUI rule removed later that day — see below and Non-goals)*:
 
 1. **`apogee complete`** — one-shot prompt → answer; scriptable and pipeable.
 2. **`apogee chat`** — interactive multi-turn session: persistent, resumable, mid-session model switching, context-window monitoring.
-3. **`apogee execute`** *(added 2026-10-04; targeted v0.1.4)* — chat's sibling opened with a **suite** instead of a model: the same session core, symphonies playable (`/play`), the Orchestrator over them opt-in. A CLI surface like chat — the no-TUI lesson is untouched.
+3. **`apogee execute`** *(added 2026-10-04; targeted v0.1.4)* — chat's sibling opened with a **suite** instead of a model: the same session core, symphonies playable (`/play`), the Orchestrator over them opt-in. A CLI surface like chat, not a screen.
 4. **`apogee serve`** — OpenAI-compatible HTTP server (`/v1/chat/completions`, `/v1/completions`, …), later joined by a bearer-gated `/v1/admin` control plane. **Server deployments only** *(decided 2026-08-24)*: serve applies when the executable runs on a server and a client — a mobile or desktop app — makes REST calls (POST/GET) to it over the network. A local front-end never talks to a localhost port.
 
 Around those sit capability and lifecycle commands (models, config, check, …) as the capability areas land — the full map is the [`backlog/`](../backlog/README.md).
 
-A **GUI ships as a sibling application** *(committed direction 2026-08-24; planned home `lib/src/darwin|linux|windows`, one app per platform — down the road)*, and it powers the CLI directly: the GUI runs the executable as a child process and speaks to it over **stdin/stdout** — a structured JSONL event mode ([machine-mode.md](../reference/machine-mode.md), shipped 2026-09-06), never a localhost port. Mutations go through the same CLI commands, which is why the CLI-is-the-contract principle carries the GUI for free. There is **no TUI**, and there never will be one (see Non-goals).
+A **GUI ships as a sibling application** *(committed direction 2026-08-24; planned home `lib/src/darwin|linux|windows`, one app per platform — down the road)*, and it powers the CLI directly: the GUI runs the executable as a child process and speaks to it over **stdin/stdout** — a structured JSONL event mode ([machine-mode.md](../reference/machine-mode.md), shipped 2026-09-06), never a localhost port. Mutations go through the same CLI commands, which is why the CLI-is-the-contract principle carries the GUI for free. Since 2026-10-04 (the user's call, v0.1.6) an **in-binary full-screen TUI** stands beside that direction, not instead of it: bare `apogee` on a terminal opens the FTXUI shell (items 32b–32d); non-terminal invocations, every raw command, and the machine-mode contract are untouched — the TUI is strictly additive.
 
 ## Scope (in)
 
@@ -54,7 +54,7 @@ A **GUI ships as a sibling application** *(committed direction 2026-08-24; plann
 
 - **No mandatory cloud dependency.** The harness runs fully local; cloud backends are opt-in per configured API key.
 - **No bundled models.** Models are user-supplied; installers download nothing unasked.
-- **No TUI, and no second in-binary front-end.** The CLI is the contract, and graphical front-ends consume it from outside the harness binary. *(Clarified 2026-08-24: a GUI is a committed direction — as a sibling project over `serve` + `/v1/admin`, never inside the harness binary.)*
+- **Removed 2026-10-04 (the user's call): "No TUI, and no second in-binary front-end."** The 2026-08-24 non-goal is lifted, unconditioned — an in-binary **full-screen TUI** is in scope (v0.1.6, items 32b–32d: bare `apogee` on a terminal opens it; FTXUI, vendored and pinned). What remains policy regardless: the CLI stays the contract (scripts, machine mode, installers and every raw command untouched — the TUI is additive), and the GUI sibling applications remain a committed direction beside it, not replaced by it. The precedent that shaped the old rule — a full TUI built across two releases and then deleted over its per-view CLI-parity burden — is kept cited on the TUI items as the anti-pattern to design against, not as a ban.
 - **No silent install drift.** Any asset landing in the data directory ships identically across all install paths in the same change.
 
 ## Principles

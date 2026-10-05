@@ -17,12 +17,13 @@
 - Tests: `tests/presentation/cli/` — the refusal and default-suite paths, banner goldens, `/play` end-to-end over scripted providers, chat-unchanged byte-equivalence; machine-mode transcript goldens for a played symphony.
 - Consumes: [27q](symphonies.md) (symphonies to play), [27d](model-suites.md) (the suite, via 27q's gate), 27e's admission/warmup (shipped by then or riding the same seam), 26o (shipped — permission presets), M1 (shipped — the busy line).
 
-**Reference.** The in-house precedent is chat itself, deliberately generalized rather than copied; the SPEC's no-TUI lesson is untouched (execute is a CLI surface like chat, not a second front-end in the non-goal's sense).
+**Reference.** The in-house precedent is chat itself, deliberately generalized rather than copied; execute is a CLI surface like chat, not a screen (specced under the then-standing no-TUI non-goal, which was removed later on 2026-10-04 — the TUI set is [32b](../v0.1.6/tui-shell.md)–32d; this item is unaffected either way).
 
 **Decisions made** (dated):
 - 2026-10-04 — Asked for by the user (the vision's surface); placed in **v0.1.4** with the set at their direction.
 - 2026-10-04 — **Execute ⊇ chat for the suite case** *(recorded as the default, vetoable)*: bare input goes to the root model through the ordinary loop; symphonies are explicit via `/play` until the Orchestrator (27t) makes them model-reachable. One conversation model across both surfaces.
 - 2026-10-04 — The SPEC revision rides this set, dated: Core surfaces grows the fourth front-end; the no-second-in-binary-front-end non-goal is not touched (that lesson is about TUIs/GUIs, and execute is a CLI command).
+- 2026-10-04 — *(Later the same day)* that non-goal was itself removed (the user's call, with the TUI set [32b](../v0.1.6/tui-shell.md)–32d). Nothing here changes: execute remains a CLI command, and the decision above stands as the record of its time.
 - 2026-10-04 — No new machine-mode event types: stage narration rides the side-call shape 26n established; a host sees a play as a turn with narrated side calls and an answer.
 
 **Guardrail(s).**
@@ -37,4 +38,4 @@
 - [ ] A machine-mode driver sees a played symphony as an ordinary turn — side-call narration events plus the answer — with zero new event types.
 - [ ] Chat's test battery is byte-identical before and after the session-core parameterization.
 
-**Scope note.** Item **27s**, earmarked for **v0.1.4**; **gated on [27q](symphonies.md)**. Out of scope: the Orchestrator ([orchestrator.md](orchestrator.md)); any `serve`/HTTP session surface (the GUI direction consumes machine mode, per SPEC); new event types; a TUI (never).
+**Scope note.** Item **27s**, earmarked for **v0.1.4**; **gated on [27q](symphonies.md)**. Out of scope: the Orchestrator ([orchestrator.md](orchestrator.md)); any `serve`/HTTP session surface (the GUI direction consumes machine mode, per SPEC); new event types; the TUI (its own set since 2026-10-04 — [32b](../v0.1.6/tui-shell.md)–32d).

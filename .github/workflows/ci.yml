@@ -10,7 +10,6 @@
 #     pass" ruleset waits for the old job names, and nothing can merge;
 #   - lib/scripts/pr-ci.sh rehearses this file's pull-request jobs, in this
 #     order, through the same scripts: mirror the change there;
-#   - the matrix here and the one in release.yml are the same list on purpose;
 #   - lib/scripts/release-from-pr.sh finds the platforms a run built by its
 #     `build <target>` jobs and `apogee-<target>` artifacts: keep both names;
 #   - a required matrix job never gets a job-level `if:` (see `changes`).
@@ -59,13 +58,24 @@
 # `version bump`; and, once a pull request into `stable` is MERGED, `tag and
 # release`, which publishes the release it makes. Nothing else.
 #
+# One pipeline (user decision, 2026-10-04, M8): this is the only workflow.
+# The separate manual release workflow, its `v*` tag trigger and its second
+# copy of the matrix are gone, so a release is published only by a merge --
+# or by the RE-CUT, this workflow dispatched on `stable` with `publish`
+# (`make -C lib/src/cli release`): every job runs as on any dispatch, and once
+# all five builds pass, `tag and release` publishes that run's own fresh
+# archives. It is the escape hatch for a merge whose archives could not be
+# released (the tree check refused them, or they expired) and for a deleted
+# release cut again. A pushed tag starts nothing: a tag is what a release
+# makes, never how one is asked for.
+#
 # The release after a merge (user decisions, 2026-09-25) rebuilds nothing. It
 # is named by `lib/release/VERSION` -- the release -- while
 # the CLI keeps its own version in lib/src/cli/CMakeLists.txt, which changes
 # only when the CLI does, and then to the release it ships in. Each build job
-# packages its archive through .github/actions/package -- the same action
-# release.yml uses, so the two cannot package differently -- proves the
-# binary runs, and keeps the archive as an artifact of the run. When the pull
+# packages its archive through .github/actions/package -- the one packaging
+# definition -- proves the binary runs, and keeps the archive as an artifact
+# of the run. When the pull
 # request merges, `tag and release` runs lib/scripts/release-from-pr.sh: with
 # the CLI changed, it finds that pull request's last green run, checks every
 # archive was built from exactly the merged source tree and that the
@@ -117,6 +127,11 @@
 #                             request's own archives or, with the CLI
 #                             unchanged, the latest release's. Nothing is
 #                             built.
+#   on request, with `publish` (the re-cut):
+#      tag and release     -- once all five builds above pass: the release
+#                             lib/release/VERSION names at the dispatched
+#                             commit, which must be on `stable`, carrying
+#                             this run's own archives.
 #
 # Why running the binary rather than `ctest -E <something>`: the add_test()
 # entries live in CTest, not in the Catch2 binary, so invoking apogee_tests
@@ -153,6 +168,8 @@ name: CI
 run-name: >-
   ${{ github.event_name == 'workflow_dispatch' && inputs.release_rehearsal_pr
   && format('PR #{0} Release Rehearsal', inputs.release_rehearsal_pr)
+  || github.event_name == 'workflow_dispatch' && inputs.publish
+  && format('{0} Release Re-cut', github.ref_name)
   || github.event_name == 'workflow_dispatch'
   && format('{0} Manual Checks', github.ref_name)
   || github.event.pull_request.merged
@@ -171,7 +188,11 @@ run-name: >-
 #                      release -- every other job skips that one
 #   workflow_dispatch  gh workflow run CI --ref <branch>; with
 #                      release_rehearsal_pr, a rehearsal of the release that
-#                      pull request's merge would publish, and nothing else
+#                      pull request's merge would publish, and nothing else;
+#                      with publish, on `stable`, the re-cut (M8)
+#
+# No `push: tags` either (user decision, 2026-10-04, M8): a hand-pushed `v*`
+# tag starts no workflow, here or anywhere.
 #
 # There is deliberately NO `push: [stable]` (user decision, 2026-09-25: a merge
 # must not start a fresh run from `stable`). It used to rebuild and retest the
@@ -207,6 +228,14 @@ on:
           Leave empty for an ordinary run.
         type: string
         default: ""
+      publish:
+        description: >-
+          The re-cut: build every target from this ref -- which must be on
+          `stable` -- and, once all five builds pass, publish the release
+          lib/release/VERSION names with this run's archives. A version
+          already released is refused. Leave off for an ordinary run.
+        type: boolean
+        default: false
 
 # Every job reads; the one that writes, `tag and release`, asks for its own.
 permissions:
@@ -214,10 +243,11 @@ permissions:
 
 # A newer push to a pull request supersedes a build still running for it. The
 # release after a merge is never superseded or cancelled: it has a group of
-# its own.
+# its own. Nor is a re-cut: a release half made -- a tag, a release object,
+# some of its assets -- is a state nobody asked for, so a second one queues.
 concurrency:
-  group: ci-${{ github.ref }}${{ github.event.action == 'closed' && '-merged' || '' }}
-  cancel-in-progress: ${{ github.event.action != 'closed' }}
+  group: ci-${{ github.ref }}${{ github.event.action == 'closed' && '-merged' || inputs.publish && '-publish' || '' }}
+  cancel-in-progress: ${{ github.event.action != 'closed' && !inputs.publish }}
 
 jobs:
   changes:
@@ -530,8 +560,8 @@ jobs:
 
       # The archive a release ships, the binary proven to run, and both kept
       # as the artifact `apogee-<target>` -- what `tag and release` publishes
-      # once this pull request merges. The same action release.yml packages
-      # with. With the CLI unchanged, nothing was built above: the action
+      # once this pull request merges, or, in a re-cut, at the end of this
+      # run. With the CLI unchanged, nothing was built above: the action
       # copies this platform's archive from the latest release instead, into
       # the same artifact, so the run always carries the CLI.
       - name: Package
@@ -554,12 +584,26 @@ jobs:
     # --publish: every lookup and check, then what it would have published.
     # Worth doing on a release branch's pull request before merging it.
     #
+    # Dispatched with `publish` (the re-cut, M8): this run's own builds, and
+    # only once all five pass -- one gating policy, the merge's: a release
+    # with an archive missing is a release nobody asked for. The script
+    # checks every archive against the dispatched commit's tree, refuses a
+    # commit not on `stable` and a version already released, then tags and
+    # publishes. Who may dispatch is GitHub's: write access to the repository.
+    #
+    # It needs the builds, and they are skipped after a merge and in a
+    # rehearsal: `!cancelled()` lets it run past a skipped need, and the
+    # re-cut alone asks that they succeeded.
+    #
     # A pull request from a fork gets a read-only token, so its merge cannot
     # publish; releases come from this repository's own version branches.
     name: tag and release
+    needs: build
     if: >-
-      (github.event.action == 'closed' && github.event.pull_request.merged)
+      ((github.event.action == 'closed' && github.event.pull_request.merged)
       || inputs.release_rehearsal_pr
+      || (inputs.publish && needs.build.result == 'success'))
+      && !cancelled()
     runs-on: ubuntu-24.04
     permissions:
       contents: write   # the tag and the release
@@ -573,10 +617,36 @@ jobs:
           ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
           fetch-depth: 0
 
+      # A rehearsal builds nothing, so it has nothing to re-cut: asking for
+      # both is two different runs, and neither is guessed at.
+      - name: A rehearsal or a re-cut, not both
+        if: inputs.publish && inputs.release_rehearsal_pr
+        run: |
+          echo "::error::publish and release_rehearsal_pr are two different runs: dispatch one or the other"
+          exit 1
+
       - name: Tag and publish the release
+        if: ${{ !inputs.publish }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number || inputs.release_rehearsal_pr }}
           PUBLISH: ${{ github.event_name == 'pull_request' && '--publish' || '' }}
         run: lib/scripts/release-from-pr.sh "$PR" $PUBLISH
+
+      # The re-cut: this run's five `apogee-<target>` artifacts, each its
+      # archive and the `.source` record of the tree it was built from.
+      - name: This run's archives (re-cut)
+        if: inputs.publish && !inputs.release_rehearsal_pr
+        uses: actions/download-artifact@v8
+        with:
+          pattern: apogee-*
+          path: recut
+          merge-multiple: true
+
+      - name: Tag and publish the re-cut
+        if: inputs.publish && !inputs.release_rehearsal_pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: lib/scripts/release-from-pr.sh --recut recut --run "$GITHUB_RUN_ID" --publish

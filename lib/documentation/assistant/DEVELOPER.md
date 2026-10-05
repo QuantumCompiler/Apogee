@@ -22,7 +22,7 @@ Requirements: CMake ≥ 3.25, a C++20 compiler, and git. `format` / `lint` addit
 
 Today that is `lib/src/cli`. The GUI applications land later as siblings (`lib/src/darwin|linux|windows`), each owning its build the same way, and each joining the `APPS` list in `lib/scripts/cicd.sh`.
 
-The build-related files outside an app directory are the two workflows and the one packaging action under `.github/`, because GitHub requires them there. They are deliberately thin callers into `lib/scripts/` — `cicd.sh` to build, `release-from-pr.sh` to release — for exactly that reason.
+The build-related files outside an app directory are the one workflow and the one packaging action under `.github/`, because GitHub requires them there. They are deliberately thin callers into `lib/scripts/` — `cicd.sh` to build, `release-from-pr.sh` to release — for exactly that reason.
 
 ---
 
@@ -31,13 +31,13 @@ The build-related files outside an app directory are the two workflows and the o
 ```
 Apogee/
 ├── .github/
-│   ├── workflows/ci.yml     — The CLI pipeline: clone llama.cpp + unit tests per platform (parallel), then build +
-│   │                          package per platform; the PR-only `version bump` check; after a merge, `tag and release`;
-│   │                          all behind `what changed`: with the CLI unchanged since the latest release, every job
-│   │                          runs with no build in it and the builds copy the release's archives (2026-09-25)
-│   ├── workflows/release.yml — The manual release: a v* tag or a dry-run dispatch → gate → unit tests ×5 → build ×5 → publish
-│   │                          (thin callers into lib/scripts/; here only because GitHub requires it)
-│   └── actions/package/     — The packaging step both workflows use: package.sh (built) or cli-from-release.sh
+│   ├── workflows/ci.yml     — The CLI pipeline, and the only workflow (M8): clone llama.cpp + unit tests per platform
+│   │                          (parallel), then build + package per platform; the PR-only `version bump` check; after a
+│   │                          merge, `tag and release`; dispatched with `publish`, the re-cut -- the same job, on this
+│   │                          run's own builds. All behind `what changed`: with the CLI unchanged since the latest
+│   │                          release, every job runs with no build in it and the builds copy the release's archives
+│   │                          (2026-09-25). Thin callers into lib/scripts/; here only because GitHub requires it
+│   └── actions/package/     — The one packaging step every build uses: package.sh (built) or cli-from-release.sh
 │                              (copied), then the artifact upload
 ├── .claude/
 │   └── skills/
@@ -99,7 +99,8 @@ Apogee/
     │   │                      (public through the API; the log is not)
     │   └── release-from-pr.sh — The release after a merge: v<VERSION>, with the PR's own CI archives (checked
     │                          against the merged tree and lib/release/VERSION) or, the CLI unchanged, the latest release's;
-    │                          a rehearsal without --publish
+    │                          a rehearsal without --publish. With --recut <dir>, the re-cut: a CI run's own archives,
+    │                          released at the commit checked out (on stable; a released version refused)
     └── src/                 — Application source, one self-contained project per app
         ├── cli/             — The CLI application
         │   ├── CMakeLists.txt   — Build root: standard, options, target wiring, link-policy assertion
@@ -903,15 +904,14 @@ The unit suite never loads a model. An item whose guardrails or acceptance check
 
 ## Changing the pipeline
 
-The CLI pipeline is `ci.yml` (pull requests, and the release after a merge), `release.yml` (the manual path), the package action, and the scripts they call. Several things are coupled to its jobs, and the costly ones fail only at merge time, so a change to it carries this list (user decision, 2026-10-03). `ci.yml`'s header repeats the short version, for whoever opens the file.
+The CLI pipeline is `ci.yml` — pull requests, the release after a merge, and the re-cut on request; since 2026-10-04 (M8) the only workflow — the package action, and the scripts they call. Several things are coupled to its jobs, and the costly ones fail only at merge time, so a change to it carries this list (user decision, 2026-10-03). `ci.yml`'s header repeats the short version, for whoever opens the file.
 
 **A job added, removed or renamed, or a matrix row changed** (`ci.yml`):
 
 1. **The required checks.** Once the pull request's run passes, and **before it merges**: `lib/scripts/required-checks.py --pr <N>` shows the difference, then `--apply` sets it. `--apply` changes the repository's settings, so an agent asks the user before running it. Until it runs, the "Stable: CI must pass" ruleset waits for the old names: a renamed job's old name never reports, and nothing can merge. See [Required checks](#required-checks).
 2. **`lib/scripts/pr-ci.sh`** rehearses the pull-request jobs in their order, through the same scripts, and its summary names them: mirror the change there.
-3. **`release.yml`'s matrix** is the same list as `ci.yml`'s, on purpose. GitHub has no way to share one.
-4. **Names other scripts read.** `release-from-pr.sh` finds the platforms a run built from its successful `build <target>` jobs and their `apogee-<target>` artifacts. Rename either, and change it there.
-5. **A required matrix job never gets a job-level `if:`.** A matrix job skipped whole reports once, under its unexpanded name, so its required check never arrives. Skip its steps instead, as the `changes` job explains.
+3. **Names other scripts read.** `release-from-pr.sh` finds the platforms a run built from its successful `build <target>` jobs and their `apogee-<target>` artifacts. Rename either, and change it there.
+4. **A required matrix job never gets a job-level `if:`.** A matrix job skipped whole reports once, under its unexpanded name, so its required check never arrives. Skip its steps instead, as the `changes` job explains.
 
 **What the CLI is built from changed** — a new directory or file its build reads, outside `lib/src/cli/` and `lib/scripts/`: add it to `cli` in `lib/scripts/changed.sh`. Otherwise a change to it alone is treated as "CLI unchanged", and the release copies the old CLI instead of building the new one.
 
@@ -950,7 +950,7 @@ Every CI build packages its target ([`.github/actions/package`](../../../.github
 
 The run page's summary lists each of those as it passes.
 
-In the Actions list that run is titled `v<VERSION> PR Release`, and the pull request's own runs `v<VERSION> Pull Request Checks` (user decision, 2026-10-04) -- the version there is the branch's name, since a run is named before any file of it can be read, which is one more reason a release branch is named for its release. A rehearsal is `PR #<N> Release Rehearsal`, and a run of the manual path `v<VERSION> Release`.
+In the Actions list that run is titled `v<VERSION> PR Release`, and the pull request's own runs `v<VERSION> Pull Request Checks` (user decision, 2026-10-04) -- the version there is the branch's name, since a run is named before any file of it can be read, which is one more reason a release branch is named for its release. A rehearsal is `PR #<N> Release Rehearsal`, and a re-cut `stable Release Re-cut`.
 
 **One consequence, recorded:** built binaries come from the test merge, so `apogee version` names *its* commit — the same source tree as the merge commit on `stable`, a different hash, and one no branch points at. The tree check is what makes that safe; the release notes do not mention it.
 
@@ -983,33 +983,40 @@ lib/scripts/required-checks.py --apply      # create or update the ruleset to ma
 
 It uses the newest open pull request into `stable`, else the last merged one; `--pr N` picks one. **When the pipeline's jobs change** — renamed, added, removed — run it with `--pr <that pull request> --apply` after the pull request's run passes and before merging: until then the ruleset still waits for the old names, and a renamed job's old name would never report. `--apply` needs `gh` signed in as someone who can administer the repository.
 
-### The manual path
+### The re-cut
 
-Still supported, as the escape hatch — for re-cutting a release, or for tagging a commit that is not the tip of a merge:
+**One pipeline** (user decision, 2026-10-04, M8): `ci.yml` is the only workflow. The separate manual release workflow is gone, and with it its `v*` tag trigger and its second copy of the matrix, so a release is published only by a merge — or by the re-cut, `ci.yml` itself dispatched on `stable` with `publish`. **A hand-pushed `v*` tag starts no workflow**: a tag is what a release makes, never how one is asked for. The escape hatch, for a merge whose own archives cannot be released (the tree check refused them, or the artifacts expired) or a deleted release cut again:
 
 ```sh
 make -C lib/src/cli release VERSION=x.y.z
 ```
 
-Preflights the tree, branch, `lib/release/VERSION` and tag, asks once, then tags and pushes; the tag push runs [`release.yml`](../../../.github/workflows/release.yml), which — unlike the merge path — **rebuilds** every target from the tag, the CLI included even when it is unchanged since the latest release. Use it when a merged pull request's own archives cannot be released: the tree check refused them, or the artifacts expired. `make -C lib/src/cli release-check VERSION=x.y.z` runs the checks and pushes nothing. `VERSION` is the only required input; `REMOTE`, `RELEASE_BRANCH` and `CONFIRM=yes` are the overrides.
+Preflights the tree, branch, `lib/release/VERSION` and tag, asks once, then runs `gh workflow run CI --ref stable -f publish=true` (so it needs `gh` signed in). The run is an ordinary dispatch — `what changed` says "on request: everything runs", so the source suite and all five builds run from `stable`'s tip, the CLI included even when it is unchanged since the latest release — and once **all five** builds pass, `tag and release` downloads that run's own `apogee-<target>` artifacts and runs `release-from-pr.sh --recut`. That checks:
+- the dispatched commit is on `stable`, so a release is merged code whichever way it is cut;
+- every archive's `.source` record names that commit's tree, and the run built every platform it has an archive for;
+- the host's binary runs and, when the CLI changed since the latest release, reports the version;
+- the version is not already released. A tag at another commit, or a release at this commit carrying every archive, is **refused**, by name. A re-cut is asked for by name, so publishing nothing is a failure to report, where a merge declines silently.
+
+Then the tag and the release are created together at that commit. Who may dispatch it is GitHub's rule: write access to the repository. `gh workflow run CI --ref stable -f publish=true` does the same without the preflight. `make -C lib/src/cli release-check VERSION=x.y.z` runs the checks and dispatches nothing. `VERSION` is the only required input; `REMOTE`, `RELEASE_BRANCH` and `CONFIRM=yes` are the overrides.
+
+GitHub reads a dispatch's inputs from the workflow on the default branch, so `publish` exists once this change is on `stable`.
 
 ### The version guard, and where it lives
 
-A tag whose name disagrees with the version it should carry would publish a release under a name the repository does not give it, and the build would stay green throughout — the pipeline's "Verify the staged binary runs" step runs `apogee version` but never reads what it printed. Since 2026-09-25 the name is `lib/release/VERSION`, and the guard holds in four places:
-- `make release` refuses a tag that disagrees with `lib/release/VERSION`, locally;
-- `release.yml`'s `gate` job fails the run for it before any runner starts;
-- on the merge path nobody types the tag at all — it is `lib/release/VERSION` at the merge commit — and when the CLI changed, the executable must report that same version;
+A tag whose name disagrees with the version it should carry would publish a release under a name the repository does not give it, and the build would stay green throughout — the pipeline's "Verify the staged binary runs" step runs `apogee version` but never reads what it printed. Since 2026-09-25 the name is `lib/release/VERSION`, and nobody types a tag any more: on the merge path it is `lib/release/VERSION` at the merge commit, and in the re-cut `lib/release/VERSION` at the dispatched commit. The guard holds in three places:
+- `make release` refuses a `VERSION` that disagrees with `lib/release/VERSION`, locally;
+- on either path, when the CLI changed since the latest release, the executable must report that same version;
 - CI's `version bump` refuses a pull request that changes the CLI without the CLI's own version equalling `lib/release/VERSION`.
 
-The gate is the one a hand-pushed tag cannot skip.
+A hand-pushed tag cannot get around any of them: since M8 nothing runs on one.
 
 ### No orphaned tags
 
-Both paths create the tag and the release in a single `gh release create --target <sha>`, and nothing earlier pushes a tag. A failure therefore leaves nothing behind: no tag without its release to delete first. A tag made with a run's `GITHUB_TOKEN` triggers no workflow, which is why the merge path's tag does not also start `release.yml`.
+Both paths create the tag and the release in a single `gh release create --target <sha>`, and nothing earlier pushes a tag. A failure therefore leaves nothing behind: no tag without its release to delete first. And no workflow listens for a tag (M8), so the tag a release makes starts nothing.
 
 ### Dry run
 
-For the merge path, the rehearsal above is the dry run. For the manual path, `make release-check VERSION=x.y.z` is the local half — tree and version, no remote — and the pipeline's is the `workflow_dispatch` with `dry_run` (default on): Actions → Release → "Run workflow". A dispatch always builds, even when the version is already released, so a dry run is never silently skipped; only `publish` is. All five archives land as Actions artifacts to inspect. Worth doing whenever the pipeline itself changed.
+For the merge path, the rehearsal above is the dry run. For the re-cut, `make release-check VERSION=x.y.z` is the local half — tree and version, no remote — and the pipeline's is a plain dispatch of CI with `publish` off (Actions → CI → "Run workflow", or `gh workflow run CI --ref <branch>`): every job runs and all five archives land as Actions artifacts to inspect, and nothing is published. `lib/scripts/release-from-pr.sh --recut <dir> --run <id>`, on a run's downloaded artifacts (`gh run download <id> --pattern 'apogee-*' --dir <dir>`), rehearses the publish step itself from a checkout of the commit: every check, then what it would publish. Worth doing whenever the pipeline itself changed.
 
 ### Pitfall: never name a branch after a tag
 
@@ -1019,24 +1026,21 @@ If both `refs/heads/vX.Y.Z` and `refs/tags/vX.Y.Z` exist, git cannot resolve the
 error: src refspec vX.Y.Z matches more than one
 ```
 
-`git checkout vX.Y.Z` also warns and picks the branch. Version-named *branches* are for releases still being built; a finished release is a tag and only a tag. Pushing as `refs/tags/vX.Y.Z` is immune either way, which is why `make release` spells it out.
+`git checkout vX.Y.Z` also warns and picks the branch. Version-named *branches* are for releases still being built; a finished release is a tag and only a tag. Pushing as `refs/tags/vX.Y.Z` is immune either way — but nothing here pushes a tag any more: the release creates it, by its full name.
 
 ### Re-running a failed run
 
 Use GitHub's own **Re-run failed jobs** (run page, or `gh run rerun <id> --failed`). Nothing needs doing first.
 
-**The merge path.** A failed `tag and release` re-runs as it is: the script decides from what exists, not from which attempt it is. No tag yet means create; a tag at the merge commit means an earlier attempt got that far, so it creates the release if missing and uploads the archives into it with `--clobber`; a tag anywhere else means the version is out and nothing is published. A re-run runs the workflow file of the original event — the merge commit's — so a *fix* to the script or the job cannot be re-run into that merge: release that version through the manual path instead.
+**The merge path.** A failed `tag and release` re-runs as it is: the script decides from what exists, not from which attempt it is. No tag yet means create; a tag at the merge commit means an earlier attempt got that far, so it creates the release if missing and uploads the archives into it with `--clobber`; a tag anywhere else means the version is out and nothing is published. A re-run runs the workflow file of the original event — the merge commit's — so a *fix* to the script or the job cannot be re-run into that merge: release that version through the re-cut instead.
 
-**The manual path** is built to survive it too:
+**The re-cut** is built to survive it too:
 
 - **Artifacts are overwritable.** `upload-artifact` scopes artifacts to the *run*, not the attempt, and its default (`overwrite: false`) fails when a name already exists. Attempt 2 would rebuild everything and then die at the upload. `overwrite: true` is set for exactly this.
-- **The gate yields to an explicit re-run.** Normally it stops the run when the version is already released. On `GITHUB_RUN_ATTEMPT > 1` it proceeds anyway: pressing re-run *is* the statement of intent, and refusing it would leave a half-published release unfixable by the pipeline that made it.
-- **Publish finishes what it started.** `gh release create` makes the release and then uploads assets, so it can fail with a real release in place and assets missing. If the release exists, publish uploads into it with `--clobber` instead of failing.
-- **Releases never run concurrently.** `concurrency: release-<ref>` with `cancel-in-progress: false` — a second run queues rather than racing, and a release in flight is never cancelled partway.
+- **Publish finishes what it started.** `gh release create` makes the release and then uploads assets, so it can fail with a real release in place and assets missing. A tag already at the dispatched commit is an earlier attempt's: the re-run creates the release if missing and uploads into it with `--clobber` — while the release lacks an archive. One carrying every archive is released, and refused.
+- **A re-cut is never cancelled.** It has a concurrency group of its own with `cancel-in-progress: false`: a second dispatch queues rather than racing, and a release in flight is never cancelled partway.
 
-What a re-run does **not** bypass is the version guard: a tag disagreeing with `CMakeLists.txt` fails the gate on every attempt. That is a wrong input, not a flaky one.
-
-**The one case re-run-failed will not catch:** `windows-x64` and `windows-arm64` are `continue-on-error` in `release.yml`, so a Windows failure is reported as a *success* and is not a "failed job". To retry one, use **Re-run all jobs**, or fix the cause and cut it again.
+What a re-run does **not** bypass is the version guard: a binary that disagrees with `lib/release/VERSION` fails on every attempt. That is a wrong input, not a flaky one. Every platform gates the re-cut, Windows included, as it gates a merge — one policy, the stricter one — so a failed build is a failed job that **Re-run failed jobs** retries.
 
 In CI's build jobs, re-runs are free of all this: the only side effect is the artifact, and the packaging action uploads with `overwrite: true` for the same reason as above. The only wrinkle is `concurrency: ci-<ref>` with `cancel-in-progress: true`: re-running an old run on a ref that has a newer run in flight will cancel one of them. The release after a merge has a group of its own and is never cancelled.
 

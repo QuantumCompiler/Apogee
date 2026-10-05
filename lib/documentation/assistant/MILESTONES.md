@@ -2067,6 +2067,53 @@ Asked for directly (Taylor), in three reports: "Not all subcommands have tab aut
 - No real `~/.apogee-dev` or `~/.apogee-test` was created, and nothing ran against the user's own install. Every check above used a temporary home.
 - `make lint` was not run over the whole tree, which takes about 25 minutes. clang-tidy over the touched sources and tests raised none of the error-class checks, and the two new style warnings it did raise were fixed. The touched files are formatted, and the build has no new compiler warnings.
 
+### 2026-10-04 — `ci-single-pipeline` (maintenance item M8): one pipeline
+
+**Why.** The user's ask (2026-10-04): one pipeline instead of two, the tag and release happening only when the branch is merged, and the second pipeline's Actions title gone. The Actions sidebar listed **CI** — the pull-request gates, the five builds, and `tag and release` after a merge — beside **Release**, the manual escape hatch kept since 2026-09-25: a hand-pushed `v*` tag rebuilt every target and published, with a dry-run dispatch beside it. The merge path already published only on a merge. Retiring the second workflow and its tag trigger makes that true by construction rather than by convention. Its one capability nothing else had, the **re-cut** — rebuild all five targets from source and publish, for a merge whose archives cannot be released or a deleted release cut again — moved into CI, so the escape hatch survives inside the one workflow.
+
+**What was built**
+
+- [x] **`.github/workflows/release.yml` deleted**, and with it the "Release" title in Actions, the `v*` tag trigger, and the second copy of the five-row matrix ("the same list on purpose", because GitHub cannot share one). A hand-pushed tag now starts no workflow: a tag is what a release makes, never how one is asked for. `ci.yml` is the only workflow.
+- [x] **The re-cut, as a `publish` input on CI's dispatch** (`ci.yml`, default off). A dispatch already ran every job and kept all five archives as artifacts, which was the old dry run in all but name. `publish` adds the one leg:
+  - `tag and release` now `needs: build` and runs past a skipped need (`!cancelled()`). After a merge and in a rehearsal it routes as before. On a dispatch with `publish` it runs only once **all five** builds pass, downloads that run's own `apogee-<target>` artifacts, and calls the script's new re-cut mode.
+  - The run is titled `<ref> Release Re-cut` and has a concurrency group of its own that is never cancelled. A release half made is a state nobody asked for, so a second dispatch queues; the old workflow kept that rule and it carries over.
+  - `publish` beside `release_rehearsal_pr` is refused: a rehearsal builds nothing, so they are two different runs.
+- [x] **`release-from-pr.sh --recut <dir> [--run <id>] [--publish]`**: the re-cut shares every step of the merge path but the first and the fourth, with no second copy:
+  - **The commit is the one checked out**, and it must be on `stable`: a release is merged code, whichever way it is cut.
+  - **The platforms are the run's successful `build <target>` jobs**, found by the same function the merge path now calls (`built_targets`). Every one's archive must be in `<dir>`, its `.source` naming that commit's tree.
+  - **The binary is run**, and must report the version when the CLI changed since the latest release.
+  - **A version already released is refused, by name**, where the merge path declines silently: a tag at another commit, or a release at this commit carrying every archive. A re-cut is asked for by name, so publishing nothing is a failure to report. A release at this commit that is missing an archive is an earlier attempt's, and the re-run finishes it.
+- [x] **`make release` rewired**: the same preflight (on `stable`, clean, in sync with the remote, `VERSION` matching `lib/release/VERSION`, the tag free locally and on the remote, no branch named like it), one confirmation, then `gh workflow run CI --ref stable -f publish=true`. No local tag is made or pushed. A retired trigger with a live target still pointing at it would have been a silent no-op.
+- [x] **The sweep**: `ci.yml`'s header, `changed.sh` (the deleted file is no longer a CLI input), the package action's header, `version-check.sh`, the Makefile's help and comments, the update-documents skill's pipeline step, CLAUDE.md (Stack, the Codebase Map's `ci.yml` and scripts rows, Release and Install Infrastructure) and DEVELOPER.md (the tree, **Changing the pipeline** — the matrix-coupling item is gone — and **Cutting a release**: the re-cut, the version guard, orphaned tags, the dry run, re-running).
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| The re-cut | Kept, as a CI dispatch input *(recorded default, 2026-10-04)* | The ask was about the workflow count and the Actions sidebar; the escape hatch exists for real needs (artifacts expire, the tree check can refuse). |
+| The `publish` guard | Write access to dispatch, plus the already-released refusal; no extra confirmation input *(default taken)* | The Actions UI's run-workflow prompt, and `make release`'s own, are the confirmation. |
+| Where a re-cut may publish | Only a commit on `stable` | "Only when the branch is merged", the user's own words, holds for both paths. Tagging an off-tip commit, which the old manual path allowed, is gone with it. |
+| Gating | All five builds or nothing (2026-10-04) | The old workflow let both Windows targets fail and published three archives. One pipeline has one policy, and it is the stricter one the merge path already had. |
+| A released version | Refused in a re-cut, declined on a merge | A merge that publishes nothing is how a docs or hotfix merge declines to cut a release. A re-cut that publishes nothing failed at what it was asked to do. |
+| A tag at the dispatched commit | Finished while its release lacks an archive; refused once complete | A re-run must be able to finish a half-made release, but a re-cut never replaces published binaries. |
+
+**Verified.**
+- `release-from-pr.sh`, merge path unchanged: rehearsing #4 (v0.1.3) through the shared target lookup found its CI run, matched all five real archives to the merged tree, ran the real macOS binary (`apogee 0.1.3`) and answered "would finish v0.1.3's release" — its answer before the change, since that tag sits at the merge commit.
+- `release-from-pr.sh --recut`, on stand-in archives with a real run's job list (run 37240820951's five `build` jobs):
+  - the rehearsal on a release branch: "would tag v0.1.4 … with 5 archives";
+  - refused: a commit not on `stable`; an archive from another tree; an archive the run built but `<dir>` lacks; a binary reporting the wrong version for a changed CLI;
+  - in throwaway worktrees of `stable`: a re-cut at its tip, where v0.1.3 is released with every archive, and at an older `stable` commit, v0.1.3 released elsewhere, were both refused with the remediation;
+  - the argument errors: no run, a pull request beside `--recut`, `--run` alone.
+- `ci.yml` parses. Its `tag and release` routing was evaluated for every event: an open pull request, a merge, a closed unmerged pull request, a rehearsal, a plain dispatch, a re-cut whose builds pass, fail or are cancelled, and a re-cut with a rehearsal. The merge and the rehearsal route as before, a plain dispatch publishes nothing, and only a re-cut whose five builds pass publishes. No job was renamed, added or removed, so the required checks cannot have changed.
+- `make release-check` on the version branch refuses ("a release is cut from 'stable'"), and `make -n release` shows the dispatch.
+- The sweep: no reference to the deleted workflow, its tag trigger or its title remains outside dated history.
+
+**Not verified here.**
+- **On GitHub.** `actionlint` is not installed, so the workflow's syntax is first checked by the pull request's own run.
+- **The required checks.** `required-checks.py --pr <N>` needs that pull request, and should report no drift.
+- **The dispatch itself.** GitHub reads a dispatch's inputs from the default branch, so `publish` exists once this is merged. The first merge after it should publish exactly as before. A real re-cut is the user's to run, since it publishes.
+- **`make pr-ci`.** It was not run; the pull-request jobs it rehearses are unchanged.
+
 ## Milestone L — The vendor-CLI family
 
 **Goal.** A fifth backend and, more importantly, the machinery the rest of the vendor-CLI family will be built on: Claude driven through the official `claude` CLI as a **long-lived child process** — the subscription-auth path beside the API-key path from Milestone D. It reuses that backend's IR mapping and typed sinks and none of its HTTP: this one speaks JSONL over pipes.

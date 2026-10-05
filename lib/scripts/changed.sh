@@ -42,7 +42,6 @@ paths_of() {
             # Its pipeline's own definition -- a change to how the CLI is
             # built must be exercised by building it.
             echo ".github/workflows/ci.yml"
-            echo ".github/workflows/release.yml"
             echo ".github/actions/package/"
             # Line endings on checkout: the CLI's embedded assets are pinned
             # byte for byte to their files (it broke Windows once, 2026-09-20).

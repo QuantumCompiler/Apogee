@@ -92,8 +92,8 @@ help:
 	@echo "  pr-ci-clean   Remove pr-ci's worktrees, builds and logs"
 	@echo ""
 	@echo "Cutting a release (DEVELOPER.md -> Cutting a release):"
-	@echo "  release-check Preflight a release -- checks only, pushes nothing"
-	@echo "  release       Preflight, then tag $(RELEASE_BRANCH) and push; the push cuts it"
+	@echo "  release-check Preflight a re-cut -- checks only, dispatches nothing"
+	@echo "  release       Preflight, then dispatch CI's re-cut: rebuild $(RELEASE_BRANCH) and publish"
 	@echo "                  make release VERSION=0.1.1"
 	@echo ""
 	@echo "Presets are the five release targets plus 'default' (host native):"
@@ -292,23 +292,29 @@ lint:
 # ---------------------------------------------------------------------------
 # Cutting a release
 #
-# Thin by the same rule as the rest of this file: the tag this pushes runs
-# .github/workflows/release.yml, which builds and publishes on GitHub's
-# runners, and nothing here builds, packages or uploads anything.
+# Thin by the same rule as the rest of this file: this dispatches CI -- the
+# one pipeline, .github/workflows/ci.yml -- with `publish` on, which builds
+# and publishes on GitHub's runners, and nothing here builds, packages, tags
+# or uploads anything.
 #
 # Since 2026-09-22 this is the ESCAPE HATCH, not the everyday path: a merge
 # into stable publishes the release lib/release/VERSION names (since
 # 2026-09-25; the CLI keeps its own version in CMakeLists.txt) --
 # from the merged pull request's own CI archives, or the latest release's when
 # the CLI is unchanged (ci.yml's `tag and release`) -- so the normal way to cut
-# a release is to bump lib/release/VERSION and merge the PR. This target is for a re-cut, for a merge whose own archives could not be
-# released (the tree check refused them, or they expired), or for tagging a
-# commit that is not the tip of a merge. It remains worth keeping because the
-# preflight below is the same set of mistakes either path can make, and it
-# catches them before the remote hears about them.
+# a release is to bump lib/release/VERSION and merge the PR. This target is the
+# RE-CUT (since 2026-10-04, M8, which retired the separate release workflow and
+# its tag trigger): for a merge whose own archives could not be released (the
+# tree check refused them, or they expired), or a deleted release cut again.
+# CI rebuilds all five targets from `stable` and, once every one passes,
+# publishes them -- a version already released is refused. It remains worth
+# keeping because the preflight below is the same set of mistakes either path
+# can make, and it catches them before the remote hears about them.
 #
-#     make release-check VERSION=0.1.1   # preflight only, pushes nothing
-#     make release VERSION=0.1.1         # preflight, confirm, tag, push
+#     make release-check VERSION=0.1.1   # preflight only, dispatches nothing
+#     make release VERSION=0.1.1         # preflight, confirm, dispatch the re-cut
+#
+# Pushing a tag by hand does nothing any more: no workflow listens for one.
 #
 # The checks exist because each one is a real way to ship a broken release:
 # a tag that disagrees with lib/release/VERSION publishes a release under a name the
@@ -316,11 +322,11 @@ lint:
 # tag's name makes every later `git push origin vX.Y.Z` fail with
 # "src refspec ... matches more than one".
 #
-# The suite is deliberately NOT run here. Since 2026-09-22 CI runs it per
-# platform, so a tag cut from a merged branch has already been tested; making
-# this target rebuild and re-run it would only delay the push. `make test`
-# remains the gate for anything not yet through CI, and the confirmation
-# prompt says so rather than pretending otherwise.
+# The suite is deliberately NOT run here: the dispatched run runs the source
+# suite on every platform before it builds, as every CI run does, and a
+# re-cut is cut from `stable`, which only merged -- already tested -- pull
+# requests reach. `make test` remains the gate for anything not yet through
+# CI.
 # ---------------------------------------------------------------------------
 
 REMOTE         ?= origin
@@ -371,27 +377,20 @@ release-check:
 
 release: release-check
 	@set -euo pipefail; \
+	if ! command -v gh >/dev/null 2>&1; then \
+	    echo "error: the re-cut is a dispatch of CI: install gh (https://cli.github.com) and sign in" >&2; exit 1; fi; \
 	if [ "$(CONFIRM)" != "yes" ]; then \
 	    echo ""; \
-	    echo "Pushing $(TAG) to $(REMOTE) builds all five targets and publishes a PUBLIC"; \
-	    echo "GitHub release. The test suite is your gate, not the pipeline's -- run"; \
-	    echo "'make test' first if you have not."; \
-	    printf "Push %s? [y/N] " "$(TAG)"; \
+	    echo "Dispatching CI on $(RELEASE_BRANCH) with publish=true rebuilds all five targets from"; \
+	    echo "$(RELEASE_BRANCH) @ $$(git rev-parse --short HEAD) and, once every build passes, publishes $(TAG)"; \
+	    echo "as a PUBLIC GitHub release."; \
+	    printf "Dispatch the re-cut of %s? [y/N] " "$(TAG)"; \
 	    read -r reply </dev/tty; \
-	    case "$$reply" in y|Y|yes|YES) ;; *) echo "aborted; nothing was tagged or pushed"; exit 1 ;; esac; \
+	    case "$$reply" in y|Y|yes|YES) ;; *) echo "aborted; nothing was dispatched"; exit 1 ;; esac; \
 	fi; \
-	git tag -a "$(TAG)" -m "Apogee $(TAG)"; \
-	git push "$(REMOTE)" "refs/tags/$(TAG)"; \
+	gh workflow run CI --ref "$(RELEASE_BRANCH)" -f publish=true; \
 	echo ""; \
-	echo "pushed $(TAG) -- the Release workflow is now running."; \
-	if command -v gh >/dev/null 2>&1; then \
-	    echo "  gh run watch \$$(gh run list --workflow=Release --limit 1 --json databaseId -q '.[0].databaseId')"; \
-	else \
-	    url="$$(git remote get-url $(REMOTE))"; \
-	    case "$$url" in \
-	        *github.com*) echo "  https://github.com/$$(printf '%s' "$$url" | sed -e 's#.*github.com[:/]##' -e 's#\.git$$##')/actions" ;; \
-	        *)            echo "  watch it on the repository's Actions tab" ;; \
-	    esac; \
-	fi; \
+	echo "dispatched -- CI is building $(TAG) from $(RELEASE_BRANCH); its run is titled '$(RELEASE_BRANCH) Release Re-cut'."; \
+	echo "  gh run watch \$$(gh run list --workflow=CI --branch $(RELEASE_BRANCH) --event workflow_dispatch --limit 1 --json databaseId -q '.[0].databaseId')"; \
 	echo ""; \
 	echo "Next: open the branch for the release after this one, from $(RELEASE_BRANCH)."

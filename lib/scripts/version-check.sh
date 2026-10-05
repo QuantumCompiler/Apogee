@@ -31,7 +31,7 @@
 # Released means the release exists: `gh release view`, when gh is installed
 # and signed in (on a runner, GH_TOKEN). Without gh it asks the remote for the
 # tag instead. The two agree, because the tag and its release are created in
-# one `gh release create` and never apart (release-from-pr.sh, make release).
+# one `gh release create` and never apart (release-from-pr.sh, on either path).
 set -euo pipefail
 
 fail() {  # fail <file> <message>

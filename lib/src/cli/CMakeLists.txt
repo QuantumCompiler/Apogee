@@ -79,7 +79,7 @@ if(NOT APOGEE_CHANNEL MATCHES "^(release|dev|test)$")
 endif()
 
 # Everything links statically into the one executable: it ships alone, on
-# every target (the release workflow copies the binary and nothing else; the
+# every target (a release archive carries the binary and nothing else; the
 # Windows presets add -static for the runtime too). Set HERE, before any
 # dependency is declared, and forced: a subproject's own
 # `option(BUILD_SHARED_LIBS ... ON)` -- llama.cpp's, for one -- would otherwise
