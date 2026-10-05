@@ -79,6 +79,10 @@ void say(const CheckInputs& inputs, const std::string& label, std::size_t done =
 
 void check_version(CheckReport& report, const CheckInputs& inputs) {
     add(report, Status::Ok, "Version", "apogee", std::string{version::semantic()});
+    add(report, Status::Ok, "Version", "channel",
+        std::string{harness::channel_name(inputs.root.channel)});
+    add(report, Status::Ok, "Version", "root",
+        inputs.home.string() + " -- " + harness::root_reason(inputs.root));
 
     if (inputs.executable.empty()) {
         return;
@@ -1698,10 +1702,6 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->callback([&context, flags]() {
         CheckInputs inputs;
         inputs.config_path = harness::resolve_config_path(context.config_path);
-        inputs.env = [](std::string_view name) {
-            const char* value = std::getenv(std::string{name}.c_str());
-            return value == nullptr ? std::string{} : std::string{value};
-        };
 
         try {
             inputs.home = harness::apogee_home();
@@ -1709,49 +1709,72 @@ void CheckCommand::bind(CLI::App& root, const RootContext& context) {
             std::cerr << "apogee check: " << e.what() << "\n";
             throw CLI::RuntimeError(1);
         }
-
-        inputs.executable = platform::executable_path();
-
-        std::error_code exists_code;
-        if (!std::filesystem::exists(inputs.config_path, exists_code)) {
-            inputs.config_missing = true;
-        } else {
-            try {
-                inputs.config = harness::load_config(inputs.config_path);
-            } catch (const harness::ConfigError& e) {
-                inputs.config_error = e.what();
-            }
-        }
-
-        if (flags->fix) {
-            const std::vector<std::string> done = apply_fixes(inputs);
-            for (const std::string& line : done) {
-                std::cout << "fixed: " << line << "\n";
-            }
-            if (done.empty()) {
-                std::cout << "nothing to fix\n";
-            }
-        }
-
-        CheckReport report;
-        {
-            // Every model's header is read, so on a full store this takes
-            // seconds: said on one line, gone before the report (M1).
-            BusyLine busy{std::cerr, "checking", busy_options(flags->quiet)};
-            inputs.progress = busy.sink();
-            report = run_checks(inputs);
-            inputs.progress = nullptr;
-        }
-        const ansi::Style style =
-            ansi::Style::detect(flags->no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
-        std::cout << render_report(report, style.color_enabled());
+        inputs.root = harness::current_root();  // which rung chose it (M10)
 
         // Non-zero on failure so a script can gate on it -- the reason this is
         // a command rather than a page of documentation.
-        if (!report.passed()) {
+        if (!run_check_pass(std::move(inputs), CheckPassOptions{.fix = flags->fix,
+                                                                .quiet = flags->quiet,
+                                                                .no_color = flags->no_color})) {
             throw CLI::RuntimeError(1);
         }
     });
+}
+
+bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
+    if (!inputs.env) {
+        inputs.env = [](std::string_view name) {
+            const char* value = std::getenv(std::string{name}.c_str());
+            return value == nullptr ? std::string{} : std::string{value};
+        };
+    }
+    if (inputs.executable.empty()) {
+        inputs.executable = platform::executable_path();
+    }
+
+    std::error_code exists_code;
+    if (!std::filesystem::exists(inputs.config_path, exists_code)) {
+        inputs.config_missing = true;
+    } else {
+        try {
+            inputs.config = harness::load_config(inputs.config_path);
+        } catch (const harness::ConfigError& e) {
+            inputs.config_error = e.what();
+        }
+    }
+
+    if (options.fix) {
+        const std::vector<std::string> done = apply_fixes(inputs);
+        std::size_t created = 0;
+        for (const std::string& line : done) {
+            if (options.fold_created && line.starts_with("created ")) {
+                ++created;
+                continue;
+            }
+            std::cout << "fixed: " << line << "\n";
+        }
+        if (created > 0) {
+            std::cout << "fixed: created " << created
+                      << " directories and files, the layout as a fresh install has it\n";
+        }
+        if (done.empty()) {
+            std::cout << "nothing to fix\n";
+        }
+    }
+
+    CheckReport report;
+    {
+        // Every model's header is read, so on a full store this takes
+        // seconds: said on one line, gone before the report (M1).
+        BusyLine busy{std::cerr, "checking", busy_options(options.quiet)};
+        inputs.progress = busy.sink();
+        report = run_checks(inputs);
+        inputs.progress = nullptr;
+    }
+    const ansi::Style style =
+        ansi::Style::detect(options.no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
+    std::cout << render_report(report, style.color_enabled());
+    return report.passed();
 }
 
 }  // namespace apogee::commands

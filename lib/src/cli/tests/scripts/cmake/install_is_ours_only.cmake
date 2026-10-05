@@ -54,9 +54,13 @@ endif()
 file(GLOB_RECURSE installed RELATIVE "${WORK_DIR}" "${WORK_DIR}/*")
 list(SORT installed)
 
-# Exactly one file: the executable. `apogee_core` is a static library and an
-# implementation detail; no dependency may appear at all.
-set(expected "bin/apogee${EXE_SUFFIX}")
+# Exactly one file: the executable, under its channel's name (`apogee`, or
+# `apogee-dev` for a dev build -- M10). `apogee_core` is a static library and
+# an implementation detail; no dependency may appear at all.
+if(NOT DEFINED EXE_NAME)
+    message(FATAL_ERROR "EXE_NAME must be set: the executable's file name")
+endif()
+set(expected "bin/${EXE_NAME}")
 if(NOT installed STREQUAL expected)
     string(REPLACE ";" "\n  " pretty "${installed}")
     message(FATAL_ERROR

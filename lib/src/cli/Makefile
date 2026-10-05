@@ -16,6 +16,25 @@ BUILD_DIR := build/$(PRESET)
 # no sudo, so the everyday developer install never runs a build as root. The
 # system-wide install is `make install PREFIX=/usr/local`.
 PREFIX ?= $(HOME)/.local
+# The channel's installed binary: `install` ends in its `check --fix`,
+# `uninstall` runs its own `uninstall`, and `reinstall` resets with it.
+APOGEE_BIN ?= $(PREFIX)/bin/$(APOGEE_NAME)
+
+# The install channel (M10, DEVELOPER.md -> Install channels): which data
+# directory the installed binary owns -- release ~/.apogee, dev ~/.apogee-dev,
+# test ~/.apogee-test -- baked in when it is built, and the name it installs
+# under beside the others: apogee, apogee-dev, apogee-test. `make` has no long
+# options, so `MODE=dev` is how this file spells the binary's `--dev`.
+MODE ?= release
+CHANNELS := release dev test
+ifneq ($(words $(MODE)),1)
+$(error MODE must be one of: $(CHANNELS) (got '$(MODE)'))
+endif
+ifeq ($(filter $(CHANNELS),$(MODE)),)
+$(error MODE must be one of: $(CHANNELS) (got '$(MODE)'))
+endif
+APOGEE_NAME := $(if $(filter release,$(MODE)),apogee,apogee-$(MODE))
+
 JOBS ?= $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 
 # Repo root is three levels up from lib/src/cli.
@@ -34,17 +53,32 @@ LINT_CXX     ?= $(dir $(CLANG_TIDY))clang++
 # formatted or linted.
 SOURCES := $(shell find source tests \( -name '*.cpp' -o -name '*.h' \) 2>/dev/null)
 
-.PHONY: help build install install-completions install-zsh-completion test clean fresh format format-check lint no-llama all release release-check pr-ci pr-ci-clean
+.PHONY: help build install reinstall install-completions install-zsh-completion test clean fresh format format-check lint no-llama all release release-check pr-ci pr-ci-clean
 
 help:
 	@echo "Apogee CLI — build wrapper (repo-wide entry point: lib/scripts/cicd.sh)"
 	@echo ""
-	@echo "Usage: make [target] [PRESET=<name>] [JOBS=N] [PREFIX=<dir>]"
+	@echo "Usage: make [target] [PRESET=<name>] [JOBS=N] [PREFIX=<dir>] [MODE=<channel>]"
 	@echo "       make -C lib/src/cli [target]   (from the repo root)"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build         Configure + build (preset: $(PRESET))"
+	@echo "  build         Configure + build (preset: $(PRESET), channel: $(MODE))"
 	@echo "  install       Build, then install the binary to $(PREFIX)/bin"
+	@echo "  reinstall     Start over from source: a fresh build, install, then 'apogee reset'"
+	@echo "                  on the installed binary -- it shows the plan and waits for 'yes'."
+	@echo "                  KEEP=\"<row> ...\" keeps those rows of the data directory and ONLY"
+	@echo "                  those. A row is one of the layout's top-level directories --"
+	@echo "                  'apogee reset --help' lists them, 'apogee reset --keep <TAB>'"
+	@echo "                  completes them. Bare 'make reinstall' keeps nothing."
+	@echo "                  make reinstall KEEP=models"
+	@echo "  uninstall     Run the installed binary's own 'uninstall' (it shows the plan and asks)"
+	@echo ""
+	@echo "Install channels (MODE=, default release) -- each its own binary and data directory:"
+	@echo "  release       apogee        ~/.apogee        with shell completions"
+	@echo "  dev           apogee-dev    ~/.apogee-dev"
+	@echo "  test          apogee-test   ~/.apogee-test"
+	@echo "                  make install MODE=dev   /   make uninstall MODE=dev"
+	@echo "                  make reinstall MODE=dev KEEP=models"
 	@echo "  test          Build, then run the full ctest suite"
 	@echo "  lint          clang-tidy over source/ and tests/"
 	@echo "  format        Rewrite source/ and tests/ in the project style"
@@ -69,8 +103,11 @@ help:
 
 all: build
 
+# The channel is passed on every configure, release included: CMake caches it,
+# so a build that left it to the cache would quietly stay whatever channel
+# the build directory last saw.
 build:
-	cmake --preset $(PRESET)
+	cmake --preset $(PRESET) -DAPOGEE_CHANNEL=$(MODE)
 	cmake --build $(BUILD_DIR) -j $(JOBS)
 
 # Builds first so `make install` on a clean checkout is one command, and so an
@@ -87,17 +124,70 @@ build:
 # the same call -- so no install path holds a list of directories that could go
 # stale against the others. That drift is the bug class this guards against;
 # the CI parity gate diffs two installs to keep it closed.
+#
+# MODE=dev or MODE=test installs that channel's binary beside the release one
+# and seeds that channel's root; the completion stubs stay release-only, since
+# they call `apogee` by name.
 install: build
 	@cmake --install $(BUILD_DIR) --prefix "$(PREFIX)" --component apogee
+ifeq ($(MODE),release)
 	@$(MAKE) --no-print-directory install-completions PREFIX="$(PREFIX)"
+else
+	@echo "no shell completions for the $(MODE) channel: the stubs call 'apogee' by name"
+endif
 	@echo ""
-	@"$(PREFIX)/bin/apogee" check --fix
+	@"$(APOGEE_BIN)" check --fix
 	@case ":$$PATH:" in \
 		*":$(PREFIX)/bin:"*) ;; \
 		*) echo ""; \
-		   echo "note: $(PREFIX)/bin is not on your PATH -- add it to run 'apogee' by name:"; \
+		   echo "note: $(PREFIX)/bin is not on your PATH -- add it to run '$(APOGEE_NAME)' by name:"; \
 		   echo "      export PATH=\"$(PREFIX)/bin:\$$PATH\"" ;; \
 	esac
+
+# Starting over from source (M9): a fresh build -- every object recompiled,
+# the fetched dependencies kept -- then `install`, then `apogee reset` on the
+# binary just installed. Each word of KEEP is forwarded as `--keep <word>`, and
+# only the rows named are kept: bare, it keeps nothing, which the plan shows
+# and the prompt confirms before anything is removed.
+#
+#     make reinstall                        # a fresh install, nothing kept
+#     make reinstall KEEP=models            # ...the models kept
+#     make reinstall KEEP="models sessions" # ...and the chats
+#
+# This file does not know the rows. They are the layout's one declaration
+# (source/data/contracts/layout.h): the binary checks every word, refuses one
+# the layout does not declare before anything is removed, and completes them
+# on `apogee reset --keep <TAB>`. The reset is the binary's, not a shell `rm`,
+# for uninstall's reason -- a removal written twice drifts -- and it is never
+# given --yes: the destructive confirmation belongs to the person, even in the
+# middle of a make target. The installed binary is run only as $(APOGEE_BIN),
+# so the binary `install` put there is the one that resets its own root --
+# with MODE=dev, `apogee-dev` resetting ~/.apogee-dev.
+#
+# It stops where `install` stops: an install whose `check --fix` reports a
+# failure (an unparseable config, an unreadable model) ends the target before
+# the reset. `apogee reset` needs nothing from the config -- run it directly.
+KEEP ?=
+
+reinstall:
+	cmake --preset $(PRESET) -DAPOGEE_CHANNEL=$(MODE)
+	cmake --build $(BUILD_DIR) -j $(JOBS) --clean-first
+	@$(MAKE) --no-print-directory install
+	@echo ""
+	@"$(APOGEE_BIN)" reset $(addprefix --keep ,$(KEEP))
+
+# Removes the MODE channel's install by running that binary's own `uninstall`:
+# its binary, its data directory -- the root it was built for, whatever flag
+# or channel any other binary would name -- and, for release only, the
+# completions. Its plan is shown and its prompt asked as they are anywhere:
+# this target never answers a destructive prompt for the user. The removal
+# lives in the binary rather than here for the reason the uninstall header
+# gives -- a second implementation in shell drifts.
+.PHONY: uninstall
+uninstall:
+	@if [ ! -x "$(APOGEE_BIN)" ]; then \
+	    echo "error: no $(MODE)-channel install at $(APOGEE_BIN)" >&2; exit 1; fi
+	@"$(APOGEE_BIN)" uninstall
 
 # Completions go where each shell already looks. A shell the user does not run
 # gets nothing -- creating its config directory would be litter that `apogee
@@ -166,7 +256,7 @@ pr-ci-clean:
 # default and is most of the compile time. The llamacpp backend then answers
 # "not built in"; every other package builds and tests as usual.
 no-llama:
-	cmake --preset $(PRESET) -DAPOGEE_ENABLE_LLAMA=OFF
+	cmake --preset $(PRESET) -DAPOGEE_ENABLE_LLAMA=OFF -DAPOGEE_CHANNEL=$(MODE)
 	cmake --build $(BUILD_DIR) -j $(JOBS)
 
 clean:

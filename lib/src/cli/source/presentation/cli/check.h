@@ -8,6 +8,7 @@
 
 #include "cli/command.h"
 #include "contracts/config.h"
+#include "contracts/paths.h"
 #include "views/status_line.h"
 
 /// `apogee check` — the install doctor.
@@ -67,6 +68,11 @@ struct CheckInputs {
     /// Root of the data directory to inspect.
     std::filesystem::path home;
 
+    /// How the chain chose `home`, and this build's channel (M10): the
+    /// Version section names both, so a doctor run against another root than
+    /// meant says so on its first lines.
+    harness::RootResolution root;
+
     /// Config file path, and the load outcome. `config_error` non-empty means
     /// the file did not parse; `config_missing` distinguishes "not there yet"
     /// (a fresh install, a warning) from "broken" (a failure).
@@ -98,6 +104,33 @@ struct CheckInputs {
 
 /// Renders a report for a terminal. `color` gates ANSI.
 [[nodiscard]] std::string render_report(const CheckReport& report, bool use_color);
+
+/// How `run_check_pass` runs.
+struct CheckPassOptions {
+    /// Repair first (`--fix`), saying what was repaired.
+    bool fix = false;
+    /// No busy line while the checks run.
+    bool quiet = false;
+    /// No ANSI colour in the report.
+    bool no_color = false;
+    /// Say the repairs that created something as one count rather than a line
+    /// each. Recreating a whole layout -- what a reset does -- creates well
+    /// over a hundred directories and bundled files, and a line apiece would
+    /// scroll the plan and the removals off the screen. Every other repair is
+    /// still said in full.
+    bool fold_created = false;
+};
+
+/// What `apogee check` does once it knows the root and the config path in
+/// `inputs`: reads the config there (loaded, broken, or not there yet), the
+/// environment and the running binary; repairs under `fix` and prints what it
+/// did; then runs every check and prints the report, all to stdout. Returns
+/// whether the install passed.
+///
+/// `apogee reset` ends with this very pass, `fix` on (M9), so the state a reset
+/// leaves is created by the one seeding path and verified by the doctor itself
+/// -- never by a second copy of either.
+[[nodiscard]] bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options);
 
 class CheckCommand final : public Command {
 public:

@@ -22,6 +22,8 @@
 ///     call the binary to do it, so neither shell script owns a copy of the
 ///     list),
 ///   - `apogee check` validates exactly these entries,
+///   - `apogee reset` plans its removals from exactly these entries, and its
+///     `--keep` accepts and completes exactly them,
 ///   - the CI parity gate diffs two installs against each other.
 ///
 /// Adding a directory means adding one row below. A contributor cannot forget
@@ -44,9 +46,9 @@ struct LayoutEntry {
     bool private_mode = false;
 
     /// Whether the directory holds the user's own data — models they supplied,
-    /// conversations they had. `apogee uninstall` prompts before removing a
-    /// tree containing any of these, and never deletes one under `--yes`
-    /// without having said so.
+    /// conversations they had. `apogee uninstall` and `apogee reset` prompt
+    /// before removing a tree containing any of these, and never delete one
+    /// under `--yes` without having said so.
     bool user_data = false;
 };
 

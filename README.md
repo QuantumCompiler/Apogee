@@ -78,6 +78,8 @@ lib/scripts/cicd.sh --test
 
 That builds every application for the host's native target and runs its suite — the same call CI makes. Requirements: CMake ≥ 3.25, a C++20 compiler, and git (libcurl development headers on Linux). llama.cpp is off by default in a source build — configure with `-DAPOGEE_ENABLE_LLAMA=ON` to link it; release binaries always ship with it. `make -C lib/src/cli help` lists the CLI project's own targets.
 
+`make -C lib/src/cli install` puts what you built in `~/.local/bin` with its shell completions, the same install the release scripts make. `MODE=dev` or `MODE=test` installs `apogee-dev` or `apogee-test` beside it instead, each keeping its models, chats and keys in a directory of its own (`~/.apogee-dev`, `~/.apogee-test`), so a development build never touches the install you rely on; `make -C lib/src/cli uninstall MODE=dev` removes it again. Any binary can be pointed at another one for a single run with `--dev`, `--test`, `--release` or `--custom <dir>/config/config.yaml`.
+
 ## Status
 
 Young and moving fast: [v0.1.0](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.0) (the harness), [v0.1.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.1) (the release pipeline), [v0.1.2](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.2) (the terminal and the model directory) and [v0.1.3](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.3) (local agent tools and small-model depth) are out, and `v0.1.4` is in development on its branch. The running board of what's shipped, in flight, and next is [ROADMAP.md](lib/documentation/assistant/ROADMAP.md).

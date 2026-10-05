@@ -4,8 +4,11 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
+#include <optional>
 #include <random>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -16,6 +19,8 @@
 #include "cli/uninstall.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
+#include "contracts/paths.h"
+#include "support/channel_guard.h"
 #include "support/env_guard.h"
 
 /// The lifecycle surfaces: shell completion, and what uninstall plans to remove.
@@ -104,6 +109,11 @@ backends:
 }
 
 [[nodiscard]] bool contains(const std::vector<std::string>& haystack, std::string_view needle) {
+    return std::find(haystack.begin(), haystack.end(), needle) != haystack.end();
+}
+
+[[nodiscard]] bool contains_path(const std::vector<std::filesystem::path>& haystack,
+                                 const std::filesystem::path& needle) {
     return std::find(haystack.begin(), haystack.end(), needle) != haystack.end();
 }
 
@@ -1008,4 +1018,151 @@ TEST_CASE("every argument completes to something, or is free text on purpose",
         INFO(kind);
         CHECK(used_kinds.contains(std::string{kind}));
     }
+}
+
+// --- Install channels (M10) ---------------------------------------------------
+
+TEST_CASE("a channel build's uninstall plans its own root, never another, flags or not",
+          "[commands][uninstall][channels]") {
+    // The guardrail: a dev-channel uninstall takes `.apogee-dev` and never the
+    // release root, with a root flag on the line or not -- and leaves the
+    // release install's completions, which a dev install never wrote.
+    const UserHome user_home;
+    const apogee::testing::EnvUnsetGuard no_override{"APOGEE_HOME"};
+    const std::filesystem::path home = user_home.dir.path();
+    REQUIRE(apogee::harness::seed_data_directory(home / ".apogee").ok());
+    REQUIRE(apogee::harness::seed_data_directory(home / ".apogee-dev").ok());
+    const std::filesystem::path stub =
+        home / ".local" / "share" / "bash-completion" / "completions" / "apogee";
+    std::filesystem::create_directories(stub.parent_path());
+    std::ofstream{stub} << "# release stub\n";
+
+    std::vector<std::optional<apogee::harness::RootFlag>> flags{std::nullopt};
+    for (const apogee::harness::Channel channel : apogee::harness::kChannels) {
+        flags.emplace_back(apogee::harness::RootFlag{.channel = channel, .custom_config = {}});
+    }
+    flags.emplace_back(apogee::harness::RootFlag{
+        .channel = std::nullopt, .custom_config = home / "elsewhere" / "config" / "config.yaml"});
+
+    for (const std::optional<apogee::harness::RootFlag>& flag : flags) {
+        INFO((flag ? flag->spelling() : std::string{"no flag"}));
+        const apogee::harness::RootFlagScope scope{flag};
+        {
+            const apogee::testing::BakedChannelGuard dev{apogee::harness::Channel::Dev};
+            const apogee::commands::UninstallPlan plan =
+                apogee::commands::plan_uninstall(apogee::harness::install_home(), {});
+            CHECK(plan.data_directory == home / ".apogee-dev");
+            CHECK(plan.completions.empty());
+        }
+        const apogee::commands::UninstallPlan release =
+            apogee::commands::plan_uninstall(apogee::harness::install_home(), {});
+        CHECK(release.data_directory == home / ".apogee");
+        CHECK(contains_path(release.completions, stub));
+    }
+    // Planning removed nothing.
+    CHECK(std::filesystem::exists(home / ".apogee"));
+    CHECK(std::filesystem::exists(home / ".apogee-dev"));
+}
+
+TEST_CASE("the root flags complete, and the custom flag completes a path",
+          "[commands][completion][channels]") {
+    // ADR 0007: a new flag is offered the moment it exists -- read out of the
+    // live parser, so nothing here lists them for completion's sake.
+    const std::vector<std::string> flags = complete_line({}, "--");
+    for (const std::string_view flag : {"--release", "--dev", "--test", "--custom", "--config"}) {
+        INFO(flag);
+        CHECK(contains(flags, flag));
+    }
+
+    CompletionRequest request;
+    request.words = {"--custom"};
+    const apogee::commands::Completion value =
+        apogee::commands::complete_words(request, two_backends(), real_tree());
+    CHECK(value.files);
+    CHECK(value.candidates.empty());
+
+    // After a channel flag, the verbs, as after no flag at all.
+    CHECK(contains(complete_line({"--dev"}), "models"));
+}
+
+TEST_CASE("a root flag on the completion line is read before the verb, and only there",
+          "[commands][completion][channels]") {
+    const UserHome user_home;
+    const apogee::testing::EnvUnsetGuard no_override{"APOGEE_HOME"};
+    const std::string custom =
+        (user_home.dir.path() / "elsewhere" / "config" / "config.yaml").string();
+    using apogee::commands::typed_root_flag;
+
+    const auto dev = typed_root_flag({"--dev", "models", "delete"}, real_tree());
+    REQUIRE(dev.has_value());
+    CHECK(dev->channel == apogee::harness::Channel::Dev);
+
+    // A value-taking root flag's value is never mistaken for the verb.
+    const auto after_config =
+        typed_root_flag({"--config", "x.yaml", "--test", "chat"}, real_tree());
+    REQUIRE(after_config.has_value());
+    CHECK(after_config->channel == apogee::harness::Channel::Test);
+
+    for (const std::vector<std::string>& line :
+         {std::vector<std::string>{"--custom", custom, "chat"},
+          std::vector<std::string>{"--custom=" + custom, "chat"}}) {
+        const auto flag = typed_root_flag(line, real_tree());
+        REQUIRE(flag.has_value());
+        CHECK_FALSE(flag->channel.has_value());
+        CHECK(flag->custom_config == custom);
+    }
+
+    // Doubtful lines complete from the default root: two flags, a flag after
+    // the verb (CLI11 takes no root flag there), the value still being typed.
+    CHECK_FALSE(typed_root_flag({"--dev", "--test", "chat"}, real_tree()).has_value());
+    CHECK_FALSE(typed_root_flag({"models", "--dev"}, real_tree()).has_value());
+    CHECK_FALSE(typed_root_flag({"--custom"}, real_tree()).has_value());
+
+    // One the chain would refuse is no flag either -- completion never errors.
+    const apogee::testing::EnvGuard other{"APOGEE_HOME", user_home.dir.path().string()};
+    CHECK_FALSE(typed_root_flag({"--dev", "chat"}, real_tree()).has_value());
+}
+
+TEST_CASE("completion offers the names in the root the line's flag chose",
+          "[commands][completion][channels]") {
+    // ADR 0007: what completion offers, the command accepts. Under `--dev`
+    // the command reads the dev root's config, so TAB must too.
+    const UserHome user_home;
+    const apogee::testing::EnvUnsetGuard no_override{"APOGEE_HOME"};
+    const apogee::testing::EnvUnsetGuard no_config{"APOGEE_CONFIG"};
+    const std::filesystem::path home = user_home.dir.path();
+    for (const auto& [root, backend] :
+         {std::pair{".apogee", "only-in-release"}, std::pair{".apogee-dev", "only-in-dev"}}) {
+        std::filesystem::create_directories(home / root / "config");
+        std::ofstream{home / root / "config" / "config.yaml"} << "backends:\n  " << backend
+                                                              << ":\n    type: mock\n";
+    }
+
+    const auto offered = [](const std::vector<std::string>& words) {
+        const std::ostringstream captured;
+        std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+        std::vector<const char*> argv{"apogee", "__complete"};
+        for (const std::string& word : words) {
+            argv.push_back(word.c_str());
+        }
+        int code = -1;
+        {
+            apogee::commands::RootCommand root{apogee::commands::default_registry()};
+            code = root.run(static_cast<int>(argv.size()), argv.data());
+        }
+        std::cout.rdbuf(old_out);
+        CHECK(code == 0);
+        return captured.str();
+    };
+
+    const std::string plain = offered({"complete", "-m", ""});
+    CHECK(plain.find("only-in-release") != std::string::npos);
+    CHECK(plain.find("only-in-dev") == std::string::npos);
+
+    const std::string dev = offered({"--dev", "complete", "-m", ""});
+    CHECK(dev.find("only-in-dev") != std::string::npos);
+    CHECK(dev.find("only-in-release") == std::string::npos);
+
+    // The answer's flag lasted as long as the answer.
+    CHECK_FALSE(apogee::harness::root_flag().has_value());
 }

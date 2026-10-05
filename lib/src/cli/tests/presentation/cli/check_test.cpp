@@ -1773,3 +1773,52 @@ TEST_CASE("the doctor says each section, and counts the headers it reads",
     CHECK(heard_as("checking models: other.gguf") == std::pair<std::size_t, std::size_t>{2, 2});
     CHECK(heard_as("checking config") == std::pair<std::size_t, std::size_t>{0, 0});
 }
+
+TEST_CASE("check names the channel, the root and the rung that chose it",
+          "[commands][check][channels]") {
+    // M10: the doctor's first lines say which Apogee this is and which data
+    // directory it is reading -- a run against another root than meant says
+    // so before anything else does.
+    using apogee::harness::Channel;
+    Install install;
+    install.seed();
+
+    const auto rows_for = [&install](const apogee::harness::RootInputs& root_inputs) {
+        CheckInputs inputs = inputs_for(install);
+        inputs.root = apogee::harness::resolve_root(root_inputs);
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* channel = row_with(report, "channel");
+        const apogee::commands::CheckRow* root = row_with(report, "root");
+        REQUIRE(channel != nullptr);
+        REQUIRE(root != nullptr);
+        CHECK(channel->section == "Version");
+        CHECK(root->section == "Version");
+        CHECK(channel->status == Status::Ok);
+        return std::pair{channel->detail, root->detail};
+    };
+
+    for (const Channel baked : apogee::harness::kChannels) {
+        const std::string name{apogee::harness::channel_name(baked)};
+        INFO(name);
+        const apogee::harness::RootInputs root_inputs{
+            .flag = std::nullopt, .environment = {}, .channel = baked, .home_directory = "/h"};
+        const auto [channel, root] = rows_for(root_inputs);
+        CHECK(channel == name);
+        CHECK(root == install.root.string() + " -- the " + name +
+                          " channel's own root, baked into this build");
+    }
+
+    const apogee::harness::RootInputs flagged{
+        .flag = apogee::harness::RootFlag{.channel = Channel::Test, .custom_config = {}},
+        .environment = {},
+        .channel = Channel::Release,
+        .home_directory = "/h"};
+    CHECK(rows_for(flagged).second == install.root.string() + " -- set by --test");
+    CHECK(rows_for(flagged).first == "release");
+
+    const apogee::harness::RootInputs ambient{.flag = std::nullopt,
+                                              .environment = install.root.string(),
+                                              .channel = Channel::Dev,
+                                              .home_directory = "/h"};
+    CHECK(rows_for(ambient).second == install.root.string() + " -- set by APOGEE_HOME");
+}

@@ -1912,6 +1912,161 @@ Asked for directly (Taylor), in three reports: "Not all subcommands have tab aut
 
 **Verification.** All 1544 ctest cases pass, run serially. `cli.shell_completion` in real bash and zsh covers names from a built home (a collection, a stand-in Ollama store's `llama3.2:3b`, a config key, the bundled kits), fixed word lists, the name-or-path fallback, and the word-break: run against the old bash stub it offers flags after `models pull llama3.2:`. On Taylor's machine, `models convert <TAB>` offers `Qwen--Qwen3.8-27B` and its SafeTensors handle, `chat --branch <TAB>` the repository's branches and tags, `chats info <TAB>` the saved conversations. fish and PowerShell are not on this host; their stubs are unverified here.
 
+### 2026-10-04 — `reset-keep-models` (maintenance item M9): start over, the models kept
+
+**Why.** The user's ask (2026-10-04), building from source: "pretty much a fresh build but replace everything except the models directory in the application directory." There was no middle path. `apogee uninstall` removes `~/.apogee` whole -- the models with it, tens of gigabytes to pull again -- or, with `--keep-data`, spares it whole; `make install` ends in `check --fix`, which creates what is missing and resets nothing; and deleting the other rows by hand means knowing the layout by heart, the drift the one declaration exists to close.
+
+**What was built**
+
+- [x] **`apogee reset [--keep <row>]... [--yes]`** (`cli/reset.h/.cpp`): the data directory back to a verified first-run state, selectively. Uninstall's contract is "Apogee is gone"; reset's is "Apogee starts over".
+  - **The plan is the layout.** `plan_reset` walks `layout.h`'s rows at runtime, in their order, each marked `keep`, `remove` or `absent`. `--keep` is repeatable and accepts exactly those rows -- a `CLI::IsMember` set built from the declaration at bind time -- so a word that is not a row is refused, with the rows listed, before anything is removed. Nothing in the command, the Makefile or a test lists the rows.
+  - **Outside the layout.** Whatever sits at the top of the directory that no row declares is removed too, and named (`chat_history   (not in the layout)`): a first-run directory holds none of it. The chat line editor's history is the one such file Apogee itself writes there; since nothing says what an unknown entry is, it is warned as the user's own.
+  - **The user's data, by name.** The removed rows holding anything but Apogee's own unedited files are warned exactly as uninstall warns them, and the secrets store by its file: `config/   the secrets store (credentials.json): your stored API keys`. Where the store lives is asked of `secrets::credentials_path`, not assumed; a kept row is not warned.
+  - **Kept means untouched.** A kept row is not opened, recreated or rewritten: `models/` after a reset is byte-identical, records included, so every stored model is still listed and a backend registered again on one resolves.
+  - **Then the doctor.** The `check --fix` pass runs in process: `run_check_pass` (new in `check.h`, and now the body of `apogee check` itself) recreates the skeleton through the one seeding path and prints the report, so what remains is verified, not hollowed. The ~140 files a recreated layout gets are said as one count (`fold_created`); every other repair is said in full.
+  - **Partial failure, reported.** A path that cannot be removed is named with the reason; the removals after it still run, the check still runs -- its report is the directory as it now is -- and the exit code is non-zero.
+  - **Nothing outside the data directory.** The binary, the completions and shell files stay uninstall's business.
+- [x] **Uninstall's plan machinery, generalized** (`cli/uninstall.h/.cpp`), so the two destructive verbs share one idea of what is the user's: `plan_rows` (the row walk and the user-data test), `describe_user_data` (the warning), `confirm_removal` (the discipline: `--yes` skips it, a terminal types `yes`, anything else is refused with the remediation) and `remove_planned` (the errors collection). Uninstall prints byte for byte what it did. Both now ask `stdin_is_piped` rather than the terminal alone -- the same answer in use, and a test that feeds `std::cin` is a pipe whatever terminal runs the suite.
+- [x] **Completion.** `apogee reset --keep <TAB>` offers exactly the layout's rows, in its order, read from the validator the command holds the word to: what TAB offers and what the verb accepts are one list, and it is the layout's ([ADR 0007](../adrs/cli/tab-completion.md)).
+- [x] **`make reinstall [KEEP="<row> …"]`** (`lib/src/cli/Makefile`): a fresh build (`cmake --build --clean-first`), `make install`, then `apogee reset` on the installed binary with each word of `KEEP` forwarded as `--keep <word>`. Only the named rows are kept; bare, nothing is, which the plan shows and the prompt confirms. The binary is run only as `$(APOGEE_BIN)`, defined beside `PREFIX` (`$(PREFIX)/bin/apogee`), so the install channels (M10) re-point the reset with the install. The Makefile knows no row and never passes `--yes`. `make help` names `KEEP`, its vocabulary and that bare keeps nothing.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| A new verb | `reset`, not a widened `uninstall` (2026-10-04) | Uninstall's contract is "Apogee is gone", reset's "Apogee starts over"; one verb with both blurs the one prompt that must never be misread. |
+| The keep set | Generic `--keep <row>`, repeatable and completable, models the motivating case *(recorded default, 2026-10-04)* | Chats or training are the same ask a week later; a generic flag costs nothing over `--keep-models`. |
+| Bare `apogee reset` | Every row reset *(recorded default, 2026-10-04)* | A carve-out nobody typed is state surviving a "fresh start" by surprise. |
+| The make target's name | `reinstall` *(default taken)* | It reads as what it does from the source tree; `fresh-install` was the alternative. |
+| The make keep set | Explicit at the invocation, `KEEP="…"`, only the named rows kept -- **the user's call** (2026-10-04, superseding a hard-wired `--keep models`) | `KEEP=` is make's spelling of `--keep` (M10's `MODE=` precedent); the rows complete on `apogee reset --keep`, where a completion Apogee ships can answer. |
+| `--yes` from make | Never (2026-10-04) | A destructive confirmation belongs to the person, even mid-target. |
+| The chats' row | `sessions`, as `layout.h` names it; no `chats` alias | The spec's example `KEEP="models chats"` is spelled `KEEP="models sessions"`. An alias accepted but not offered breaks ADR 0007's both-ways rule, and one offered breaks "exactly the layout's rows"; the refusal lists the rows before anything is removed. |
+| Entries outside the layout | Removed, named, and warned as the user's | "A bare reset leaves exactly the first-run skeleton" is false while `chat_history` survives it, and nothing says an unknown entry is Apogee's to dismiss. |
+| "A fresh build" | `cmake --build --clean-first`, not `make clean` | Every object recompiled; `make clean` deletes the fetched dependencies too (llama.cpp among them), so the target would need the network. |
+| The fix pass's output | The files it creates folded to one count; every other repair verbatim | A recreated layout is ~140 created files, and a line each scrolled the plan and the removals away. |
+| Modes reached | The command line only: no admin-plane route, no machine-mode verb -- skipped and said ([ADR 0002](../adrs/cli/mode-parity.md)), and classified a carve-out beside `uninstall` in `parity_test`'s table | As with `uninstall`, a served reset would delete the server's own state under it. |
+
+**Guardrails, each mutation-tested** (six mutants, all caught by `[reset]`): kept rows removed too; no `check --fix` after; a pipe proceeding; stopping at the first failure; entries outside the layout surviving; the secrets store unnamed.
+
+**Tests.** `tests/presentation/cli/reset_test.cpp`, 13 cases over sandboxed temp `APOGEE_HOME`s with `HOME` guarded:
+- the plan word for word, over fixture rows handed in place of the layout -- a golden that pins the wording without restating the real rows;
+- every declared row planned, in order; every removed user-data row warned, the secrets store named by its file and unnamed when its row is kept; a fresh install's own files never warned;
+- **the no-second-list pin**: a row appended to the layout -- through the very parameter the command fills from `layout.h` -- is planned, warned, keepable and kept with nothing taught, and against the real layout the same directory is named as outside it;
+- on the real command, in process: `--keep models` leaves `models/` byte-identical and every other row exactly what a fresh seed makes, with `check` passing and a backend registered again on the kept GGUF listed; a bare reset leaves exactly the first-run skeleton; a piped reset without `--yes` -- even with `yes` on the pipe -- shows the plan, refuses with the remediation and removes nothing; a keep the layout does not declare is refused with nothing removed; the confirmation word for word;
+- a row that cannot be removed (POSIX: a locked directory inside `sessions/`) named, the removals after it run, the kept row untouched, the check run after it;
+- the completion golden: `reset --keep <TAB>` offers exactly the layout's rows, enumerated rather than restated, and every row offered is one the verb keeps.
+
+**Verified.**
+- The full suite, `make test`: 100% of 2181 ctest cases pass (the pdftotext skip is the host's, as before), the 13 new ones, `harness.layering`, `cli.install_parity` and `cli.shell_completion` among them. The CLI↔HTTP parity table failed the first run, as it exists to -- a new verb unclassified -- and `reset` is now a carve-out in it.
+- On the real binary, in a sandbox -- a temp `HOME`, `PREFIX` and `APOGEE_HOME`, never the real install: `reset --help` lists the rows; a piped `reset --keep models` shows the plan and refuses with nothing touched; `--keep chats` is refused with the rows listed (exit 105) before anything is removed; `reset --keep models --yes` removes the rest, recreates the skeleton, and keeps the stored model byte-identical; `__complete reset --keep` offers the fifteen rows, and `mo` gives `models`.
+- **`make reinstall KEEP="models sessions"`** under a pseudo-terminal, answered at the prompt: a fresh build, the install, the plan with both rows kept and `config/` warned as the secrets store, then `yes` -- thirteen rows and `chat_history` removed, `fixed: created 139 directories and files`, `check` with no failures. `models/` byte-identical (hashed before and after), the chat kept, the keys and the history gone; after `config init`, `models list` lists the stored model, and `config add-backend m` fills itself from it and reads `ok`. About two and a half minutes on this Mac, the clean rebuild mostly ccache hits.
+- **Bare `make reinstall` on a pipe**: the keep-nothing plan -- every row `remove`, the models, the chats, the keys and the history warned -- then the refusal; nothing removed, and the target fails.
+
+**A sharp edge, recorded.** `reinstall` stops where `install` stops: `make install` fails when its own `check --fix` finds a failure (an unparseable config, an unreadable model), and the target then ends before the reset. Found by the sandbox run itself, whose first fixture model was not a GGUF. `apogee reset` needs nothing from the config and is the way through such an install; `install`'s gate is left as it is (it is install's, and M10 reshapes that target).
+
+**Not verified.** The partial-failure case is POSIX-only: Windows has no directory mode to lock one with, so it is a recorded skip there; the reset itself is portable `std::filesystem`. A run on the user's own install is theirs.
+
+### 2026-10-04 — `install-channels` (maintenance item M10): dev, test and release roots
+
+**Why.** The user asked for this (2026-10-04) as the thorough fix behind the question that became M9 (the selective reset). A build from source shared `~/.apogee` with the install the user relies on. A dev build's experiments landed among the real models, chats and keys, and the only clean slate was an uninstall that took everything. Most of the pieces existed already: `APOGEE_HOME` relocated the whole tree, a global `--config` existed, and `home_for_config()` derived a root from a config file's position. What was missing:
+- a root the binary knows by itself;
+- shorthand flags for the common roots;
+- one chain that re-roots the entire layout, not just the config read.
+
+**What was built**
+
+- [x] **The channel is a build fact.** `APOGEE_CHANNEL` is `release` by default, or `dev` or `test`; any other value fails the configure.
+  - `apogee_channel_executable` (`source/CMakeLists.txt`) stamps it into `main.cpp` as a compile definition, and names a non-release build `apogee-dev` or `apogee-test`.
+  - `main()` holds the stamp to the three names with a `static_assert`, then bakes it into the library (`harness::set_baked_channel`) before anything runs.
+  - CI, `cicd.sh`, both installers and every release archive build the release channel, unchanged.
+- [x] **One resolution chain**, in `contracts/paths.h`. `resolve_root` is a pure function over four inputs: the root flag, `APOGEE_HOME`, the baked channel and the home directory. It answers with the root, the config file, the rung that chose it, or a refusal.
+  - `apogee_home()` is its answer for the process, so every layout row follows a flag.
+  - A flag and an `APOGEE_HOME` naming different roots are refused, both named. Naming the same directory, compared absolute and through symlinks, is no conflict, and the flag is credited.
+  - A channel's root with no home directory is refused rather than guessed.
+  - `APOGEE_HOME` with no flag resolves exactly as before.
+- [x] **The root flags** on the root command: `--release`, `--dev`, `--test` and `--custom <config file>`.
+  - They exclude one another, and they complete like any flag: they are read from the live parser, and `--custom` offers paths.
+  - A `RootFlagScope` holds the flag in force for the run. It is written nowhere.
+  - `--custom` checks that its file sits at `<root>/config/<file>`, then derives the root through `home_for_config()`. A file anywhere else is refused, naming that shape and where the file would have to sit. A file at the top of the filesystem is refused too.
+  - A refusal comes once parsing completes, before any command runs.
+- [x] **`--config` beside them**, which the item asked to have stated. `--config` names a file only.
+  - Beside a channel flag or `APOGEE_HOME`, it reads that file over the channel's data directory. The flag claims a root and no file, so the two do not disagree.
+  - `--custom` names a file too, so a `--config` or `APOGEE_CONFIG` naming a different file is refused with both named. The same file is accepted.
+  - Help says so on both flags.
+- [x] **Which Apogee this is, said.** `apogee version` and `--version` keep the version line first and alone, since the release scripts read line one. Then come `channel:` and `root: <path> (<rung>)`, the rung being one of `the dev channel's own root, baked into this build`, `set by --test`, `set by APOGEE_HOME` or `set by --custom <file>`. `check`'s Version section gains the same two rows. `--version` became a plain flag, answered after the root flags: CLI11's version flag is answered while the flags are still being read.
+- [x] **Uninstall per channel.**
+  - `UninstallCommand` resolves its root through `install_home()`. That is `APOGEE_HOME` when set, so every sandboxed uninstall stays hermetic, and otherwise the baked channel's root. Never a flag's.
+  - A dev or test build plans no completion stubs. The stubs call `apogee` by name and a dev install never writes any, so the release install's must survive a dev uninstall.
+- [x] **Completion follows the line's root.** `typed_root_flag` reads a root flag typed before the verb. So `apogee --dev complete -m <TAB>` offers the dev root's backends, which are what the command will accept ([ADR 0007](../adrs/cli/tab-completion.md)).
+- [x] **The Makefile.** `MODE ?= release`, and any other value is an error naming the three channels.
+  - `APOGEE_BIN` names the channel's installed binary: `$(PREFIX)/bin/apogee`, `apogee-dev` or `apogee-test`.
+  - `build` and `no-llama` pass `-DAPOGEE_CHANNEL=$(MODE)` on every configure, release included, because CMake caches the value. `install` builds through `build`.
+  - `install` skips the completion stubs for a non-release channel, and ends with the channel binary's own `check --fix`.
+  - A new `uninstall` target runs the channel binary's `uninstall`. Its plan and prompt are intact, and it never passes `--yes`.
+  - M9's `reinstall`, built alongside, follows `MODE` too: it configures with the channel and resets through `APOGEE_BIN`, so `make reinstall MODE=dev KEEP=models` rebuilds and reinstalls `apogee-dev` and resets `~/.apogee-dev`, the release install untouched.
+
+**Decisions**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Non-release binaries | Suffixed (`apogee-dev`, `apogee-test`), with no completion stubs *(default taken)* | Three channels overwriting one binary would make the baked root a lie. Suffixed stubs would be litter until someone asks for them. |
+| How make takes the channel | `MODE=<channel>` (2026-10-04) | `make` has no long options. The targets keep their names, and the mode is the argument after them, the ask's own framing. |
+| Where the channel lives | A compile definition (2026-10-04), stamped into the executable's `main.cpp` and baked into the library at startup | The binary must know its root before it reads a file, and a marker file inside a root begs the question of which root to read it from. The stamp is on the executable, not the contracts library, so `apogee_core` is the same for every channel. Switching channels recompiles one file, a test can be any channel's build in process, and the parity check builds a dev executable over the very same `apogee_core`. |
+| Precedence | Flag, then `APOGEE_HOME`, then the baked channel (2026-10-04) | Explicit beats ambient beats built-in. The environment rung keeps every sandboxed test and probe working untouched. |
+| `--custom` | Takes a config file, and derives the root from its position in the layout; anything off `<root>/config/<file>` is refused (2026-10-04) | The layout already fixes where a config sits, and `home_for_config()` is the one derivation. |
+| `--config` beside a root flag | Allowed beside a channel flag, as beside `APOGEE_HOME`; beside `--custom`, refused when it names a different file | Disagreement is refused, never guessed, and only `--custom` and `--config` answer the same question. |
+| Uninstall | Ignores the root flags and removes the baked channel's root, with `APOGEE_HOME` honored | A release uninstall must never take `.apogee-dev` because a flag was on the line. |
+
+**Tests**
+- `tests/data/contracts/paths_test.cpp`, the precedence table:
+  - every rung alone, and each channel flag against each baked channel;
+  - the environment against each baked channel;
+  - a flag and `APOGEE_HOME` agreeing, with or without a trailing separator, and disagreeing, refused with both named;
+  - what needs a home directory and what does not;
+  - the `--custom` derivation and every refusal;
+  - the channel names, checked at compile time.
+- `paths_test.cpp`, the pins:
+  - **the re-root:** with `--custom` in force, every row of `layout.h` is seeded under the derived root and nothing under the baked one;
+  - a scope puts back the flag it replaced;
+  - uninstall's root ignores every flag on every channel's build.
+- `tests/presentation/cli/root_test.cpp`, the flags as the command line meets them:
+  - help names them and how they relate to `--config`;
+  - they exclude one another;
+  - each roots its run, is gone afterwards, and writes nothing, and a second parse of the same root reads what that parse was given, never a value the first left bound;
+  - the refusals: a disagreeing `APOGEE_HOME`, `--custom` against `--config` and against `APOGEE_CONFIG`, an off-layout path;
+  - a channel flag beside `--config`;
+  - the `version` and `--version` wording for each channel and each rung.
+- `check_test`: the Version section's `channel` and `root` rows for each channel and rung.
+- `lifecycle_test`:
+  - a dev build's uninstall plans `.apogee-dev` and no stubs under every flag, and a release build plans `.apogee` and its stub;
+  - the root flags complete, and `--custom` completes a path;
+  - `typed_root_flag`'s rules;
+  - `__complete` offers the dev root's backends under `--dev`.
+- **`cli.install_parity`** takes a dev-channel executable, `apogee_channel_probe`. It is `main.cpp` stamped dev by the same `apogee_channel_executable`, built on demand by the new `cli.channel_probe_build` fixture and never by a plain build, so CI builds nothing new. With `APOGEE_HOME` unset and `HOME` in its own work directory, it requires:
+  - the suffixed name;
+  - the same tree and modes under `.apogee-dev`, and nothing under `.apogee`;
+  - a passing `check`;
+  - `version` naming the channel and the baked root;
+  - the dev build's uninstall, run from a copy with `--release` on the line, removing its own root and binary and leaving the release root and its stub;
+  - the release build's `--dev` seeding the same tree at the dev root.
+- Each new half was checked against a planted fault. A `main()` that never baked its channel failed it, and so did an uninstall back on `apogee_home()`.
+- `cli.install_is_ours_only` takes the executable's file name rather than assuming `apogee`.
+
+**Verified end to end**, with a temporary `HOME`, a temporary `PREFIX` and no `APOGEE_HOME`, through the real Makefile:
+- `make install MODE=dev`, `MODE=test` and a plain `make install` left `apogee`, `apogee-dev` and `apogee-test` side by side, each with its own root seeded. Only the release install wrote completions.
+- Each binary's `version` named its channel and its own root. `apogee-dev check` named the dev channel and why.
+- `MODE=bogus` and `MODE="dev test"` stopped make, naming the three channels.
+- `make uninstall MODE=test`, answered `no` on a pseudo-terminal, removed nothing.
+- `make uninstall MODE=dev`, answered `yes`, removed `apogee-dev` and `.apogee-dev`. The release binary, its root and its completions were untouched.
+- Run again, it said there is no dev-channel install. From a pipe, the channel's own `uninstall` refused, naming `--yes`.
+- The full suite: `make -C lib/src/cli test` ends "100% tests passed, 0 tests failed out of 2202" (the pdftotext case skips, as before).
+
+**Found on the way.** The parity script's mode listing was written `a || b && c`. The shell binds `&&` after `||`, so it ran its GNU `stat -c` branch on macOS too, and printed a usage error for every directory. Both sides printed the same errors, so the diff still compared the BSD listing alone. It now asks which `stat` it has first.
+
+**Not done.**
+- No real `~/.apogee-dev` or `~/.apogee-test` was created, and nothing ran against the user's own install. Every check above used a temporary home.
+- `make lint` was not run over the whole tree, which takes about 25 minutes. clang-tidy over the touched sources and tests raised none of the error-class checks, and the two new style warnings it did raise were fixed. The touched files are formatted, and the build has no new compiler warnings.
+
 ## Milestone L — The vendor-CLI family
 
 **Goal.** A fifth backend and, more importantly, the machinery the rest of the vendor-CLI family will be built on: Claude driven through the official `claude` CLI as a **long-lived child process** — the subscription-auth path beside the API-key path from Milestone D. It reuses that backend's IR mapping and typed sinks and none of its HTTP: this one speaks JSONL over pipes.

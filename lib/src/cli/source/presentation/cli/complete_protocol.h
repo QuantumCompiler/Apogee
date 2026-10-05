@@ -3,12 +3,14 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "cli/command.h"
 #include "contracts/config.h"
+#include "contracts/paths.h"
 
 /// The hidden `apogee __complete` verb — the shell-completion protocol.
 ///
@@ -176,6 +178,15 @@ inline constexpr const char* kCompletionProtocolVar = "APOGEE_COMPLETION_PROTOCO
 
 /// Reads the whole command tree out of a parser; the root has an empty name.
 [[nodiscard]] CommandSpec specs_from_app(const CLI::App& app);
+
+/// The root flag a typed line carries before its verb (M10) -- `--dev`,
+/// `--test`, `--release` or `--custom <file>` -- when it carries exactly one
+/// the root chain accepts; otherwise none. `apogee --dev models delete <TAB>`
+/// must offer the dev root's models, since those are what the verb will take
+/// (ADR 0007: what completion offers, the command accepts). A doubtful line
+/// completes from the default root: completion never errors.
+[[nodiscard]] std::optional<harness::RootFlag> typed_root_flag(
+    const std::vector<std::string>& words, const CommandSpec& root);
 
 /// Filters `candidates` to those starting with `prefix`.
 [[nodiscard]] std::vector<std::string> filter_prefix(const std::vector<std::string>& candidates,

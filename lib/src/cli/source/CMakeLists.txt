@@ -92,11 +92,29 @@ foreach(layer IN LISTS layers_down)
     target_link_libraries(apogee_core INTERFACE apogee_${layer})
 endforeach()
 
+# An executable's install channel (M10): the channel stamped into main.cpp,
+# which the executable hands the library before anything runs -- the root it
+# owns with no flag and no APOGEE_HOME -- and the name it builds under:
+# `apogee` for release, `apogee-<channel>` for the others, so the channels
+# install side by side instead of overwriting one binary. Everything else in
+# the link is the same for every channel, so switching channels rebuilds one
+# file. Called for `apogee`, and by the install-parity case for its dev build.
+function(apogee_channel_executable target channel)
+    target_compile_definitions(${target} PRIVATE APOGEE_CHANNEL="${channel}")
+    if(channel STREQUAL "release")
+        set_target_properties(${target} PROPERTIES OUTPUT_NAME apogee)
+    else()
+        set_target_properties(${target} PROPERTIES OUTPUT_NAME apogee-${channel})
+    endif()
+endfunction()
+
 add_executable(apogee main.cpp)
 target_link_libraries(apogee PRIVATE apogee_core)
 apogee_set_target_options(apogee)
+apogee_channel_executable(apogee "${APOGEE_CHANNEL}")
 
-# The install path: the binary, and nothing else. `make install` is a thin
+# The install path: the binary, and nothing else -- under its channel's name
+# (`bin/apogee`, or `bin/apogee-dev` beside it). `make install` is a thin
 # caller into this, so there is exactly one install path -- the same shape as
 # the build (one CMake definition, a Makefile wrapper that adds no steps).
 #

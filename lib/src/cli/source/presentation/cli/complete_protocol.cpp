@@ -217,6 +217,45 @@ CommandSpec specs_from_app(const CLI::App& app) {
     return root;
 }
 
+std::optional<harness::RootFlag> typed_root_flag(const std::vector<std::string>& words,
+                                                 const CommandSpec& root) {
+    const std::string custom_equals = std::string{harness::kCustomFlag} + "=";
+    std::optional<harness::RootFlag> flag;
+    int given = 0;
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        const std::string& word = words[i];
+        if (!word.starts_with('-')) {
+            break;  // the verb: the root's flags come before it
+        }
+        for (const harness::Channel channel : harness::kChannels) {
+            if (word == harness::channel_flag(channel)) {
+                flag = harness::RootFlag{.channel = channel, .custom_config = {}};
+                ++given;
+            }
+        }
+        if (word.starts_with(custom_equals)) {
+            flag = harness::RootFlag{.channel = std::nullopt,
+                                     .custom_config = word.substr(custom_equals.size())};
+            ++given;
+        } else if (root.values.contains(word) && i + 1 < words.size()) {
+            ++i;  // the flag's value, never the verb
+            if (word == harness::kCustomFlag) {
+                flag = harness::RootFlag{.channel = std::nullopt, .custom_config = words[i]};
+                ++given;
+            }
+        }
+    }
+    if (given != 1) {
+        return std::nullopt;
+    }
+    harness::RootInputs inputs = harness::current_root_inputs();
+    inputs.flag = flag;
+    if (!harness::resolve_root(inputs).ok()) {
+        return std::nullopt;
+    }
+    return flag;
+}
+
 Completion complete_words(const CompletionRequest& request, const harness::Config& config,
                           const CommandSpec& root, const CompletionSources& sources) {
     // Walk the words the way the parser will: descend on a subcommand's name,
@@ -349,6 +388,15 @@ void CompleteProtocolCommand::bind(CLI::App& root, const RootContext& context) {
             request.words.assign(words->begin(), words->end() - 1);
         }
 
+        // Read out of the live parser, so a flag or command added anywhere, at
+        // any depth, completes without this file being told about it. The
+        // protocol verb itself is hidden, so it is never offered.
+        const CommandSpec tree = specs_from_app(root);
+
+        // A root flag on the line steers which install the candidates come
+        // from, for this answer only (M10).
+        const harness::RootFlagScope typed_root{typed_root_flag(request.words, tree)};
+
         harness::Config config;
         try {
             config = harness::load_config(harness::resolve_config_path(context.config_path));
@@ -356,11 +404,6 @@ void CompleteProtocolCommand::bind(CLI::App& root, const RootContext& context) {
             // Silent. A broken or absent config makes completion unhelpful; it
             // must never print a diagnostic into the user's command line.
         }
-
-        // Read out of the live parser, so a flag or command added anywhere, at
-        // any depth, completes without this file being told about it. The
-        // protocol verb itself is hidden, so it is never offered.
-        const CommandSpec tree = specs_from_app(root);
 
         // Directives only for a stub that asks: an older stub would offer the
         // directive line itself as a candidate.

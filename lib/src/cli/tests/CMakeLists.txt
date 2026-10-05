@@ -44,6 +44,8 @@ add_library(apogee_tests_data OBJECT
     data/contracts/host_test.cpp
     data/contracts/paths_test.cpp
     data/contracts/types_test.cpp
+    support/channel_guard.h
+    support/channel_guard.cpp
     data/backends/mock_test.cpp
     data/transport/sse_parser_test.cpp
     data/transport/http_client_test.cpp
@@ -207,6 +209,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/chat_test.cpp
     presentation/cli/check_test.cpp
     presentation/cli/lifecycle_test.cpp
+    presentation/cli/reset_test.cpp
     presentation/machine/machine_mode_test.cpp
     presentation/views/line_reader_test.cpp
     presentation/cli/chat_attachments_test.cpp
@@ -441,7 +444,7 @@ add_test(NAME cli.install_is_ours_only
         -DBUILD_DIR=${CMAKE_BINARY_DIR}
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/install-only
         -DMAKEFILE=${CMAKE_CURRENT_SOURCE_DIR}/../Makefile
-        -DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
+        -DEXE_NAME=$<TARGET_FILE_NAME:apogee>
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/install_is_ours_only.cmake"
 )
 
@@ -472,14 +475,34 @@ add_test(NAME cli.test_names
 )
 
 if(UNIX)
+    # A dev-channel build of the executable, for the parity case below (M10):
+    # main.cpp over the same apogee_core, stamped through the one function
+    # `apogee` is (apogee_channel_executable) -- so it is what `make install
+    # MODE=dev` builds, under the name it installs as. Built on demand by the
+    # fixture, never by a plain build: what CI builds stays the release
+    # executable alone, and a channel costs the suite one compile and a link.
+    add_executable(apogee_channel_probe EXCLUDE_FROM_ALL "${PROJECT_SOURCE_DIR}/source/main.cpp")
+    target_link_libraries(apogee_channel_probe PRIVATE apogee_core)
+    apogee_set_target_options(apogee_channel_probe)
+    apogee_channel_executable(apogee_channel_probe dev)
+    set_target_properties(apogee_channel_probe PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/channel-probe")
+    add_test(NAME cli.channel_probe_build
+        COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target apogee_channel_probe)
+    set_tests_properties(cli.channel_probe_build PROPERTIES
+        FIXTURES_SETUP channel_probe TIMEOUT 900)
+
     # The install-parity gate. See tests/scripts/sh/install_parity.sh for why an exception
-    # here is where the next drift hides.
+    # here is where the next drift hides -- and, since M10, a channel install held to the
+    # same tree under its own root.
     add_test(NAME cli.install_parity
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/install_parity.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/install-parity
+            $<TARGET_FILE:apogee_channel_probe>
     )
-    set_tests_properties(cli.install_parity PROPERTIES TIMEOUT 60)
+    set_tests_properties(cli.install_parity PROPERTIES
+        TIMEOUT 60 FIXTURES_REQUIRED channel_probe)
 
     # The completion stubs in the real shells (bash always; zsh and fish when
     # present) against the real binary -- what a stub SENDS `__complete`, which

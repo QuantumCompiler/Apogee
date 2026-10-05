@@ -144,6 +144,8 @@ apogee_add_module(cli
     cli/complete_sources.cpp
     cli/uninstall.h
     cli/uninstall.cpp
+    cli/reset.h
+    cli/reset.cpp
     cli/check.cpp
     cli/complete.h
     cli/complete.cpp

@@ -121,6 +121,9 @@ const std::map<std::string, Classification>& table() {
         {"config init", carve_out("the server cannot exist without a config to start from")},
         {"check", carve_out("--fix repairs the local install; host-local by nature")},
         {"uninstall", carve_out("removes the binary and the data directory; host-local")},
+        {"reset",
+         carve_out("resets the data directory to a fresh install; host-local, like uninstall -- "
+                   "served, it would delete the server's own state under it")},
         {"serve", carve_out("it is the server")},
         {"train setup",
          carve_out("creates the Python environment on the host; training control is CLI-only")},
