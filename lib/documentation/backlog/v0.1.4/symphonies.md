@@ -17,7 +17,7 @@
 - `contracts/config.h/.cpp` + the editor: the `symphonies:` block; the same parser reads spec files (the `training.pipelines` precedent, same file ↔ entry duality).
 - `business/scaffold/symphony.h/.cpp`: the shared create core, so CLI- and admin-plane-created symphonies are byte-identical (the `scaffold/agent.h` precedent).
 - `presentation/cli/symphonies_cmd.h/.cpp`: the lifecycle verbs and one-shot `play` (input from the argument or stdin, output to stdout, `--output-format json` per the house rule); completion for verbs and names per [ADR tab-completion](../../adrs/cli/tab-completion.md).
-- `assets/symphonies/`: the starter set, registered by name beside user definitions.
+- `assets/symphonies/`: the starter set — three demonstrative definitions (the summarize-then-verify duo, the grammar-held single-stage extraction, the vision-role describe-then-answer pair; confirmed 2026-10-04) — registered by name beside user definitions.
 - Tests: `tests/business/symphony/` — parse/validation tables, runner over scripted mock providers (stage order, output threading, call counts), template goldens; scaffold byte-identity; the asset-parity check in the install suite.
 - Consumes: [27d](model-suites.md) (roles and the suite), [27f](suite-consult.md) (the call core), 26f (shipped — grammars), 26n (shipped — narration), M1 (shipped — the busy line for long plays).
 
@@ -29,9 +29,7 @@
 - 2026-10-04 — Stage handoff is plain text with per-stage opt-in grammars *(recorded as the default, vetoable)*: 26f already holds structure where a stage declares it, and free-text handoff keeps definitions writable by hand.
 - 2026-10-04 — Definitions live as `symphonies:` config entries **and** spec files through one parser *(the default, from the training precedent)*; shipped starters are asset spec files registered by name.
 - 2026-10-04 — The serial-latency cost accepted and stated: chains of generations are the physics of the feature, priced in the doc, never hidden.
-
-**Open calls:**
-- [default: the starter set is small and demonstrative — a summarize-then-verify duo, a single-stage structured extraction, and a describe-then-answer media pair — final roster at build time, each exercising a distinct stage feature]
+- 2026-10-04 — Confirmed (the default taken, the user's confirmation): the starter set is three demonstrative definitions — a summarize-then-verify duo (output threading), a single-stage structured extraction (a grammar-held stage), and a describe-then-answer media pair (a vision-role stage) — final names and prompts the builder's at build time, each starter exercising a distinct stage feature.
 
 **Guardrail(s).**
 - Runner tables over scripted providers: stage order, output threading and call counts asserted; a failing stage stops the walk with the stage named.
