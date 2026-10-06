@@ -1,8 +1,11 @@
 #pragma once
 
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "cli/command.h"
+#include "symphony/definition.h"
 
 /// `apogee symphonies list|show|create|edit|delete|play` (27q) -- named,
 /// staged prompt processes over a suite's members, the agents lifecycle for
@@ -19,6 +22,12 @@
 /// `--image` -- under the active suite (`--suite` for this run), each stage
 /// said as it runs, and prints the output: CLI-only, the training precedent.
 namespace apogee::commands {
+
+/// `list`'s table, one line each -- the header, then a row per definition
+/// `catalog` holds: its name, its role chain, its source and its description,
+/// or that it cannot be played. What an execute session's `/symphonies` says
+/// too (27s), so the two read alike.
+[[nodiscard]] std::vector<std::string> symphony_list_lines(const symphony::Catalog& catalog);
 
 class SymphoniesCommand final : public Command {
 public:

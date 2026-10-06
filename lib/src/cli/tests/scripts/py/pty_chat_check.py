@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Chat behaviours that only reproduce against a real terminal, or a real kill.
 
-Eleven checks:
+Twelve checks:
 
   typeahead   Text typed BEFORE the first prompt is discarded once; text typed
               after it is honoured.  Only reproducible on a PTY -- `tcflush`
@@ -50,6 +50,13 @@ Eleven checks:
               machine-mode run reads no input, so nothing is asked -- the
               ungranted tool is denied by nobody, the question ends the task
               -- and the run ends by itself, its lifecycle on the stream.
+
+  execute     `apogee execute` (27s): the banner names the suite and how
+              many symphonies it can play; Tab completes a symphony's name
+              after `/play`; the play's stages are narrated in the thinking
+              block, which collapses, and its output is rendered as the
+              session's answer; the saved chat keeps the play as one exchange
+              and none of the narration.
 
 POSIX only -- `pty` and SIGKILL have no portable Windows equivalent.  Recorded
 as a per-item skip in CLAUDE.md -> Platforms.
@@ -491,6 +498,55 @@ def check_task_machine(binary, home, env):
     return failures
 
 
+def check_execute(binary, home, env):
+    """`execute` at a terminal (27s): its banner, a play narrated stage by
+    stage in the thinking block, the output rendered as the answer."""
+    helper = os.path.join(home, "helper.json")
+    with open(helper, "w", encoding="utf-8") as handle:
+        json.dump({"turns": [{"text": "A cat sat on a mat."}]}, handle)
+    scripted(binary, env, home, [{"text": "The **final** summary.\n"}])
+    for args in (["config", "add-backend", "helper", "--type", "mock", "--model-path", helper],
+                 ["config", "add-suite", "duo", "--chat", "scripted", "--utility", "helper"]):
+        if subprocess.run([binary, *args], env=env, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode != 0:
+            raise RuntimeError(f"setup failed: {args}")
+    term = Pty(binary, env, ("--suite", "duo", "--no-recall"), command=("execute",))
+    term.drain(2.0)
+    # The symphony's name by Tab, from execute's table and its catalog.
+    term.send(b"/play su")
+    term.drain(0.5)
+    term.send(b"\t")
+    term.drain(0.5)
+    term.send(b" The cat sat on the mat.\r")
+    term.drain(3.0)
+    term.send(b"/exit\r")
+    term.drain(2.0)
+    term.close()
+    text = term.text()
+    failures = []
+    if b"scripted  \xc2\xb7  suite duo  \xc2\xb7  3 symphonies  \xc2\xb7  chat " not in text:
+        failures.append(f"the banner does not name the suite and its symphonies: {text!r}")
+    for stage in ("stage 1/2 summarize \u2014 asking utility (helper)",
+                  "stage 2/2 verify \u2014 asking chat (scripted)"):
+        if stage.encode() not in text:
+            failures.append(f"'{stage}' was not narrated: {text!r}")
+    if b"Worked for" not in text:
+        failures.append(f"the block of stages did not collapse to 'Worked for': {text!r}")
+    if b"The final summary." not in text or b"**final**" in text:
+        failures.append(f"the output was not rendered as the answer: {text!r}")
+    saved = sessions(home)
+    if len(saved) != 1:
+        failures.append(f"expected one saved chat, found {len(saved)}")
+    else:
+        kept = [(message["role"], json.dumps(message["content"])) for message in saved[0]["messages"]]
+        if [role for role, _ in kept] != ["user", "assistant"] or \
+                "/play summarize-verify The cat sat on the mat." not in kept[0][1]:
+            failures.append(f"the play, its name taken by Tab, was not kept as one exchange: {kept}")
+        if "asking utility" in json.dumps(saved[0]):
+            failures.append("the narration reached the saved chat")
+    return failures
+
+
 def check_base_model(binary, home, env):
     """A base model's chat: `base model` in the banner and the spinner, and
     `tools off` said once (26r)."""
@@ -644,6 +700,7 @@ def main():
                         ("task-attended", check_task_attended),
                         ("task-machine", check_task_machine),
                         ("base-model", check_base_model),
+                        ("execute", check_execute),
                         ("interrupt", check_interrupt)):
         home = tempfile.mkdtemp(prefix=f"apogee-chat-{name}-")
         try:
@@ -663,6 +720,7 @@ def main():
     print("typeahead discarded once; completed turns survive a kill -9; "
           "the banner and each question stand apart; answers render, raw with --raw; "
           "typing mid-reply waits for the prompt; side calls are narrated in the block; a preset is the session answer given early; an attended task asks for what it was not granted, and one in machine mode asks nothing; a base model is said and its tools are off; "
+          "execute's banner names its suite and symphonies and a play is narrated in the block; "
           "Ctrl-C restores echo - OK")
     return 0
 

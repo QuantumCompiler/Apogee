@@ -12,9 +12,10 @@
 #include "contracts/config.h"
 #include "views/line_reader.h"
 
-/// What `apogee chat` offers as the user types: its commands after a `/` at
-/// the start of the line, each command's own values after it, and paths after
-/// an `@`.
+/// What `apogee chat` -- and `apogee execute`, chat's session opened with a
+/// suite (27s) -- offers as the user types: its commands after a `/` at the
+/// start of the line, each command's own values after it, and paths after an
+/// `@`.
 ///
 /// **One table.** The commands, their argument shapes, their one-line
 /// descriptions and what their arguments complete from are declared once,
@@ -26,6 +27,28 @@
 /// Everything here is pure over what it is handed: the listings arrive as
 /// data and a closure, so the tests never touch a real filesystem or config.
 namespace apogee::commands {
+
+/// Which session a line is typed into (27s): `apogee chat`, or `apogee
+/// execute` -- the same session core, opened with a suite, its symphonies
+/// playable. The one table serves both; a row says which sessions offer it.
+enum class SessionMode : std::uint8_t {
+    Chat,
+    Execute,
+};
+
+/// Which sessions offer a row of the table.
+enum class SessionRows : std::uint8_t {
+    /// Chat and execute alike -- every row chat had before execute.
+    Every,
+    /// Chat's alone: its `/suite`, which can turn the suite off.
+    ChatOnly,
+    /// Execute's alone: `/symphonies`, `/play`, and its `/suite`, which
+    /// cannot -- an execute session always runs under one.
+    ExecuteOnly,
+};
+
+/// Whether a row marked `rows` is offered in a `mode` session.
+[[nodiscard]] bool offered_in(SessionRows rows, SessionMode mode) noexcept;
 
 /// Which handler a chat command runs. `/exit` and `/quit` share one.
 enum class ChatVerb : std::uint8_t {
@@ -54,6 +77,9 @@ enum class ChatVerb : std::uint8_t {
     Revoke,
     Permissions,
     Exit,
+    // Execute's (27s), after `Exit`: chat's rows hold every verb up to it.
+    Symphonies,
+    Play,
 };
 
 /// What a command's argument completes from.
@@ -80,6 +106,11 @@ enum class ArgumentValues : std::uint8_t {
     Suites,
     /// An attach's graph methods: `code`, `off` (27p).
     GraphMethods,
+    /// The configured suites alone, without `off` (27s): an execute session
+    /// always runs under one.
+    NamedSuites,
+    /// The symphonies a session can play, described (27s).
+    Symphonies,
 };
 
 /// A flag a command takes after its argument, as `--name=value` (27p).
@@ -105,18 +136,26 @@ struct ChatCommandSpec {
     /// The flags that follow its argument, completed once the argument is
     /// typed and a space follows it (27p): `--name=` first, then its values.
     std::span<const ChatFlagSpec> flags = {};
+    /// The sessions that offer it (27s).
+    SessionRows sessions = SessionRows::Every;
 };
 
-/// Every chat command, in the order `/help` and completion show them.
-[[nodiscard]] std::span<const ChatCommandSpec> chat_commands() noexcept;
+/// Every command a `mode` session offers, in the order `/help` and
+/// completion show them -- each a row of the one table.
+[[nodiscard]] std::vector<std::reference_wrapper<const ChatCommandSpec>> chat_commands(
+    SessionMode mode = SessionMode::Chat);
 
-/// The command spelled `verb` (without the `/`), or null.
-[[nodiscard]] const ChatCommandSpec* find_chat_command(std::string_view verb) noexcept;
+/// The command spelled `verb` (without the `/`) that a `mode` session
+/// offers, or null.
+[[nodiscard]] const ChatCommandSpec* find_chat_command(
+    std::string_view verb, SessionMode mode = SessionMode::Chat) noexcept;
 
-/// `/help`'s rows: each command with its argument shape, then its
-/// description in a shared column, wrapped to stay short of `width`'s last
-/// column. A width of 0 is a pipe: one row per command, unwrapped.
-[[nodiscard]] std::vector<std::string> chat_help_lines(std::size_t width = 0);
+/// `/help`'s rows for a `mode` session: each command with its argument
+/// shape, then its description in a shared column, wrapped to stay short of
+/// `width`'s last column. A width of 0 is a pipe: one row per command,
+/// unwrapped.
+[[nodiscard]] std::vector<std::string> chat_help_lines(std::size_t width = 0,
+                                                       SessionMode mode = SessionMode::Chat);
 
 /// One entry of a directory, as the `@` completer needs it.
 struct DirectoryEntry {
@@ -153,6 +192,10 @@ struct ChatCompletionSources {
     std::function<std::vector<std::string>()> gated_tools;
     std::function<std::vector<std::string>()> session_permissions;
     DirectoryLister list;
+    /// Which session the line is typed into (27s): the rows it offers.
+    SessionMode mode = SessionMode::Chat;
+    /// The symphonies `/play` takes, described (27s). Empty offers none.
+    std::function<std::vector<NamedChoice>()> symphonies;
 };
 
 /// The sources for a chat over `config`, with paths under `working_directory`.

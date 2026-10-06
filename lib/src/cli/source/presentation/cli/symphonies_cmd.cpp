@@ -223,17 +223,8 @@ void bind_list(CLI::App& parent, const RootContext& context) {
             write_document(std::cout, symphony::list_document(catalog));
             return;
         }
-        std::cout << padded("NAME", kNameColumn) << padded("STAGES", kStagesColumn)
-                  << padded("SOURCE", kSourceColumn) << "DESCRIPTION\n";
-        for (const symphony::Definition& definition : catalog.definitions) {
-            const std::vector<std::string> problems = symphony::validate(definition.spec, catalog);
-            std::cout << padded(definition.spec.name, kNameColumn)
-                      << padded(symphony::role_chain(definition.spec), kStagesColumn)
-                      << padded(source_label(definition), kSourceColumn)
-                      << (problems.empty() ? definition.spec.description
-                                           : "cannot be played -- 'apogee symphonies show " +
-                                                 definition.spec.name + "' says why")
-                      << "\n";
+        for (const std::string& line : symphony_list_lines(catalog)) {
+            std::cout << line << "\n";
         }
         for (const std::string& problem : catalog.problems) {
             std::cerr << "apogee symphonies: skipped " << problem << "\n";
@@ -740,6 +731,21 @@ void bind_play(CLI::App& parent, const RootContext& context) {
 }
 
 }  // namespace
+
+std::vector<std::string> symphony_list_lines(const symphony::Catalog& catalog) {
+    std::vector<std::string> lines{padded("NAME", kNameColumn) + padded("STAGES", kStagesColumn) +
+                                   padded("SOURCE", kSourceColumn) + "DESCRIPTION"};
+    for (const symphony::Definition& definition : catalog.definitions) {
+        const std::vector<std::string> problems = symphony::validate(definition.spec, catalog);
+        lines.push_back(padded(definition.spec.name, kNameColumn) +
+                        padded(symphony::role_chain(definition.spec), kStagesColumn) +
+                        padded(source_label(definition), kSourceColumn) +
+                        (problems.empty() ? definition.spec.description
+                                          : "cannot be played -- 'apogee symphonies show " +
+                                                definition.spec.name + "' says why"));
+    }
+    return lines;
+}
 
 std::string_view SymphoniesCommand::name() const noexcept {
     return "symphonies";

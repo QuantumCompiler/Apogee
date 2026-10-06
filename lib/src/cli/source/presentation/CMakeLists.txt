@@ -201,6 +201,8 @@ apogee_add_module(cli
     cli/knowledge.cpp
     cli/chat.h
     cli/chat.cpp
+    cli/execute.h
+    cli/execute.cpp
     cli/chat_completer.h
     cli/chat_completer.cpp
     cli/attachment_graph.h
@@ -209,8 +211,12 @@ apogee_add_module(cli
     cli/chat_attachments.cpp
     cli/chat_history.h
     cli/chat_history.cpp
+    cli/chat_play.h
+    cli/chat_play.cpp
     cli/chat_recall.h
     cli/chat_recall.cpp
+    cli/chat_session.h
+    cli/chat_session.cpp
     cli/chat_turn.h
     cli/chat_turn.cpp
     cli/task_cmd.h

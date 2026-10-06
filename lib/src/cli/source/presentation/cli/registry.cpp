@@ -16,6 +16,7 @@
 #include "cli/config_cmd.h"
 #include "cli/datasets.h"
 #include "cli/embed.h"
+#include "cli/execute.h"
 #include "cli/graph.h"
 #include "cli/knowledge.h"
 #include "cli/mcp_cmd.h"
@@ -82,6 +83,7 @@ CommandRegistry default_registry() {
     registry.add(std::make_unique<ConfigCommand>());
     registry.add(std::make_unique<DatasetsCommand>());
     registry.add(std::make_unique<EmbedCommand>());
+    registry.add(std::make_unique<ExecuteCommand>());
     registry.add(std::make_unique<GraphCommand>());
     registry.add(std::make_unique<KnowledgeCommand>());
     registry.add(std::make_unique<McpCommand>());

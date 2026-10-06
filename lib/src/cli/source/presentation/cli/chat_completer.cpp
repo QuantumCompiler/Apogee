@@ -29,10 +29,39 @@ constexpr std::array kCommands{
     ChatCommandSpec{"model", ChatVerb::Model, "[backend]",
                     "Show the backend answering, or switch to another", ArgumentValues::Backends},
     ChatCommandSpec{"models", ChatVerb::Models, "", "List the configured backends"},
-    ChatCommandSpec{"suite", ChatVerb::Suite, "[name|off]",
+    ChatCommandSpec{"suite",
+                    ChatVerb::Suite,
+                    "[name|off]",
                     "Show the suite and what its members hold, or switch to another (then "
                     "--force, --warm) or off",
-                    ArgumentValues::Suites},
+                    ArgumentValues::Suites,
+                    {},
+                    SessionRows::ChatOnly},
+    // An execute session always runs under a suite (27s): its `/suite`
+    // switches and never turns it off.
+    ChatCommandSpec{"suite",
+                    ChatVerb::Suite,
+                    "[name]",
+                    "Show the suite and what its members hold, or switch to another (then "
+                    "--force, --warm)",
+                    ArgumentValues::NamedSuites,
+                    {},
+                    SessionRows::ExecuteOnly},
+    ChatCommandSpec{"symphonies",
+                    ChatVerb::Symphonies,
+                    "",
+                    "List the symphonies /play can play",
+                    ArgumentValues::None,
+                    {},
+                    SessionRows::ExecuteOnly},
+    ChatCommandSpec{"play",
+                    ChatVerb::Play,
+                    "<symphony> [input]",
+                    "Play a symphony on the input: its stages on the suite's members, its "
+                    "output this session's answer",
+                    ArgumentValues::Symphonies,
+                    {},
+                    SessionRows::ExecuteOnly},
     ChatCommandSpec{"system", ChatVerb::System, "<text>", "Replace the system prompt"},
     ChatCommandSpec{"temperature", ChatVerb::Temperature, "<number>",
                     "Set the sampling temperature"},
@@ -298,6 +327,14 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
             choices = sources.suites;
             choices.push_back({std::string{harness::kSuiteOff}, "No suite: the global pointers"});
             break;
+        case ArgumentValues::NamedSuites:
+            choices = sources.suites;
+            break;
+        case ArgumentValues::Symphonies:
+            if (sources.symphonies) {
+                choices = sources.symphonies();
+            }
+            break;
         case ArgumentValues::GraphMethods:
             for (const std::string_view name : harness::attachment_graph_method_names()) {
                 choices.push_back(
@@ -437,20 +474,38 @@ Suggestions complete_flags(std::string_view before, std::size_t begin, const Cha
 
 }  // namespace
 
-std::span<const ChatCommandSpec> chat_commands() noexcept {
-    return kCommands;
+bool offered_in(SessionRows rows, SessionMode mode) noexcept {
+    switch (rows) {
+        case SessionRows::Every:
+            return true;
+        case SessionRows::ChatOnly:
+            return mode == SessionMode::Chat;
+        case SessionRows::ExecuteOnly:
+            return mode == SessionMode::Execute;
+    }
+    return false;
 }
 
-const ChatCommandSpec* find_chat_command(std::string_view verb) noexcept {
+std::vector<std::reference_wrapper<const ChatCommandSpec>> chat_commands(SessionMode mode) {
+    std::vector<std::reference_wrapper<const ChatCommandSpec>> rows;
     for (const ChatCommandSpec& spec : kCommands) {
-        if (spec.verb == verb) {
+        if (offered_in(spec.sessions, mode)) {
+            rows.emplace_back(spec);
+        }
+    }
+    return rows;
+}
+
+const ChatCommandSpec* find_chat_command(std::string_view verb, SessionMode mode) noexcept {
+    for (const ChatCommandSpec& spec : kCommands) {
+        if (spec.verb == verb && offered_in(spec.sessions, mode)) {
             return &spec;
         }
     }
     return nullptr;
 }
 
-std::vector<std::string> chat_help_lines(std::size_t width) {
+std::vector<std::string> chat_help_lines(std::size_t width, SessionMode mode) {
     const auto usage = [](const ChatCommandSpec& spec) {
         std::string out = "/" + std::string{spec.verb};
         if (!spec.argument.empty()) {
@@ -458,8 +513,9 @@ std::vector<std::string> chat_help_lines(std::size_t width) {
         }
         return out;
     };
+    const std::vector<std::reference_wrapper<const ChatCommandSpec>> offered = chat_commands(mode);
     std::size_t widest = 0;
-    for (const ChatCommandSpec& spec : kCommands) {
+    for (const ChatCommandSpec& spec : offered) {
         widest = std::max(widest, ansi::display_width(usage(spec)));
     }
     // Two in, the usages, two more, then the descriptions -- wrapped under
@@ -475,7 +531,7 @@ std::vector<std::string> chat_help_lines(std::size_t width) {
     const std::size_t text_width = unbounded ? std::string::npos : width - 1 - indent;
 
     std::vector<std::string> lines;
-    for (const ChatCommandSpec& spec : kCommands) {
+    for (const ChatCommandSpec& spec : offered) {
         const std::string head = std::string(kIndent, ' ') + usage(spec);
         const std::vector<std::string> rows = wrap_words(spec.description, text_width);
         if (beside) {
@@ -551,7 +607,7 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
         if (typed.find('/') != std::string_view::npos) {
             return out;
         }
-        for (const ChatCommandSpec& spec : kCommands) {
+        for (const ChatCommandSpec& spec : chat_commands(sources.mode)) {
             if (spec.verb.starts_with(typed)) {
                 const std::string name = "/" + std::string{spec.verb};
                 // A trailing space when it takes an argument, so the next
@@ -573,7 +629,8 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
     if (!slash) {
         return out;
     }
-    const ChatCommandSpec* spec = find_chat_command(before_cursor.substr(1, first_space - 1));
+    const ChatCommandSpec* spec =
+        find_chat_command(before_cursor.substr(1, first_space - 1), sources.mode);
     if (spec == nullptr || spec->values == ArgumentValues::None) {
         return out;
     }

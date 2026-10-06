@@ -258,6 +258,8 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/attachment_graph_test.cpp
     presentation/operations/graph_sources_test.cpp
     presentation/cli/chat_completer_test.cpp
+    presentation/cli/chat_session_test.cpp
+    presentation/cli/execute_test.cpp
     presentation/httpserver/handler_test.cpp
     presentation/httpserver/sse_test.cpp
     presentation/httpserver/session_test.cpp
@@ -635,6 +637,22 @@ if(UNIX)
             ${CMAKE_CURRENT_SOURCE_DIR}/../assets/symphonies
     )
     set_tests_properties(cli.symphonies_lifecycle PROPERTIES TIMEOUT 120)
+
+    # Execute mode (27s) on the real binary, scripted members echoing their
+    # briefs and no input after the command: the suite-first refusals naming
+    # the way to a suite; bare input answered and saved byte for byte as
+    # `chat --suite`; `/play` threading stage one into stage two, its output
+    # the answer and one exchange of the saved conversation, a play that
+    # cannot run kept out of it; `/symphonies`, `/suite off` refused; resumed
+    # by `execute -c` and `chat --resume` with its plays intact, and
+    # compacted; machine mode carrying a play in the events it already has,
+    # an `error` for one that cannot run; completion.
+    add_test(NAME cli.execute_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/execute_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/execute-e2e
+    )
+    set_tests_properties(cli.execute_lifecycle PROPERTIES TIMEOUT 120)
 
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_listen_check.sh"

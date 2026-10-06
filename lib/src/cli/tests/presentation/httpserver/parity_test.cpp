@@ -192,6 +192,9 @@ const std::map<std::string, Classification>& table() {
         {"graph query", served("/v1/admin/graph/{id}/query")},
         // --- read-only / interactive ------------------------------------------
         {"chat", read_only()},
+        // chat's session opened with a suite (27s); a session surface, as chat
+        // is -- the GUI drives it over machine mode, never HTTP.
+        {"execute", read_only()},
         {"complete", read_only()},
         {"analyze", read_only()},
         {"agents list", read_only()},

@@ -1,0 +1,389 @@
+=== apogee chat
+--- stdin
+hello
+/help
+/models
+/model
+/model helper
+again
+/model root
+/suite
+/think
+/think off
+/think
+/recall
+/retriever
+/retriever lexical
+/rerank
+/rerank off
+/temperature warm
+/max-tokens many
+/permissions
+/allow
+/branch
+/attachments
+/detach nothing
+/attach
+/check
+/title renamed
+/system be brief
+/compact
+/play summarize-verify x
+/symphonies
+/nonsense
+/exit
+--- exit 0
+--- stdout
+ROOT<hello>
+HELPER<again>
+--- stderr
+  /help                   List these commands
+  /model [backend]        Show the backend answering, or switch to another
+  /models                 List the configured backends
+  /suite [name|off]       Show the suite and what its members hold, or switch to another (then --force, --warm) or off
+  /system <text>          Replace the system prompt
+  /temperature <number>   Set the sampling temperature
+  /think [on|off|auto]    Show or set whether the model thinks first: on, off, or auto per question
+  /max-tokens <number>    Cap each answer's length in tokens
+  /compact                Summarise the conversation so far, to free context
+  /title <name>           Rename this chat
+  /retriever [mode]       Show or set how documents are searched: auto, lexical, vector or hybrid
+  /rerank [backend]       Show or set the model that reranks search results, or off, or auto
+  /branch [ref]           Show or set the branch under review: head, base..head, or off
+  /capture [status|link]  Save this conversation as a knowledge record
+  /check                  Have the suite's verifier check the last answer, once
+  /attach <path>          Attach a file, folder or glob: inlined when it fits, retrieved when not (then --graph=code|off)
+  /attachments            List what is attached
+  /detach <name>          Detach an attachment
+  /recall [on|off]        Show or set whether turns recall earlier chats
+  /private                Never summarise this chat for recall
+  /allow [tool|website]   Allow a tool or website for this chat; alone, list each answer
+  /deny <tool|website>    Refuse a tool or website for this chat, without asking
+  /revoke <tool|website>  Forget this chat's answer for a tool or website
+  /permissions            List each tool's answer and where it comes from
+  /exit                   Save and leave
+  /quit                   Save and leave
+  helper
+* root
+root
+[apogee] switched to helper
+[apogee] switched to root
+[apogee] suite: none -- /suite <name> runs the chat under one
+[apogee] thinking: on
+[apogee] thinking: off
+[apogee] recall: off
+[rag] retriever: auto -- vector when the collection's vectors match the embedding backend, else lexical; hybrid only when asked
+[rag] retriever set to lexical
+[rag] rerank: following each collection's rerank: pin -- /rerank <backend>|off|auto
+[rag] rerank set to off
+[error] not a number: 'warm'
+[error] not a number: 'many'
+  no tool in this chat asks permission (--tools)
+  no tool in this chat asks permission (--tools)
+[apogee] review: off -- /branch <head>, <base>..<head>, or off
+[apogee] nothing attached -- /attach <path>
+[error] nothing attached as 'nothing' -- /attachments lists them
+[error] /attach takes a file, a folder or a glob -- /attach <path> [--graph=code|off]
+[error] check: no suite is active -- a check is one member of a suite checking another's work
+[apogee] renamed
+[apogee] system prompt updated
+[apogee] history compacted
+[error] unknown command '/play' -- /help lists them
+[error] unknown command '/symphonies' -- /help lists them
+[error] unknown command '/nonsense' -- /help lists them
+=== apogee chat -c
+--- stdin
+/model
+/suite
+what now
+--- exit 0
+--- stdout
+ROOT<what now>
+--- stderr
+root
+[apogee] suite: none -- /suite <name> runs the chat under one
+=== apogee chat --suite duo
+--- stdin
+hi
+/suite
+/suite off
+still here
+/suite duo
+/suite nope
+/suite duo --warm
+bye
+--- exit 0
+--- stdout
+ROOT<hi>
+ROOT<still here>
+ROOT<bye>
+--- stderr
+[apogee] suite duo: no member holds memory on this machine
+[apogee] suite: duo -- chat root · utility helper
+footprint: suite duo
+  root (chat): nothing held here
+  helper (utility): nothing held here
+  total: suite duo: no member holds memory on this machine
+[apogee] suite off -- the roles follow the global pointers; the conversation stays on root
+[apogee] suite duo -- chat root · utility helper
+[apogee] suite duo: no member holds memory on this machine
+[error] no suite named 'nope' (configured: duo)
+[apogee] suite duo -- chat root · utility helper
+[apogee] suite duo: no member holds memory on this machine
+=== apogee chat -c
+--- stdin
+/suite
+back
+--- exit 0
+--- stdout
+ROOT<back>
+--- stderr
+[apogee] suite duo: no member holds memory on this machine
+[apogee] suite: duo -- chat root · utility helper
+footprint: suite duo
+  root (chat): nothing held here
+  helper (utility): nothing held here
+  total: suite duo: no member holds memory on this machine
+=== apogee chat
+--- stdin
+hi
+/suite
+--- exit 0
+--- stdout
+ROOT<hi>
+--- stderr
+[apogee] suite duo: no member holds memory on this machine
+[apogee] suite: duo -- chat root · utility helper
+footprint: suite duo
+  root (chat): nothing held here
+  helper (utility): nothing held here
+  total: suite duo: no member holds memory on this machine
+=== apogee chat --suite off
+--- stdin
+hi
+/suite
+--- exit 0
+--- stdout
+ROOT<hi>
+--- stderr
+[apogee] suite: none -- /suite <name> runs the chat under one
+=== apogee chat --output-format stream-json
+--- stdin
+{"type":"user","text":"hello"}
+{"type":"user","text":"/play summarize-verify x"}
+{"type":"attach","path":"nothing-here"}
+{"type":"nonsense"}
+--- exit 0
+--- stdout
+{"model":"root","protocol_version":1,"type":"session"}
+{"type":"thinking"}
+{"type":"answer_start"}
+{"text":"ROOT<hel","type":"answer_delta"}
+{"text":"lo>","type":"answer_delta"}
+{"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"ROOT<hello>","type":"result"}
+{"type":"thinking"}
+{"type":"answer_start"}
+{"text":"ROOT</pl","type":"answer_delta"}
+{"text":"ay summa","type":"answer_delta"}
+{"text":"rize-ver","type":"answer_delta"}
+{"text":"ify x>","type":"answer_delta"}
+{"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"ROOT</play summarize-verify x>","type":"result"}
+{"text":"no file or folder at nothing-here","type":"notice"}
+--- stderr
+=== apogee chat --suite duo --output-format stream-json
+--- stdin
+{"type":"user","text":"hi"}
+--- exit 0
+--- stdout
+{"model":"root","protocol_version":1,"type":"session"}
+{"type":"thinking"}
+{"type":"answer_start"}
+{"text":"ROOT<hi>","type":"answer_delta"}
+{"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"ROOT<hi>","type":"result"}
+--- stderr
+[apogee] suite duo: no member holds memory on this machine
+=== apogee chat --suite nope
+--- stdin
+hi
+--- exit 1
+--- stdout
+--- stderr
+apogee chat: --suite: no suite named 'nope' (configured: duo)
+=== apogee chat --warm
+--- stdin
+hi
+--- exit 1
+--- stdout
+--- stderr
+apogee chat: --warm loads a suite's members, and this chat runs under none -- --suite <name> names one
+=== apogee chat --input-format stream-json
+--- stdin
+hi
+--- exit 1
+--- stdout
+--- stderr
+apogee chat: --input-format stream-json cannot be combined with --output-format text; a driven chat session speaks the protocol in both directions
+=== apogee chat --graph code
+--- stdin
+hi
+--- exit 1
+--- stdout
+--- stderr
+apogee chat: --graph applies to the --attach given with it -- for every attach, set attachments.graph in the config; for one, /attach <path> --graph=code|off
+=== apogee chat --allow write_file
+--- stdin
+hi
+--- exit 1
+--- stdout
+--- stderr
+apogee chat: --allow, --deny and --allow-host need --tools: without tools, nothing is asked
+=== apogee chat --tools --allow nothing
+--- stdin
+hi
+--- exit 1
+--- stdout
+--- stderr
+apogee chat: --allow: 'nothing' is not a tool this chat asks about -- the ones it asks about: delete_file, delete_note, edit_file, run_command, write_file, write_note (a website takes --allow-host)
+=== apogee chat --fetch --no-fetch
+--- stdin
+hi
+--- exit 1
+--- stdout
+--- stderr
+apogee chat: --fetch and --no-fetch are mutually exclusive
+=== apogee chat --resume nope
+--- stdin
+hi
+--- exit 1
+--- stdout
+--- stderr
+apogee chat: no chat named 'nope'
+=== apogee chat -c
+--- stdin
+hi
+--- exit 1
+--- stdout
+--- stderr
+apogee chat: no saved conversation to continue
+=== apogee chat --think sometimes
+--- stdin
+hi
+--- exit 105
+--- stdout
+--- stderr
+--think: sometimes not in {on,off,auto}
+Run with --help for more information.
+=== apogee chat --help
+--- stdin
+--- exit 0
+--- stdout
+Start or resume an interactive conversation
+Usage: apogee chat [OPTIONS]
+
+Options:
+  -h,--help                   Print this help message and exit
+  -m,--model BACKEND          Backend or model to use
+  -s,--system TEXT            System prompt for the session
+  --rag COLLECTION            Retrieve context from this collection each turn (see 'apogee embed'); "" switches off the config's auto_rag for this session
+  --rag-limit INT             How many chunks to inject (default 4)
+  --retriever TEXT:{lexical,vector,hybrid,auto}
+                              How to search the collection: lexical, vector, hybrid, or auto
+  --rerank BACKEND            Backend that reorders retrieved chunks with one generation call, on (the utility model), or off
+  --image PATH ...            An image to attach, as /attach does: seen as it is with the first message by a model that can, described for one that cannot (repeatable)
+  --attach PATH ...           A file, folder or glob to attach to the chat: indexed, inlined when it fits, retrieved each turn when not (repeatable)
+  --graph TEXT:{code,off}     For the --attach given here: code builds a folder's code graph, off indexes its chunks alone (default: the config's attachments.graph, else code)
+  -t,--temperature FLOAT      Sampling temperature
+  -n,--max-tokens INT         Maximum tokens per reply
+  --think TEXT:{on,off,auto}  Whether a reasoning model thinks first: on, off, or auto (per question)
+  --no-recall                 Recall no earlier chats in this run
+  --allow TOOL                Allow a tool for this chat without asking (repeatable, with --tools)
+  --deny TOOL                 Refuse a tool or website for this chat without asking (repeatable)
+  --allow-host TEXT           Allow fetching from a website for this chat without asking (repeatable)
+  --think-budget INT:INT in [0 - 1000000]
+                              The most tokens a reasoning model may think for before it answers
+  --tools                     Let the model call tools
+  --search                    Enable the provider's server-side web search
+  --no-color                  Disable ANSI colour output
+  --raw                       Show answers' Markdown as written instead of rendering it on the terminal
+  --output-format TEXT:{text,stream-json}
+                              Output format: text (default) or stream-json for a machine driver
+  --input-format TEXT:{text,stream-json}
+                              Input format: text (default) or stream-json; follows --output-format if unset
+  -v,--verbose                Print progress notes
+  --resume CHAT               Resume a saved conversation by id or name
+  --suite MODEL_SUITE         Run under this suite -- its members answer for the roles it names -- or off for none
+  --warm                      Load the suite's members now, on the progress line, rather than at first use
+  --force                     Run the suite even when what it takes is over this machine's memory
+  -q,--quiet                  No progress line while the suite's members load
+  -c,--continue               Resume the most recent conversation
+  --branch GIT_REF            Branch under review for the git tools (the head); never checked out
+  --base GIT_REF              Ref to compare against (default: the default branch)
+  --remote REMOTE             Remote to resolve refs against (default origin)
+  --fetch                     Always fetch the refs before diffing
+  --no-fetch                  Never fetch; refuse a ref that is absent
+--- stderr
+=== apogee __complete chat --
+--- stdin
+--- exit 0
+--- stdout
+--allow
+--allow-host
+--attach
+--base
+--branch
+--continue
+--deny
+--fetch
+--force
+--graph
+--help
+--image
+--input-format
+--max-tokens
+--model
+--no-color
+--no-fetch
+--no-recall
+--output-format
+--quiet
+--rag
+--rag-limit
+--raw
+--remote
+--rerank
+--resume
+--retriever
+--search
+--suite
+--system
+--temperature
+--think
+--think-budget
+--tools
+--verbose
+--warm
+--- stderr
+=== apogee __complete chat --suite ""
+--- stdin
+--- exit 0
+--- stdout
+duo
+--- stderr
+=== apogee __complete chat --think ""
+--- stdin
+--- exit 0
+--- stdout
+on
+off
+auto
+--- stderr
+=== apogee __complete chat --output-format ""
+--- stdin
+--- exit 0
+--- stdout
+text
+stream-json
+--- stderr

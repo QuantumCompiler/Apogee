@@ -23,11 +23,17 @@ apogee chat --output-format stream-json --input-format stream-json
 apogee task run "Write the report" --require-file report.txt --output-format stream-json
 ```
 
+```bash
+apogee execute --suite research --output-format stream-json
+```
+
 `--output-format` selects the event stream on stdout. `--input-format` selects
 JSONL user turns on stdin, which is what makes one `chat` child serve a whole
 conversation. It defaults to whatever `--output-format` is, so a driver may pass
 one flag; on `chat` the two directions **must agree**, and disagreeing is an
-error rather than a silently ignored flag. `task run` and `task resume` take
+error rather than a silently ignored flag. `execute` (27s) is chat's session
+opened with a suite, and takes both flags as chat does (see
+[Playing a symphony](#playing-a-symphony-execute)). `task run` and `task resume` take
 `--output-format` alone: a task reads nothing from its driver (see
 [A task's run](#a-tasks-run)).
 
@@ -222,6 +228,32 @@ be read, such as a video's sound with no model to hear it.
 Closing stdin ends the session: the child drains its queued output, persists the
 conversation, and exits cleanly.
 
+### Playing a symphony (`execute`)
+
+`apogee execute` (27s) is chat's session opened with a suite: the same lines in,
+the same events out, a `user` line answered by the suite's root model as chat
+answers it. One `user` line means more there: one whose text is a `/play`
+command plays that symphony on the suite's members instead of asking the root.
+
+```jsonl
+{"type":"user","text":"/play summarize-verify The minutes of the meeting…"}
+```
+
+It arrives as an ordinary turn, in events the protocol already has: a
+`tool_status` as each stage starts, in a side call's shape (`stage 1/2 summarize
+— asking utility (l3b): …`; a chain's stages name their position, `digest →
+summarize-verify, stage 1/2 summarize`), then `answer_start`, the output in
+`answer_delta`, `answer_end`, and the turn's `result` carrying the whole output.
+The session keeps the play as one ordinary exchange — the line as typed, then
+the output — so the next `user` line builds on it, and a resumed or compacted
+session holds it like any other. A play that cannot run — no symphony of that
+name, no input for one that reads it, one that takes an image (a play from a
+line carries text alone), a stage refused or failed, the play's
+`symphony_caps` budget spent — ends in an `error` event instead of a `result`,
+the reason on stderr too, and nothing is kept. Every other line is what it is
+in `chat`: a slash word other than `/play` is a prompt like any text. The
+catalog is a read: `apogee symphonies list --output-format json`.
+
 ### Answering a question
 
 When the model calls `ask_user`, the child emits a `question` event and **blocks
@@ -379,4 +411,6 @@ stderr with its position (`outer → inner, stage 2/3 verify (chat): …`).
   and a task's events only on the stdout of the `task run` or `task resume`
   that runs it: a `chat` child never narrates a task it did not start.
 - **It does not represent slash commands.** `/model`, `/compact` and the rest are
-  terminal-REPL affordances; a driver uses the CLI commands and its own UI.
+  terminal-REPL affordances; a driver uses the CLI commands and its own UI. The
+  one exception is an `execute` session's `/play`, which is a turn rather than a
+  setting (see [Playing a symphony](#playing-a-symphony-execute)).
