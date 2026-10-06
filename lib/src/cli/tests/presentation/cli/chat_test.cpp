@@ -1586,3 +1586,130 @@ TEST_CASE("answers always reaches complete, with tools or without", "[chat][cli]
               .find("validate: utility (helper) objects to the answer -- \"17 x 23 is 391, not "
                     "381.\"") != std::string::npos);
 }
+
+namespace {
+
+/// The tool results `session` holds, in order.
+[[nodiscard]] std::vector<std::string> tool_results(const apogee::logger::Session& session) {
+    std::vector<std::string> out;
+    for (const ChatMessage& message : session.messages) {
+        if (message.role == apogee::harness::Role::Tool) {
+            out.push_back(message.content.plain_text());
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a chat with a graphed folder offers the graph tools scoped to it; detached, they go",
+          "[chat][cli][attachments][graph]") {
+    // 27o: the scripted model calls graph_explain each question. With the
+    // folder of code attached, the call reads the chat's own graph; after it
+    // is detached -- a folder of notes still attached, chunks only -- the
+    // same call reads what the unscoped toolset reads: here, nothing built.
+    // Few enough toolsets that every tool is offered (26g selects past 16).
+    const nlohmann::json explain = {
+        {"tool_calls", {{{"name", "graph_explain"}, {"arguments", {{"node", "make_user"}}}}}}};
+    HelperChat chat{nlohmann::json::array({explain,
+                                           {{"text", "offered {{tool_names}}"}},
+                                           explain,
+                                           {{"text", "offered {{tool_names}}"}}}),
+                    {"Graph chat", "make_user"},
+                    {},
+                    "tools:\n  disabled: [git, notes, shell, rag]\n"};
+    const std::filesystem::path app = chat.home.path() / "app";
+    std::filesystem::copy(std::filesystem::path{APOGEE_TEST_FIXTURES} / "code_graph" / "python",
+                          app, std::filesystem::copy_options::recursive);
+    const std::filesystem::path notes = chat.home.path() / "notes";
+    std::filesystem::create_directories(notes);
+    std::ofstream{notes / "a.md", std::ios::binary} << "alpha\n";
+    std::ofstream{notes / "b.md", std::ios::binary} << "beta\n";
+
+    const std::string input = "/attach " + notes.generic_string() + "\n/attach " +
+                              app.generic_string() + "\nwho makes users?\n/detach " +
+                              app.generic_string() + "\nand now?\n";
+    REQUIRE(chat.run({"chat", "--tools"}, input) == 0);
+    INFO(chat.err);
+    CHECK(chat.err.find("graph: ") != std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    const std::vector<std::string> results = tool_results(session);
+    REQUIRE(results.size() == 2);
+    // Scoped: the chat's graph, its member and file.
+    const nlohmann::json card = nlohmann::json::parse(results[0], nullptr, false);
+    REQUIRE_FALSE(card.is_discarded());
+    CHECK(card["graph"] == "attachments");
+    CHECK(card["node"]["member"] == "app");
+    CHECK(card["node"]["file"] == "pkg/service.py");
+    // All four offered beside the rest.
+    std::vector<std::string> answers;
+    for (const ChatMessage& message : session.messages) {
+        if (message.role == apogee::harness::Role::Assistant && message.tool_calls.empty()) {
+            answers.push_back(message.content.plain_text());
+        }
+    }
+    REQUIRE(answers.size() == 2);
+    for (const std::string_view tool :
+         {"graph_explain", "graph_path", "graph_query", "graph_neighbors"}) {
+        CHECK(answers[0].find(tool) != std::string::npos);
+    }
+    // Detached -- notes, chunks only, still attached: the scoped set is gone
+    // with it, and the name reads what the unscoped set reads.
+    CHECK(results[1].find("attachments") == std::string::npos);
+    CHECK(results[1].find("no graph is built yet") != std::string::npos);
+    CHECK(session.attachments.size() == 1);
+}
+
+TEST_CASE("a driven chat walks its attached folder's graph through the scoped tools",
+          "[chat][cli][attachments][graph][machine]") {
+    HelperChat chat{
+        nlohmann::json::array(
+            {{{"tool_calls",
+               {{{"name", "graph_path"},
+                 {"arguments", {{"from", "main"}, {"to", "make_user"}, {"directed", true}}}}}}},
+             {{"text", "walked"}}}),
+        {"Driven"}};
+    const std::filesystem::path app = chat.home.path() / "app";
+    std::filesystem::copy(std::filesystem::path{APOGEE_TEST_FIXTURES} / "code_graph" / "python",
+                          app, std::filesystem::copy_options::recursive);
+    const std::string input = R"({"type":"attach","path":")" + app.generic_string() + "\"}\n" +
+                              R"({"type":"user","text":"how does main reach make_user?"})" + "\n";
+    REQUIRE(chat.run({"chat", "--tools", "--input-format", "stream-json", "--output-format",
+                      "stream-json"},
+                     input) == 0);
+    INFO(chat.err);
+    CHECK(chat.out.find("graph: ") != std::string::npos);
+    const std::vector<std::string> results = tool_results(HelperChat::only_session());
+    REQUIRE(results.size() == 1);
+    const nlohmann::json path = nlohmann::json::parse(results[0], nullptr, false);
+    REQUIRE_FALSE(path.is_discarded());
+    CHECK(path["graph"] == "attachments");
+    CHECK(path["found"] == true);
+    CHECK(path["hops"] == 2);
+}
+
+TEST_CASE("a suite's toolset pin keeps the graph tools scoped to the chat's folder",
+          "[chat][cli][attachments][graph][suites]") {
+    // The pin narrows what the scoped registry offers -- never back to the
+    // unscoped set (27d's pin over 27o's scope).
+    const nlohmann::json explain = {
+        {"tool_calls", {{{"name", "graph_explain"}, {"arguments", {{"node", "make_user"}}}}}}};
+    HelperChat chat{nlohmann::json::array({explain, {{"text", "offered {{tool_names}}"}}}),
+                    {"Pinned"},
+                    {},
+                    "suites:\n  research:\n    members:\n      chat:\n        backend: chatty\n"
+                    "        toolset: [graph]\n"};
+    const std::filesystem::path app = chat.home.path() / "app";
+    std::filesystem::copy(std::filesystem::path{APOGEE_TEST_FIXTURES} / "code_graph" / "python",
+                          app, std::filesystem::copy_options::recursive);
+    REQUIRE(chat.run({"chat", "--tools", "--suite", "research"},
+                     "/attach " + app.generic_string() + "\nwho makes users?\n") == 0);
+    INFO(chat.err);
+    const apogee::logger::Session session = HelperChat::only_session();
+    const std::vector<std::string> results = tool_results(session);
+    REQUIRE(results.size() == 1);
+    CHECK(nlohmann::json::parse(results[0], nullptr, false)["graph"] == "attachments");
+    REQUIRE_FALSE(session.messages.empty());
+    CHECK(session.messages.back().content.plain_text() ==
+          "offered graph_explain,graph_neighbors,graph_path,graph_query");
+}

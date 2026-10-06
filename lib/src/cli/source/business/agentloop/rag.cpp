@@ -25,15 +25,21 @@ namespace {
     return budget.tokens(request).tokens;
 }
 
-/// A chat's attachment hits as labelled excerpts, fitted to `share` (26d).
+/// A chat's attachment hits as labelled excerpts, fitted to `share` (26d)
+/// -- with the chat's code-graph section after them when the turn expanded
+/// (27o), under the fitting rules the collection path obeys: the leading
+/// excerpts that fit beside the section, else the section alone when it
+/// fits, else neither, said.
 [[nodiscard]] RagResult package_attachments(const RagTurn& turn,
                                             const std::vector<embedstore::SearchHit>& hits,
-                                            std::int64_t share, RagResult result) {
+                                            std::int64_t share, std::string graph_section,
+                                            RagResult result) {
     std::vector<AttachmentExcerpt> excerpts = attachment_excerpts(hits);
     if (turn.budget.budget.known()) {
         const auto render = [&](std::size_t count) {
             return render_attachment_excerpts(
-                {excerpts.begin(), excerpts.begin() + static_cast<std::ptrdiff_t>(count)});
+                {excerpts.begin(), excerpts.begin() + static_cast<std::ptrdiff_t>(count)},
+                graph_section);
         };
         const std::size_t fit = fitting_prefix(turn.budget, share, excerpts.size(), render);
         if (fit < excerpts.size()) {
@@ -41,13 +47,24 @@ namespace {
                                    " excerpts fit the context budget");
             excerpts.resize(fit);
         }
+        if (fit == 0 && !graph_section.empty() &&
+            fitting_prefix(turn.budget, share, 1, [&](std::size_t) {
+                return render_attachment_excerpts({}, graph_section);
+            }) == 0) {
+            result.notes.emplace_back("the graph context did not fit the context budget either");
+            graph_section.clear();
+        }
     }
-    if (excerpts.empty()) {
+    if (graph_section.empty()) {
+        result.graph_entities = 0;
+    }
+    if (excerpts.empty() && graph_section.empty()) {
         return result;
     }
     result.chunks = static_cast<std::int64_t>(excerpts.size());
-    result.top_score = excerpts.front().score;
-    result.prefix.push_back(harness::ChatMessage::system(render_attachment_excerpts(excerpts)));
+    result.top_score = excerpts.empty() ? 0.0 : excerpts.front().score;
+    result.prefix.push_back(
+        harness::ChatMessage::system(render_attachment_excerpts(excerpts, graph_section)));
     result.tokens = prefix_tokens(turn.budget, result.prefix);
     return result;
 }
@@ -306,15 +323,28 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
             result.retriever == "vector" ? std::string_view{} : std::string_view{turn.question};
         const std::string header = turn.graph_name.empty() ? turn.collection : turn.graph_name;
         try {
-            // The collection's own graph lives beside its chunks; a named
-            // graph's in its own database, opened for this walk alone.
-            const std::optional<embedstore::Store> named =
-                turn.graph_store_path.empty()
-                    ? std::nullopt
-                    : std::optional<embedstore::Store>{std::in_place, turn.graph_store_path};
-            const GraphSection section = build_graph_section_labelled(
-                named.has_value() ? *named : *store, header, seeds, lexical_query, turn.graph_hops,
-                turn.graph_max_entities);
+            GraphSection section;
+            if (turn.attachments) {
+                // A chat's attachment index holds its code graph beside its
+                // chunks (27n): the same top-k seed it, by the code their
+                // lines state -- a code mention is a line, not a chunk.
+                const std::vector<embedstore::SearchHit> leading{
+                    hits.begin(), hits.begin() + static_cast<std::ptrdiff_t>(
+                                                     std::min(hits.size(), seeds.size()))};
+                section = build_graph_section_excerpts(*store, header, code_excerpt_refs(leading),
+                                                       lexical_query, turn.graph_hops,
+                                                       turn.graph_max_entities);
+            } else {
+                // The collection's own graph lives beside its chunks; a named
+                // graph's in its own database, opened for this walk alone.
+                const std::optional<embedstore::Store> named =
+                    turn.graph_store_path.empty()
+                        ? std::nullopt
+                        : std::optional<embedstore::Store>{std::in_place, turn.graph_store_path};
+                section = build_graph_section_labelled(named.has_value() ? *named : *store, header,
+                                                       seeds, lexical_query, turn.graph_hops,
+                                                       turn.graph_max_entities);
+            }
             graph_section = section.text;
             result.graph_entities = section.entities;
         } catch (const std::exception& e) {
@@ -366,7 +396,7 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
     const std::int64_t share = std::max<std::int64_t>(
         turn.budget.budget.share(BudgetSource::Retrieval) - turn.share_used, 0);
     if (turn.attachments) {
-        return package_attachments(turn, hits, share, std::move(result));
+        return package_attachments(turn, hits, share, std::move(graph_section), std::move(result));
     }
     std::vector<std::string> texts;
     texts.reserve(hits.size());

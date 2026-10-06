@@ -85,6 +85,13 @@ std::string strength_of(const agentloop::RagResult& result) {
                                         : ", " + result.strength.band + " match (" + raw + ")";
 }
 
+/// ` +N graph entities`, or nothing when the expansion injected none.
+std::string graph_of(const agentloop::RagResult& result) {
+    return result.graph_entities > 0
+               ? " +" + std::to_string(result.graph_entities) + " graph entities"
+               : std::string{};
+}
+
 }  // namespace
 
 std::string describe_attachment_retrieval(const agentloop::RagResult& result) {
@@ -100,11 +107,14 @@ std::string describe_attachment_retrieval(const agentloop::RagResult& result) {
         return "nothing relevant in the attachments -- the best match is under the floor (" +
                raw_of(result, result.best_score) + ")" + notes;
     }
+    // The chat's code graph's contribution, named as a collection's is
+    // (27o): context the user did not see retrieved.
+    const std::string graph = graph_of(result);
     if (result.chunks == 0) {
-        return "nothing in the attachments matched [" + result.retriever + "]" + notes;
+        return "nothing in the attachments matched [" + result.retriever + "]" + graph + notes;
     }
     return std::to_string(result.chunks) + (result.chunks == 1 ? " excerpt" : " excerpts") +
-           " from the attachments" + strength_of(result) + notes;
+           " from the attachments" + strength_of(result) + graph + notes;
 }
 
 std::string describe_retrieval(const RagChoice& choice, const agentloop::RagResult& result) {
@@ -118,9 +128,7 @@ std::string describe_retrieval(const RagChoice& choice, const agentloop::RagResu
     }
     // The graph's contribution, always named: entities injected beside the
     // chunks are context the user did not see retrieved.
-    const std::string graph = result.graph_entities > 0
-                                  ? " +" + std::to_string(result.graph_entities) + " graph entities"
-                                  : "";
+    const std::string graph = graph_of(result);
     if (result.strength.floored) {
         return "nothing relevant in '" + choice.collection +
                "' -- the best match is under the floor (" + raw_of(result, result.best_score) +

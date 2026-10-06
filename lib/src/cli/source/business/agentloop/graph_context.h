@@ -71,6 +71,16 @@ struct GraphSection {
     const std::vector<embedstore::ChunkRef>& seed_chunks, std::string_view lexical_query, int hops,
     int max_entities);
 
+/// The same over a chat's attachment index (27o): the walk is seeded by the
+/// code its retrieved excerpts state -- named by content and lines, through
+/// the code graph's file states (`Store::code_nodes_in_excerpts`), never
+/// re-listed since their code is already injected -- and by `lexical_query`
+/// through the entity index as above, so a lexical-only chat expands too.
+[[nodiscard]] GraphSection build_graph_section_excerpts(
+    const embedstore::Store& store, std::string_view header,
+    const std::vector<embedstore::CodeExcerptRef>& excerpts, std::string_view lexical_query,
+    int hops, int max_entities);
+
 // --- Which graph covers a collection -----------------------------------------
 //
 // A per-collection graph cannot see across collection boundaries; a **named

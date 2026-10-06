@@ -121,6 +121,20 @@ struct AttachmentExcerpt {
 [[nodiscard]] std::string render_attachment_excerpts(
     const std::vector<AttachmentExcerpt>& excerpts);
 
+/// The same with the chat's code-graph section after the excerpts, in the
+/// same message (27o) -- or, with no excerpts, the section framed on its
+/// own, so a judge that kept none cannot drop what was captured before it
+/// ran. Empty with neither.
+[[nodiscard]] std::string render_attachment_excerpts(const std::vector<AttachmentExcerpt>& excerpts,
+                                                     std::string_view graph_section);
+
+/// What `hits` are to the code graph (27o): each chunk's content and its
+/// lines, read from its metadata -- the excerpts an attachment turn's
+/// expansion is seeded from. A chunk with no line range (a PDF's pages, a
+/// recording's times) states no code, and is left out.
+[[nodiscard]] std::vector<embedstore::CodeExcerptRef> code_excerpt_refs(
+    const std::vector<embedstore::SearchHit>& hits);
+
 /// The code names `question` uses: a token with an underscore inside it
 /// (`fitting_prefix`), a lower-to-upper case change inside it
 /// (`parseConfig`), a `::` (`Store::search`), or a trailing `()`. A file name

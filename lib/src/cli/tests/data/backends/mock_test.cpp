@@ -275,6 +275,12 @@ TEST_CASE("placeholders expand against the request: the last tool result and the
     request.transient.response_schema = R"({"b": 1, "a": 2})";
     CHECK(apogee::backends::expand_mock_text("{{response_schema:json}}", request) ==
           R"("{\"b\": 1, \"a\": 2}")");
+    // The tools the request offered, by name in its order (27o).
+    CHECK(apogee::backends::expand_mock_text("[{{tool_names}}]", request) == "[]");
+    request.tools = {apogee::harness::Tool{.name = "graph_explain"},
+                     apogee::harness::Tool{.name = "read_file"}};
+    CHECK(apogee::backends::expand_mock_text("{{tool_count}}: {{tool_names}}", request) ==
+          "2: graph_explain,read_file");
 
     // And through the provider, streamed and not.
     apogee::backends::MockProvider::Options options;

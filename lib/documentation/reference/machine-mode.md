@@ -182,6 +182,16 @@ Should the attach be interrupted, the notice says `graph: not built -- cancelled
 attach it again to build it`. A single file, a glob, or a folder with no such code
 gets no graph and no such notice.
 
+While a folder's graph is attached, each turn's retrieval walks it from the
+excerpts it found: the turn's attachments `notice` then ends with the count,
+`3 excerpts from the attachments, strong match (0.912 [lexical], 2 of 2 question
+words) +5 graph entities`. And a chat started with `--tools` offers the model the
+four graph tools -- `graph_query`, `graph_path`, `graph_explain`,
+`graph_neighbors` -- reading that chat's own graph: ordinary, never-gated tool
+calls whose results are the documents `apogee graph <verb> --output-format json`
+prints for the same tree, named `"graph": "attachments"`. Detached, the tools read
+the configured graphs again.
+
 An image, a recording or a video is attached the same way. A chat model that can
 read it is sent it as it is with the next `user` message; from the turn after, it
 reaches the model as text: an image's description, a recording's transcript, or

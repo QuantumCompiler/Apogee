@@ -265,3 +265,72 @@ TEST_CASE("a scoped toolset reads the store it was handed, and takes no selectio
               apogee::graph::explain_node(open, apogee::graph::CardRequest{.node = "Vault"}))
               .dump());
 }
+
+TEST_CASE("a registry's graph toolset is swapped for a scoped one, and nothing else moves",
+          "[tools][graph][scope]") {
+    const apogee::testing::TempDir home{"tools-graph-swap-" +
+                                        std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    const std::filesystem::path path = home.path() / "attachments.db";
+    {
+        apogee::embedstore::Store store{path};
+        apogee::testing::build_navigation_graph(store, store, "");
+    }
+    apogee::graph::GraphTarget target;
+    target.name = "attachments";
+    target.store_path = path;
+    target.databases[""] = path;
+    const std::string note =
+        " Reads the code graph of the folder attached to this chat, lib/src/cli/source.";
+
+    ToolRegistry registry;
+    apogee::tools::register_native_toolsets(registry, apogee::tools::ToolsetOptions{});
+    const ToolRegistry scoped = apogee::tools::with_graph_scope(
+        registry, {.config = nullptr, .scope = target, .scope_note = note});
+
+    // The same names; every other tool untouched; the environment note told
+    // when to reach for them (26p's mechanism), after what it said before.
+    CHECK(scoped.names() == registry.names());
+    CHECK(scoped.environment() ==
+          registry.environment() + "\n\n" + std::string{apogee::tools::scoped_graph_policy()});
+    CHECK(apogee::tools::scoped_graph_policy().starts_with("How to use the code graph: "));
+    // Asked by a registry narrowed to a toolset without them, it says nothing
+    // of them.
+    ToolRegistry narrowed;
+    narrowed.set_environment(scoped.environment_source());
+    narrowed.add(*scoped.find("read_file"));
+    CHECK(narrowed.environment().find("code graph") == std::string::npos);
+    for (const std::string& name : registry.names()) {
+        const bool graph = std::ranges::find(apogee::tools::graph_tool_names(), name) !=
+                           apogee::tools::graph_tool_names().end();
+        if (!graph) {
+            CHECK(scoped.find(name)->description == registry.find(name)->description);
+            continue;
+        }
+        INFO(name);
+        // The scoped set's: no selection, the note in place of the graph's
+        // name -- so a question about that code ranks it (26g) -- ungated.
+        const apogee::agent::Tool* tool = scoped.find(name);
+        CHECK(tool->description.ends_with(note));
+        CHECK(registry.find(name)->description.find(note) == std::string::npos);
+        const nlohmann::json schema = nlohmann::json::parse(tool->parameters_schema);
+        CHECK_FALSE(schema["properties"].contains("graph"));
+        CHECK_FALSE(apogee::agent::gated(*tool));
+    }
+    // It reads the store it was handed, where the unscoped set finds none.
+    const ToolOutcome card = scoped.find("graph_explain")->run(R"({"node":"Vault"})");
+    REQUIRE_FALSE(card.is_error);
+    CHECK(nlohmann::json::parse(card.content)["graph"] == "attachments");
+    CHECK(registry.find("graph_explain")->run(R"({"node":"Vault"})").is_error);
+
+    // Switched off, it stays off: the scope is the same toolset.
+    ToolRegistry off;
+    apogee::tools::register_native_toolsets(off,
+                                            apogee::tools::ToolsetOptions{.disabled = {"graph"}});
+    const ToolRegistry still = apogee::tools::with_graph_scope(off, {.scope = target});
+    CHECK(still.names() == off.names());
+    CHECK(still.find("graph_explain") == nullptr);
+    // No scope, nothing changes.
+    CHECK(apogee::tools::with_graph_scope(registry, {}).find("graph_explain")->description ==
+          registry.find("graph_explain")->description);
+}

@@ -7,6 +7,7 @@
 
 #include "embedstore/store.h"
 #include "operations/graph_sources.h"
+#include "tools/graph_nav.h"
 
 namespace apogee::commands {
 namespace {
@@ -148,6 +149,41 @@ std::string attachment_graph_line(const logger::AttachmentGraph& graph, std::int
     return "graph: " + counted(nodes, "node") + ", " + counted(edges, "edge") +
            " (supported: " + kinds_text(graph.supported) +
            "; skipped: " + kinds_text(graph.skipped) + ")";
+}
+
+graph::GraphTarget attachment_graph_target(const AttachmentGraphScope& scope) {
+    // No member databases: a code graph's provenance is its lines, read from
+    // the store itself; and the knobs are `GraphTarget`'s defaults, the graph
+    // block's own.
+    graph::GraphTarget target;
+    target.name = std::string{kAttachmentGraphName};
+    target.store_path = scope.store;
+    return target;
+}
+
+std::string attachment_graph_note(const AttachmentGraphScope& scope) {
+    const bool one = scope.folders.size() == 1;
+    std::string folders;
+    for (std::size_t index = 0; index < scope.folders.size(); ++index) {
+        const GraphedFolder& folder = scope.folders[index];
+        if (index > 0) {
+            folders += index + 1 == scope.folders.size() ? " and " : ", ";
+        }
+        folders += folder.name + " (member '" + folder.label + "')";
+    }
+    return std::string{" Reads the code graph of the "} + (one ? "folder" : "folders") +
+           " attached to this chat, " + folders +
+           ": where its functions and classes are defined and implemented, what calls what, and "
+           "how one reaches another. A file is named relative to its " +
+           (one ? "folder" : "member's folder") + ".";
+}
+
+agent::ToolRegistry attachment_graph_tools(const agent::ToolRegistry& registry,
+                                           const AttachmentGraphScope& scope) {
+    return tools::with_graph_scope(
+        registry, tools::GraphToolsOptions{.config = nullptr,
+                                           .scope = attachment_graph_target(scope),
+                                           .scope_note = attachment_graph_note(scope)});
 }
 
 }  // namespace apogee::commands

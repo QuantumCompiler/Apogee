@@ -665,6 +665,16 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         // Past a dozen and a half tools, each turn offers the ones its
         // question needs (26g); one selection for the whole conversation.
         std::unique_ptr<agentloop::ToolSelection> selection;
+        // The `graph` toolset read through the chat's code graph while a
+        // graphed folder is attached (27o): the scoped set in place of the
+        // configured graphs', so a model walks the attached code instead of
+        // inventing paths -- in when the first graphed folder settles, out
+        // when the last is detached, looked at before every turn.
+        std::optional<AttachmentGraphScope> offered_scope;
+        std::optional<agent::ToolRegistry> scoped_registry;
+        const auto base_tools = [&]() -> const agent::ToolRegistry& {
+            return scoped_registry.has_value() ? *scoped_registry : registry;
+        };
         const auto offer_tools = [&]() {
             offered_pin = harness::suite_pins(config, session.backend).toolset;
             const tools::ConsultOffer consult = tools::consult_offer(harness);
@@ -677,13 +687,14 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
             if (offered_pin.has_value() || !consult.description.empty()) {
                 // The consult tool joins after the pin: a suite's
                 // `consultable:` is its own switch, never a toolset's.
-                pinned_registry =
-                    offered_pin.has_value() ? apply_toolset(registry, *offered_pin) : registry;
+                pinned_registry = offered_pin.has_value()
+                                      ? apply_toolset(base_tools(), *offered_pin)
+                                      : base_tools();
                 (void)tools::register_consult_tool(*pinned_registry, harness, member_calls);
                 offered = &*pinned_registry;
             } else {
                 pinned_registry.reset();
-                offered = &registry;
+                offered = &base_tools();
             }
             std::string ranked_by;
             selection = make_tool_selection(harness, config, *offered, config_path, ranked_by);
@@ -704,6 +715,22 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
         if (flags->tools) {
             offer_tools();
         }
+        const auto rescope_tools = [&](const ChatAttachments& attachments) {
+            if (!flags->tools) {
+                return;
+            }
+            std::optional<AttachmentGraphScope> scope = attachments.graph_scope();
+            if (scope == offered_scope) {
+                return;
+            }
+            offered_scope = std::move(scope);
+            if (offered_scope.has_value()) {
+                scoped_registry = attachment_graph_tools(registry, *offered_scope);
+            } else {
+                scoped_registry.reset();
+            }
+            offer_tools();
+        };
         // The gate: config levels, then what the user answers for this
         // session. The prompt half is chosen per surface below.
         const auto approvals = std::make_shared<SessionApprovals>();
@@ -869,6 +896,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                     machine_reporter.on_notice(note);
                                 });
                 attached.settle();
+                rescope_tools(attached);
 
                 // The driver reads structured input, so there IS someone to
                 // answer a question -- the loop's "nil AskFn <=> never
@@ -1558,6 +1586,7 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                                 reporter.status().print_line(style.dim(note));
                             });
             attached.settle();
+            rescope_tools(attached);
             if (decorate) {
                 // One blank line between the question and whatever answers it
                 // -- the thinking block, or the answer itself -- as there is

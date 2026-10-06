@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -15,12 +16,15 @@
 
 #include "agent/tool.h"
 #include "agentloop/graph_context.h"
+#include "cli/chat_attachments.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "embedstore/store.h"
+#include "harness/harness.h"
 #include "httpserver/admin_graph_navigate.h"
+#include "logger/session.h"
 #include "support/env_guard.h"
 #include "support/graph_fixture.h"
 #include "tools/graph_nav.h"
@@ -101,6 +105,20 @@ struct Fixture {
         const apogee::harness::Config config = apogee::harness::load_config(config_path);
         apogee::agent::ToolRegistry registry;
         apogee::tools::register_graph_tools(registry, {.config = &config, .scope = {}});
+        return registry.find(name)->run(arguments);
+    }
+
+    /// The scoped instance's result (27o): the set built over `graph`'s store
+    /// alone, `arguments` without a selection.
+    [[nodiscard]] apogee::agent::ToolOutcome scoped(std::string_view graph, std::string_view name,
+                                                    const std::string& arguments) const {
+        const apogee::harness::Config config = apogee::harness::load_config(config_path);
+        apogee::agent::ToolRegistry registry;
+        apogee::tools::register_graph_tools(
+            registry, {.config = nullptr,
+                       .scope = apogee::graph::resolve_graph_target(
+                           config, apogee::graph::GraphSelection{.graph = std::string{graph}}),
+                       .scope_note = " Reads the code attached to this chat."});
         return registry.find(name)->run(arguments);
     }
 
@@ -211,6 +229,15 @@ TEST_CASE("one core: the CLI's JSON, the tool's result and the served read are o
         const apogee::agent::ToolOutcome tool = fixture.tool(golden.tool, golden.arguments);
         CHECK_FALSE(tool.is_error);
         CHECK(tool.content == document);
+
+        // The scoped instance (27o), handed the same store: the same bytes,
+        // the selection gone from its arguments.
+        nlohmann::json unselected = nlohmann::json::parse(golden.arguments);
+        unselected.erase("graph");
+        const apogee::agent::ToolOutcome scoped =
+            fixture.scoped("work", golden.tool, unselected.dump());
+        CHECK_FALSE(scoped.is_error);
+        CHECK(scoped.content == document);
 
         const apogee::httpserver::HttpResponse served =
             fixture.served(golden.verb, "work", golden.query);
@@ -375,4 +402,72 @@ TEST_CASE("with one graph built, the verbs need no selection", "[commands][graph
     REQUIRE(fixture.run({"graph", "explain", "kr-0001"}, &out) == 0);
     CHECK(out.starts_with("kr-0001 (decision, shipped) in graph \"work\"\n"));
     CHECK(contains(out, "  Discipline: engineering\n"));
+}
+
+TEST_CASE("one core, scoped: a chat's attachment graph answers as the CLI does over the same tree",
+          "[commands][graph][navigate][parity][attachments]") {
+    // 27o: the folder attached to a chat holds, in the chat's index, the graph
+    // `graph build --source` builds over the same tree (27n); the scoped
+    // tools over the index and the verbs over that build print one document.
+    const Fixture fixture{/*with_docs=*/false};
+    const std::filesystem::path tree = fixture.home.path() / "work" / "app";
+    std::filesystem::create_directories(tree.parent_path());
+    std::filesystem::copy(std::filesystem::path{APOGEE_TEST_FIXTURES} / "code_graph" / "python",
+                          tree, std::filesystem::copy_options::recursive);
+    REQUIRE(fixture.run({"graph", "build", "--source", tree.string(), "--graph", "attachments"}) ==
+            0);
+
+    apogee::harness::Harness harness{apogee::harness::parse_config("# no backends\n", "<test>")};
+    harness.use_default_router();
+    apogee::logger::Session session;
+    session.chat_id = "golden";
+    apogee::commands::ChatAttachments attached{
+        harness, session, apogee::commands::ChatAttachments::index_for("golden"),
+        apogee::commands::ChatAttachments::Hooks{.say = [](const std::string&, bool) {},
+                                                 .progress = {},
+                                                 .confirm_large = {},
+                                                 .save = false,
+                                                 .code_graph = true}};
+    REQUIRE(attached.attach("app", tree.parent_path()));
+    attached.settle();
+    const std::optional<apogee::commands::AttachmentGraphScope> scope = attached.graph_scope();
+    REQUIRE(scope.has_value());
+    apogee::agent::ToolRegistry registry;
+    apogee::tools::register_graph_tools(
+        registry, {.config = nullptr,
+                   .scope = apogee::commands::attachment_graph_target(*scope),
+                   .scope_note = apogee::commands::attachment_graph_note(*scope)});
+
+    struct Golden {
+        std::vector<std::string> args;
+        std::string tool;
+        std::string arguments;
+    };
+
+    const std::vector<Golden> goldens{
+        {{"graph", "explain", "make_user"}, "graph_explain", R"({"node":"make_user"})"},
+        {{"graph", "explain", "pkg/models.py:11", "--max-neighbors", "2"},
+         "graph_explain",
+         R"({"node":"pkg/models.py:11","max_neighbors":2})"},
+        {{"graph", "path", "main", "make_user", "--directed", "--relation", "calls"},
+         "graph_path",
+         R"({"from":"main","to":"make_user","directed":true,"relations":["calls"]})"},
+        {{"graph", "neighbors", "pkg.models.User", "--direction", "in"},
+         "graph_neighbors",
+         R"({"node":"pkg.models.User","direction":"in"})"},
+        {{"graph", "query", "greet"}, "graph_query", R"({"question":"greet"})"},
+    };
+    for (const Golden& golden : goldens) {
+        INFO(golden.arguments);
+        std::vector<std::string> args = golden.args;
+        args.insert(args.end(), {"--graph", "attachments", "--output-format", "json"});
+        std::string out;
+        std::string err;
+        REQUIRE(fixture.run(args, &out, &err) == 0);
+        CHECK(err.empty());
+        REQUIRE(out.ends_with("\n"));
+        const apogee::agent::ToolOutcome tool = registry.find(golden.tool)->run(golden.arguments);
+        CHECK_FALSE(tool.is_error);
+        CHECK(tool.content == out.substr(0, out.size() - 1));
+    }
 }

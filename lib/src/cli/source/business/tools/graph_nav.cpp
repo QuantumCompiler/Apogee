@@ -21,11 +21,26 @@ namespace {
 constexpr std::array<std::string_view, 4> kGraphToolNames{
     kGraphQueryToolName, kGraphPathToolName, kGraphExplainToolName, kGraphNeighborsToolName};
 
+/// When to reach for a scoped set (27o). Offered and never mentioned, the
+/// tools went uncalled on real weights: Qwen3-VL-8B and Llama 3.1 8B answered
+/// "where is retrieval implemented?" from the turn's excerpts alone -- the
+/// passive injection the attachment-representation spike found failing. A
+/// capability and why, never an order: the model still decides.
+constexpr std::string_view kScopedGraphPolicy =
+    "How to use the code graph: when a question turns on the code attached to this chat -- "
+    "where something is defined or implemented, what calls what, how one part reaches another "
+    "-- look it up with the graph tools before you answer: graph_query to find what the question "
+    "names, graph_explain for one function, class or file, graph_path for how one reaches "
+    "another. The excerpts show a few passages; the graph shows the whole structure, each entity "
+    "at its file and line. Name only files and lines the graph or the excerpts show, never a "
+    "guessed path.";
+
 /// What a call is given beside its own arguments, shared by the four.
 struct Context {
     std::shared_ptr<const harness::Config> fallback;
     const harness::Config* config = nullptr;
     std::optional<graph::GraphTarget> scope;
+    std::string scope_note;
 
     [[nodiscard]] const harness::Config& settings() const {
         return config != nullptr ? *config : *fallback;
@@ -55,7 +70,8 @@ constexpr std::string_view kAddressing =
 
 [[nodiscard]] std::string described(const Context& context, std::string text) {
     if (context.scope.has_value()) {
-        text += " Reads the graph '" + context.scope->name + "'.";
+        text += context.scope_note.empty() ? " Reads the graph '" + context.scope->name + "'."
+                                           : context.scope_note;
     }
     return text;
 }
@@ -211,6 +227,7 @@ void register_graph_tools(agent::ToolRegistry& registry, const GraphToolsOptions
     context->fallback = std::make_shared<const harness::Config>();
     context->config = options.config;
     context->scope = options.scope;
+    context->scope_note = options.scope_note;
 
     agent::Tool query;
     query.name = std::string{kGraphQueryToolName};
@@ -323,6 +340,39 @@ void register_graph_tools(agent::ToolRegistry& registry, const GraphToolsOptions
             });
     };
     registry.add(std::move(neighbors));
+}
+
+std::string_view scoped_graph_policy() noexcept {
+    return kScopedGraphPolicy;
+}
+
+agent::ToolRegistry with_graph_scope(const agent::ToolRegistry& registry,
+                                     const GraphToolsOptions& options) {
+    const bool registered = std::ranges::any_of(
+        kGraphToolNames, [&](std::string_view name) { return registry.find(name) != nullptr; });
+    if (!registered || !options.scope.has_value()) {
+        return registry;
+    }
+    agent::ToolRegistry scoped;
+    // The note says when to reach for them (26p's mechanism), read off the
+    // registry asking: one narrowed to a toolset without them says nothing.
+    scoped.set_environment(
+        [inner = registry.environment_source()](const agent::ToolRegistry& tools) {
+            std::string note = inner ? inner(tools) : std::string{};
+            if (std::ranges::any_of(kGraphToolNames, [&](std::string_view name) {
+                    return tools.find(name) != nullptr;
+                })) {
+                note += (note.empty() ? "" : "\n\n") + std::string{kScopedGraphPolicy};
+            }
+            return note;
+        });
+    for (const std::string& name : registry.names()) {
+        if (std::ranges::find(kGraphToolNames, name) == kGraphToolNames.end()) {
+            scoped.add(*registry.find(name));
+        }
+    }
+    register_graph_tools(scoped, options);
+    return scoped;
 }
 
 }  // namespace apogee::tools

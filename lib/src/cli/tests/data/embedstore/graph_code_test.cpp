@@ -4,6 +4,7 @@
 
 #include <sqlite3.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <random>
@@ -455,4 +456,153 @@ TEST_CASE("an unresolved name is navigable but never structure: no community edg
     }
     // A name node as a seed seeds nothing.
     CHECK(store.graph_expand_labelled({}, {name}, 1, 8).empty());
+}
+
+// ---- An excerpt's code (27o) -----------------------------------------------
+
+namespace {
+
+/// A span of `file` under `member`, `role` (`definition` by default).
+[[nodiscard]] CodeNodeRow spanned(std::string type, std::string name, std::string member,
+                                  std::string file, std::int64_t line, std::int64_t end_line,
+                                  std::string role = "definition") {
+    CodeNodeRow row = code_node(std::move(type), std::move(name), std::move(file), line);
+    row.mentions.front().collection = std::move(member);
+    row.mentions.front().end_line = end_line;
+    row.mentions.front().role = std::move(role);
+    return row;
+}
+
+void recorded(Store& store, std::string member, std::string file, std::string hash) {
+    store.set_code_file_state(CodeFileState{.collection = std::move(member),
+                                            .file = std::move(file),
+                                            .content_hash = std::move(hash),
+                                            .extractor = "test",
+                                            .facts = "{}",
+                                            .parsed_at = "2026-10-04T00:00:00Z"});
+}
+
+/// Two members: `src` holds a.py (content `aaa`) and b.py (`bbb`); `dup`
+/// holds a copy of a.py, the same bytes under another name; c.py's code has
+/// only a prose source's state, whose hash is empty.
+///
+///     a.py  1-20  file, module a
+///           3-6   a.run      -- calls b.far and a.helper
+///           8-9   a.helper   (declared at 8, defined at 9)
+///           11-20 a.Box      -- a.Box.tag on its first line, a.Box.add at 13-14
+///     b.py  1-2   b.far
+struct Excerpts {
+    Scratch scratch;
+    Store store{scratch.db()};
+
+    Excerpts() {
+        (void)store.sync_code_graph(
+            {spanned("file", "a.py", "src", "a.py", 1, 20),
+             spanned("module", "a", "src", "a.py", 1, 20),
+             spanned("function", "a.run", "src", "a.py", 3, 6),
+             spanned("function", "a.helper", "src", "a.py", 8, 8, "declaration"),
+             spanned("class", "a.Box", "src", "a.py", 11, 20),
+             spanned("function", "a.Box.tag", "src", "a.py", 11, 11),
+             spanned("function", "a.Box.add", "src", "a.py", 13, 14),
+             spanned("function", "b.far", "src", "b.py", 1, 2),
+             spanned("function", "dup.run", "dup", "a.py", 3, 6),
+             spanned("function", "c.ghost", "src", "c.py", 1, 2),
+             spanned("name", "print", "src", "a.py", 4, 4, "reference")},
+            {code_edge("function", "a.run", "function", "b.far", "calls", {4}),
+             code_edge("function", "a.run", "function", "a.helper", "calls", {5}),
+             code_edge("function", "a.Box.add", "class", "a.Box", "defined_in", {13}),
+             code_edge("function", "a.run", "name", "print", "calls", {4})});
+        recorded(store, "src", "a.py", "aaa");
+        recorded(store, "src", "b.py", "bbb");
+        recorded(store, "dup", "a.py", "aaa");
+        // A prose source's state under the same member and name: its hash is
+        // empty, and names no code.
+        store.set_source_state("src", "c.py", 1, 1, "extractor");
+    }
+
+    [[nodiscard]] std::vector<std::string> stated(
+        const std::vector<apogee::embedstore::CodeExcerptRef>& excerpts) const {
+        const std::vector<GraphNode> nodes =
+            store.nodes_by_ids(store.code_nodes_in_excerpts(excerpts));
+        std::vector<std::string> out;
+        out.reserve(nodes.size());
+        for (const GraphNode& node : nodes) {
+            out.push_back(node.name);
+        }
+        std::ranges::sort(out);
+        return out;
+    }
+};
+
+}  // namespace
+
+TEST_CASE("an excerpt states the functions and classes starting in it, and the one it is inside",
+          "[embedstore][graph][code][excerpts]") {
+    const Excerpts g;
+    // Starting within the lines -- a declaration as much as a definition --
+    // in every file of that content: the copy under `dup` too.
+    CHECK(g.stated({{.content_hash = "aaa", .first_line = 3, .last_line = 8}}) ==
+          std::vector<std::string>{"a.helper", "a.run", "dup.run"});
+    // Its first line and its last count: a class and the method on the line
+    // it opens, as well as the innermost.
+    CHECK(g.stated({{.content_hash = "aaa", .first_line = 11, .last_line = 12}}) ==
+          std::vector<std::string>{"a.Box", "a.Box.tag"});
+    CHECK(g.stated({{.content_hash = "aaa", .first_line = 2, .last_line = 3}}) ==
+          std::vector<std::string>{"a.run", "dup.run"});
+    // Begun mid-function: the innermost holding its first line, and not the
+    // class around it.
+    CHECK(g.stated({{.content_hash = "aaa", .first_line = 14, .last_line = 16}}) ==
+          std::vector<std::string>{"a.Box.add"});
+    CHECK(g.stated({{.content_hash = "aaa", .first_line = 12, .last_line = 12}}) ==
+          std::vector<std::string>{"a.Box"});
+    // A file and a module hold everything beside it; a name is no structure.
+    CHECK(g.stated({{.content_hash = "aaa", .first_line = 1, .last_line = 2}}).empty());
+    // Another content, unknown content, and a ref with no lines state nothing
+    // of a.py.
+    CHECK(g.stated({{.content_hash = "bbb", .first_line = 1, .last_line = 1}}) ==
+          std::vector<std::string>{"b.far"});
+    CHECK(g.stated({{.content_hash = "ccc", .first_line = 1, .last_line = 20}}).empty());
+    CHECK(g.stated({{.content_hash = "", .first_line = 1, .last_line = 20}}).empty());
+    CHECK(g.stated({{.content_hash = "aaa", .first_line = 0, .last_line = 0}}).empty());
+    // Several excerpts, each node once.
+    CHECK(g.stated({{.content_hash = "aaa", .first_line = 3, .last_line = 4},
+                    {.content_hash = "aaa", .first_line = 5, .last_line = 6},
+                    {.content_hash = "bbb", .first_line = 1, .last_line = 2}}) ==
+          std::vector<std::string>{"a.run", "b.far", "dup.run"});
+}
+
+TEST_CASE("an excerpt's code seeds the walk and is never listed; a hit by name is",
+          "[embedstore][graph][code][excerpts][expand]") {
+    const Excerpts g;
+    const auto names = [](const apogee::embedstore::Expansion& expansion) {
+        std::vector<std::string> out;
+        for (const apogee::embedstore::ExpandEntity& entity : expansion.entities) {
+            out.push_back(entity.node.name);
+        }
+        std::ranges::sort(out);
+        return out;
+    };
+    // b.far's excerpt reaches its caller; b.far itself is in the excerpt.
+    const apogee::embedstore::Expansion from_far = g.store.graph_expand_excerpts(
+        {{.content_hash = "bbb", .first_line = 1, .last_line = 2}}, {}, 1, 8);
+    CHECK(names(from_far) == std::vector<std::string>{"a.run"});
+    // Two hops: the caller's other callee too, and never the name it calls.
+    CHECK(names(g.store.graph_expand_excerpts(
+              {{.content_hash = "bbb", .first_line = 1, .last_line = 2}}, {}, 2, 8)) ==
+          std::vector<std::string>{"a.helper", "a.run"});
+    // A node handed in by name is listed at hop 0, as ever.
+    const std::int64_t box = node_named(g.store, "a.Box", "class").id;
+    CHECK(names(g.store.graph_expand_excerpts(
+              {{.content_hash = "bbb", .first_line = 1, .last_line = 2}}, {box}, 1, 8)) ==
+          std::vector<std::string>{"a.Box", "a.Box.add", "a.run"});
+    // The cap holds, and nothing seeds nothing.
+    CHECK(g.store
+              .graph_expand_excerpts({{.content_hash = "bbb", .first_line = 1, .last_line = 2}}, {},
+                                     2, 1)
+              .entities.size() == 1);
+    CHECK(g.store.graph_expand_excerpts({}, {}, 1, 8).empty());
+    CHECK(g.store
+              .graph_expand_excerpts({{.content_hash = "ccc", .first_line = 1, .last_line = 9}}, {},
+                                     1, 8)
+              .empty());
 }

@@ -310,6 +310,33 @@ TEST_CASE("one renderer: each retriever's strength, raw score kept, and the floo
           "of the question's words) (auto_rag)");
 }
 
+TEST_CASE("an attachment turn's line counts the chat's graph entities, as a collection's does",
+          "[commands][helpers][rag][attachments][graph]") {
+    apogee::agentloop::RagResult result;
+    result.chunks = 2;
+    result.best_score = 0.869;
+    result.top_score = 0.869;
+    result.retriever = "lexical";
+    result.strength = {.band = "strong", .floored = false, .measure = "2 of 2 question words"};
+    result.graph_entities = 3;
+    CHECK(describe_attachment_retrieval(result) ==
+          "2 excerpts from the attachments, strong match (0.869 [lexical], 2 of 2 question "
+          "words) +3 graph entities");
+    // The section alone, its excerpts cut by the budget: still counted.
+    result.chunks = 0;
+    result.notes = {"0 of 2 excerpts fit the context budget"};
+    CHECK(describe_attachment_retrieval(result) ==
+          "nothing in the attachments matched [lexical] +3 graph entities -- 0 of 2 excerpts "
+          "fit the context budget");
+    // None injected, none said -- a chunk-only chat's line is as it was.
+    result.chunks = 2;
+    result.notes.clear();
+    result.graph_entities = 0;
+    CHECK(describe_attachment_retrieval(result) ==
+          "2 excerpts from the attachments, strong match (0.869 [lexical], 2 of 2 question "
+          "words)");
+}
+
 TEST_CASE("the retrieval line names chunks, score, retriever, and its origin",
           "[commands][helpers][rag]") {
     apogee::agentloop::RagResult result;

@@ -495,6 +495,62 @@ TEST_CASE("adjacent chunks of one file merge into one excerpt, labelled by lines
     CHECK(rendered.find("cite it by the label") != std::string::npos);
 }
 
+TEST_CASE("each excerpt is named to the code graph by its content and its lines",
+          "[agentloop][attachments][graph]") {
+    const Scratch scratch;
+    (void)scratch.write("src/parser.cpp", numbered_lines(60));
+    AttachmentIndex index{scratch.dir.path() / "index.db", {}, std::nullopt};
+    const auto added = index.add(scratch.found("src/parser.cpp"), {});
+    REQUIRE(added.file.has_value());
+    const Store store{scratch.dir.path() / "index.db"};
+    const auto chunks = store.chunks_by_source(attachment_source(added.file->sha256));
+    REQUIRE(chunks.size() >= 2);
+
+    std::vector<SearchHit> hits{
+        SearchHit{.chunk = chunks[1], .score = 0.9, .retriever = "lexical"},
+        SearchHit{.chunk = chunks[0], .score = 0.5, .retriever = "lexical"}};
+    // A chunk with no line range -- a PDF's pages -- names no code.
+    apogee::embedstore::Chunk paged = chunks[0];
+    paged.metadata = R"({"file":"report.pdf","sha256":"abc","pages":[3,4]})";
+    hits.push_back(SearchHit{.chunk = paged, .score = 0.4, .retriever = "lexical"});
+    apogee::embedstore::Chunk bare = chunks[0];
+    bare.metadata = "";
+    hits.push_back(SearchHit{.chunk = bare, .score = 0.3, .retriever = "lexical"});
+    // Lines with no content to name them by: no file to find them in.
+    apogee::embedstore::Chunk unnamed = chunks[0];
+    unnamed.metadata = R"({"file":"x.cpp","lines":[1,4]})";
+    hits.push_back(SearchHit{.chunk = unnamed, .score = 0.2, .retriever = "lexical"});
+
+    const std::vector<apogee::embedstore::CodeExcerptRef> refs =
+        apogee::agentloop::code_excerpt_refs(hits);
+    REQUIRE(refs.size() == 2);
+    // In the hits' order, each its own chunk's lines.
+    for (std::size_t at = 0; at < refs.size(); ++at) {
+        const nlohmann::json meta = metadata_of(hits[at].chunk);
+        CHECK(refs[at].content_hash == added.file->sha256);
+        CHECK(refs[at].first_line == meta["lines"][0].get<std::int64_t>());
+        CHECK(refs[at].last_line == meta["lines"][1].get<std::int64_t>());
+    }
+    CHECK(refs[0].first_line > refs[1].first_line);
+    CHECK(refs[1].first_line == 1);
+}
+
+TEST_CASE("the code-graph section rides after the excerpts, or stands framed on its own",
+          "[agentloop][attachments][graph]") {
+    const std::vector<apogee::agentloop::AttachmentExcerpt> excerpts{
+        {.source = "sha256:x", .label = "a.py:1–3", .text = "def run(): pass", .score = 1.0}};
+    const std::string section = "[Knowledge graph: attachments]\nb.far (function, b.py:1)";
+    const std::string both = apogee::agentloop::render_attachment_excerpts(excerpts, section);
+    CHECK(both == apogee::agentloop::render_attachment_excerpts(excerpts) + "\n" + section + "\n");
+    const std::string alone = apogee::agentloop::render_attachment_excerpts({}, section);
+    CHECK(alone.starts_with("The following code-graph context is from files the user attached"));
+    CHECK(alone.ends_with("\n\n" + section + "\n"));
+    // No section: exactly the excerpts; neither: nothing.
+    CHECK(apogee::agentloop::render_attachment_excerpts(excerpts, "") ==
+          apogee::agentloop::render_attachment_excerpts(excerpts));
+    CHECK(apogee::agentloop::render_attachment_excerpts({}, "").empty());
+}
+
 TEST_CASE("an inlined file is framed by its name", "[agentloop][attachments]") {
     CHECK(apogee::agentloop::render_inline_attachment("notes.md", "hello") ==
           "--- attached file: notes.md ---\nhello\n--- end of notes.md ---\n");

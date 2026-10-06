@@ -503,6 +503,40 @@ std::string render_attachment_excerpts(const std::vector<AttachmentExcerpt>& exc
     return out;
 }
 
+std::string render_attachment_excerpts(const std::vector<AttachmentExcerpt>& excerpts,
+                                       std::string_view graph_section) {
+    if (graph_section.empty()) {
+        return render_attachment_excerpts(excerpts);
+    }
+    if (excerpts.empty()) {
+        return "The following code-graph context is from files the user attached to this "
+               "conversation: what the code there defines and how it connects, each entity at "
+               "its file and line. Use it if it helps.\n\n" +
+               std::string{graph_section} + "\n";
+    }
+    // After the excerpts, in the same message: it augments them and never
+    // crowds them out (Milestone Y's rule, kept for the chat's own graph).
+    return render_attachment_excerpts(excerpts) + "\n" + std::string{graph_section} + "\n";
+}
+
+std::vector<embedstore::CodeExcerptRef> code_excerpt_refs(
+    const std::vector<embedstore::SearchHit>& hits) {
+    std::vector<embedstore::CodeExcerptRef> out;
+    for (const embedstore::SearchHit& hit : hits) {
+        const nlohmann::json meta = metadata_of(hit.chunk);
+        const nlohmann::json lines = meta.value("lines", nlohmann::json{});
+        const std::string sha256 = meta.value("sha256", std::string{});
+        if (sha256.empty() || !lines.is_array() || lines.size() != 2 ||
+            !lines[0].is_number_integer() || !lines[1].is_number_integer()) {
+            continue;
+        }
+        out.push_back(embedstore::CodeExcerptRef{.content_hash = sha256,
+                                                 .first_line = lines[0].get<std::int64_t>(),
+                                                 .last_line = lines[1].get<std::int64_t>()});
+    }
+    return out;
+}
+
 namespace {
 
 /// Whether `token` -- trimmed of `:` and `_` at its ends -- is a code name;

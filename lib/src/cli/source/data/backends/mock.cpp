@@ -48,8 +48,15 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
         }
     }
     replace_all(out, "{{last_user}}", last_user);
-    // How many tool definitions the request carried (26r).
+    // How many tool definitions the request carried (26r), and which (27o).
     replace_all(out, "{{tool_count}}", std::to_string(request.tools.size()));
+    if (out.find("{{tool_names}}") != std::string::npos) {
+        std::string names;
+        for (const harness::Tool& tool : request.tools) {
+            names += (names.empty() ? "" : ",") + tool.name;
+        }
+        replace_all(out, "{{tool_names}}", names);
+    }
     // The `:json` variants expand to a JSON string literal, quotes included,
     // so a scripted JSON answer can carry a tool result verbatim.
     replace_all(out, "{{last_tool_result:json}}", nlohmann::json(last_tool_result).dump());

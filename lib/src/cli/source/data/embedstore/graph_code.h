@@ -105,6 +105,17 @@ struct EdgeSite {
     std::int64_t line = 0;
 };
 
+/// An excerpt of a parsed file, named by its content and its lines (27o) --
+/// what a chat's retrieved attachment excerpt is to the code graph. A chat
+/// keys a file's chunks by the same SHA-256 of its bytes a code file's state
+/// records, so the code an excerpt states is found with no path at all, in
+/// every file of that content. Lines are 1-based and inclusive.
+struct CodeExcerptRef {
+    std::string content_hash;
+    std::int64_t first_line = 0;
+    std::int64_t last_line = 0;
+};
+
 /// How much of the code layer one source member states (27n): its parsed
 /// files, the code nodes it mentions and the edges it is a site of. With one
 /// member, every code row there is.

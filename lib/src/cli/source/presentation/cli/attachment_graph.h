@@ -6,10 +6,13 @@
 #include <map>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "agent/tool.h"
 #include "contracts/cancellation.h"
 #include "graph/code_build.h"
+#include "graph/navigate.h"
 #include "logger/session.h"
 
 /// The attachment code graph (27n): a folder of code attached to a chat is
@@ -109,5 +112,56 @@ void forget_attachment_graph(const std::filesystem::path& store_path, const std:
 
 /// How many kinds the notice names before folding the rest into a count.
 inline constexpr std::size_t kGraphLineKinds = 8;
+
+// ---- The graph at work on turns (27o) -----------------------------------------
+//
+// A graph nobody can reach is worthless: an attachment turn expands through
+// it, and the `graph` toolset -- 27l's four read-only tools, one traversal
+// core -- is offered scoped to it, so a model walks the attached code rather
+// than inventing paths. The scope is the chat's own state, never a `graphs:`
+// entry: `resolve_turn_graph` stays about collections and named graphs.
+
+/// What the chat's code graph is called wherever it is named: the section an
+/// attachment turn injects (`[Knowledge graph: attachments]`) and every
+/// payload the scoped tools return.
+inline constexpr std::string_view kAttachmentGraphName = "attachments";
+
+/// One graphed folder of a chat.
+struct GraphedFolder {
+    /// The attachment as the user named it: its root, as its excerpts' labels
+    /// and its map card name it.
+    std::string name;
+    /// The source member its files are recorded under in the index.
+    std::string label;
+
+    bool operator==(const GraphedFolder&) const = default;
+};
+
+/// The chat's code graph as the scoped `graph` toolset reads it: the index,
+/// and the folders whose code it holds. Equal scopes offer the same tools.
+struct AttachmentGraphScope {
+    std::filesystem::path store;
+    std::vector<GraphedFolder> folders;
+
+    bool operator==(const AttachmentGraphScope&) const = default;
+};
+
+/// The graph the scoped tools read: the chat's index under
+/// `kAttachmentGraphName`, with the graph knobs' defaults -- a store the chat
+/// owns, made directly as `graph::GraphTarget` allows.
+[[nodiscard]] graph::GraphTarget attachment_graph_target(const AttachmentGraphScope& scope);
+
+/// What the scoped tools' descriptions say they read: the attached folders by
+/// their roots, each file named relative to its folder -- so 26g ranks the
+/// tools against a question about that code, and a model cites a file where
+/// it is.
+[[nodiscard]] std::string attachment_graph_note(const AttachmentGraphScope& scope);
+
+/// `registry` as a chat with `scope` offers it: its `graph` toolset read
+/// through the chat's code graph (`tools::with_graph_scope` over
+/// `attachment_graph_target`, each description ending with
+/// `attachment_graph_note`), everything else as it was.
+[[nodiscard]] agent::ToolRegistry attachment_graph_tools(const agent::ToolRegistry& registry,
+                                                         const AttachmentGraphScope& scope);
 
 }  // namespace apogee::commands

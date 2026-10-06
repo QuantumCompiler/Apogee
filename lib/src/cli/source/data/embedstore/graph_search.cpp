@@ -609,11 +609,6 @@ Expansion Store::graph_expand(const std::vector<std::int64_t>& seed_chunks,
 Expansion Store::graph_expand_labelled(const std::vector<ChunkRef>& seed_chunks,
                                        const std::vector<std::int64_t>& seed_nodes, int hops,
                                        int max_entities) const {
-    Expansion out;
-    hops = std::clamp(hops < 1 ? kDefaultGraphHops : hops, 1, kMaxGraphHops);
-    if (max_entities <= 0) {
-        max_entities = kDefaultGraphMaxEntities;
-    }
     sqlite3* handle = impl_->connection.get();
 
     // Seed nodes: entities mentioned by the retrieved chunks -- per member
@@ -635,6 +630,83 @@ Expansion Store::graph_expand_labelled(const std::vector<ChunkRef>& seed_chunks,
             seeds.insert(sqlite3_column_int64(select.get(), 0));
         }
     }
+    return expand_from(std::move(seeds), seed_nodes, hops, max_entities);
+}
+
+std::vector<std::int64_t> Store::code_nodes_in_excerpts(
+    const std::vector<CodeExcerptRef>& excerpts) const {
+    sqlite3* handle = impl_->connection.get();
+    std::set<std::int64_t> out;
+    // A file's recorded content names it: an excerpt's hash finds every
+    // (member, file) holding those bytes -- a code file's state, never a
+    // prose source's, whose hash is empty. Only a function or a class seeds
+    // -- a file or a module holds everything beside the excerpt, and a walk
+    // from one lists its whole contents rather than what the excerpt is
+    // about.
+    StatementPtr within = prepare(handle,
+                                  "SELECT DISTINCT m.node_id FROM kg_state s"
+                                  "  JOIN kg_code_mentions m"
+                                  "    ON m.collection = s.collection AND m.file = s.source_file"
+                                  "  JOIN kg_nodes n ON n.id = m.node_id"
+                                  " WHERE s.content_hash = ?1 AND s.content_hash != ''"
+                                  "   AND m.role IN ('definition', 'declaration')"
+                                  "   AND n.type IN ('function', 'class')"
+                                  "   AND m.line >= ?2 AND m.line <= ?3");
+    // The one each file's excerpt sits inside: innermost (shortest span)
+    // first, as `code_spans_at` orders them.
+    StatementPtr holding =
+        prepare(handle,
+                "SELECT s.collection, s.source_file, m.node_id FROM kg_state s"
+                "  JOIN kg_code_mentions m"
+                "    ON m.collection = s.collection AND m.file = s.source_file"
+                "  JOIN kg_nodes n ON n.id = m.node_id"
+                " WHERE s.content_hash = ?1 AND s.content_hash != ''"
+                "   AND m.role IN ('definition', 'declaration')"
+                "   AND n.type IN ('function', 'class')"
+                "   AND m.line <= ?2 AND MAX(m.end_line, m.line) >= ?2"
+                " ORDER BY s.collection, s.source_file, MAX(m.end_line, m.line) - m.line,"
+                "          m.line DESC, m.node_id");
+    for (const CodeExcerptRef& excerpt : excerpts) {
+        sqlite3_reset(within.get());
+        bind_text(within.get(), 1, excerpt.content_hash);
+        sqlite3_bind_int64(within.get(), 2, excerpt.first_line);
+        sqlite3_bind_int64(within.get(), 3, excerpt.last_line);
+        while (sqlite3_step(within.get()) == SQLITE_ROW) {
+            out.insert(sqlite3_column_int64(within.get(), 0));
+        }
+        sqlite3_reset(holding.get());
+        bind_text(holding.get(), 1, excerpt.content_hash);
+        sqlite3_bind_int64(holding.get(), 2, excerpt.first_line);
+        std::string file;
+        while (sqlite3_step(holding.get()) == SQLITE_ROW) {
+            // The first row of each file is its innermost.
+            std::string at = column_text(holding.get(), 0) + '\n' + column_text(holding.get(), 1);
+            if (at != file) {
+                out.insert(sqlite3_column_int64(holding.get(), 2));
+                file = std::move(at);
+            }
+        }
+    }
+    return {out.begin(), out.end()};
+}
+
+Expansion Store::graph_expand_excerpts(const std::vector<CodeExcerptRef>& seed_excerpts,
+                                       const std::vector<std::int64_t>& seed_nodes, int hops,
+                                       int max_entities) const {
+    const std::vector<std::int64_t> stated = code_nodes_in_excerpts(seed_excerpts);
+    return expand_from({stated.begin(), stated.end()}, seed_nodes, hops, max_entities);
+}
+
+Expansion Store::expand_from(std::set<std::int64_t> seeds,
+                             const std::vector<std::int64_t>& seed_nodes, int hops,
+                             int max_entities) const {
+    Expansion out;
+    hops = std::clamp(hops < 1 ? kDefaultGraphHops : hops, 1, kMaxGraphHops);
+    if (max_entities <= 0) {
+        max_entities = kDefaultGraphMaxEntities;
+    }
+    sqlite3* handle = impl_->connection.get();
+
     // An unresolved reference's name node is never context: not a seed, not
     // a step of the walk, not an entity rendered (27k).
     std::set<std::int64_t> hop0;

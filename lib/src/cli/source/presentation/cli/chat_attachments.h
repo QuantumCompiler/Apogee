@@ -48,6 +48,12 @@
 /// chat: re-attached, only what changed is parsed again; detached, its part
 /// is forgotten; the chat deleted, it goes with the index file. Ctrl-C keeps
 /// the chunks that are ready and leaves the graph absent, and says so.
+///
+/// **And turns reach it** (27o): while the index holds a graph, an
+/// attachment turn's excerpts seed the retrieval-time expansion through it,
+/// its section riding after them, and `graph_scope` hands the chat the
+/// store its scoped `graph` tools read -- so a model walks the attached code
+/// rather than inventing paths.
 namespace apogee::commands {
 
 class ChatAttachments {
@@ -126,6 +132,13 @@ public:
     /// Whether this turn will search the index -- so the question is worth
     /// restating first.
     [[nodiscard]] bool retrieves() const;
+
+    /// The chat's code graph, while a recorded folder carries one and the
+    /// index holds it (27o): what an attachment turn expands through and what
+    /// the scoped `graph` toolset reads -- nullopt for a chat whose
+    /// attachments are chunks only, and again once the last graphed folder
+    /// is detached. Decided from the chat's own state, never from `graphs:`.
+    [[nodiscard]] std::optional<AttachmentGraphScope> graph_scope() const;
 
     /// The turn whose user message sits at `user_message` in history: an
     /// attachment settled since the last turn rides it when inlined -- an

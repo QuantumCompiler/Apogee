@@ -834,6 +834,37 @@ bool ChatAttachments::retrieves() const {
     });
 }
 
+std::optional<AttachmentGraphScope> ChatAttachments::graph_scope() const {
+    AttachmentGraphScope scope;
+    scope.store = store_path_;
+    // The session's graphed folders: after every settle and detach the
+    // index's code graph is exactly theirs (27n's reconcile).
+    for (const logger::Attachment& attachment : session_.attachments) {
+        if (attachment.graph.has_value() && !attachment.graph->label.empty()) {
+            scope.folders.push_back(
+                GraphedFolder{.name = attachment.name, .label = attachment.graph->label});
+        }
+    }
+    if (scope.folders.empty()) {
+        return std::nullopt;
+    }
+    // And the index holds it: a folder whose files parsed to nothing has no
+    // graph to walk. Opening a store creates one, so a missing index is
+    // asked about first.
+    std::error_code code;
+    if (!std::filesystem::exists(store_path_, code)) {
+        return std::nullopt;
+    }
+    try {
+        if (!embedstore::Store{store_path_}.has_graph()) {
+            return std::nullopt;
+        }
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    return scope;
+}
+
 ChatAttachments::Turn ChatAttachments::for_turn(std::size_t user_message, const std::string& query,
                                                 const agentloop::TurnBudget& budget, int limit,
                                                 const harness::CancellationToken& cancellation,
@@ -921,9 +952,14 @@ ChatAttachments::Turn ChatAttachments::for_turn(std::size_t user_message, const 
         rag.harness = &harness_;
         rag.config = &harness_.config();
         rag.cancellation = cancellation;
-        rag.collection = "attachments";
+        // The name the chat's code graph's section carries, too (27o).
+        rag.collection = std::string{kAttachmentGraphName};
         rag.budget = budget;
         rag.attachments = true;
+        // The chat's code graph, when it holds one (27o): the excerpts seed
+        // its expansion, under the graph knobs' defaults `RagTurn` holds --
+        // decided from the chat's own state, never by `resolve_turn_graph`.
+        rag.graph_enabled = graph_scope().has_value();
         rag.exclude_sources = std::move(inline_sources);
         rag.moments = agentloop::moments_in(query);
         turn.retrieved = agentloop::retrieve_for_turn(rag);

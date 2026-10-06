@@ -560,7 +560,32 @@ public:
                                                   const std::vector<std::int64_t>& seed_nodes,
                                                   int hops, int max_entities) const;
 
+    /// The functions and classes `excerpts` state (27o): in every file whose
+    /// recorded content is an excerpt's, each one defined or declared
+    /// starting within its lines, and the innermost one holding its first
+    /// line -- the code a retrieved excerpt is about, the way a chunk's
+    /// mentions are what a prose chunk is about. Files and modules hold
+    /// everything beside the excerpt and unresolved names are not structure,
+    /// so neither is one. Sorted, each once.
+    [[nodiscard]] std::vector<std::int64_t> code_nodes_in_excerpts(
+        const std::vector<CodeExcerptRef>& excerpts) const;
+
+    /// `graph_expand` over a chat's attachment index (27o): the seed set is
+    /// the code `seed_excerpts` state (`code_nodes_in_excerpts` -- walked
+    /// from, never re-listed: their code is already injected) and
+    /// `seed_nodes` (listed, as ever); the walk, the ranking and the cap are
+    /// `graph_expand`'s own.
+    [[nodiscard]] Expansion graph_expand_excerpts(const std::vector<CodeExcerptRef>& seed_excerpts,
+                                                  const std::vector<std::int64_t>& seed_nodes,
+                                                  int hops, int max_entities) const;
+
 private:
+    /// The one walk every expansion runs: from `seeds` (never listed) and
+    /// `seed_nodes` (listed at hop 0 when the walk does not reach them).
+    [[nodiscard]] Expansion expand_from(std::set<std::int64_t> seeds,
+                                        const std::vector<std::int64_t>& seed_nodes, int hops,
+                                        int max_entities) const;
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
