@@ -120,6 +120,8 @@ apogee_add_module(graph
     graph/code_resolve.cpp
     graph/code_build.h
     graph/code_build.cpp
+    graph/navigate.h
+    graph/navigate.cpp
 )
 target_link_libraries(apogee_business_graph PUBLIC nlohmann_json::nlohmann_json
                       PRIVATE apogee_tree_sitter_all)
@@ -140,6 +142,8 @@ apogee_add_module(tools
     tools/notes.cpp
     tools/rag_query.h
     tools/rag_query.cpp
+    tools/graph_nav.h
+    tools/graph_nav.cpp
     tools/environment.h
     tools/environment.cpp
     tools/toolsets.h

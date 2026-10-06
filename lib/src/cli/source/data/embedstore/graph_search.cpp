@@ -311,6 +311,217 @@ std::vector<ChunkRef> Store::node_mention_refs(std::int64_t node_id, int limit) 
     return out;
 }
 
+bool Store::has_graph() const {
+    return count_of(impl_->connection.get(), "SELECT EXISTS (SELECT 1 FROM kg_nodes)") != 0;
+}
+
+std::vector<RelationCount> Store::relation_counts(std::int64_t node_id) const {
+    StatementPtr select = prepare(impl_->connection.get(),
+                                  "SELECT relation, (source_id = ?1) AS outgoing, COUNT(*)"
+                                  "  FROM kg_edges WHERE source_id = ?1 OR target_id = ?1"
+                                  " GROUP BY relation, outgoing ORDER BY relation, outgoing DESC");
+    sqlite3_bind_int64(select.get(), 1, node_id);
+    std::vector<RelationCount> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out.push_back(RelationCount{.relation = column_text(select.get(), 0),
+                                    .outgoing = sqlite3_column_int64(select.get(), 1) != 0,
+                                    .count = sqlite3_column_int64(select.get(), 2)});
+    }
+    return out;
+}
+
+std::vector<Neighbor> Store::node_neighbors(std::int64_t node_id, const NeighborFilter& filter,
+                                            int limit) const {
+    // Numbered parameters throughout: ?1 the node, then the relations, the
+    // peer type and the limit, each at a number the filter decides.
+    std::string sql =
+        "SELECT e.relation, e.description, e.weight, (e.source_id = ?1) AS outgoing, p.id,"
+        "       p.name, p.type, e.id, e.origin, e.confidence"
+        "  FROM kg_edges e"
+        "  JOIN kg_nodes p ON p.id ="
+        "       CASE WHEN e.source_id = ?1 THEN e.target_id ELSE e.source_id END"
+        " WHERE ";
+    switch (filter.direction) {
+        case EdgeDirection::Out:
+            sql += "e.source_id = ?1";
+            break;
+        case EdgeDirection::In:
+            sql += "e.target_id = ?1";
+            break;
+        case EdgeDirection::Both:
+            sql += "(e.source_id = ?1 OR e.target_id = ?1)";
+            break;
+    }
+    int next = 2;
+    if (!filter.relations.empty()) {
+        sql += " AND e.relation IN (";
+        for (std::size_t i = 0; i < filter.relations.size(); ++i) {
+            sql += (i == 0 ? "?" : ", ?") + std::to_string(next++);
+        }
+        sql += ")";
+    }
+    const int type_index = next++;
+    if (!filter.peer_type.empty()) {
+        sql += " AND p.type = ?" + std::to_string(type_index);
+    }
+    const int limit_index = next;
+    // Structure first: an unresolved name (27k) is navigable but stands for
+    // something outside the tree, so it never crowds a parsed neighbour out
+    // of a capped list.
+    sql +=
+        " ORDER BY (p.type = 'name'), e.weight DESC, p.name, p.type, e.relation, outgoing DESC,"
+        " e.id LIMIT ?" +
+        std::to_string(limit_index);
+    StatementPtr select = prepare(impl_->connection.get(), sql);
+    sqlite3_bind_int64(select.get(), 1, node_id);
+    for (std::size_t i = 0; i < filter.relations.size(); ++i) {
+        bind_text(select.get(), 2 + static_cast<int>(i), filter.relations[i]);
+    }
+    if (!filter.peer_type.empty()) {
+        bind_text(select.get(), type_index, filter.peer_type);
+    }
+    sqlite3_bind_int(select.get(), limit_index, limit > 0 ? limit : -1);
+    std::vector<Neighbor> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        Neighbor neighbor;
+        neighbor.relation = column_text(select.get(), 0);
+        neighbor.description = column_text(select.get(), 1);
+        neighbor.weight = sqlite3_column_int64(select.get(), 2);
+        neighbor.outgoing = sqlite3_column_int64(select.get(), 3) != 0;
+        neighbor.peer_id = sqlite3_column_int64(select.get(), 4);
+        neighbor.peer_name = column_text(select.get(), 5);
+        neighbor.peer_type = column_text(select.get(), 6);
+        neighbor.edge_id = sqlite3_column_int64(select.get(), 7);
+        neighbor.origin = column_text(select.get(), 8);
+        neighbor.confidence = sqlite3_column_type(select.get(), 9) == SQLITE_NULL
+                                  ? -1.0
+                                  : sqlite3_column_double(select.get(), 9);
+        out.push_back(std::move(neighbor));
+    }
+    return out;
+}
+
+std::vector<NodeResult> Store::search_node_names(std::string_view query, int limit,
+                                                 bool include_unresolved) const {
+    const std::string terms = fts_match_query(query);
+    if (terms.empty()) {
+        return {};
+    }
+    // A column filter: the question's words against what entities are
+    // called, never what a description happens to mention.
+    const std::string match = "name : (" + terms + ")";
+    StatementPtr select = prepare(impl_->connection.get(),
+                                  std::string{"SELECT n.id, n.name, n.name_norm, n.type,"
+                                              "       n.description, n.dim, n.mention_count,"
+                                              "       COALESCE(n.metadata, ''),"
+                                              "       bm25(kg_nodes_fts)"
+                                              "  FROM kg_nodes_fts"
+                                              "  JOIN kg_nodes n ON n.id = kg_nodes_fts.rowid"
+                                              " WHERE kg_nodes_fts MATCH ?"} +
+                                      (include_unresolved ? "" : " AND n.type != 'name'") +
+                                      " ORDER BY bm25(kg_nodes_fts), n.name, n.type LIMIT ?");
+    bind_text(select.get(), 1, match);
+    sqlite3_bind_int(select.get(), 2, limit > 0 ? limit : -1);
+    std::vector<NodeResult> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        NodeResult result;
+        result.node = node_row(select.get());
+        result.score = normalize_bm25(sqlite3_column_double(select.get(), 8));
+        out.push_back(std::move(result));
+    }
+    return out;
+}
+
+std::vector<GraphNode> Store::code_nodes_ending(std::string_view unqualified) const {
+    if (unqualified.empty()) {
+        return {};
+    }
+    // GLOB, not LIKE: GLOB is case-sensitive, as code identity is, and its
+    // only metacharacters are escaped by bracketing them.
+    std::string escaped;
+    for (const char c : unqualified) {
+        if (c == '*' || c == '?' || c == '[') {
+            escaped += '[';
+            escaped += c;
+            escaped += ']';
+        } else {
+            escaped += c;
+        }
+    }
+    StatementPtr select =
+        prepare(impl_->connection.get(),
+                "SELECT " + std::string{kNodeColumns} +
+                    " FROM kg_nodes WHERE (type IN ('module', 'class', 'function', 'name')"
+                    " AND (name GLOB ?1 OR name GLOB ?2)) OR (type = 'file' AND name GLOB ?3)"
+                    " ORDER BY mention_count DESC, name, type");
+    bind_text(select.get(), 1, "*::" + escaped);
+    bind_text(select.get(), 2, "*." + escaped);
+    bind_text(select.get(), 3, "*/" + escaped);
+    std::vector<GraphNode> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out.push_back(node_row(select.get()));
+    }
+    return out;
+}
+
+std::vector<CodeFile> Store::code_files() const {
+    StatementPtr select = prepare(impl_->connection.get(),
+                                  "SELECT DISTINCT collection, file FROM kg_code_mentions"
+                                  " ORDER BY collection, file");
+    std::vector<CodeFile> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out.push_back(CodeFile{.collection = column_text(select.get(), 0),
+                               .file = column_text(select.get(), 1)});
+    }
+    return out;
+}
+
+std::vector<CodeSpan> Store::code_spans_at(std::string_view collection, std::string_view file,
+                                           std::int64_t line) const {
+    StatementPtr select =
+        prepare(impl_->connection.get(),
+                "SELECT node_id, collection, file, line, MAX(end_line, line), role"
+                "  FROM kg_code_mentions"
+                " WHERE collection = ?1 AND file = ?2 AND line <= ?3"
+                "   AND MAX(end_line, line) >= ?3 AND role IN ('definition', 'declaration')"
+                " ORDER BY MAX(end_line, line) - line, line DESC, node_id");
+    bind_text(select.get(), 1, collection);
+    bind_text(select.get(), 2, file);
+    sqlite3_bind_int64(select.get(), 3, line);
+    std::vector<CodeSpan> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out.push_back(CodeSpan{.node_id = sqlite3_column_int64(select.get(), 0),
+                               .collection = column_text(select.get(), 1),
+                               .file = column_text(select.get(), 2),
+                               .line = sqlite3_column_int64(select.get(), 3),
+                               .end_line = sqlite3_column_int64(select.get(), 4),
+                               .role = column_text(select.get(), 5)});
+    }
+    return out;
+}
+
+std::vector<GraphCommunity> Store::node_communities(std::int64_t node_id) const {
+    StatementPtr select = prepare(impl_->connection.get(),
+                                  "SELECT c.id, c.member_key, c.size, c.summary, c.model,"
+                                  "       c.summarized_at"
+                                  "  FROM kg_community_members m"
+                                  "  JOIN kg_communities c ON c.id = m.community_id"
+                                  " WHERE m.node_id = ? ORDER BY c.size DESC, c.id");
+    sqlite3_bind_int64(select.get(), 1, node_id);
+    std::vector<GraphCommunity> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        GraphCommunity community;
+        community.id = sqlite3_column_int64(select.get(), 0);
+        community.member_key = column_text(select.get(), 1);
+        community.size = sqlite3_column_int64(select.get(), 2);
+        community.summary = column_text(select.get(), 3);
+        community.model = column_text(select.get(), 4);
+        community.summarized_at = column_text(select.get(), 5);
+        out.push_back(std::move(community));
+    }
+    return out;
+}
+
 std::vector<GraphEdge> Store::all_edges() const {
     // An unresolved reference's name node is not structure: its edges are
     // left out, or every caller of `.push_back` would cluster as one theme.

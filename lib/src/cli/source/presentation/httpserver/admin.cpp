@@ -188,6 +188,22 @@ HttpResponse AdminHandler::graph_entity(const HttpRequest& request, std::string_
     return admin_graph_entity(config_context(), collection, request);
 }
 
+HttpResponse AdminHandler::graph_path(const HttpRequest& request, std::string_view name) {
+    return admin_graph_path(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::graph_explain(const HttpRequest& request, std::string_view name) {
+    return admin_graph_explain(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::graph_neighbors(const HttpRequest& request, std::string_view name) {
+    return admin_graph_neighbors(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::graph_query(const HttpRequest& request, std::string_view name) {
+    return admin_graph_query(config_context(), name, request);
+}
+
 HttpResponse AdminHandler::delete_graph(const HttpRequest& request, std::string_view collection) {
     return admin_delete_graph(config_context(), collection, request);
 }

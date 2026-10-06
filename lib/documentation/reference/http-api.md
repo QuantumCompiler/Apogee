@@ -690,6 +690,68 @@ a named graph each supporting chunk names the member `collection` it lives
 in, resolved through that member's store. `400` without a name; `404` when
 the graph is unbuilt, the collection has no data, or nothing matches.
 
+### `GET /v1/admin/graph/{id}/path`
+
+The read twin of `apogee graph path` (27l), and the four navigation reads
+below with it: `{id}` resolves graphs-first exactly as `--graph` does, and
+the `200` body is the one document `apogee graph <verb> --graph {id}
+--output-format json` prints and the `graph` tools return -- the same bytes,
+from one traversal core. Reads only: nothing here writes. Navigation is
+model-free: no backend need be served.
+
+`?from=&to=` (both required; each a name, `kind:name`, `path:line` for code,
+or a code node's unqualified name when exactly one qualified name ends in
+it), `max_hops` (default 8, 1..32), `directed` (`true`/`false`, default
+undirected with each hop's direction shown), `relations` (comma-separated:
+walk only these). `200 {"object": "graph.path", graph, from, to, matched:
+{from, to}, directed, max_hops, relations?, found, hops, nodes: [node…],
+steps: [{from, relation, origin, direction: "forward" | "backward", to,
+weight, at?, description?}], note?}` -- `origin` is `extracted` or
+`inferred`, `at` a parsed edge's first site (`file:line`), and with no path
+`found: false` and `note: "no path within N hops"`. A node is `{name, type,
+member?, file?, line?, end_line?, unresolved?, status?, discipline?}`. An
+unresolved `name` node may end a path and never carries one.
+
+Failures carry the CLI's message in the error envelope: `400` for a missing
+or non-integer parameter, a cap out of range, an `{id}` that is not a plain
+name, or a name **several nodes answer to** -- never picked:
+`error.candidates` lists them, each a node; `404` (`not_found_error`)
+when `{id}` names no graph or collection, the graph is not built, or a node
+matches nothing (`error.candidates` then holds the near matches).
+
+### `GET /v1/admin/graph/{id}/explain`
+
+The read twin of `apogee graph explain`: `?node=` (required), `max_neighbors`
+(per relation, default 12, 1..100). `200 {"object": "graph.node", graph,
+node, matched, description?, mentions, degree: {total, out, in},
+max_per_relation, relations: [{relation, direction: "out" | "in", total,
+neighbors: [node + {weight, origin, at?, description?}]}], provenance: {code:
+[{role, member, file, line, end_line?}], chunks: [{collection, source, chunk}
+| {collection, chunk_id, missing: true}]}, communities: [{id, size,
+summary?}], decisions: [node + {decision?}]}` -- each relation group counted
+in full and listed to the cap, the first 12 lines or chunks of provenance,
+and the knowledge records one edge away. Failures as `path`'s.
+
+### `GET /v1/admin/graph/{id}/neighbors`
+
+The read twin of `apogee graph neighbors`: `?node=` (required), `relation`
+(only this one), `direction` (`both`, `out`, `in`), `max_neighbors` (per
+relation, default 12, 1..100). `200 {"object": "graph.neighbors", graph,
+node, matched, degree, relation?, direction, max_per_relation, relations}`,
+the groups shaped as `explain`'s. Failures as `path`'s.
+
+### `GET /v1/admin/graph/{id}/query`
+
+The read twin of `apogee graph query`: `?q=` (required) matched as an entity's
+exact name, else its words against entity names (never descriptions), then
+walked as a turn's retrieval-time expansion walks -- `hops` (1 or 2) and
+`max_entities` (1..50) defaulting to the graph's own -- and cut whole lines at
+the 1,500-codepoint section a turn injects. `200 {"object": "graph.query",
+graph, question, match: "exact" | "names" | "none", hops, max_entities,
+budget, seeds: [node…], entities: [node + {hop, description?}], relations:
+[{from, relation, origin, to, description?}], truncated}`. Nothing matching is
+`200` with `match: "none"`. Failures as `path`'s.
+
 ### `POST /v1/admin/graph/{id}/communities`
 
 The twin of `apogee graph communities {id}`: the graph's **global layer**.

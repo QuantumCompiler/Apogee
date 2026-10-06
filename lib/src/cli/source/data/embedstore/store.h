@@ -469,6 +469,50 @@ public:
     /// returns all.
     [[nodiscard]] std::vector<ChunkRef> node_mention_refs(std::int64_t node_id, int limit) const;
 
+    // --- The knowledge graph: navigation reads (embedstore/graph_search.cpp,
+    // 27l) -- what `graph/navigate` walks with; each a read, never a write.
+
+    /// Whether the graph holds any node at all -- built, as navigation asks.
+    [[nodiscard]] bool has_graph() const;
+
+    /// A node's edges counted per (relation, direction), ordered by relation
+    /// then outgoing first -- what a card states before it caps the lists.
+    [[nodiscard]] std::vector<RelationCount> relation_counts(std::int64_t node_id) const;
+
+    /// The edges incident to a node that `filter` admits, joined with their
+    /// peers: structural peers before unresolved `name` nodes, then heaviest
+    /// first, then by the peer's name, type and the relation -- a
+    /// deterministic order a walk and a card both rely on. `limit` 0 or less
+    /// returns all.
+    [[nodiscard]] std::vector<Neighbor> node_neighbors(std::int64_t node_id,
+                                                       const NeighborFilter& filter,
+                                                       int limit) const;
+
+    /// The entity index over **names alone**, BM25-ranked and normalised like
+    /// `search_nodes` -- a question's words matched against what entities
+    /// are called, never what their descriptions happen to say. Unresolved
+    /// `name` nodes only with `include_unresolved`. `limit` 0 or less returns
+    /// every match.
+    [[nodiscard]] std::vector<NodeResult> search_node_names(std::string_view query, int limit,
+                                                            bool include_unresolved) const;
+
+    /// Code nodes whose qualified name ends in `unqualified` at a separator
+    /// -- `::x` or `.x` for a module, class, function or name, `/x` for a
+    /// file -- case-sensitive, as code identity is. Most-mentioned first.
+    [[nodiscard]] std::vector<GraphNode> code_nodes_ending(std::string_view unqualified) const;
+
+    /// Every (member, file) the code layer mentions something in, sorted.
+    [[nodiscard]] std::vector<CodeFile> code_files() const;
+
+    /// The definitions and declarations in `file` under `collection` whose
+    /// lines hold `line`, innermost (shortest span) first.
+    [[nodiscard]] std::vector<CodeSpan> code_spans_at(std::string_view collection,
+                                                      std::string_view file,
+                                                      std::int64_t line) const;
+
+    /// The stored communities a node is a member of, largest first.
+    [[nodiscard]] std::vector<GraphCommunity> node_communities(std::int64_t node_id) const;
+
     /// The whole edge set between structural nodes -- the community
     /// detector's input. An edge to an unresolved reference's `name` node is
     /// left out (27k): a name is not structure.

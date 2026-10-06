@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 84> kRoutes{{
+constexpr std::array<Route, 88> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -192,6 +192,23 @@ constexpr std::array<Route, 84> kRoutes{{
     {"GET", "/v1/admin/graph/{id}/entity", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->graph_entity(r, id);
+     }},
+    // Navigation (27l): reads only, the `graph` verbs' JSON documents.
+    {"GET", "/v1/admin/graph/{id}/path", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->graph_path(r, id);
+     }},
+    {"GET", "/v1/admin/graph/{id}/explain", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->graph_explain(r, id);
+     }},
+    {"GET", "/v1/admin/graph/{id}/neighbors", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->graph_neighbors(r, id);
+     }},
+    {"GET", "/v1/admin/graph/{id}/query", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->graph_query(r, id);
      }},
     {"POST", "/v1/admin/graph/{id}/communities", true,
      +[](Handler& h, AdminHandler* a, const HttpRequest& r, const std::string& id) {

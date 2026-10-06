@@ -237,7 +237,8 @@ struct ModelsConfig {
 [[nodiscard]] std::span<const std::string_view> suite_role_names() noexcept;
 
 /// The words a suite member's `toolset:` takes (27d): the native toolsets
-/// `tools/toolsets.h` registers (`fs`, `shell`, `git`, `notes`, `rag`), `web`
+/// `tools/toolsets.h` registers (`fs`, `shell`, `git`, `notes`, `rag`, and
+/// since 27l `graph`), `web`
 /// (fetch_url and web_search) and `mcp` (every MCP server's tools). Declared
 /// here, beside the parser that refuses any other word, as `lora_methods()`
 /// is; a test holds it to the toolsets that exist.

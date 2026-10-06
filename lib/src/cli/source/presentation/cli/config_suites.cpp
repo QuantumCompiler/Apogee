@@ -170,7 +170,7 @@ void bind_member_flags(CLI::App& cmd, MemberFlags& flags) {
         ->allow_extra_args(false);
     cmd.add_option("--toolset", flags.toolsets,
                    "Pin the tools a member is offered: ROLE=fs,git,... -- fs, shell, git, notes, "
-                   "rag, web, mcp; ROLE= for none (repeatable)")
+                   "rag, graph, web, mcp; ROLE= for none (repeatable)")
         ->type_name(words_value(role_prefixes()))
         ->expected(1)
         ->allow_extra_args(false);

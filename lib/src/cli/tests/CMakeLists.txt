@@ -101,6 +101,9 @@ add_library(apogee_tests_data OBJECT
     data/embedstore/graph_dedupe_test.cpp
     data/embedstore/graph_multi_test.cpp
     data/embedstore/graph_code_test.cpp
+    data/embedstore/graph_navigate_test.cpp
+    support/graph_fixture.h
+    support/graph_fixture.cpp
     support/fake_transport.h
     support/fake_llama.h
     support/fake_transport.cpp
@@ -154,6 +157,7 @@ add_library(apogee_tests_business OBJECT
     business/tools/environment_test.cpp
     business/tools/toolsets_test.cpp
     business/tools/consult_test.cpp
+    business/tools/graph_nav_test.cpp
     business/tools/tool_args_validation_test.cpp
     business/mcp/types_test.cpp
     business/mcp/transport_test.cpp
@@ -180,6 +184,7 @@ add_library(apogee_tests_business OBJECT
     business/graph/code_parser_test.cpp
     business/graph/code_resolve_test.cpp
     business/graph/code_build_test.cpp
+    business/graph/navigate_test.cpp
     business/agentloop/graph_named_test.cpp
     business/training/script_runner_test.cpp
     business/training/python_env_test.cpp
@@ -263,8 +268,10 @@ add_library(apogee_tests_presentation OBJECT
     presentation/httpserver/admin_knowledge_test.cpp
     presentation/cli/graph_test.cpp
     presentation/cli/graph_code_test.cpp
+    presentation/cli/graph_navigate_test.cpp
     presentation/httpserver/admin_graph_test.cpp
     presentation/httpserver/admin_graphs_test.cpp
+    presentation/httpserver/admin_graph_navigate_test.cpp
     presentation/httpserver/admin_suites_test.cpp
     presentation/cli/datasets_test.cpp
     presentation/cli/train_test.cpp
@@ -712,6 +719,21 @@ if(UNIX)
             "${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
     )
     set_tests_properties(cli.code_graph_lifecycle PROPERTIES TIMEOUT 120)
+
+    # Graph navigation on the real binary (27l), with zero backends: path,
+    # explain, neighbors and query over a code graph built with no model; an
+    # external MCP client over stdio listing the four graph tools from
+    # `__mcp-tools`, read-only, each answering with the CLI's own JSON byte
+    # for byte; a tool-using turn on a pipe calling graph_path ungated; and
+    # the graph's rows unchanged by all of it. Needs python3 (skips without).
+    add_test(NAME cli.graph_navigation_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/graph_navigation_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/graph-navigation-e2e
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/mcp_graph_client.py"
+    )
+    set_tests_properties(cli.graph_navigation_lifecycle PROPERTIES TIMEOUT 120)
 
     # The datasets floor on the real binary: the seeded kits, create, synth
     # through the scripted mock, the Python boundary (the refusal on a pipe,

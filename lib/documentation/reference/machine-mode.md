@@ -274,6 +274,23 @@ apogee task list --output-format json        # {"object":"list","data":[…],"to
 newest 50 (`id`, `status`, `rounds_used`, `rounds_budget`, `goal`), `total` every
 task. A read given `stream-json`, or any word but `text` and `json`, is refused.
 
+Since 27l the graph navigation verbs are reads of the same kind:
+
+```bash
+apogee graph path <from> <to> [--directed] [--relation calls] --output-format json   # {"object":"graph.path",…}
+apogee graph explain <node> --output-format json                                       # {"object":"graph.node",…}
+apogee graph neighbors <node> [--relation R] [--direction in|out] --output-format json # {"object":"graph.neighbors",…}
+apogee graph query "<question>" --output-format json                                   # {"object":"graph.query",…}
+```
+
+Each takes `--graph <name>` or `--collection <name>` (neither: the one graph
+built). Each document is byte for byte what the `graph` tools return — to a
+model in a turn, and to any MCP client of `apogee __mcp-tools` — and what `GET
+/v1/admin/graph/{id}/path|explain|neighbors|query` serves; the shapes are in
+[http-api.md](http-api.md#get-v1admingraphidpath). A node that cannot be
+resolved, or a name several nodes answer to, exits `1` with the message — the
+candidates named — on stderr and nothing on stdout.
+
 ## What machine mode does not do
 
 - **It opens no sockets.** Not one, ever — asserted in CI with `lsof`. Only

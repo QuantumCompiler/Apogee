@@ -102,6 +102,8 @@ apogee_add_module(httpserver
     httpserver/admin_knowledge.cpp
     httpserver/admin_graph.h
     httpserver/admin_graph.cpp
+    httpserver/admin_graph_navigate.h
+    httpserver/admin_graph_navigate.cpp
     httpserver/admin_graphs.h
     httpserver/admin_graphs.cpp
     httpserver/admin_suites.h
@@ -181,6 +183,8 @@ apogee_add_module(cli
     cli/agents_cmd.cpp
     cli/graph.h
     cli/graph.cpp
+    cli/graph_navigate.h
+    cli/graph_navigate.cpp
     cli/datasets.h
     cli/datasets.cpp
     cli/train.h

@@ -932,9 +932,9 @@ namespace {
 /// The arguments that are free text on purpose, reviewed 2026-09-24: prompts
 /// and messages, names for things being created, dates, patterns, and values
 /// with no listing to read (a vendor model id, a Hugging Face repository, an
-/// entity in a graph). Everything else must complete to something. A new
-/// TEXT argument fails the test below until it is tagged -- or added here,
-/// on purpose.
+/// entity in a graph -- and since 27l a relation in one, or a question). Everything else must
+/// complete to something. A new TEXT argument fails the test below until it is tagged -- or added
+/// here, on purpose.
 const std::vector<std::string> kFreeText{"agents create name",
                                          "agents create --description",
                                          "agents create --save-name",
@@ -970,6 +970,13 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "embed query text",
                                          "embed delete --source",
                                          "graph show ENTITY",
+                                         "graph path FROM",
+                                         "graph path TO",
+                                         "graph path --relation",
+                                         "graph explain NODE",
+                                         "graph neighbors NODE",
+                                         "graph neighbors --relation",
+                                         "graph query QUESTION",
                                          "knowledge capture TEXT",
                                          "knowledge capture --source",
                                          "knowledge query TEXT",

@@ -435,8 +435,8 @@ constexpr std::array<std::string_view, 6> kSuiteRoles{"chat",   "embedding",    
                                                       "vision", "transcription", "utility"};
 
 /// The words `toolset:` accepts (27d).
-constexpr std::array<std::string_view, 7> kSuiteToolsets{"fs",  "shell", "git", "notes",
-                                                         "rag", "web",   "mcp"};
+constexpr std::array<std::string_view, 8> kSuiteToolsets{"fs",  "shell", "git", "notes",
+                                                         "rag", "graph", "web", "mcp"};
 
 /// The roles `consultable:` accepts (27f): not the root's own, not the
 /// embedder's.

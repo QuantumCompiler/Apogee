@@ -11,6 +11,7 @@
 #include "httpserver/admin_datasets.h"
 #include "httpserver/admin_events.h"
 #include "httpserver/admin_graph.h"
+#include "httpserver/admin_graph_navigate.h"
 #include "httpserver/admin_graphs.h"
 #include "httpserver/admin_knowledge.h"
 #include "httpserver/admin_suites.h"
@@ -92,6 +93,12 @@ public:
                                            std::string_view name);
     [[nodiscard]] HttpResponse graph_stats(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse graph_entity(const HttpRequest& request, std::string_view name);
+    /// The navigation reads (27l): the CLI's `graph path|explain|neighbors|
+    /// query --output-format json` documents, served.
+    [[nodiscard]] HttpResponse graph_path(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse graph_explain(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse graph_neighbors(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse graph_query(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse delete_graph(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse set_graph_enabled(const HttpRequest& request,
                                                  std::string_view collection);

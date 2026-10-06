@@ -17,6 +17,7 @@
 #include "agentloop/graph_context.h"
 #include "backends/factory.h"
 #include "cli/embed.h"
+#include "cli/graph_navigate.h"
 #include "cli/helpers.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -1327,6 +1328,9 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
             print_node(store, node, *sh_chunks);
         }
     });
+
+    // ---- path, explain, neighbors, query (27l) ---------------------------------
+    bind_graph_navigation(*cmd, context);
 
     // ---- communities -----------------------------------------------------------
     auto c = std::make_shared<CommunitiesFlags>();

@@ -177,6 +177,10 @@ const std::map<std::string, Classification>& table() {
         // --- reads served: the same view, over the admin plane ------------------
         {"task status", served("/v1/admin/tasks/{id}")},
         {"task list", served("/v1/admin/tasks")},
+        {"graph path", served("/v1/admin/graph/{id}/path")},
+        {"graph explain", served("/v1/admin/graph/{id}/explain")},
+        {"graph neighbors", served("/v1/admin/graph/{id}/neighbors")},
+        {"graph query", served("/v1/admin/graph/{id}/query")},
         // --- read-only / interactive ------------------------------------------
         {"chat", read_only()},
         {"complete", read_only()},

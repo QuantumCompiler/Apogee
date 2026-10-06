@@ -1215,8 +1215,9 @@ TEST_CASE("the suite vocabularies are the roles and the toolsets", "[config][sui
           std::vector<std::string_view>{"chat", "embedding", "extraction", "vision",
                                         "transcription", "utility"});
     const auto toolsets = apogee::harness::suite_toolset_names();
-    CHECK(std::vector<std::string_view>(toolsets.begin(), toolsets.end()) ==
-          std::vector<std::string_view>{"fs", "shell", "git", "notes", "rag", "web", "mcp"});
+    CHECK(
+        std::vector<std::string_view>(toolsets.begin(), toolsets.end()) ==
+        std::vector<std::string_view>{"fs", "shell", "git", "notes", "rag", "graph", "web", "mcp"});
     // The shipped template documents suites and configures none.
     const Config shipped = load_text(apogee::harness::config_template());
     CHECK(shipped.suites.empty());

@@ -12,6 +12,7 @@
 #include "platform/platform.h"
 #include "tools/environment.h"
 #include "tools/fs.h"
+#include "tools/graph_nav.h"
 #include "tools/notes.h"
 #include "tools/rag_query.h"
 #include "tools/shell.h"
@@ -19,7 +20,8 @@
 namespace apogee::tools {
 namespace {
 
-constexpr std::array<std::string_view, 5> kToolsetNames{"fs", "shell", "git", "notes", "rag"};
+constexpr std::array<std::string_view, 6> kToolsetNames{"fs",    "shell", "git",
+                                                        "notes", "rag",   "graph"};
 
 constexpr std::array<std::string_view, 6> kDestructiveTools{
     "write_file", "edit_file", "delete_file", "run_command", "write_note", "delete_note"};
@@ -86,6 +88,10 @@ void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOption
     }
     if (!disabled(options, "rag")) {
         register_rag_tools(registry, options.harness, options.config);
+    }
+    if (!disabled(options, "graph")) {
+        // Read-only (27l): ungated, and served by `__mcp-tools` with the rest.
+        register_graph_tools(registry, GraphToolsOptions{.config = options.config, .scope = {}});
     }
 
     // Set whatever is switched off: fetch_url and MCP tools ride the same

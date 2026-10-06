@@ -4,7 +4,7 @@
 
 **Compiles as** `apogee_tests_data`, an OBJECT library linking the Data and Infrastructure modules: a test that includes a header from above this layer does not compile, and the link policy refuses the library a link above it. A behavior spanning layers is tested in the highest layer it touches -- a backend's suite drives the backend; driving it through the Harness is Business's test.
 
-**Support** (`tests/support/`, each file with the lowest layer whose headers it includes): `fake_transport`, `fake_llama`, `media_fakes`, `channel_guard`, and the Infrastructure ones.
+**Support** (`tests/support/`, each file with the lowest layer whose headers it includes): `fake_transport`, `fake_llama`, `media_fakes`, `channel_guard`, `graph_fixture` (27l: the committed navigation graph every layer's graph tests walk), and the Infrastructure ones.
 
 **Conventions:** hermetic -- no network, no models, nothing written outside the test's own temporary directory, named with a random draw because ctest runs cases as parallel processes, and never the real home directory (guard `HOME`). A test name never starts with a dash or holds a double quote (`cli.test_names`). One `apogee_tests` binary runs every layer's suites.
 
