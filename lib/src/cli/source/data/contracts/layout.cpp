@@ -14,7 +14,7 @@ namespace {
 /// Order matters only for readability -- `create_directories` handles nesting
 /// -- but keeping it stable keeps `apogee check` output stable, and diffing
 /// two installs is easier when both enumerate in the same order.
-constexpr std::array<LayoutEntry, 16> kDirectories{{
+constexpr std::array<LayoutEntry, 17> kDirectories{{
     // `config` is a row like any other, even though `config_dir()` is the
     // accessor callers use. Leaving it out was the first version, and it
     // immediately produced the bug this whole file exists to prevent: seeding
@@ -39,6 +39,12 @@ constexpr std::array<LayoutEntry, 16> kDirectories{{
     {"prompts", "agents' system prompts, loaded by 'apogee analyze --agent'", false, true},
     {"schemas", "agents' output schemas (JSON Schema), loaded beside the prompts", false, true},
     {"analyses", "reports saved by 'apogee analyze', one directory per agent", false, true},
+    // The shipped starters seed here, and a spec file the user drops beside
+    // them plays by its name too (27q).
+    {"symphonies",
+     "symphony spec files -- the shipped starters and any of your own, played by "
+     "name ('apogee symphonies')",
+     false, true},
     {"knowledge", "captured decision records' raw conversations (knowledge/raw)", true, true},
     {"training",
      "training datasets, kits, scripts and the Python environment ('apogee datasets' / 'apogee "
@@ -152,6 +158,10 @@ std::filesystem::path training_cycle_dir() {
 
 std::filesystem::path tasks_dir() {
     return apogee_home() / "tasks";
+}
+
+std::filesystem::path symphonies_dir() {
+    return apogee_home() / "symphonies";
 }
 
 std::filesystem::path prompts_dir() {

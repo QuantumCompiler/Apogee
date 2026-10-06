@@ -25,6 +25,7 @@ apogee_add_module(contracts
     contracts/assets_training.cpp
     contracts/assets_converter.cpp
     contracts/assets_mlx.cpp
+    contracts/assets_symphonies.cpp
     contracts/errors.h
     contracts/errors.cpp
     contracts/cancellation.h

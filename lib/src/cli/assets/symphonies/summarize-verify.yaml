@@ -1,0 +1,33 @@
+# A shipped symphony (27q): a passage summarized by the suite's utility
+# member, then checked against the passage and corrected by its chat member.
+# What it shows: output threading -- stage two reads stage one's answer as
+# {{summarize}}, beside the input as {{input}}.
+#
+#   apogee symphonies play summarize-verify --input "$(cat notes.txt)"
+#   apogee symphonies create my-summary --from summarize-verify
+name: summarize-verify
+description: Summarize a passage, then check the summary against the passage and correct it.
+input:
+  description: The passage to summarize.
+stages:
+  - name: summarize
+    role: utility
+    answer_tokens: 400
+    prompt: |
+      Summarize the passage below in at most three sentences. Keep every name, number and date exactly as the passage gives it.
+
+      Passage:
+      {{input}}
+  - name: verify
+    role: chat
+    answer_tokens: 400
+    prompt: |
+      Here is a passage and a summary of it.
+
+      Passage:
+      {{input}}
+
+      Summary:
+      {{summarize}}
+
+      Check the summary against the passage. Correct anything it gets wrong and add any key fact it leaves out, in at most three sentences. Reply with the final summary only.

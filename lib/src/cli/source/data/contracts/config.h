@@ -395,6 +395,70 @@ struct SuiteConfig {
     bool operator==(const SuiteConfig&) const = default;
 };
 
+/// The roles a symphony stage may play (27q): every suite role that answers a
+/// prompt -- `chat`, `extraction`, `vision`, `transcription`, `utility` --
+/// and never `embedding`, which answers none. In listing order.
+[[nodiscard]] std::span<const std::string_view> symphony_role_names() noexcept;
+
+/// What a symphony takes in (27q): the text a play is given, described for
+/// whoever plays it, and whether it carries an image too.
+struct SymphonyInput {
+    /// Free text: what the input is (`The passage to summarize.`). Shown by
+    /// `symphonies show`; never interpreted.
+    std::string description;
+    /// The play takes an image beside its text (`play --image`), which a
+    /// stage marked `image: true` is sent with its prompt.
+    bool image = false;
+
+    bool operator==(const SymphonyInput&) const = default;
+};
+
+/// One stage of a symphony (27q): a suite ROLE -- never a backend: the suite
+/// decides placement, the symphony decides process -- given a prompt rendered
+/// from the input and the earlier stages' answers, through the one member
+/// call (`agentloop/member_call`).
+struct SymphonyStage {
+    /// Unique in its symphony, letters, digits, `_` and `-`; what later
+    /// stages name its answer by (`{{summarize}}`). Never `input`.
+    std::string name;
+    /// One of `symphony_role_names()`.
+    std::string role;
+    /// The template, as written: `{{input}}` and `{{<an earlier stage>}}`
+    /// are replaced at play time (`business/symphony/definition`), and
+    /// nothing else in it is touched. Never `${ENV}`-expanded.
+    std::string prompt;
+    /// A JSON Schema the stage's answer is held to (26f's grammar on a local
+    /// member), as its author wrote it -- the text rides the request as
+    /// written, so a grammar writes the properties in the order it lists
+    /// them. Empty for a plain-text answer.
+    std::string schema;
+    /// The input's image goes with this stage's prompt.
+    bool image = false;
+    /// This stage's caps; unset takes the symphony defaults
+    /// (`business/symphony/definition`). The member's window stays the
+    /// ceiling over both.
+    std::optional<std::int64_t> brief_tokens;
+    std::optional<std::int64_t> answer_tokens;
+
+    bool operator==(const SymphonyStage&) const = default;
+};
+
+/// A symphony (27q): a named, staged prompt process -- an input in, its
+/// stages played in order, each one member call on a role of the active
+/// suite, and the last stage's answer out. From a `symphonies:` config entry
+/// or a spec file -- the same parser reads both (the `training.pipelines`
+/// precedent) -- or a shipped starter, which is a spec file compiled in.
+struct SymphonySpec {
+    std::string name;
+    /// Free text, for a listing.
+    std::string description;
+    SymphonyInput input;
+    /// In play order; at least one.
+    std::vector<SymphonyStage> stages;
+
+    bool operator==(const SymphonySpec&) const = default;
+};
+
 /// Whether two role-pointer sets are identical. Defined in `config.cpp` -- the
 /// one place besides the resolver allowed to name the fields -- so a caller
 /// comparing configs (the admin plane's `restart_required`) never reads a
@@ -942,6 +1006,12 @@ struct Config {
     /// one chain; read the members directly only to display or validate them.
     std::map<std::string, SuiteConfig, CaseInsensitiveLess> suites;
 
+    /// Symphonies keyed by name AS WRITTEN, compared case-insensitively
+    /// (27q). The shipped starters are not here unless the file overrides
+    /// one: they are compiled in (`contracts/assets.h`) and a same-named
+    /// entry wins.
+    std::map<std::string, SymphonySpec, CaseInsensitiveLess> symphonies;
+
     StatusMode status_mode = StatusMode::Line;
     bool color = true;
 
@@ -982,6 +1052,9 @@ struct Config {
 
     /// Suite names as written, in the map's (case-folded) order.
     [[nodiscard]] std::vector<std::string> suite_names() const;
+
+    /// Case-insensitive lookup of a `symphonies:` entry. nullptr when absent.
+    [[nodiscard]] const SymphonySpec* find_symphony(std::string_view name) const noexcept;
 };
 
 /// The active suite: the entry `models.default_suite` names, surrounding
@@ -1058,6 +1131,24 @@ struct SuiteBackend {
 /// A regime spec from YAML text, as a `training.regimes:` entry is read.
 [[nodiscard]] RegimeSpec parse_regime_spec(std::string_view content, std::string_view origin,
                                            std::string_view fallback_name = {});
+
+/// A symphony from a spec file's YAML text (27q) -- the same parser and the
+/// same rules a `symphonies:` entry gets: at least one stage, each with a
+/// unique name, a prompt and a role of `symphony_role_names()` -- a stage
+/// naming a backend (a `backend:` or `model:` key, or a role that is one of
+/// `backends`, the configured names) refused with the principle: the suite
+/// decides placement -- a schema that is a JSON object, positive caps, and
+/// no key it does not know. The name defaults to `fallback_name` when the
+/// text carries none. What the templates and schemas mean is
+/// `business/symphony/definition`'s to check. Throws ConfigError naming
+/// what is wrong.
+[[nodiscard]] SymphonySpec parse_symphony_spec(std::string_view content, std::string_view origin,
+                                               std::string_view fallback_name = {},
+                                               const std::vector<std::string>& backends = {});
+
+/// Whether `name` can name a symphony or a stage: letters, digits, `_` and
+/// `-`, not empty.
+[[nodiscard]] bool is_symphony_name(std::string_view name) noexcept;
 
 /// Reads and parses the file at `path`.
 /// Throws ConfigError when it cannot be read or does not parse.

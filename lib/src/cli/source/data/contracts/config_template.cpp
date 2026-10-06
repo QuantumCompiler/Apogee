@@ -112,6 +112,27 @@ models:
 #     validate:
 #       tool_args: on
 
+# Symphonies: named, staged prompt processes over a suite's members. An input
+# goes in; each stage -- a ROLE, never a backend, so one symphony plays on any
+# suite -- is sent its prompt with {{input}} and the earlier stages' answers
+# ({{<stage>}}) filled in, and the last stage's answer comes out:
+# `apogee symphonies play <name> --input "..."`. A stage's `schema:` (a JSON
+# Schema, as JSON text) holds its answer to it; `image: true` sends it the
+# play's --image. Three ship (`apogee symphonies list`), and a spec file under
+# symphonies/ plays by its name too. `apogee symphonies create` and `edit`
+# write entries here. Each stage is one model call, one after another.
+#
+# symphonies:
+#   brief:
+#     description: Summarize, then tighten
+#     stages:
+#       - name: summarize
+#         role: utility
+#         prompt: "Summarize in three sentences: {{input}}"
+#       - name: tighten
+#         role: chat
+#         prompt: "Shorten this to one sentence: {{summarize}}"
+
 # Optional search roots that pre-fill path prompts. Each is optional; an empty
 # value simply means "no default". ${ENV_VAR} references are expanded.
 paths:

@@ -1,9 +1,11 @@
 #include "contracts/config_edit.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <optional>
 #include <random>
 #include <span>
@@ -958,6 +960,304 @@ std::string append_suite(std::string_view content, std::string_view name, const 
 
 std::string delete_suite(std::string_view content, std::string_view name) {
     return delete_entry(content, "suites", "suite", name);
+}
+
+// ---- Symphonies (27q) ---------------------------------------------------------
+
+namespace {
+
+/// The words YAML reads as something other than the strings they spell.
+constexpr std::array<std::string_view, 13> kYamlKeywords{
+    "true", "false", "null", "yes", "no", "on", "off", "y", "n", "~", ".nan", ".inf", "-.inf"};
+
+/// The digits a `\xNN` escape is written with.
+constexpr std::string_view kHexDigits = "0123456789abcdef";
+
+/// A word YAML would read as something other than the string it spells.
+bool yaml_keyword(std::string_view value) {
+    return std::ranges::any_of(kYamlKeywords,
+                               [&](std::string_view word) { return equals_folded(value, word); });
+}
+
+/// `parts` joined -- one allocation-friendly line of an entry.
+std::string line_of(std::initializer_list<std::string_view> parts) {
+    std::string out;
+    for (const std::string_view part : parts) {
+        out += part;
+    }
+    return out;
+}
+
+/// Whether `value` reads back as itself written plain: a letter or digit
+/// first, a few punctuation marks inside, nothing at either end YAML would
+/// strip, and no word YAML treats as a keyword.
+bool plain_safe(std::string_view value) {
+    if (value.empty() || yaml_keyword(value) || value.back() == ' ') {
+        return false;
+    }
+    if (std::isalnum(static_cast<unsigned char>(value.front())) == 0) {
+        return false;
+    }
+    return std::ranges::all_of(value, [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) != 0 ||
+               std::string_view{" _-.,;()/+='?!"}.find(c) != std::string_view::npos;
+    });
+}
+
+/// `value` double-quoted, every character YAML would not keep escaped.
+std::string quoted_text(std::string_view value) {
+    std::string out = "\"";
+    for (const char c : value) {
+        switch (c) {
+            case '"':
+                out += "\\\"";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+                    out += "\\x";
+                    out += kHexDigits[(static_cast<unsigned char>(c) >> 4U) & 0x0FU];
+                    out += kHexDigits[static_cast<unsigned char>(c) & 0x0FU];
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out + "\"";
+}
+
+/// Whether a literal block can carry `value` exactly: printable lines (a tab
+/// is), no carriage return, and at most one newline at the end -- a block
+/// keeping trailing blank lines would swallow whatever an editor puts after
+/// it.
+bool block_safe(std::string_view value) {
+    if (value.find('\n') == std::string_view::npos ||
+        value.find_first_not_of(" \t\n") == std::string_view::npos) {
+        return false;  // one line, or nothing to show: a scalar says it
+    }
+    if (value.size() >= 2 && value.substr(value.size() - 2) == "\n\n") {
+        return false;
+    }
+    // A line of nothing but blanks reads as an empty one to a line scan.
+    std::string_view rest = value;
+    while (!rest.empty()) {
+        const std::size_t newline = rest.find('\n');
+        const std::string_view line = rest.substr(0, newline);
+        if (!line.empty() && line.find_first_not_of(" \t") == std::string_view::npos) {
+            return false;
+        }
+        if (newline == std::string_view::npos) {
+            break;
+        }
+        rest.remove_prefix(newline + 1);
+    }
+    return std::ranges::none_of(value, [](char c) {
+        return c == '\r' || c == 0x7F ||
+               (static_cast<unsigned char>(c) < 0x20 && c != '\n' && c != '\t');
+    });
+}
+
+/// `key: value` at `indent`, the value as its text reads back exactly through
+/// `parse_symphony_spec`: plain when that is safe, a literal block for
+/// several lines, double-quoted with escapes otherwise.
+void text_field(Lines& out, std::size_t indent, std::string_view key, std::string_view value,
+                std::string_view terminator) {
+    const std::string pad(indent, ' ');
+    const std::string end{terminator};
+    if (!block_safe(value)) {
+        out.push_back(pad + std::string{key} + ": " +
+                      (plain_safe(value) ? std::string{value} : quoted_text(value)) + end);
+        return;
+    }
+    // Clip keeps one final newline, strip none; an explicit indentation
+    // indicator when the first line opens with a space, which detection
+    // would take for the block's own indentation.
+    const bool final_newline = value.back() == '\n';
+    std::string_view lines = final_newline ? value.substr(0, value.size() - 1) : value;
+    const std::size_t first = lines.find_first_not_of('\n');
+    const bool leading_space = first != std::string_view::npos && lines[first] == ' ';
+    out.push_back(
+        line_of({pad, key, ": |", leading_space ? "2" : "", final_newline ? "" : "-", end}));
+    const std::string content(indent + 2, ' ');
+    while (true) {
+        const std::size_t newline = lines.find('\n');
+        const std::string_view line = lines.substr(0, newline);
+        out.push_back(line.empty() ? end : line_of({content, line, end}));
+        if (newline == std::string_view::npos) {
+            break;
+        }
+        lines.remove_prefix(newline + 1);
+    }
+}
+
+/// A definition's lines at `indent`, everything but the name: `description`
+/// and `input` when they say something, then `stages`, each stage's short
+/// fields before its prompt and schema.
+void symphony_body(Lines& out, const SymphonySpec& spec, std::size_t indent,
+                   std::string_view terminator) {
+    const std::string pad(indent, ' ');
+    const std::string end{terminator};
+    if (!spec.description.empty()) {
+        text_field(out, indent, "description", spec.description, terminator);
+    }
+    if (!spec.input.description.empty() || spec.input.image) {
+        out.push_back(line_of({pad, "input:", end}));
+        if (!spec.input.description.empty()) {
+            text_field(out, indent + 2, "description", spec.input.description, terminator);
+        }
+        if (spec.input.image) {
+            out.push_back(line_of({pad, "  image: true", end}));
+        }
+    }
+    out.push_back(line_of({pad, "stages:", end}));
+    const std::string field(indent + 4, ' ');
+    for (const SymphonyStage& stage : spec.stages) {
+        out.push_back(line_of({pad, "  - name: ", stage.name, end}));
+        out.push_back(line_of({field, "role: ", stage.role, end}));
+        if (stage.image) {
+            out.push_back(line_of({field, "image: true", end}));
+        }
+        if (stage.brief_tokens.has_value()) {
+            out.push_back(
+                line_of({field, "brief_tokens: ", std::to_string(*stage.brief_tokens), end}));
+        }
+        if (stage.answer_tokens.has_value()) {
+            out.push_back(
+                line_of({field, "answer_tokens: ", std::to_string(*stage.answer_tokens), end}));
+        }
+        text_field(out, indent + 4, "prompt", stage.prompt, terminator);
+        if (!stage.schema.empty()) {
+            text_field(out, indent + 4, "schema", stage.schema, terminator);
+        }
+    }
+}
+
+/// The lines one `symphonies:` entry occupies. Unlike `entry_extent`, a
+/// line indented under the entry is the entry's whatever it starts with: a
+/// prompt's `# Heading` is block content, not a comment that might belong to
+/// the next entry. Blank lines, and comments at an entry's own indent or
+/// less, stay tentative.
+std::pair<std::size_t, std::size_t> symphony_extent(const Lines& lines, std::size_t key_index,
+                                                    std::size_t section_end) {
+    std::size_t last_content = key_index;
+    for (std::size_t i = key_index + 1; i < section_end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line)) {
+            continue;
+        }
+        if (indent_of(line) >= kFieldIndent) {
+            last_content = i;
+            continue;
+        }
+        if (is_comment(line)) {
+            continue;
+        }
+        break;
+    }
+    return {key_index, last_content + 1};
+}
+
+}  // namespace
+
+std::string render_symphony_spec(const SymphonySpec& spec) {
+    Lines out;
+    out.push_back("name: " + spec.name + "\n");
+    symphony_body(out, spec, 0, "\n");
+    return join_lines(out);
+}
+
+std::string append_symphony(std::string_view content, std::string_view name,
+                            const SymphonySpec& spec, bool force) {
+    if (!is_symphony_name(name)) {
+        throw ConfigEditError("symphony name '" + std::string{name} +
+                              "' is not one (letters, digits, '_' and '-')");
+    }
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    Lines entry;
+    entry.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" + terminator);
+    symphony_body(entry, spec, kFieldIndent, terminator);
+
+    const SectionRange range = find_section(lines, "symphonies");
+    if (!range.found) {
+        // No section yet: the generic path creates it at the file's end.
+        return append_entry(content, "symphonies", "symphony", name, std::move(entry), force);
+    }
+    if (const std::optional<std::string> clash =
+            fold_collision(section_entry_names(content, "symphonies"), name);
+        clash.has_value() && !force) {
+        throw ConfigEditError("symphony '" + std::string{name} + "' collides with existing '" +
+                              *clash +
+                              "' -- symphony names are compared case-insensitively, so the two "
+                              "would be the same symphony; choose a distinct name");
+    }
+    if (const std::optional<std::size_t> existing = find_entry_line(lines, range, name);
+        existing.has_value()) {
+        if (!force) {
+            throw ConfigEditError("symphony '" + std::string{name} +
+                                  "' already exists; pass --force to replace it");
+        }
+        // Replaced in place, its own extent: the entry keeps its position and
+        // the comment above it.
+        const auto [begin, end] = symphony_extent(lines, *existing, range.end);
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
+                    lines.begin() + static_cast<std::ptrdiff_t>(end));
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(begin), entry.begin(),
+                     entry.end());
+        return join_lines(lines);
+    }
+    // After the last entry's own extent -- a prompt whose last line opens
+    // with '#' is that entry's, not a trailing comment to insert above -- and
+    // above any comment block that closes the section.
+    std::size_t insert_at = range.begin;
+    for (std::size_t i = range.begin; i < range.end; ++i) {
+        if (entry_name(body(lines[i])).has_value()) {
+            insert_at = symphony_extent(lines, i, range.end).second;
+        }
+    }
+    if (insert_at > 0 && insert_at == lines.size()) {
+        std::string& previous = lines.back();
+        if (!previous.empty() && previous.back() != '\n') {
+            previous += terminator;
+        }
+    }
+    if (insert_at > range.begin) {
+        entry.insert(entry.begin(), terminator);
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insert_at), entry.begin(),
+                 entry.end());
+    return join_lines(lines);
+}
+
+std::string delete_symphony(std::string_view content, std::string_view name) {
+    Lines lines = split_lines(content);
+    const SectionRange range = find_section(lines, "symphonies");
+    if (!range.found) {
+        throw ConfigEditError("no 'symphonies:' section in this config");
+    }
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
+    if (!key_line.has_value()) {
+        throw ConfigEditError("symphony '" + std::string{name} + "' not found in config");
+    }
+    auto [begin, end] = symphony_extent(lines, *key_line, range.end);
+    // The blank separator above it goes too: the exact inverse of the append.
+    if (begin > range.begin && is_blank(body(lines[begin - 1]))) {
+        --begin;
+    }
+    lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
+                lines.begin() + static_cast<std::ptrdiff_t>(end));
+    return join_lines(lines);
 }
 
 std::string set_suite_member(std::string_view content, std::string_view suite,

@@ -96,8 +96,14 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
         }
     }
     CHECK(public_rows == 8);
-    CHECK(admin_rows == 80);
+    CHECK(admin_rows == 85);
     CHECK(has("POST", "/v1/admin/backends/default-vision"));
+    // The symphonies slice (27q): three twins and two reads, no play.
+    CHECK(has("GET", "/v1/admin/symphonies"));
+    CHECK(has("POST", "/v1/admin/symphonies"));
+    CHECK(has("GET", "/v1/admin/symphonies/{id}"));
+    CHECK(has("PUT", "/v1/admin/symphonies/{id}"));
+    CHECK(has("DELETE", "/v1/admin/symphonies/{id}"));
     // The tasks slice (27j): two reads, no control.
     CHECK(has("GET", "/v1/admin/tasks"));
     CHECK(has("GET", "/v1/admin/tasks/{id}"));

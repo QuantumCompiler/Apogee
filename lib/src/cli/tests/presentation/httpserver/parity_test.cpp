@@ -97,6 +97,9 @@ const std::map<std::string, Classification>& table() {
         {"agents create", twin("POST", "/v1/admin/agents")},
         {"agents edit", twin("PUT", "/v1/admin/agents/{id}")},
         {"agents delete", twin("DELETE", "/v1/admin/agents/{id}")},
+        {"symphonies create", twin("POST", "/v1/admin/symphonies")},
+        {"symphonies edit", twin("PUT", "/v1/admin/symphonies/{id}")},
+        {"symphonies delete", twin("DELETE", "/v1/admin/symphonies/{id}")},
         {"knowledge capture", twin("POST", "/v1/admin/knowledge/capture")},
         {"knowledge link", twin("PATCH", "/v1/admin/knowledge/{id}")},
         {"knowledge status", twin("PATCH", "/v1/admin/knowledge/{id}")},
@@ -174,9 +177,15 @@ const std::map<std::string, Classification>& table() {
         {"task halt", carve_out("steers the task running on the host; task control is CLI-only")},
         {"task cancel",
          carve_out("ends the turn of the task running on the host; task control is CLI-only")},
+        {"symphonies play",
+         carve_out("runs the host's own models, stage by stage, on a user's act; playing is "
+                   "CLI-only, the training precedent -- the definitions are served under "
+                   "/v1/admin/symphonies*")},
         // --- reads served: the same view, over the admin plane ------------------
         {"task status", served("/v1/admin/tasks/{id}")},
         {"task list", served("/v1/admin/tasks")},
+        {"symphonies list", served("/v1/admin/symphonies")},
+        {"symphonies show", served("/v1/admin/symphonies/{id}")},
         {"graph path", served("/v1/admin/graph/{id}/path")},
         {"graph explain", served("/v1/admin/graph/{id}/explain")},
         {"graph neighbors", served("/v1/admin/graph/{id}/neighbors")},

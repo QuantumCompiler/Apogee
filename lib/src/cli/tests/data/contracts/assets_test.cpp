@@ -61,11 +61,15 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     const apogee::testing::TempDir root{"assets-seed-" + std::to_string(std::random_device{}())};
     const apogee::harness::AssetSeedResult first = seed_bundled_assets(root.path());
     REQUIRE(first.ok());
-    // Six agent files, four kits, three training drivers, the two mlx
-    // drivers, the vendored converter.
+    // Six agent files, four kits, three symphony starters (27q), three
+    // training drivers, the two mlx drivers, the vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
     CHECK(first.created.size() ==
-          6 + 4 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          6 + 4 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+    for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
+        CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
+              starter.text);
+    }
     const std::filesystem::path prompt = root.path() / "prompts" / "security-review.txt";
     REQUIRE(std::filesystem::exists(prompt));
     CHECK(read(prompt) == find_bundled_agent("security-review")->prompt);
@@ -190,7 +194,7 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          6 + 4 + 3 + 2 + apogee::harness::bundled_converter_files().size());
+          6 + 4 + 3 + 3 + 2 + apogee::harness::bundled_converter_files().size());
 }
 
 TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",

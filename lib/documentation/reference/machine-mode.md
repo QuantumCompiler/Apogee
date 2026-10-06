@@ -345,6 +345,27 @@ entities `shared` by several), `decisions` and `orphans` (each a `total` and the
 `shown` ten), and `human_summary` — one paragraph of the same facts. `--out <file>`
 writes the document there instead.
 
+Since 27q the symphonies — named, staged prompt processes over a suite's
+members — read the same way, and a play prints one document too:
+
+```bash
+apogee symphonies list --output-format json                  # {"object":"list","data":[…],"problems":[…]}
+apogee symphonies show <name> --output-format json           # {"object":"symphony",…}
+apogee symphonies play <name> --input "…" --output-format json   # {"object":"symphony.play",…}
+```
+
+`list` and `show` are byte for byte what `GET /v1/admin/symphonies[/{id}]`
+serves; their shape is in
+[http-api.md](http-api.md#get-v1adminsymphonies). A play's document is
+`symphony` (its name), `suite` (the active suite's, `null` for none), `output`
+(the last stage's answer) and `stages` — each `name`, `role`, `backend` (the one
+that answered), `answer`, `cut` (it reached its cap), `tokens` when the provider
+said, and `seconds`. A play is not a turn and emits no events: a host drives it
+as a command, the input as `--input` or on stdin. A play that stops — a stage
+refused or failed, an answer outside its stage's schema — prints nothing on
+stdout and exits `1` (refused before anything was sent) or `2` (a member's
+failure), the stage named on stderr.
+
 ## What machine mode does not do
 
 - **It opens no sockets.** Not one, ever — asserted in CI with `lsof`. Only

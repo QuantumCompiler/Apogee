@@ -66,6 +66,9 @@ inline constexpr const char* kRunValue = "RUN";
 inline constexpr const char* kPipelineRunValue = "PIPELINE_RUN";
 /// A task's id (27h).
 inline constexpr const char* kTaskValue = "TASK";
+/// A symphony (27q): a config entry, a shipped starter, a spec file under
+/// `symphonies/` -- or a spec file's path.
+inline constexpr const char* kSymphonyValue = "SYMPHONY";
 /// A `training.pipelines` entry, or a spec path.
 inline constexpr const char* kPipelineValue = "PIPELINE";
 /// A `training.regimes` entry, or a spec path.
@@ -107,7 +110,7 @@ inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 31> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 32> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -137,7 +140,8 @@ inline constexpr std::array<std::string_view, 31> kNameValues{kCollectionValue,
                                                               kGitRemoteValue,
                                                               kConfigKeyValue,
                                                               kToolValue,
-                                                              kAllowedHostValue};
+                                                              kAllowedHostValue,
+                                                              kSymphonyValue};
 
 /// The type name for free text with a known set of usual words: the parser
 /// still takes any word -- the command validates it, with its own message,

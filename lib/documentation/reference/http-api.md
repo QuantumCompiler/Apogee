@@ -426,6 +426,56 @@ its prompt and schema files are removed too. `200 {deleted, files_removed}`;
 `404` when there is no entry -- including for a bundled agent that was never
 overridden, which has no entry to delete.
 
+### `GET /v1/admin/symphonies`
+
+Every symphony (27q) -- a named, staged prompt process whose stages name
+suite roles, never backends -- as `{"object": "list", "data": [...],
+"problems": [...]}`: the shipped starters first (a config entry of the same
+name in its place), then the config's `symphonies:` entries, then the spec
+files under the data directory's `symphonies/`, each name once. Each item is
+`{object: "symphony", name, description, source, path?, overrides, input:
+{description, image}, stages: [{name, role, prompt, schema?, image,
+brief_tokens?, answer_tokens?}], problems}` -- `source` one of `shipped`,
+`config`, `file`; `path` only for one read from a file; a stage's `schema` its
+JSON Schema as the text it was written in; `problems` empty for a definition
+that can be played. The list's `problems` names spec files that could not be
+read. Byte for byte what `apogee symphonies list --output-format json` prints.
+
+### `POST /v1/admin/symphonies`
+
+The twin of `apogee symphonies create`. Body: the definition in the view's own
+shape -- `name` (required), `description`, `input: {description, image}`,
+`stages` (required: each `name`, `role`, `prompt`, and optionally `schema`,
+`image`, `brief_tokens`, `answer_tokens`) -- and `force`. Read back through the
+same parser and validation as the CLI's and written through its scaffold, so
+the config entry is byte-identical to the CLI's. A stage naming a backend (a
+`backend` or `model` key, or a `role` that is a configured backend) is `400`
+with the reason, as is any other refusal -- an unknown role, a template naming
+no earlier stage, a schema that is not one; `409` (`type: conflict`) when the
+name exists without `force`. `201` with the definition's view (`200` when it
+replaced one). No restart is needed: a play reads the config each run.
+
+### `GET /v1/admin/symphonies/{id}`
+
+One definition's view, byte for byte what `apogee symphonies show <name>
+--output-format json` prints. `{id}` is a name; the plane never reads a path a
+client gives. `404` when unknown.
+
+### `PUT /v1/admin/symphonies/{id}`
+
+The twin of `apogee symphonies edit`: the same body as `POST`, with the name
+from the path and `force` implied -- what `edit` writes back. A starter or a
+spec file edited this way gains a config entry of its name that stands in for
+it. `200` with the view; `400` on a refusal or a malformed body.
+
+### `DELETE /v1/admin/symphonies/{id}`
+
+The twin of `apogee symphonies delete`: the entry is removed, the exact
+inverse of its writing. `200 {deleted}`; `404` when there is no entry --
+including for a shipped starter, which has none. There is deliberately no
+play route: playing runs the host's models on a user's act, and stays on the
+command line as training control does.
+
 ### `POST /v1/admin/knowledge/capture`
 
 The twin of `apogee knowledge capture`: the normalization clerk over a raw

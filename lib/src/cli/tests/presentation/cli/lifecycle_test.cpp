@@ -988,7 +988,12 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "models pull --base-name",
                                          "serve --bind",
                                          "task run goal",
-                                         "task run --require"};
+                                         "task run --require",
+                                         "symphonies create name",
+                                         "symphonies create --description",
+                                         "symphonies create --input-description",
+                                         "symphonies create --stage",
+                                         "symphonies play --input"};
 
 }  // namespace
 

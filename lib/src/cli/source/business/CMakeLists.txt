@@ -1,5 +1,5 @@
 # The Business layer (ADR 0001): what Apogee does -- the harness, the loop,
-# tools, knowledge, the graph, models, training, tasks.
+# tools, knowledge, the graph, models, training, tasks, symphonies.
 #
 # One static library per module -- apogee_business_<module> -- linked to
 # exactly the modules cmake/modules.cmake declares for it (apogee_add_module,
@@ -267,11 +267,26 @@ apogee_add_module(tasks
 )
 target_link_libraries(apogee_business_tasks PUBLIC nlohmann_json::nlohmann_json)
 
+# Symphonies (27q): a definition's sources and its validation, the stage
+# walk over the one member call, and the view every surface renders -- a
+# stage's call arrives through agentloop's core, never a backend or a surface.
+apogee_add_module(symphony
+    symphony/definition.h
+    symphony/definition.cpp
+    symphony/runner.h
+    symphony/runner.cpp
+    symphony/view.h
+    symphony/view.cpp
+)
+target_link_libraries(apogee_business_symphony PUBLIC nlohmann_json::nlohmann_json)
+
 apogee_add_module(scaffold
     scaffold/mcp_server.h
     scaffold/mcp_server.cpp
     scaffold/agent.h
     scaffold/agent.cpp
+    scaffold/symphony.h
+    scaffold/symphony.cpp
 )
 
 apogee_add_layer()

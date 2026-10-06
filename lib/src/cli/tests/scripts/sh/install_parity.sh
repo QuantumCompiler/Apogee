@@ -82,6 +82,27 @@ if ! diff <(modes "$WORK/a" | sed "s|$WORK/a||") <(modes "$WORK/b" | sed "s|$WOR
     exit 1
 fi
 
+# --- The shipped symphonies, identical on every path (27q) ----------------------
+# A starter is a seeded file, not a directory, so the listings above cannot see
+# it: each must be on both paths, byte for byte the repository's asset, and no
+# path may seed one that does not ship.
+SYMPHONY_ASSETS="$(cd "$(dirname "$0")/../../../assets/symphonies" && pwd)"
+same_starters() {  # same_starters <root> <what seeded it>
+    if ! diff <(ls "$SYMPHONY_ASSETS") <(ls "$1/symphonies"); then
+        echo "INSTALL PARITY VIOLATED: $2 seeds a different set of symphony starters" >&2
+        exit 1
+    fi
+    for starter in "$SYMPHONY_ASSETS"/*.yaml; do
+        if ! cmp -s "$starter" "$1/symphonies/$(basename "$starter")"; then
+            echo "INSTALL PARITY VIOLATED: $2 seeds symphonies/$(basename "$starter")" \
+                 "unlike the shipped asset" >&2
+            exit 1
+        fi
+    done
+}
+same_starters "$WORK/a" "path A"
+same_starters "$WORK/b" "path B"
+
 # --- The layout is non-empty -------------------------------------------------
 # A gate that passes because both sides created nothing is worse than no gate.
 # This is the same "cannot pass vacuously" rule the layering check follows.
@@ -129,6 +150,7 @@ same_tree() {
         echo "INSTALL PARITY VIOLATED: $2 seeds different modes" >&2
         exit 1
     fi
+    same_starters "$1" "$2"
 }
 
 if [ -n "$CHANNEL_BIN" ]; then

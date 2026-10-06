@@ -1,0 +1,32 @@
+# A shipped symphony (27q): one stage on the suite's extraction member, its
+# answer held to a JSON Schema -- on a local member by a grammar (26f), so it
+# is valid JSON by construction, never coaxed out of the prompt.
+#
+#   apogee symphonies play extract-facts --input "$(cat article.txt)"
+#   apogee symphonies create my-extract --from extract-facts
+name: extract-facts
+description: Pull the key facts out of a text as one JSON document, held to its schema.
+input:
+  description: The text to read.
+stages:
+  - name: extract
+    role: extraction
+    answer_tokens: 800
+    prompt: |
+      Read the text below and record its key facts: what it is about, the people and the places it names, the dates it gives, and each fact it states, one per entry. Leave a list empty when the text names none.
+
+      Text:
+      {{input}}
+    schema: |
+      {
+        "type": "object",
+        "properties": {
+          "topic": {"type": "string"},
+          "people": {"type": "array", "items": {"type": "string"}},
+          "places": {"type": "array", "items": {"type": "string"}},
+          "dates": {"type": "array", "items": {"type": "string"}},
+          "facts": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["topic", "people", "places", "dates", "facts"],
+        "additionalProperties": false
+      }

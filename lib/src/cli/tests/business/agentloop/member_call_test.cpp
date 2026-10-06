@@ -16,6 +16,7 @@
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "harness/harness.h"
+#include "support/media_fakes.h"
 
 /// The bounded, brief-only member call (27f): the one model-calling path the
 /// consult tool, validation (27g) and symphony stages (27q) share -- its wire
@@ -118,6 +119,75 @@ TEST_CASE("a member's request is exactly the brief", "[agentloop][member_call]")
     CHECK(request.transient.side_request);
     CHECK(request.transient.length == 0);
     CHECK(request.transient.response_schema.empty());
+}
+
+TEST_CASE("a symphony stage's schema rides beside the brief, and its image ahead of it",
+          "[agentloop][member_call]") {
+    // 27q: the schema is asked of the provider (a local member's grammar,
+    // 26f) and never written into the brief; a picture opens the message,
+    // the brief's words after it, as vision models were trained.
+    const std::string schema = R"({"type": "object", "properties": {"x": {"type": "string"}}})";
+    const apogee::harness::ContentPart image =
+        apogee::harness::ContentPart::from_image_url("data:image/png;base64,AAAA");
+    const ChatRequest request =
+        apogee::agentloop::member_request("eye", "What is in it?", 300, schema, {image});
+    REQUIRE(request.messages.size() == 1);
+    const std::vector<apogee::harness::ContentPart>& parts =
+        request.messages.front().content.parts();
+    REQUIRE(parts.size() == 2);
+    CHECK(parts[0].kind == apogee::harness::ContentPart::Kind::ImageUrl);
+    CHECK(parts[0].image_url == "data:image/png;base64,AAAA");
+    CHECK(parts[1].text == "What is in it?");
+    CHECK(request.messages.front().content.plain_text() == "What is in it?");
+    CHECK(request.transient.response_schema == schema);
+    CHECK(request.max_tokens == 300);
+    CHECK(request.thinking.off());
+    CHECK(request.transient.side_request);
+    CHECK(request.tools.empty());
+}
+
+TEST_CASE("a member call with an image refuses a member that cannot read one, unsent",
+          "[agentloop][member_call]") {
+    apogee::harness::Harness harness{apogee::harness::parse_config(R"YAML(models:
+  default: blind
+  default_vision: blind
+backends:
+  blind:
+    type: mock
+  eye:
+    type: mock
+)YAML",
+                                                                   "<test>")};
+    auto blind = std::make_shared<apogee::testing::MediaProvider>();
+    auto eye = std::make_shared<apogee::testing::MediaProvider>();
+    eye->sees = true;
+    harness.register_provider("blind", blind);
+    harness.register_provider("eye", eye);
+    harness.use_default_router();
+    MemberCall call = asking(ModelRole::Vision, "Describe it.");
+    call.images = {apogee::harness::ContentPart::from_image_url("data:image/png;base64,AAAA")};
+    call.local_only = false;
+    const MemberAnswer refused = call_member(harness, call, {}, {});
+    CHECK(refused.refused ==
+          "'blind' (vision) cannot read an image -- name a member that can for the vision role");
+    CHECK(blind->requests().empty());
+
+    // The member that can see is sent the picture and the words.
+    apogee::harness::Harness seeing{apogee::harness::parse_config(R"YAML(models:
+  default: eye
+  default_vision: eye
+backends:
+  eye:
+    type: mock
+)YAML",
+                                                                  "<test>")};
+    seeing.register_provider("eye", eye);
+    seeing.use_default_router();
+    const MemberAnswer answer = call_member(seeing, call, {}, {});
+    REQUIRE(answer.ok());
+    const std::vector<ChatRequest> seen = eye->requests();
+    REQUIRE(seen.size() == 1);
+    CHECK(seen.front().messages.front().content.parts().size() == 2);
 }
 
 TEST_CASE("a member call reaches the member through the one resolver, brief only",

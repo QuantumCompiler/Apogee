@@ -61,6 +61,14 @@ struct MemberCall {
     /// Refuse a member whose generation is billed per call: a call on the
     /// model's initiative never spends (the spend principle).
     bool local_only = true;
+    /// A JSON Schema the answer is held to (27q: a symphony stage's), as its
+    /// author wrote it: asked of the provider -- a local member's grammar
+    /// (26f) -- and riding nowhere in the brief. Empty for a plain answer.
+    std::string schema;
+    /// Pictures the member reads with the brief, before it as vision models
+    /// were trained (27q: a stage given the input's image). A member that
+    /// cannot read an image is refused before anything is sent.
+    std::vector<harness::ContentPart> images;
 };
 
 /// What came back.
@@ -89,11 +97,13 @@ struct MemberAnswer {
 /// The request a member call sends `backend`: exactly `brief` as the one
 /// user message, at most `answer_tokens` back, no tools, no reasoning, and
 /// marked a side request so a local backend runs it on its own context and
-/// the conversation's cache is untouched. Exposed so the isolation is
+/// the conversation's cache is untouched. `schema`, when set, is asked of
+/// the provider beside it (never written into the brief), and `images` open
+/// the message ahead of the brief's text. Exposed so the isolation is
 /// testable on its own.
-[[nodiscard]] harness::ChatRequest member_request(const std::string& backend,
-                                                  std::string_view brief,
-                                                  std::int64_t answer_tokens);
+[[nodiscard]] harness::ChatRequest member_request(
+    const std::string& backend, std::string_view brief, std::int64_t answer_tokens,
+    std::string_view schema = {}, const std::vector<harness::ContentPart>& images = {});
 
 /// The narration's detail for a call: `asking utility (l3b): <the brief's
 /// first words>`.

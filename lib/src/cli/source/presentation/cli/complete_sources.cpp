@@ -21,6 +21,7 @@
 #include "modelstore/store.h"
 #include "operations/knowledge_core.h"
 #include "platform/child_process.h"
+#include "symphony/definition.h"
 #include "tasks/ledger.h"
 #include "tasks/task.h"
 #include "tools/toolsets.h"
@@ -266,6 +267,12 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(task.id);
         }
         list.none = "no tasks yet -- 'apogee task run'";
+    } else if (kind == kSymphonyValue) {
+        for (const symphony::Definition& definition :
+             symphony::catalog(config, harness::symphonies_dir()).definitions) {
+            list.names.push_back(definition.spec.name);
+        }
+        list.paths = true;
     } else if (kind == kPipelineValue) {
         for (const auto& [name, spec] : config.training.pipelines) {
             list.names.push_back(name);

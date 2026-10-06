@@ -79,10 +79,21 @@ std::optional<harness::ModelRole> role_named(std::string_view name) {
 }
 
 harness::ChatRequest member_request(const std::string& backend, std::string_view brief,
-                                    std::int64_t answer_tokens) {
+                                    std::int64_t answer_tokens, std::string_view schema,
+                                    const std::vector<harness::ContentPart>& images) {
     harness::ChatRequest request;
     request.model = backend;
-    request.messages.push_back(harness::ChatMessage::user(std::string{brief}));
+    if (images.empty()) {
+        request.messages.push_back(harness::ChatMessage::user(std::string{brief}));
+    } else {
+        // The picture before the words about it, as vision models were
+        // trained (26e's describe request keeps the same order).
+        std::vector<harness::ContentPart> parts = images;
+        parts.push_back(harness::ContentPart::from_text(std::string{brief}));
+        request.messages.push_back(
+            harness::ChatMessage::user(harness::MessageContent::from_parts(std::move(parts))));
+    }
+    request.transient.response_schema = std::string{schema};
     request.max_tokens = answer_tokens;
     // An answer capped this short has no room for a reasoning trace ahead
     // of it, and a member is briefed to answer, not to think aloud.
@@ -147,6 +158,12 @@ MemberAnswer call_member(const harness::Harness& harness, const MemberCall& call
                       " -- shorten it to what the member needs and ask again";
         return out;
     }
+    if (!call.images.empty() && !harness.can_read(out.backend, harness::Medium::Image)) {
+        out.refused = "'" + out.backend + "' (" + std::string{role} +
+                      ") cannot read an image -- name a member that can for the " +
+                      std::string{role} + " role";
+        return out;
+    }
     if (const std::int64_t window = harness.context_window_for_model(out.backend);
         window > 0 && brief + call.answer_tokens > window) {
         out.refused = "'" + out.backend + "' runs at a " + std::to_string(window) +
@@ -162,8 +179,9 @@ MemberAnswer call_member(const harness::Harness& harness, const MemberCall& call
     SideCallScope said{narrate, call.label, member_call_detail(role, out.backend, call.brief)};
     harness::ChatResponse response;
     try {
-        response =
-            harness.chat(member_request(out.backend, call.brief, call.answer_tokens), cancellation);
+        response = harness.chat(
+            member_request(out.backend, call.brief, call.answer_tokens, call.schema, call.images),
+            cancellation);
     } catch (const harness::CancelledError&) {
         throw;
     } catch (const std::exception& e) {

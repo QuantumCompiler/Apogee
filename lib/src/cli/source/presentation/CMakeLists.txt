@@ -100,6 +100,8 @@ apogee_add_module(httpserver
     httpserver/admin_config.cpp
     httpserver/admin_agents.h
     httpserver/admin_agents.cpp
+    httpserver/admin_symphonies.h
+    httpserver/admin_symphonies.cpp
     httpserver/admin_knowledge.h
     httpserver/admin_knowledge.cpp
     httpserver/admin_graph.h
@@ -183,6 +185,8 @@ apogee_add_module(cli
     cli/analyze.cpp
     cli/agents_cmd.h
     cli/agents_cmd.cpp
+    cli/symphonies_cmd.h
+    cli/symphonies_cmd.cpp
     cli/graph.h
     cli/graph.cpp
     cli/graph_navigate.h

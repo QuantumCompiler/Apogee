@@ -25,7 +25,7 @@ constexpr std::string_view kAdminPrefix = "/v1/admin";
 /// `documentation/reference/http-api.md`, and each documented route to be
 /// here -- so the reference a client author trusts cannot drift from the
 /// routes that exist. Admin rows are only reachable through the gate.
-constexpr std::array<Route, 88> kRoutes{{
+constexpr std::array<Route, 93> kRoutes{{
     {"POST", "/v1/chat/completions", false,
      +[](Handler& h, AdminHandler*, const HttpRequest& r, const std::string&) {
          return h.chat_completions(r);
@@ -142,6 +142,28 @@ constexpr std::array<Route, 88> kRoutes{{
     {"DELETE", "/v1/admin/agents/{id}", true,
      +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
          return a->delete_agent(r, id);
+     }},
+    // The symphonies slice (27q): the twins of create, edit and delete, and
+    // the reads list and show serve; play stays on the command line.
+    {"GET", "/v1/admin/symphonies", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->list_symphonies(r);
+     }},
+    {"POST", "/v1/admin/symphonies", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string&) {
+         return a->create_symphony(r);
+     }},
+    {"GET", "/v1/admin/symphonies/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->get_symphony(r, id);
+     }},
+    {"PUT", "/v1/admin/symphonies/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->put_symphony(r, id);
+     }},
+    {"DELETE", "/v1/admin/symphonies/{id}", true,
+     +[](Handler&, AdminHandler* a, const HttpRequest& r, const std::string& id) {
+         return a->delete_symphony(r, id);
      }},
     {"POST", "/v1/admin/knowledge", true,
      +[](Handler& h, AdminHandler* a, const HttpRequest& r, const std::string&) {

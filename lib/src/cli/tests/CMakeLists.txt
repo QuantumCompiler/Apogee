@@ -44,6 +44,7 @@ target_link_libraries(apogee_tests_infrastructure PRIVATE apogee_infrastructure 
 add_library(apogee_tests_data OBJECT
     data/contracts/config_test.cpp
     data/contracts/config_edit_test.cpp
+    data/contracts/symphony_spec_test.cpp
     data/contracts/host_test.cpp
     data/contracts/paths_test.cpp
     data/contracts/types_test.cpp
@@ -166,6 +167,7 @@ add_library(apogee_tests_business OBJECT
     business/mcp/serve_stdio_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
+    business/scaffold/symphony_test.cpp
     business/agentloop/structured_test.cpp
     business/agentloop/review_context_test.cpp
     business/knowledge/record_test.cpp
@@ -211,6 +213,9 @@ add_library(apogee_tests_business OBJECT
     business/tasks/unattended_test.cpp
     business/tasks/runner_test.cpp
     business/tasks/view_test.cpp
+    business/symphony/definition_test.cpp
+    business/symphony/runner_test.cpp
+    business/symphony/view_test.cpp
     support/fake_mcp_server.cpp
     support/fake_mcp_server.h
 )
@@ -269,6 +274,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/analyze_test.cpp
     presentation/cli/agents_test.cpp
     presentation/httpserver/admin_agents_test.cpp
+    presentation/httpserver/admin_symphonies_test.cpp
     presentation/cli/knowledge_test.cpp
     presentation/httpserver/admin_knowledge_test.cpp
     presentation/cli/graph_test.cpp
@@ -282,6 +288,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/datasets_test.cpp
     presentation/cli/train_test.cpp
     presentation/cli/task_test.cpp
+    presentation/cli/symphonies_test.cpp
     presentation/httpserver/admin_datasets_test.cpp
     presentation/httpserver/admin_training_test.cpp
     presentation/httpserver/admin_tasks_test.cpp
@@ -612,6 +619,21 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/task-e2e
     )
     set_tests_properties(cli.task_lifecycle PROPERTIES TIMEOUT 180)
+
+    # Symphonies (27q) on the real binary, scripted members echoing their
+    # briefs: the starters seeded byte for byte; play's stages in order with
+    # each request exactly its rendered template, each stage said, the JSON
+    # document, --suite and stdin, a schema stage held and a miss stopping the
+    # walk named; create refusing a backend at parse with the file untouched,
+    # edit through $EDITOR, delete the inverse; a hand-written backend refused
+    # at load; completion for the verbs and the names.
+    add_test(NAME cli.symphonies_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/symphonies_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/symphonies-e2e
+            ${CMAKE_CURRENT_SOURCE_DIR}/../assets/symphonies
+    )
+    set_tests_properties(cli.symphonies_lifecycle PROPERTIES TIMEOUT 120)
 
     add_test(NAME cli.complete_opens_no_listening_socket
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/no_listen_check.sh"

@@ -53,6 +53,26 @@ HttpResponse AdminHandler::delete_agent(const HttpRequest& request, std::string_
     return admin_delete_agent(config_context(), name, request);
 }
 
+HttpResponse AdminHandler::list_symphonies(const HttpRequest&) {
+    return admin_list_symphonies(config_context());
+}
+
+HttpResponse AdminHandler::create_symphony(const HttpRequest& request) {
+    return admin_create_symphony(config_context(), request);
+}
+
+HttpResponse AdminHandler::get_symphony(const HttpRequest&, std::string_view name) {
+    return admin_get_symphony(config_context(), name);
+}
+
+HttpResponse AdminHandler::put_symphony(const HttpRequest& request, std::string_view name) {
+    return admin_put_symphony(config_context(), name, request);
+}
+
+HttpResponse AdminHandler::delete_symphony(const HttpRequest&, std::string_view name) {
+    return admin_delete_symphony(config_context(), name);
+}
+
 HttpResponse AdminHandler::list_mcp_servers(const HttpRequest&) {
     return admin_list_mcp_servers(config_context());
 }

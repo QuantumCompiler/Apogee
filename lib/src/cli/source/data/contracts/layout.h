@@ -143,6 +143,10 @@ struct LayoutEntry {
 /// `task.lock`, the PID lock one running task holds. Private: a ledger
 /// names the goal and the plan.
 [[nodiscard]] std::filesystem::path tasks_dir();
+/// `<APOGEE_HOME>/symphonies` -- symphony spec files (27q): the shipped
+/// starters, seeded skip-if-present, and any the user drops beside them, each
+/// played by its file's name.
+[[nodiscard]] std::filesystem::path symphonies_dir();
 [[nodiscard]] std::filesystem::path cache_dir();
 /// `cache/prompt` -- a local model's attention cache kept between processes
 /// (26j): `models/<model>/` holds each model's prefix files (the state after

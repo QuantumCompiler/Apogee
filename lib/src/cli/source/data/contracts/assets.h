@@ -208,13 +208,36 @@ struct ConverterTreeState {
     const std::filesystem::path& dir,
     std::span<const std::string_view> retired = bundled_converter_retired());
 
+/// A shipped symphony starter (27q): a spec file compiled in, byte-identical
+/// to `assets/symphonies/<name>.yaml` by test, and seeded skip-if-present
+/// under `symphonies/` -- so, as a kit's, the seeded copy is the user's once
+/// it exists and is what plays by the starter's name, the compiled-in text
+/// standing in only while the file is absent. Three ship, each showing a
+/// distinct stage feature: `summarize-verify` (output threading),
+/// `extract-facts` (a grammar-held stage), `describe-answer` (a vision stage
+/// given the input's image).
+struct BundledSymphony {
+    std::string_view name;
+    std::string_view text;
+};
+
+/// The starters, by name.
+[[nodiscard]] std::span<const BundledSymphony> bundled_symphonies() noexcept;
+
+/// The starter `name` (exactly), or nullptr.
+[[nodiscard]] const BundledSymphony* find_bundled_symphony(std::string_view name) noexcept;
+
+/// `symphonies/<name>.yaml`, relative to the data directory.
+[[nodiscard]] std::string bundled_symphony_relative_path(std::string_view name);
+
 /// `training/kits/<name>.yaml` and `training/scripts/<name>`, relative to the
 /// data directory -- the paths seeding writes and the commands read.
 [[nodiscard]] std::string bundled_kit_relative_path(std::string_view name);
 [[nodiscard]] std::string bundled_script_relative_path(std::string_view name);
 
 /// Every file seeding materialises: the agents' prompts and schemas, the
-/// kits, the drivers (the trainers' and the mlx backend's), the converter. ONE list, so the seeder,
+/// kits, the symphony starters, the drivers (the trainers' and the mlx
+/// backend's), the converter. ONE list, so the seeder,
 /// the unmodified check and the doctor's drift row cannot disagree about what Apogee ships.
 struct BundledFile {
     std::string relative_path;

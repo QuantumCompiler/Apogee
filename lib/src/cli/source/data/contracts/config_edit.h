@@ -187,6 +187,27 @@ public:
 /// Removes the entry and its fields; the exact inverse of the append.
 [[nodiscard]] std::string delete_agent(std::string_view content, std::string_view name);
 
+/// Appends a `symphonies:` entry -- a staged prompt process (27q) -- creating
+/// the section when absent: `description` and `input` when they say
+/// something, then `stages`, each `name` and `role`, its flags and caps when
+/// set, then its `prompt` and `schema` -- several lines as a literal block,
+/// anything a block cannot carry exactly double-quoted -- so the entry reads
+/// back through the one parser as exactly `spec`. The name must be one
+/// (`is_symphony_name`). Same collision and `force` rules as
+/// `append_backend`; a replaced entry keeps its place and the comment above
+/// it.
+[[nodiscard]] std::string append_symphony(std::string_view content, std::string_view name,
+                                          const SymphonySpec& spec, bool force);
+
+/// Removes the entry and its lines -- a prompt's included, whatever they
+/// start with; the exact inverse of the append.
+[[nodiscard]] std::string delete_symphony(std::string_view content, std::string_view name);
+
+/// `spec` as a spec file: `name:` first, then the definition exactly as an
+/// entry writes it, at the top level -- what `symphonies edit` opens, and
+/// what `parse_symphony_spec` reads back as `spec`.
+[[nodiscard]] std::string render_symphony_spec(const SymphonySpec& spec);
+
 /// Appends a `graphs:` entry -- a named multi-collection graph -- creating
 /// the section when absent: `collections` as a flow list, then
 /// `extract_backend` when set and `hops`/`max_entities` when not the

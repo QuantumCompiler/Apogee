@@ -15,6 +15,7 @@
 #include "httpserver/admin_graphs.h"
 #include "httpserver/admin_knowledge.h"
 #include "httpserver/admin_suites.h"
+#include "httpserver/admin_symphonies.h"
 #include "httpserver/admin_tasks.h"
 #include "httpserver/admin_training.h"
 #include "httpserver/http_types.h"
@@ -75,6 +76,14 @@ public:
     [[nodiscard]] HttpResponse get_agent(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse put_agent(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse delete_agent(const HttpRequest& request, std::string_view name);
+
+    /// The `symphonies:` slice (27q) -- the twins of `symphonies create`,
+    /// `edit` and `delete`, and the reads of `list` and `show`.
+    [[nodiscard]] HttpResponse list_symphonies(const HttpRequest& request);
+    [[nodiscard]] HttpResponse create_symphony(const HttpRequest& request);
+    [[nodiscard]] HttpResponse get_symphony(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse put_symphony(const HttpRequest& request, std::string_view name);
+    [[nodiscard]] HttpResponse delete_symphony(const HttpRequest& request, std::string_view name);
 
     /// The knowledge routes borrow the inference plane: its harness runs the
     /// clerk, its served set decides which backend may.

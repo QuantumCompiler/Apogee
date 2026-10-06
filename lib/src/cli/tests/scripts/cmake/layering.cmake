@@ -145,7 +145,8 @@ endif()
 
 # ---- The named rules ------------------------------------------------------------
 
-set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph training tasks)
+set(GUARDED_PACKAGES harness agentloop agent secrets tools mcp knowledge graph training tasks
+                     symphony)
 
 set(ALL_SOURCES "")
 foreach(package IN LISTS GUARDED_PACKAGES)
@@ -426,6 +427,33 @@ if(NOT VIOLATIONS STREQUAL "")
     message(FATAL_ERROR "the tasks package includes a surface:\n${pretty}\n"
                         "tasks/ may include only agentloop/, agent/, harness/, logger/, "
                         "contracts/, platform/ and itself.")
+endif()
+
+# `symphony/` is a domain core like `tasks/` (27q): a definition's sources,
+# its validation, the stage walk and its view. Its model calls are the one
+# member call's (`agentloop/member_call`), so it may include the loop, the
+# harness, the contracts, the platform seam and itself -- never a backend,
+# which would make a second calling path, and never a surface.
+file(GLOB_RECURSE symphony_sources "${PACKAGE_DIR_symphony}/*.h"
+                                   "${PACKAGE_DIR_symphony}/*.cpp")
+if(symphony_sources STREQUAL "")
+    message(FATAL_ERROR "no sources found under ${PACKAGE_DIR_symphony} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS symphony_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(symphony|agentloop|harness|contracts|platform)/")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  symphony/${name} reaches a surface: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the symphony package includes a surface:\n${pretty}\n"
+                        "symphony/ may include only agentloop/, harness/, contracts/, "
+                        "platform/ and itself.")
 endif()
 
 # The packages A1 carved, each held to the floor it was carved for.
