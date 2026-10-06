@@ -2,6 +2,7 @@
 
 #include <CLI/CLI.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <functional>
@@ -439,6 +440,9 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     // --- the task: a new one, or the one named -----------------------------
     const fs::path here = working_folder();
     std::string task_id;
+    // One reading of the clock names a new task and dates it: `list_tasks`
+    // orders a second's tasks by their ids.
+    const std::chrono::system_clock::time_point minted = std::chrono::system_clock::now();
     tasks::AutonomyPolicy policy;
     if (what.existing.has_value()) {
         task_id = what.existing->id;
@@ -464,7 +468,7 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
             }
         }
         policy = policy_from_flags(flags);
-        task_id = tasks::new_task_id(root);
+        task_id = tasks::new_task_id(root, minted);
     }
     // The agent whose policy the task runs under, read as the config has it
     // now -- on a resume too: a task never runs under a policy the config no
@@ -721,7 +725,7 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
         // The session exists from the start, naming its task: a resume that
         // later finds it gone knows it was deleted, not never made.
         logger::save(session);
-        task.created_at = tasks::now_timestamp();
+        task.created_at = tasks::timestamp(minted);
         tasks::record_transition(task, tasks::kCreatedEvent, task.created_at, 0, task.goal);
         if (const std::string failure = tasks::save_task(root, task); !failure.empty()) {
             fail_user("the task's ledger could not be written: " + failure);

@@ -395,8 +395,8 @@ TEST_CASE("validation and consults share the turn's budget; spent, a check degra
     REQUIRE(said.notices.size() == 1);
     CHECK(said.notices[0] ==
           "validate: delete_file {\"path\":\"notes/final.md\"} not checked -- the turn's "
-          "member-call budget is spent (1 of 1, consults and checks together) -- checked by "
-          "structure only; its structure passed");
+          "member-call budget is spent (1 of 1, plays, consults and checks together) -- checked "
+          "by structure only; its structure passed");
     CHECK_FALSE(world.exists("final.md"));
     CHECK(world.asked.size() == 1);
 }

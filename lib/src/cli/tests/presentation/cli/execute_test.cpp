@@ -32,6 +32,7 @@
 #include "logger/session.h"
 #include "support/cli_home.h"
 #include "support/env_guard.h"
+#include "symphony/tools.h"
 
 /// `apogee execute` (27s): chat's session core opened with a suite.
 ///
@@ -596,16 +597,26 @@ TEST_CASE("/play's argument is the symphony, then the rest of the line as typed"
 
 TEST_CASE("the banner names the suite and what execute can play; chat's is chat's",
           "[execute][banner]") {
-    CHECK(c::session_banner(c::SessionMode::Execute, "root", false, "duo", false, 4, "id-1") ==
+    CHECK(c::session_banner(c::SessionMode::Execute, "root", false, "duo", false, 4, std::nullopt,
+                            "id-1") ==
           "root  ·  suite duo  ·  4 symphonies  ·  chat id-1  ·  /help for commands");
-    CHECK(c::session_banner(c::SessionMode::Execute, "root", true, "duo", true, 1, "id-1") ==
+    CHECK(c::session_banner(c::SessionMode::Execute, "root", true, "duo", true, 1, std::nullopt,
+                            "id-1") ==
           "root  ·  base model  ·  suite duo (over budget, --force)  ·  1 symphony  ·  chat id-1  "
           "·  /help for commands");
-    CHECK(c::session_banner(c::SessionMode::Chat, "root", false, "duo", false, 4, "id-1") ==
-          "root  ·  suite duo  ·  chat id-1  ·  /help for commands");
-    CHECK(c::session_banner(c::SessionMode::Chat, "root", false, "", false, 0, "id-1") ==
-          "root  ·  chat id-1  ·  /help for commands");
+    CHECK(c::session_banner(c::SessionMode::Chat, "root", false, "duo", false, 4, std::nullopt,
+                            "id-1") == "root  ·  suite duo  ·  chat id-1  ·  /help for commands");
+    CHECK(c::session_banner(c::SessionMode::Chat, "root", false, "", false, 0, std::nullopt,
+                            "id-1") == "root  ·  chat id-1  ·  /help for commands");
     CHECK(c::symphony_count(0) == "0 symphonies");
+    // Orchestrating (27t): how many the model is offered as tools -- none
+    // said, never left out.
+    CHECK(c::session_banner(c::SessionMode::Execute, "root", false, "duo", false, 3, 2, "id-1") ==
+          "root  ·  suite duo  ·  3 symphonies  ·  orchestrating 2  ·  chat id-1  ·  /help for "
+          "commands");
+    CHECK(c::session_banner(c::SessionMode::Execute, "root", false, "duo", false, 0, 0, "id-1") ==
+          "root  ·  suite duo  ·  0 symphonies  ·  orchestrating none  ·  chat id-1  ·  /help "
+          "for commands");
 }
 
 // --- the one table and completion -------------------------------------------------------
@@ -820,6 +831,157 @@ std::optional<std::string> slurp(const std::filesystem::path& path) {
 }
 
 }  // namespace
+
+// --- the Orchestrator (27t) ---------------------------------------------------------
+
+namespace {
+
+/// A root that answers with the tools it was offered.
+constexpr std::string_view kToolNames = R"({"turns": [{"text": "TOOLS<{{tool_names}}>"}]})";
+
+/// `home`'s config, with a suite `orch` -- duo, orchestrating -- and its root's
+/// script replaced by `root`.
+void orchestral(const Home& home, std::string_view root) {
+    std::string config = config_with(home.home.home() / "scripts", "");
+    config = replaced(config, "symphonies:\n",
+                      "  orch:\n    members:\n      chat: root\n      utility: helper\n"
+                      "    consultable: [utility]\n    orchestrate: true\nsymphonies:\n");
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::trunc} << config;
+    std::ofstream{home.home.home() / "scripts" / "root.json", std::ios::binary | std::ios::trunc}
+        << root;
+}
+
+}  // namespace
+
+TEST_CASE("without orchestration a session registers no symphony tool, as 27s shipped it",
+          "[execute][orchestrate]") {
+    const Home home;
+    orchestral(home, kToolNames);
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--suite", "duo"}, &out, &err, "hi\n") == 0);
+    CHECK(out == "TOOLS<>\n");
+    REQUIRE(home.run({"execute", "--suite", "duo", "--tools"}, &out, &err, "hi\n") == 0);
+    CHECK(out.starts_with("TOOLS<"));
+    CHECK(out.find("play_") == std::string::npos);
+    CHECK(err.find("orchestrat") == std::string::npos);
+    // The suite's own switch is execute's: a chat under it is a chat.
+    REQUIRE(home.run({"chat", "--suite", "orch", "--tools"}, &out, &err, "hi\n") == 0);
+    CHECK(out.find("play_") == std::string::npos);
+    REQUIRE(home.run({"chat", "--suite", "orch"}, &out, &err, "hi\n") == 0);
+    CHECK(out == "TOOLS<>\n");
+    // `/suite` moves the offer with the suite: on under orch, off again under duo.
+    REQUIRE(home.run({"execute", "--suite", "duo"}, &out, &err,
+                     "hi\n/suite orch\nhi\n/suite duo\nhi\n") == 0);
+    CHECK(out == "TOOLS<>\nTOOLS<play_echo2,play_extract-facts,play_summarize-verify>\nTOOLS<>\n");
+    // And the flag is execute's alone.
+    CHECK(home.run({"chat", "--suite", "duo", "--orchestrate"}, &out, &err, "hi\n") != 0);
+    CHECK(err.find("--orchestrate") != std::string::npos);
+}
+
+TEST_CASE("orchestrating, the root is offered each symphony it can play, framed as orchestrator",
+          "[execute][orchestrate]") {
+    const Home home;
+    orchestral(home, kToolNames);
+    std::string out;
+    std::string err;
+    // The flag, with no --tools: orchestration is its own consent. The vision
+    // starter takes an image, so it is not offered -- said under --verbose.
+    REQUIRE(home.run({"execute", "--suite", "duo", "--orchestrate"}, &out, &err, "hi\n") == 0);
+    CHECK(out == "TOOLS<play_echo2,play_extract-facts,play_summarize-verify>\n");
+    CHECK(err.find("orchestrate:") == std::string::npos);
+    REQUIRE(home.run({"execute", "--suite", "duo", "--orchestrate", "--verbose"}, &out, &err,
+                     "hi\n") == 0);
+    CHECK(err.find("orchestrate: not offering describe-answer -- it takes an image, which a tool "
+                   "call cannot give") != std::string::npos);
+    // The suite's own `orchestrate: true`: no consult without --tools, the
+    // consent every other tool asks for.
+    REQUIRE(home.run({"execute", "--suite", "orch"}, &out, &err, "hi\n") == 0);
+    CHECK(out == "TOOLS<play_echo2,play_extract-facts,play_summarize-verify>\n");
+    // With the native tools and consult beside.
+    REQUIRE(home.run({"execute", "--suite", "orch", "--tools"}, &out, &err, "hi\n") == 0);
+    CHECK(out.find("play_echo2") != std::string::npos);
+    CHECK(out.find("play_summarize-verify") != std::string::npos);
+    CHECK(out.find("read_file") != std::string::npos);
+    CHECK(out.find("consult") != std::string::npos);
+    // The environment note frames the root as the orchestrator.
+    std::ofstream{home.home.home() / "scripts" / "root.json", std::ios::binary | std::ios::trunc}
+        << R"({"turns": [{"text": "SYS<{{system}}>"}]})";
+    REQUIRE(home.run({"execute", "--suite", "orch"}, &out, &err, "hi\n") == 0);
+    CHECK(out == "SYS<" + std::string{apogee::symphony::orchestrator_framing()} + ">\n");
+}
+
+TEST_CASE("a suite whose symphonies all reach a billed member offers none, and says so",
+          "[execute][orchestrate]") {
+    const Home home;
+    // The root bills per call, and every symphony reaches it.
+    orchestral(home, R"({"metered": true, "turns": [{"text": "TOOLS<{{tool_names}}>"}]})");
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--suite", "duo", "--orchestrate"}, &out, &err, "hi\n") == 0);
+    CHECK(out == "TOOLS<>\n");
+    CHECK(err.find("orchestrate: not offering echo2 -- its second stage (chat) is 'root', billed "
+                   "per call -- a play the model starts runs on its initiative, which never "
+                   "spends") != std::string::npos);
+    CHECK(err.find("orchestrate: no symphony can be offered as a tool -- the model answers "
+                   "without plays") != std::string::npos);
+}
+
+TEST_CASE("the root plays a symphony unprompted: its stages run, its output is a tool result",
+          "[execute][orchestrate]") {
+    const Home home;
+    orchestral(home,
+               R"({"turns": [{"text": "", "tool_calls": [{"name": "play_echo2", "arguments": )"
+               R"("{\"input\": \"hello\"}"}]}, {"text": "ROOT<{{last_user}}>"}, )"
+               R"({"text": "ANSWER<{{last_tool_result}}>"}]})");
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--suite", "duo", "--orchestrate"}, &out, &err, "go\n") == 0);
+    const std::string result = "echo2 answered:\n" + std::string{kPlayed};
+    CHECK(out == "ANSWER<" + result + ">\n");
+    // An ordinary tool call and result in the history -- no new shape.
+    const std::vector<apogee::logger::Session> sessions = home.sessions();
+    REQUIRE(sessions.size() == 1);
+    const std::vector<apogee::harness::ChatMessage>& messages = sessions.front().messages;
+    REQUIRE(messages.size() == 4);
+    REQUIRE(messages[1].tool_calls.size() == 1);
+    CHECK(messages[1].tool_calls.front().name == "play_echo2");
+    CHECK(messages[2].role == apogee::harness::Role::Tool);
+    CHECK(messages[2].content.plain_text() == result);
+}
+
+TEST_CASE("a driver sees the model's play as ordinary tool-call narration, no new event type",
+          "[execute][orchestrate][machine]") {
+    const Home home;
+    orchestral(home,
+               R"({"turns": [{"text": "", "tool_calls": [{"name": "play_echo2", "arguments": )"
+               R"("{\"input\": \"hello\"}"}]}, {"text": "ROOT<{{last_user}}>"}, )"
+               R"({"text": "DONE"}]})");
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--suite", "orch", "--output-format", "stream-json"}, &out, &err,
+                     "{\"type\":\"user\",\"text\":\"go\"}\n") == 0);
+    const std::set<std::string> known{"session",      "thinking",   "tool_status", "answer_start",
+                                      "answer_delta", "answer_end", "result"};
+    std::vector<std::string> statuses;
+    std::istringstream lines{out};
+    for (std::string line; std::getline(lines, line);) {
+        const nlohmann::json event = nlohmann::json::parse(line);
+        CHECK(known.contains(event.at("type").get<std::string>()));
+        if (event.at("type") == "tool_status") {
+            statuses.push_back(event.at("text").get<std::string>());
+        }
+    }
+    // The call, the labeled line -- the model's choice and its cost -- and a
+    // line for each stage.
+    REQUIRE(statuses.size() == 4);
+    CHECK(statuses[0] == "[tool] play_echo2");
+    CHECK(statuses[1] == "play — the model chose echo2: 2 member calls, utility → chat");
+    CHECK_THAT(statuses[2], Catch::Matchers::StartsWith(
+                                "stage 1/2 first — asking utility (helper): One: hello"));
+    CHECK_THAT(statuses[3], Catch::Matchers::StartsWith("stage 2/2 second — asking chat (root)"));
+    CHECK(event_types(out).back() == "result");
+}
 
 TEST_CASE("execute's whole surface, golden", "[execute][golden]") {
     const std::string actual = battery();

@@ -413,6 +413,38 @@ TEST_CASE("a registered consult is in the core: offered whatever the question ra
     CHECK_FALSE(without.begin_turn("show the commit history", {}).names.contains("consult"));
 }
 
+TEST_CASE("every registered symphony tool is in the core: the model's choice is never ranked out",
+          "[agentloop][tool_selection][orchestrate]") {
+    // 27t: orchestration is the user's opt-in to the model choosing among the
+    // symphonies; a play ranked out of the offer is no choice at all.
+    ToolRegistry registry = full_registry();
+    for (const char* name : {"play_summarize-verify", "play_extract-facts"}) {
+        Tool play;
+        play.name = name;
+        play.description = "Plays a symphony on your suite's models";
+        play.run = [](std::string_view) { return ToolOutcome{"ok"}; };
+        registry.add(std::move(play));
+    }
+    ToolSelection selection{words_ranker(registry), registry.size()};
+    const ToolOffer offer = selection.begin_turn(
+        "read write edit delete list search files directory git log diff show notes commit "
+        "branch status",
+        {});
+    REQUIRE(offer.active);
+    REQUIRE(std::ranges::find(offer.ranked, "play_extract-facts") == offer.ranked.end());
+    CHECK(offer.names.contains("play_summarize-verify"));
+    CHECK(offer.names.contains("play_extract-facts"));
+    CHECK(apogee::agentloop::is_core_tool("play_anything"));
+    CHECK(apogee::agentloop::is_core_tool("consult"));
+    CHECK_FALSE(apogee::agentloop::is_core_tool("git_log"));
+    // Unregistered, the core never brings one in.
+    const ToolRegistry plain = full_registry();
+    ToolSelection without{words_ranker(plain), plain.size()};
+    for (const std::string& name : without.begin_turn("summarize this", {}).names) {
+        CHECK_FALSE(name.starts_with("play_"));
+    }
+}
+
 TEST_CASE("selection only narrows what the registry holds", "[agentloop][tool_selection]") {
     // A read-only policy's registry has no run_command: the core never
     // brings back what the policy dropped, and find_tools never finds it.

@@ -50,6 +50,14 @@ namespace apogee::httpserver {
 [[nodiscard]] HttpResponse admin_set_suite_validate(const AdminConfigContext& context,
                                                     std::string_view name,
                                                     const HttpRequest& request);
+/// The twin of `config set-suite --orchestrate on|off` (27t): `{"orchestrate":
+/// true | false}`, written in place -- `orchestrate: true`, or the key
+/// removed -- every other line of the entry as it was; on, every member a
+/// symphony the suite would offer reaches must be local and unmetered, as the
+/// CLI holds it.
+[[nodiscard]] HttpResponse admin_set_suite_orchestrate(const AdminConfigContext& context,
+                                                       std::string_view name,
+                                                       const HttpRequest& request);
 /// The twin of `config set-default-suite`: `{"name"}`, `off` for none.
 [[nodiscard]] HttpResponse admin_set_default_suite(const AdminConfigContext& context,
                                                    const HttpRequest& request);

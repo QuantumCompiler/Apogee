@@ -96,7 +96,7 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
         }
     }
     CHECK(public_rows == 8);
-    CHECK(admin_rows == 85);
+    CHECK(admin_rows == 86);
     CHECK(has("POST", "/v1/admin/backends/default-vision"));
     // The symphonies slice (27q): three twins and two reads, no play.
     CHECK(has("GET", "/v1/admin/symphonies"));
@@ -119,6 +119,8 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
     CHECK(has("PUT", "/v1/admin/suites/{id}/consult"));
     // Which seams a member checks, and which member (27g).
     CHECK(has("PUT", "/v1/admin/suites/{id}/validate"));
+    // Whether an execute session's root plays the symphonies (27t).
+    CHECK(has("PUT", "/v1/admin/suites/{id}/orchestrate"));
     CHECK(has("POST", "/v1/admin/backends/default-transcription"));
     CHECK(has("POST", "/v1/admin/backends/default-utility"));
     CHECK(has("GET", "/v1/admin/allowed-hosts"));

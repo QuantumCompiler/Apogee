@@ -58,6 +58,13 @@ Twelve checks:
               session's answer; the saved chat keeps the play as one exchange
               and none of the narration.
 
+  orchestrate An orchestrating `execute` (27t): the banner says how many
+              symphonies the model is offered; the model's own play is a
+              labeled line -- its choice and its member calls -- with its
+              stage lines beneath it in the thinking block, each closed with
+              what it took, the block collapsing, and the answer that reads
+              its output is rendered.
+
 POSIX only -- `pty` and SIGKILL have no portable Windows equivalent.  Recorded
 as a per-item skip in CLAUDE.md -> Platforms.
 """
@@ -547,6 +554,52 @@ def check_execute(binary, home, env):
     return failures
 
 
+def check_orchestrate(binary, home, env):
+    """An orchestrating `execute` at a terminal (27t): the banner says how many
+    symphonies the model is offered; the model's own play is a labeled line
+    -- its choice and its cost -- with its stage lines beneath, in the
+    thinking block, and the answer that reads its output is rendered."""
+    helper = os.path.join(home, "helper.json")
+    with open(helper, "w", encoding="utf-8") as handle:
+        json.dump({"turns": [{"text": "A cat sat on a mat."}]}, handle)
+    scripted(binary, env, home, [
+        {"text": "", "tool_calls": [{"name": "play_summarize-verify",
+                                     "arguments": json.dumps({"input": "The cat sat on the mat."})}]},
+        {"text": "A cat sat on the mat."},
+        {"text": "The **played** summary.\n"}])
+    for args in (["config", "add-backend", "helper", "--type", "mock", "--model-path", helper],
+                 ["config", "add-suite", "duo", "--chat", "scripted", "--utility", "helper"]):
+        if subprocess.run([binary, *args], env=env, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode != 0:
+            raise RuntimeError(f"setup failed: {args}")
+    term = Pty(binary, env, ("--suite", "duo", "--orchestrate", "--no-recall"),
+               command=("execute",))
+    term.drain(2.0)
+    term.send(b"Summarize: the cat sat on the mat.\r")
+    term.drain(3.0)
+    term.send(b"/exit\r")
+    term.drain(2.0)
+    term.close()
+    text = term.text()
+    failures = []
+    if b"3 symphonies  \xc2\xb7  orchestrating 2  \xc2\xb7  chat " not in text:
+        failures.append(f"the banner does not say what the model is offered: {text!r}")
+    for line in ("play \u2014 the model chose summarize-verify: 2 member calls, utility \u2192 chat",
+                 "stage 1/2 summarize \u2014 asking utility (helper)",
+                 "stage 2/2 verify \u2014 asking chat (scripted)"):
+        if line.encode() not in text:
+            failures.append(f"'{line}' was not narrated: {text!r}")
+    # What it costs: the labeled line says its member calls, and each stage
+    # closes with what it took.
+    if not re.search(rb"asking chat \(scripted\): [^\n]*\xc2\xb7 [0-9.]+ s", text):
+        failures.append(f"the play's stages did not close with their cost: {text!r}")
+    if b"Worked for" not in text:
+        failures.append(f"the block did not collapse to 'Worked for': {text!r}")
+    if b"The played summary." not in text or b"**played**" in text:
+        failures.append(f"the answer was not rendered: {text!r}")
+    return failures
+
+
 def check_base_model(binary, home, env):
     """A base model's chat: `base model` in the banner and the spinner, and
     `tools off` said once (26r)."""
@@ -701,6 +754,7 @@ def main():
                         ("task-machine", check_task_machine),
                         ("base-model", check_base_model),
                         ("execute", check_execute),
+                        ("orchestrate", check_orchestrate),
                         ("interrupt", check_interrupt)):
         home = tempfile.mkdtemp(prefix=f"apogee-chat-{name}-")
         try:
@@ -721,6 +775,7 @@ def main():
           "the banner and each question stand apart; answers render, raw with --raw; "
           "typing mid-reply waits for the prompt; side calls are narrated in the block; a preset is the session answer given early; an attended task asks for what it was not granted, and one in machine mode asks nothing; a base model is said and its tools are off; "
           "execute's banner names its suite and symphonies and a play is narrated in the block; "
+          "the model's own play is a labeled line with its stages and its cost; "
           "Ctrl-C restores echo - OK")
     return 0
 

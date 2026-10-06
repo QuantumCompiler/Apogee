@@ -872,6 +872,15 @@ Lines format_validate(const ValidateConfig& validate, std::string_view terminato
     return out;
 }
 
+/// `orchestrate: true` (27t) when the suite orchestrates; nothing when it
+/// does not -- off is absent.
+Lines format_orchestrate(bool orchestrate, std::string_view terminator) {
+    if (!orchestrate) {
+        return {};
+    }
+    return Lines{std::string(kFieldIndent, ' ') + "orchestrate: true" + std::string{terminator}};
+}
+
 Lines format_suite_entry(std::string_view name, const SuiteConfig& suite,
                          std::string_view terminator) {
     const std::string end{terminator};
@@ -896,6 +905,8 @@ Lines format_suite_entry(std::string_view name, const SuiteConfig& suite,
     out.insert(out.end(), caps.begin(), caps.end());
     const Lines validate = format_validate(suite.validate, terminator);
     out.insert(out.end(), validate.begin(), validate.end());
+    const Lines orchestrate = format_orchestrate(suite.orchestrate, terminator);
+    out.insert(out.end(), orchestrate.begin(), orchestrate.end());
     return out;
 }
 
@@ -1477,6 +1488,14 @@ std::string set_suite_validate(std::string_view content, std::string_view suite,
     return set_suite_field(
         content, suite, "validate", "",
         [&validate](std::string_view terminator) { return format_validate(validate, terminator); });
+}
+
+std::string set_suite_orchestrate(std::string_view content, std::string_view suite,
+                                  bool orchestrate) {
+    return set_suite_field(content, suite, "orchestrate", "",
+                           [orchestrate](std::string_view terminator) {
+                               return format_orchestrate(orchestrate, terminator);
+                           });
 }
 
 std::vector<std::string_view> models_role_fields() {

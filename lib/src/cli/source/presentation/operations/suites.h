@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "contracts/config.h"
+#include "symphony/definition.h"
 
 /// The write-time rules a `suites:` entry must satisfy (27d), decided ONCE for
 /// `config add-suite`/`set-suite` and their admin twins, so a suite one
@@ -56,12 +57,29 @@ using MeteredProbe =
                                                     const harness::SuiteConfig& suite,
                                                     const MeteredProbe& metered);
 
+/// Why `suite`'s `orchestrate: true` cannot be written as `name` (27t), or
+/// empty: every member a symphony it would offer reaches -- each symphony of
+/// `symphonies` that can be played and projected as a tool, its stages and
+/// those of every symphony it plays, each role resolved through the one chain
+/// under the suite -- local and unmetered by `metered`'s word, since a play
+/// the model starts runs on its initiative, which never spends. The refusal
+/// names the symphony, its stage, the role and the backend. Off is always
+/// writable; on with no catalog to read (`symphonies` null) cannot be told,
+/// and unknown is metered.
+[[nodiscard]] std::string validate_suite_orchestrate(const harness::Config& config,
+                                                     std::string_view name,
+                                                     const harness::SuiteConfig& suite,
+                                                     const MeteredProbe& metered,
+                                                     const symphony::Catalog* symphonies);
+
 /// Why `suite` cannot be written as `name`, or empty: a name that is not
-/// `off`, at least one member, every member valid, and its consultable
-/// members and caps valid (`validate_suite_consult`, through `metered`).
+/// `off`, at least one member, every member valid, its consultable members
+/// and caps valid (`validate_suite_consult`, through `metered`), and its
+/// orchestration (`validate_suite_orchestrate`, over `symphonies`).
 [[nodiscard]] std::string validate_suite(const harness::Config& config, std::string_view name,
                                          const harness::SuiteConfig& suite,
-                                         const MeteredProbe& metered = {});
+                                         const MeteredProbe& metered = {},
+                                         const symphony::Catalog* symphonies = nullptr);
 
 /// Why a run cannot go ahead under `config`'s active suite, or empty: a member
 /// naming a backend the config does not have. The resolver returns that name

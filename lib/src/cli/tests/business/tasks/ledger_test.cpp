@@ -98,6 +98,37 @@ TEST_CASE("tasks list newest first, an unreadable one named and skipped", "[task
     CHECK(t::list_tasks(fixture.dir.path() / "absent").empty());
 }
 
+TEST_CASE("inside one second, the id's own time and then its suffix order the list",
+          "[tasks][ledger]") {
+    // A ledger whose `created_at` was read after its id was minted can carry
+    // an earlier second's suffixed id beside a later second's: the later
+    // second is the newer task, whatever the ids' lengths (found at 27t's
+    // boundary: the task e2e's newest-task lookup returned the older one).
+    const Fixture fixture;
+    const std::string second = "2026-10-04T12:00:00Z";
+    for (const char* id : {"task-20261004-115959-2", "task-20261004-120000",
+                           "task-20261004-120000-9", "task-20261004-120000-10"}) {
+        REQUIRE(t::save_task(fixture.root, make(id, second)).empty());
+    }
+    const std::vector<t::Task> all = t::list_tasks(fixture.root);
+    REQUIRE(all.size() == 4);
+    CHECK(all[0].id == "task-20261004-120000-10");
+    CHECK(all[1].id == "task-20261004-120000-9");
+    CHECK(all[2].id == "task-20261004-120000");
+    CHECK(all[3].id == "task-20261004-115959-2");
+}
+
+TEST_CASE("a new task's id and created_at come from one reading of the clock", "[tasks][ledger]") {
+    const Fixture fixture;
+    const auto at = std::chrono::sys_days{std::chrono::year{2026} / 10 / 4} +
+                    std::chrono::hours{11} + std::chrono::minutes{59} + std::chrono::seconds{59} +
+                    std::chrono::milliseconds{999};
+    CHECK(t::new_task_id(fixture.root, at) == "task-20261004-115959");
+    CHECK(t::timestamp(at) == "2026-10-04T11:59:59Z");
+    CHECK(t::timestamp(std::chrono::system_clock::now()).size() ==
+          std::string{"YYYY-MM-DDTHH:MM:SSZ"}.size());
+}
+
 TEST_CASE("a new task's id is its start in UTC, suffixed past one that exists", "[tasks][ledger]") {
     const Fixture fixture;
     const auto when = std::chrono::system_clock::time_point{std::chrono::seconds{1791117296}};

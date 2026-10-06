@@ -56,7 +56,7 @@ set(APOGEE_LINKS_mcp agent contracts events platform transport)
 set(APOGEE_LINKS_models contracts modelstore platform transport)
 set(APOGEE_LINKS_training contracts platform transport)
 set(APOGEE_LINKS_tasks agent agentloop contracts logger platform)
-set(APOGEE_LINKS_symphony agentloop contracts)
+set(APOGEE_LINKS_symphony agent agentloop contracts harness)
 set(APOGEE_LINKS_scaffold contracts symphony)
 
 # ---- Presentation -----------------------------------------------------------
@@ -65,7 +65,7 @@ set(APOGEE_LINKS_render "")
 set(APOGEE_LINKS_views agentloop ansi contracts markdown platform)
 set(APOGEE_LINKS_machine agent agentloop contracts tasks)
 set(APOGEE_LINKS_operations agentloop contracts embedstore graph harness knowledge logger
-                            training)
+                            symphony training)
 set(APOGEE_LINKS_httpserver agent agentloop contracts embedstore events graph harness knowledge
                             logger operations scaffold secrets symphony tasks tools training)
 set(APOGEE_LINKS_cli agent agentloop ansi backends contracts embedstore events graph harness

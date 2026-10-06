@@ -1,8 +1,12 @@
 #include "operations/suites.h"
 
 #include <algorithm>
+#include <map>
 #include <span>
 #include <vector>
+
+#include "harness/roles.h"
+#include "symphony/tools.h"
 
 namespace apogee::commands {
 namespace {
@@ -155,8 +159,70 @@ std::string validate_suite_validation(const harness::Config& config,
     return {};
 }
 
+std::string validate_suite_orchestrate(const harness::Config& config, std::string_view name,
+                                       const harness::SuiteConfig& suite,
+                                       const MeteredProbe& metered,
+                                       const symphony::Catalog* symphonies) {
+    if (!suite.orchestrate) {
+        return {};
+    }
+    const std::string where = "orchestrate: ";
+    if (symphonies == nullptr) {
+        return where +
+               "the symphonies cannot be read here, so whether one reaches a member billed per "
+               "call cannot be told -- unknown is metered";
+    }
+    // The members as a session under this suite would resolve them: the
+    // suite active, the conversation on its chat role.
+    harness::Config probe = config;
+    probe.suites[std::string{name}] = suite;
+    probe.models.default_suite = std::string{name};
+    const std::string conversation =
+        harness::resolve_backend(probe, harness::RoleRequest{.role = harness::ModelRole::Chat}).key;
+    std::map<std::string, MeteredAnswer, std::less<>> asked;
+    for (const symphony::Definition& definition : symphonies->definitions) {
+        const harness::SymphonySpec& spec = definition.spec;
+        if (!symphony::unprojectable(spec, *symphonies).empty()) {
+            continue;  // never offered, so never played on the model's initiative
+        }
+        for (const symphony::ReachedMember& member :
+             symphony::reached_members(probe, spec, *symphonies, conversation)) {
+            if (member.backend.empty()) {
+                continue;  // nothing answers: nothing to spend
+            }
+            auto answer = asked.find(member.backend);
+            if (answer == asked.end()) {
+                answer = asked
+                             .emplace(member.backend,
+                                      metered ? metered(probe, member.backend)
+                                              : MeteredAnswer{.metered = true,
+                                                              .unknown = "nothing here can ask "
+                                                                         "its provider"})
+                             .first;
+            }
+            const std::string reached = "'" + spec.name + "' reaches " + member.role + " ('" +
+                                        member.backend + "') through " +
+                                        symphony::reached_at(spec.name, member);
+            if (!answer->second.unknown.empty()) {
+                return where + reached + ", and whether '" + member.backend +
+                       "' is billed per call cannot be told (" + answer->second.unknown +
+                       ") -- unknown is metered, and only a suite whose symphonies reach local, "
+                       "unmetered members can orchestrate";
+            }
+            if (answer->second.metered) {
+                return where + reached + ", and '" + member.backend +
+                       "' is billed per call -- a play the model starts runs on its initiative, "
+                       "which never spends: only a suite whose symphonies reach local, unmetered "
+                       "members can orchestrate";
+            }
+        }
+    }
+    return {};
+}
+
 std::string validate_suite(const harness::Config& config, std::string_view name,
-                           const harness::SuiteConfig& suite, const MeteredProbe& metered) {
+                           const harness::SuiteConfig& suite, const MeteredProbe& metered,
+                           const symphony::Catalog* symphonies) {
     if (name.empty()) {
         return "a suite needs a name";
     }
@@ -174,7 +240,10 @@ std::string validate_suite(const harness::Config& config, std::string_view name,
             return refused;
         }
     }
-    return validate_suite_consult(config, suite, metered);
+    if (std::string refused = validate_suite_consult(config, suite, metered); !refused.empty()) {
+        return refused;
+    }
+    return validate_suite_orchestrate(config, name, suite, metered, symphonies);
 }
 
 std::string validate_active_suite(const harness::Config& config) {

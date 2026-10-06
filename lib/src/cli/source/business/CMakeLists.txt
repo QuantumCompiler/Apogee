@@ -275,6 +275,8 @@ apogee_add_module(symphony
     symphony/definition.cpp
     symphony/runner.h
     symphony/runner.cpp
+    symphony/tools.h
+    symphony/tools.cpp
     symphony/view.h
     symphony/view.cpp
 )

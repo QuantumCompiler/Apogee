@@ -98,6 +98,12 @@ models:
 # when that passes; an objection goes back once for one revision, and one
 # still standing is shown to you with both sides. It spends from the same
 # per-turn budget as consult.
+# `orchestrate: true` lets an execute session's chat model play the suite's
+# symphonies on its own initiative: each one it can play is offered to it as
+# a tool (play_<name>), and it chooses -- `apogee execute --orchestrate` does
+# the same for one session. Only a suite whose symphonies reach local,
+# unmetered members can orchestrate, and a play spends from the same per-turn
+# budget as consult.
 #
 # suites:
 #   research:
@@ -111,6 +117,7 @@ models:
 #     consultable: [utility]
 #     validate:
 #       tool_args: on
+#     orchestrate: true
 
 # Symphonies: named, staged prompt processes over a suite's members. An input
 # goes in; each stage -- a ROLE, never a backend, so one symphony plays on any

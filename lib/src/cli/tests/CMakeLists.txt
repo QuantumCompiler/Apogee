@@ -216,6 +216,7 @@ add_library(apogee_tests_business OBJECT
     business/tasks/view_test.cpp
     business/symphony/definition_test.cpp
     business/symphony/runner_test.cpp
+    business/symphony/tools_test.cpp
     business/symphony/view_test.cpp
     support/fake_mcp_server.cpp
     support/fake_mcp_server.h

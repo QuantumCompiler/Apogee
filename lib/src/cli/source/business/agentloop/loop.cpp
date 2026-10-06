@@ -258,12 +258,14 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
     result.tokens.estimated = false;
 
     // The turn's member calls (27f): counted from zero, said where this
-    // run's other model calls are said, and cancelled with the turn.
+    // run's other model calls are said, and cancelled with the turn -- and a
+    // play the model started that could not run kept as a notice (27t).
     std::optional<MemberCalls::Turn> member_turn;
     if (options.member_calls != nullptr) {
         member_turn.emplace(options.member_calls->begin_turn(
             [&reporter](const SideCall& call) { reporter.on_side_call(call); },
-            options.cancellation));
+            options.cancellation,
+            [&reporter](std::string_view line) { reporter.on_notice(line); }));
     }
 
     // The suite's validation (27g), where a turn has a member-call budget:

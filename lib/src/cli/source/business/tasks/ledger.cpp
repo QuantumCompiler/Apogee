@@ -3,7 +3,10 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <compare>
 #include <fstream>
+#include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -19,6 +22,39 @@ std::filesystem::path task_dir(const std::filesystem::path& root, std::string_vi
 std::filesystem::path ledger_path(const std::filesystem::path& root, std::string_view id) {
     return task_dir(root, id) / kLedgerFileName;
 }
+
+namespace {
+
+/// An id's place in time: its `YYYYMMDD-HHMMSS` and then its suffix, the
+/// first task of a second being 1. An id not of the minted shape sorts by its
+/// text after every minted one of the same second.
+struct IdOrder {
+    std::string time;
+    unsigned long long suffix = 0;
+    std::string text;
+
+    auto operator<=>(const IdOrder&) const = default;
+};
+
+IdOrder id_order(const std::string& id) {
+    static constexpr std::size_t kTimeLength = 15;  // YYYYMMDD-HHMMSS
+    const std::string_view prefix = kTaskIdPrefix;
+    if (id.size() < prefix.size() + kTimeLength || id.compare(0, prefix.size(), prefix) != 0) {
+        return {.time = {}, .suffix = 0, .text = id};
+    }
+    std::string time = id.substr(prefix.size(), kTimeLength);
+    const std::string rest = id.substr(prefix.size() + kTimeLength);
+    if (rest.empty()) {
+        return {.time = std::move(time), .suffix = 1, .text = id};
+    }
+    if (rest.size() < 2 || rest[0] != '-' || rest.size() > 20 ||
+        !std::ranges::all_of(rest.substr(1), [](char c) { return c >= '0' && c <= '9'; })) {
+        return {.time = std::move(time), .suffix = 0, .text = id};
+    }
+    return {.time = std::move(time), .suffix = std::stoull(rest.substr(1)), .text = id};
+}
+
+}  // namespace
 
 std::string new_task_id(const std::filesystem::path& root,
                         std::chrono::system_clock::time_point now) {
@@ -42,7 +78,11 @@ bool valid_task_id(std::string_view id) noexcept {
 }
 
 std::string now_timestamp() {
-    return platform::utc_time(std::chrono::system_clock::now(), "%Y-%m-%dT%H:%M:%SZ");
+    return timestamp(std::chrono::system_clock::now());
+}
+
+std::string timestamp(std::chrono::system_clock::time_point at) {
+    return platform::utc_time(at, "%Y-%m-%dT%H:%M:%SZ");
 }
 
 std::string save_task(const std::filesystem::path& root, const Task& task) {
@@ -110,13 +150,16 @@ std::vector<Task> list_tasks(const std::filesystem::path& root,
             problems->push_back(error);
         }
     }
-    // Newest first: the ids sort by their start time, and a later suffix is
-    // a later task.
+    // Newest first: by when each was created, then -- inside one second -- by
+    // the id, whose time and suffix say which came later. A ledger written
+    // before the id and `created_at` shared a clock reading can carry an
+    // earlier second's id (`...-115959-2`) beside a later one's (`...-120000`),
+    // so the id's own time decides before its suffix does.
     std::ranges::sort(tasks, [](const Task& a, const Task& b) {
         if (a.created_at != b.created_at) {
             return a.created_at > b.created_at;
         }
-        return a.id.size() != b.id.size() ? a.id.size() > b.id.size() : a.id > b.id;
+        return id_order(a.id) > id_order(b.id);
     });
     return tasks;
 }

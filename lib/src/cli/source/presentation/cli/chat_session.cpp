@@ -47,6 +47,7 @@
 #include "operations/knowledge_core.h"
 #include "operations/suites.h"
 #include "platform/platform.h"
+#include "symphony/tools.h"
 #include "tools/consult.h"
 #include "tools/git.h"
 #include "views/ask_prompt.h"
@@ -334,6 +335,14 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
                         : "Run under this suite -- its members answer for the roles it names -- "
                           "or off for none")
         ->type_name(kModelSuiteValue);
+    // The Orchestrator (27t): execute's alone, so chat's surface is what it
+    // was.
+    if (mode == SessionMode::Execute) {
+        cmd->add_flag("--orchestrate", flags->orchestrate,
+                      "Let the suite's chat model play its symphonies on its own initiative, each "
+                      "offered to it as a tool, on local members only (as the suite's "
+                      "orchestrate: true does)");
+    }
     cmd->add_flag("--warm", flags->warm,
                   "Load the suite's members now, on the progress line, rather than at first use");
     cmd->add_flag("--force", flags->force,
@@ -662,26 +671,82 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     const auto base_tools = [&]() -> const agent::ToolRegistry& {
         return scoped_registry.has_value() ? *scoped_registry : registry;
     };
+    // The Orchestrator (27t): an execute session that orchestrates --
+    // `--orchestrate`, or the suite's own `orchestrate: true` -- offers its
+    // root the symphonies as tools, each one it can play here; re-offered
+    // when a switch moves the suite or the conversation. Off, none exists.
+    std::optional<symphony::OrchestraOffer> offered_orchestra;
+    const auto orchestrates = [&]() {
+        return mode == SessionMode::Execute &&
+               symphony::orchestrating(harness.config(), flags->orchestrate);
+    };
+    const auto orchestra_now = [&]() -> std::optional<symphony::OrchestraOffer> {
+        if (!orchestrates()) {
+            return std::nullopt;
+        }
+        return symphony::orchestra_offer(harness, session_catalog(harness.config(), config_path),
+                                         session.backend);
+    };
+    // The turn's tools: `--tools`, or the symphonies an orchestrating
+    // session offers -- its own consent to the model starting a play.
+    const auto tools_on = [&]() {
+        return flags->tools ||
+               (offered_orchestra.has_value() && !offered_orchestra->offered.empty());
+    };
     const auto offer_tools = [&]() {
-        offered_pin = harness::suite_pins(config, session.backend).toolset;
-        const tools::ConsultOffer consult = tools::consult_offer(harness);
+        offered_pin = flags->tools ? harness::suite_pins(config, session.backend).toolset
+                                   : std::optional<std::vector<std::string>>{};
+        const tools::ConsultOffer consult =
+            flags->tools ? tools::consult_offer(harness) : tools::ConsultOffer{};
         if (consult.description != offered_consult) {
             for (const std::string& note : consult.notes) {
                 reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + note);
             }
         }
         offered_consult = consult.description;
-        if (offered_pin.has_value() || !consult.description.empty()) {
+        std::optional<symphony::OrchestraOffer> orchestra;
+        if (offered_pin.has_value() || !consult.description.empty() || orchestrates()) {
             // The consult tool joins after the pin: a suite's
-            // `consultable:` is its own switch, never a toolset's.
+            // `consultable:` is its own switch, never a toolset's -- and so
+            // is orchestration (27t).
             pinned_registry =
                 offered_pin.has_value() ? apply_toolset(base_tools(), *offered_pin) : base_tools();
-            (void)tools::register_consult_tool(*pinned_registry, harness, member_calls);
+            if (flags->tools) {
+                (void)tools::register_consult_tool(*pinned_registry, harness, member_calls);
+            }
+            if (orchestrates()) {
+                orchestra = symphony::register_play_tools(
+                    *pinned_registry, harness, session_catalog(harness.config(), config_path),
+                    symphony::PlayToolContext{.calls = member_calls, .conversation = [&session]() {
+                                                  return session.backend;
+                                              }});
+            }
             offered = &*pinned_registry;
         } else {
             pinned_registry.reset();
             offered = &base_tools();
         }
+        if (orchestra.has_value() && orchestra != offered_orchestra) {
+            // Each symphony not offered, said once with why: one a member
+            // or a cap keeps out, always; one whose definition does --
+            // it takes an image -- when asked for.
+            for (const symphony::Withheld& withheld : orchestra->withheld) {
+                const std::string line =
+                    "orchestrate: not offering " + withheld.symphony + " -- " + withheld.reason;
+                if (!withheld.structural) {
+                    reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + line);
+                } else if (flags->verbose) {
+                    reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " + line);
+                }
+            }
+            if (orchestra->offered.empty()) {
+                reporter.status().print_line(
+                    style.tag(ansi::Role::Warning) +
+                    " orchestrate: no symphony can be offered as a tool -- the model answers "
+                    "without plays");
+            }
+        }
+        offered_orchestra = std::move(orchestra);
         std::string ranked_by;
         selection = make_tool_selection(harness, config, *offered, config_path, ranked_by);
         if (selection != nullptr && flags->verbose) {
@@ -692,12 +757,13 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
     };
     const auto reoffer_tools = [&]() {
-        if (flags->tools && (harness::suite_pins(config, session.backend).toolset != offered_pin ||
-                             tools::consult_offer(harness).description != offered_consult)) {
+        if ((flags->tools && (harness::suite_pins(config, session.backend).toolset != offered_pin ||
+                              tools::consult_offer(harness).description != offered_consult)) ||
+            orchestra_now() != offered_orchestra) {
             offer_tools();
         }
     };
-    if (flags->tools) {
+    if (flags->tools || orchestrates()) {
         offer_tools();
     }
     const auto rescope_tools = [&](const ChatAttachments& attachments) {
@@ -749,6 +815,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                            mode == SessionMode::Execute
                                ? session_catalog(harness.config(), config_path).definitions.size()
                                : 0,
+                           offered_orchestra.has_value()
+                               ? std::optional<std::size_t>{offered_orchestra->offered.size()}
+                               : std::nullopt,
                            session.chat_id));
     }
     // What the suite takes of this machine, stated where the session
@@ -772,7 +841,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     }
     // Tools withheld from a base model are said once, at the start, on a
     // terminal and a pipe alike -- never into machine mode's stream.
-    if (flags->tools && flags->output_format != OutputFormat::StreamJson &&
+    if (tools_on() && flags->output_format != OutputFormat::StreamJson &&
         is_base_model(harness, model)) {
         reporter.status().print_line(style.tag(ansi::Role::Warning) + " " +
                                      base_model_tools_note(model));
@@ -929,7 +998,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             // The driver reads structured input, so there IS someone to
             // answer a question -- the loop's "nil AskFn <=> never
             // advertised" rule is satisfied rather than sidestepped.
-            run_chat_turn(harness, session, message.text, flags->tools ? offered : nullptr,
+            run_chat_turn(harness, session, message.text, tools_on() ? offered : nullptr,
                           selection.get(), member_calls.get(), driver_ask,
                           ToolGate{permission,
                                    flags->tools ? make_driver_confirm_fn(machine_reporter, std::cin,
@@ -1696,7 +1765,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         reporter.set_resting_label(
             is_base_model(harness, session.backend) ? "Thinking… · base model" : "Thinking…");
         run_chat_turn(
-            harness, session, input, flags->tools ? offered : nullptr, selection.get(),
+            harness, session, input, tools_on() ? offered : nullptr, selection.get(),
             member_calls.get(),
             flags->tools ? terminal_ask_fn(reporter.status(), style) : agentloop::AskFn{},
             ToolGate{permission, flags->tools ? terminal_confirm_fn(reporter.status(), style,
@@ -1762,9 +1831,13 @@ std::string execute_suite_refusal(const harness::Config& config) {
            "), or make one the default: apogee config set-default-suite <name>";
 }
 
+std::string orchestration_count(std::size_t offered) {
+    return "orchestrating " + (offered == 0 ? std::string{"none"} : std::to_string(offered));
+}
+
 std::string session_banner(SessionMode mode, std::string_view model, bool base_model,
                            std::string_view suite, bool forced, std::size_t symphonies,
-                           std::string_view chat_id) {
+                           std::optional<std::size_t> orchestrated, std::string_view chat_id) {
     std::string banner{model};
     if (base_model) {
         banner += "  ·  base model";
@@ -1772,6 +1845,9 @@ std::string session_banner(SessionMode mode, std::string_view model, bool base_m
     banner += banner_suite(suite, forced);
     if (mode == SessionMode::Execute) {
         banner += "  ·  " + symphony_count(symphonies);
+        if (orchestrated.has_value()) {
+            banner += "  ·  " + orchestration_count(*orchestrated);
+        }
     }
     banner += "  ·  chat ";
     banner += chat_id;

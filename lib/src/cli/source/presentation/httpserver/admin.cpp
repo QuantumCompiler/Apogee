@@ -355,6 +355,11 @@ HttpResponse AdminHandler::set_suite_validate(const HttpRequest& request, std::s
     return admin_set_suite_validate(config_context(), name, request);
 }
 
+HttpResponse AdminHandler::set_suite_orchestrate(const HttpRequest& request,
+                                                 std::string_view name) {
+    return admin_set_suite_orchestrate(config_context(), name, request);
+}
+
 HttpResponse AdminHandler::list_jobs(const HttpRequest& /*request*/) {
     nlohmann::json data = nlohmann::json::array();
     for (const JobRecord& record : jobs_->list()) {

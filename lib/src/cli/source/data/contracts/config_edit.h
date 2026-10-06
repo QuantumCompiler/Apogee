@@ -227,8 +227,8 @@ public:
 /// section when absent: `description` when set, then `members:` in role
 /// order, each `role: backend` alone or, when it pins a knob, the long form
 /// with `backend`, `context_size` and `toolset`; then, when set, its
-/// `consultable:` flow list and `consult_caps:` block (27f), and its
-/// `validate:` block (27g). Same collision
+/// `consultable:` flow list and `consult_caps:` block (27f), its
+/// `validate:` block (27g), and `orchestrate: true` (27t). Same collision
 /// and `force` rules as `append_backend`; the name `off` is refused, being
 /// `/suite off`.
 [[nodiscard]] std::string append_suite(std::string_view content, std::string_view name,
@@ -270,6 +270,13 @@ public:
 /// refuses a verifier that cannot check or has no member.
 [[nodiscard]] std::string set_suite_validate(std::string_view content, std::string_view suite,
                                              const ValidateConfig& validate);
+
+/// Sets an existing suite's `orchestrate:` (27t): `orchestrate: true` when
+/// on, the key removed when off -- off is absent -- in place, as
+/// `set_suite_consultable` does. Throws ConfigEditError when the suite is
+/// missing.
+[[nodiscard]] std::string set_suite_orchestrate(std::string_view content, std::string_view suite,
+                                                bool orchestrate);
 
 /// Sets `models.default_suite` -- the suite every surface resolves under --
 /// as `set_models_role` sets a pointer; "" clears it. The re-parse refuses a

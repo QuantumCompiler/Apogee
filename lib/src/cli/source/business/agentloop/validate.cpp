@@ -569,7 +569,7 @@ Verifier bind_verifier(const harness::Harness& harness, MemberCalls& calls,
         if (calls.used() >= limits.per_turn) {
             return "the turn's member-call budget is spent (" + std::to_string(calls.used()) +
                    " of " + std::to_string(limits.per_turn) +
-                   ", consults and checks together) -- checked by structure only";
+                   ", plays, consults and checks together) -- checked by structure only";
         }
         return {};
     };

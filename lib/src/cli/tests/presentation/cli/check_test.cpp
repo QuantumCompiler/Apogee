@@ -2368,6 +2368,47 @@ TEST_CASE("a suite's row names whom its root may consult, and fails a member bil
     CHECK(row->status == Status::Ok);
 }
 
+TEST_CASE(
+    "a suite's row says it orchestrates, and fails one whose symphonies reach a billed member",
+    "[commands][check][suites][orchestrate]") {
+    // 27t: the config verbs refuse `orchestrate: true` over a billed member a
+    // symphony reaches; one written by hand -- or a symphony added since --
+    // is found here, by the same rule.
+    Install install;
+    install.seed();
+    const auto check = [&](const apogee::commands::MeteredProbe& metered) {
+        CheckInputs inputs = inputs_for(install);
+        install.write("config/config.yaml",
+                      "models:\n  default: root\nbackends:\n  root:\n    type: mock\n"
+                      "  helper:\n    type: mock\nsuites:\n  research:\n    members:\n"
+                      "      chat: root\n      utility: helper\n    orchestrate: true\n");
+        load_into(inputs);
+        inputs.metered = metered;
+        return run_checks(inputs);
+    };
+    using apogee::commands::MeteredAnswer;
+    const CheckReport local = check([](const apogee::harness::Config&, std::string_view) {
+        return MeteredAnswer{.metered = false};
+    });
+    const auto* row = row_with(local, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+    CHECK(row->detail == "chat root · utility helper  · orchestrates");
+
+    const CheckReport billed = check([](const apogee::harness::Config&, std::string_view backend) {
+        return MeteredAnswer{.metered = backend == "helper"};
+    });
+    row = row_with(billed, "suite: research");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Fail);
+    CHECK(row->detail ==
+          "orchestrate: 'summarize-verify' reaches utility ('helper') through its summarize stage "
+          "(utility), and 'helper' is billed per call -- a play the model starts runs on its "
+          "initiative, which never spends: only a suite whose symphonies reach local, unmetered "
+          "members can orchestrate");
+    CHECK(row->remedy == "apogee config set-suite research --orchestrate off");
+}
+
 TEST_CASE("a suite's row names what its verifier checks, and fails a verifier billed per call",
           "[commands][check][suites][validate]") {
     Install install;

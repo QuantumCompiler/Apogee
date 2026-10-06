@@ -11,6 +11,7 @@
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "operations/suites.h"
+#include "symphony/definition.h"
 
 namespace apogee::httpserver {
 namespace {
@@ -27,6 +28,22 @@ constexpr std::string_view kConflict = "conflict";
                                  kConfigError);
         return std::nullopt;
     }
+}
+
+/// The symphonies a suite in the served config would offer the model (27t):
+/// every source, the spec files beside the config -- what the CLI's rule
+/// reads, so the twins refuse alike.
+[[nodiscard]] symphony::Catalog symphonies_for(const AdminConfigContext& context,
+                                               const harness::Config& config) {
+    return symphony::catalog(config, symphony::directory_for(context.config_path));
+}
+
+/// `validate_suite` as the CLI calls it: the probe, and the symphonies.
+[[nodiscard]] std::string refused_suite(const AdminConfigContext& context,
+                                        const harness::Config& config, std::string_view name,
+                                        const harness::SuiteConfig& suite) {
+    const symphony::Catalog symphonies = symphonies_for(context, config);
+    return commands::validate_suite(config, name, suite, context.metered, &symphonies);
 }
 
 [[nodiscard]] nlohmann::json member_json(const harness::SuiteMember& member) {
@@ -132,6 +149,9 @@ constexpr std::string_view kConflict = "conflict";
     }
     if (suite.validate.any()) {
         out["validate"] = validate_json(suite.validate);
+    }
+    if (suite.orchestrate) {
+        out["orchestrate"] = true;
     }
     return out;
 }
@@ -300,6 +320,13 @@ struct Parsed {
             return out;
         }
     }
+    if (const auto it = body.find("orchestrate"); it != body.end() && !it->is_null()) {
+        if (!it->is_boolean()) {
+            out.error = "orchestrate must be true or false";
+            return out;
+        }
+        out.suite.orchestrate = it->get<bool>();
+    }
     return out;
 }
 
@@ -355,8 +382,7 @@ HttpResponse admin_create_suite(const AdminConfigContext& context, const HttpReq
     if (!config.has_value()) {
         return failure;
     }
-    if (const std::string refused =
-            commands::validate_suite(*config, parsed.name, parsed.suite, context.metered);
+    if (const std::string refused = refused_suite(context, *config, parsed.name, parsed.suite);
         !refused.empty()) {
         return error_response(400, refused);
     }
@@ -401,8 +427,7 @@ HttpResponse admin_put_suite(const AdminConfigContext& context, std::string_view
         return error_response(404, "suite '" + std::string{name} + "' is not configured",
                               kNotFoundError);
     }
-    if (const std::string refused =
-            commands::validate_suite(*config, parsed.name, parsed.suite, context.metered);
+    if (const std::string refused = refused_suite(context, *config, parsed.name, parsed.suite);
         !refused.empty()) {
         return error_response(400, refused);
     }
@@ -476,19 +501,27 @@ HttpResponse admin_set_suite_member(const AdminConfigContext& context, std::stri
     } else {
         after.members.erase(role);
     }
-    if (const std::string refused =
-            member.has_value()
-                ? commands::validate_suite_member(*config, role, *member)
-                : commands::validate_suite(*config, found->first, after, context.metered);
+    if (const std::string refused = member.has_value()
+                                        ? commands::validate_suite_member(*config, role, *member)
+                                        : refused_suite(context, *config, found->first, after);
         !refused.empty()) {
         return error_response(400, refused);
     }
     // A consultable member moved to a backend that bills per call is refused
-    // here, as the CLI refuses it (27f).
+    // here, as the CLI refuses it (27f) -- and so is one a symphony of a
+    // suite that orchestrates reaches (27t).
     if (const std::string refused =
             commands::validate_suite_consult(*config, after, context.metered);
         !refused.empty()) {
         return error_response(400, refused);
+    }
+    {
+        const symphony::Catalog symphonies = symphonies_for(context, *config);
+        if (const std::string refused = commands::validate_suite_orchestrate(
+                *config, found->first, after, context.metered, &symphonies);
+            !refused.empty()) {
+            return error_response(400, refused);
+        }
     }
     return write(context, found->first, 200, [&](std::string_view content) {
         return harness::set_suite_member(content, found->first, role, member);
@@ -546,8 +579,7 @@ HttpResponse admin_set_suite_consult(const AdminConfigContext& context, std::str
             }
         }
     }
-    if (const std::string refused =
-            commands::validate_suite(*config, found->first, after, context.metered);
+    if (const std::string refused = refused_suite(context, *config, found->first, after);
         !refused.empty()) {
         return error_response(400, refused);
     }
@@ -585,8 +617,7 @@ HttpResponse admin_set_suite_validate(const AdminConfigContext& context, std::st
     if (!apply_validate_json(body, after.validate, error)) {
         return error_response(400, error);
     }
-    if (const std::string refused =
-            commands::validate_suite(*config, found->first, after, context.metered);
+    if (const std::string refused = refused_suite(context, *config, found->first, after);
         !refused.empty()) {
         return error_response(400, refused);
     }
@@ -595,6 +626,40 @@ HttpResponse admin_set_suite_validate(const AdminConfigContext& context, std::st
             return std::string{content};
         }
         return harness::set_suite_validate(content, found->first, after.validate);
+    });
+}
+
+HttpResponse admin_set_suite_orchestrate(const AdminConfigContext& context, std::string_view name,
+                                         const HttpRequest& request) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+    if (body.is_discarded() || !body.is_object()) {
+        return error_response(400, "the request body must be a JSON object");
+    }
+    const auto it = body.find("orchestrate");
+    if (it == body.end() || !it->is_boolean()) {
+        return error_response(400, "orchestrate is required -- true or false");
+    }
+    HttpResponse failure;
+    const std::optional<harness::Config> config = load_now(context, failure);
+    if (!config.has_value()) {
+        return failure;
+    }
+    const auto found = config->suites.find(name);
+    if (found == config->suites.end()) {
+        return error_response(404, "suite '" + std::string{name} + "' is not configured",
+                              kNotFoundError);
+    }
+    harness::SuiteConfig after = found->second;
+    after.orchestrate = it->get<bool>();
+    if (const std::string refused = refused_suite(context, *config, found->first, after);
+        !refused.empty()) {
+        return error_response(400, refused);
+    }
+    return write(context, found->first, 200, [&](std::string_view content) {
+        if (after.orchestrate == found->second.orchestrate) {
+            return std::string{content};
+        }
+        return harness::set_suite_orchestrate(content, found->first, after.orchestrate);
     });
 }
 

@@ -229,19 +229,28 @@ MemberCalls::Turn::~Turn() {
     }
     calls_->in_turn_ = false;
     calls_->narrate_ = nullptr;
+    calls_->notice_ = nullptr;
     calls_->cancellation_ = {};
 }
 
 MemberCalls::Turn MemberCalls::begin_turn(SideCallSink narrate,
-                                          harness::CancellationToken cancellation) {
+                                          harness::CancellationToken cancellation,
+                                          NoticeSink notice) {
     if (in_turn_) {
         throw std::logic_error("a member-call turn is already open");
     }
     in_turn_ = true;
     used_ = 0;
     narrate_ = std::move(narrate);
+    notice_ = std::move(notice);
     cancellation_ = std::move(cancellation);
     return Turn{*this};
+}
+
+void MemberCalls::notice(std::string_view line) const {
+    if (notice_ && !line.empty()) {
+        notice_(line);
+    }
 }
 
 MemberAnswer MemberCalls::consult(std::string_view role, std::string_view brief) {

@@ -370,8 +370,8 @@ struct ValidatePolicy {
 /// role it speaks for, every other role falling through the existing chain.
 ///
 /// Later items hang their policy here, beside `members:` -- the consultable
-/// members (27f), the validation seams (27g), orchestration (27t, not yet
-/// declared) -- and none of them is declared until something consumes it.
+/// members (27f), the validation seams (27g), orchestration (27t) -- and none
+/// of them is declared until something consumes it.
 struct SuiteConfig {
     /// Free text, for a listing. Never interpreted.
     std::string description;
@@ -391,6 +391,12 @@ struct SuiteConfig {
     /// be a member of this suite; whether that member is local and unmetered
     /// is held where a provider can be asked, as for `consultable:`.
     ValidateConfig validate;
+    /// Whether an execute session under this suite offers its root model the
+    /// symphonies as tools (27t) -- `orchestrate: true`, written only when on.
+    /// Off is absent: no symphony tool exists. Whether every member a
+    /// symphony reaches is local and unmetered is held where a provider can be
+    /// asked, as for `consultable:`: a play the model starts never spends.
+    bool orchestrate = false;
 
     bool operator==(const SuiteConfig&) const = default;
 };

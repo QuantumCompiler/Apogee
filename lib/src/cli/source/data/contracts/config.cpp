@@ -668,6 +668,12 @@ SuiteConfig parse_suite(const YAML::Node& node, std::string_view origin, const s
     }
     suite.description = scalar(node["description"], origin, where + ".description");
     const YAML::Node members = node["members"];
+    // Whether an execute session offers the root the symphonies as tools
+    // (27t): a switch, like a `validate:` seam.
+    if (const YAML::Node orchestrate = node["orchestrate"];
+        orchestrate.IsDefined() && !orchestrate.IsNull()) {
+        suite.orchestrate = parse_switch(orchestrate, origin, where + ".orchestrate");
+    }
     if (!members.IsDefined() || members.IsNull()) {
         parse_consult(node, origin, where, suite);
         parse_validate(node, origin, where, suite);

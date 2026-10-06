@@ -949,7 +949,8 @@ The `suites:` entries -- named bundles of models, one backend per role a
 suite speaks for -- the twins of `apogee config add-suite`, `set-suite`,
 `delete-suite` and `set-default-suite`. `200 {"object": "list", "data":
 [{name, description?, members: {role: {backend, context_size?, toolset?}},
-consultable?, consult_caps?, default}]}`, `default` saying whether
+consultable?, consult_caps?, validate?, orchestrate?, default}]}`, `default`
+saying whether
 `models.default_suite` names it. The roles are `chat`, `embedding`,
 `extraction`, `vision`, `transcription` and `utility`; `toolset` words are
 `fs`, `shell`, `git`, `notes`, `rag`, `web` and `mcp`. `consultable` lists
@@ -963,7 +964,9 @@ role whose member checks the others' work (`utility` when absent), whether a
 gated tool's arguments are checked before it runs and a knowledge capture's
 record against its source (booleans, `on`/`off` in the file), and whether
 answers are checked on request (`request`, the default: chat's `/check`) or
-`always`. A suite is resolution, not transport: the server resolves every
+`always`. `orchestrate` (27t), present and `true` only when on, is whether an
+`apogee execute` session under the suite offers its chat model the
+symphonies as tools. A suite is resolution, not transport: the server resolves every
 request under the suite it started with -- the config's default, never a
 request's -- and each write below answers `restart_required` when the file
 has moved on from it.
@@ -974,8 +977,8 @@ Adds an entry through the same comment-preserving transform the CLI uses,
 byte-identical. Body: `name` and `members` (role -> a backend's name, or
 `{backend, context_size?, toolset?}`) required; `description`,
 `consultable` (a list of roles), `consult_caps` (`{per_turn?,
-brief_tokens?, answer_tokens?}`) and `validate` (`{verifier?, tool_args?,
-extraction?, answers?}`) optional. The CLI's rules, answered as
+brief_tokens?, answer_tokens?}`), `validate` (`{verifier?, tool_args?,
+extraction?, answers?}`) and `orchestrate` (a boolean) optional. The CLI's rules, answered as
 `400`: a name that is not `off` (`/suite off` means no suite), at least one
 member, every member a configured backend, a positive window, known toolset
 words, one backend pinned one way -- and each consultable role one that
@@ -983,7 +986,11 @@ answers, with a member in the suite whose backend's provider says it is not
 billed per call (asked as the CLI asks it: a consult runs on the model's
 initiative, which never spends), every cap positive -- and a verifier that
 can check (not `chat`, not `embedding`) with a member in the suite whose
-provider says it is not billed per call, held the same way. `201
+provider says it is not billed per call, held the same way -- and, with
+`orchestrate` on, every member a symphony the suite would offer reaches,
+resolved through the one role chain, not billed per call by its provider's
+word (a play the model starts runs on its initiative, which never spends).
+`201
 {"data": {…}, "restart_required"}`; `409` when the name exists -- `PUT`
 replaces.
 
@@ -1043,6 +1050,18 @@ place and every other line of the entry is left as it was. `200 {"data":
 {…}, "restart_required"}`; `404` when the suite is not configured, `400`
 under the CLI's rules -- a verifier with no member, or one billed per call,
 among them.
+
+### `PUT /v1/admin/suites/{id}/orchestrate`
+
+The twin of `apogee config set-suite --orchestrate on|off` (27t): whether an
+`apogee execute` session under the suite offers its chat model the
+symphonies as tools. Body `{"orchestrate": true | false}`; `true` writes
+`orchestrate: true` and `false` removes the key, in place, every other line
+of the entry left as it was. `200 {"data": {…}, "restart_required"}`; `404`
+when the suite is not configured, `400` under the CLI's rules -- a member a
+symphony reaches that is billed per call (named, with the symphony and its
+stage), or a provider that cannot be asked, among them. The member route
+above holds a suite that orchestrates to the same rule.
 
 ### `POST /v1/admin/knowledge`
 

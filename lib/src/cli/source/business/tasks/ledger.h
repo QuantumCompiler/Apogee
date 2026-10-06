@@ -47,6 +47,11 @@ inline constexpr std::string_view kLockFileName = "task.lock";
 /// The time now, as every record stamps it.
 [[nodiscard]] std::string now_timestamp();
 
+/// `at`, as every record stamps it. A new task's id and its `created_at` are
+/// both made from one reading of the clock, so a task listed as created in a
+/// second carries that second's id -- the order `list_tasks` relies on.
+[[nodiscard]] std::string timestamp(std::chrono::system_clock::time_point at);
+
 /// Writes the ledger through a temp file and a rename, creating the
 /// directory. The error text, or empty.
 [[nodiscard]] std::string save_task(const std::filesystem::path& root, const Task& task);

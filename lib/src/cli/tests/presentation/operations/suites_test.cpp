@@ -2,11 +2,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "contracts/config.h"
+#include "symphony/definition.h"
 
 /// The suite rules both surfaces share (27d): what a write may say, what a
 /// run under the active suite may rely on, and what may not be deleted.
@@ -186,4 +188,58 @@ TEST_CASE("a verifier is written only when its provider says it is local and unm
     removed.members.erase("utility");
     CHECK(validate_suite(config, "s", removed, local).find("the verifier is the utility member") !=
           std::string::npos);
+}
+
+TEST_CASE("orchestrate is written only when every member a symphony reaches is local and unmetered",
+          "[operations][suites][orchestrate]") {
+    using apogee::commands::MeteredAnswer;
+    using apogee::commands::MeteredProbe;
+    using apogee::commands::validate_suite_orchestrate;
+    const Config config = apogee::harness::parse_config(
+        "models:\n  default: root\nbackends:\n  root:\n    type: mock\n  helper:\n    type: mock\n"
+        "  paid:\n    type: mock\n  eyes:\n    type: mock\n",
+        "<test>");
+    // The starters, compiled in: extract-facts (extraction), summarize-verify
+    // (utility, chat) and describe-answer (vision, chat) -- that one takes an
+    // image, so it is never offered and never asked about.
+    const apogee::symphony::Catalog symphonies =
+        apogee::symphony::catalog(config, "/nonexistent/symphonies");
+    SuiteConfig suite;
+    suite.members["chat"] = {.backend = "root"};
+    suite.members["utility"] = {.backend = "helper"};
+    suite.members["vision"] = {.backend = "eyes"};
+    suite.orchestrate = true;
+    std::vector<std::string> asked;
+    const MeteredProbe paid_billed = [&asked](const Config&, std::string_view backend) {
+        asked.emplace_back(backend);
+        return MeteredAnswer{.metered = backend == "paid" || backend == "eyes"};
+    };
+    CHECK(validate_suite(config, "s", suite, paid_billed, &symphonies).empty());
+    // Each backend asked once, the one a role resolves to -- extraction, with
+    // no member, falls to the conversation -- and never the vision member,
+    // which nothing offered reaches.
+    std::ranges::sort(asked);
+    CHECK(asked == std::vector<std::string>{"helper", "root"});
+
+    // A billed member a symphony reaches: refused, naming the symphony, its
+    // stage, the role and the backend.
+    SuiteConfig billed = suite;
+    billed.members["utility"] = {.backend = "paid"};
+    CHECK(validate_suite(config, "s", billed, paid_billed, &symphonies) ==
+          "orchestrate: 'summarize-verify' reaches utility ('paid') through its summarize stage "
+          "(utility), and 'paid' is billed per call -- a play the model starts runs on its "
+          "initiative, which never spends: only a suite whose symphonies reach local, unmetered "
+          "members can orchestrate");
+    // Off is always writable; the same suite without orchestration passes.
+    billed.orchestrate = false;
+    CHECK(validate_suite(config, "s", billed, paid_billed, &symphonies).empty());
+    // Unknown is metered, and no catalog is unknown.
+    const MeteredProbe unknown = [](const Config&, std::string_view) {
+        return MeteredAnswer{.metered = false, .unknown = "no API key"};
+    };
+    CHECK(validate_suite_orchestrate(config, "s", suite, unknown, &symphonies)
+              .find("cannot be told (no API key) -- unknown is metered") != std::string::npos);
+    CHECK(validate_suite_orchestrate(config, "s", suite, paid_billed, nullptr)
+              .starts_with("orchestrate: the symphonies cannot be read here"));
+    CHECK(validate_suite(config, "s", suite).starts_with("orchestrate: "));
 }

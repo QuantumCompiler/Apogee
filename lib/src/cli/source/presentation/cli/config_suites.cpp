@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <iostream>
 #include <map>
@@ -14,6 +15,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
 #include "operations/suites.h"
+#include "symphony/definition.h"
 
 namespace apogee::commands {
 namespace {
@@ -116,7 +118,12 @@ struct MemberFlags {
     std::optional<std::string> verifier;
     /// `--validate SEAM=VALUE`, each; `off` clears the block.
     std::vector<std::string> validate;
+    /// `--orchestrate on|off`, when given (27t).
+    std::optional<std::string> orchestrate;
 };
+
+/// What `--orchestrate` takes (27t).
+constexpr std::array<std::string_view, 2> kOrchestrateWords{"on", "off"};
 
 /// `tool_args=`, ...: what `--validate` offers, and `off`.
 const std::vector<std::string>& seam_prefixes() {
@@ -201,6 +208,13 @@ void bind_member_flags(CLI::App& cmd, MemberFlags& flags) {
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
+    cmd.add_option_function<std::string>(
+           "--orchestrate", [&flags](const std::string& value) { flags.orchestrate = value; },
+           "Let an execute session's chat model play the suite's symphonies on its own "
+           "initiative, each offered as a tool: on or off -- symphonies reaching local, "
+           "unmetered members only")
+        ->type_name(words_value(kOrchestrateWords))
+        ->expected(1);
 }
 
 /// `--validate SEAM=on|off`'s value: on, off, or empty for the default.
@@ -264,6 +278,24 @@ void apply_validate(SuiteConfig& suite, const MemberFlags& flags) {
         const std::string role = trimmed_word(*flags.verifier);
         suite.validate.verifier = role.empty() ? std::nullopt : std::optional<std::string>{role};
     }
+}
+
+/// The orchestrate flag applied onto `suite` (27t): `on` or `off`.
+void apply_orchestrate(SuiteConfig& suite, const MemberFlags& flags) {
+    if (!flags.orchestrate.has_value()) {
+        return;
+    }
+    const std::string value = trimmed_word(*flags.orchestrate);
+    if (std::ranges::find(kOrchestrateWords, value) == kOrchestrateWords.end()) {
+        fail("--orchestrate " + *flags.orchestrate + ": on or off");
+    }
+    suite.orchestrate = value == kOrchestrateWords.front();
+}
+
+/// The symphonies a suite in the config at `path` would offer the model
+/// (27t): every source, the spec files beside that config's data.
+symphony::Catalog symphonies_for(const Config& config, const std::filesystem::path& path) {
+    return symphony::catalog(config, symphony::directory_for(path));
 }
 
 /// A suite's validation as it holds -- `verifier utility (default),
@@ -415,8 +447,10 @@ void bind_add_suite(CLI::App& parent, const RootContext& context) {
         apply_knobs(suite, flags->members);
         apply_consult(suite, flags->members);
         apply_validate(suite, flags->members);
-        if (const std::string refused =
-                validate_suite(config, flags->name, suite, provider_metered_probe(path));
+        apply_orchestrate(suite, flags->members);
+        const symphony::Catalog symphonies = symphonies_for(config, path);
+        if (const std::string refused = validate_suite(config, flags->name, suite,
+                                                       provider_metered_probe(path), &symphonies);
             !refused.empty()) {
             fail("add-suite: " + refused);
         }
@@ -487,8 +521,10 @@ void bind_set_suite(CLI::App& parent, const RootContext& context) {
         apply_knobs(after, flags->members);
         apply_consult(after, flags->members);
         apply_validate(after, flags->members);
-        if (const std::string refused =
-                validate_suite(config, flags->name, after, provider_metered_probe(path));
+        apply_orchestrate(after, flags->members);
+        const symphony::Catalog symphonies = symphonies_for(config, path);
+        if (const std::string refused = validate_suite(config, flags->name, after,
+                                                       provider_metered_probe(path), &symphonies);
             !refused.empty()) {
             fail("set-suite: " + refused);
         }
@@ -496,7 +532,7 @@ void bind_set_suite(CLI::App& parent, const RootContext& context) {
             fail(
                 "set-suite: nothing to change -- name a member with --<role>, or pass "
                 "--context-size, --toolset, --unpin, --remove, --consultable, --consult-cap, "
-                "--verifier or --validate");
+                "--verifier, --validate or --orchestrate");
         }
         // One member at a time, each in place: every other line of the
         // entry, its comments included, stays as it was.
@@ -521,6 +557,9 @@ void bind_set_suite(CLI::App& parent, const RootContext& context) {
             }
             if (after.validate != before.validate) {
                 edited = harness::set_suite_validate(edited, flags->name, after.validate);
+            }
+            if (after.orchestrate != before.orchestrate) {
+                edited = harness::set_suite_orchestrate(edited, flags->name, after.orchestrate);
             }
             return edited;
         });
@@ -661,6 +700,9 @@ std::optional<std::string> suite_lookup(const Config& config, std::string_view k
         if (suite->validate.any()) {
             lines.push_back("validate: " + describe_validate(*suite));
         }
+        if (suite->orchestrate) {
+            lines.emplace_back("orchestrate: on");
+        }
         return joined(lines, "\n");
     }
     const std::string_view field = rest.substr(dot + 1);
@@ -675,6 +717,9 @@ std::optional<std::string> suite_lookup(const Config& config, std::string_view k
     }
     if (field == "validate") {
         return describe_validate(*suite);
+    }
+    if (field == "orchestrate") {
+        return std::string{suite->orchestrate ? "on" : "off"};
     }
     const std::span<const std::string_view> roles = harness::suite_role_names();
     if (std::ranges::find(roles, field) == roles.end()) {
@@ -709,6 +754,7 @@ void append_suite_keys(const Config& config, std::vector<std::string>& keys) {
         keys.push_back(prefix + ".consultable");
         keys.push_back(prefix + ".consult_caps");
         keys.push_back(prefix + ".validate");
+        keys.push_back(prefix + ".orchestrate");
         for (const std::string_view role : harness::suite_role_names()) {
             keys.push_back(prefix + "." + std::string{role});
         }

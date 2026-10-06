@@ -137,6 +137,8 @@ public:
     [[nodiscard]] HttpResponse set_suite_consult(const HttpRequest& request, std::string_view name);
     [[nodiscard]] HttpResponse set_suite_validate(const HttpRequest& request,
                                                   std::string_view name);
+    [[nodiscard]] HttpResponse set_suite_orchestrate(const HttpRequest& request,
+                                                     std::string_view name);
 
     /// The datasets slice -- the twins of `apogee datasets`; synth is the
     /// plane's third job kind (teacher inference, not training).

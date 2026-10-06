@@ -373,3 +373,58 @@ TEST_CASE("a suite's validation over HTTP is byte-identical to the CLI's",
     CHECK(moved.status == 400);
     CHECK(moved.body.find("validate: 'embedder' is billed per call") != std::string::npos);
 }
+
+TEST_CASE("a suite's orchestration over HTTP is byte-identical to the CLI's",
+          "[httpserver][admin][suites][parity][orchestrate]") {
+    const Fixture fixture;
+    AdminConfigContext context = fixture.context();
+    context.metered = apogee::commands::provider_metered_probe(fixture.http_config);
+
+    // add-suite --orchestrate on <-> POST with `orchestrate`.
+    REQUIRE(fixture.cli({"config", "add-suite", "research", "--chat", "root", "--utility", "helper",
+                         "--orchestrate", "on"}) == 0);
+    const HttpResponse created = admin_create_suite(
+        context, with_body("POST", {{"name", "research"},
+                                    {"members", {{"chat", "root"}, {"utility", "helper"}}},
+                                    {"orchestrate", true}}));
+    REQUIRE(created.status == 201);
+    CHECK(fixture.same());
+    CHECK(parsed(created)["data"]["orchestrate"] == true);
+
+    // set-suite --orchestrate off|on <-> PUT orchestrate, in place.
+    REQUIRE(fixture.cli({"config", "set-suite", "research", "--orchestrate", "off"}) == 0);
+    const HttpResponse off = apogee::httpserver::admin_set_suite_orchestrate(
+        context, "research", with_body("PUT", {{"orchestrate", false}}));
+    REQUIRE(off.status == 200);
+    CHECK(fixture.same());
+    CHECK_FALSE(parsed(off)["data"].contains("orchestrate"));
+    REQUIRE(fixture.cli({"config", "set-suite", "research", "--orchestrate", "on"}) == 0);
+    REQUIRE(apogee::httpserver::admin_set_suite_orchestrate(
+                context, "research", with_body("PUT", {{"orchestrate", true}}))
+                .status == 200);
+    CHECK(fixture.same());
+
+    // Refused alike, the file untouched: a member a symphony reaches that
+    // bills per call -- moved there by the member route too -- a body that
+    // is not a switch, a suite not configured, and no probe at all.
+    const std::string before = Fixture::bytes(fixture.http_config);
+    AdminConfigContext billing = context;
+    billing.metered = [](const apogee::harness::Config&, std::string_view backend) {
+        return apogee::commands::MeteredAnswer{.metered = backend == "embedder"};
+    };
+    const HttpResponse moved = admin_set_suite_member(
+        billing, "research", with_body("PUT", {{"role", "utility"}, {"member", "embedder"}}));
+    CHECK(moved.status == 400);
+    CHECK(moved.body.find("orchestrate: 'summarize-verify' reaches utility ('embedder')") !=
+          std::string::npos);
+    CHECK(apogee::httpserver::admin_set_suite_orchestrate(context, "research",
+                                                          with_body("PUT", {{"orchestrate", "on"}}))
+              .status == 400);
+    CHECK(apogee::httpserver::admin_set_suite_orchestrate(context, "nope",
+                                                          with_body("PUT", {{"orchestrate", true}}))
+              .status == 404);
+    CHECK(apogee::httpserver::admin_set_suite_orchestrate(fixture.context(), "research",
+                                                          with_body("PUT", {{"orchestrate", true}}))
+              .status == 400);  // no probe: whether a member bills cannot be told
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+}

@@ -165,6 +165,7 @@ Options:
   -v,--verbose                Print progress notes
   --resume CHAT               Resume a saved conversation by id or name
   --suite MODEL_SUITE         Run under this suite -- its members answer for the roles it names, its symphonies play on them (default: models.default_suite)
+  --orchestrate               Let the suite's chat model play its symphonies on its own initiative, each offered to it as a tool, on local members only (as the suite's orchestrate: true does)
   --warm                      Load the suite's members now, on the progress line, rather than at first use
   --force                     Run the suite even when what it takes is over this machine's memory
   -q,--quiet                  No progress line while the suite's members load
@@ -197,6 +198,7 @@ Options:
 --no-color
 --no-fetch
 --no-recall
+--orchestrate
 --output-format
 --quiet
 --rag

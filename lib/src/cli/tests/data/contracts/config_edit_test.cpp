@@ -1535,6 +1535,52 @@ TEST_CASE("setting a suite's validate: block leaves every other line as it was",
                     ConfigEditError);
 }
 
+TEST_CASE("a suite's orchestrate: is written last, only when on, and round-trips",
+          "[config_edit][golden][suites][orchestrate]") {
+    using apogee::harness::append_suite;
+    apogee::harness::SuiteConfig suite = research_suite();
+    suite.validate.tool_args = true;
+    suite.orchestrate = true;
+    const std::string added = append_suite(kCommented, "research", suite, false);
+    require_parses(added);
+    CHECK(added.ends_with("    validate:\n      tool_args: on\n    orchestrate: true\n"));
+    CHECK(*apogee::harness::parse_config(added, "<test>").find_suite("research") == suite);
+    CHECK(apogee::harness::delete_suite(added, "research") ==
+          std::string{kCommented} + "\nsuites:\n");
+    // Off is absent: nothing written.
+    suite.orchestrate = false;
+    CHECK(append_suite(kCommented, "research", suite, false).find("orchestrate") ==
+          std::string::npos);
+}
+
+TEST_CASE("setting a suite's orchestrate: leaves every other line as it was",
+          "[config_edit][golden][suites][orchestrate]") {
+    using apogee::harness::set_suite_orchestrate;
+    const std::string hand{kHandSuite};
+    // On: added at the entry's end.
+    const std::string on = set_suite_orchestrate(hand, "research", true);
+    require_parses(on);
+    std::string expected = hand;
+    expected.insert(expected.find("  fast:\n"), "    orchestrate: true\n");
+    CHECK(on == expected);
+    CHECK(apogee::harness::parse_config(on, "<test>").find_suite("research")->orchestrate);
+    // On again: unchanged. Off: the key removed, the file as it was.
+    CHECK(set_suite_orchestrate(on, "research", true) == on);
+    CHECK(set_suite_orchestrate(on, "research", false) == hand);
+    CHECK(set_suite_orchestrate(hand, "research", false) == hand);
+    // A hand-written value, with a comment above it: replaced in place, the
+    // comment kept.
+    const std::string commented = std::string{kHandSuite}.insert(
+        std::string{kHandSuite}.find("  fast:\n"), "    # plays on its own\n    orchestrate: on\n");
+    require_parses(commented);
+    CHECK(set_suite_orchestrate(commented, "research", true) ==
+          std::string{kHandSuite}.insert(std::string{kHandSuite}.find("  fast:\n"),
+                                         "    # plays on its own\n    orchestrate: true\n"));
+    // The last suite: at the file's end.
+    CHECK(set_suite_orchestrate(hand, "fast", true).ends_with("    orchestrate: true\n"));
+    CHECK_THROWS_AS((void)set_suite_orchestrate(hand, "nope", true), ConfigEditError);
+}
+
 TEST_CASE("attachments.graph is set through the one editor, every comment kept",
           "[config_edit][attachments]") {
     using apogee::harness::AttachmentGraphMethod;

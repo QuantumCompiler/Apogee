@@ -35,10 +35,12 @@ class Option;
 /// **The mode changes exactly what execute is, and nothing else**: the
 /// command's name in what it says; a suite required -- named, resumed or the
 /// config's default, never `off` -- with the way to configure one when there
-/// is none; the banner's symphony count; the table's execute rows; and in
-/// machine mode a `user` line that is a `/play` command played as one. Chat's
-/// whole surface is held byte for byte to what it was before the core was
-/// shared (`chat_session_test`'s golden).
+/// is none; the banner's symphony count; the table's execute rows; in
+/// machine mode a `user` line that is a `/play` command played as one; and
+/// since 27t the Orchestrator -- `--orchestrate`, or the suite's
+/// `orchestrate: true`, offering the root model the symphonies as tools
+/// (`symphony/tools`). Chat's whole surface is held byte for byte to what it
+/// was before the core was shared (`chat_session_test`'s golden).
 namespace apogee::commands {
 
 /// The command a `mode` session is: `chat` or `execute`.
@@ -113,6 +115,9 @@ struct SessionFlags {
     bool warm = false;
     /// Run the suite even when its footprint is over the machine's budget.
     bool force = false;
+    /// Execute only (27t): offer the suite's root model the symphonies as
+    /// tools for this session, as a suite's `orchestrate: true` does.
+    bool orchestrate = false;
     /// No busy line while the members load.
     bool quiet = false;
     /// The arbitrary-branch review: the git tools' defaults and a system
@@ -148,10 +153,17 @@ void run_session(const RootContext& context, const SessionFlags& flags,
 
 /// The line a session opens with on a terminal, after its tag: the model --
 /// `· base model` when it is one (26r) -- the suite (27d, 27e), under execute
-/// how many symphonies it can play (27s), the chat's id, and where the
-/// commands are.
+/// how many symphonies it can play (27s) and, when it orchestrates, how many
+/// of them its model is offered as tools (`orchestrated`, 27t; nullopt when
+/// it does not), the chat's id, and where the commands are.
 [[nodiscard]] std::string session_banner(SessionMode mode, std::string_view model, bool base_model,
                                          std::string_view suite, bool forced,
-                                         std::size_t symphonies, std::string_view chat_id);
+                                         std::size_t symphonies,
+                                         std::optional<std::size_t> orchestrated,
+                                         std::string_view chat_id);
+
+/// The banner's word for what an orchestrating session offers its model
+/// (27t): `orchestrating 2`, or `orchestrating none`.
+[[nodiscard]] std::string orchestration_count(std::size_t offered);
 
 }  // namespace apogee::commands

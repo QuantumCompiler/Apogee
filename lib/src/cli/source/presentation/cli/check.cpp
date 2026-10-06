@@ -42,12 +42,14 @@
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "operations/graph_sources.h"
+#include "operations/suites.h"
 #include "platform/child_process.h"
 #include "platform/ffmpeg.h"
 #include "platform/platform.h"
 #include "scaffold/agent.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
+#include "symphony/definition.h"
 #include "tools/toolsets.h"
 #include "training/cycle.h"
 #include "training/kit.h"
@@ -224,8 +226,11 @@ void check_role_pointer(CheckReport& report, const harness::Config& config,
 /// hand-edited one that does fails here, where the config verbs would have
 /// refused it -- and the row names whom the root may consult. Since 27g the
 /// verifier is held the same way, and the row names the seams it checks.
+/// Since 27t a suite that orchestrates is held to the config verbs' own rule
+/// -- every member a symphony it would offer reaches local and unmetered --
+/// over `symphonies`, and the row says it orchestrates.
 void check_suites(CheckReport& report, const harness::Config& config, const backends::MlxHost& host,
-                  const MeteredProbe& metered) {
+                  const MeteredProbe& metered, const symphony::Catalog& symphonies) {
     const harness::SuiteConfig* active = harness::active_suite(config);
     for (const auto& [name, suite] : config.suites) {
         const std::string label = "suite: " + name;
@@ -327,6 +332,18 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
                 }
             }
         }
+        // A play the model starts is a member call too (27t): the rule the
+        // config verbs hold `orchestrate: true` to, asked of a hand-edited
+        // file or a symphony added since.
+        if (!reported && suite.orchestrate) {
+            if (const std::string refused =
+                    validate_suite_orchestrate(config, name, suite, metered, &symphonies);
+                !refused.empty()) {
+                add(report, Status::Fail, "Config", label, refused,
+                    "apogee config set-suite " + name + " --orchestrate off");
+                reported = true;
+            }
+        }
         if (!reported) {
             std::string consult;
             for (const std::string& role : suite.consultable) {
@@ -346,8 +363,14 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
                 validate = "  · validate: " + (seams.empty() ? std::string{"on request"} : seams) +
                            " (verifier " + policy.verifier + ")";
             }
-            add(report, Status::Ok, "Config", label,
-                members + consult + validate + (active == &suite ? "  -- the default suite" : ""));
+            std::string detail = members + consult + validate;
+            if (suite.orchestrate) {
+                detail += "  · orchestrates";
+            }
+            if (active == &suite) {
+                detail += "  -- the default suite";
+            }
+            add(report, Status::Ok, "Config", label, detail);
         }
     }
 }
@@ -543,7 +566,8 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                        config.models.default_transcription, Medium::Audio);
     check_role_pointer(report, config, host, "default_utility", config.models.default_utility);
     check_suites(report, config, host,
-                 inputs.metered ? inputs.metered : provider_metered_probe(inputs.config_path));
+                 inputs.metered ? inputs.metered : provider_metered_probe(inputs.config_path),
+                 symphony::catalog(config, symphony::directory_for(inputs.config_path)));
 
     // Collections: a typo in `retriever:` must never silently mean auto, and a
     // `rerank:` or `backend:` must name something that exists. The validator

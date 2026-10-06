@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -35,6 +36,14 @@ namespace apogee::agentloop {
 /// the loop's tool selection can keep it on offer without reaching up into
 /// `tools/`.
 inline constexpr std::string_view kConsultToolName = "consult";
+
+/// What every symphony's tool is named after (27t): `play_<symphony>` -- a
+/// name no native or MCP tool takes, valid as a tool name on every vendor
+/// whatever the symphony is called, and the mark by which selection keeps the
+/// symphony tools on offer. Declared here, beside consult's, for the same
+/// reason: the loop's selection reads it without reaching up into
+/// `symphony/`.
+inline constexpr std::string_view kPlayToolPrefix = "play_";
 
 /// The role `name` spells, as `members:`, `consultable:` and `validate:`
 /// name one; nullopt for a word that names none.
@@ -171,8 +180,14 @@ public:
         MemberCalls* calls_;
     };
 
+    /// A line the turn's surface keeps -- a play the model started and could
+    /// not run, said rather than silent (27t).
+    using NoticeSink = std::function<void(std::string_view)>;
+
     /// Opens a turn. Throws std::logic_error when one is already open.
-    [[nodiscard]] Turn begin_turn(SideCallSink narrate, harness::CancellationToken cancellation);
+    /// `notice` is where `notice()` says a line; null drops it.
+    [[nodiscard]] Turn begin_turn(SideCallSink narrate, harness::CancellationToken cancellation,
+                                  NoticeSink notice = {});
 
     /// Consults the member `role` names under the active suite, with `brief`:
     /// refused when no turn is open, when the role is not consultable there,
@@ -191,6 +206,16 @@ public:
         return used_;
     }
 
+    /// Where this turn's model calls are said (26n): a consumer narrating
+    /// what wraps its calls -- a play the model started (27t) -- says it
+    /// beside them. Null when no turn is open.
+    [[nodiscard]] const SideCallSink& narration() const noexcept {
+        return narrate_;
+    }
+
+    /// Says `line` as a kept line on this turn's surface, when it gave one.
+    void notice(std::string_view line) const;
+
     [[nodiscard]] bool in_turn() const noexcept {
         return in_turn_;
     }
@@ -200,6 +225,7 @@ private:
     bool in_turn_ = false;
     std::int64_t used_ = 0;
     SideCallSink narrate_;
+    NoticeSink notice_;
     harness::CancellationToken cancellation_;
 };
 

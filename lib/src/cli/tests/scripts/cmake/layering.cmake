@@ -433,7 +433,8 @@ endif()
 # its validation, the stage walk and its view. Its model calls are the one
 # member call's (`agentloop/member_call`), so it may include the loop, the
 # harness, the contracts, the platform seam and itself -- never a backend,
-# which would make a second calling path, and never a surface.
+# which would make a second calling path, and never a surface. Since 27t it
+# projects each definition as a tool, so the tool registry (`agent/`) too.
 file(GLOB_RECURSE symphony_sources "${PACKAGE_DIR_symphony}/*.h"
                                    "${PACKAGE_DIR_symphony}/*.cpp")
 if(symphony_sources STREQUAL "")
@@ -443,7 +444,7 @@ endif()
 foreach(source IN LISTS symphony_sources)
     file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
     foreach(line IN LISTS project_includes)
-        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(symphony|agentloop|harness|contracts|platform)/")
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(symphony|agent|agentloop|harness|contracts|platform)/")
             get_filename_component(name "${source}" NAME)
             list(APPEND VIOLATIONS "  symphony/${name} reaches a surface: ${line}")
         endif()
@@ -452,7 +453,7 @@ endforeach()
 if(NOT VIOLATIONS STREQUAL "")
     string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
     message(FATAL_ERROR "the symphony package includes a surface:\n${pretty}\n"
-                        "symphony/ may include only agentloop/, harness/, contracts/, "
+                        "symphony/ may include only agent/, agentloop/, harness/, contracts/, "
                         "platform/ and itself.")
 endif()
 

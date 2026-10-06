@@ -445,6 +445,63 @@ TEST_CASE("the suite verbs switch validation seams and name the verifier, refusi
                     ->validate.any());
 }
 
+TEST_CASE(
+    "the suite verbs switch orchestration, refusing a suite whose symphonies reach a billed "
+    "member",
+    "[commands][config][suites][orchestrate]") {
+    const CliHome probe{""};
+    const std::filesystem::path script = probe.home() / "paid.json";
+    {
+        std::ofstream out{script};
+        out << R"({"metered": true, "turns": [{"text": "paid"}]})";
+    }
+    const CliHome home{std::string{kSuiteConfig} +
+                       "  paid:\n    type: mock\n    model_path: " + script.string() + "\n"};
+    std::string out;
+    REQUIRE(home.run({"config", "add-suite", "research", "--chat", "root", "--utility", "helper",
+                      "--orchestrate", "on"},
+                     &out) == 0);
+    INFO(out);
+    CHECK(
+        home.config_text().ends_with("\nsuites:\n  research:\n    members:\n      chat: root\n"
+                                     "      utility: helper\n    orchestrate: true\n"));
+    REQUIRE(home.run({"config", "get", "suites.research.orchestrate"}, &out) == 0);
+    CHECK(out == "on\n");
+    REQUIRE(home.run({"config", "get", "suites.research"}, &out) == 0);
+    CHECK(out == "chat: root\nutility: helper\norchestrate: on\n");
+
+    // At config time, through the one editor's verbs: a member a symphony
+    // reaches that bills per call is refused, naming member and symphony, and
+    // the file is left as it was.
+    const std::string before = home.config_text();
+    const std::vector<std::pair<std::vector<std::string>, std::string>> refused{
+        {{"config", "set-suite", "research", "--utility", "paid"},
+         "set-suite: orchestrate: 'summarize-verify' reaches utility ('paid') through its "
+         "summarize stage (utility), and 'paid' is billed per call -- a play the model starts "
+         "runs on its initiative, which never spends"},
+        {{"config", "add-suite", "x", "--chat", "paid", "--orchestrate", "on"},
+         "add-suite: orchestrate: 'summarize-verify' reaches utility ('paid') through its "
+         "summarize stage (utility)"},
+        {{"config", "set-suite", "research", "--orchestrate", "maybe"},
+         "--orchestrate maybe: on or off"},
+    };
+    for (const auto& [args, said] : refused) {
+        INFO(said);
+        CHECK(home.run(args, &out) != 0);
+        CHECK(out.find(said) != std::string::npos);
+        CHECK(home.config_text() == before);
+    }
+    // Off removes the key; on writes it back in place.
+    REQUIRE(home.run({"config", "set-suite", "research", "--orchestrate", "off"}, &out) == 0);
+    CHECK(home.config_text().ends_with("      utility: helper\n"));
+    REQUIRE(home.run({"config", "get", "suites.research.orchestrate"}, &out) == 0);
+    CHECK(out == "off\n");
+    // Off, the billed member is the suite's business alone.
+    REQUIRE(home.run({"config", "set-suite", "research", "--utility", "paid"}, &out) == 0);
+    CHECK(home.run({"config", "set-suite", "research", "--orchestrate", "on"}, &out) != 0);
+    CHECK(out.find("'paid' is billed per call") != std::string::npos);
+}
+
 TEST_CASE("config get reads attachments.graph: empty unset, the word the editor wrote",
           "[commands][config][attachments]") {
     // 27p: no verb writes the block -- the one editor does, or a hand edit --

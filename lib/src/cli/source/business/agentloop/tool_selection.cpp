@@ -76,6 +76,11 @@ const std::vector<std::string>& core_tools() {
     return core;
 }
 
+bool is_core_tool(std::string_view name) {
+    return name.starts_with(kPlayToolPrefix) ||
+           std::ranges::find(core_tools(), name) != core_tools().end();
+}
+
 harness::Tool find_tools_tool(const std::vector<std::string>& hidden) {
     harness::Tool tool;
     tool.name = std::string{kFindToolsName};
@@ -374,6 +379,14 @@ ToolOffer ToolSelection::begin_turn(std::string_view query,
                 });
             if (registered) {
                 offered_.insert(name);
+            }
+        }
+        // Every symphony's tool too (27t): orchestration is the user's
+        // opt-in to the model choosing among them, and a choice ranked out of
+        // the offer is no choice at all -- consult's lesson (27f).
+        for (const harness::Tool& tool : ranker_->tools()) {
+            if (is_core_tool(tool.name)) {
+                offered_.insert(tool.name);
             }
         }
         for (const std::string& name : offer.ranked) {

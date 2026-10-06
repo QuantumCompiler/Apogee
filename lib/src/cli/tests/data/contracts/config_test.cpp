@@ -1411,6 +1411,27 @@ TEST_CASE("a suite's validate: block opts each seam in, and names its verifier",
     CHECK(apogee::harness::kDefaultVerifier == "utility");
 }
 
+TEST_CASE("a suite's orchestrate: switch reads as a validate seam does, off when absent",
+          "[config][suites][orchestrate]") {
+    const std::string members = "    members:\n      chat: root\n      utility: helper\n";
+    const Config config =
+        load_text(with_suites("  plays:\n" + members + "    orchestrate: true\n" + "  word:\n" +
+                              members + "    orchestrate: on\n" + "  quiet:\n" + members +
+                              "    orchestrate: false\n" + "  plain:\n" + members));
+    CHECK(config.find_suite("plays")->orchestrate);
+    CHECK(config.find_suite("word")->orchestrate);
+    CHECK_FALSE(config.find_suite("quiet")->orchestrate);
+    CHECK_FALSE(config.find_suite("plain")->orchestrate);
+    try {
+        (void)load_text(with_suites("  s:\n" + members + "    orchestrate: maybe\n"));
+        FAIL("expected a ConfigError");
+    } catch (const ConfigError& e) {
+        CHECK_THAT(std::string{e.what()},
+                   Catch::Matchers::ContainsSubstring(
+                       "suites.s.orchestrate: expected on or off, not 'maybe'"));
+    }
+}
+
 TEST_CASE("a validation that cannot hold is refused at load, by name",
           "[config][suites][validate]") {
     const std::string members = "  s:\n    members:\n      chat: root\n      utility: helper\n";

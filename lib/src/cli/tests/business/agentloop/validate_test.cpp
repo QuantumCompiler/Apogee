@@ -736,8 +736,8 @@ suites:
     const Check spent = run_checks({}, &verifier, [] { return std::string{"Check again."}; });
     CHECK(spent.outcome == Check::Outcome::Unchecked);
     CHECK(spent.note ==
-          "the turn's member-call budget is spent (2 of 2, consults and checks together) -- "
-          "checked by structure only");
+          "the turn's member-call budget is spent (2 of 2, plays, consults and checks together) "
+          "-- checked by structure only");
     CHECK(mocks["helper"]->requests().size() == 2);
     // And a consult finds it spent too.
     CHECK_THAT(calls.consult("utility", "more").refused,
