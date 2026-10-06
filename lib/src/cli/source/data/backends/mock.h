@@ -35,8 +35,10 @@ struct MockTurn {
     /// in the request, `{{last_user}}` the last user message as it was sent
     /// (an inlined attachment and all), `{{system}}` the concatenated system
     /// messages; the
-    /// `{{last_tool_result:json}}` / `{{system:json}}` forms expand to a
-    /// JSON string literal, quotes included, for use inside a JSON answer.
+    /// `{{last_tool_result:json}}` / `{{system:json}}` / `{{last_user:json}}`
+    /// forms expand to a JSON string literal, quotes included, for use inside
+    /// a JSON answer (the last, 27r: a schema stage's answer that carries the
+    /// brief it was sent).
     /// `{{thinking}}` is the thinking the request asked for -- `on`, `off`
     /// or `auto`, with `:N` for a budget (26i). `{{tool_count}}` is how many
     /// tool definitions the request carried (26r), `{{tool_names}}` their

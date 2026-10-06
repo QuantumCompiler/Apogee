@@ -360,11 +360,16 @@ serves; their shape is in
 `symphony` (its name), `suite` (the active suite's, `null` for none), `output`
 (the last stage's answer) and `stages` — each `name`, `role`, `backend` (the one
 that answered), `answer`, `cut` (it reached its cap), `tokens` when the provider
-said, and `seconds`. A play is not a turn and emits no events: a host drives it
-as a command, the input as `--input` or on stdin. A play that stops — a stage
-refused or failed, an answer outside its stage's schema — prints nothing on
-stdout and exits `1` (refused before anything was sent) or `2` (a member's
-failure), the stage named on stderr.
+said, and `seconds`. Since 27r a stage may play another symphony: its entry
+in `stages` is `name`, `play` (the symphony it played), `answer` (that
+symphony's output), `cut`, `tokens` when any of its stages said, `seconds`,
+and `stages` — the played symphony's own, in this same shape, as deep as the
+play went. A play is not a turn and emits no events: a host drives it as a
+command, the input as `--input` or on stdin. A play that stops — a stage
+refused or failed, an answer outside its stage's schema, the whole walk's
+budget (`symphony_caps`) spent — prints nothing on stdout and exits `1`
+(refused, or the budget) or `2` (a member's failure), the stage named on
+stderr with its position (`outer → inner, stage 2/3 verify (chat): …`).
 
 ## What machine mode does not do
 

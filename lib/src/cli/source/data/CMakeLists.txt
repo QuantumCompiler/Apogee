@@ -18,6 +18,8 @@ apogee_add_module(contracts
     contracts/config_template.cpp
     contracts/config_edit.h
     contracts/config_edit.cpp
+    contracts/symphony_walk.h
+    contracts/symphony_walk.cpp
     contracts/host.h
     contracts/host.cpp
     contracts/assets.h

@@ -438,7 +438,12 @@ files under the data directory's `symphonies/`, each name once. Each item is
 brief_tokens?, answer_tokens?}], problems}` -- `source` one of `shipped`,
 `config`, `file`; `path` only for one read from a file; a stage's `schema` its
 JSON Schema as the text it was written in; `problems` empty for a definition
-that can be played. The list's `problems` names spec files that could not be
+that can be played. A stage that plays another symphony (27r) is `{name, play,
+input?, image}` -- `play` the symphony's name, `input` its template only when
+written (absent, the played symphony is given the previous stage's answer) --
+and a chain's `problems` include what it reaches: a loop, a nesting past
+`symphony_caps.depth`, a played name nothing defines, a played symphony that
+cannot be played, each named with its path. The list's `problems` names spec files that could not be
 read. Byte for byte what `apogee symphonies list --output-format json` prints.
 
 ### `POST /v1/admin/symphonies`
@@ -446,12 +451,14 @@ read. Byte for byte what `apogee symphonies list --output-format json` prints.
 The twin of `apogee symphonies create`. Body: the definition in the view's own
 shape -- `name` (required), `description`, `input: {description, image}`,
 `stages` (required: each `name`, `role`, `prompt`, and optionally `schema`,
-`image`, `brief_tokens`, `answer_tokens`) -- and `force`. Read back through the
+`image`, `brief_tokens`, `answer_tokens` -- or, for a stage that plays another
+symphony, `name`, `play` and optionally `input` and `image`) -- and `force`. Read back through the
 same parser and validation as the CLI's and written through its scaffold, so
 the config entry is byte-identical to the CLI's. A stage naming a backend (a
 `backend` or `model` key, or a `role` that is a configured backend) is `400`
 with the reason, as is any other refusal -- an unknown role, a template naming
-no earlier stage, a schema that is not one; `409` (`type: conflict`) when the
+no earlier stage, a schema that is not one, a stage that both plays a role and
+a symphony, a definition that would loop or nest past the cap; `409` (`type: conflict`) when the
 name exists without `force`. `201` with the definition's view (`200` when it
 replaced one). No restart is needed: a play reads the config each run.
 

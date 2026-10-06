@@ -92,7 +92,7 @@ std::optional<harness::SymphonySpec> spec_from(const nlohmann::json& body, std::
     }
     const auto stages = body.find("stages");
     if (stages == body.end() || !stages->is_array()) {
-        error = "stages must be a list of stages (name, role, prompt)";
+        error = "stages must be a list of stages (name, role, prompt -- or name, play, input)";
         return std::nullopt;
     }
     std::size_t index = 0;
@@ -105,7 +105,9 @@ std::optional<harness::SymphonySpec> spec_from(const nlohmann::json& body, std::
         harness::SymphonyStage stage;
         stage.name = text_at(item, "name", error, where);
         stage.role = text_at(item, "role", error, where);
+        stage.play = text_at(item, "play", error, where);
         stage.prompt = text_at(item, "prompt", error, where);
+        stage.input = text_at(item, "input", error, where);
         stage.schema = text_at(item, "schema", error, where);
         stage.image = flag_at(item, "image", error, where);
         stage.brief_tokens = count_at(item, "brief_tokens", error, where);
@@ -165,7 +167,7 @@ HttpResponse write(const AdminConfigContext& context, const HttpRequest& request
         return error_response(500, found.error);
     }
     const int status = force || result.replaced ? 200 : 201;
-    return json_response(status, symphony::definition_document(*found.definition));
+    return json_response(status, symphony::definition_document(*found.definition, found.catalog));
 }
 
 }  // namespace
@@ -197,7 +199,7 @@ HttpResponse admin_get_symphony(const AdminConfigContext& context, std::string_v
     if (!found.definition.has_value()) {
         return error_response(404, found.error, kNotFoundError);
     }
-    return json_response(200, symphony::definition_document(*found.definition));
+    return json_response(200, symphony::definition_document(*found.definition, found.catalog));
 }
 
 HttpResponse admin_put_symphony(const AdminConfigContext& context, std::string_view name,

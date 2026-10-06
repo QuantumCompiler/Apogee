@@ -244,3 +244,97 @@ TEST_CASE("play runs the stages under the active suite, says each, and prints th
         CHECK(out == "ROOT<Say hi>\n");
     }
 }
+
+TEST_CASE("a chain is created, listed, shown and played as any symphony (27r)",
+          "[commands][symphonies]") {
+    const Home home;
+    const std::string before = home.home.config_text();
+    std::string out;
+    std::string err;
+    // --stage and --play interleave in the order they are written.
+    REQUIRE(home.run({"symphonies", "create", "digest", "--play", "summary:summarize-verify",
+                      "--stage", "note:chat:Note {{summary}}", "--play",
+                      "again:summarize-verify:{{note}} / {{input}}"},
+                     &out, &err) == 0);
+    CHECK_THAT(out, Catch::Matchers::StartsWith(
+                        "created symphony 'digest' (play:summarize-verify → chat → "
+                        "play:summarize-verify)\n"));
+    CHECK(home.home.config_text() == before + R"YAML(
+symphonies:
+  digest:
+    stages:
+      - name: summary
+        play: summarize-verify
+      - name: note
+        role: chat
+        prompt: "Note {{summary}}"
+      - name: again
+        play: summarize-verify
+        input: "{{note}} / {{input}}"
+)YAML");
+
+    REQUIRE(home.run({"symphonies", "list"}, &out, &err) == 0);
+    CHECK_THAT(out, Catch::Matchers::Matches(
+                        "(?:.|\n)*digest +play:summarize-verify → chat → play:summarize-verify +"
+                        "config(?:.|\n)*"));
+    REQUIRE(home.run({"symphonies", "show", "digest"}, &out, &err) == 0);
+    CHECK_THAT(out, Catch::Matchers::ContainsSubstring(
+                        "stage 1/3  summary  ·  plays summarize-verify  ·  given the symphony's "
+                        "input\n"));
+    CHECK_THAT(out, Catch::Matchers::ContainsSubstring(
+                        "stage 3/3  again  ·  plays summarize-verify  ·  given:\n    {{note}} / "
+                        "{{input}}\n"));
+    CHECK_THAT(out, Catch::Matchers::ContainsSubstring(
+                        "one play: 5 member calls, one after another, 2 symphonies deep (the cap "
+                        "is 4)\n"));
+
+    // Played: every stage a member call, each line its position.
+    REQUIRE(home.run({"symphonies", "play", "digest", "--input", "P"}, &out, &err) == 0);
+    CHECK_THAT(err, Catch::Matchers::StartsWith(
+                        "digest → summarize-verify, stage 1/2 summarize — asking utility "
+                        "(helper): "));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring(
+                        "\ndigest → summarize-verify, stage 2/2 verify — asking chat (root): "));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring(
+                        "\ndigest, stage 2/3 note — asking chat (root): Note ROOT<"));
+    // The last play's input is the note's answer and the chain's input.
+    CHECK_THAT(out, Catch::Matchers::ContainsSubstring("Passage:\nROOT<Note ROOT<"));
+    CHECK_THAT(out, Catch::Matchers::ContainsSubstring("> / P\n"));
+    REQUIRE(home.run({"symphonies", "play", "digest", "--input", "P", "--output-format", "json"},
+                     &out, &err) == 0);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    REQUIRE(document["stages"].size() == 3);
+    CHECK(document["stages"][0]["play"] == "summarize-verify");
+    CHECK(document["stages"][0]["stages"].size() == 2);
+    CHECK(document["stages"][1]["role"] == "chat");
+    CHECK(document["output"] == document["stages"][2]["answer"]);
+
+    // A loop through another entry is refused at create, the file untouched.
+    const std::string with_digest = home.home.config_text();
+    CHECK(home.run({"symphonies", "create", "summarize-verify", "--play", "x:digest"}, &out,
+                   &err) == 1);
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring(
+                        "a loop, summarize-verify → digest → summarize-verify"));
+    CHECK(home.home.config_text() == with_digest);
+    CHECK(home.run({"symphonies", "create", "bad", "--play", "nocolon"}, &out, &err) == 1);
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("expected NAME:SYMPHONY[:INPUT]"));
+}
+
+TEST_CASE("a chain's budget is the config's symphony_caps, stopping it named (27r)",
+          "[commands][symphonies]") {
+    const Home home{
+        "symphony_caps:\n  stage_calls: 3\nsymphonies:\n  twice:\n    stages:\n"
+        "      - {name: a, play: summarize-verify}\n"
+        "      - {name: b, play: summarize-verify}\n"};
+    std::string out;
+    std::string err;
+    // Each play of the starter is two calls; the chain's fourth is past the cap.
+    CHECK(home.run({"symphonies", "play", "twice", "--input", "P"}, &out, &err) == 1);
+    CHECK(out.empty());
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring(
+                        "apogee symphonies: twice → summarize-verify, stage 2/2 verify (chat): "
+                        "the play's budget is spent -- 3 of 3 member calls made"));
+    // The starter alone is inside the same cap.
+    REQUIRE(home.run({"symphonies", "play", "summarize-verify", "--input", "P", "-q"}, &out,
+                     &err) == 0);
+}

@@ -191,6 +191,20 @@ std::vector<std::string> template_variables(std::string_view text) {
     return out;
 }
 
+std::string stage_template(const harness::SymphonySpec& spec, std::size_t index) {
+    const harness::SymphonyStage& stage = spec.stages.at(index);
+    if (!stage.plays()) {
+        return stage.prompt;
+    }
+    if (!stage.input.empty()) {
+        return stage.input;
+    }
+    // A chain threads each answer into the next play unless it says otherwise.
+    const std::string_view previous =
+        index == 0 ? kInputVariable : std::string_view{spec.stages[index - 1].name};
+    return "{{" + std::string{previous} + "}}";
+}
+
 namespace {
 
 /// What is wrong with stage `index`'s template; `reads_input` set when it
@@ -198,7 +212,7 @@ namespace {
 void check_template(const harness::SymphonySpec& spec, std::size_t index, const std::string& at,
                     std::vector<std::string>& problems, bool& reads_input) {
     std::string error;
-    const std::vector<Segment> segments = parse_template(spec.stages[index].prompt, error);
+    const std::vector<Segment> segments = parse_template(stage_template(spec, index), error);
     if (!error.empty()) {
         problems.push_back(at + ": " + error);
     }
@@ -278,8 +292,79 @@ std::vector<std::string> validate(const harness::SymphonySpec& spec) {
     return problems;
 }
 
+namespace {
+
+/// What `owner`'s play stages hand the symphonies they play that those do
+/// not take: an image one needs and is not passed, or one passed to a
+/// symphony that takes none. `prefix` names `owner` below the root.
+void check_boundaries(const harness::SymphonySpec& owner, const std::string& prefix,
+                      const Catalog& catalog, std::vector<std::string>& problems) {
+    for (std::size_t index = 0; index < owner.stages.size(); ++index) {
+        const harness::SymphonyStage& stage = owner.stages[index];
+        const Definition* played = stage.plays() ? catalog.find(stage.play) : nullptr;
+        if (played == nullptr) {
+            continue;  // a role stage, or a name the walk has already refused
+        }
+        const std::string at =
+            prefix + "stage " + std::to_string(index + 1) + " (" + stage.name + ")";
+        if (played->spec.input.image && !stage.image) {
+            problems.push_back(at + ": plays '" + played->spec.name +
+                               "', which takes an image, and the stage does not pass it on -- "
+                               "mark the stage 'image: true'");
+        } else if (!played->spec.input.image && stage.image) {
+            problems.push_back(at + ": passes the image to '" + played->spec.name +
+                               "', which takes none");
+        }
+    }
+}
+
+}  // namespace
+
+harness::SymphonyWalk walk(const harness::SymphonySpec& spec, const Catalog& catalog) {
+    return harness::walk_symphony(spec, catalog.lookup(), catalog.max_depth, true);
+}
+
+std::vector<std::string> validate(const harness::SymphonySpec& spec, const Catalog& catalog) {
+    std::vector<std::string> problems = validate(spec);
+    const harness::SymphonyWalk walked = walk(spec, catalog);
+    if (!walked.ok()) {
+        problems.push_back(walked.problem);
+        return problems;
+    }
+    check_boundaries(spec, {}, catalog, problems);
+    // Each symphony reached is held to its own rules: a chain that plays an
+    // unplayable one cannot be played either.
+    for (const std::string& name : walked.reached) {
+        const Definition* reached = catalog.find(name);
+        if (reached == nullptr) {
+            continue;
+        }
+        if (const std::vector<std::string> own = validate(reached->spec); !own.empty()) {
+            problems.push_back("'" + reached->spec.name +
+                               "', which it plays, cannot be played: " + own.front());
+        }
+        check_boundaries(reached->spec, reached->spec.name + ", ", catalog, problems);
+    }
+    return problems;
+}
+
+const Definition* Catalog::find(std::string_view name) const noexcept {
+    const auto found = std::ranges::find_if(definitions, [&](const Definition& definition) {
+        return same_folded(definition.spec.name, name);
+    });
+    return found == definitions.end() ? nullptr : &*found;
+}
+
+harness::SymphonyLookup Catalog::lookup() const {
+    return [this](std::string_view name) -> const harness::SymphonySpec* {
+        const Definition* found = find(name);
+        return found == nullptr ? nullptr : &found->spec;
+    };
+}
+
 Catalog catalog(const harness::Config& config, const std::filesystem::path& dir) {
     Catalog out;
+    out.max_depth = config.symphony_caps.max_depth();
     const std::vector<std::string> backends = config.backend_names();
     const std::vector<std::pair<std::string, std::filesystem::path>> files = spec_files(dir);
     const auto file_named = [&](std::string_view name) -> const std::filesystem::path* {
@@ -393,14 +478,15 @@ Found find_definition(const harness::Config& config, const std::filesystem::path
         definition.source = Source::File;
         definition.path = path;
         out.definition = std::move(definition);
+        // A file named by its path plays what the name lookup would find.
+        out.catalog = catalog(config, dir);
         return out;
     }
-    Catalog all = catalog(config, dir);
-    for (Definition& definition : all.definitions) {
-        if (same_folded(definition.spec.name, wanted)) {
-            out.definition = std::move(definition);
-            return out;
-        }
+    out.catalog = catalog(config, dir);
+    const Catalog& all = out.catalog;
+    if (const Definition* found = all.find(wanted); found != nullptr) {
+        out.definition = *found;
+        return out;
     }
     // A broken file of that name says why, rather than "no such symphony".
     for (const std::string& problem : all.problems) {
@@ -429,7 +515,7 @@ std::string role_chain(const harness::SymphonySpec& spec) {
     std::string out;
     for (const harness::SymphonyStage& stage : spec.stages) {
         out += out.empty() ? "" : " → ";
-        out += stage.role;
+        out += stage.plays() ? "play:" + stage.play : stage.role;
     }
     return out;
 }

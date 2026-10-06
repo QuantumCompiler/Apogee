@@ -9,6 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -16,7 +17,8 @@
 
 /// The symphony scaffold core (27q): the one writer the CLI's create and
 /// edit and the admin plane's POST and PUT share -- the entry, the refusals
-/// that leave the config as it was, and a replacement in place.
+/// that leave the config as it was, and a replacement in place; since 27r a
+/// chain, walked as it will stand among every source before it is written.
 namespace {
 
 using apogee::scaffold::create_symphony;
@@ -125,4 +127,63 @@ TEST_CASE("a bare create writes a one-stage skeleton that plays", "[scaffold][sy
     CHECK(starter.stages[0].role == "utility");
     CHECK(starter.stages[0].prompt == "{{input}}\n");
     CHECK(create_symphony(tree.config, starter, false).name == "mine");
+}
+
+TEST_CASE(
+    "a chain is created like any symphony; one that loops, nests too deep or plays nothing "
+    "is refused, unwritten",
+    "[scaffold][symphony]") {
+    const Tree tree;
+    const auto spec = [](std::string_view text) {
+        return apogee::harness::parse_symphony_spec(text, "<test>");
+    };
+    // Two shipped starters, chained (27r).
+    CHECK(create_symphony(tree.config,
+                          spec("name: digest\nstages:\n  - {name: summary, play: "
+                               "summarize-verify}\n  - {name: facts, play: extract-facts}\n"),
+                          false)
+              .name == "digest");
+
+    std::string before = tree.bytes();
+    CHECK(refusal(tree, spec("name: a\nstages:\n  - {name: one, play: b}\n")) ==
+          "symphony 'a': stage 1 (one): plays 'b', and no symphony is named 'b'");
+    CHECK(tree.bytes() == before);
+
+    // A loop through another entry, made by replacing that entry.
+    (void)create_symphony(
+        tree.config,
+        spec("name: b\nstages:\n  - {name: one, role: utility, prompt: '{{input}}'}\n"), false);
+    (void)create_symphony(tree.config, spec("name: a\nstages:\n  - {name: one, play: b}\n"), false);
+    before = tree.bytes();
+    try {
+        (void)create_symphony(tree.config, spec("name: b\nstages:\n  - {name: one, play: a}\n"),
+                              true);
+        FAIL("a loop through another entry was written");
+    } catch (const std::runtime_error& e) {
+        CHECK_THAT(e.what(), Catch::Matchers::ContainsSubstring("a loop, b → a → b"));
+    }
+    CHECK(tree.bytes() == before);
+
+    // A loop through a spec file the config never sees.
+    const std::filesystem::path dir = tree.home.path() / "symphonies";
+    std::filesystem::create_directories(dir);
+    std::ofstream{dir / "filed.yaml"} << "stages:\n  - {name: one, play: c}\n";
+    CHECK_THAT(refusal(tree, spec("name: c\nstages:\n  - {name: one, play: filed}\n")),
+               Catch::Matchers::ContainsSubstring("a loop, c → filed → c"));
+    CHECK(tree.bytes() == before);
+
+    // Four deep is written; a fifth level is refused naming the path.
+    (void)create_symphony(
+        tree.config,
+        spec("name: l4\nstages:\n  - {name: one, role: utility, prompt: '{{input}}'}\n"), false);
+    for (const std::string level : {"3", "2", "1"}) {
+        (void)create_symphony(tree.config,
+                              spec("name: l" + level + "\nstages:\n  - {name: one, play: l" +
+                                   std::to_string(std::stoi(level) + 1) + "}\n"),
+                              false);
+    }
+    before = tree.bytes();
+    CHECK_THAT(refusal(tree, spec("name: l0\nstages:\n  - {name: one, play: l1}\n")),
+               Catch::Matchers::ContainsSubstring("which nests 5 deep -- l0 → l1 → l2 → l3 → l4"));
+    CHECK(tree.bytes() == before);
 }

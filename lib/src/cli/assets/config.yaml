@@ -99,6 +99,10 @@ models:
 # play's --image. Three ship (`apogee symphonies list`), and a spec file under
 # symphonies/ plays by its name too. `apogee symphonies create` and `edit`
 # write entries here. Each stage is one model call, one after another.
+# A stage may play another symphony instead of a role -- `play: <name>`,
+# given `input:` (a template, as a prompt is; the previous stage's answer
+# when left out) as that symphony's {{input}} -- so a chain is a symphony.
+# One that reaches itself is refused, and plays nest at most four deep.
 #
 # symphonies:
 #   brief:
@@ -110,6 +114,22 @@ models:
 #       - name: tighten
 #         role: chat
 #         prompt: "Shorten this to one sentence: {{summarize}}"
+#   digest:
+#     description: Summarize, then pull out the facts
+#     stages:
+#       - name: summary
+#         play: summarize-verify
+#       - name: facts
+#         play: extract-facts
+#
+# How deep plays nest, and one whole play's budget -- every symphony it
+# reaches counted together, a play that reaches a cap stopped there with no
+# answer. Unset, the depth is 4, the member calls each stage once, and the
+# answer tokens unbounded.
+# symphony_caps:
+#   depth: 4
+#   stage_calls: 12
+#   answer_tokens: 8000
 
 # Optional search roots that pre-fill path prompts. Each is optional; an empty
 # value simply means "no default". ${ENV_VAR} references are expanded.

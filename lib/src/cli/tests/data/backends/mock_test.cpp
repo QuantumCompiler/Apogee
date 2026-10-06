@@ -270,6 +270,10 @@ TEST_CASE("placeholders expand against the request: the last tool result and the
     const nlohmann::json parsed = nlohmann::json::parse(answer, nullptr, false);
     REQUIRE_FALSE(parsed.is_discarded());
     CHECK(parsed.at("s") == "line \"quoted\"\nsecond");
+    // The brief itself, the same way (27r: a schema stage carrying what it
+    // was sent).
+    CHECK(apogee::backends::expand_mock_text(R"({"t": {{last_user:json}}})", request) ==
+          R"({"t": "q"})");
     CHECK(apogee::backends::expand_mock_text("plain", request) == "plain");
     // The request's schema, exactly as it rode (26f).
     request.transient.response_schema = R"({"b": 1, "a": 2})";

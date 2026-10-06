@@ -417,12 +417,27 @@ struct SymphonyInput {
 /// decides placement, the symphony decides process -- given a prompt rendered
 /// from the input and the earlier stages' answers, through the one member
 /// call (`agentloop/member_call`).
+///
+/// **Or another symphony, played** (27r): a stage that names a symphony under
+/// `play:` instead of a role is that symphony's whole walk, given `input` as
+/// its `{{input}}` -- its stages the same member calls an inline stage makes
+/// -- and its output is this stage's answer, threaded on exactly as a role
+/// stage's is. A chain is a symphony; there is no other kind.
 struct SymphonyStage {
     /// Unique in its symphony, letters, digits, `_` and `-`; what later
     /// stages name its answer by (`{{summarize}}`). Never `input`.
     std::string name;
-    /// One of `symphony_role_names()`.
+    /// One of `symphony_role_names()`. Empty for a play stage.
     std::string role;
+    /// The symphony this stage plays, by name (27r). Empty for a role stage:
+    /// a stage is one kind or the other, never both.
+    std::string play;
+    /// A play stage's template for what the played symphony is given as its
+    /// `{{input}}`, the prompt's grammar (27r). Empty means the previous
+    /// stage's answer -- the symphony's own input for the first stage -- so
+    /// stages that each play a symphony chain without a word. A role stage
+    /// has none: its brief is its `prompt`.
+    std::string input;
     /// The template, as written: `{{input}}` and `{{<an earlier stage>}}`
     /// are replaced at play time (`business/symphony/definition`), and
     /// nothing else in it is touched. Never `${ENV}`-expanded.
@@ -439,6 +454,11 @@ struct SymphonyStage {
     /// ceiling over both.
     std::optional<std::int64_t> brief_tokens;
     std::optional<std::int64_t> answer_tokens;
+
+    /// Whether this stage plays a symphony rather than a role (27r).
+    [[nodiscard]] bool plays() const noexcept {
+        return !play.empty();
+    }
 
     bool operator==(const SymphonyStage&) const = default;
 };
@@ -457,6 +477,34 @@ struct SymphonySpec {
     std::vector<SymphonyStage> stages;
 
     bool operator==(const SymphonySpec&) const = default;
+};
+
+/// How deep symphonies may nest (27r) when `symphony_caps.depth` does not
+/// say: a symphony that plays none is 1 deep, one that plays it 2. Deep
+/// enough for real composition, shallow enough that the serial latency of a
+/// whole walk stays legible.
+inline constexpr std::int64_t kSymphonyDepth = 4;
+
+/// The `symphony_caps:` section (27r), hand-edited like `memory:`: how deep a
+/// play may nest, and the whole walk's budget. The budget aggregates across
+/// every symphony a play reaches -- a chain cannot multiply its way past a
+/// cap a single symphony honors -- and a walk that reaches it stops there,
+/// named, with no answer.
+struct SymphonyCaps {
+    /// The nesting cap, refused at definition time like a loop. Unset is
+    /// `kSymphonyDepth`.
+    std::optional<std::int64_t> depth;
+    /// The member calls one whole play may make. Unset is the walk's own
+    /// count -- each stage once -- so a play is never refused for its size.
+    std::optional<std::int64_t> stage_calls;
+    /// The answer tokens one whole play may produce. Unset is none.
+    std::optional<std::int64_t> answer_tokens;
+
+    [[nodiscard]] std::int64_t max_depth() const noexcept {
+        return depth.value_or(kSymphonyDepth);
+    }
+
+    bool operator==(const SymphonyCaps&) const = default;
 };
 
 /// Whether two role-pointer sets are identical. Defined in `config.cpp` -- the
@@ -1011,6 +1059,8 @@ struct Config {
     /// one: they are compiled in (`contracts/assets.h`) and a same-named
     /// entry wins.
     std::map<std::string, SymphonySpec, CaseInsensitiveLess> symphonies;
+    /// How deep a play nests and the whole walk's budget (27r).
+    SymphonyCaps symphony_caps;
 
     StatusMode status_mode = StatusMode::Line;
     bool color = true;
@@ -1138,8 +1188,12 @@ struct SuiteBackend {
 /// naming a backend (a `backend:` or `model:` key, or a role that is one of
 /// `backends`, the configured names) refused with the principle: the suite
 /// decides placement -- a schema that is a JSON object, positive caps, and
-/// no key it does not know. The name defaults to `fallback_name` when the
-/// text carries none. What the templates and schemas mean is
+/// no key it does not know. A stage may instead play a symphony by name
+/// (27r): `play:` and optionally `input:`, never a role, a prompt, a schema
+/// or caps beside it, and never the symphony's own name -- the loop the
+/// parser can see (`contracts/symphony_walk.h`; a config's entries are walked
+/// against each other on load). The name defaults to `fallback_name` when
+/// the text carries none. What the templates and schemas mean is
 /// `business/symphony/definition`'s to check. Throws ConfigError naming
 /// what is wrong.
 [[nodiscard]] SymphonySpec parse_symphony_spec(std::string_view content, std::string_view origin,

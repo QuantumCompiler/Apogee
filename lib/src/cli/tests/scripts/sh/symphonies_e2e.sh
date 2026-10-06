@@ -17,6 +17,13 @@
 #     $EDITOR written back as the entry, a starter edited becoming an entry
 #     that stands in for it, and `delete` the exact inverse;
 #   * a hand-written entry naming a backend refused when the config loads;
+#   * chains (27r): two shipped starters chained by `create --play`, played
+#     with the first's output on the second's wire -- an extraction member
+#     whose JSON answer carries the brief it was sent -- every line naming
+#     its position; a hand-written loop failing the load with its path; spec
+#     files nesting five deep refused at play start with nothing sent; and
+#     `symphony_caps.stage_calls` stopping a chain mid-walk, named, with no
+#     answer;
 #   * completion for the verbs and the names.
 #
 # POSIX only, like the other .sh checks here (CLAUDE.md -> Platforms).
@@ -44,13 +51,14 @@ script helper '{"text": "HELPER<{{last_user}}>"}'
 script other '{"text": "OTHER<{{last_user}}>"}'
 script scribe '{"text": "{\"topic\": \"cats\", \"people\": [], \"places\": [\"mat\"], \"dates\": [], \"facts\": [\"a cat sat\"]}"}'
 script liar '{"text": "{\"title\": \"no topic here\"}"}'
+script carrier '{"text": "{\"topic\": {{last_user:json}}, \"people\": [], \"places\": [], \"dates\": [], \"facts\": []}"}'
 
 mkdir -p "$APOGEE_HOME/config"
 CONFIG="$APOGEE_HOME/config/config.yaml"
 {
     echo "# PRESERVE-ME: a comment the editor keeps"
     echo "backends:"
-    for name in root helper other scribe liar; do
+    for name in root helper other scribe liar carrier; do
         echo "  $name:"
         echo "    type: mock"
         echo "    model_path: $WORK_DIR/scripts/$name.json"
@@ -71,6 +79,11 @@ CONFIG="$APOGEE_HOME/config/config.yaml"
     echo "      chat: other"
     echo "      utility: other"
     echo "      extraction: liar"
+    echo "  carried:"
+    echo "    members:"
+    echo "      chat: root"
+    echo "      utility: helper"
+    echo "      extraction: carrier"
 } > "$CONFIG"
 "$APOGEE_BIN" check --fix </dev/null >"$WORK_DIR/fix.txt" 2>&1 || fail "check --fix: $(cat "$WORK_DIR/fix.txt")"
 
@@ -200,6 +213,81 @@ printf '  hand:\n    stages:\n      - {name: a, role: root, prompt: "{{input}}"}
     fail "a stage naming a backend loaded"
 grep -q "symphonies.hand.stages\[0\].role: 'root' is a backend" "$WORK_DIR/err.txt" ||
     fail "the load refusal: $(cat "$WORK_DIR/err.txt")"
+cp "$WORK_DIR/config.bak" "$CONFIG"
+
+# --- Chains (27r) --------------------------------------------------------------
+"$APOGEE_BIN" symphonies create digest --description "Summarize, then pull the facts." \
+    --play summary:summarize-verify --play facts:extract-facts </dev/null >"$WORK_DIR/out.txt" 2>&1 ||
+    fail "create the chain: $(cat "$WORK_DIR/out.txt")"
+grep -q "(play:summarize-verify → play:extract-facts)" "$WORK_DIR/out.txt" ||
+    fail "create did not say the chain: $(cat "$WORK_DIR/out.txt")"
+"$APOGEE_BIN" symphonies play digest --suite carried --input "The cat sat on the mat on 4 May." \
+    </dev/null >"$WORK_DIR/out.txt" 2>"$WORK_DIR/err.txt" || fail "play the chain: $(cat "$WORK_DIR/err.txt")"
+# The extraction member's answer carries its brief: extract-facts' prompt
+# rendered with summarize-verify's output -- the chat member's echo -- as its
+# input, and the chain's own input only inside that.
+python3 - "$WORK_DIR/out.txt" <<'EOF' || fail "the chain's output is not the second starter's answer to the first's output: $(cat "$WORK_DIR/out.txt")"
+import json, sys
+topic = json.load(open(sys.argv[1]))["topic"]
+assert topic.startswith("Read the text below and record its key facts"), topic
+assert "\n\nText:\nROOT<Here is a passage and a summary of it." in topic, topic
+assert "Summary:\nHELPER<Summarize the passage below" in topic, topic
+EOF
+for line in \
+    '^digest → summarize-verify, stage 1/2 summarize — asking utility (helper): ' \
+    '^digest → summarize-verify, stage 2/2 verify — asking chat (root): ' \
+    '^digest → extract-facts, stage 1/1 extract — asking extraction (carrier): Read the text below'; do
+    grep -q "$line" "$WORK_DIR/err.txt" || fail "the chain's narration has no '$line': $(cat "$WORK_DIR/err.txt")"
+done
+[ "$(wc -l < "$WORK_DIR/err.txt" | tr -d ' ')" = "3" ] || fail "the chain said more than its three calls"
+JSON=$("$APOGEE_BIN" symphonies play digest --suite carried --input "x" --output-format json </dev/null 2>/dev/null) ||
+    fail "play the chain as json"
+echo "$JSON" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert [s["play"] for s in d["stages"]] == ["summarize-verify", "extract-facts"], d
+assert [s["backend"] for s in d["stages"][0]["stages"]] == ["helper", "root"], d
+assert d["stages"][1]["stages"][0]["backend"] == "carrier", d
+assert d["output"] == d["stages"][1]["answer"] == d["stages"][1]["stages"][0]["answer"], d
+' || fail "the chain's document: $JSON"
+
+# A loop written by hand fails the load, naming its path.
+cp "$CONFIG" "$WORK_DIR/config.bak"
+printf '  ping:\n    stages:\n      - {name: a, play: pong}\n  pong:\n    stages:\n      - {name: b, play: ping}\n' >> "$CONFIG"
+"$APOGEE_BIN" symphonies list </dev/null >/dev/null 2>"$WORK_DIR/err.txt" && fail "a loop loaded"
+grep -q "symphonies.ping: ping → pong, stage 1 (b): plays 'ping', which is already playing -- a loop, ping → pong → ping" \
+    "$WORK_DIR/err.txt" || fail "the loop refusal: $(cat "$WORK_DIR/err.txt")"
+cp "$WORK_DIR/config.bak" "$CONFIG"
+
+# Spec files nesting five deep -- late-bound, so no load sees them -- are
+# refused at play start, before any member is asked anything.
+for level in 2 3 4; do
+    printf 'stages:\n  - {name: down, play: n%s}\n' "$((level + 1))" > "$APOGEE_HOME/symphonies/n$level.yaml"
+done
+printf 'stages:\n  - {name: leaf, role: chat, prompt: "Leaf {{input}}"}\n' > "$APOGEE_HOME/symphonies/n5.yaml"
+OUT=$("$APOGEE_BIN" symphonies play n2 --input go -q </dev/null 2>&1) || fail "four deep did not play: $OUT"
+[ "$OUT" = "ROOT<Leaf go>" ] || fail "four deep: $OUT"
+printf 'stages:\n  - {name: down, play: n2}\n' > "$APOGEE_HOME/symphonies/n1.yaml"
+"$APOGEE_BIN" symphonies play n1 --input go </dev/null >"$WORK_DIR/out.txt" 2>"$WORK_DIR/err.txt"
+[ $? -eq 1 ] || fail "five deep was not refused"
+grep -q "plays 'n5', which nests 5 deep -- n1 → n2 → n3 → n4 → n5, and the cap is 4" "$WORK_DIR/err.txt" ||
+    fail "the depth refusal: $(cat "$WORK_DIR/err.txt")"
+grep -q "asking" "$WORK_DIR/err.txt" && fail "a member was asked before the depth refusal"
+rm -f "$APOGEE_HOME"/symphonies/n[1-5].yaml
+
+# One budget for the whole walk: two plays of a two-stage starter under a cap
+# of three stop at the fourth call, named, with nothing on stdout.
+printf 'symphony_caps:\n  stage_calls: 3\n' >> "$CONFIG"
+"$APOGEE_BIN" symphonies create twice --play a:summarize-verify --play b:summarize-verify \
+    </dev/null >/dev/null 2>&1 || fail "create twice"
+"$APOGEE_BIN" symphonies play twice --input P </dev/null >"$WORK_DIR/out.txt" 2>"$WORK_DIR/err.txt"
+[ $? -eq 1 ] || fail "a spent budget did not exit 1"
+[ -s "$WORK_DIR/out.txt" ] && fail "a stopped chain printed an output: $(cat "$WORK_DIR/out.txt")"
+grep -q "twice → summarize-verify, stage 2/2 verify (chat): the play's budget is spent -- 3 of 3 member calls made" \
+    "$WORK_DIR/err.txt" || fail "the budget stop: $(cat "$WORK_DIR/err.txt")"
+[ "$(grep -c "asking" "$WORK_DIR/err.txt")" = "3" ] || fail "the budget did not hold the walk to three calls"
+"$APOGEE_BIN" symphonies delete twice </dev/null >/dev/null 2>&1 || fail "delete twice"
+"$APOGEE_BIN" symphonies delete digest </dev/null >/dev/null 2>&1 || fail "delete digest"
 cp "$WORK_DIR/config.bak" "$CONFIG"
 
 # --- Completion: the verbs and the names --------------------------------------

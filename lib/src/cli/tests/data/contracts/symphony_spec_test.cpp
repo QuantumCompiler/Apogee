@@ -16,7 +16,9 @@
 /// Symphonies at the Data floor (27q): the one parser a `symphonies:` entry
 /// and a spec file share -- roles, never backends, refused by name -- the
 /// editor that writes an entry back as exactly what it read, and the shipped
-/// starters compiled in byte for byte.
+/// starters compiled in byte for byte. Since 27r a stage that plays another
+/// symphony: its keys and refusals, its own name refused at parse, the
+/// entries walked against each other on load, `symphony_caps:`.
 namespace {
 
 using apogee::harness::append_symphony;
@@ -181,6 +183,178 @@ TEST_CASE("what else the parser refuses, by name", "[contracts][symphony]") {
     CHECK_THAT(refusal("stages: [\n"), Catch::Matchers::ContainsSubstring("not valid YAML"));
 }
 
+TEST_CASE("a stage may play a symphony instead of a role: its keys, and what it refuses",
+          "[contracts][symphony]") {
+    const SymphonySpec spec = parse_symphony_spec(R"YAML(name: chain
+input:
+  description: A passage.
+  image: true
+stages:
+  - name: summary
+    play: summarize-verify
+  - name: look
+    play: describe-answer
+    image: true
+    input: "About {{summary}}: {{input}}"
+)YAML",
+                                                  "chain.yaml");
+    REQUIRE(spec.stages.size() == 2);
+    CHECK(spec.stages[0].plays());
+    CHECK(spec.stages[0].play == "summarize-verify");
+    CHECK(spec.stages[0].role.empty());
+    CHECK(spec.stages[0].prompt.empty());
+    CHECK(spec.stages[0].input.empty());
+    CHECK(spec.stages[1].play == "describe-answer");
+    CHECK(spec.stages[1].image);
+    // The input is a template, read exactly as written.
+    CHECK(spec.stages[1].input == "About {{summary}}: {{input}}");
+
+    const auto play_stage = [](std::string_view rest) {
+        return "stages:\n  - name: a\n    play: other\n" + std::string{rest};
+    };
+    CHECK(refusal(play_stage("")).empty());
+    CHECK_THAT(refusal(play_stage("    role: utility\n")),
+               Catch::Matchers::ContainsSubstring(
+                   "stages[0].role: a stage plays a role or a symphony, never both"));
+    CHECK_THAT(refusal(play_stage("    prompt: x\n")),
+               Catch::Matchers::ContainsSubstring("stages[0].prompt: a play stage has no prompt"));
+    CHECK_THAT(refusal(play_stage("    schema: '{}'\n")),
+               Catch::Matchers::ContainsSubstring("stages[0].schema: a play stage's answer is the "
+                                                  "played symphony's output"));
+    CHECK_THAT(refusal(play_stage("    answer_tokens: 9\n")),
+               Catch::Matchers::ContainsSubstring(
+                   "stages[0].answer_tokens: a play stage makes no call of its own"));
+    CHECK_THAT(refusal(play_stage("    brief_tokens: 9\n")),
+               Catch::Matchers::ContainsSubstring("a play stage makes no call of its own"));
+    CHECK_THAT(refusal(play_stage("    input: '  '\n")),
+               Catch::Matchers::ContainsSubstring("stages[0].input: empty"));
+    CHECK_THAT(refusal(play_stage("    image: true\n")),
+               Catch::Matchers::ContainsSubstring("the input takes none"));
+    CHECK_THAT(refusal(play_stage("    backend: l3b\n")),
+               Catch::Matchers::ContainsSubstring("never a backend"));
+    CHECK_THAT(refusal("stages:\n  - {name: a, play: 'two words'}\n"),
+               Catch::Matchers::ContainsSubstring("'two words' is not a symphony name"));
+    CHECK_THAT(refusal("stages:\n  - {name: a, play: 'yes'}\n"),
+               Catch::Matchers::ContainsSubstring("is not a symphony name"));
+    // A role stage has a prompt, never an input.
+    CHECK_THAT(refusal("stages:\n  - {name: a, role: utility, prompt: x, input: y}\n"),
+               Catch::Matchers::ContainsSubstring(
+                   "stages[0].input: a role stage's brief is its 'prompt'"));
+    // Neither kind: the stage is told both ways out.
+    CHECK_THAT(refusal("stages:\n  - {name: a, prompt: x}\n"),
+               Catch::Matchers::ContainsSubstring("or a symphony to play (play: <name>)"));
+}
+
+TEST_CASE("a definition that plays its own name is refused at parse, the loop named",
+          "[contracts][symphony]") {
+    CHECK(refusal("name: again\nstages:\n  - {name: a, role: utility, prompt: '{{input}}'}\n"
+                  "  - {name: b, play: AGAIN}\n") ==
+          "spec.yaml: stage 2 (b): plays 'AGAIN', which is already playing -- a "
+          "loop, again → AGAIN; a symphony may not reach itself, directly or through another");
+    // The name falls back to the file's: a file that plays its own stem loops.
+    CHECK_THAT(refusal("stages:\n  - {name: a, play: fallback}\n"),
+               Catch::Matchers::ContainsSubstring("a loop, fallback → fallback"));
+}
+
+TEST_CASE(
+    "a config's entries are walked against each other on load: a loop or a nesting past "
+    "the cap fails it, named",
+    "[contracts][symphony]") {
+    const auto load_refusal = [](std::string_view text) {
+        try {
+            (void)parse_config(text, "<test>");
+        } catch (const ConfigError& e) {
+            return std::string{e.what()};
+        }
+        return std::string{};
+    };
+    // Mutual.
+    CHECK(load_refusal(R"YAML(symphonies:
+  a:
+    stages:
+      - {name: one, play: b}
+  b:
+    stages:
+      - {name: one, role: utility, prompt: "{{input}}"}
+      - {name: two, play: a}
+)YAML") == "<test>: symphonies.a: a → b, stage 2 (two): plays 'a', which is already playing -- a "
+           "loop, a → b → a; a symphony may not reach itself, directly or through another");
+    // Its own name, as an entry.
+    CHECK_THAT(load_refusal("symphonies:\n  me:\n    stages:\n      - {name: one, play: me}\n"),
+               Catch::Matchers::ContainsSubstring("symphonies.me: stage 1 (one): plays 'me', "
+                                                  "which is already playing -- a loop, me → me"));
+    // Transitive, through an entry standing in for a starter.
+    CHECK_THAT(
+        load_refusal(R"YAML(symphonies:
+  summarize-verify:
+    stages:
+      - {name: one, play: middle}
+  middle:
+    stages:
+      - {name: one, play: front}
+  front:
+    stages:
+      - {name: one, play: summarize-verify}
+)YAML"),
+        Catch::Matchers::ContainsSubstring("a loop, front → summarize-verify → middle → front"));
+
+    // Five deep fails the load; four deep loads -- and a played name no entry
+    // defines (a starter, a spec file) is late-bound, a leaf one level down.
+    const auto nested = [](int levels, std::string_view caps = {}) {
+        std::string text{caps};
+        text += "symphonies:\n";
+        for (int level = 1; level < levels; ++level) {
+            text += "  l" + std::to_string(level) + ":\n    stages:\n      - {name: one, play: l" +
+                    std::to_string(level + 1) + "}\n";
+        }
+        text += "  l" + std::to_string(levels) +
+                ":\n    stages:\n      - {name: one, role: utility, prompt: \"{{input}}\"}\n";
+        return text;
+    };
+    CHECK(load_refusal(nested(4)).empty());
+    CHECK_THAT(load_refusal(nested(5)),
+               Catch::Matchers::ContainsSubstring(
+                   "symphonies.l1: l1 → l2 → l3 → l4, stage 1 (one): plays 'l5', which nests 5 "
+                   "deep -- l1 → l2 → l3 → l4 → l5, and the cap is 4 (symphony_caps.depth)"));
+    CHECK(load_refusal(nested(5, "symphony_caps:\n  depth: 5\n")).empty());
+    CHECK_THAT(load_refusal(nested(3, "symphony_caps:\n  depth: 2\n")),
+               Catch::Matchers::ContainsSubstring("and the cap is 2"));
+    CHECK(load_refusal("symphonies:\n  chain:\n    stages:\n      - {name: one, play: "
+                       "summarize-verify}\n      - {name: two, play: some-file}\n")
+              .empty());
+}
+
+TEST_CASE("symphony_caps: the depth and the whole walk's budget, each a positive number",
+          "[contracts][symphony]") {
+    const apogee::harness::Config none = parse_config("models:\n  default: x\n", "<test>");
+    CHECK(none.symphony_caps == apogee::harness::SymphonyCaps{});
+    CHECK(none.symphony_caps.max_depth() == apogee::harness::kSymphonyDepth);
+    CHECK(apogee::harness::kSymphonyDepth == 4);
+
+    const apogee::harness::Config set = parse_config(
+        "symphony_caps:\n  depth: 6\n  stage_calls: 12\n  answer_tokens: 4000\n", "<test>");
+    CHECK(set.symphony_caps.max_depth() == 6);
+    CHECK(set.symphony_caps.stage_calls == 12);
+    CHECK(set.symphony_caps.answer_tokens == 4000);
+
+    const auto load_refusal = [](std::string_view text) {
+        try {
+            (void)parse_config(text, "<test>");
+        } catch (const ConfigError& e) {
+            return std::string{e.what()};
+        }
+        return std::string{};
+    };
+    CHECK_THAT(load_refusal("symphony_caps:\n  depth: 0\n"),
+               Catch::Matchers::ContainsSubstring("symphony_caps.depth: must be at least 1"));
+    CHECK_THAT(load_refusal("symphony_caps:\n  stage_calls: -1\n"),
+               Catch::Matchers::ContainsSubstring("symphony_caps.stage_calls: must be at least 1"));
+    CHECK_THAT(load_refusal("symphony_caps:\n  calls: 3\n"),
+               Catch::Matchers::ContainsSubstring("symphony_caps: unknown key 'calls'"));
+    CHECK_THAT(load_refusal("symphony_caps: 4\n"),
+               Catch::Matchers::ContainsSubstring("symphony_caps: expected a mapping"));
+}
+
 TEST_CASE("a symphonies: entry is read by the same parser, its key its name",
           "[contracts][symphony]") {
     const apogee::harness::Config config = parse_config(R"YAML(backends:
@@ -258,6 +432,12 @@ TEST_CASE("an entry is written as exactly what it reads back, whatever its promp
         SymphonySpec spec = two_stages();
         spec.stages[0].prompt = prompt;
         spec.description = prompt;
+        // A stage that plays a symphony (27r), its input the same text.
+        SymphonyStage played;
+        played.name = "again";
+        played.play = "other";
+        played.input = prompt;
+        spec.stages.push_back(played);
         const std::string written = append_symphony("models:\n  default: x\n", "duo", spec, false);
         const apogee::harness::Config config = parse_config(written, "<test>");
         REQUIRE(config.find_symphony("duo") != nullptr);
@@ -310,6 +490,43 @@ symphonies:
                       Catch::Matchers::ContainsSubstring("collides"));
     CHECK_THROWS_AS(delete_symphony(base, "nope"), ConfigEditError);
     CHECK_THROWS_AS(append_symphony(base, "bad name", spec, false), ConfigEditError);
+}
+
+TEST_CASE("a play stage's entry: its play and its input, nothing a role stage writes",
+          "[contracts][symphony][config_edit]") {
+    SymphonySpec spec;
+    spec.name = "chain";
+    SymphonyStage first;
+    first.name = "summary";
+    first.play = "summarize-verify";
+    SymphonyStage second;
+    second.name = "facts";
+    second.play = "extract-facts";
+    second.input = "Summary:\n{{summary}}\n";
+    spec.stages = {first, second};
+    const std::string added = append_symphony("models:\n  default: x\n", "chain", spec, false);
+    CHECK(added == R"YAML(models:
+  default: x
+
+symphonies:
+  chain:
+    stages:
+      - name: summary
+        play: summarize-verify
+      - name: facts
+        play: extract-facts
+        input: |
+          Summary:
+          {{summary}}
+)YAML");
+    CHECK(*parse_config(added, "<test>").find_symphony("chain") == spec);
+    CHECK(delete_symphony(added, "chain").find("chain") == std::string::npos);
+    // A stage holding both kinds is written as it is, so the parser -- not
+    // the renderer -- refuses it.
+    SymphonySpec both = spec;
+    both.stages[0].role = "utility";
+    CHECK_THROWS_WITH(parse_symphony_spec(render_symphony_spec(both), "x"),
+                      Catch::Matchers::ContainsSubstring("never both"));
 }
 
 TEST_CASE("a replaced entry keeps its place, and a prompt's last line goes with it",

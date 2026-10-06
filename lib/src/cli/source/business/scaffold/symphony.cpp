@@ -49,7 +49,14 @@ SymphonyResult create_symphony(const std::filesystem::path& config_path,
     } catch (const harness::ConfigError& e) {
         throw std::runtime_error(e.what());
     }
-    if (const std::vector<std::string> problems = symphony::validate(parsed); !problems.empty()) {
+    // Validated against every source -- the other entries, the starters, the
+    // spec files -- so a loop through any of them is refused here, unwritten
+    // (27r). The definition is the walk's root, so a path back to its name is
+    // a loop by name whatever the catalog holds under that name today.
+    const symphony::Catalog catalog =
+        symphony::catalog(config, symphony::directory_for(config_path));
+    if (const std::vector<std::string> problems = symphony::validate(parsed, catalog);
+        !problems.empty()) {
         std::string message = "symphony '" + spec.name + "': " + problems.front();
         if (problems.size() > 1) {
             message += " (and " + std::to_string(problems.size() - 1) + " more)";

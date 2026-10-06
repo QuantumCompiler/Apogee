@@ -200,3 +200,51 @@ TEST_CASE("what the plane refuses, and the status it says it with",
     CHECK_THAT(starter.body, Catch::Matchers::ContainsSubstring("is a shipped starter"));
     CHECK(admin_delete_symphony(fixture.context(), "nope").status == 404);
 }
+
+TEST_CASE("a chain written over HTTP is byte-identical to one the CLI writes (27r)",
+          "[httpserver][admin][symphonies][parity]") {
+    const Fixture fixture;
+    (void)Fixture::cli(
+        fixture.cli_config,
+        {"symphonies", "create", "digest", "--play", "summary:summarize-verify", "--stage",
+         "note:chat:Note {{summary}}", "--play", "facts:extract-facts:{{note}}"});
+    const nlohmann::json body = nlohmann::json::parse(R"({
+    "name": "digest",
+    "stages": [
+        {"name": "summary", "play": "summarize-verify"},
+        {"name": "note", "role": "chat", "prompt": "Note {{summary}}"},
+        {"name": "facts", "play": "extract-facts", "input": "{{note}}"}
+    ]
+})");
+    const HttpResponse created = admin_create_symphony(fixture.context(), with_body("POST", body));
+    REQUIRE(created.status == 201);
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    // The view read back is the shape a client sends: PUT it unchanged and
+    // nothing moves.
+    const nlohmann::json view =
+        nlohmann::json::parse(admin_get_symphony(fixture.context(), "digest").body);
+    CHECK(view["stages"][0] == nlohmann::json::parse(R"({"name": "summary", "play":
+                                                     "summarize-verify", "image": false})"));
+    CHECK(view["problems"].empty());
+    const std::string written = Fixture::bytes(fixture.http_config);
+    REQUIRE(admin_put_symphony(fixture.context(), "digest", with_body("PUT", view)).status == 200);
+    CHECK(Fixture::bytes(fixture.http_config) == written);
+
+    // A loop is refused over HTTP as on the command line, nothing written.
+    const nlohmann::json loop = nlohmann::json::parse(R"({
+    "name": "summarize-verify",
+    "stages": [{"name": "back", "play": "digest"}]
+})");
+    const HttpResponse refused = admin_create_symphony(fixture.context(), with_body("POST", loop));
+    CHECK(refused.status == 400);
+    CHECK_THAT(refused.body, Catch::Matchers::ContainsSubstring(
+                                 "a loop, summarize-verify → digest → summarize-verify"));
+    // A stage that is both kinds is refused by the parser, never half-read.
+    nlohmann::json both = body;
+    both["name"] = "both";
+    both["stages"][0]["role"] = "chat";
+    const HttpResponse mixed = admin_create_symphony(fixture.context(), with_body("POST", both));
+    CHECK(mixed.status == 400);
+    CHECK_THAT(mixed.body, Catch::Matchers::ContainsSubstring("never both"));
+    CHECK(Fixture::bytes(fixture.http_config) == written);
+}

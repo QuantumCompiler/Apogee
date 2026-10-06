@@ -15,8 +15,11 @@
 /// A definition is held to everything before a byte is written: rendered as
 /// the entry would be and read back through the one parser (roles, never
 /// backends; names; caps; keys), then validated (templates, schemas, the
-/// input read), so a refused one leaves the config as it was. The write is
-/// the comment-preserving editor's, never a marshal.
+/// input read) -- and, since 27r, walked as the entry will stand among every
+/// source, so a definition that loops through another, nests past the cap or
+/// plays a name nothing defines is refused naming it -- so a refused one
+/// leaves the config as it was. The write is the comment-preserving
+/// editor's, never a marshal.
 namespace apogee::scaffold {
 
 /// What was written.

@@ -9,9 +9,11 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <utility>
 
+#include "contracts/symphony_walk.h"
 #include "platform/platform.h"
 
 namespace apogee::harness {
@@ -759,8 +761,10 @@ constexpr std::array<std::string_view, 5> kSymphonyRoles{"chat", "extraction", "
 /// typo, refused by name -- a `promt:` read as no prompt would play nothing.
 constexpr std::array<std::string_view, 4> kSymphonyKeys{"name", "description", "input", "stages"};
 constexpr std::array<std::string_view, 2> kSymphonyInputKeys{"description", "image"};
-constexpr std::array<std::string_view, 7> kSymphonyStageKeys{
-    "name", "role", "prompt", "schema", "image", "brief_tokens", "answer_tokens"};
+constexpr std::array<std::string_view, 9> kSymphonyStageKeys{
+    "name", "role", "play", "prompt", "input", "schema", "image", "brief_tokens", "answer_tokens"};
+/// The keys `symphony_caps:` accepts (27r), in writing order.
+constexpr std::array<std::string_view, 3> kSymphonyCapKeys{"depth", "stage_calls", "answer_tokens"};
 
 template <std::size_t N>
 std::string joined(const std::array<std::string_view, N>& words) {
@@ -811,42 +815,70 @@ std::optional<std::int64_t> positive(const YAML::Node& node, std::string_view or
     return value;
 }
 
-SymphonyStage parse_symphony_stage(const YAML::Node& node, std::string_view origin,
-                                   const std::string& where,
-                                   const std::vector<std::string>& backends) {
-    if (!node.IsMap()) {
-        fail(origin, (where.empty() ? std::string{"a stage"} : where) +
-                         ": expected a block of settings (name, role, prompt)");
+/// Whether `node` has `key` set to something.
+bool has_key(const YAML::Node& node, std::string_view key) {
+    const YAML::Node value = node[std::string{key}];
+    return value.IsDefined() && !value.IsNull();
+}
+
+/// A stage that plays a symphony (27r): `play:` and optionally `input:` --
+/// nothing a role stage's call carries, since the played symphony's own
+/// stages make the calls.
+void parse_play_stage(const YAML::Node& node, std::string_view origin, const std::string& where,
+                      SymphonyStage& stage) {
+    if (has_key(node, "role")) {
+        fail(origin, at_key(where, "role") +
+                         ": a stage plays a role or a symphony, never both -- remove 'role:' "
+                         "or 'play:'");
     }
-    // Roles, never backends: the suite owns placement, so one definition
-    // serves every suite and machine (the 27d contract).
-    for (const std::string_view key : {std::string_view{"backend"}, std::string_view{"model"}}) {
-        if (node[std::string{key}].IsDefined()) {
+    if (has_key(node, "prompt")) {
+        fail(origin, at_key(where, "prompt") +
+                         ": a play stage has no prompt of its own -- 'input:' is what the "
+                         "symphony it plays is given as its {{input}}");
+    }
+    if (has_key(node, "schema")) {
+        fail(origin, at_key(where, "schema") +
+                         ": a play stage's answer is the played symphony's output -- its own "
+                         "stages hold their answers to their schemas");
+    }
+    for (const std::string_view key :
+         {std::string_view{"brief_tokens"}, std::string_view{"answer_tokens"}}) {
+        if (has_key(node, key)) {
             fail(origin, at_key(where, key) +
-                             ": a stage names the role it plays, never a backend -- the "
-                             "suite decides which backend plays it (role: one of " +
-                             joined(kSymphonyRoles) + ")");
+                             ": a play stage makes no call of its own -- the played symphony's "
+                             "stages carry their caps");
         }
     }
-    refuse_unknown_keys(node, origin, where, kSymphonyStageKeys);
-    SymphonyStage stage;
-    stage.name = raw_scalar(node["name"], origin, at_key(where, "name"));
-    if (stage.name.empty()) {
-        fail(origin, where + ": a stage needs a name");
+    stage.play = raw_scalar(node["play"], origin, at_key(where, "play"));
+    if (!is_symphony_name(stage.play)) {
+        fail(origin, at_key(where, "play") + ": '" + stage.play +
+                         "' is not a symphony name (letters, digits, '_' and '-')");
     }
-    if (!is_symphony_name(stage.name)) {
-        fail(origin, at_key(where, "name") + ": '" + stage.name +
-                         "' is not a stage name (letters, digits, '_' and '-')");
+    if (has_key(node, "input")) {
+        stage.input = raw_scalar(node["input"], origin, at_key(where, "input"));
+        if (stage.input.find_first_not_of(" \t\r\n") == std::string::npos) {
+            fail(origin, at_key(where, "input") +
+                             ": empty -- leave it out and the played symphony is given the "
+                             "previous stage's answer");
+        }
     }
-    if (same_folded(stage.name, "input")) {
-        fail(origin, at_key(where, "name") +
-                         ": 'input' is the symphony's input, {{input}} -- name the "
-                         "stage something else");
-    }
+    stage.image = boolean(node["image"], origin, at_key(where, "image"), false);
+}
+
+/// A stage that plays a role (27q): the role, its prompt, and optionally a
+/// schema, the image and caps.
+void parse_role_stage(const YAML::Node& node, std::string_view origin, const std::string& where,
+                      const std::vector<std::string>& backends, SymphonyStage& stage) {
     const std::string at = where + " ('" + stage.name + "')";
+    if (has_key(node, "input")) {
+        fail(origin, at_key(where, "input") +
+                         ": a role stage's brief is its 'prompt' -- 'input:' is what a play "
+                         "stage gives the symphony it plays");
+    }
     stage.role = raw_scalar(node["role"], origin, at_key(where, "role"));
     if (stage.role.empty()) {
-        fail(origin, at + ": a stage needs a role (one of " + joined(kSymphonyRoles) + ")");
+        fail(origin, at + ": a stage needs a role (one of " + joined(kSymphonyRoles) +
+                         ") or a symphony to play (play: <name>)");
     }
     if (std::ranges::find(kSymphonyRoles, std::string_view{stage.role}) == kSymphonyRoles.end()) {
         if (stage.role == "embedding") {
@@ -881,6 +913,45 @@ SymphonyStage parse_symphony_stage(const YAML::Node& node, std::string_view orig
     stage.image = boolean(node["image"], origin, at_key(where, "image"), false);
     stage.brief_tokens = positive(node["brief_tokens"], origin, at_key(where, "brief_tokens"));
     stage.answer_tokens = positive(node["answer_tokens"], origin, at_key(where, "answer_tokens"));
+}
+
+SymphonyStage parse_symphony_stage(const YAML::Node& node, std::string_view origin,
+                                   const std::string& where,
+                                   const std::vector<std::string>& backends) {
+    if (!node.IsMap()) {
+        fail(origin, (where.empty() ? std::string{"a stage"} : where) +
+                         ": expected a block of settings (name, role, prompt)");
+    }
+    // Roles, never backends: the suite owns placement, so one definition
+    // serves every suite and machine (the 27d contract).
+    for (const std::string_view key : {std::string_view{"backend"}, std::string_view{"model"}}) {
+        if (node[std::string{key}].IsDefined()) {
+            fail(origin, at_key(where, key) +
+                             ": a stage names the role it plays, never a backend -- the "
+                             "suite decides which backend plays it (role: one of " +
+                             joined(kSymphonyRoles) + ")");
+        }
+    }
+    refuse_unknown_keys(node, origin, where, kSymphonyStageKeys);
+    SymphonyStage stage;
+    stage.name = raw_scalar(node["name"], origin, at_key(where, "name"));
+    if (stage.name.empty()) {
+        fail(origin, where + ": a stage needs a name");
+    }
+    if (!is_symphony_name(stage.name)) {
+        fail(origin, at_key(where, "name") + ": '" + stage.name +
+                         "' is not a stage name (letters, digits, '_' and '-')");
+    }
+    if (same_folded(stage.name, "input")) {
+        fail(origin, at_key(where, "name") +
+                         ": 'input' is the symphony's input, {{input}} -- name the "
+                         "stage something else");
+    }
+    if (has_key(node, "play")) {
+        parse_play_stage(node, origin, where, stage);
+    } else {
+        parse_role_stage(node, origin, where, backends, stage);
+    }
     return stage;
 }
 
@@ -947,7 +1018,36 @@ SymphonySpec parse_symphony_node(const YAML::Node& node, std::string_view origin
         spec.input.image = boolean(input["image"], origin, at_key(where, "input.image"), false);
     }
     parse_symphony_stages(node["stages"], origin, where, backends, spec);
+    // The one loop a definition alone shows: playing its own name (27r). The
+    // rest wait for a lookup that knows the other definitions -- the load's
+    // walk over every entry, the catalog's at create and at play.
+    const SymphonyWalk walk = walk_symphony(
+        spec,
+        [&spec](std::string_view played) {
+            return same_folded(played, spec.name) ? &spec : nullptr;
+        },
+        std::numeric_limits<std::int64_t>::max(), false);
+    if (!walk.ok()) {
+        fail(origin, where.empty() ? walk.problem : where + ": " + walk.problem);
+    }
     return spec;
+}
+
+/// `symphony_caps:` (27r): positive whole numbers, an unknown key refused by
+/// name.
+SymphonyCaps parse_symphony_caps(const YAML::Node& node, std::string_view origin) {
+    SymphonyCaps caps;
+    if (!node.IsDefined() || node.IsNull()) {
+        return caps;
+    }
+    if (!node.IsMap()) {
+        fail(origin, "symphony_caps: expected a mapping (" + joined(kSymphonyCapKeys) + ")");
+    }
+    refuse_unknown_keys(node, origin, "symphony_caps", kSymphonyCapKeys);
+    caps.depth = positive(node["depth"], origin, "symphony_caps.depth");
+    caps.stage_calls = positive(node["stage_calls"], origin, "symphony_caps.stage_calls");
+    caps.answer_tokens = positive(node["answer_tokens"], origin, "symphony_caps.answer_tokens");
+    return caps;
 }
 
 }  // namespace
@@ -1768,6 +1868,19 @@ Config parse_config(std::string_view content, std::string_view origin) {
                                  "' -- symphony names are compared case-insensitively, so these "
                                  "would be the same symphony; rename one");
             }
+        }
+    }
+    config.symphony_caps = parse_symphony_caps(root["symphony_caps"], origin);
+    // The entries walked against each other (27r): a loop among them, or a
+    // nesting past the cap, fails the load like a bad suite -- never found at
+    // play time. A name no entry defines is a starter's or a spec file's,
+    // walked again by the catalog that knows it.
+    for (const auto& [name, spec] : config.symphonies) {
+        const SymphonyWalk walk = walk_symphony(
+            spec, [&config](std::string_view played) { return config.find_symphony(played); },
+            config.symphony_caps.max_depth(), false);
+        if (!walk.ok()) {
+            fail(origin, "symphonies." + name + ": " + walk.problem);
         }
     }
 

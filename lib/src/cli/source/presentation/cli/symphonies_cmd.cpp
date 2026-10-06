@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "agentloop/member_call.h"
@@ -67,15 +68,23 @@ harness::Config load(const std::filesystem::path& path) {
     }
 }
 
-symphony::Definition find_or_fail(const harness::Config& config,
-                                  const std::filesystem::path& config_path,
-                                  std::string_view name_or_path) {
+/// A definition found, and the catalog its play stages resolve against
+/// (27r).
+struct Resolved {
+    symphony::Definition definition;
+    symphony::Catalog catalog;
+};
+
+/// The definition `name_or_path` names -- or the reason there is none, said.
+Resolved find_or_fail(const harness::Config& config, const std::filesystem::path& config_path,
+                      std::string_view name_or_path) {
     symphony::Found found =
         symphony::find_definition(config, symphonies_dir_for(config_path), name_or_path);
     if (!found.definition.has_value()) {
         fail_user(found.error);
     }
-    return std::move(*found.definition);
+    return Resolved{.definition = std::move(*found.definition),
+                    .catalog = std::move(found.catalog)};
 }
 
 /// `--output-format text|json` on a read, the 27j convention.
@@ -124,7 +133,22 @@ void print_block(std::ostream& out, std::string_view text, std::string_view inde
     }
 }
 
-void print_definition(const symphony::Definition& definition) {
+/// A stage that plays a symphony (27r): what it plays, and what it gives it.
+void print_play_stage(const harness::SymphonyStage& stage, std::size_t index) {
+    std::cout << "  ·  plays " << stage.play;
+    if (stage.image) {
+        std::cout << "  ·  passes the image on";
+    }
+    if (stage.input.empty()) {
+        std::cout << "  ·  given "
+                  << (index == 0 ? "the symphony's input" : "the previous stage's answer") << "\n";
+        return;
+    }
+    std::cout << "  ·  given:\n";
+    print_block(std::cout, stage.input, "    ");
+}
+
+void print_definition(const symphony::Definition& definition, const symphony::Catalog& catalog) {
     const harness::SymphonySpec& spec = definition.spec;
     std::cout << spec.name << "  ·  " << source_label(definition);
     if (!definition.path.empty()) {
@@ -144,8 +168,12 @@ void print_definition(const symphony::Definition& definition) {
     const std::size_t count = spec.stages.size();
     for (std::size_t index = 0; index < count; ++index) {
         const harness::SymphonyStage& stage = spec.stages[index];
-        std::cout << "\nstage " << index + 1 << "/" << count << "  " << stage.name << "  ·  role "
-                  << stage.role;
+        std::cout << "\nstage " << index + 1 << "/" << count << "  " << stage.name;
+        if (stage.plays()) {
+            print_play_stage(stage, index);
+            continue;
+        }
+        std::cout << "  ·  role " << stage.role;
         if (stage.image) {
             std::cout << "  ·  given the image";
         }
@@ -158,11 +186,19 @@ void print_definition(const symphony::Definition& definition) {
             print_block(std::cout, stage.schema, "    ");
         }
     }
-    if (const std::vector<std::string> problems = symphony::validate(spec); !problems.empty()) {
+    const std::vector<std::string> problems = symphony::validate(spec, catalog);
+    if (!problems.empty()) {
         std::cout << "\ncannot be played:\n";
         for (const std::string& problem : problems) {
             std::cout << "  - " << problem << "\n";
         }
+        return;
+    }
+    // A chain says what one play of it costs, every symphony it reaches
+    // counted (27r).
+    if (const harness::SymphonyWalk walked = symphony::walk(spec, catalog); walked.depth > 1) {
+        std::cout << "\none play: " << walked.stage_calls << " member calls, one after another, "
+                  << walked.depth << " symphonies deep (the cap is " << catalog.max_depth << ")\n";
     }
 }
 
@@ -190,7 +226,7 @@ void bind_list(CLI::App& parent, const RootContext& context) {
         std::cout << padded("NAME", kNameColumn) << padded("STAGES", kStagesColumn)
                   << padded("SOURCE", kSourceColumn) << "DESCRIPTION\n";
         for (const symphony::Definition& definition : catalog.definitions) {
-            const std::vector<std::string> problems = symphony::validate(definition.spec);
+            const std::vector<std::string> problems = symphony::validate(definition.spec, catalog);
             std::cout << padded(definition.spec.name, kNameColumn)
                       << padded(symphony::role_chain(definition.spec), kStagesColumn)
                       << padded(source_label(definition), kSourceColumn)
@@ -219,12 +255,13 @@ void bind_show(CLI::App& parent, const RootContext& context) {
     cmd->callback([&context, name, format]() {
         const std::filesystem::path config_path = config_path_for(context);
         const harness::Config config = load(config_path);
-        const symphony::Definition definition = find_or_fail(config, config_path, *name);
+        const Resolved found = find_or_fail(config, config_path, *name);
         if (*format == ReadFormat::Json) {
-            write_document(std::cout, symphony::definition_document(definition));
+            write_document(std::cout,
+                           symphony::definition_document(found.definition, found.catalog));
             return;
         }
-        print_definition(definition);
+        print_definition(found.definition, found.catalog);
     });
 }
 
@@ -247,6 +284,46 @@ harness::SymphonyStage parse_stage_flag(const std::string& value) {
     return stage;
 }
 
+/// `--play NAME:SYMPHONY[:INPUT]` (27r): the input template is everything
+/// after the second colon, colons and all; without one the stage is given
+/// the previous stage's answer.
+harness::SymphonyStage parse_play_flag(const std::string& value) {
+    const std::size_t first = value.find(':');
+    if (first == std::string::npos) {
+        fail_user("--play '" + value +
+                  "': expected NAME:SYMPHONY[:INPUT] -- e.g. --play summary:summarize-verify");
+    }
+    const std::size_t second = value.find(':', first + 1);
+    harness::SymphonyStage stage;
+    stage.name = value.substr(0, first);
+    stage.play = value.substr(first + 1, second == std::string::npos ? second : second - first - 1);
+    if (second != std::string::npos) {
+        stage.input = value.substr(second + 1);
+    }
+    return stage;
+}
+
+/// The stages `--stage` and `--play` give, in the order they were written:
+/// each flag's values are its own, so the command's parse order interleaves
+/// them.
+std::vector<harness::SymphonyStage> stages_in_order(const CLI::App& command,
+                                                    const CLI::Option* stage_option,
+                                                    const std::vector<std::string>& stages,
+                                                    const CLI::Option* play_option,
+                                                    const std::vector<std::string>& plays) {
+    std::vector<harness::SymphonyStage> out;
+    std::size_t next_stage = 0;
+    std::size_t next_play = 0;
+    for (const CLI::Option* option : command.parse_order()) {
+        if (option == stage_option && next_stage < stages.size()) {
+            out.push_back(parse_stage_flag(stages[next_stage++]));
+        } else if (option == play_option && next_play < plays.size()) {
+            out.push_back(parse_play_flag(plays[next_play++]));
+        }
+    }
+    return out;
+}
+
 void bind_create(CLI::App& parent, const RootContext& context) {
     struct Flags {
         std::string name;
@@ -254,10 +331,13 @@ void bind_create(CLI::App& parent, const RootContext& context) {
         std::string input_description;
         bool input_image = false;
         std::vector<std::string> stages;
+        std::vector<std::string> plays;
         std::string from;
         bool force = false;
         CLI::Option* description_option = nullptr;
         CLI::Option* input_option = nullptr;
+        CLI::Option* stage_option = nullptr;
+        CLI::Option* play_option = nullptr;
     };
 
     auto flags = std::make_shared<Flags>();
@@ -277,31 +357,41 @@ void bind_create(CLI::App& parent, const RootContext& context) {
     for (const std::string_view role : harness::symphony_role_names()) {
         roles += (roles.empty() ? "" : ", ") + std::string{role};
     }
-    cmd->add_option("--stage", flags->stages,
-                    "A stage, in play order (repeatable): NAME:ROLE:PROMPT, the role one of " +
-                        roles +
-                        " -- never a backend; the prompt reads {{input}} and earlier stages' "
-                        "answers by name")
-        ->expected(1)
-        ->allow_extra_args(false)
-        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
+    flags->stage_option =
+        cmd->add_option("--stage", flags->stages,
+                        "A stage, in play order (repeatable): NAME:ROLE:PROMPT, the role one of " +
+                            roles +
+                            " -- never a backend; the prompt reads {{input}} and earlier "
+                            "stages' answers by name")
+            ->expected(1)
+            ->allow_extra_args(false)
+            ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
+    flags->play_option =
+        cmd->add_option("--play", flags->plays,
+                        "A stage that plays another symphony, in play order with --stage "
+                        "(repeatable): NAME:SYMPHONY[:INPUT], the input what it is given as its "
+                        "{{input}} (default: the previous stage's answer)")
+            ->type_name("NAME:SYMPHONY[:INPUT]")
+            ->expected(1)
+            ->allow_extra_args(false)
+            ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--from", flags->from,
                     "Start from another symphony -- a starter, a config entry or a spec file")
         ->type_name(kSymphonyValue);
     cmd->add_flag("--force", flags->force, "Replace an existing entry of the name");
-    cmd->callback([&context, flags]() {
-        if (!flags->from.empty() && !flags->stages.empty()) {
-            fail_user("--from and --stage both say what the stages are -- give one");
+    cmd->callback([&context, cmd, flags]() {
+        const bool staged = !flags->stages.empty() || !flags->plays.empty();
+        if (!flags->from.empty() && staged) {
+            fail_user("--from and --stage/--play both say what the stages are -- give one");
         }
         const std::filesystem::path config_path = config_path_for(context);
         const harness::Config config = load(config_path);
         harness::SymphonySpec spec;
         if (!flags->from.empty()) {
-            spec = find_or_fail(config, config_path, flags->from).spec;
-        } else if (!flags->stages.empty()) {
-            for (const std::string& value : flags->stages) {
-                spec.stages.push_back(parse_stage_flag(value));
-            }
+            spec = find_or_fail(config, config_path, flags->from).definition.spec;
+        } else if (staged) {
+            spec.stages = stages_in_order(*cmd, flags->stage_option, flags->stages,
+                                          flags->play_option, flags->plays);
         } else {
             spec = scaffold::starter_symphony(flags->name, {});
         }
@@ -392,7 +482,7 @@ void bind_edit(CLI::App& parent, const RootContext& context) {
                       " is a spec file's path -- edit the file in place; 'edit' takes a "
                       "symphony's name and writes its config entry");
         }
-        const symphony::Definition definition = find_or_fail(config, config_path, *name);
+        const symphony::Definition definition = find_or_fail(config, config_path, *name).definition;
         const std::string before = harness::render_symphony_spec(definition.spec);
         const std::filesystem::path scratch = harness::home_for_config(config_path) / "cache" /
                                               ("symphony-" + definition.spec.name + ".yaml");
@@ -547,7 +637,8 @@ void build_members(harness::Harness& harness, const harness::Config& config,
 void play(const RootContext& context, const PlayFlags& flags, ReadFormat format) {
     const std::filesystem::path config_path = config_path_for(context);
     harness::Config config = load(config_path);
-    const symphony::Definition definition = find_or_fail(config, config_path, flags.name);
+    const Resolved found = find_or_fail(config, config_path, flags.name);
+    const symphony::Definition& definition = found.definition;
     if (!flags.suite.empty()) {
         if (const std::string refused = select_suite(config, flags.suite); !refused.empty()) {
             fail_user(refused);
@@ -555,8 +646,10 @@ void play(const RootContext& context, const PlayFlags& flags, ReadFormat format)
     }
 
     const symphony::PlayInput input = play_input(flags);
-    // What the definition refuses is said before anything is built.
-    if (const std::string refused = symphony::refusal(definition.spec, input); !refused.empty()) {
+    // What the definition refuses is said before anything is built -- the
+    // whole walk checked, every symphony it plays found (27r).
+    if (const std::string refused = symphony::refusal(definition.spec, found.catalog, input);
+        !refused.empty()) {
         fail_user(refused +
                   (input.text.empty() ? " -- pass --input \"…\", or pipe it on stdin" : ""));
     }
@@ -591,7 +684,11 @@ void play(const RootContext& context, const PlayFlags& flags, ReadFormat format)
     try {
         const agentloop::MemberCalls::Turn turn =
             calls.begin_turn(std::move(narrate), InterruptScope::token());
-        result = symphony::play(definition.spec, input, calls);
+        // One budget for the whole walk, the config's caps when it sets them.
+        symphony::PlayOptions options;
+        options.per_turn = config.symphony_caps.stage_calls.value_or(0);
+        options.answer_tokens = config.symphony_caps.answer_tokens.value_or(0);
+        result = symphony::play(definition.spec, found.catalog, input, calls, options);
     } catch (const harness::CancelledError&) {
         busy.finish();
         std::cerr << "apogee symphonies: cancelled\n";

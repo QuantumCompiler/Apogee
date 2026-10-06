@@ -60,6 +60,7 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
     // The `:json` variants expand to a JSON string literal, quotes included,
     // so a scripted JSON answer can carry a tool result verbatim.
     replace_all(out, "{{last_tool_result:json}}", nlohmann::json(last_tool_result).dump());
+    replace_all(out, "{{last_user:json}}", nlohmann::json(last_user).dump());
     replace_all(out, "{{system:json}}", nlohmann::json(system).dump());
     // The schema the request carried, as it carried it -- so a check on the
     // real binary can see a caller kept its author's order (26f).

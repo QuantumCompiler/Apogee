@@ -225,3 +225,126 @@ TEST_CASE("with no directory and no entries, the starters alone", "[symphony][de
         CHECK(definition.source == Source::Shipped);
     }
 }
+
+// ---- Composition (27r) --------------------------------------------------------
+
+TEST_CASE("a play stage's template: its input, else the previous answer, else the input",
+          "[symphony][definition]") {
+    SymphonySpec spec = spec_of({stage("a", "utility", "{{input}}")});
+    SymphonyStage first;
+    first.name = "first";
+    first.play = "x";
+    SymphonyStage second;
+    second.name = "second";
+    second.play = "x";
+    SymphonyStage third;
+    third.name = "third";
+    third.play = "x";
+    third.input = "Both: {{first}} {{input}}";
+    spec.stages = {first, second, third, stage("last", "chat", "{{third}}")};
+    using apogee::symphony::stage_template;
+    CHECK(stage_template(spec, 0) == "{{input}}");
+    CHECK(stage_template(spec, 1) == "{{first}}");
+    CHECK(stage_template(spec, 2) == "Both: {{first}} {{input}}");
+    CHECK(stage_template(spec, 3) == "{{third}}");
+    // A play stage's input is held to the grammar a prompt is.
+    CHECK(validate(spec).empty());
+    spec.stages[2].input = "{{last}}";
+    CHECK_THAT(first_problem(spec),
+               Catch::Matchers::ContainsSubstring("stage 3 (third): {{last}} is stage 4's answer"));
+    CHECK(apogee::symphony::role_chain(spec) == "play:x → play:x → play:x → chat");
+}
+
+TEST_CASE("validation against the catalog: what a chain reaches is held too",
+          "[symphony][definition]") {
+    const apogee::harness::Config config = apogee::harness::parse_config(R"YAML(symphony_caps:
+  depth: 3
+symphonies:
+  broken:
+    stages:
+      - {name: a, role: utility, prompt: "{{nope}} {{input}}"}
+  inner:
+    stages:
+      - {name: a, play: leaf}
+  leaf:
+    stages:
+      - {name: a, role: utility, prompt: "{{input}}"}
+)YAML",
+                                                                         "<test>");
+    const apogee::symphony::Catalog all =
+        catalog(config, "/nonexistent/apogee/symphonies-composition");
+    CHECK(all.max_depth == 3);
+    REQUIRE(all.find("INNER") != nullptr);
+    CHECK(all.find("INNER")->spec.name == "inner");
+    CHECK(all.find("nope") == nullptr);
+
+    const auto chain = [](std::string_view play) {
+        SymphonySpec spec;
+        spec.name = "chain";
+        SymphonyStage stage;
+        stage.name = "s";
+        stage.play = std::string{play};
+        spec.stages = {stage};
+        return spec;
+    };
+    CHECK(validate(chain("inner"), all).empty());
+    CHECK(validate(chain("summarize-verify"), all).empty());
+    // One symphony too deep for the config's cap of three.
+    SymphonySpec deeper = chain("chain2");
+    apogee::symphony::Catalog more = all;
+    Definition chain2;
+    chain2.spec = chain("inner");
+    chain2.spec.name = "chain2";
+    more.definitions.push_back(chain2);
+    CHECK_THAT(validate(deeper, more).front(),
+               Catch::Matchers::ContainsSubstring("nests 4 deep -- chain → chain2 → inner → leaf, "
+                                                  "and the cap is 3"));
+    // A symphony it plays that cannot be played itself.
+    const std::vector<std::string> broken = validate(chain("broken"), all);
+    REQUIRE(broken.size() == 1);
+    CHECK_THAT(broken.front(),
+               Catch::Matchers::StartsWith("'broken', which it plays, cannot be played: stage 1 "
+                                           "(a): {{nope}} names no stage"));
+    // An image the played symphony needs and is not passed, or one it does not take.
+    const std::vector<std::string> blind = validate(chain("describe-answer"), all);
+    REQUIRE(blind.size() == 1);
+    CHECK_THAT(blind.front(), Catch::Matchers::ContainsSubstring(
+                                  "stage 1 (s): plays 'describe-answer', which takes an image"));
+    SymphonySpec passing = chain("inner");
+    passing.input.image = true;
+    passing.stages[0].image = true;
+    CHECK_THAT(validate(passing, all).front(),
+               Catch::Matchers::ContainsSubstring("passes the image to 'inner', which takes none"));
+    // Without a catalog, a play stage plays nothing.
+    CHECK_THAT(validate(chain("inner"), apogee::symphony::Catalog{}).front(),
+               Catch::Matchers::ContainsSubstring("no symphony is named 'inner'"));
+}
+
+TEST_CASE("a found definition carries the catalog its plays resolve against",
+          "[symphony][definition]") {
+    const apogee::harness::Config config = apogee::harness::parse_config(R"YAML(symphonies:
+  chain:
+    stages:
+      - {name: s, play: summarize-verify}
+)YAML",
+                                                                         "<test>");
+    const std::filesystem::path dir = "/nonexistent/apogee/symphonies-found";
+    const apogee::symphony::Found found = find_definition(config, dir, "chain");
+    REQUIRE(found.definition.has_value());
+    REQUIRE(found.catalog.find("summarize-verify") != nullptr);
+    CHECK(validate(found.definition.value().spec, found.catalog).empty());
+    const apogee::harness::SymphonyWalk walked =
+        apogee::symphony::walk(found.definition.value().spec, found.catalog);
+    CHECK(walked.depth == 2);
+    CHECK(walked.stage_calls == 2);
+
+    // A spec file named by its path plays what a name would find.
+    const apogee::testing::TempDir home{"symphony-found-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path file = home.path() / "chain-file.yaml";
+    write(file, "stages:\n  - {name: s, play: chain}\n");
+    const apogee::symphony::Found by_path = find_definition(config, dir, file.string());
+    REQUIRE(by_path.definition.has_value());
+    REQUIRE(by_path.catalog.find("chain") != nullptr);
+    CHECK(validate(by_path.definition.value().spec, by_path.catalog).empty());
+    CHECK(apogee::symphony::walk(by_path.definition.value().spec, by_path.catalog).depth == 3);
+}

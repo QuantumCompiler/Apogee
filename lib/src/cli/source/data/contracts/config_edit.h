@@ -191,8 +191,9 @@ public:
 /// the section when absent: `description` and `input` when they say
 /// something, then `stages`, each `name` and `role`, its flags and caps when
 /// set, then its `prompt` and `schema` -- several lines as a literal block,
-/// anything a block cannot carry exactly double-quoted -- so the entry reads
-/// back through the one parser as exactly `spec`. The name must be one
+/// anything a block cannot carry exactly double-quoted -- and a stage that
+/// plays a symphony (27r) its `play:` and its `input:` when set, so the entry
+/// reads back through the one parser as exactly `spec`. The name must be one
 /// (`is_symphony_name`). Same collision and `force` rules as
 /// `append_backend`; a replaced entry keeps its place and the comment above
 /// it.

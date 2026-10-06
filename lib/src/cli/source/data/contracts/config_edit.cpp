@@ -1103,7 +1103,8 @@ void text_field(Lines& out, std::size_t indent, std::string_view key, std::strin
 
 /// A definition's lines at `indent`, everything but the name: `description`
 /// and `input` when they say something, then `stages`, each stage's short
-/// fields before its prompt and schema.
+/// fields before its prompt and schema -- a play stage's (27r) `play:`, and
+/// its `input:` when it has one.
 void symphony_body(Lines& out, const SymphonySpec& spec, std::size_t indent,
                    std::string_view terminator) {
     const std::string pad(indent, ' ');
@@ -1124,7 +1125,15 @@ void symphony_body(Lines& out, const SymphonySpec& spec, std::size_t indent,
     const std::string field(indent + 4, ' ');
     for (const SymphonyStage& stage : spec.stages) {
         out.push_back(line_of({pad, "  - name: ", stage.name, end}));
-        out.push_back(line_of({field, "role: ", stage.role, end}));
+        // Every field the stage holds is written, so the parser -- not the
+        // renderer -- judges a stage that mixes the two kinds (27r): a role
+        // and a play both set read back refused, never as one of them.
+        if (!stage.role.empty() || !stage.plays()) {
+            out.push_back(line_of({field, "role: ", stage.role, end}));
+        }
+        if (stage.plays()) {
+            out.push_back(line_of({field, "play: ", stage.play, end}));
+        }
         if (stage.image) {
             out.push_back(line_of({field, "image: true", end}));
         }
@@ -1136,7 +1145,12 @@ void symphony_body(Lines& out, const SymphonySpec& spec, std::size_t indent,
             out.push_back(
                 line_of({field, "answer_tokens: ", std::to_string(*stage.answer_tokens), end}));
         }
-        text_field(out, indent + 4, "prompt", stage.prompt, terminator);
+        if (!stage.plays() || !stage.prompt.empty()) {
+            text_field(out, indent + 4, "prompt", stage.prompt, terminator);
+        }
+        if (!stage.input.empty()) {
+            text_field(out, indent + 4, "input", stage.input, terminator);
+        }
         if (!stage.schema.empty()) {
             text_field(out, indent + 4, "schema", stage.schema, terminator);
         }
