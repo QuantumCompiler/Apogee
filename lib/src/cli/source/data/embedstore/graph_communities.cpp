@@ -149,6 +149,11 @@ std::int64_t Store::replace_community(std::string_view member_key,
                 fail(handle, "could not store a community's membership");
             }
         }
+        // A community clustered with no summariser (27k: a code graph needs
+        // none) is stored without a pseudo-chunk: there is nothing to find.
+        if (summary.empty()) {
+            return;
+        }
         // The lexical pseudo-chunk: searchable at once through the chunk
         // index's insert trigger, vectorised later.
         StatementPtr chunk = prepare(handle,
@@ -194,7 +199,7 @@ std::int64_t Store::prune_communities(const std::set<std::string>& keep) {
 std::vector<std::int64_t> Store::communities_without_vectors() const {
     StatementPtr select = prepare(impl_->connection.get(),
                                   "SELECT c.id FROM kg_communities c"
-                                  " WHERE NOT EXISTS (SELECT 1 FROM chunks"
+                                  " WHERE c.summary != '' AND NOT EXISTS (SELECT 1 FROM chunks"
                                   "   WHERE chunks.source = ? || c.id AND chunks.dim > 0)"
                                   " ORDER BY c.id");
     bind_text(select.get(), 1, kCommunitySourcePrefix);

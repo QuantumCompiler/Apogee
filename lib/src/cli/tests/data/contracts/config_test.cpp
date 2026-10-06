@@ -686,6 +686,30 @@ graphs:
     CHECK(load_text(apogee::harness::config_template()).graphs.empty());
 }
 
+TEST_CASE("a graphs: entry may hold source trees and languages, a tree's variables expanded",
+          "[config][graphs][code]") {
+    const EnvGuard root{"APOGEE_TEST_SRC_ROOT", "/home/someone"};
+    const auto config = apogee::harness::parse_config(R"YAML(
+graphs:
+  code:
+    sources: ["${APOGEE_TEST_SRC_ROOT}/src/app", /opt/lib]
+    languages: [cpp, python]
+  mixed:
+    collections: [docs]
+    sources: [/srv/repo]
+)YAML",
+                                                      "<test>");
+    const apogee::harness::NamedGraphConfig* code = config.find_graph("code");
+    REQUIRE(code != nullptr);
+    CHECK(code->collections.empty());
+    CHECK(code->sources == std::vector<std::string>{"/home/someone/src/app", "/opt/lib"});
+    CHECK(code->languages == std::vector<std::string>{"cpp", "python"});
+    CHECK(config.find_graph("mixed")->collections == std::vector<std::string>{"docs"});
+    CHECK(config.find_graph("mixed")->sources == std::vector<std::string>{"/srv/repo"});
+    CHECK_THROWS_AS(apogee::harness::parse_config("graphs:\n  w:\n    sources: /x\n", "<test>"),
+                    apogee::harness::ConfigError);
+}
+
 TEST_CASE("the training section carries the interpreter the environment is seeded from",
           "[harness][config][training]") {
     const apogee::harness::Config config = apogee::harness::parse_config(

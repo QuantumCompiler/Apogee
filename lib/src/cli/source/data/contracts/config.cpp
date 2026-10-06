@@ -1431,6 +1431,9 @@ Config parse_config(std::string_view content, std::string_view origin) {
                 }
                 graph.collections =
                     string_list(node["collections"], origin, where + ".collections", false);
+                graph.sources = string_list(node["sources"], origin, where + ".sources", true);
+                graph.languages =
+                    string_list(node["languages"], origin, where + ".languages", false);
                 graph.extract_backend =
                     scalar(node["extract_backend"], origin, where + ".extract_backend");
                 if (const std::optional<std::int64_t> hops =

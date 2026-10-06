@@ -45,16 +45,18 @@ struct GraphSection {
 /// decision node folds the record's branch marker into the parenthetical --
 /// `kr-… (decision, shipped): <decision — intent>` -- so the model weighs a
 /// superseded or rejected decision correctly and a reader can `knowledge
-/// info` the id.
+/// info` the id. A code entity (27k) folds in its provenance --
+/// `apogee::graph::build (function, source/business/graph/build.cpp:220):
+/// <signature>` -- so what the code graph injects is citable to the line.
 [[nodiscard]] std::string entity_line(const embedstore::GraphNode& node);
 
 /// Expands and renders: `[Knowledge graph: <collection>]`, the entity lines,
-/// then the relation triples (`A —[relation]→ B: description`), cut whole
-/// lines at the budget. `seed_chunks` are the turn's retrieved chunks in
-/// retrieval order; `lexical_query` is the question on a lexical or hybrid
-/// turn (empty on a vector turn) and seeds through the entity index. Throws
-/// what the store throws; the caller decides what a failure costs. The
-/// collection's own graph: every seed is labelled `''`.
+/// then the relation triples (`A —[relation]→ B: description`; a parsed
+/// edge, 27k, as `A —[calls·extracted]→ B`), cut whole lines at the budget. `seed_chunks` are the
+/// turn's retrieved chunks in retrieval order; `lexical_query` is the question on a lexical or
+/// hybrid turn (empty on a vector turn) and seeds through the entity index. Throws what the store
+/// throws; the caller decides what a failure costs. The collection's own graph: every seed is
+/// labelled `''`.
 [[nodiscard]] GraphSection build_graph_section(const embedstore::Store& store,
                                                std::string_view collection,
                                                const std::vector<std::int64_t>& seed_chunks,

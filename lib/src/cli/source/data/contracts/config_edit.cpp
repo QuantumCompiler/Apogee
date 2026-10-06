@@ -717,13 +717,31 @@ Lines format_graph_entry(std::string_view name, const NamedGraphConfig& graph,
     };
     out.push_back(std::string(kEntryIndent, ' ') + std::string{name} + ":" +
                   std::string{terminator});
-    std::string members = "[";
-    for (const std::string& collection : graph.collections) {
-        members += members.size() > 1 ? ", " : "";
-        members += yaml_scalar(collection);
+    // `collections:` is always written for a graph of collections; a code
+    // graph (27k) with only `sources:` omits the empty list.
+    if (!graph.collections.empty() || graph.sources.empty()) {
+        std::string members = "[";
+        for (const std::string& collection : graph.collections) {
+            members += members.size() > 1 ? ", " : "";
+            members += yaml_scalar(collection);
+        }
+        members += "]";
+        field("collections", members);
     }
-    members += "]";
-    field("collections", members);
+    const auto list = [&](std::string_view key, const std::vector<std::string>& values) {
+        std::string rendered = "[";
+        for (const std::string& value : values) {
+            rendered += rendered.size() > 1 ? ", " : "";
+            rendered += yaml_scalar(value);
+        }
+        field(key, rendered + "]");
+    };
+    if (!graph.sources.empty()) {
+        list("sources", graph.sources);
+    }
+    if (!graph.languages.empty()) {
+        list("languages", graph.languages);
+    }
     if (!graph.extract_backend.empty()) {
         field("extract_backend", yaml_scalar(graph.extract_backend));
     }

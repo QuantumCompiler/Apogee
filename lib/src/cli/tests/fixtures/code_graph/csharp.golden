@@ -1,0 +1,155 @@
+node class Bank.Models.Account
+  description public class Account : IAccount
+  metadata {"end_line":26,"file":"Models/Account.cs","kind":"code","lang":"csharp","line":8,"member":"csharp"}
+  mentions 1
+  at csharp:Models/Account.cs:8-26 definition
+node class Bank.Models.IAccount
+  description public interface IAccount
+  metadata {"end_line":6,"file":"Models/Account.cs","kind":"code","lang":"csharp","line":3,"member":"csharp"}
+  mentions 1
+  at csharp:Models/Account.cs:3-6 definition
+node class Bank.Program
+  description public static class Program
+  metadata {"end_line":15,"file":"Program.cs","kind":"code","lang":"csharp","line":6,"member":"csharp"}
+  mentions 1
+  at csharp:Program.cs:6-15 definition
+node file Models/Account.cs
+  description C# file
+  metadata {"end_line":27,"file":"Models/Account.cs","kind":"code","lang":"csharp","line":1,"member":"csharp"}
+  mentions 1
+  at csharp:Models/Account.cs:1-27 definition
+node file Program.cs
+  description C# file
+  metadata {"end_line":16,"file":"Program.cs","kind":"code","lang":"csharp","line":1,"member":"csharp"}
+  mentions 1
+  at csharp:Program.cs:1-16 definition
+node function Bank.Models.Account.Balance
+  description public decimal Balance()
+  metadata {"end_line":20,"file":"Models/Account.cs","kind":"code","lang":"csharp","line":17,"member":"csharp"}
+  mentions 1
+  at csharp:Models/Account.cs:17-20 definition
+node function Bank.Models.Account.Deposit
+  description public void Deposit(decimal amount)
+  metadata {"end_line":15,"file":"Models/Account.cs","kind":"code","lang":"csharp","line":12,"member":"csharp"}
+  mentions 1
+  at csharp:Models/Account.cs:12-15 definition
+node function Bank.Models.Account.Validate
+  description private static decimal Validate(decimal amount)
+  metadata {"end_line":25,"file":"Models/Account.cs","kind":"code","lang":"csharp","line":22,"member":"csharp"}
+  mentions 1
+  at csharp:Models/Account.cs:22-25 definition
+node function Bank.Models.IAccount.Balance
+  description decimal Balance()
+  metadata {"end_line":5,"file":"Models/Account.cs","kind":"code","lang":"csharp","line":5,"member":"csharp"}
+  mentions 1
+  at csharp:Models/Account.cs:5-5 declaration
+node function Bank.Program.Main
+  description public static void Main()
+  metadata {"end_line":14,"file":"Program.cs","kind":"code","lang":"csharp","line":8,"member":"csharp"}
+  mentions 1
+  at csharp:Program.cs:8-14 definition
+node module Bank
+  description namespace Bank
+  metadata {"end_line":16,"file":"Program.cs","kind":"code","lang":"csharp","line":4,"member":"csharp"}
+  mentions 1
+  at csharp:Program.cs:4-16 definition
+node module Bank.Models
+  description namespace Bank.Models
+  metadata {"end_line":27,"file":"Models/Account.cs","kind":"code","lang":"csharp","line":1,"member":"csharp"}
+  mentions 1
+  at csharp:Models/Account.cs:1-27 definition
+node name .Max
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at csharp:Models/Account.cs:24-24 reference
+node name .WriteLine
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at csharp:Program.cs:13-13 reference
+node name System
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at csharp:Program.cs:1-1 reference
+edge class Bank.Models.Account -[defined_in]-> file Models/Account.cs
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Models/Account.cs:8
+edge class Bank.Models.Account -[inherits]-> class Bank.Models.IAccount
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Models/Account.cs:8
+edge class Bank.Models.IAccount -[defined_in]-> file Models/Account.cs
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Models/Account.cs:3
+edge class Bank.Program -[defined_in]-> file Program.cs
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Program.cs:6
+edge file Models/Account.cs -[defined_in]-> module Bank.Models
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Models/Account.cs:1
+edge file Program.cs -[defined_in]-> module Bank
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Program.cs:4
+edge file Program.cs -[imports]-> module Bank.Models
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Program.cs:2
+edge file Program.cs -[imports]-> name System
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Program.cs:1
+edge function Bank.Models.Account.Balance -[defined_in]-> class Bank.Models.Account
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Models/Account.cs:17
+edge function Bank.Models.Account.Deposit -[calls]-> function Bank.Models.Account.Validate
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Models/Account.cs:14
+edge function Bank.Models.Account.Deposit -[defined_in]-> class Bank.Models.Account
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Models/Account.cs:12
+edge function Bank.Models.Account.Validate -[calls]-> name .Max
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Models/Account.cs:24
+edge function Bank.Models.Account.Validate -[defined_in]-> class Bank.Models.Account
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Models/Account.cs:22
+edge function Bank.Models.IAccount.Balance -[defined_in]-> class Bank.Models.IAccount
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Models/Account.cs:5
+edge function Bank.Program.Main -[calls]-> class Bank.Models.Account
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Program.cs:10
+edge function Bank.Program.Main -[calls]-> function Bank.Models.Account.Deposit
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Program.cs:12
+edge function Bank.Program.Main -[calls]-> function Bank.Models.IAccount.Balance
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Program.cs:13
+edge function Bank.Program.Main -[calls]-> name .WriteLine
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Program.cs:13
+edge function Bank.Program.Main -[defined_in]-> class Bank.Program
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Program.cs:8
+edge module Bank.Models -[defined_in]-> module Bank
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site csharp:Models/Account.cs:1

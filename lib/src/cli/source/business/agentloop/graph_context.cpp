@@ -29,6 +29,14 @@ std::string entity_line(const embedstore::GraphNode& node) {
         if (!meta.status.empty()) {
             label += ", " + meta.status;
         }
+    } else if (embedstore::is_code_node_type(node.type)) {
+        // A code entity carries where it is defined (27k): the model can
+        // cite, and a reader open, the line itself.
+        const embedstore::CodeNodeMetadata meta =
+            embedstore::parse_code_node_metadata(node.metadata);
+        if (meta.code && !meta.unresolved && !meta.file.empty()) {
+            label += ", " + meta.file + ":" + std::to_string(meta.line);
+        }
     }
     std::string line = node.name + " (" + label + ")";
     if (!node.description.empty()) {
@@ -97,7 +105,12 @@ GraphSection build_graph_section_labelled(const embedstore::Store& store, std::s
     }
     if (!truncated) {
         for (const embedstore::ExpandEdge& edge : expansion.edges) {
-            std::string line = edge.source_name + " —[" + edge.relation + "]→ " + edge.target_name;
+            // A parsed edge says so (27k): what the source states, beside
+            // what a model asserted -- which keeps the bare form it always had.
+            const std::string relation = edge.origin == embedstore::kOriginExtracted
+                                             ? edge.relation + "·" + edge.origin
+                                             : edge.relation;
+            std::string line = edge.source_name + " —[" + relation + "]→ " + edge.target_name;
             if (!edge.description.empty()) {
                 line += ": " + edge.description;
             }

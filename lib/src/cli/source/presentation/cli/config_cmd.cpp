@@ -2,6 +2,7 @@
 
 #include <CLI/CLI.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <initializer_list>
@@ -18,7 +19,9 @@
 #include "contracts/host.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "graph/code_languages.h"
 #include "modelstore/store.h"
+#include "operations/graph_sources.h"
 #include "tools/toolsets.h"
 
 namespace apogee::commands {
@@ -714,6 +717,8 @@ void bind_delete_mcp_server(CLI::App& parent, const RootContext& context) {
 struct AddGraphFlags {
     std::string name;
     std::string collections;
+    std::vector<std::string> sources;
+    std::vector<std::string> languages;
     std::string extract_backend;
     int hops = 1;
     int max_entities = 8;
@@ -726,13 +731,27 @@ struct AddGraphFlags {
 void bind_add_graph(CLI::App& parent, const RootContext& context) {
     auto flags = std::make_shared<AddGraphFlags>();
     CLI::App* cmd = parent.add_subcommand(
-        "add-graph", "Add a named knowledge graph spanning several collections");
+        "add-graph", "Add a named knowledge graph spanning collections and, parsed, source trees");
     cmd->add_option("name", flags->name, "Name for the graph (must not be a collection's name)")
         ->required();
     cmd->add_option("--collections", flags->collections,
                     "The member collections, comma-separated (e.g. docs,meetings)")
-        ->type_name(kCollectionListValue)
-        ->required();
+        ->type_name(kCollectionListValue);
+    cmd->add_option("--sources", flags->sources,
+                    "Source trees parsed into the graph with no model (repeatable; a directory)")
+        ->type_name(kPathValue);
+    {
+        // Each a roster name, comma-separated or repeated: the parser holds
+        // every word to the vendored grammars, and completion offers them.
+        std::vector<std::string> names;
+        for (const graph::CodeLanguage& language : graph::code_languages()) {
+            names.emplace_back(language.name);
+        }
+        cmd->add_option("--languages", flags->languages,
+                        "Only these grammars for the source trees, comma-separated (default: all)")
+            ->delimiter(',')
+            ->check(CLI::IsMember(names));
+    }
     cmd->add_option("--extract-backend", flags->extract_backend,
                     "The backend `graph build` extracts with (default: the extraction role)")
         ->type_name(kBackendValue);
@@ -743,22 +762,37 @@ void bind_add_graph(CLI::App& parent, const RootContext& context) {
     cmd->callback([&context, flags]() {
         const std::filesystem::path path = config_path_for(context);
         harness::NamedGraphConfig graph;
-        std::size_t start = 0;
-        while (start <= flags->collections.size()) {
-            const std::size_t comma = flags->collections.find(',', start);
-            std::string item = flags->collections.substr(
-                start, comma == std::string::npos ? std::string::npos : comma - start);
-            const std::size_t first = item.find_first_not_of(" \t");
-            const std::size_t last = item.find_last_not_of(" \t");
-            item =
-                first == std::string::npos ? std::string{} : item.substr(first, last - first + 1);
-            if (!item.empty()) {
-                graph.collections.push_back(item);
+        const auto comma_list = [](const std::string& text) {
+            std::vector<std::string> items;
+            std::size_t start = 0;
+            while (start <= text.size()) {
+                const std::size_t comma = text.find(',', start);
+                std::string item = text.substr(
+                    start, comma == std::string::npos ? std::string::npos : comma - start);
+                const std::size_t first = item.find_first_not_of(" \t");
+                const std::size_t last = item.find_last_not_of(" \t");
+                item = first == std::string::npos ? std::string{}
+                                                  : item.substr(first, last - first + 1);
+                if (!item.empty()) {
+                    items.push_back(item);
+                }
+                if (comma == std::string::npos) {
+                    break;
+                }
+                start = comma + 1;
             }
-            if (comma == std::string::npos) {
-                break;
+            return items;
+        };
+        graph.collections = comma_list(flags->collections);
+        for (const std::string& language : flags->languages) {
+            if (std::ranges::find(graph.languages, language) == graph.languages.end()) {
+                graph.languages.push_back(language);
             }
-            start = comma + 1;
+        }
+        // A source tree is recorded absolute: a config is read from wherever
+        // apogee runs, and a relative path would mean something else there.
+        for (const std::string& source : flags->sources) {
+            graph.sources.push_back(absolute_source_path(source));
         }
         graph.extract_backend = flags->extract_backend;
         graph.hops = flags->hops;

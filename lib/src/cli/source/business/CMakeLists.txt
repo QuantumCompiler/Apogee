@@ -98,6 +98,11 @@ target_link_libraries(apogee_business_knowledge PUBLIC nlohmann_json::nlohmann_j
 # (prompt and schema compiled in, validation in host code) and the
 # resumable build with the record pass. Model-free: generation and
 # embedding arrive as closures (tests/scripts/cmake/layering.cmake holds it to that).
+#
+# The code graph (27k) rides the same module: tree-sitter parses a source
+# tree with no model at all. `code_parser` is the one boundary over its C API
+# -- the grammars and the runtime are linked PRIVATE, so their headers reach
+# that file and nothing that includes the graph's own.
 apogee_add_module(graph
     graph/extract.h
     graph/extract.cpp
@@ -105,8 +110,19 @@ apogee_add_module(graph
     graph/build.cpp
     graph/communities.h
     graph/communities.cpp
+    graph/code_languages.h
+    graph/code_languages.cpp
+    graph/code_parser.h
+    graph/code_parser.cpp
+    graph/code_extract.h
+    graph/code_extract.cpp
+    graph/code_resolve.h
+    graph/code_resolve.cpp
+    graph/code_build.h
+    graph/code_build.cpp
 )
-target_link_libraries(apogee_business_graph PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(apogee_business_graph PUBLIC nlohmann_json::nlohmann_json
+                      PRIVATE apogee_tree_sitter_all)
 
 apogee_add_module(tools
     tools/tools.h

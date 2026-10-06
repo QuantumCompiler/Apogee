@@ -1,0 +1,139 @@
+node class Greeting::Base
+  description class Base
+  metadata {"end_line":6,"file":"lib/greeter.rb","kind":"code","lang":"ruby","line":2,"member":"ruby"}
+  mentions 1
+  at ruby:lib/greeter.rb:2-6 definition
+node class Greeting::Greeter
+  description class Greeter < Base
+  metadata {"end_line":16,"file":"lib/greeter.rb","kind":"code","lang":"ruby","line":8,"member":"ruby"}
+  mentions 1
+  at ruby:lib/greeter.rb:8-16 definition
+node file lib/greeter.rb
+  description Ruby file
+  metadata {"end_line":17,"file":"lib/greeter.rb","kind":"code","lang":"ruby","line":1,"member":"ruby"}
+  mentions 1
+  at ruby:lib/greeter.rb:1-17 definition
+node file main.rb
+  description Ruby file
+  metadata {"end_line":9,"file":"main.rb","kind":"code","lang":"ruby","line":1,"member":"ruby"}
+  mentions 1
+  at ruby:main.rb:1-9 definition
+node function Greeting::Base::prefix
+  description def prefix
+  metadata {"end_line":5,"file":"lib/greeter.rb","kind":"code","lang":"ruby","line":3,"member":"ruby"}
+  mentions 1
+  at ruby:lib/greeter.rb:3-5 definition
+node function Greeting::Greeter::format_name
+  description def format_name(head, name)
+  metadata {"end_line":15,"file":"lib/greeter.rb","kind":"code","lang":"ruby","line":13,"member":"ruby"}
+  mentions 1
+  at ruby:lib/greeter.rb:13-15 definition
+node function Greeting::Greeter::greet
+  description def greet(name)
+  metadata {"end_line":11,"file":"lib/greeter.rb","kind":"code","lang":"ruby","line":9,"member":"ruby"}
+  mentions 1
+  at ruby:lib/greeter.rb:9-11 definition
+node function run
+  description def run
+  metadata {"end_line":7,"file":"main.rb","kind":"code","lang":"ruby","line":4,"member":"ruby"}
+  mentions 1
+  at ruby:main.rb:4-7 definition
+node module Greeting
+  description module Greeting
+  metadata {"end_line":17,"file":"lib/greeter.rb","kind":"code","lang":"ruby","line":1,"member":"ruby"}
+  mentions 1
+  at ruby:lib/greeter.rb:1-17 definition
+node name .capitalize
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at ruby:lib/greeter.rb:14-14 reference
+node name .greet
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at ruby:main.rb:6-6 reference
+node name .new
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at ruby:main.rb:5-5 reference
+node name .to_json
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at ruby:main.rb:6-6 reference
+node name json
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at ruby:main.rb:2-2 reference
+node name puts
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at ruby:main.rb:6-6 reference
+edge class Greeting::Base -[defined_in]-> file lib/greeter.rb
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:lib/greeter.rb:2
+edge class Greeting::Greeter -[defined_in]-> file lib/greeter.rb
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:lib/greeter.rb:8
+edge class Greeting::Greeter -[inherits]-> class Greeting::Base
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:lib/greeter.rb:8
+edge file lib/greeter.rb -[defined_in]-> module Greeting
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:lib/greeter.rb:1
+edge file main.rb -[imports]-> file lib/greeter.rb
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:main.rb:1
+edge file main.rb -[imports]-> name json
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:main.rb:2
+edge function Greeting::Base::prefix -[defined_in]-> class Greeting::Base
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:lib/greeter.rb:3
+edge function Greeting::Greeter::format_name -[calls]-> name .capitalize
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:lib/greeter.rb:14
+edge function Greeting::Greeter::format_name -[defined_in]-> class Greeting::Greeter
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:lib/greeter.rb:13
+edge function Greeting::Greeter::greet -[calls]-> function Greeting::Greeter::format_name
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:lib/greeter.rb:10
+edge function Greeting::Greeter::greet -[defined_in]-> class Greeting::Greeter
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:lib/greeter.rb:9
+edge function run -[calls]-> name .greet
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:main.rb:6
+edge function run -[calls]-> name .new
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:main.rb:5
+edge function run -[calls]-> name .to_json
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:main.rb:6
+edge function run -[calls]-> name puts
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:main.rb:6
+edge function run -[defined_in]-> file main.rb
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site ruby:main.rb:4

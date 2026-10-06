@@ -437,9 +437,20 @@ backends:
 # Managed by `apogee config add-graph` / `delete-graph`. A graph's name must
 # not collide with a collection's -- `apogee check` fails the collision.
 #
+# A named graph can hold code too: `sources:` lists source trees parsed with
+# tree-sitter -- files, modules, classes and functions, and the calls,
+# imports, bases and type references between them, each `file:line` -- with
+# no model, no key and no network. `apogee graph build --source <dir> --graph
+# <name>` adds one (and the entry, when it is new); `apogee graph update
+# <name>` re-parses only the files that changed. `languages:` limits which
+# grammars are used (c, cpp, python, javascript, typescript, tsx, go, rust,
+# java, csharp, ruby, bash); empty means all.
+#
 # graphs:
 #   work:
 #     collections: [docs, meetings]   # the member collections
+#     # sources: [/path/to/repo/src]  # source trees parsed into the same graph
+#     # languages: [cpp, python]      # only these grammars (default: all)
 #     # extract_backend: local        # the backend `graph build work` extracts with
 #     # hops: 1                       # expansion depth at retrieval (1 or 2)
 #     # max_entities: 8               # neighbour entities an expansion injects, at most

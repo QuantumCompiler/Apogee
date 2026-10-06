@@ -59,6 +59,8 @@ apogee_add_module(operations
     operations/dataset_core.cpp
     operations/graph_members.h
     operations/graph_members.cpp
+    operations/graph_sources.h
+    operations/graph_sources.cpp
     operations/knowledge_core.h
     operations/knowledge_core.cpp
     operations/retrieval.h

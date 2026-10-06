@@ -36,8 +36,20 @@ struct GraphStats {
     /// Chunks the last build failed to extract.
     std::int64_t failed_chunks = 0;
     std::string extract_model;
-    /// Stored label-propagation communities with summaries.
+    /// Stored label-propagation communities (with a summary or without).
     std::int64_t communities = 0;
+    /// Communities stored without a summary (clustered, never summarised).
+    std::int64_t communities_unsummarised = 0;
+    /// The origin split (schema v6): edges a parse stated, edges a model
+    /// asserted.
+    std::int64_t edges_extracted = 0;
+    std::int64_t edges_inferred = 0;
+    /// The code layer: parsed files per language, code mentions, and the
+    /// unresolved references' name nodes.
+    std::map<std::string, std::int64_t> code_files_by_language;
+    std::int64_t code_files = 0;
+    std::int64_t code_mentions = 0;
+    std::int64_t unresolved_names = 0;
 
     [[nodiscard]] bool built() const noexcept {
         return nodes > 0;
@@ -73,9 +85,15 @@ struct NodeResult {
 /// One edge incident to a node, joined with the peer it connects to.
 /// Direction is from the queried node's perspective.
 struct Neighbor {
+    /// The edge's row id -- the handle its sites are read by.
+    std::int64_t edge_id = 0;
     std::string relation;
     std::string description;
     std::int64_t weight = 1;
+    /// `extracted` or `inferred`.
+    std::string origin;
+    /// Set for an extracted edge (1.0); a negative value means not recorded.
+    double confidence = -1.0;
     /// True: queried node -> peer; false: peer -> queried node.
     bool outgoing = true;
     std::int64_t peer_id = 0;
@@ -107,6 +125,8 @@ struct ExpandEntity {
 /// One relation on the traversed neighbourhood, carrying display names so a
 /// caller renders triples without re-querying.
 struct ExpandEdge {
+    /// `extracted` or `inferred` -- what the rendering labels.
+    std::string origin;
     std::int64_t source_id = 0;
     std::int64_t target_id = 0;
     std::string source_name;

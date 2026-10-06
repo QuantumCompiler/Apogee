@@ -103,6 +103,7 @@ const std::map<std::string, Classification>& table() {
         {"knowledge delete", twin("DELETE", "/v1/admin/knowledge/{id}")},
         {"knowledge reindex", twin("POST", "/v1/admin/knowledge/reindex")},
         {"graph build", twin("POST", "/v1/admin/graph/{id}/build")},
+        {"graph update", twin("POST", "/v1/admin/graph/{id}/build")},
         {"graph delete", twin("DELETE", "/v1/admin/graph/{id}")},
         {"graph communities", twin("POST", "/v1/admin/graph/{id}/communities")},
         {"graph dedupe", twin("POST", "/v1/admin/graph/{id}/dedupe")},

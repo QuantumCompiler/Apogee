@@ -906,6 +906,28 @@ TEST_CASE("a graphs: entry round-trips byte-exactly, with only what it says writ
     CHECK_THROWS_AS((void)delete_graph(kCommented, "work"), ConfigEditError);
 }
 
+TEST_CASE("a code graph's entry writes its trees and languages, and no empty collections",
+          "[config_edit][golden][graphs][code]") {
+    apogee::harness::NamedGraphConfig graph;
+    graph.sources = {"/srv/repo/src", "/srv/other"};
+    const std::string code = append_graph("graphs:\n", "code", graph, false);
+    CHECK(code == "graphs:\n  code:\n    sources: [/srv/repo/src, /srv/other]\n");
+    require_parses(code);
+    graph.languages = {"cpp", "python"};
+    graph.collections = {"docs"};
+    const std::string mixed = append_graph("graphs:\n", "mixed", graph, false);
+    CHECK(mixed ==
+          "graphs:\n  mixed:\n    collections: [docs]\n    sources: [/srv/repo/src, /srv/other]\n"
+          "    languages: [cpp, python]\n");
+    const auto loaded = apogee::harness::parse_config(mixed, "<test>");
+    CHECK(loaded.find_graph("mixed")->sources == graph.sources);
+    CHECK(loaded.find_graph("mixed")->languages == graph.languages);
+    // A graph with neither collections nor trees keeps writing `[]`, as it
+    // always did.
+    CHECK(append_graph("graphs:\n", "bare", apogee::harness::NamedGraphConfig{}, false) ==
+          "graphs:\n  bare:\n    collections: []\n");
+}
+
 TEST_CASE("graph helpers are section-scoped: a same-named agent and MCP server stay intact",
           "[config_edit][graphs][scope]") {
     apogee::harness::AgentConfig agent;

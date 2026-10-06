@@ -101,6 +101,8 @@ apogee_add_module(embedstore
     embedstore/graph_communities.cpp
     embedstore/graph_dedupe.h
     embedstore/graph_dedupe.cpp
+    embedstore/graph_code.h
+    embedstore/graph_code.cpp
     embedstore/fts.h
     embedstore/fts.cpp
     embedstore/chunk.h

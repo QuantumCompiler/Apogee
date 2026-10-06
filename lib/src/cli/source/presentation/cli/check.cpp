@@ -32,6 +32,7 @@
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "embedstore/ingest.h"
+#include "graph/code_languages.h"
 #include "harness/roles.h"
 #include "httpserver/admin_auth.h"
 #include "knowledge/store.h"
@@ -40,6 +41,7 @@
 #include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "operations/graph_sources.h"
 #include "platform/child_process.h"
 #include "platform/ffmpeg.h"
 #include "platform/platform.h"
@@ -1391,9 +1393,30 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
                 "rename the graph: apogee config delete-graph " + name + ", then add-graph");
             continue;
         }
-        if (graph.collections.empty()) {
-            add(report, Status::Fail, "Graph", label, "no member collections",
+        if (graph.collections.empty() && graph.sources.empty()) {
+            add(report, Status::Fail, "Graph", label, "no member collections or source trees",
                 "apogee config add-graph " + name + " --collections <a,b> --force");
+            continue;
+        }
+        // Source trees (27k): each a directory, every language vendored.
+        bool sources_ok = true;
+        for (const std::string& source : graph.sources) {
+            if (!std::filesystem::is_directory(source, code)) {
+                add(report, Status::Fail, "Graph", label,
+                    "source tree '" + source + "' is not a directory",
+                    "fix the path under graphs." + name + ".sources, or remove it");
+                sources_ok = false;
+            }
+        }
+        for (const std::string& language : graph.languages) {
+            if (graph::code_language_by_name(language) == nullptr) {
+                add(report, Status::Fail, "Graph", label,
+                    "languages names '" + language + "', which no vendored grammar parses",
+                    "use one of: " + graph::code_language_names());
+                sources_ok = false;
+            }
+        }
+        if (!sources_ok) {
             continue;
         }
         if (!graph.extract_backend.empty() &&
@@ -1424,11 +1447,21 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
         for (const std::string& member : graph.collections) {
             members += (members.empty() ? "" : ", ") + member;
         }
-        const std::string detail =
-            "over [" + members + "]; hops " + std::to_string(graph.hops) + ", max_entities " +
-            std::to_string(graph.max_entities) + ", extractor " +
-            (graph.extract_backend.empty() ? std::string{"(the extraction role)"}
-                                           : graph.extract_backend);
+        std::string trees;
+        for (const std::string& source : graph.sources) {
+            trees += (trees.empty() ? "" : ", ") + source_member_label(source);
+        }
+        std::string detail = graph.collections.empty() ? std::string{} : "over [" + members + "]; ";
+        if (!trees.empty()) {
+            detail += "source trees [" + trees + "] (parsed, no model); ";
+        }
+        detail += "hops " + std::to_string(graph.hops) + ", max_entities " +
+                  std::to_string(graph.max_entities);
+        if (!graph.collections.empty()) {
+            detail += ", extractor " + (graph.extract_backend.empty()
+                                            ? std::string{"(the extraction role)"}
+                                            : graph.extract_backend);
+        }
         const std::filesystem::path db = inputs.home / "embeddings" / "graphs" / (name + ".db");
         if (std::filesystem::exists(db, code)) {
             add(report, Status::Ok, "Graph", label, detail + "; built");

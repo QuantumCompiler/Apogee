@@ -21,6 +21,7 @@ using detail::bind_text;
 using detail::column_text;
 using detail::exec;
 using detail::fail;
+using detail::has_column;
 using detail::in_transaction;
 using detail::placeholders;
 using detail::prepare;
@@ -97,6 +98,49 @@ void ensure_graph_schema(sqlite3* handle) {
          "  community_id INTEGER NOT NULL REFERENCES kg_communities(id) ON DELETE CASCADE,"
          "  node_id      INTEGER NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,"
          "  PRIMARY KEY (community_id, node_id))");
+
+    // v6 (27k): origin on every edge -- `extracted` (parsed from source) or
+    // `inferred` (asserted by a model) -- and its confidence. Additive, the
+    // chunk-metadata-column precedent: every row an earlier build wrote was a
+    // model's, and reads as `inferred` with no confidence recorded.
+    if (!has_column(handle, "kg_edges", "origin")) {
+        exec(handle, "ALTER TABLE kg_edges ADD COLUMN origin TEXT NOT NULL DEFAULT 'inferred'");
+    }
+    if (!has_column(handle, "kg_edges", "confidence")) {
+        exec(handle, "ALTER TABLE kg_edges ADD COLUMN confidence REAL");
+    }
+    // v6: a code file's fingerprint is its content hash, and its parsed
+    // facts ride beside it, so `graph update` re-links the whole tree from
+    // the cache and re-parses only what changed. Empty on every prose row.
+    if (!has_column(handle, "kg_state", "content_hash")) {
+        exec(handle, "ALTER TABLE kg_state ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''");
+    }
+    if (!has_column(handle, "kg_state", "facts")) {
+        exec(handle, "ALTER TABLE kg_state ADD COLUMN facts TEXT");
+    }
+    // v6: the code layer's provenance -- where a code node is defined,
+    // declared or (a name node) referenced, `file:line` under its source
+    // member; and every site that states a code edge. A prose mention is a
+    // chunk; a code mention is a line.
+    exec(handle,
+         "CREATE TABLE IF NOT EXISTS kg_code_mentions ("
+         "  node_id    INTEGER NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,"
+         "  collection TEXT    NOT NULL,"
+         "  file       TEXT    NOT NULL,"
+         "  line       INTEGER NOT NULL,"
+         "  end_line   INTEGER NOT NULL DEFAULT 0,"
+         "  role       TEXT    NOT NULL DEFAULT 'definition',"
+         "  PRIMARY KEY (node_id, collection, file, line, role))");
+    exec(handle,
+         "CREATE INDEX IF NOT EXISTS kg_code_mentions_at ON kg_code_mentions(collection, file, "
+         "line)");
+    exec(handle,
+         "CREATE TABLE IF NOT EXISTS kg_edge_sites ("
+         "  edge_id    INTEGER NOT NULL REFERENCES kg_edges(id) ON DELETE CASCADE,"
+         "  collection TEXT    NOT NULL,"
+         "  file       TEXT    NOT NULL,"
+         "  line       INTEGER NOT NULL,"
+         "  PRIMARY KEY (edge_id, collection, file, line))");
 
     // The entity index: external-content FTS5 over name and description, the
     // same tokenizer as the chunk index so `fts_match_query` serves both.
@@ -209,6 +253,49 @@ DecisionNodeMetadata parse_decision_node_metadata(std::string_view json) {
     return out;
 }
 
+bool is_code_node_type(std::string_view type) noexcept {
+    return type == kCodeKindFile || type == kCodeKindModule || type == kCodeKindClass ||
+           type == kCodeKindFunction || type == kCodeKindName;
+}
+
+std::string code_identity(std::string_view name) {
+    return std::string{name};
+}
+
+std::string code_node_metadata_json(const CodeNodeMetadata& metadata) {
+    nlohmann::json out{{"kind", "code"}};
+    if (metadata.unresolved) {
+        out["unresolved"] = true;
+        return out.dump();
+    }
+    out["lang"] = metadata.language;
+    out["member"] = metadata.member;
+    out["file"] = metadata.file;
+    out["line"] = metadata.line;
+    out["end_line"] = metadata.end_line;
+    return out.dump();
+}
+
+CodeNodeMetadata parse_code_node_metadata(std::string_view json) {
+    CodeNodeMetadata out;
+    if (json.empty()) {
+        return out;
+    }
+    const nlohmann::json parsed = nlohmann::json::parse(json, nullptr, false);
+    if (parsed.is_discarded() || !parsed.is_object() ||
+        parsed.value("kind", std::string{}) != "code") {
+        return out;
+    }
+    out.code = true;
+    out.unresolved = parsed.value("unresolved", false);
+    out.language = parsed.value("lang", std::string{});
+    out.member = parsed.value("member", std::string{});
+    out.file = parsed.value("file", std::string{});
+    out.line = parsed.value("line", std::int64_t{0});
+    out.end_line = parsed.value("end_line", std::int64_t{0});
+    return out;
+}
+
 UpsertResult Store::upsert_node(std::string_view name, std::string_view type,
                                 std::string_view description) {
     sqlite3* handle = impl_->connection.get();
@@ -256,7 +343,7 @@ void Store::upsert_edge(std::int64_t source_id, std::int64_t target_id, std::str
     StatementPtr upsert =
         prepare(handle,
                 "INSERT INTO kg_edges (source_id, target_id, relation, description,"
-                " weight) VALUES (?, ?, ?, ?, 1)"
+                " weight, origin) VALUES (?, ?, ?, ?, 1, 'inferred')"
                 " ON CONFLICT(source_id, target_id, relation) DO UPDATE SET"
                 "   weight = kg_edges.weight + 1,"
                 "   description = CASE"
@@ -325,7 +412,8 @@ bool Store::ensure_edge(std::int64_t source_id, std::int64_t target_id, std::str
     sqlite3* handle = impl_->connection.get();
     StatementPtr insert = prepare(handle,
                                   "INSERT OR IGNORE INTO kg_edges (source_id, target_id, relation,"
-                                  " description, weight) VALUES (?, ?, ?, ?, 1)");
+                                  " description, weight, origin) VALUES (?, ?, ?, ?, 1,"
+                                  " 'inferred')");
     sqlite3_bind_int64(insert.get(), 1, source_id);
     sqlite3_bind_int64(insert.get(), 2, target_id);
     bind_text(insert.get(), 3, relation);
@@ -436,7 +524,8 @@ std::map<std::string, SourceState> Store::source_states() const {
 std::map<std::string, SourceState> Store::source_states(std::string_view collection) const {
     StatementPtr select = prepare(impl_->connection.get(),
                                   "SELECT source_file, chunk_count, max_chunk_id, extracted_at,"
-                                  " model FROM kg_state WHERE collection = ?");
+                                  " model FROM kg_state WHERE collection = ?"
+                                  " AND content_hash = ''");
     bind_text(select.get(), 1, collection);
     std::map<std::string, SourceState> out;
     while (sqlite3_step(select.get()) == SQLITE_ROW) {
@@ -561,8 +650,11 @@ ReconcileResult Store::reconcile_graph_multi(const MemberStores& members) {
             StatementPtr mentions =
                 prepare(handle, "DELETE FROM kg_mentions WHERE collection NOT IN (" +
                                     placeholders(members.size()) + ")");
-            StatementPtr states = prepare(handle, "DELETE FROM kg_state WHERE collection NOT IN (" +
-                                                      placeholders(members.size()) + ")");
+            // Prose rows only: a source member's code-file rows are the code
+            // build's to converge (`sync_code_graph`, `remove_code_files`).
+            StatementPtr states =
+                prepare(handle, "DELETE FROM kg_state WHERE collection NOT IN (" +
+                                    placeholders(members.size()) + ") AND content_hash = ''");
             int index = 1;
             for (const auto& [collection, unused] : members) {
                 bind_text(mentions.get(), index, collection);
@@ -591,8 +683,9 @@ ReconcileResult Store::reconcile_graph_multi(const MemberStores& members) {
         }
         for (const auto& [collection, sources] : dead_sources) {
             for (const std::string& source : sources) {
-                StatementPtr remove = prepare(
-                    handle, "DELETE FROM kg_state WHERE collection = ? AND source_file = ?");
+                StatementPtr remove = prepare(handle,
+                                              "DELETE FROM kg_state WHERE collection = ? AND"
+                                              " source_file = ? AND content_hash = ''");
                 bind_text(remove.get(), 1, collection);
                 bind_text(remove.get(), 2, source);
                 count(std::move(remove), out.states_pruned, "could not prune a vanished source");
@@ -601,8 +694,8 @@ ReconcileResult Store::reconcile_graph_multi(const MemberStores& members) {
         // Recompute rather than decrement: this also self-heals a count that
         // drifted for any other reason.
         exec(handle,
-             "UPDATE kg_nodes SET mention_count ="
-             " (SELECT COUNT(*) FROM kg_mentions WHERE node_id = kg_nodes.id)");
+             ("UPDATE kg_nodes SET mention_count = " + std::string{detail::kMentionCountSql})
+                 .c_str());
         count(prepare(handle,
                       "DELETE FROM kg_edges WHERE"
                       "   source_id IN (SELECT id FROM kg_nodes WHERE mention_count = 0)"
@@ -623,6 +716,8 @@ void Store::delete_graph() {
         for (const char* sql :
              {"DELETE FROM kg_community_members", "DELETE FROM kg_communities",
               "DELETE FROM chunks WHERE source LIKE 'graph://community/%'",
+              // The code layer's mentions and sites go with their nodes and
+              // edges: the schema cascades (27k).
               "DELETE FROM kg_mentions", "DELETE FROM kg_edges", "DELETE FROM kg_nodes",
               "DELETE FROM kg_state", "DELETE FROM graph_meta"}) {
             exec(handle, sql);

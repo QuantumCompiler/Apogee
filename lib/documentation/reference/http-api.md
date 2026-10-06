@@ -639,11 +639,37 @@ from the entry has its rows reconciled away on the next build. `--dry-run`
 is CLI-only. Every knowledge record in a collection -- or in any member -- is
 materialised as a `decision` node on every build, deterministically.
 
+**Source trees (27k).** A named graph whose entry lists `sources:` has them
+parsed first, with tree-sitter and **no model**: files, modules, classes and
+functions, and the calls, imports, bases, type references and containment
+between them, each stated at a `file:line` and stored with origin
+`extracted`. Incremental by content hash -- a file is parsed again only when
+its bytes or the extractor change -- and re-linked whole, so the result is
+what a fresh build stores. The job's record carries a `code` object:
+`{files_used, files_parsed, files_unchanged, files_removed,
+files_by_language, skipped: [{member, file, reason}], partial,
+missing_sources, empty_sources, references_resolved, references_unresolved,
+nodes, edges}` -- every file it could not use named with why, never
+silently; a tree that is not a directory in `missing_sources` (what it
+contributed forgotten), one that offers no file -- inside a git repository
+only what git tracks or does not ignore is read -- in `empty_sources`. A graph of
+source trees alone needs **no generation backend**: it builds even on a
+server that serves none, and `model` is not consulted. **`"update": true`**
+is the twin of `apogee graph update {id}`: the trees re-parsed where they
+changed, the collections left as they are, never a model call -- `400` when
+`{id}` is not a named graph or has no source trees. A graph holding
+collections too still needs its extractor for them (the rules above).
+
 ### `GET /v1/admin/graph/{id}/stats`
 
 `200` with `{nodes, edges, mentions, nodes_by_type, nodes_with_vectors,
-total_chunks, chunks_with_mentions, stale_files, failed_chunks, communities[,
-extract_model]}`. For a named graph also `graph`, `collections`, the graph's
+total_chunks, chunks_with_mentions, stale_files, failed_chunks, communities,
+communities_unsummarised, edges_extracted, edges_inferred[, extract_model]}`
+-- every edge parsed from source (`extracted`) or asserted by a model
+(`inferred`), the split always said; with a code layer (27k) also
+`code_files`, `code_files_by_language`, `code_mentions` and
+`unresolved_names` (references nothing in the trees defines, each a `name`
+node, never guessed at). For a named graph also `graph`, `collections`, the graph's
 own `embed_model` when entities were embedded, and `members`: one
 `{collection, mentions, total_chunks, chunks_with_mentions, stale_files[,
 missing: true]}` per member, coverage read from the member's own store, a
@@ -684,11 +710,16 @@ summary kept). Summary vectors follow the same spend rule as the build's
 entity vectors, and a summary still without one is vectorised on the next
 run with an embedder.
 
-Body, every field optional: `model`, `force`, `min_size`. The summariser
-resolves exactly as the build's extractor does, with the same refusals:
-`400` for a metered default reached by fall-through, a vendor CLI, or an
-unserved backend; `404` for an unbuilt graph or a collection with no data;
-`501` when the server serves no generation backend. A named graph's
+Body, every field optional: `model`, `force`, `min_size`, and **`summaries`**
+(27k, default `true`): `false` is `--no-summaries` -- the clusters detected
+and stored with **no model call and no backend needed**, each without a
+summary (so without a pseudo-chunk), and the job's counts adding `clustered`
+and `summaries_absent`; a later run with summaries writes exactly the ones
+still without. With summaries, the summariser resolves exactly as the
+build's extractor does, with the same refusals: `400` for a metered default
+reached by fall-through, a vendor CLI, or an unserved backend; `404` for an
+unbuilt graph or a collection with no data; `501` when the server serves no
+generation backend (the message names `"summaries": false`). A named graph's
 summaries live in its own database and are listable here; they do not
 surface through its members' retrieval.
 
@@ -707,12 +738,18 @@ earliest-extracted node survives: edges are repointed to it (weights summed
 when they collide, would-be self-loops dropped), mentions unioned and
 recounted, descriptions merged first-non-empty (the survivor's vector
 cleared on a text change), and the merged nodes' community memberships
-removed (the next communities run recomputes). Entities without a vector are
-never considered, and **`decision` nodes are never merged**. Synchronous --
-storage and cosine, no generation -- and **never automatic**: `200
-{"groups": [{kept, kept_type, merged: [names]}], "merged_nodes", "threshold",
-"dry_run"}`; with `"dry_run": true` the groups are computed and nothing is
-written. `400` for a threshold outside `(0, 1]`; `404` for an unbuilt graph
+removed (the next communities run recomputes); a parsed edge never merges
+down to a model's, and its sites move with it. Entities without a vector are
+never considered, **`decision` nodes are never merged**, and neither is a
+**code entity** (27k) -- its identity is its exact qualified name, one node
+per name as it is built. Synchronous -- storage and cosine, no generation --
+and **never automatic**: `200 {"groups": [{kept, kept_type, merged:
+[names]}], "merged_nodes", "threshold", "dry_run", "code_entities",
+"code_identity_merges"[, "prose_skipped"]}` -- `code_identity_merges` the
+code entities stated at more than one place (a declaration and its
+definition), `prose_skipped` the reason the vector pass did not run when no
+prose entity has a vector to compare; with `"dry_run": true` the groups are
+computed and nothing is written. `400` for a threshold outside `(0, 1]`; `404` for an unbuilt graph
 or a collection with no data.
 
 ### `DELETE /v1/admin/graph/{id}`
@@ -742,7 +779,8 @@ without the boolean.
 
 The `graphs:` entries -- named graphs spanning several collections, the
 twins of `apogee config add-graph` / `delete-graph`. `200 {"object": "list",
-"data": [{name, collections, extract_backend?, hops, max_entities, built}]}`,
+"data": [{name, collections, sources?, languages?, extract_backend?, hops,
+max_entities, built}]}`,
 `built` reporting whether the graph's database exists. Config only: the data
 routes are `/v1/admin/graph/{id}/*` above. A collection covered by a built
 entry expands through it at retrieval, cross-collection; the first entry
@@ -752,10 +790,15 @@ nothing.
 ### `POST /v1/admin/graphs`
 
 Adds an entry through the same comment-preserving transform the CLI uses,
-byte-identical. Body: `name` and `collections` (a non-empty list of
-collection names) required; `extract_backend`, `hops` (1 or 2),
-`max_entities` optional. The CLI's rules, answered as `400`: a plain name, at
-least one member, **no collision with a collection name** (resolution is
+byte-identical. Body: `name`, and `collections` (collection names) or
+`sources` (27k: source trees, each an **absolute** directory, recorded
+normalized as the CLI records it) or both; `languages` (the trees' grammars:
+`c`, `cpp`, `python`, `javascript`, `typescript`, `tsx`, `go`, `rust`,
+`java`, `csharp`, `ruby`, `bash`; empty for all), `extract_backend`, `hops`
+(1 or 2), `max_entities` optional. A tree that is not a directory yet is a
+`warnings` entry; a relative tree, two trees with one directory name, a tree
+named like a member collection, or an unknown language is a `400`. The CLI's rules, answered as `400`: a plain name, at
+least one member collection or source tree, **no collision with a collection name** (resolution is
 graphs-first, so a collision would make the collection's own graph
 unreachable), a configured `extract_backend` when one is named, knobs in
 range. A member that is not configured yet is a `warnings` entry, never a

@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -23,10 +24,13 @@
 #include "contracts/paths.h"
 #include "embedstore/store.h"
 #include "graph/build.h"
+#include "graph/code_build.h"
+#include "graph/code_languages.h"
 #include "graph/communities.h"
 #include "graph/extract.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
+#include "operations/graph_sources.h"
 #include "operations/knowledge_core.h"
 #include "views/status_line.h"
 
@@ -158,7 +162,8 @@ struct Generation {
 [[nodiscard]] Generation resolve_generation(const harness::Config& config,
                                             const harness::Harness& harness,
                                             std::string_view override, const Target& target,
-                                            const std::string& what) {
+                                            const std::string& what,
+                                            std::string_view alternative = {}) {
     const harness::Resolution resolved = harness::resolve_backend(
         config, harness::RoleRequest{.role = harness::ModelRole::Extraction,
                                      .override = override,
@@ -181,7 +186,8 @@ struct Generation {
         fail_user("a full " + what +
                   " never runs on a metered backend on Apogee's initiative -- '" + resolved.key +
                   "' is the default backend and is billed per call. Name it explicitly with -m " +
-                  resolved.key + ", " + target.extractor_hint() + ", or set the extraction role");
+                  resolved.key + ", " + target.extractor_hint() + ", or set the extraction role" +
+                  (alternative.empty() ? std::string{} : " -- or " + std::string{alternative}));
     }
     return Generation{.key = resolved.key,
                       .kg_model = backend->model.empty() ? resolved.key : backend->model};
@@ -333,19 +339,57 @@ void print_build_summary(const std::string& name, const graph::BuildResult& resu
     return out;
 }
 
+/// How many of a graph's nodes are the code layer's (27k).
+[[nodiscard]] std::int64_t code_node_count(const embedstore::GraphStats& st) {
+    std::int64_t out = 0;
+    for (const auto& [type, count] : st.nodes_by_type) {
+        if (embedstore::is_code_node_type(type)) {
+            out += count;
+        }
+    }
+    return out;
+}
+
 /// The counts every graph form shares.
 void print_stats_body(const std::string& name, const embedstore::GraphStats& st) {
+    const std::int64_t code_nodes = code_node_count(st);
+    const bool code_only = code_nodes == st.nodes && st.total_chunks == 0;
     std::cout << "  Nodes:     " << st.nodes << " (" << type_summary(st) << ")\n";
     std::cout << "  Edges:     " << st.edges << "\n";
-    std::cout << "  Mentions:  " << st.mentions << "\n";
-    const std::int64_t coverage =
-        st.total_chunks > 0 ? 100 * st.chunks_with_mentions / st.total_chunks : 0;
-    std::cout << "  Coverage:  " << coverage << "% of " << st.total_chunks
-              << " chunks carry at least one entity\n";
-    std::cout << "  Vectors:   " << st.nodes_with_vectors << "/" << st.nodes
-              << " entities embedded\n";
-    std::cout << "  Extractor: " << (st.extract_model.empty() ? "(unrecorded)" : st.extract_model)
-              << "\n";
+    // Origin is schema (27k): what a parse stated, and what a model asserted.
+    std::cout << "  Origin:    " << st.edges_extracted << " extracted (parsed from source), "
+              << st.edges_inferred << " inferred (asserted by a model)\n";
+    std::cout << "  Mentions:  " << st.mentions;
+    if (st.code_mentions > 0) {
+        std::cout << " in chunks, " << st.code_mentions << " at a file:line";
+    }
+    std::cout << "\n";
+    if (!code_only) {
+        const std::int64_t coverage =
+            st.total_chunks > 0 ? 100 * st.chunks_with_mentions / st.total_chunks : 0;
+        std::cout << "  Coverage:  " << coverage << "% of " << st.total_chunks
+                  << " chunks carry at least one entity\n";
+    }
+    if (code_nodes > 0) {
+        std::cout << "  Vectors:   " << st.nodes_with_vectors << "/" << st.nodes - code_nodes
+                  << " prose entities embedded (code entities never are)\n";
+    } else {
+        std::cout << "  Vectors:   " << st.nodes_with_vectors << "/" << st.nodes
+                  << " entities embedded\n";
+    }
+    if (st.code_files > 0) {
+        std::string languages;
+        for (const auto& [language, count] : st.code_files_by_language) {
+            languages += (languages.empty() ? "" : ", ") + language + " " + std::to_string(count);
+        }
+        std::cout << "  Code:      " << st.code_files << " file(s) parsed (" << languages << "), "
+                  << st.unresolved_names << " unresolved name(s) -- `apogee graph update " << name
+                  << "` re-parses what changed\n";
+    }
+    if (!code_only || !st.extract_model.empty()) {
+        std::cout << "  Extractor: "
+                  << (st.extract_model.empty() ? "(unrecorded)" : st.extract_model) << "\n";
+    }
     if (st.stale_files > 0) {
         std::cout << "  Stale:     " << st.stale_files
                   << " source file(s) need re-extraction -- run `apogee graph build " << name
@@ -356,8 +400,12 @@ void print_stats_body(const std::string& name, const embedstore::GraphStats& st)
                   << " chunk(s) failed extraction in the last build\n";
     }
     if (st.communities > 0) {
-        std::cout << "  Communities: " << st.communities
-                  << " summarised (`apogee graph communities " << name << " --list`)\n";
+        std::cout << "  Communities: " << st.communities - st.communities_unsummarised
+                  << " summarised";
+        if (st.communities_unsummarised > 0) {
+            std::cout << ", " << st.communities_unsummarised << " clustered without a summary";
+        }
+        std::cout << " (`apogee graph communities " << name << " --list`)\n";
     }
 }
 
@@ -385,6 +433,29 @@ void print_node_core(const embedstore::Store& store, const embedstore::GraphNode
         std::cout << "  (knowledge record -- `apogee knowledge info " << node.name
                   << "` for the full record)\n";
     }
+    // A code node's provenance (27k): where it is defined and declared --
+    // or, for an unresolved name, referenced -- each a file:line.
+    if (embedstore::is_code_node_type(node.type)) {
+        const std::vector<embedstore::CodeMention> mentions = store.node_code_mentions(node.id, 0);
+        if (!mentions.empty()) {
+            std::cout << "\n"
+                      << (node.type == embedstore::kCodeKindName ? "Referenced at:" : "Stated at:")
+                      << "\n";
+            constexpr std::size_t kShown = 12;
+            for (std::size_t i = 0; i < mentions.size() && i < kShown; ++i) {
+                const embedstore::CodeMention& at = mentions[i];
+                std::cout << "  " << at.role << "  " << at.collection << ": " << at.file << ":"
+                          << at.line;
+                if (at.end_line > at.line) {
+                    std::cout << "-" << at.end_line;
+                }
+                std::cout << "\n";
+            }
+            if (mentions.size() > kShown) {
+                std::cout << "  ... and " << mentions.size() - kShown << " more\n";
+            }
+        }
+    }
     const std::vector<embedstore::Neighbor> neighbors = store.node_neighbors(node.id);
     if (!neighbors.empty()) {
         std::cout << "\nRelations:\n";
@@ -399,10 +470,27 @@ void print_node_core(const embedstore::Store& store, const embedstore::GraphNode
             if (neighbor.weight > 1) {
                 std::cout << " x" << neighbor.weight;
             }
+            if (neighbor.origin == embedstore::kOriginExtracted) {
+                std::cout << " -- extracted";
+            }
             if (!neighbor.description.empty()) {
                 std::cout << " -- " << preview_text(neighbor.description, 100);
             }
             std::cout << "\n";
+            // Where a parsed edge is stated: the call site, the import, the
+            // declaration -- a few, then a count.
+            if (neighbor.origin == embedstore::kOriginExtracted) {
+                constexpr int kSites = 3;
+                const std::vector<embedstore::EdgeSite> sites =
+                    store.edge_sites(neighbor.edge_id, kSites + 1);
+                for (std::size_t i = 0; i < sites.size() && i < static_cast<std::size_t>(kSites);
+                     ++i) {
+                    std::cout << "         at " << sites[i].file << ":" << sites[i].line << "\n";
+                }
+                if (neighbor.weight > kSites) {
+                    std::cout << "         (+" << neighbor.weight - kSites << " more)\n";
+                }
+            }
         }
     }
 }
@@ -449,14 +537,30 @@ void print_named_node(const embedstore::Store& store, const embedstore::GraphNod
     }
 }
 
-void print_communities(const embedstore::Store& store, const std::string& name) {
+/// How many communities a run lists after it; `--list` shows every one.
+constexpr std::size_t kCommunitiesAfterRun = 20;
+
+/// The stored communities, largest first; `limit` 0 shows every one. One
+/// clustered with no model reads `(no summary)`, the way to write them said
+/// once at the end -- a code graph clusters into hundreds.
+void print_communities(const embedstore::Store& store, const std::string& name,
+                       std::size_t limit = 0) {
     const std::vector<embedstore::GraphCommunity> communities = store.graph_communities();
     if (communities.empty()) {
         std::cout << "No communities stored for \"" << name << "\". Run: apogee graph communities "
                   << name << "\n";
         return;
     }
+    std::size_t shown = 0;
+    std::size_t unsummarised = 0;
     for (const embedstore::GraphCommunity& community : communities) {
+        if (community.summary.empty()) {
+            ++unsummarised;
+        }
+        if (limit > 0 && shown == limit) {
+            continue;
+        }
+        ++shown;
         std::vector<std::string> top;
         for (const embedstore::GraphNode& member : store.community_members(community.id)) {
             if (top.size() == 3) {
@@ -468,18 +572,40 @@ void print_communities(const embedstore::Store& store, const std::string& name) 
                   << " entities (top: " << join(top) << ")\n";
         if (!community.summary.empty()) {
             std::cout << indent_lines(preview_text(community.summary, 400), "  ") << "\n";
+        } else {
+            std::cout << "  (no summary)\n";
         }
         std::cout << "\n";
+    }
+    if (shown < communities.size()) {
+        std::cout << "... and " << communities.size() - shown
+                  << " more -- `apogee graph communities " << name << " --list` lists every one.\n";
+    }
+    if (unsummarised > 0) {
+        std::cout << unsummarised << " communit" << (unsummarised == 1 ? "y" : "ies")
+                  << " clustered with no model have no summary -- `apogee graph communities "
+                  << name << " -m <backend>` writes them.\n";
     }
 }
 
 struct BuildFlags {
     std::string name;
+    std::string graph;
     std::string model;
+    std::vector<std::string> sources;
+    std::vector<std::string> languages;
     bool dry_run = false;
     bool force = false;
     int limit = 0;
     bool quiet = false;
+    bool show_skipped = false;
+};
+
+struct UpdateFlags {
+    std::string name;
+    bool force = false;
+    bool quiet = false;
+    bool show_skipped = false;
 };
 
 struct CommunitiesFlags {
@@ -489,6 +615,7 @@ struct CommunitiesFlags {
     int min_size = 0;
     bool list = false;
     bool quiet = false;
+    bool no_summaries = false;
 };
 
 struct DedupeFlags {
@@ -555,6 +682,221 @@ struct DedupeFlags {
         });
     };
     return options;
+}
+
+// ---- The code layer (27k) ----------------------------------------------------
+
+/// The skipped files, grouped by why, each named -- up to ten per reason
+/// unless `all`, the rest counted with the flag that names them.
+void print_skipped(const graph::SourceBuildResult& result, bool all) {
+    if (result.skipped.empty()) {
+        return;
+    }
+    std::map<std::string, std::vector<std::string>> by_reason;
+    for (const graph::SkippedFile& file : result.skipped) {
+        by_reason[file.reason].push_back(file.member + "/" + file.file);
+    }
+    std::cout << "  Skipped:          " << result.skipped.size()
+              << " file(s) -- named, never parsed:\n";
+    constexpr std::size_t kNamed = 10;
+    for (const auto& [reason, files] : by_reason) {
+        std::cout << "    " << reason << ": " << files.size() << "\n";
+        for (std::size_t i = 0; i < files.size(); ++i) {
+            if (!all && i == kNamed) {
+                std::cout << "      ... and " << files.size() - kNamed
+                          << " more (--show-skipped names every one)\n";
+                break;
+            }
+            std::cout << "      " << files[i] << "\n";
+        }
+    }
+}
+
+void print_code_summary(const std::string& name, const GraphSourceBuild& build, bool show_skipped) {
+    const graph::SourceBuildResult& result = build.result;
+    for (const std::string& missing : build.missing) {
+        std::cout << "[graph] source tree " << missing
+                  << " is not a directory -- it contributes nothing, and what it contributed "
+                     "is forgotten.\n";
+    }
+    for (const std::string& empty : build.empty) {
+        std::cout << "[graph] source tree " << empty
+                  << " offers no file to read -- inside a git repository, only what git tracks "
+                     "or does not ignore is read.\n";
+    }
+    if (result.cancelled) {
+        std::cout << "Code graph for \"" << name << "\" interrupted after " << result.files_parsed
+                  << " parsed file(s); they are cached, and the next build or update links "
+                     "them.\n";
+        return;
+    }
+    std::string languages;
+    for (const auto& [language, count] : result.files_by_language) {
+        languages += (languages.empty() ? "" : ", ") + language + " " + std::to_string(count);
+    }
+    std::cout << (result.dry_run ? "Dry run -- code graph for \"" : "Code graph for \"") << name
+              << "\" (no model):\n";
+    std::cout << "  Files used:       " << result.files_used;
+    if (!languages.empty()) {
+        std::cout << " (" << languages << ")";
+    }
+    std::cout << " -- " << result.files_parsed << " parsed, " << result.files_unchanged
+              << " unchanged since the last build\n";
+    if (result.files_removed > 0) {
+        std::cout << "  Files forgotten:  " << result.files_removed << "\n";
+    }
+    for (const auto& [directory, count] : result.excluded) {
+        std::cout << "  Excluded:         " << directory << " (" << count
+                  << " file(s); vendored or build output)\n";
+    }
+    if (!result.partial.empty()) {
+        std::cout << "  Partial:          " << result.partial.size()
+                  << " file(s) parsed around a syntax error -- what parsed is kept:\n";
+        for (const std::string& file : result.partial) {
+            std::cout << "      " << file << "\n";
+        }
+    }
+    const graph::ResolveCounts& counts = result.counts;
+    std::cout << "  References:       " << counts.resolved() << " resolved, " << counts.unresolved()
+              << " unresolved (calls " << counts.calls_resolved << "/" << counts.calls << ", types "
+              << counts.types_resolved << "/" << counts.types << ", imports "
+              << counts.imports_resolved << "/" << counts.imports << ", bases "
+              << counts.inherits_resolved << "/" << counts.inherits
+              << ") -- an unresolved one is a name node, never a guess\n";
+    if (result.dry_run) {
+        std::cout << "  Would store:      " << result.nodes << " code node(s), " << result.edges
+                  << " edge(s) -- nothing was stored.\n";
+    } else {
+        std::cout << "  Code graph:       " << result.nodes << " node(s), " << result.edges
+                  << " edge(s) (nodes +" << result.sync.nodes_added << " ~"
+                  << result.sync.nodes_changed << " -" << result.sync.nodes_removed << "; edges +"
+                  << result.sync.edges_added << " -" << result.sync.edges_removed << ")\n";
+    }
+    print_skipped(result, show_skipped);
+}
+
+/// Parses a named graph's source trees into `store` -- the model-free half
+/// of a build, and all of an update. Nothing here builds a provider.
+void build_code(embedstore::Store& store, const Target& target,
+                const harness::NamedGraphConfig& named, bool force, bool dry_run, bool quiet,
+                bool show_skipped, bool update) {
+    std::string labels;
+    for (const std::string& source : named.sources) {
+        labels += (labels.empty() ? "" : ", ") + source_member_label(source);
+    }
+    std::cout << (update ? "Updating" : "Parsing") << " the code of \"" << target.name
+              << "\" from [" << labels << "] -- tree-sitter, no model...\n";
+    GraphSourceBuild build;
+    {
+        BusyLine busy{std::cerr, "parsing", busy_options(quiet)};
+        graph::SourceBuildOptions options;
+        options.force = force;
+        options.dry_run = dry_run;
+        options.on_progress = [&busy, quiet](const graph::SourceProgress& progress) {
+            if (!progress.parsing) {
+                return;  // a file read from the cache is not news
+            }
+            if (busy.active()) {
+                busy.report("parsing " + progress.member + "/" + progress.file,
+                            static_cast<std::size_t>(progress.index),
+                            static_cast<std::size_t>(progress.count));
+            } else if (!quiet) {
+                std::cerr << "[graph] parsing " << progress.member << "/" << progress.file << " ("
+                          << progress.index << "/" << progress.count << ")\n";
+            }
+        };
+        try {
+            build = build_graph_sources(store, named, options);
+        } catch (const std::exception& e) {
+            busy.finish();
+            fail_backend(std::string{"code graph build failed: "} + e.what());
+        }
+    }
+    if (!dry_run && !build.result.cancelled) {
+        store.set_graph_meta(embedstore::kGraphMetaGraphName, target.name);
+    }
+    print_code_summary(target.name, build, show_skipped);
+}
+
+/// `--source` / `--lang`: the named graph `request.name`, with the trees and
+/// the grammars added -- made when it is new, written through the one config
+/// editor (a dry run writes nothing and builds what would be written).
+[[nodiscard]] harness::NamedGraphConfig register_sources(const harness::Config& config,
+                                                         const std::filesystem::path& config_path,
+                                                         const GraphBuildRequest& request) {
+    const std::string& name = request.name;
+    require_plain_name(name);
+    const harness::NamedGraphConfig* existing = config.find_graph(name);
+    if (existing == nullptr &&
+        (config.find_embedding(name) != nullptr || file_exists(collection_path(name)))) {
+        fail_user("'" + name +
+                  "' is a collection -- a source tree builds into a named graph. Name one with "
+                  "--graph <name>; it may list '" +
+                  name + "' as a member: apogee config add-graph <name> --collections " + name +
+                  " --sources <dir>");
+    }
+    harness::NamedGraphConfig entry = existing != nullptr ? *existing : harness::NamedGraphConfig{};
+    bool changed = existing == nullptr;
+    std::vector<std::string> added;
+    for (const std::string& source : request.sources) {
+        std::error_code code;
+        if (!std::filesystem::is_directory(source, code)) {
+            fail_user("--source " + source + ": not a directory");
+        }
+        const std::string absolute = absolute_source_path(source);
+        if (std::ranges::find(entry.sources, absolute) == entry.sources.end()) {
+            entry.sources.push_back(absolute);
+            added.push_back(absolute);
+            changed = true;
+        }
+    }
+    if (!request.languages.empty()) {
+        std::vector<std::string> names;
+        for (const std::string& language : request.languages) {
+            const graph::CodeLanguage* known = graph::code_language_by_name(language);
+            if (known == nullptr) {
+                fail_user("--lang " + language +
+                          ": no vendored grammar -- one of: " + graph::code_language_names());
+            }
+            if (std::ranges::find(names, std::string{known->name}) == names.end()) {
+                names.emplace_back(known->name);
+            }
+        }
+        if (names != entry.languages) {
+            entry.languages = std::move(names);
+            changed = true;
+        }
+    }
+    if (entry.sources.empty()) {
+        fail_user("graph '" + name +
+                  "' has no source trees -- --lang applies to them; add one "
+                  "with --source <dir>");
+    }
+    const NamedGraphValidation validation = validate_named_graph(config, name, entry);
+    if (!validation.error.empty()) {
+        fail_user(validation.error);
+    }
+    for (const std::string& warning : validation.warnings) {
+        std::cerr << "apogee graph: warning: " << warning << "\n";
+    }
+    if (changed && !request.dry_run) {
+        try {
+            harness::edit_config_file(config_path, [&](std::string_view content) {
+                return harness::append_graph(content, name, entry, existing != nullptr);
+            });
+        } catch (const std::exception& e) {
+            fail_backend("could not record graph '" + name + "' in " + config_path.string() + ": " +
+                         e.what());
+        }
+        if (existing == nullptr) {
+            std::cout << "added graph '" << name << "' to " << config_path.string() << "\n";
+        }
+        for (const std::string& source : added) {
+            std::cout << "graph '" << name << "' parses source tree '"
+                      << source_member_label(source) << "' (" << source << ")\n";
+        }
+    }
+    return entry;
 }
 
 /// A collection's own graph: extract into its database, then record that
@@ -624,24 +966,55 @@ void build_collection(const harness::Config& config, const std::filesystem::path
     }
 }
 
-/// A named graph: every member's chunks into the graph's own database,
-/// created by this build; nothing to enable -- the entry is the enablement.
+/// A named graph: its source trees parsed (no model), then every member's
+/// chunks extracted, into the graph's own database, created by this build;
+/// nothing to enable -- the entry is the enablement.
 void build_named(const harness::Config& config, const std::filesystem::path& config_path,
                  const Target& target, const GraphBuildRequest& request) {
     const harness::NamedGraphConfig& named = *target.named;
-    if (named.collections.empty()) {
+    if (named.collections.empty() && named.sources.empty()) {
         fail_user("graph '" + target.name +
-                  "' has no member collections -- add some with 'apogee config add-graph " +
-                  target.name + " --collections <a,b> --force'");
+                  "' has no member collections or source trees -- add some with 'apogee config "
+                  "add-graph " +
+                  target.name +
+                  " --collections <a,b> --force', or 'apogee graph build --source "
+                  "<dir> --graph " +
+                  target.name + "'");
     }
+    // The graph database is created by the first real build. A dry run over
+    // a graph that does not exist yet plans against an in-memory store, so
+    // its footprint is zero -- not even the file.
+    std::error_code code;
+    if (!request.dry_run) {
+        std::filesystem::create_directories(target.db_path.parent_path(), code);
+    }
+    const bool built = file_exists(target.db_path);
+    embedstore::Store store{request.dry_run && !built ? std::filesystem::path{":memory:"}
+                                                      : target.db_path};
+
+    // The code first: free, local, and the half that needs no backend.
+    if (!named.sources.empty()) {
+        build_code(store, target, named, request.force, request.dry_run, request.quiet,
+                   request.show_skipped, false);
+        if (named.collections.empty()) {
+            return;
+        }
+        std::cout << "\n";
+    }
+
     const GraphMembers members = open_graph_members(named);
-    for (const auto& [collection, store] : members.stores) {
-        if (store == nullptr) {
+    for (const auto& [collection, member_store] : members.stores) {
+        if (member_store == nullptr) {
             std::cout << "[graph] member collection \"" << collection
                       << "\" has no database -- it contributes nothing this build.\n";
         }
     }
     if (!members.any_data()) {
+        if (!named.sources.empty()) {
+            std::cout << "[graph] no member collection of \"" << target.name
+                      << "\" has any data yet -- only its code was built.\n";
+            return;
+        }
         fail_user("no member collection of graph '" + target.name +
                   "' has any data -- ingest documents first with 'apogee embed ingest'");
     }
@@ -654,16 +1027,6 @@ void build_named(const harness::Config& config, const std::filesystem::path& con
         std::cout << "[graph] entity vectors skipped for \"" << target.name << "\" -- "
                   << entity_embedder.note << "; entity search will be full-text only.\n";
     }
-    // The graph database is created by the first real build. A dry run over
-    // a graph that does not exist yet plans against an in-memory store, so
-    // its footprint is zero -- not even the file.
-    std::error_code code;
-    if (!request.dry_run) {
-        std::filesystem::create_directories(target.db_path.parent_path(), code);
-    }
-    const bool built = file_exists(target.db_path);
-    embedstore::Store store{request.dry_run && !built ? std::filesystem::path{":memory:"}
-                                                      : target.db_path};
     std::cout << "Building knowledge graph \"" << target.name << "\" over ["
               << join(named.collections) << "] with " << generation.key << "...\n";
     graph::BuildResult result;
@@ -685,6 +1048,39 @@ void build_named(const harness::Config& config, const std::filesystem::path& con
     print_build_summary(target.name, result);
 }
 
+/// `graph update`: a named graph's source trees, re-parsed where their
+/// content changed and re-linked whole -- never a model call, never a
+/// provider built.
+void run_graph_update(const RootContext& context, const UpdateFlags& flags) {
+    std::filesystem::path config_path;
+    const harness::Config config = load_config_strict(context, config_path);
+    const Target target = resolve_target(config, flags.name);
+    if (target.named == nullptr) {
+        fail_user("'" + target.name +
+                  "' is not a named graph -- `graph update` refreshes a named graph's source "
+                  "trees; a collection's graph is rebuilt with `apogee graph build " +
+                  target.name + "`");
+    }
+    const harness::NamedGraphConfig& named = *target.named;
+    if (named.sources.empty()) {
+        fail_user("graph '" + target.name +
+                  "' has no source trees -- add one with `apogee graph build --source <dir> "
+                  "--graph " +
+                  target.name + "`; its collections are extracted by `apogee graph build " +
+                  target.name + "`");
+    }
+    std::error_code code;
+    std::filesystem::create_directories(target.db_path.parent_path(), code);
+    embedstore::Store store{target.db_path};
+    build_code(store, target, named, flags.force, false, flags.quiet, flags.show_skipped, true);
+    if (!named.collections.empty()) {
+        std::cout << "Its collections [" << join(named.collections)
+                  << "] are left as they are: `apogee graph build " << target.name
+                  << "` extracts them, a model call per stale chunk -- `update` never makes "
+                     "one.\n";
+    }
+}
+
 void print_named_stats(const Target& target) {
     const harness::NamedGraphConfig& named = *target.named;
     if (!file_exists(target.db_path)) {
@@ -700,14 +1096,27 @@ void print_named_stats(const Target& target) {
                   << target.name << "\n";
         return;
     }
-    std::cout << "Knowledge graph \"" << target.name << "\" over [" << join(named.collections)
-              << "]:\n";
+    std::cout << "Knowledge graph \"" << target.name << "\"";
+    if (!named.collections.empty()) {
+        std::cout << " over [" << join(named.collections) << "]";
+    }
+    if (!named.sources.empty()) {
+        std::vector<std::string> labels;
+        for (const std::string& source : named.sources) {
+            labels.push_back(source_member_label(source));
+        }
+        std::cout << (named.collections.empty() ? " from" : " and") << " source tree(s) ["
+                  << join(labels) << "]";
+    }
+    std::cout << ":\n";
     print_stats_body(target.name, stats.totals);
     if (const std::string embed_model = store.graph_meta(embedstore::kGraphMetaEmbedModel);
         !embed_model.empty()) {
         std::cout << "  Embedder:  " << embed_model << " (the graph's own entity-vector model)\n";
     }
-    std::cout << "  Members:\n";
+    if (!stats.members.empty()) {
+        std::cout << "  Members:\n";
+    }
     for (const embedstore::MemberStats& member : stats.members) {
         std::cout << "    " << member.collection << ": " << member.mentions << " mention(s), "
                   << member.chunks_with_mentions << "/" << member.total_chunks
@@ -723,7 +1132,7 @@ void print_named_stats(const Target& target) {
     std::vector<std::string> current = named.collections;
     std::ranges::sort(current);
     if (const std::vector<std::string> as_built = store.graph_members();
-        !as_built.empty() && as_built != current) {
+        !as_built.empty() && !current.empty() && as_built != current) {
         std::cout << "  Note: membership changed since the last build (was [" << join(as_built)
                   << "]) -- run `apogee graph build " << target.name << "` to converge.\n";
     }
@@ -733,8 +1142,23 @@ void print_named_stats(const Target& target) {
 
 void run_graph_build(const RootContext& context, const GraphBuildRequest& request) {
     std::filesystem::path config_path;
-    const harness::Config config = load_config_strict(context, config_path);
-    const Target target = resolve_target(config, request.name);
+    harness::Config config = load_config_strict(context, config_path);
+    // `--source`/`--lang` (27k) shape the named graph before it builds: the
+    // entry written (and re-read), or -- in a dry run -- held in memory.
+    std::optional<harness::NamedGraphConfig> pending;
+    if (!request.sources.empty() || !request.languages.empty()) {
+        pending = register_sources(config, config_path, request);
+        if (!request.dry_run) {
+            config = load_config_strict(context, config_path);
+            pending.reset();
+        }
+    }
+    Target target = resolve_target(config, request.name);
+    if (pending.has_value()) {
+        target.named = &*pending;
+        target.entry = nullptr;
+        target.db_path = agentloop::graph_db_path(request.name);
+    }
     if (target.named != nullptr) {
         build_named(config, config_path, target, request);
     } else {
@@ -758,10 +1182,31 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
     auto b = std::make_shared<BuildFlags>();
     CLI::App* build = cmd->add_subcommand(
         "build",
-        "Extract entities and relations from a collection's or a named graph's stale chunks");
+        "Extract entities and relations from a collection's or a named graph's stale chunks, "
+        "and parse its source trees (no model)");
     build->add_option("NAME", b->name, "A named graph (a graphs: entry) or a collection")
-        ->type_name(kGraphValue)
-        ->required();
+        ->type_name(kGraphValue);
+    build
+        ->add_option("--graph", b->graph,
+                     "The named graph to build -- the same as NAME; with --source, made when new")
+        ->type_name(kNamedGraphValue);
+    build
+        ->add_option("--source", b->sources,
+                     "A source tree to parse into the named graph with tree-sitter -- no model, no "
+                     "key, no network (repeatable; recorded on the graph's entry)")
+        ->type_name(kPathValue);
+    {
+        std::vector<std::string> names;
+        for (const graph::CodeLanguage& language : graph::code_languages()) {
+            names.emplace_back(language.name);
+        }
+        build
+            ->add_option("--lang", b->languages,
+                         "Parse only these languages (repeatable; recorded on the graph's entry)")
+            ->check(CLI::IsMember(names));
+    }
+    build->add_flag("--show-skipped", b->show_skipped,
+                    "Name every file the code build skipped, however many");
     build
         ->add_option("-m,--model", b->model,
                      "The extraction backend (default: the entry's extract_backend, then the "
@@ -773,13 +1218,38 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
     build->add_option("--limit", b->limit, "Stop after N chunks (0 = no limit)");
     build->add_flag("-q,--quiet", b->quiet, "No progress: no busy line, no per-chunk lines");
     build->callback([&context, b]() {
-        run_graph_build(context, GraphBuildRequest{.name = b->name,
+        if (!b->name.empty() && !b->graph.empty() && b->name != b->graph) {
+            fail_user("NAME '" + b->name + "' and --graph '" + b->graph +
+                      "' name two graphs -- give one");
+        }
+        const std::string name = b->graph.empty() ? b->name : b->graph;
+        if (name.empty()) {
+            fail_user("which graph? -- give NAME, or --graph <name> with --source <dir>");
+        }
+        run_graph_build(context, GraphBuildRequest{.name = name,
                                                    .model = b->model,
                                                    .dry_run = b->dry_run,
                                                    .force = b->force,
                                                    .limit = b->limit,
-                                                   .quiet = b->quiet});
+                                                   .quiet = b->quiet,
+                                                   .sources = b->sources,
+                                                   .languages = b->languages,
+                                                   .show_skipped = b->show_skipped});
     });
+
+    // ---- update --------------------------------------------------------------
+    auto u = std::make_shared<UpdateFlags>();
+    CLI::App* update = cmd->add_subcommand(
+        "update",
+        "Re-parse a named graph's source trees where files changed -- never a model call");
+    update->add_option("NAME", u->name, "A named graph with source trees")
+        ->type_name(kNamedGraphValue)
+        ->required();
+    update->add_flag("--force", u->force, "Re-parse every file, changed or not");
+    update->add_flag("-q,--quiet", u->quiet, "No progress: no busy line, no per-file lines");
+    update->add_flag("--show-skipped", u->show_skipped,
+                     "Name every file the build skipped, however many");
+    update->callback([&context, u]() { run_graph_update(context, *u); });
 
     // ---- stats ---------------------------------------------------------------
     auto s_name = std::make_shared<std::string>();
@@ -878,6 +1348,8 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
     communities->add_flag("--list", c->list, "List the stored communities; summarise nothing");
     communities->add_flag("-q,--quiet", c->quiet,
                           "No progress: no busy line, no per-community lines");
+    communities->add_flag("--no-summaries", c->no_summaries,
+                          "Cluster only -- no model call; the summaries are reported absent");
     communities->callback([&context, c]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
@@ -892,20 +1364,44 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
                       "' has no relations to cluster -- build it first: apogee graph build " +
                       target.name);
         }
-        const Providers providers{config, config_path};
-        const Generation generation = resolve_generation(config, providers.harness, c->model,
-                                                         target, "community summary run");
-        const graph::EntityEmbedder embedder = resolve_embedder(providers.harness, config, target);
-        if (!embedder.embed) {
-            std::cout << "[graph] summary vectors skipped for \"" << target.name << "\" -- "
-                      << embedder.note << "; summaries will be full-text searchable only.\n";
+        // Clustering is deterministic and needs no model; a summary is one
+        // generation call (27k). With nothing to summarise with -- or told
+        // not to -- the clusters are stored and the summaries said absent.
+        std::optional<Providers> providers;
+        std::optional<Generation> generation;
+        graph::EntityEmbedder embedder;
+        std::string absent;
+        if (c->no_summaries) {
+            absent = "--no-summaries";
+        } else if (c->model.empty() &&
+                   harness::resolve_backend(
+                       config, harness::RoleRequest{.role = harness::ModelRole::Extraction,
+                                                    .override = "",
+                                                    .entry_backend = target.entry_backend()})
+                       .key.empty()) {
+            absent = "no generation backend is configured";
+        } else {
+            providers.emplace(config, config_path);
+            generation = resolve_generation(
+                config, providers->harness, c->model, target, "community summary run",
+                "--no-summaries to cluster with no model, the summaries reported absent");
+            embedder = resolve_embedder(providers->harness, config, target);
+            if (!embedder.embed) {
+                std::cout << "[graph] summary vectors skipped for \"" << target.name << "\" -- "
+                          << embedder.note << "; summaries will be full-text searchable only.\n";
+            }
         }
         graph::CommunitiesOptions options;
-        options.model = generation.kg_model;
+        options.model = generation.has_value() ? generation->kg_model : std::string{};
         options.force = c->force;
         options.min_size = c->min_size;
-        std::cout << "Detecting and summarising communities for \"" << target.name << "\" with "
-                  << generation.key << "...\n";
+        if (generation.has_value()) {
+            std::cout << "Detecting and summarising communities for \"" << target.name << "\" with "
+                      << generation->key << "...\n";
+        } else {
+            std::cout << "Detecting communities for \"" << target.name
+                      << "\" -- no model; summaries absent (" << absent << ")...\n";
+        }
         graph::CommunitiesResult result;
         {
             BusyLine busy{std::cerr, "detecting communities", busy_options(c->quiet)};
@@ -920,7 +1416,10 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
             };
             try {
                 result = graph::build_communities(
-                    store, graph::make_summarizer(providers.harness, generation.key),
+                    store,
+                    generation.has_value()
+                        ? graph::make_summarizer(providers->harness, generation->key)
+                        : graph::SummarizeFn{},
                     embedder.embed, options);
             } catch (const std::exception& e) {
                 busy.finish();
@@ -935,6 +1434,9 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         std::cout << "Communities for \"" << target.name << "\": " << result.detected
                   << " detected -- " << result.summarized << " summarised, " << result.unchanged
                   << " unchanged, " << result.pruned << " pruned";
+        if (result.clustered > 0) {
+            std::cout << ", " << result.clustered << " clustered without a summary";
+        }
         if (result.failed > 0) {
             std::cout << ", " << result.failed << " failed (re-run to retry)";
         }
@@ -942,12 +1444,19 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
             std::cout << ", " << result.embedded << " embedded";
         }
         std::cout << ".\n";
+        if (result.summaries_absent > 0) {
+            std::cout << "Summaries absent: " << result.summaries_absent << " communit"
+                      << (result.summaries_absent == 1 ? "y" : "ies") << " stored without one"
+                      << (absent.empty() ? std::string{} : " (" + absent + ")")
+                      << " -- clustering needs no model; `apogee graph communities " << target.name
+                      << " -m <backend>` summarises them.\n";
+        }
         if (!result.embed_error.empty()) {
             std::cout << "Warning: summary embedding stopped early (" << result.embed_error
                       << ") -- summaries stay full-text searchable; re-run to embed them.\n";
         }
         std::cout << "\n";
-        print_communities(store, target.name);
+        print_communities(store, target.name, kCommunitiesAfterRun);
     });
 
     // ---- dedupe --------------------------------------------------------------
@@ -968,6 +1477,24 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         const harness::Config config = load_config_strict(context, config_path);
         const Target target = resolve_target(config, d->name);
         embedstore::Store store = open_target(target);
+        // What each layer's dedupe is (27k), read once beside the admin
+        // twin: a code entity's identity is its exact qualified name, so its
+        // merges are the ones the build made; a prose entity merges by vector
+        // agreement, and with no vector to compare the pass is skipped --
+        // said, never silently.
+        const embedstore::DedupeScope scope = store.dedupe_scope();
+        if (scope.code_entities > 0) {
+            std::cout << "Code entities: " << scope.code_entities
+                      << " -- merged by exact qualified name as they were built ("
+                      << scope.code_identity_merges
+                      << " stated at more than one place, one node each); never by "
+                         "resemblance.\n";
+        }
+        if (const std::string skip = scope.prose_skip_reason(); !skip.empty()) {
+            std::cout << "Prose entities: vector dedupe skipped -- " << skip
+                      << "; nothing to merge.\n";
+            return;
+        }
         std::vector<embedstore::MergeGroup> groups;
         try {
             groups = store.dedupe_nodes(d->threshold, d->dry_run);

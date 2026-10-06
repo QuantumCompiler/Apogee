@@ -1183,6 +1183,33 @@ TEST_CASE(
     CHECK(row_with(built, "named graph: work")->remedy.empty());
 }
 
+TEST_CASE("the doctor's Graph section checks a code graph's trees and languages",
+          "[commands][check][graphs][code]") {
+    const Install install;
+    const std::filesystem::path tree = install.root / "repo" / "app";
+    std::filesystem::create_directories(tree);
+    const std::string tree_text = tree.generic_string();
+    const CheckReport healthy = run_checks(
+        inputs_with_config(install, "graphs:\n  code:\n    sources: [\"" + tree_text + "\"]\n"));
+    REQUIRE(row_with(healthy, "named graph: code") != nullptr);
+    CHECK(row_with(healthy, "named graph: code")->status == Status::Ok);
+    CHECK(row_with(healthy, "named graph: code")
+              ->detail.find("source trees [app] (parsed, no model)") != std::string::npos);
+    // No extractor is asked about: a code graph needs none.
+    CHECK(row_with(healthy, "named graph: code")->detail.find("extractor") == std::string::npos);
+
+    const CheckReport missing = run_checks(inputs_with_config(
+        install, "graphs:\n  code:\n    sources: [\"" + tree_text + "/gone\"]\n"));
+    CHECK(row_with(missing, "named graph: code")->status == Status::Fail);
+    CHECK(row_with(missing, "named graph: code")->detail.find("is not a directory") !=
+          std::string::npos);
+    const CheckReport unknown =
+        run_checks(inputs_with_config(install, "graphs:\n  code:\n    sources: [\"" + tree_text +
+                                                   "\"]\n    languages: [cobol]\n"));
+    CHECK(row_with(unknown, "named graph: code")->status == Status::Fail);
+    CHECK(row_with(unknown, "named graph: code")->remedy.find("cpp, python") != std::string::npos);
+}
+
 TEST_CASE(
     "the training rows: the environment a warning with its command, seeded kits and the "
     "script ok, an edited script kept, a broken kit a failure, a missing hf_dir a warning",

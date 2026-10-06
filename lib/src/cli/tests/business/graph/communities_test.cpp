@@ -292,8 +292,53 @@ TEST_CASE("a summariser failure is soft and leaves the old summary in place",
         return std::string{"   \n"};
     };
     CHECK(apogee::graph::build_communities(f.store, blank, {}, options).failed == 1);
-    CHECK_THROWS_AS((void)apogee::graph::build_communities(f.store, {}, {}, options),
-                    std::invalid_argument);
+    // No summariser at all (27k: clustering alone) is no failure either, and
+    // never costs the summary already there -- forced or not.
+    const CommunitiesResult bare = apogee::graph::build_communities(f.store, {}, {}, options);
+    CHECK(bare.failed == 0);
+    CHECK(bare.unchanged == 1);
+    CHECK(bare.summaries_absent == 0);
+    CHECK(f.store.graph_communities().front().summary == kept);
+}
+
+TEST_CASE(
+    "with no summariser, communities are clustered with no model and the summaries "
+    "reported absent; a later summariser fills exactly those",
+    "[graph][communities][build][model-free]") {
+    Fixture f;
+    CommunitiesOptions options;
+    const CommunitiesResult clustered = apogee::graph::build_communities(f.store, {}, {}, options);
+    CHECK(clustered.detected == 1);
+    CHECK(clustered.clustered == 1);
+    CHECK(clustered.summarized == 0);
+    CHECK(clustered.failed == 0);
+    CHECK(clustered.summaries_absent == 1);
+    REQUIRE(f.store.graph_communities().size() == 1);
+    CHECK(f.store.graph_communities().front().summary.empty());
+    CHECK(f.store.graph_communities().front().size == 3);
+    // Nothing to find: no summary, so no pseudo-chunk -- and nothing to embed.
+    CHECK(f.store
+              .chunks_by_source(std::string{apogee::embedstore::kCommunitySourcePrefix} +
+                                std::to_string(f.store.graph_communities().front().id))
+              .empty());
+    CHECK(f.store.search("Summary", 5).empty());
+    CHECK(f.store.communities_without_vectors().empty());
+    CHECK(f.store.graph_stats().communities_unsummarised == 1);
+
+    // Run again bare: unchanged, still said absent.
+    const CommunitiesResult again = apogee::graph::build_communities(f.store, {}, {}, options);
+    CHECK(again.unchanged == 1);
+    CHECK(again.clustered == 0);
+    CHECK(again.summaries_absent == 1);
+
+    // A summariser later writes the one still without, and only that one.
+    FakeSummarizer summarizer;
+    const CommunitiesResult filled =
+        apogee::graph::build_communities(f.store, summarizer.fn(), {}, options);
+    CHECK(summarizer.calls == 1);
+    CHECK(filled.summarized == 1);
+    CHECK(filled.summaries_absent == 0);
+    CHECK(f.store.search("Summary", 5).size() == 1);
 }
 
 TEST_CASE(

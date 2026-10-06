@@ -31,6 +31,15 @@
 /// and anything else is a collection. `apogee check` keeps the two name
 /// spaces apart.
 ///
+/// **Code, with no model at all** (27k): a named graph's `sources:` are
+/// source trees parsed with tree-sitter into the same tables -- files,
+/// modules, classes, functions; calls, imports, bases, type references and
+/// containment, each stated at a `file:line` and stored `extracted` -- built
+/// by `build` beside its collections and refreshed by `update`, which
+/// re-parses only the files whose content changed and never makes a model
+/// call. `build --source <dir> --graph <name>` adds a tree (and the entry,
+/// when it is new).
+///
 /// `communities` is the global layer: deterministic label-propagation
 /// clusters, each summarised by one generation call and stored as a
 /// retrievable pseudo-chunk, so "what are the main themes?" is answerable by
@@ -62,6 +71,15 @@ struct GraphBuildRequest {
     /// No progress at all: no busy line on a terminal, no per-chunk line on
     /// a pipe (M1). The results and every failure still print.
     bool quiet = false;
+    /// `--source` (27k): source trees to add to the named graph `name` --
+    /// the entry made when it is new -- before it builds. A collection's
+    /// name is refused: a tree builds into a named graph.
+    std::vector<std::string> sources;
+    /// `--lang`: the grammars the graph's trees are parsed with, recorded on
+    /// the entry (empty: leave the entry's as it is).
+    std::vector<std::string> languages;
+    /// Name every skipped file, however many.
+    bool show_skipped = false;
 };
 
 void run_graph_build(const RootContext& context, const GraphBuildRequest& request);

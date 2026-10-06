@@ -314,6 +314,63 @@ if(NOT VIOLATIONS STREQUAL "")
                         "harness/, contracts/, platform/ and itself.")
 endif()
 
+# The code graph (27k) is model-free by construction, not by care: its files
+# -- `graph/code_*` -- may include one another, the store (`embedstore/`),
+# and by name the SHA-256 the content fingerprint uses and the cancellation
+# token. Not `harness/`, not `agentloop/`, not `agent/`, not `knowledge/`, not
+# the prose extractor: there is no route to a model from the code path to
+# take, so "zero model calls" is a property of the include graph.
+file(GLOB graph_code_sources "${PACKAGE_DIR_graph}/code_*.h" "${PACKAGE_DIR_graph}/code_*.cpp")
+if(graph_code_sources STREQUAL "")
+    message(FATAL_ERROR "no code_* sources found under ${PACKAGE_DIR_graph} — "
+                        "this check would pass vacuously")
+endif()
+foreach(source IN LISTS graph_code_sources)
+    file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS project_includes)
+        if(NOT line MATCHES "#[ \t]*include[ \t]*\"(graph/code_|embedstore/)"
+           AND NOT line MATCHES "#[ \t]*include[ \t]*\"contracts/(sha256|cancellation)\\.h\"")
+            get_filename_component(name "${source}" NAME)
+            list(APPEND VIOLATIONS "  graph/${name} reaches past the code path: ${line}")
+        endif()
+    endforeach()
+endforeach()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "the code graph can reach a model:\n${pretty}\n"
+                        "graph/code_* may include only graph/code_*, embedstore/, "
+                        "contracts/sha256.h and contracts/cancellation.h.")
+endif()
+
+# tree-sitter's C API has ONE boundary (27k): `graph/code_parser.cpp` wraps
+# its handles in unique_ptrs with custom deleters, and no raw handle -- and no
+# tree-sitter type -- leaves it. So exactly that file includes its header;
+# the check requires seeing it there, so a moved boundary fails rather than
+# passes.
+file(GLOB_RECURSE every_source "${APOGEE_SOURCE_DIR}/*.h" "${APOGEE_SOURCE_DIR}/*.cpp")
+set(tree_sitter_seen FALSE)
+foreach(source IN LISTS every_source)
+    file(STRINGS "${source}" tree_sitter_includes REGEX "^[ \t]*#[ \t]*include[ \t]*[\"<]tree_sitter/")
+    if(tree_sitter_includes STREQUAL "")
+        continue()
+    endif()
+    file(RELATIVE_PATH relative "${APOGEE_SOURCE_DIR}" "${source}")
+    if(relative STREQUAL "business/graph/code_parser.cpp")
+        set(tree_sitter_seen TRUE)
+    else()
+        list(APPEND VIOLATIONS "  ${relative} includes tree-sitter: ${tree_sitter_includes}")
+    endif()
+endforeach()
+if(NOT tree_sitter_seen)
+    list(APPEND VIOLATIONS "  business/graph/code_parser.cpp no longer includes tree_sitter/api.h "
+                           "-- the boundary moved; move this check with it")
+endif()
+if(NOT VIOLATIONS STREQUAL "")
+    string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
+    message(FATAL_ERROR "tree-sitter's C API escapes its boundary:\n${pretty}\n"
+                        "Only graph/code_parser.cpp may include tree_sitter/ headers.")
+endif()
+
 # `training/` is a domain core like `graph/`: the Python boundary, the kits,
 # the synth core and the dataset store every surface shares. It may include
 # the harness, the contracts, the platform seam, the loop's closures' types

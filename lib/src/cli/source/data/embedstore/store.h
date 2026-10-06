@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "embedstore/graph.h"
+#include "embedstore/graph_code.h"
 #include "embedstore/graph_communities.h"
 #include "embedstore/graph_dedupe.h"
 #include "embedstore/graph_search.h"
@@ -373,6 +374,62 @@ public:
     /// the groups and writes nothing. One transaction.
     [[nodiscard]] std::vector<MergeGroup> dedupe_nodes(double threshold, bool dry_run);
 
+    /// What a dedupe pass has to work with, per layer (27k): see DedupeScope.
+    [[nodiscard]] DedupeScope dedupe_scope() const;
+
+    // --- The knowledge graph: the code layer (embedstore/graph_code.cpp) ----
+    //
+    // Written whole by the deterministic code build (27k): see graph_code.h.
+
+    /// Converges every code row on `nodes` and `edges`, in one transaction:
+    /// the code mentions and edge sites rewritten; a node kept where it
+    /// survives (its id, and what hangs off it, stay), its description and
+    /// metadata replaced -- a changed description clearing its vector -- and
+    /// added where new; an edge stored `extracted`, confidence 1.0, its
+    /// weight its site count, an existing `inferred` one promoted, never the
+    /// other way; then every extracted edge no site states and every code
+    /// node nothing mentions removed. The prose layer is untouched. Nodes and
+    /// edges are named by (type, name); an edge whose endpoint is not among
+    /// `nodes` is skipped.
+    [[nodiscard]] CodeSyncResult sync_code_graph(const std::vector<CodeNodeRow>& nodes,
+                                                 const std::vector<CodeEdgeRow>& edges);
+
+    /// Every parsed file's state under the source member `collection`,
+    /// keyed by file.
+    [[nodiscard]] std::map<std::string, CodeFileState> code_file_states(
+        std::string_view collection) const;
+
+    /// Every source member with a parsed file, sorted.
+    [[nodiscard]] std::vector<std::string> code_members() const;
+
+    /// Records (or replaces) one parsed file's state. Throws without a
+    /// content hash -- an empty one is what marks a prose row.
+    void set_code_file_state(const CodeFileState& state);
+
+    /// Forgets the named files' states under `collection`; returns how many.
+    [[nodiscard]] std::int64_t remove_code_files(std::string_view collection,
+                                                 const std::vector<std::string>& files);
+
+    /// Forgets every file state of a source member; returns how many.
+    [[nodiscard]] std::int64_t remove_code_member(std::string_view collection);
+
+    /// Where a code node is stated: definitions first, then declarations,
+    /// then references, each in (member, file, line) order. `limit` 0 or
+    /// less returns all.
+    [[nodiscard]] std::vector<CodeMention> node_code_mentions(std::int64_t node_id,
+                                                              int limit) const;
+
+    /// Where an edge is stated, in (member, file, line) order. `limit` 0 or
+    /// less returns all.
+    [[nodiscard]] std::vector<EdgeSite> edge_sites(std::int64_t edge_id, int limit) const;
+
+    /// The whole graph as canonical text -- every node in identity order with
+    /// its description, metadata and provenance, every edge with its origin,
+    /// weight and sites -- with no row id, vector or timestamp in it: two
+    /// stores holding the same graph dump the same bytes, however they came
+    /// to hold it. What "an update converges on a fresh build" is held to.
+    [[nodiscard]] std::string graph_dump() const;
+
     // --- The knowledge graph: reads (embedstore/graph_search.cpp) -----------
 
     [[nodiscard]] GraphStats graph_stats() const;
@@ -384,7 +441,9 @@ public:
     [[nodiscard]] GraphStatsMulti graph_stats_multi(const MemberStores& members) const;
 
     /// Every node whose normalised name equals `name` -- one per type sharing
-    /// it -- most-mentioned first. Empty for an unknown name, never an error.
+    /// it -- most-mentioned first. A code node (27k) matches its exact
+    /// qualified name, or the fold of it when no code node is spelled
+    /// exactly `name`. Empty for an unknown name, never an error.
     [[nodiscard]] std::vector<GraphNode> find_nodes(std::string_view name) const;
 
     /// The top `limit` entities by BM25 over names and descriptions -- the
@@ -410,7 +469,9 @@ public:
     /// returns all.
     [[nodiscard]] std::vector<ChunkRef> node_mention_refs(std::int64_t node_id, int limit) const;
 
-    /// The whole edge set -- the community detector's input.
+    /// The whole edge set between structural nodes -- the community
+    /// detector's input. An edge to an unresolved reference's `name` node is
+    /// left out (27k): a name is not structure.
     [[nodiscard]] std::vector<GraphEdge> all_edges() const;
 
     /// Expands a retrieval turn through the graph. The seed set is the union
@@ -443,8 +504,11 @@ private:
 /// `embed_dim` keys in `store_meta`. v3 added the nullable `chunks.metadata`
 /// column (knowledge records). v4 added the knowledge-graph tables (`kg_*`,
 /// `graph_meta`, the entity FTS index) and made chunk ids AUTOINCREMENT. v5
-/// added the community tables (`kg_communities`, `kg_community_members`). An
-/// older store gains them on open.
-inline constexpr int kSchemaVersion = 5;
+/// added the community tables (`kg_communities`, `kg_community_members`). v6
+/// (27k) added an edge's `origin` and `confidence`, a code file's
+/// `content_hash` and cached `facts` on `kg_state`, and the code layer's
+/// provenance tables (`kg_code_mentions`, `kg_edge_sites`). An older store
+/// gains them on open.
+inline constexpr int kSchemaVersion = 6;
 
 }  // namespace apogee::embedstore

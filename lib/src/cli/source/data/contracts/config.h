@@ -470,6 +470,14 @@ struct NamedGraphConfig {
     /// The member collections, each an `embeddings:` name. Removing one
     /// converges on the next build -- its rows reconcile away.
     std::vector<std::string> collections;
+    /// Source trees parsed into the graph by the code build (27k), each an
+    /// absolute directory (`~` and `${VAR}` expanded at load). Removing one
+    /// converges on the next build or update -- its rows are forgotten.
+    std::vector<std::string> sources;
+    /// The code build's grammars, by roster name (`cpp`, `python`, ...);
+    /// empty means every vendored one. Validated by `apogee check` and the
+    /// writers, not at load: the roster is the graph package's.
+    std::vector<std::string> languages;
     /// The backend `graph build <name>` extracts with when `-m` is not
     /// given. Empty means the extraction role, then the default.
     std::string extract_backend;

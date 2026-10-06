@@ -49,6 +49,12 @@
 #                                  HTTP only: a deployment terminates TLS in
 #                                  front of it, which is where certificates
 #                                  belong.
+#   Code parsing tree-sitter    -- third_party/tree-sitter/ (arrived with the
+#                                  code graph, 27k). The runtime and each
+#                                  grammar fetched at its own exact commit and
+#                                  compiled as plain C there: FETCHED NEVER
+#                                  FOUND, since the graph's goldens pin the
+#                                  tree a grammar of one version produces.
 
 include(FetchContent)
 

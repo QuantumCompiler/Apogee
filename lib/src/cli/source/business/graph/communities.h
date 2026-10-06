@@ -96,6 +96,12 @@ struct CommunitiesOptions {
 struct CommunitiesResult {
     /// Communities of at least `min_size` the detector found.
     int detected = 0;
+    /// Run with no summariser (27k): new or changed communities stored
+    /// clustered and unsummarised.
+    int clustered = 0;
+    /// Stored communities with no summary after the run -- reported, never
+    /// silently required: a code graph's clustering needs no model.
+    int summaries_absent = 0;
     /// Kept as-is: same membership, already summarised.
     int unchanged = 0;
     /// Newly generated: a new membership, or forced.
@@ -121,8 +127,14 @@ struct CommunitiesResult {
 /// without a vector in a batched embed phase last (so a failed embed never
 /// loses summarisation work). Summariser failures are soft: the community
 /// is counted and skipped, and an existing summary row is left in place
-/// rather than replaced with nothing. Throws `std::invalid_argument` with
-/// no summariser.
+/// rather than replaced with nothing.
+///
+/// **With no summariser** (a null `summarize`, 27k) the run is clustering
+/// alone and makes no model call: every detected community is stored with
+/// its membership and no summary (and so no pseudo-chunk), an unchanged one
+/// kept as it is, the stale ones pruned -- and the summaries' absence is
+/// counted in `summaries_absent`, for every surface to say. A later run with
+/// a summariser summarises exactly the ones still without.
 [[nodiscard]] CommunitiesResult build_communities(embedstore::Store& store,
                                                   const SummarizeFn& summarize,
                                                   const EmbedFn& embed,

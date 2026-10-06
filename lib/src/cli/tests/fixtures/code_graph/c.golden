@@ -1,0 +1,140 @@
+node class store
+  description struct store
+  metadata {"end_line":8,"file":"store.h","kind":"code","lang":"c","line":6,"member":"c"}
+  mentions 1
+  at c:store.h:6-8 definition
+node file main.c
+  description C file
+  metadata {"end_line":14,"file":"main.c","kind":"code","lang":"c","line":1,"member":"c"}
+  mentions 1
+  at c:main.c:1-14 definition
+node file store.c
+  description C file
+  metadata {"end_line":13,"file":"store.c","kind":"code","lang":"c","line":1,"member":"c"}
+  mentions 1
+  at c:store.c:1-13 definition
+node file store.h
+  description C file
+  metadata {"end_line":13,"file":"store.h","kind":"code","lang":"c","line":1,"member":"c"}
+  mentions 1
+  at c:store.h:1-13 definition
+node function main
+  description int main(void)
+  metadata {"end_line":14,"file":"main.c","kind":"code","lang":"c","line":9,"member":"c"}
+  mentions 1
+  at c:main.c:9-14 definition
+node function main.c::clamp
+  description static int clamp(int value)
+  metadata {"end_line":7,"file":"main.c","kind":"code","lang":"c","line":5,"member":"c"}
+  mentions 1
+  at c:main.c:5-7 definition
+node function store.c::clamp
+  description static int clamp(int value)
+  metadata {"end_line":5,"file":"store.c","kind":"code","lang":"c","line":3,"member":"c"}
+  mentions 1
+  at c:store.c:3-5 definition
+node function store_add
+  description void store_add(struct store* s, int value)
+  metadata {"end_line":9,"file":"store.c","kind":"code","lang":"c","line":7,"member":"c"}
+  mentions 2
+  at c:store.c:7-9 definition
+  at c:store.h:10-10 declaration
+node function store_total
+  description int store_total(const struct store* s)
+  metadata {"end_line":13,"file":"store.c","kind":"code","lang":"c","line":11,"member":"c"}
+  mentions 2
+  at c:store.c:11-13 definition
+  at c:store.h:11-11 declaration
+node name printf
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at c:main.c:12-12 reference
+node name stddef.h
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at c:store.h:4-4 reference
+node name stdio.h
+  description 
+  metadata {"kind":"code","unresolved":true}
+  mentions 1
+  at c:main.c:1-1 reference
+edge class store -[defined_in]-> file store.h
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:store.h:6
+edge file main.c -[imports]-> file store.h
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:main.c:3
+edge file main.c -[imports]-> name stdio.h
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:main.c:1
+edge file store.c -[imports]-> file store.h
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:store.c:1
+edge file store.h -[imports]-> name stddef.h
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:store.h:4
+edge function main -[calls]-> function main.c::clamp
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:main.c:11
+edge function main -[calls]-> function store_add
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:main.c:11
+edge function main -[calls]-> function store_total
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:main.c:12
+edge function main -[calls]-> name printf
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:main.c:12
+edge function main -[defined_in]-> file main.c
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:main.c:9
+edge function main.c::clamp -[defined_in]-> file main.c
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:main.c:5
+edge function store.c::clamp -[defined_in]-> file store.c
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:store.c:3
+edge function store_add -[calls]-> function store.c::clamp
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:store.c:8
+edge function store_add -[defined_in]-> file store.c
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:store.c:7
+edge function store_add -[defined_in]-> file store.h
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:store.h:10
+edge function store_add -[references]-> class store
+  description 
+  weight 2 origin extracted confidence 1.000000
+  site c:store.c:7
+  site c:store.h:10
+edge function store_total -[defined_in]-> file store.c
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:store.c:11
+edge function store_total -[defined_in]-> file store.h
+  description 
+  weight 1 origin extracted confidence 1.000000
+  site c:store.h:11
+edge function store_total -[references]-> class store
+  description 
+  weight 2 origin extracted confidence 1.000000
+  site c:store.c:11
+  site c:store.h:11

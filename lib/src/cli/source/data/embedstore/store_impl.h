@@ -11,13 +11,13 @@
 
 /// Package-private: the connection and the statement helpers the store's
 /// translation units share (`store.cpp`, `graph.cpp`, `graph_search.cpp`,
-/// `graph_communities.cpp`, `graph_dedupe.cpp`).
+/// `graph_communities.cpp`, `graph_dedupe.cpp`, `graph_code.cpp`).
 ///
 /// The raw `sqlite3*` never leaves the package: it is wrapped in a
 /// `unique_ptr` here, no public accessor returns it, and only members of
 /// `Store` -- whichever file they are defined in -- can reach `impl_`. That
 /// is the Code Style rule for C APIs applied to a class whose implementation
-/// spans five files rather than one.
+/// spans six files rather than one.
 namespace apogee::embedstore::detail {
 
 struct ConnectionDeleter {
@@ -112,6 +112,13 @@ void in_transaction(sqlite3* handle, Body&& body) {
     }
     return out;
 }
+
+/// A node's salience, recomputed from its provenance: its prose mentions
+/// (chunks) plus its code mentions (lines). Every recount uses this one
+/// expression, so neither layer's rows ever read as orphans to the other's.
+inline constexpr std::string_view kMentionCountSql =
+    "((SELECT COUNT(*) FROM kg_mentions WHERE node_id = kg_nodes.id) +"
+    " (SELECT COUNT(*) FROM kg_code_mentions WHERE node_id = kg_nodes.id))";
 
 /// The knowledge-graph tables, the entity full-text index and its triggers
 /// (schema v4; the community tables since v5). Called from the store's

@@ -22,6 +22,7 @@
 #include "httpserver/handler.h"
 #include "operations/collections.h"
 #include "operations/graph_members.h"
+#include "operations/graph_sources.h"
 
 namespace apogee::httpserver {
 namespace {
@@ -77,7 +78,10 @@ struct Target {
     }
 
     [[nodiscard]] nlohmann::json job_fields(std::string_view backend) const {
-        nlohmann::json out{{"model", std::string{backend}}};
+        // No model at all -- a clustering run without summaries (27k) -- says
+        // so by carrying none.
+        nlohmann::json out = backend.empty() ? nlohmann::json::object()
+                                             : nlohmann::json{{"model", std::string{backend}}};
         out[named.has_value() ? "graph" : "collection"] = name;
         return out;
     }
@@ -179,7 +183,64 @@ struct Generation {
     if (!stats.extract_model.empty()) {
         out["extract_model"] = stats.extract_model;
     }
+    // Origin is schema (27k): every edge parsed or asserted, and the split
+    // said; the code layer's counts when it has one.
+    out["edges_extracted"] = stats.edges_extracted;
+    out["edges_inferred"] = stats.edges_inferred;
+    if (stats.code_files > 0) {
+        out["code_files"] = stats.code_files;
+        out["code_files_by_language"] = stats.code_files_by_language;
+        out["code_mentions"] = stats.code_mentions;
+        out["unresolved_names"] = stats.unresolved_names;
+    }
     return out;
+}
+
+/// What a code build did (27k), on the job's result.
+[[nodiscard]] nlohmann::json code_fields(const commands::GraphSourceBuild& build) {
+    const graph::SourceBuildResult& result = build.result;
+    nlohmann::json skipped = nlohmann::json::array();
+    for (const graph::SkippedFile& file : result.skipped) {
+        skipped.push_back({{"member", file.member}, {"file", file.file}, {"reason", file.reason}});
+    }
+    return nlohmann::json{{"files_used", result.files_used},
+                          {"files_parsed", result.files_parsed},
+                          {"files_unchanged", result.files_unchanged},
+                          {"files_removed", result.files_removed},
+                          {"files_by_language", result.files_by_language},
+                          {"skipped", std::move(skipped)},
+                          {"partial", result.partial},
+                          {"missing_sources", build.missing},
+                          {"empty_sources", build.empty},
+                          {"references_resolved", result.counts.resolved()},
+                          {"references_unresolved", result.counts.unresolved()},
+                          {"nodes", result.nodes},
+                          {"edges", result.edges}};
+}
+
+/// A named graph's source trees parsed into its database -- the model-free
+/// half of a build, run on the job's worker. The CLI's `build_code` twin.
+[[nodiscard]] commands::GraphSourceBuild build_code_layer(
+    const std::filesystem::path& db_path, const std::string& name,
+    const harness::NamedGraphConfig& named, bool force,
+    const harness::CancellationToken& cancellation, JobRegistry& jobs, const std::string& job_id) {
+    std::error_code code;
+    std::filesystem::create_directories(db_path.parent_path(), code);
+    embedstore::Store store{db_path};
+    graph::SourceBuildOptions options;
+    options.force = force;
+    options.cancellation = cancellation;
+    options.on_progress = [&jobs, job_id](const graph::SourceProgress& progress) {
+        if (progress.parsing) {
+            jobs.progress(job_id, "parsing " + progress.member + "/" + progress.file,
+                          nlohmann::json{{"file", progress.index}, {"files", progress.count}});
+        }
+    };
+    commands::GraphSourceBuild build = commands::build_graph_sources(store, named, options);
+    if (!build.result.cancelled) {
+        store.set_graph_meta(embedstore::kGraphMetaGraphName, name);
+    }
+    return build;
 }
 
 [[nodiscard]] nlohmann::json build_fields(const Target& target, const graph::BuildResult& result) {
@@ -274,7 +335,66 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
         }
         limit = it->get<int>();
     }
+    // `"update": true` is `graph update` (27k): a named graph's source trees
+    // re-parsed where they changed, its collections left as they are.
+    bool update = false;
+    if (const auto it = body.find("update"); it != body.end() && !it->is_null()) {
+        if (!it->is_boolean()) {
+            return error_response(400, "update must be a boolean");
+        }
+        update = it->get<bool>();
+    }
+    // A named graph of source trees alone (27k) is built with no model: no
+    // generation backend is needed, and none is asked for.
+    const auto start_code_only = [&](const Target& target) {
+        const JobRegistry::Started started =
+            jobs.start(std::string{kBuildJobKind}, nlohmann::json{{"graph", target.name}});
+        const std::string job_id = started.id;
+        workers.run(started.cancellation, [&jobs, job_id, target, force,
+                                           cancellation = started.cancellation] {
+            try {
+                const commands::GraphSourceBuild build = build_code_layer(
+                    target.db_path, target.name, *target.named, force, cancellation, jobs, job_id);
+                if (build.result.cancelled) {
+                    return;
+                }
+                jobs.finish(job_id,
+                            nlohmann::json{{"graph", target.name}, {"code", code_fields(build)}});
+            } catch (const std::exception& e) {
+                jobs.fail(job_id, e.what());
+            }
+        });
+        return json_response(202, nlohmann::json{{"job_id", job_id}});
+    };
+    const auto code_only = [](const Target& target) {
+        return target.is_named() && target.named->collections.empty() &&
+               !target.named->sources.empty();
+    };
+    if (update) {
+        HttpResponse failure;
+        const std::optional<harness::Config> config = load_now(context, failure);
+        if (!config.has_value()) {
+            return failure;
+        }
+        const Target target = resolve_target(*config, name);
+        if (!target.is_named()) {
+            return error_response(400, "'" + target.name +
+                                           "' is not a named graph -- an update refreshes a "
+                                           "named graph's source trees");
+        }
+        if (target.named->sources.empty()) {
+            return error_response(400, "graph '" + target.name + "' has no source trees");
+        }
+        return start_code_only(target);
+    }
     if (plane.options().served.empty()) {
+        HttpResponse unused;
+        if (const std::optional<harness::Config> config = load_now(context, unused);
+            config.has_value()) {
+            if (const Target target = resolve_target(*config, name); code_only(target)) {
+                return start_code_only(target);
+            }
+        }
         return error_response(kNotImplemented,
                               "this server has no generation backend to run the extractor on",
                               kBackendUnavailable);
@@ -285,12 +405,16 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
         return failure;
     }
     const Target target = resolve_target(*config, name);
+    if (code_only(target)) {
+        return start_code_only(target);
+    }
     // What must hold data: a collection's own store, or at least one of a
     // named graph's members (the graph's database is what the build makes).
     std::shared_ptr<commands::GraphMembers> members;
     if (target.is_named()) {
         if (target.named->collections.empty()) {
-            return error_response(400, "graph '" + target.name + "' has no member collections");
+            return error_response(
+                400, "graph '" + target.name + "' has no member collections or source trees");
         }
         members =
             std::make_shared<commands::GraphMembers>(commands::open_graph_members(*target.named));
@@ -336,9 +460,20 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
             const graph::ExtractFn extract =
                 graph::make_structured_extractor(plane.harness(), backend);
             graph::BuildResult result;
+            std::optional<nlohmann::json> code;
             if (target.is_named()) {
-                std::error_code code;
-                std::filesystem::create_directories(target.db_path.parent_path(), code);
+                // The code first, as on the CLI: free, local, no model.
+                if (!target.named->sources.empty()) {
+                    const commands::GraphSourceBuild build =
+                        build_code_layer(target.db_path, target.name, *target.named, force,
+                                         cancellation, jobs, job_id);
+                    if (build.result.cancelled) {
+                        return;
+                    }
+                    code = code_fields(build);
+                }
+                std::error_code error;
+                std::filesystem::create_directories(target.db_path.parent_path(), error);
                 embedstore::Store store{target.db_path};
                 options.graph_name = target.name;
                 result = graph::build_multi(store, members->members(*target.named), extract, embed,
@@ -351,6 +486,9 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
                 return;  // the registry already marked it
             }
             nlohmann::json fields = build_fields(target, result);
+            if (code.has_value()) {
+                fields["code"] = std::move(*code);
+            }
             // A collection's first successful build records that the graph
             // exists, through the same editor the CLI uses -- byte-identical.
             // A failure is a warning on the result: the graph is already
@@ -648,9 +786,19 @@ HttpResponse admin_build_communities(const AdminConfigContext& context, Handler&
         }
         min_size = it->get<int>();
     }
-    if (plane.options().served.empty()) {
+    // `"summaries": false` is `--no-summaries` (27k): clustering alone, no
+    // model, no backend needed -- the summaries reported absent.
+    bool summaries = true;
+    if (const auto it = body.find("summaries"); it != body.end() && !it->is_null()) {
+        if (!it->is_boolean()) {
+            return error_response(400, "summaries must be a boolean");
+        }
+        summaries = it->get<bool>();
+    }
+    if (summaries && plane.options().served.empty()) {
         return error_response(kNotImplemented,
-                              "this server has no generation backend to run the summariser on",
+                              "this server has no generation backend to run the summariser on "
+                              "-- send \"summaries\": false to cluster with no model",
                               kBackendUnavailable);
     }
     HttpResponse failure;
@@ -662,19 +810,23 @@ HttpResponse admin_build_communities(const AdminConfigContext& context, Handler&
     if (!file_exists(target.db_path)) {
         return missing_target(target);
     }
-    const std::optional<Generation> generation =
-        resolve_generation(*config, plane, model, target, "community summary run", failure);
-    if (!generation.has_value()) {
-        return failure;
+    std::optional<Generation> generation;
+    graph::EmbedFn embed;
+    if (summaries) {
+        generation =
+            resolve_generation(*config, plane, model, target, "community summary run", failure);
+        if (!generation.has_value()) {
+            return failure;
+        }
+        embed = resolve_embedder(plane, *config, target).embed;
     }
-    const graph::EntityEmbedder embedder = resolve_embedder(plane, *config, target);
-    const graph::EmbedFn embed = embedder.embed;
 
     const JobRegistry::Started started =
-        jobs.start(std::string{kCommunitiesJobKind}, target.job_fields(generation->key));
+        jobs.start(std::string{kCommunitiesJobKind},
+                   target.job_fields(generation.has_value() ? generation->key : std::string{}));
     const std::string job_id = started.id;
-    const std::string backend = generation->key;
-    const std::string kg_model = generation->kg_model;
+    const std::string backend = generation.has_value() ? generation->key : std::string{};
+    const std::string kg_model = generation.has_value() ? generation->kg_model : std::string{};
     const std::filesystem::path db_path = target.db_path;
     workers.run(started.cancellation, [&plane, &jobs, job_id, db_path, backend, kg_model, embed,
                                        force, min_size, cancellation = started.cancellation] {
@@ -690,14 +842,18 @@ HttpResponse admin_build_communities(const AdminConfigContext& context, Handler&
                               nlohmann::json{{"done", done}, {"total", total}});
             };
             const graph::CommunitiesResult result = graph::build_communities(
-                store, graph::make_summarizer(plane.harness(), backend), embed, options);
+                store,
+                backend.empty() ? graph::SummarizeFn{}
+                                : graph::make_summarizer(plane.harness(), backend),
+                embed, options);
             if (result.cancelled) {
                 return;
             }
             nlohmann::json fields{
                 {"detected", result.detected},   {"summarized", result.summarized},
                 {"unchanged", result.unchanged}, {"failed", result.failed},
-                {"pruned", result.pruned},       {"embedded", result.embedded}};
+                {"pruned", result.pruned},       {"embedded", result.embedded},
+                {"clustered", result.clustered}, {"summaries_absent", result.summaries_absent}};
             if (!result.embed_error.empty()) {
                 fields["embed_error"] = result.embed_error;
             }
@@ -788,7 +944,14 @@ HttpResponse admin_dedupe_graph(const AdminConfigContext& context, std::string_v
     }
     try {
         embedstore::Store store{target.db_path};
-        const std::vector<embedstore::MergeGroup> groups = store.dedupe_nodes(threshold, dry_run);
+        // Per layer, as the CLI reads it (27k): code entities are merged by
+        // exact qualified name as they are built; the vector pass over prose
+        // is skipped, and the reason said, when there is nothing to compare.
+        const embedstore::DedupeScope scope = store.dedupe_scope();
+        const std::string skip = scope.prose_skip_reason();
+        const std::vector<embedstore::MergeGroup> groups =
+            skip.empty() ? store.dedupe_nodes(threshold, dry_run)
+                         : std::vector<embedstore::MergeGroup>{};
         nlohmann::json data = nlohmann::json::array();
         std::size_t merged = 0;
         for (const embedstore::MergeGroup& group : groups) {
@@ -801,10 +964,16 @@ HttpResponse admin_dedupe_graph(const AdminConfigContext& context, std::string_v
                                           {"kept_type", group.kept.type},
                                           {"merged", std::move(names)}});
         }
-        return json_response(200, nlohmann::json{{"groups", std::move(data)},
-                                                 {"merged_nodes", merged},
-                                                 {"threshold", threshold},
-                                                 {"dry_run", dry_run}});
+        nlohmann::json out{{"groups", std::move(data)},
+                           {"merged_nodes", merged},
+                           {"threshold", threshold},
+                           {"dry_run", dry_run},
+                           {"code_entities", scope.code_entities},
+                           {"code_identity_merges", scope.code_identity_merges}};
+        if (!skip.empty()) {
+            out["prose_skipped"] = skip;
+        }
+        return json_response(200, out);
     } catch (const std::exception& e) {
         return error_response(500, std::string{"dedupe failed: "} + e.what());
     }

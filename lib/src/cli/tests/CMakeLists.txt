@@ -100,6 +100,7 @@ add_library(apogee_tests_data OBJECT
     data/embedstore/graph_communities_test.cpp
     data/embedstore/graph_dedupe_test.cpp
     data/embedstore/graph_multi_test.cpp
+    data/embedstore/graph_code_test.cpp
     support/fake_transport.h
     support/fake_llama.h
     support/fake_transport.cpp
@@ -175,6 +176,10 @@ add_library(apogee_tests_business OBJECT
     business/agentloop/graph_context_test.cpp
     business/graph/communities_test.cpp
     business/graph/graph_multi_test.cpp
+    business/graph/code_extract_test.cpp
+    business/graph/code_parser_test.cpp
+    business/graph/code_resolve_test.cpp
+    business/graph/code_build_test.cpp
     business/agentloop/graph_named_test.cpp
     business/training/script_runner_test.cpp
     business/training/python_env_test.cpp
@@ -257,6 +262,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/knowledge_test.cpp
     presentation/httpserver/admin_knowledge_test.cpp
     presentation/cli/graph_test.cpp
+    presentation/cli/graph_code_test.cpp
     presentation/httpserver/admin_graph_test.cpp
     presentation/httpserver/admin_graphs_test.cpp
     presentation/httpserver/admin_suites_test.cpp
@@ -691,6 +697,21 @@ if(UNIX)
             ${CMAKE_CURRENT_BINARY_DIR}/graph-e2e
     )
     set_tests_properties(cli.graph_lifecycle PROPERTIES TIMEOUT 120)
+
+    # The code graph on the real binary (27k): the model-free pass on a
+    # sandbox with zero backends, no key and the network pointed at a closed
+    # port -- build over a source tree (a skipped file named, a vendored one
+    # left out), stats' origin split, show across files to the line, an edit
+    # re-parsed alone and converging on a fresh build, communities clustered
+    # with the summaries absent, dedupe's per-layer report -- then expansion
+    # over code beside a collection on a scripted mock.
+    add_test(NAME cli.code_graph_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/code_graph_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/code-graph-e2e
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    )
+    set_tests_properties(cli.code_graph_lifecycle PROPERTIES TIMEOUT 120)
 
     # The datasets floor on the real binary: the seeded kits, create, synth
     # through the scripted mock, the Python boundary (the refusal on a pipe,

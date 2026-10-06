@@ -2,17 +2,20 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <exception>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "agentloop/graph_context.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "operations/graph_members.h"
+#include "operations/graph_sources.h"
 
 namespace apogee::httpserver {
 namespace {
@@ -41,6 +44,14 @@ constexpr std::string_view kConflict = "conflict";
                        {"built", std::filesystem::exists(agentloop::graph_db_path(name), code)}};
     if (!graph.extract_backend.empty()) {
         out["extract_backend"] = graph.extract_backend;
+    }
+    // Source trees (27k), only when the entry has any -- a graph of
+    // collections reads exactly as it did.
+    if (!graph.sources.empty()) {
+        out["sources"] = graph.sources;
+    }
+    if (!graph.languages.empty()) {
+        out["languages"] = graph.languages;
     }
     return out;
 }
@@ -85,6 +96,32 @@ struct Parsed {
                 return out;
             }
             out.graph.collections.push_back(item.get<std::string>());
+        }
+    }
+    for (const auto& [key, target] :
+         {std::pair<std::string_view, std::vector<std::string>*>{"sources", &out.graph.sources},
+          std::pair<std::string_view, std::vector<std::string>*>{"languages",
+                                                                 &out.graph.languages}}) {
+        const auto it = body.find(std::string{key});
+        if (it == body.end() || it->is_null()) {
+            continue;
+        }
+        if (!it->is_array() || !std::ranges::all_of(*it, [](const nlohmann::json& item) {
+                return item.is_string();
+            })) {
+            out.error = std::string{key} + " must be a list of strings";
+            return out;
+        }
+        for (const nlohmann::json& item : *it) {
+            target->push_back(item.get<std::string>());
+        }
+    }
+    // A tree is recorded as the CLI records it -- normalized, no trailing
+    // separator -- so the two surfaces write the same bytes. A relative one
+    // is left as given, for the rules to refuse.
+    for (std::string& source : out.graph.sources) {
+        if (std::filesystem::path{source}.is_absolute()) {
+            source = commands::absolute_source_path(source);
         }
     }
     if (const auto it = body.find("extract_backend"); it != body.end() && !it->is_null()) {

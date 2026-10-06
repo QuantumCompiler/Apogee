@@ -62,6 +62,25 @@ GraphStats Store::graph_stats() const {
     out.total_chunks =
         count_of(handle, "SELECT COUNT(*) FROM chunks WHERE source NOT LIKE 'graph://%'");
     out.communities = count_of(handle, "SELECT COUNT(*) FROM kg_communities");
+    out.communities_unsummarised =
+        count_of(handle, "SELECT COUNT(*) FROM kg_communities WHERE summary = ''");
+    out.edges_extracted =
+        count_of(handle, "SELECT COUNT(*) FROM kg_edges WHERE origin = 'extracted'");
+    out.edges_inferred = out.edges - out.edges_extracted;
+    out.code_mentions = count_of(handle, "SELECT COUNT(*) FROM kg_code_mentions");
+    out.unresolved_names = count_of(handle, "SELECT COUNT(*) FROM kg_nodes WHERE type = 'name'");
+    {
+        // A code file's extractor id opens with its language (`cpp:...`).
+        StatementPtr languages =
+            prepare(handle, "SELECT model FROM kg_state WHERE content_hash != ''");
+        while (sqlite3_step(languages.get()) == SQLITE_ROW) {
+            const std::string extractor = column_text(languages.get(), 0);
+            const std::size_t colon = extractor.find(':');
+            ++out.code_files_by_language[colon == std::string::npos ? extractor
+                                                                    : extractor.substr(0, colon)];
+            ++out.code_files;
+        }
+    }
     out.chunks_with_mentions =
         count_of(handle,
                  "SELECT COUNT(DISTINCT chunk_id) FROM kg_mentions"
@@ -143,14 +162,38 @@ GraphStatsMulti Store::graph_stats_multi(const MemberStores& members) const {
 }
 
 std::vector<GraphNode> Store::find_nodes(std::string_view name) const {
+    // A prose entity by its folded name; a code entity (27k) by its exact
+    // qualified name -- its identity is case-sensitive -- or, when no code
+    // entity is spelled exactly so, by the fold: `store::add` finds
+    // `Store::add`, and a fold two code entities share lists both.
     StatementPtr select =
-        prepare(impl_->connection.get(), "SELECT " + std::string{kNodeColumns} +
-                                             " FROM kg_nodes WHERE name_norm = ?"
-                                             " ORDER BY mention_count DESC, type");
+        prepare(impl_->connection.get(),
+                "SELECT " + std::string{kNodeColumns} +
+                    ", (type IN ('file', 'module', 'class', 'function', 'name')) AS code,"
+                    " (name_norm = ?2) AS exact"
+                    " FROM kg_nodes WHERE name_norm = ?1 OR (type IN ('file', 'module', 'class',"
+                    " 'function', 'name') AND (name_norm = ?2 OR lower(name_norm) = ?1))"
+                    " ORDER BY mention_count DESC, type");
     bind_text(select.get(), 1, normalize_entity_name(name));
+    bind_text(select.get(), 2, code_identity(name));
     std::vector<GraphNode> out;
+    std::vector<bool> folded;
+    bool exact_code = false;
     while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        const bool code = sqlite3_column_int(select.get(), 8) != 0;
+        const bool exact = sqlite3_column_int(select.get(), 9) != 0;
+        exact_code = exact_code || (code && exact);
+        folded.push_back(code && !exact);
         out.push_back(node_row(select.get()));
+    }
+    if (exact_code) {
+        std::vector<GraphNode> kept;
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            if (!folded[i]) {
+                kept.push_back(std::move(out[i]));
+            }
+        }
+        return kept;
     }
     return out;
 }
@@ -200,7 +243,8 @@ std::vector<GraphNode> Store::nodes_by_ids(const std::vector<std::int64_t>& ids)
 std::vector<Neighbor> Store::node_neighbors(std::int64_t node_id) const {
     StatementPtr select = prepare(impl_->connection.get(),
                                   "SELECT e.relation, e.description, e.weight,"
-                                  "       (e.source_id = ?) AS outgoing, p.id, p.name, p.type"
+                                  "       (e.source_id = ?) AS outgoing, p.id, p.name, p.type,"
+                                  "       e.id, e.origin, e.confidence"
                                   "  FROM kg_edges e"
                                   "  JOIN kg_nodes p ON p.id ="
                                   "       CASE WHEN e.source_id = ? THEN e.target_id"
@@ -220,6 +264,11 @@ std::vector<Neighbor> Store::node_neighbors(std::int64_t node_id) const {
         neighbor.peer_id = sqlite3_column_int64(select.get(), 4);
         neighbor.peer_name = column_text(select.get(), 5);
         neighbor.peer_type = column_text(select.get(), 6);
+        neighbor.edge_id = sqlite3_column_int64(select.get(), 7);
+        neighbor.origin = column_text(select.get(), 8);
+        neighbor.confidence = sqlite3_column_type(select.get(), 9) == SQLITE_NULL
+                                  ? -1.0
+                                  : sqlite3_column_double(select.get(), 9);
         out.push_back(std::move(neighbor));
     }
     return out;
@@ -263,9 +312,14 @@ std::vector<ChunkRef> Store::node_mention_refs(std::int64_t node_id, int limit) 
 }
 
 std::vector<GraphEdge> Store::all_edges() const {
+    // An unresolved reference's name node is not structure: its edges are
+    // left out, or every caller of `.push_back` would cluster as one theme.
     StatementPtr select = prepare(impl_->connection.get(),
-                                  "SELECT id, source_id, target_id, relation, description, weight"
-                                  " FROM kg_edges ORDER BY id");
+                                  "SELECT e.id, e.source_id, e.target_id, e.relation,"
+                                  " e.description, e.weight FROM kg_edges e"
+                                  " JOIN kg_nodes sn ON sn.id = e.source_id"
+                                  " JOIN kg_nodes tn ON tn.id = e.target_id"
+                                  " WHERE sn.type != 'name' AND tn.type != 'name' ORDER BY e.id");
     std::vector<GraphEdge> out;
     while (sqlite3_step(select.get()) == SQLITE_ROW) {
         GraphEdge edge;
@@ -320,7 +374,14 @@ Expansion Store::graph_expand_labelled(const std::vector<ChunkRef>& seed_chunks,
             seeds.insert(sqlite3_column_int64(select.get(), 0));
         }
     }
-    const std::set<std::int64_t> hop0(seed_nodes.begin(), seed_nodes.end());
+    // An unresolved reference's name node is never context: not a seed, not
+    // a step of the walk, not an entity rendered (27k).
+    std::set<std::int64_t> hop0;
+    for (const GraphNode& node : nodes_by_ids(seed_nodes)) {
+        if (node.type != kCodeKindName) {
+            hop0.insert(node.id);
+        }
+    }
     seeds.insert(hop0.begin(), hop0.end());
     if (seeds.empty()) {
         return out;
@@ -339,10 +400,13 @@ Expansion Store::graph_expand_labelled(const std::vector<ChunkRef>& seed_chunks,
     std::map<std::int64_t, Candidate> candidates;
     for (int hop = 1; hop <= hops && !frontier.empty(); ++hop) {
         StatementPtr select = prepare(handle,
-                                      "SELECT source_id, target_id, weight FROM kg_edges"
-                                      " WHERE source_id IN (" +
-                                          placeholders(frontier.size()) + ") OR target_id IN (" +
-                                          placeholders(frontier.size()) + ")");
+                                      "SELECT e.source_id, e.target_id, e.weight FROM kg_edges e"
+                                      "  JOIN kg_nodes sn ON sn.id = e.source_id"
+                                      "  JOIN kg_nodes tn ON tn.id = e.target_id"
+                                      " WHERE (e.source_id IN (" +
+                                          placeholders(frontier.size()) + ") OR e.target_id IN (" +
+                                          placeholders(frontier.size()) +
+                                          ")) AND sn.type != 'name' AND tn.type != 'name'");
         bind_ids(select.get(), 1, frontier);
         bind_ids(select.get(), 1 + static_cast<int>(frontier.size()), frontier);
         std::set<std::int64_t> next;
@@ -426,7 +490,7 @@ Expansion Store::graph_expand_labelled(const std::vector<ChunkRef>& seed_chunks,
     StatementPtr edges =
         prepare(handle,
                 "SELECT e.source_id, e.target_id, sn.name, tn.name, e.relation,"
-                "       e.description, e.weight"
+                "       e.description, e.weight, e.origin"
                 "  FROM kg_edges e"
                 "  JOIN kg_nodes sn ON sn.id = e.source_id"
                 "  JOIN kg_nodes tn ON tn.id = e.target_id"
@@ -444,6 +508,7 @@ Expansion Store::graph_expand_labelled(const std::vector<ChunkRef>& seed_chunks,
         edge.relation = column_text(edges.get(), 4);
         edge.description = column_text(edges.get(), 5);
         edge.weight = sqlite3_column_int64(edges.get(), 6);
+        edge.origin = column_text(edges.get(), 7);
         out.edges.push_back(std::move(edge));
     }
     return out;

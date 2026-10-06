@@ -17,7 +17,7 @@
 - `cli/chat.cpp` / `cli/chat_attachments.cpp/.h` — the chat registers the scoped `graph` toolset when its attachment store holds a graph (and drops it when the last graphed attachment is detached); `ChatAttachments` exposes the store's graph state.
 - `tools/` — 27l's toolset constructed over an injected store path (it already is, for named graphs); registration plumbing only.
 - Tests: `tests/business/agentloop/` for the attachment-turn expansion (budget, seeding, lexical-only); `tests/presentation/commands/` for toolset registration/deregistration; golden: the same question over the same fixture graph yields identical payloads via CLI verb and scoped tool (27l's one-core assertion extended).
-- Consumes: [27n](attachment-code-graph.md) (the graph exists), [27l](graph-navigation.md) (verbs, toolset, caps, addressing), [27k](code-graph-extraction.md) (what the graph contains); 26g (shipped) governs how the added tools rank in selection — no special pleading.
+- Consumes: [27n](attachment-code-graph.md) (the graph exists), [27l](graph-navigation.md) (verbs, toolset, caps, addressing), [27k](../../assistant/MILESTONES.md#milestone-ae--the-code-graph) (what the graph contains); 26g (shipped) governs how the added tools rank in selection — no special pleading.
 
 **Reference.** The expansion half builds on Milestone Y's shipped retrieval-time expansion (collection-scoped there).
 
@@ -39,4 +39,4 @@
 - [ ] `graph_explain` through the scoped toolset equals the CLI verb's payload over the same store, golden-compared.
 - [ ] A lexical-only chat (no embedder) walks its attachment graph through the tools.
 
-**Scope note.** Item **27o** (30e under the then-v0.1.7, 31o under the then-v0.1.8, until 2026-10-03's merge and migration — the user's calls), earmarked for **v0.1.4**; **gated on [27k](code-graph-extraction.md), [27l](graph-navigation.md), [27n](attachment-code-graph.md)**. Out of scope: write tools; growing the transient graph budget (the fix is tools, not more injection); the flags/config surface ([27p](attachment-options.md)); forcing the model through the graph (27l's recorded divergence from Graphify stands).
+**Scope note.** Item **27o** (30e under the then-v0.1.7, 31o under the then-v0.1.8, until 2026-10-03's merge and migration — the user's calls), earmarked for **v0.1.4**; **gated on [27l](graph-navigation.md), [27n](attachment-code-graph.md)** ([27k](../../assistant/MILESTONES.md#milestone-ae--the-code-graph) shipped 2026-10-04). Out of scope: write tools; growing the transient graph budget (the fix is tools, not more injection); the flags/config surface ([27p](attachment-options.md)); forcing the model through the graph (27l's recorded divergence from Graphify stands).
