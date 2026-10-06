@@ -42,4 +42,11 @@ namespace apogee::testing {
 void build_navigation_graph(embedstore::Store& graph, embedstore::Store& chunks,
                             std::string_view member);
 
+/// The report's additions (27m): twelve orphans -- `Orphan 01`..`Orphan 12`,
+/// concepts no relation touches, `Orphan NN` mentioned by the first NN of
+/// `docs/log.md`'s chunks -- past the report's ten. Call after
+/// `build_navigation_graph` over the same stores.
+void add_report_orphans(embedstore::Store& graph, embedstore::Store& chunks,
+                        std::string_view member);
+
 }  // namespace apogee::testing

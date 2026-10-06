@@ -185,6 +185,8 @@ add_library(apogee_tests_business OBJECT
     business/graph/code_resolve_test.cpp
     business/graph/code_build_test.cpp
     business/graph/navigate_test.cpp
+    business/graph/report_test.cpp
+    business/graph/export_test.cpp
     business/agentloop/graph_named_test.cpp
     business/training/script_runner_test.cpp
     business/training/python_env_test.cpp
@@ -261,6 +263,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/httpserver/admin_auth_routes_test.cpp
     presentation/cli/permissions_test.cpp
     presentation/render/json_report_test.cpp
+    presentation/render/graph_report_test.cpp
     presentation/cli/analyze_test.cpp
     presentation/cli/agents_test.cpp
     presentation/httpserver/admin_agents_test.cpp
@@ -269,6 +272,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/graph_test.cpp
     presentation/cli/graph_code_test.cpp
     presentation/cli/graph_navigate_test.cpp
+    presentation/cli/graph_artifacts_test.cpp
     presentation/httpserver/admin_graph_test.cpp
     presentation/httpserver/admin_graphs_test.cpp
     presentation/httpserver/admin_graph_navigate_test.cpp
@@ -734,6 +738,24 @@ if(UNIX)
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/mcp_graph_client.py"
     )
     set_tests_properties(cli.graph_navigation_lifecycle PROPERTIES TIMEOUT 120)
+
+    # Graph artifacts on the real binary (27m), with zero backends: the
+    # report printed and the same bytes at --out, its one JSON document; the
+    # HTML page under its default name in the working directory with its data
+    # block, its cap note and no external reference -- its own script driven
+    # through layout, click-to-explain, search and the legend where node is
+    # installed; GraphML read back by Python's stdlib parser and by networkx
+    # where installed; a Mermaid call flow every line of which the grammar
+    # reads; and a canary in the source's comments and the private layout rows
+    # in no artifact, the data directory unchanged. python3 and node optional.
+    add_test(NAME cli.graph_artifacts_lifecycle
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/graph_artifacts_e2e.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/graph-artifacts-e2e
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/js/graph_html_check.js"
+    )
+    set_tests_properties(cli.graph_artifacts_lifecycle PROPERTIES TIMEOUT 120)
 
     # The datasets floor on the real binary: the seeded kits, create, synth
     # through the scripted mock, the Python boundary (the refusal on a pipe,

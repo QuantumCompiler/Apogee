@@ -291,6 +291,24 @@ model in a turn, and to any MCP client of `apogee __mcp-tools` — and what `GET
 resolved, or a name several nodes answer to, exits `1` with the message — the
 candidates named — on stderr and nothing on stdout.
 
+Since 27m `graph report` is one more, with the same selection:
+
+```bash
+apogee graph report --output-format json                                              # {"object":"graph.report",…}
+```
+
+The document holds the facts the Markdown report renders, assembled from the
+store with no model call: `overview` (entity and relation counts, the kinds,
+the members, the parsed files per language, the unresolved names), `origin`
+(`extracted`/`inferred`), `hubs` (`metric: "degree"`, how many were `ranked`, and
+the `shown` ten, each a node, its `degree` and its relation groups as `graph
+neighbors` carries them), `communities` (`total`, `unsummarised`, the ten largest —
+`summary` absent on one clustered with no model), `links` (only for a named graph
+of two or more members: member `pairs`, relations `crossings` between them,
+entities `shared` by several), `decisions` and `orphans` (each a `total` and the
+`shown` ten), and `human_summary` — one paragraph of the same facts. `--out <file>`
+writes the document there instead.
+
 ## What machine mode does not do
 
 - **It opens no sockets.** Not one, ever — asserted in CI with `lsof`. Only

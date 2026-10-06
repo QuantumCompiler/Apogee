@@ -19,6 +19,8 @@ apogee_add_module(markdown
 apogee_add_module(render
     render/json_report.h
     render/json_report.cpp
+    render/graph_report.h
+    render/graph_report.cpp
 )
 target_link_libraries(apogee_presentation_render PUBLIC nlohmann_json::nlohmann_json)
 
@@ -185,6 +187,8 @@ apogee_add_module(cli
     cli/graph.cpp
     cli/graph_navigate.h
     cli/graph_navigate.cpp
+    cli/graph_artifacts.h
+    cli/graph_artifacts.cpp
     cli/datasets.h
     cli/datasets.cpp
     cli/train.h

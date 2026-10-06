@@ -518,6 +518,22 @@ public:
     /// left out (27k): a name is not structure.
     [[nodiscard]] std::vector<GraphEdge> all_edges() const;
 
+    // --- The knowledge graph: artifact reads (embedstore/graph_search.cpp,
+    // 27m) -- what `graph report` and `graph export` enumerate; reads only.
+
+    /// Every node, in id order.
+    [[nodiscard]] std::vector<GraphNode> graph_nodes() const;
+
+    /// Every edge, an unresolved reference's included, in id order -- the
+    /// uncapped edge list GraphML carries.
+    [[nodiscard]] std::vector<GraphEdge> graph_edges() const;
+
+    /// The members each node is stated in -- its chunk mentions' collection
+    /// labels and its code mentions' source members -- by node id, each list
+    /// sorted. `''` is a collection's own graph; a node nothing mentions has
+    /// no entry.
+    [[nodiscard]] std::map<std::int64_t, std::vector<std::string>> node_members() const;
+
     /// Expands a retrieval turn through the graph. The seed set is the union
     /// of the entities mentioned by `seed_chunks` (the turn's retrieved
     /// chunks) and `seed_nodes` (query-term entity hits from `search_nodes`).

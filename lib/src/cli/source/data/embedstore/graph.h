@@ -176,7 +176,8 @@ struct ChunkRef {
     [[nodiscard]] bool operator==(const ChunkRef&) const noexcept = default;
 };
 
-/// One relation row as stored -- the community detector's input.
+/// One relation row as stored -- the community detector's input, and the
+/// edge list an export carries (27m).
 struct GraphEdge {
     std::int64_t id = 0;
     std::int64_t source_id = 0;
@@ -184,6 +185,10 @@ struct GraphEdge {
     std::string relation;
     std::string description;
     std::int64_t weight = 1;
+    /// `extracted` or `inferred` (schema v6).
+    std::string origin;
+    /// Set for an extracted edge (1.0); a negative value means not recorded.
+    double confidence = -1.0;
 };
 
 /// A graph's member collections by label, each a read-only view of that

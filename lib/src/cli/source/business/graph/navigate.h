@@ -69,6 +69,10 @@ inline constexpr std::size_t kSummaryClip = 300;
 /// An inferred relation's description beside a neighbour or a step.
 inline constexpr std::size_t kRelationDescriptionClip = 200;
 
+/// `text` cut to `limit` codepoints, an ellipsis marking the cut -- never
+/// inside a codepoint. How every payload clips a description.
+[[nodiscard]] std::string clip_text(std::string_view text, std::size_t limit);
+
 // ---- How a payload names a node -------------------------------------------------
 
 /// A node as every payload names it: identity, and where it lives -- its
@@ -226,6 +230,27 @@ struct Degree {
     std::int64_t in = 0;
 };
 
+/// A node's degree: every edge touching it, either way, counted in SQL
+/// (`relation_counts`) -- the one definition a card, a neighbour list and
+/// 27m's hub ranking all state.
+[[nodiscard]] Degree node_degree(const embedstore::Store& store, std::int64_t node_id);
+
+[[nodiscard]] nlohmann::json to_json(const Degree& degree);
+
+/// A node and its degree.
+struct RankedNode {
+    embedstore::GraphNode node;
+    Degree degree;
+};
+
+/// Every node but the unresolved `name` nodes, ranked by degree -- the
+/// highest first, then the most mentioned, then by name and type, so the
+/// order is the store's to decide. What "a hub" means everywhere (27m): the
+/// report's hubs and orphans, the HTML's cap and the Mermaid selection all
+/// read this one ranking. A name is left out because it is not structure
+/// (27k): ranked, `.push_back` would be the busiest entity of any C++ tree.
+[[nodiscard]] std::vector<RankedNode> rank_by_degree(const embedstore::Store& store);
+
 /// One neighbour: the peer, and the edge that reaches it.
 struct NeighborEntry {
     NodeRef node;
@@ -247,6 +272,10 @@ struct NeighborGroup {
     std::int64_t total = 0;
     std::vector<NeighborEntry> shown;
 };
+
+/// One group as every payload carries it: `relation`, `direction`, `total`
+/// and the `neighbors` shown.
+[[nodiscard]] nlohmann::json to_json(const NeighborGroup& group);
 
 // ---- path ------------------------------------------------------------------------
 

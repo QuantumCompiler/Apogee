@@ -17,6 +17,7 @@
 #include "agentloop/graph_context.h"
 #include "backends/factory.h"
 #include "cli/embed.h"
+#include "cli/graph_artifacts.h"
 #include "cli/graph_navigate.h"
 #include "cli/helpers.h"
 #include "contracts/config.h"
@@ -1331,6 +1332,9 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
 
     // ---- path, explain, neighbors, query (27l) ---------------------------------
     bind_graph_navigation(*cmd, context);
+
+    // ---- report, export html|graphml|mermaid (27m) ------------------------------
+    bind_graph_artifacts(*cmd, context);
 
     // ---- communities -----------------------------------------------------------
     auto c = std::make_shared<CommunitiesFlags>();

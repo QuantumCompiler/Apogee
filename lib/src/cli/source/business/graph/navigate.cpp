@@ -307,16 +307,25 @@ void check_neighbor_cap(int cap) {
     }
 }
 
+/// The degree `counts` add up to -- the one summation.
+[[nodiscard]] Degree degree_of(const std::vector<embedstore::RelationCount>& counts) {
+    Degree degree;
+    for (const embedstore::RelationCount& count : counts) {
+        degree.total += count.count;
+        (count.outgoing ? degree.out : degree.in) += count.count;
+    }
+    return degree;
+}
+
 /// The groups and degree every neighbour read shares.
 void read_groups(const Store& store, const GraphNode& node, const std::string& relation,
                  EdgeDirection direction, int cap, Degree& degree,
                  std::vector<NeighborGroup>& groups) {
     const std::vector<embedstore::RelationCount> counts = store.relation_counts(node.id);
+    degree = degree_of(counts);
     std::vector<std::pair<NeighborGroup, std::vector<embedstore::Neighbor>>> read;
     std::vector<std::int64_t> peers;
     for (const embedstore::RelationCount& count : counts) {
-        degree.total += count.count;
-        (count.outgoing ? degree.out : degree.in) += count.count;
         if (!relation.empty() && count.relation != relation) {
             continue;
         }
@@ -358,35 +367,76 @@ void read_groups(const Store& store, const GraphNode& node, const std::string& r
     }
 }
 
-[[nodiscard]] nlohmann::json degree_json(const Degree& degree) {
-    return nlohmann::json{{"total", degree.total}, {"out", degree.out}, {"in", degree.in}};
-}
-
 [[nodiscard]] nlohmann::json groups_json(const std::vector<NeighborGroup>& groups) {
     nlohmann::json out = nlohmann::json::array();
     for (const NeighborGroup& group : groups) {
-        nlohmann::json neighbors = nlohmann::json::array();
-        for (const NeighborEntry& entry : group.shown) {
-            nlohmann::json row = to_json(entry.node);
-            row["weight"] = entry.weight;
-            row["origin"] = entry.origin;
-            if (!entry.at.empty()) {
-                row["at"] = entry.at;
-            }
-            if (!entry.description.empty()) {
-                row["description"] = entry.description;
-            }
-            neighbors.push_back(std::move(row));
-        }
-        out.push_back(nlohmann::json{{"relation", group.relation},
-                                     {"direction", group.outgoing ? "out" : "in"},
-                                     {"total", group.total},
-                                     {"neighbors", std::move(neighbors)}});
+        out.push_back(to_json(group));
     }
     return out;
 }
 
 }  // namespace
+
+std::string clip_text(std::string_view text, std::size_t limit) {
+    return clip(text, limit);
+}
+
+// ---- Degree and the ranking ------------------------------------------------------
+
+Degree node_degree(const Store& store, std::int64_t node_id) {
+    return degree_of(store.relation_counts(node_id));
+}
+
+nlohmann::json to_json(const Degree& degree) {
+    return nlohmann::json{{"total", degree.total}, {"out", degree.out}, {"in", degree.in}};
+}
+
+nlohmann::json to_json(const NeighborGroup& group) {
+    nlohmann::json neighbors = nlohmann::json::array();
+    for (const NeighborEntry& entry : group.shown) {
+        nlohmann::json row = to_json(entry.node);
+        row["weight"] = entry.weight;
+        row["origin"] = entry.origin;
+        if (!entry.at.empty()) {
+            row["at"] = entry.at;
+        }
+        if (!entry.description.empty()) {
+            row["description"] = entry.description;
+        }
+        neighbors.push_back(std::move(row));
+    }
+    return nlohmann::json{{"relation", group.relation},
+                          {"direction", group.outgoing ? "out" : "in"},
+                          {"total", group.total},
+                          {"neighbors", std::move(neighbors)}};
+}
+
+std::vector<RankedNode> rank_by_degree(const Store& store) {
+    std::vector<RankedNode> out;
+    for (GraphNode& node : store.graph_nodes()) {
+        if (node.type == embedstore::kCodeKindName) {
+            continue;
+        }
+        const Degree degree = node_degree(store, node.id);
+        out.push_back(RankedNode{.node = std::move(node), .degree = degree});
+    }
+    std::ranges::sort(out, [](const RankedNode& a, const RankedNode& b) {
+        if (a.degree.total != b.degree.total) {
+            return a.degree.total > b.degree.total;
+        }
+        if (a.node.mention_count != b.node.mention_count) {
+            return a.node.mention_count > b.node.mention_count;
+        }
+        if (a.node.name != b.node.name) {
+            return a.node.name < b.node.name;
+        }
+        if (a.node.type != b.node.type) {
+            return a.node.type < b.node.type;
+        }
+        return a.node.id < b.node.id;
+    });
+    return out;
+}
 
 // ---- NodeRef ---------------------------------------------------------------------
 
@@ -891,7 +941,7 @@ nlohmann::json to_json(const Neighborhood& result) {
                        {"graph", result.graph},
                        {"node", to_json(result.node)},
                        {"matched", result.matched},
-                       {"degree", degree_json(result.degree)}};
+                       {"degree", to_json(result.degree)}};
     if (!result.relation.empty()) {
         out["relation"] = result.relation;
     }
@@ -983,7 +1033,7 @@ nlohmann::json to_json(const NodeCard& card) {
         out["description"] = card.description;
     }
     out["mentions"] = card.mentions;
-    out["degree"] = degree_json(card.degree);
+    out["degree"] = to_json(card.degree);
     out["max_per_relation"] = card.max_per_relation;
     out["relations"] = groups_json(card.relations);
     nlohmann::json code = nlohmann::json::array();

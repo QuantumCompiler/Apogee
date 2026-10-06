@@ -228,4 +228,19 @@ void build_navigation_graph(embedstore::Store& graph, embedstore::Store& chunks,
         {atlas, vault, decision}, "Atlas and the Vault it writes its readings to.", "fixture");
 }
 
+void add_report_orphans(embedstore::Store& graph, embedstore::Store& chunks,
+                        std::string_view member) {
+    const std::vector<embedstore::Chunk> log = chunks.chunks_by_source("docs/log.md");
+    for (int i = 1; i <= 12; ++i) {
+        const std::int64_t orphan =
+            graph
+                .upsert_node("Orphan " + two_digits(i), "concept",
+                             "An orphan, mentioned " + std::to_string(i) + " time(s).")
+                .id;
+        for (int c = 0; c < i && c < static_cast<int>(log.size()); ++c) {
+            (void)graph.add_mention(orphan, member, log[static_cast<std::size_t>(c)].id);
+        }
+    }
+}
+
 }  // namespace apogee::testing

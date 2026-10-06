@@ -122,6 +122,16 @@ apogee_add_module(graph
     graph/code_build.cpp
     graph/navigate.h
     graph/navigate.cpp
+    graph/report.h
+    graph/report.cpp
+    graph/html_template.h
+    graph/html_template.cpp
+    graph/export_html.h
+    graph/export_html.cpp
+    graph/export_graphml.h
+    graph/export_graphml.cpp
+    graph/export_mermaid.h
+    graph/export_mermaid.cpp
 )
 target_link_libraries(apogee_business_graph PUBLIC nlohmann_json::nlohmann_json
                       PRIVATE apogee_tree_sitter_all)

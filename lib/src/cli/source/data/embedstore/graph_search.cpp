@@ -522,25 +522,75 @@ std::vector<GraphCommunity> Store::node_communities(std::int64_t node_id) const 
     return out;
 }
 
+namespace {
+
+/// The columns `edge_row` reads, in order.
+constexpr std::string_view kEdgeColumns =
+    "e.id, e.source_id, e.target_id, e.relation, e.description, e.weight, e.origin, e.confidence";
+
+[[nodiscard]] GraphEdge edge_row(sqlite3_stmt* statement) {
+    GraphEdge edge;
+    edge.id = sqlite3_column_int64(statement, 0);
+    edge.source_id = sqlite3_column_int64(statement, 1);
+    edge.target_id = sqlite3_column_int64(statement, 2);
+    edge.relation = column_text(statement, 3);
+    edge.description = column_text(statement, 4);
+    edge.weight = sqlite3_column_int64(statement, 5);
+    edge.origin = column_text(statement, 6);
+    edge.confidence = sqlite3_column_type(statement, 7) == SQLITE_NULL
+                          ? -1.0
+                          : sqlite3_column_double(statement, 7);
+    return edge;
+}
+
+}  // namespace
+
 std::vector<GraphEdge> Store::all_edges() const {
     // An unresolved reference's name node is not structure: its edges are
     // left out, or every caller of `.push_back` would cluster as one theme.
-    StatementPtr select = prepare(impl_->connection.get(),
-                                  "SELECT e.id, e.source_id, e.target_id, e.relation,"
-                                  " e.description, e.weight FROM kg_edges e"
-                                  " JOIN kg_nodes sn ON sn.id = e.source_id"
-                                  " JOIN kg_nodes tn ON tn.id = e.target_id"
-                                  " WHERE sn.type != 'name' AND tn.type != 'name' ORDER BY e.id");
+    StatementPtr select =
+        prepare(impl_->connection.get(),
+                "SELECT " + std::string{kEdgeColumns} +
+                    " FROM kg_edges e"
+                    " JOIN kg_nodes sn ON sn.id = e.source_id"
+                    " JOIN kg_nodes tn ON tn.id = e.target_id"
+                    " WHERE sn.type != 'name' AND tn.type != 'name' ORDER BY e.id");
     std::vector<GraphEdge> out;
     while (sqlite3_step(select.get()) == SQLITE_ROW) {
-        GraphEdge edge;
-        edge.id = sqlite3_column_int64(select.get(), 0);
-        edge.source_id = sqlite3_column_int64(select.get(), 1);
-        edge.target_id = sqlite3_column_int64(select.get(), 2);
-        edge.relation = column_text(select.get(), 3);
-        edge.description = column_text(select.get(), 4);
-        edge.weight = sqlite3_column_int64(select.get(), 5);
-        out.push_back(std::move(edge));
+        out.push_back(edge_row(select.get()));
+    }
+    return out;
+}
+
+std::vector<GraphNode> Store::graph_nodes() const {
+    StatementPtr select = prepare(impl_->connection.get(), "SELECT " + std::string{kNodeColumns} +
+                                                               " FROM kg_nodes ORDER BY id");
+    std::vector<GraphNode> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out.push_back(node_row(select.get()));
+    }
+    return out;
+}
+
+std::vector<GraphEdge> Store::graph_edges() const {
+    StatementPtr select = prepare(impl_->connection.get(), "SELECT " + std::string{kEdgeColumns} +
+                                                               " FROM kg_edges e ORDER BY e.id");
+    std::vector<GraphEdge> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out.push_back(edge_row(select.get()));
+    }
+    return out;
+}
+
+std::map<std::int64_t, std::vector<std::string>> Store::node_members() const {
+    // UNION, not UNION ALL: one row per (node, member) whichever table states it.
+    StatementPtr select = prepare(impl_->connection.get(),
+                                  "SELECT node_id, collection FROM kg_mentions"
+                                  " UNION SELECT node_id, collection FROM kg_code_mentions"
+                                  " ORDER BY 1, 2");
+    std::map<std::int64_t, std::vector<std::string>> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out[sqlite3_column_int64(select.get(), 0)].push_back(column_text(select.get(), 1));
     }
     return out;
 }
