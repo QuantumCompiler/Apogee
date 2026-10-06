@@ -14,7 +14,9 @@
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
 #include "contracts/layout.h"
+#include "embedstore/store.h"
 #include "harness/roles.h"
+#include "operations/graph_sources.h"
 
 namespace apogee::commands {
 namespace {
@@ -69,6 +71,19 @@ constexpr std::string_view kMapCard = " (map)";
     for (const std::string& phrase : phrases) {
         out += (out.empty() ? "" : ", ") + phrase;
     }
+    return out;
+}
+
+/// A graphed folder's end of its `/attachments` line (27n): its part of the
+/// graph counted from the index as it stands, or the absence said.
+[[nodiscard]] std::string graph_suffix(const logger::AttachmentGraph& graph,
+                                       const std::optional<embedstore::Store>& store) {
+    embedstore::CodeMemberCounts counts;
+    if (store.has_value() && !graph.label.empty()) {
+        counts = store->code_member_counts(graph.label);
+    }
+    std::string out = "; ";
+    out += attachment_graph_line(graph, counts.nodes, counts.edges);
     return out;
 }
 
@@ -250,6 +265,10 @@ bool ChatAttachments::attach(std::string_view spec,
     for (const std::string& skip : found.skips) {
         hooks_.say(skip, true);
     }
+    // What the walk found, before media nothing reads is left out: the graph
+    // build is handed the same list a `graph build --source` of the folder
+    // would walk (27n), and counts what it cannot parse.
+    const std::vector<agentloop::FoundFile> walked = found.files;
     const std::string chat = session_.backend;
     if (!readable(spec, found.files, chat)) {
         return false;
@@ -272,14 +291,114 @@ bool ChatAttachments::attach(std::string_view spec,
     }
     const std::string summary = "attaching " + std::string{spec} + " (" +
                                 files_of(found.files.size()) + ", " + size_of(found.bytes) + ")";
+    std::optional<AttachmentGraphJob> graph = graph_job(spec, working_directory, walked);
     {
         const std::scoped_lock lock{mutex_};
-        queue_.push_back(
-            Queued{.name = std::string{spec}, .files = std::move(found.files), .chat = chat});
+        queue_.push_back(Queued{.name = std::string{spec},
+                                .files = std::move(found.files),
+                                .chat = chat,
+                                .graph = std::move(graph)});
     }
     hooks_.say(summary, false);
     start_worker();
     return true;
+}
+
+std::optional<std::string> ChatAttachments::graph_label_of(const std::string& name) const {
+    // A recorded folder's -- a resumed chat's among them: re-attached, only
+    // what changed is parsed; detached, its part is the one forgotten.
+    const auto it = std::ranges::find(session_.attachments, name, &logger::Attachment::name);
+    if (it != session_.attachments.end() && it->graph.has_value() && !it->graph->label.empty()) {
+        return it->graph->label;
+    }
+    return std::nullopt;
+}
+
+std::set<std::string> ChatAttachments::graph_members_but(const std::string& name) const {
+    std::set<std::string> out;
+    for (const logger::Attachment& attachment : session_.attachments) {
+        if (attachment.name != name && attachment.graph.has_value() &&
+            !attachment.graph->label.empty()) {
+            out.insert(attachment.graph->label);
+        }
+    }
+    for (const auto& [owner, label] : graph_in_flight_) {
+        if (owner != name) {
+            out.insert(label);
+        }
+    }
+    return out;
+}
+
+std::optional<AttachmentGraphJob> ChatAttachments::graph_job(
+    std::string_view spec, const std::filesystem::path& working_directory,
+    const std::vector<agentloop::FoundFile>& files) {
+    const std::string name{spec};
+    const std::optional<std::string> prior = graph_label_of(name);
+    AttachmentGraphJob job;
+    job.name = name;
+    job.keep = graph_members_but(name);
+    // A folder -- never one file, never a glob (no folder is named by one) --
+    // whose files include a language a vendored grammar parses.
+    job.build = false;
+    if (hooks_.code_graph) {
+        std::filesystem::path root{std::string{spec}};
+        if (root.is_relative()) {
+            root = working_directory / root;
+        }
+        root = root.lexically_normal();
+        std::error_code code;
+        if (std::filesystem::is_directory(root, code)) {
+            job.files = source_files_under(files, root);
+            job.build = offers_code(job.files);
+            job.root = std::move(root);
+        }
+    }
+    if (!job.build && !prior.has_value()) {
+        return std::nullopt;  // nothing to build, and nothing built before
+    }
+    if (prior.has_value()) {
+        job.label = *prior;  // re-attached: the same member, updated
+    } else {
+        // The folder's name, as `graph build --source` labels the same tree;
+        // two folders of one name in one chat are told apart by a number.
+        const std::string base = source_member_label(job.root.generic_string());
+        job.label = base;
+        for (int n = 2; job.keep.contains(job.label); ++n) {
+            job.label = base + "-" + std::to_string(n);
+        }
+    }
+    if (job.build) {
+        graph_in_flight_[name] = job.label;
+    }
+    return job;
+}
+
+AttachmentGraphOutcome ChatAttachments::graph_pass(const AttachmentGraphJob& job,
+                                                   const harness::CancellationToken& token) {
+    // Whatever is not built here -- cancelled, failed, no longer asked for --
+    // leaves its member to the settle that records it, which forgets it
+    // (`reconcile_graph`): an absent graph, never a stale or half-built one
+    // trusted as this attachment's. A cancel that is the process ending
+    // reaches no settle, so the graph stays as the saved session knows it.
+    AttachmentGraphOutcome out;
+    if (!job.build) {
+        out.state = AttachmentGraphOutcome::State::Forgotten;
+        return out;
+    }
+    {
+        const std::scoped_lock lock{mutex_};
+        status_ = "building the code graph of " + job.name;
+    }
+    // Cancelled already -- Ctrl-C while the chunks were indexed -- the build
+    // stops before its first file and says so.
+    return build_attachment_graph(
+        store_path_, job, token, [this, &job](const graph::SourceProgress& progress) {
+            const std::scoped_lock lock{mutex_};
+            status_ = "building the code graph of " + job.name + ": " + progress.file + " (" +
+                      std::to_string(progress.index) + " of " + std::to_string(progress.count) +
+                      ")";
+        });
 }
 
 void ChatAttachments::start_worker() {
@@ -309,7 +428,7 @@ void ChatAttachments::start_worker() {
                               const harness::CancellationToken& cancellation) {
                     return read_media(file, medium, chat, cancellation);
                 }};
-            Indexed indexed{.name = item.name, .added = {}, .native = {}};
+            Indexed indexed{.name = item.name, .added = {}, .native = {}, .graph = {}};
             for (std::size_t at = 0; at < item.files.size(); ++at) {
                 const agentloop::FoundFile& file = item.files[at];
                 if (token.stop_requested()) {
@@ -347,6 +466,17 @@ void ChatAttachments::start_worker() {
                         added.note += (added.note.empty() ? "" : "\n") + note;
                     }
                 }
+            }
+            // The folder's code graph (27n), after its chunks and from the
+            // files the attach found -- when this attach replaces anything:
+            // with nothing of it indexed, the earlier attachment stands, and
+            // its graph with it.
+            const bool replaces = std::ranges::any_of(
+                indexed.added, [](const agentloop::AttachmentIndex::Added& added) {
+                    return added.file.has_value();
+                });
+            if (item.graph.has_value() && replaces) {
+                indexed.graph = graph_pass(*item.graph, token);
             }
             const std::scoped_lock lock{mutex_};
             done_.push_back(std::move(indexed));
@@ -390,6 +520,9 @@ void ChatAttachments::settle() {
         const std::scoped_lock lock{mutex_};
         finished.swap(done_);
     }
+    // Everything queued is done and about to be recorded: the session holds
+    // each graphed folder's label from here (27n).
+    graph_in_flight_.clear();
     if (finished.empty()) {
         return;
     }
@@ -398,7 +531,50 @@ void ChatAttachments::settle() {
     for (Indexed& indexed : finished) {
         record(std::move(indexed), budget);
     }
+    reconcile_graph();
     save();
+}
+
+void ChatAttachments::reconcile_graph() {
+    std::error_code code;
+    if (!std::filesystem::exists(store_path_, code)) {
+        return;
+    }
+    // The index's code graph holds exactly the recorded folders' parts
+    // (27n): a member none of them owns -- a folder detached, or recorded
+    // with its graph cancelled, failed or no longer asked for; one attached
+    // twice before a settle, the second time with no code; a build a crash
+    // cut short -- is forgotten, the rest re-linked. Nothing to forget,
+    // nothing done.
+    try {
+        forget_attachment_graph(store_path_, {}, graph_members_but({}));
+    } catch (const std::exception& e) {
+        hooks_.say(std::string{"the chat's code graph could not be checked: "} + e.what(), true);
+    }
+}
+
+ChatAttachments::GraphSaid ChatAttachments::take_graph(const Indexed& indexed) {
+    GraphSaid out;
+    if (!indexed.graph.has_value()) {
+        return out;  // no pass: no folder of code, now or before
+    }
+    const AttachmentGraphOutcome& outcome = *indexed.graph;
+    switch (outcome.state) {
+        case AttachmentGraphOutcome::State::Built:
+            out.record = outcome.record;
+            out.line = attachment_graph_line(outcome.record, outcome.nodes, outcome.edges);
+            break;
+        case AttachmentGraphOutcome::State::Cancelled:
+        case AttachmentGraphOutcome::State::Failed:
+            // Absent, and said -- never half-trusted.
+            out.record = outcome.record;
+            out.line = attachment_graph_line(outcome.record, 0, 0);
+            out.warning = true;
+            break;
+        case AttachmentGraphOutcome::State::Forgotten:
+            break;
+    }
+    return out;
 }
 
 void ChatAttachments::record(Indexed indexed, const agentloop::TurnBudget& budget) {
@@ -422,8 +598,9 @@ void ChatAttachments::record(Indexed indexed, const agentloop::TurnBudget& budge
     }
     if (files.empty()) {
         hooks_.say("nothing attached from " + indexed.name, true);
-        return;
+        return;  // the earlier attachment of this name, if any, stands with its graph
     }
+    GraphSaid graph = take_graph(indexed);
     // Attached again under the same name: the new one replaces it.
     std::erase_if(session_.attachments, [&](const logger::Attachment& attachment) {
         return attachment.name == indexed.name;
@@ -435,8 +612,11 @@ void ChatAttachments::record(Indexed indexed, const agentloop::TurnBudget& budge
     map_texts_.erase(indexed.name);
     map_costs_.erase(indexed.name);
 
-    session_.attachments.push_back(logger::Attachment{
-        .name = indexed.name, .files = std::move(files), .inline_at = {}, .map_at = {}});
+    session_.attachments.push_back(logger::Attachment{.name = indexed.name,
+                                                      .files = std::move(files),
+                                                      .inline_at = {},
+                                                      .map_at = {},
+                                                      .graph = std::move(graph.record)});
     const logger::Attachment& attachment = session_.attachments.back();
     std::int64_t in_use = inline_tokens_in_use(budget);
     // A folder's or a glob's map first (26q): a few lines, and what keeps a
@@ -490,6 +670,9 @@ void ChatAttachments::record(Indexed indexed, const agentloop::TurnBudget& budge
     line += native ? " -- read as it is with your next message, then " : " -- ";
     line += inlined ? "inlined whole" : "its excerpts are retrieved each turn";
     hooks_.say(line, false);
+    if (!graph.line.empty()) {
+        hooks_.say(graph.line, graph.warning);
+    }
 }
 
 std::string ChatAttachments::inline_text(const logger::Attachment& attachment) {
@@ -570,6 +753,8 @@ bool ChatAttachments::detach(std::string_view name) {
         removed.insert(file.sha256);
     }
     session_.attachments.erase(it);
+    // Its part of the code graph goes with it (27n), the rest re-linked.
+    reconcile_graph();
     for (const logger::Attachment& other : session_.attachments) {
         for (const logger::AttachedFile& file : other.files) {
             removed.erase(file.sha256);  // still attached under another name
@@ -593,6 +778,18 @@ bool ChatAttachments::detach(std::string_view name) {
 
 std::vector<std::string> ChatAttachments::describe() const {
     std::vector<std::string> lines;
+    // A graphed folder's line ends with its graph's (27n), counted from the
+    // index as it stands -- another folder's code may have linked into it.
+    std::optional<embedstore::Store> store;
+    if (std::ranges::any_of(session_.attachments, [](const logger::Attachment& attachment) {
+            return attachment.graph.has_value() && !attachment.graph->label.empty();
+        })) {
+        try {
+            store.emplace(store_path_);
+        } catch (const std::exception&) {
+            store.reset();
+        }
+    }
     for (const logger::Attachment& attachment : session_.attachments) {
         std::uint64_t bytes = 0;
         for (const logger::AttachedFile& file : attachment.files) {
@@ -611,8 +808,14 @@ std::vector<std::string> ChatAttachments::describe() const {
             state += ", with a map of its folders";
         }
         const std::string reading = reading_of(attachment.files);
+        std::string graph;
+        if (const std::optional<logger::AttachmentGraph>& part = attachment.graph;
+            part.has_value()) {
+            graph = graph_suffix(*part, store);
+        }
         lines.push_back(attachment.name + " -- " + files_of(attachment.files.size()) + ", " +
-                        size_of(bytes) + (reading.empty() ? "" : ", " + reading) + ", " + state);
+                        size_of(bytes) + (reading.empty() ? "" : ", " + reading) + ", " + state +
+                        graph);
     }
     return lines;
 }

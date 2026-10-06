@@ -10,7 +10,9 @@
 # each layer had. Then, with a scripted mock to answer, retrieval-time
 # expansion over a graph holding code beside a collection: a lexical turn
 # naming a function injects its code entity, labelled `file:line`, and the
-# parsed relation marked extracted.
+# parsed relation marked extracted. Last, the attachment code graph (27n): a
+# machine-mode chat attaching the same tree gets one notice and, in its own
+# index, row for row the graph a direct build holds; `chats delete` takes it.
 #
 # POSIX only, like the other shell checks.
 set -eu
@@ -137,6 +139,56 @@ grep -q "\[Knowledge graph: code\]" "$WORK_DIR/turn.out" || fail "no graph secti
 grep -q "pkg.service.make_user (function, pkg/service.py:6): def make_user(name: str) -> User" "$WORK_DIR/turn.out" || fail "the code entity was not injected with its line: $(cat "$WORK_DIR/turn.out")"
 grep -q "·extracted\]→" "$WORK_DIR/turn.out" || fail "the parsed relation was not marked: $(cat "$WORK_DIR/turn.out")"
 grep -q "graph entities" "$WORK_DIR/turn.err" || fail "the status line did not count the graph entities: $(cat "$WORK_DIR/turn.err")"
+
+# --- the attachment code graph (27n) ------------------------------------------
+# A chat attaches the same tree -- a plain mock answering, no embedder, no
+# key: the graph is built into the chat's own index with no model, said in
+# one notice, and holds row for row what `graph build --source` builds over
+# the same files; deleting the chat takes it with the index.
+"$APOGEE_BIN" config add-backend plain --type mock >/dev/null || fail "add-backend plain"
+"$APOGEE_BIN" graph build --source "$SRC_ROOT/src" --graph direct -q </dev/null >/dev/null 2>&1 || fail "direct build"
+(cd "$SRC_ROOT" && printf '{"type":"attach","path":"src"}\n{"type":"user","text":"hello"}\n' |
+    "$APOGEE_BIN" chat -m plain --output-format stream-json) >"$WORK_DIR/attach.jsonl" 2>"$WORK_DIR/attach.err" || fail "attach: $(cat "$WORK_DIR/attach.err")"
+grep -q '"text":"attached src: ' "$WORK_DIR/attach.jsonl" || fail "no attach line: $(cat "$WORK_DIR/attach.jsonl")"
+grep -q '"text":"graph: [0-9]* nodes, [0-9]* edges (supported: python 4; skipped: .lua 1, third_party/ 1)"' "$WORK_DIR/attach.jsonl" || fail "no graph line: $(cat "$WORK_DIR/attach.jsonl")"
+set -- "$APOGEE_HOME"/attachments/*.db
+[ "$#" -eq 1 ] && [ -f "$1" ] || fail "not one chat index: $*"
+INDEX=$1
+python3 - "$INDEX" "$APOGEE_HOME/embeddings/graphs/direct.db" <<'PY' || fail "the attachment graph is not the direct build's"
+import sqlite3
+import sys
+
+
+def rows(path):
+    db = sqlite3.connect(path)
+    def q(sql):
+        return sorted(db.execute(sql).fetchall())
+    return {
+        "nodes": q("SELECT type, name, description, COALESCE(metadata, ''), mention_count"
+                   " FROM kg_nodes"),
+        "edges": q("SELECT s.type, s.name, e.relation, t.type, t.name, e.weight, e.origin"
+                   " FROM kg_edges e JOIN kg_nodes s ON s.id = e.source_id"
+                   " JOIN kg_nodes t ON t.id = e.target_id"),
+        "mentions": q("SELECT n.type, n.name, m.collection, m.file, m.line, m.end_line, m.role"
+                      " FROM kg_code_mentions m JOIN kg_nodes n ON n.id = m.node_id"),
+        "sites": q("SELECT s.name, e.relation, t.name, x.collection, x.file, x.line"
+                   " FROM kg_edge_sites x JOIN kg_edges e ON e.id = x.edge_id"
+                   " JOIN kg_nodes s ON s.id = e.source_id JOIN kg_nodes t ON t.id = e.target_id"),
+    }
+
+
+attached, direct = rows(sys.argv[1]), rows(sys.argv[2])
+if not attached["nodes"] or not attached["edges"]:
+    sys.exit("the attachment graph is empty")
+for key in attached:
+    if attached[key] != direct[key]:
+        sys.exit(f"{key}: {len(attached[key])} attached, {len(direct[key])} direct")
+PY
+CHAT_ID=$(basename "$INDEX" .db)
+"$APOGEE_BIN" chats delete "$CHAT_ID" </dev/null >/dev/null 2>&1 || fail "chats delete"
+if ls "$APOGEE_HOME/attachments" | grep -q "$CHAT_ID"; then
+    fail "deleting the chat left its index: $(ls "$APOGEE_HOME/attachments")"
+fi
 
 # --- delete ----------------------------------------------------------------------
 "$APOGEE_BIN" graph delete code </dev/null >/dev/null 2>&1 || fail "delete"

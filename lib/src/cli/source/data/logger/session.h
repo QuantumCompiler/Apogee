@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -87,6 +88,26 @@ struct AttachedFile {
     std::uint64_t bytes = 0;
 };
 
+/// A folder attachment's part of the chat's code graph (27n): the graph lives
+/// in the chat's index beside the chunks, and this is what the session keeps
+/// of it -- which part is whose, and what the notice said. Additive: an older
+/// file has none, and reads as an attachment with no graph.
+struct AttachmentGraph {
+    /// The source member its files are recorded under in the index -- the
+    /// folder's name, made unique among the chat's attachments. Empty when
+    /// the graph is absent.
+    std::string label;
+    /// The files the build used, by language (`cpp`, `python`), and what it
+    /// left out, by extension, reason or vendored directory (`.md`,
+    /// `binary`, `third_party/`) -- the notice's parentheses.
+    std::map<std::string, std::int64_t> supported;
+    std::map<std::string, std::int64_t> skipped;
+    /// Why there is no graph although one was asked for -- `cancelled`, or
+    /// the error that stopped it -- so `/attachments` says the absence too.
+    /// Empty when it was built.
+    std::string absent;
+};
+
 /// A file, folder or glob attached to the chat (26d).
 struct Attachment {
     /// As the user named it: `report.pdf`, `src`, `docs/*.md`.
@@ -101,6 +122,10 @@ struct Attachment {
     /// one file's -- or nullopt when it has none. Rebuilt from `files`, like
     /// the inlined text, so the transcript keeps the message as typed.
     std::optional<std::size_t> map_at;
+    /// Its part of the chat's code graph (27n): a folder whose files include
+    /// a supported language; nullopt for a file, a glob, or a folder with no
+    /// code.
+    std::optional<AttachmentGraph> graph;
 };
 
 /// One saved conversation.

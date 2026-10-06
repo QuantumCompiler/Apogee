@@ -839,7 +839,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                             }
                         },
                     .confirm_large = {},
-                    .save = true}};
+                    .save = true,
+                    // A folder of code builds its graph (27n).
+                    .code_graph = true}};
             // `--image` is an attachment like any other (26e): read as it is
             // with the first message by a model that can, described for one
             // that cannot.
@@ -941,7 +943,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                               return answer == "y" || answer == "Y" || answer == "yes";
                           }}
                         : std::function<bool(const std::string&)>{},
-                .save = true}};
+                .save = true,
+                // A folder of code builds its graph (27n).
+                .code_graph = true}};
         for (const std::string& spec : flags->images) {
             (void)attached.attach(spec, working_directory);
         }

@@ -105,4 +105,13 @@ struct EdgeSite {
     std::int64_t line = 0;
 };
 
+/// How much of the code layer one source member states (27n): its parsed
+/// files, the code nodes it mentions and the edges it is a site of. With one
+/// member, every code row there is.
+struct CodeMemberCounts {
+    std::int64_t files = 0;
+    std::int64_t nodes = 0;
+    std::int64_t edges = 0;
+};
+
 }  // namespace apogee::embedstore

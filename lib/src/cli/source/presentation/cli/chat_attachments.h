@@ -17,6 +17,7 @@
 #include "agentloop/budget.h"
 #include "agentloop/loop.h"
 #include "agentloop/rag.h"
+#include "cli/attachment_graph.h"
 #include "contracts/cancellation.h"
 #include "harness/harness.h"
 #include "logger/session.h"
@@ -39,6 +40,14 @@
 /// model, and a helper describing or transcribing, only ever run while the
 /// user is typing -- and anything else that reaches a model settles this
 /// first.
+///
+/// **A folder of code builds its graph** (27n): after its chunks are
+/// indexed, the worker parses the folder's files -- the ones the attach
+/// found, never a second walk -- into the same index with 27k's model-free
+/// build (`cli/attachment_graph`), says it in one line, and keeps it with the
+/// chat: re-attached, only what changed is parsed again; detached, its part
+/// is forgotten; the chat deleted, it goes with the index file. Ctrl-C keeps
+/// the chunks that are ready and leaves the graph absent, and says so.
 namespace apogee::commands {
 
 class ChatAttachments {
@@ -56,6 +65,10 @@ public:
         /// Whether a settled attach is saved to the session file: a chat's
         /// is, `complete`'s temporary one is not.
         bool save = true;
+        /// Whether a folder of code builds its code graph (27n): a chat's
+        /// does; `complete`'s one-shot store does not -- a one-shot has no
+        /// follow-up to walk it in.
+        bool code_graph = true;
     };
 
     /// `store_path` is the conversation's index: `index_for(chat_id)` for a
@@ -93,10 +106,12 @@ public:
     void settle();
 
     /// Detaches the attachment named `name`, and its files from the index
-    /// unless another attachment holds the same content.
+    /// unless another attachment holds the same content -- and its part of
+    /// the code graph (27n), the rest re-linked.
     [[nodiscard]] bool detach(std::string_view name);
 
-    /// One line per attachment, for `/attachments`.
+    /// One line per attachment, for `/attachments` -- a graphed folder's
+    /// ending with its graph's line, counted from the index as it is now.
     [[nodiscard]] std::vector<std::string> describe() const;
     /// The attachments' names, for `/detach`'s completion.
     [[nodiscard]] std::vector<std::string> names() const;
@@ -140,6 +155,9 @@ private:
         std::vector<agentloop::FoundFile> files;
         /// The chat model when it was attached: who reads its media natively.
         std::string chat;
+        /// Its code graph's pass (27n): built for a folder of code, or an
+        /// earlier one forgotten; none for anything else.
+        std::optional<AttachmentGraphJob> graph;
     };
 
     struct Indexed {
@@ -148,9 +166,41 @@ private:
         /// Its media as the chat model reads them natively, for the next
         /// message (26e); empty when it cannot.
         std::vector<harness::ContentPart> native;
+        /// What its graph pass did; none when it ran none -- no job, or
+        /// nothing of the attach was indexed, so the earlier one stands.
+        std::optional<AttachmentGraphOutcome> graph;
     };
 
     void start_worker();
+    /// The graph pass of a queued folder (27n), on the worker after its
+    /// chunks: built -- or cancelled, failed, no longer asked for, its member
+    /// left for the settle that records it to forget.
+    [[nodiscard]] AttachmentGraphOutcome graph_pass(const AttachmentGraphJob& job,
+                                                    const harness::CancellationToken& token);
+    /// The graph pass `spec` takes, if any; `files` are what the attach found.
+    [[nodiscard]] std::optional<AttachmentGraphJob> graph_job(
+        std::string_view spec, const std::filesystem::path& working_directory,
+        const std::vector<agentloop::FoundFile>& files);
+    /// The member `name`'s code graph is kept under, as the session records
+    /// it, if it has one.
+    [[nodiscard]] std::optional<std::string> graph_label_of(const std::string& name) const;
+    /// The chat's graphed attachments' members but `name`'s.
+    [[nodiscard]] std::set<std::string> graph_members_but(const std::string& name) const;
+
+    /// What an indexed attachment's graph pass leaves the session and says
+    /// (27n): its record, its line, whether the line is a warning -- the
+    /// member labels kept in step.
+    struct GraphSaid {
+        std::optional<logger::AttachmentGraph> record;
+        std::string line;
+        bool warning = false;
+    };
+
+    [[nodiscard]] GraphSaid take_graph(const Indexed& indexed);
+    /// After a settle's records, and a detach: any member of the index's
+    /// code graph no recorded attachment owns is forgotten (27n), so the
+    /// graph is exactly the session's graphed folders'.
+    void reconcile_graph();
     /// Media `files` no model can read, said and left out; a run of billed
     /// descriptions asked about. False when nothing is left.
     [[nodiscard]] bool readable(std::string_view spec, std::vector<agentloop::FoundFile>& files,
@@ -189,6 +239,10 @@ private:
     std::string status_;
     std::future<void> worker_;
     harness::CancellationToken cancellation_ = harness::CancellationToken::create();
+    /// The members of folders queued since the last settle, by name (27n):
+    /// the session holds a recorded folder's, and these keep two folders of
+    /// one name, attached before either settles, apart.
+    std::map<std::string, std::string> graph_in_flight_;
 
     /// Settled and inlined, waiting for the next user message to ride.
     std::set<std::string> pending_inline_;

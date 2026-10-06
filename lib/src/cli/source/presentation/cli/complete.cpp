@@ -265,7 +265,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                                        bool /*warning*/) { reporter.on_notice(line); },
                     .progress = {},
                     .confirm_large = {},
-                    .save = false});
+                    .save = false,
+                    // No graph for a one-shot (27n): no follow-up walks it.
+                    .code_graph = false});
             ChatAttachments::Turn turn =
                 attach_for_prompt(*machine_attachments, flags, prompt, request.messages.size() - 1,
                                   agentloop::turn_budget(harness, model, max_tokens));
@@ -404,7 +406,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                         }
                     },
                 .confirm_large = {},
-                .save = false});
+                .save = false,
+                // No graph for a one-shot (27n): no follow-up walks it.
+                .code_graph = false});
         ChatAttachments::Turn turn =
             attach_for_prompt(*attached, flags, prompt, request.messages.size() - 1, budget);
         loop_options.inline_attachments = std::move(turn.inlined);

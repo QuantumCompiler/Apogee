@@ -286,6 +286,20 @@ std::int64_t Store::remove_code_member(std::string_view collection) {
     return sqlite3_changes(handle);
 }
 
+CodeMemberCounts Store::code_member_counts(std::string_view collection) const {
+    sqlite3* handle = impl_->connection.get();
+    const auto count = [&](const char* sql) {
+        StatementPtr select = prepare(handle, sql);
+        bind_text(select.get(), 1, collection);
+        return sqlite3_step(select.get()) == SQLITE_ROW ? sqlite3_column_int64(select.get(), 0)
+                                                        : std::int64_t{0};
+    };
+    return CodeMemberCounts{
+        .files = count("SELECT COUNT(*) FROM kg_state WHERE collection = ? AND content_hash != ''"),
+        .nodes = count("SELECT COUNT(DISTINCT node_id) FROM kg_code_mentions WHERE collection = ?"),
+        .edges = count("SELECT COUNT(DISTINCT edge_id) FROM kg_edge_sites WHERE collection = ?")};
+}
+
 std::vector<CodeMention> Store::node_code_mentions(std::int64_t node_id, int limit) const {
     StatementPtr select = prepare(impl_->connection.get(),
                                   "SELECT collection, file, line, end_line, role"

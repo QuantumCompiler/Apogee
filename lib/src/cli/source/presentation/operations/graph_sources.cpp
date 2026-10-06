@@ -1,5 +1,6 @@
 #include "operations/graph_sources.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -8,6 +9,7 @@
 #include <utility>
 
 #include "agentloop/attachments.h"
+#include "graph/code_languages.h"
 
 namespace apogee::commands {
 
@@ -36,6 +38,58 @@ std::string source_member_label(std::string_view source) {
     return label.empty() || label == "." ? path.generic_string() : label;
 }
 
+std::vector<std::string> source_files_under(const std::vector<agentloop::FoundFile>& found,
+                                            const std::filesystem::path& root) {
+    // `/a/b/` is the folder `/a/b` is: a trailing separator's empty element
+    // counts for nothing in `lexically_relative` (LWG 3070).
+    const std::filesystem::path base = root.lexically_normal();
+    std::vector<std::string> out;
+    out.reserve(found.size());
+    for (const agentloop::FoundFile& file : found) {
+        const std::filesystem::path relative =
+            file.path.lexically_normal().lexically_relative(base);
+        if (relative.empty() || *relative.begin() == "..") {
+            continue;
+        }
+        out.push_back(relative.generic_string());
+    }
+    return out;
+}
+
+graph::SourceMember source_member(std::string label, const std::filesystem::path& root,
+                                  std::vector<std::string> files) {
+    graph::SourceMember member;
+    member.label = std::move(label);
+    member.files = std::move(files);
+    member.read = [root](std::string_view path, std::string& error) -> std::optional<std::string> {
+        std::ifstream in{root / std::filesystem::path{std::string{path}}, std::ios::binary};
+        if (!in) {
+            error = "cannot open";
+            return std::nullopt;
+        }
+        std::string content{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+        if (in.bad()) {
+            error = "read failed";
+            return std::nullopt;
+        }
+        return content;
+    };
+    return member;
+}
+
+bool offers_code(const std::vector<std::string>& files) {
+    std::vector<std::string> kept;
+    for (const std::string& file : files) {
+        if (graph::vendored_directory(file).empty()) {
+            kept.push_back(file);
+        }
+    }
+    const bool headers_are_cpp = graph::tree_has_cpp(kept);
+    return std::ranges::any_of(kept, [&](const std::string& file) {
+        return graph::code_language_for_path(file, headers_are_cpp) != nullptr;
+    });
+}
+
 GraphSources open_graph_sources(const harness::NamedGraphConfig& named) {
     GraphSources out;
     for (const std::string& source : named.sources) {
@@ -45,30 +99,12 @@ GraphSources open_graph_sources(const harness::NamedGraphConfig& named) {
             out.missing.push_back(source);
             continue;
         }
-        graph::SourceMember member;
-        member.label = source_member_label(source);
         const agentloop::FoundFiles found = agentloop::find_attachment_files(".", root);
-        for (const agentloop::FoundFile& file : found.files) {
-            member.files.push_back(file.name);
-        }
+        graph::SourceMember member =
+            source_member(source_member_label(source), root, source_files_under(found.files, root));
         if (member.files.empty()) {
             out.empty.push_back(source);
         }
-        member.read = [root](std::string_view path,
-                             std::string& error) -> std::optional<std::string> {
-            std::ifstream in{root / std::filesystem::path{std::string{path}}, std::ios::binary};
-            if (!in) {
-                error = "cannot open";
-                return std::nullopt;
-            }
-            std::string content{std::istreambuf_iterator<char>{in},
-                                std::istreambuf_iterator<char>{}};
-            if (in.bad()) {
-                error = "read failed";
-                return std::nullopt;
-            }
-            return content;
-        };
         out.members.push_back(std::move(member));
     }
     return out;

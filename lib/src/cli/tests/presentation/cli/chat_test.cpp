@@ -794,6 +794,18 @@ TEST_CASE("a folder attached sends its map on the prompt, and never into the sav
         CHECK(chat.out.find("--- map of attachment: ") != std::string::npos);
         CHECK(chat.out.find("docs/  1 file\nsrc/  1 file\n") != std::string::npos);
         CHECK(chat.out.find("where is main?") != std::string::npos);
+        // A one-shot has no follow-up to walk a graph in: none is built (27n).
+        CHECK(chat.err.find("graph:") == std::string::npos);
+    }
+    {
+        // complete in machine mode: the same one-shot, the same answer.
+        HelperChat chat{texts({"{{last_user}}"}), {}, "    context_size: 8000\n"};
+        folder(chat.home.path() / "proj");
+        INFO(chat.err);
+        REQUIRE(chat.run({"complete", "--output-format", "stream-json", "--attach",
+                          (chat.home.path() / "proj").string(), "where is main?"}) == 0);
+        CHECK(chat.out.find("with a map of its folders") != std::string::npos);
+        CHECK(chat.out.find("graph:") == std::string::npos);
     }
     {
         // chat: the map rides the request; the saved message is as typed.
@@ -809,6 +821,11 @@ TEST_CASE("a folder attached sends its map on the prompt, and never into the sav
         const apogee::harness::ChatMessage& asked =
             session.messages.at(*session.attachments[0].map_at);
         CHECK(asked.content.plain_text() == "where is main?");
+        // A chat's folder of code is graphed in its index, and said (27n).
+        CHECK(chat.err.find("graph: ") != std::string::npos);
+        CHECK(chat.err.find("(supported: cpp 1; skipped: .md 1)") != std::string::npos);
+        REQUIRE(session.attachments[0].graph.has_value());
+        CHECK(session.attachments[0].graph->label == "proj");
     }
 }
 

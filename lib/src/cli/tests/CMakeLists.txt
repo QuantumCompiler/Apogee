@@ -249,6 +249,8 @@ add_library(apogee_tests_presentation OBJECT
     presentation/machine/machine_mode_test.cpp
     presentation/views/line_reader_test.cpp
     presentation/cli/chat_attachments_test.cpp
+    presentation/cli/attachment_graph_test.cpp
+    presentation/operations/graph_sources_test.cpp
     presentation/cli/chat_completer_test.cpp
     presentation/httpserver/handler_test.cpp
     presentation/httpserver/sse_test.cpp
@@ -715,7 +717,9 @@ if(UNIX)
     # left out), stats' origin split, show across files to the line, an edit
     # re-parsed alone and converging on a fresh build, communities clustered
     # with the summaries absent, dedupe's per-layer report -- then expansion
-    # over code beside a collection on a scripted mock.
+    # over code beside a collection on a scripted mock; and since 27n a chat
+    # attaching the tree, its index holding the direct build's graph row for
+    # row, gone with `chats delete`.
     add_test(NAME cli.code_graph_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/code_graph_e2e.sh"
             $<TARGET_FILE:apogee>

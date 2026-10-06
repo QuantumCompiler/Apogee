@@ -172,6 +172,16 @@ folder over 500 files or 50 MB is refused, since there is no terminal to ask on;
 attach a narrower folder or a glob. A `user` message that mentions `@path` attaches
 that path the same way, and is answered as typed.
 
+A folder whose files include code a bundled grammar parses (C, C++, Python,
+JavaScript, TypeScript, Go, Rust, Java, C#, Ruby, Bash) is also parsed into the
+chat's code graph, after its chunks and with no model: one more `notice` follows
+the attach line, `graph: 412 nodes, 1820 edges (supported: cpp 30, python 2;
+skipped: .md 3)` -- the folder's part of the graph, the files used by language and
+what was left out. Attached again, only the files that changed are parsed again.
+Should the attach be interrupted, the notice says `graph: not built -- cancelled;
+attach it again to build it`. A single file, a glob, or a folder with no such code
+gets no graph and no such notice.
+
 An image, a recording or a video is attached the same way. A chat model that can
 read it is sent it as it is with the next `user` message; from the turn after, it
 reaches the model as text: an image's description, a recording's transcript, or

@@ -413,6 +413,12 @@ public:
     /// Forgets every file state of a source member; returns how many.
     [[nodiscard]] std::int64_t remove_code_member(std::string_view collection);
 
+    /// What the source member `collection` states of the code layer: its
+    /// parsed files, the code nodes it mentions, the edges it is a site of
+    /// (27n -- a chat's attachment graph, said per attached folder). Zero
+    /// for a member the store does not hold.
+    [[nodiscard]] CodeMemberCounts code_member_counts(std::string_view collection) const;
+
     /// Where a code node is stated: definitions first, then declarations,
     /// then references, each in (member, file, line) order. `limit` 0 or
     /// less returns all.

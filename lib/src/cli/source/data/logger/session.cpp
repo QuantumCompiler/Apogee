@@ -160,6 +160,20 @@ std::string serialize(const Session& session) {
             if (const std::optional<std::size_t> at = attachment.map_at; at.has_value()) {
                 entry["map_at"] = *at;
             }
+            if (const std::optional<AttachmentGraph> part = attachment.graph; part.has_value()) {
+                // Which part of the index's code graph is this attachment's,
+                // and what its notice said (27n) -- never the graph itself.
+                nlohmann::json graph = nlohmann::json::object();
+                if (!part->label.empty()) {
+                    graph["label"] = part->label;
+                    graph["supported"] = part->supported;
+                    graph["skipped"] = part->skipped;
+                }
+                if (!part->absent.empty()) {
+                    graph["absent"] = part->absent;
+                }
+                entry["graph"] = std::move(graph);
+            }
             attachments.push_back(std::move(entry));
         }
         out["attachments"] = std::move(attachments);
@@ -304,6 +318,29 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
                 if (const auto at = entry.find("map_at");
                     at != entry.end() && at->is_number_unsigned()) {
                     attachment.map_at = at->get<std::size_t>();
+                }
+                if (const auto graph = entry.find("graph");
+                    graph != entry.end() && graph->is_object()) {
+                    // A graph record that cannot be read costs the graph's
+                    // line, never the attachment: the next attach rebuilds it.
+                    try {
+                        AttachmentGraph read;
+                        read.label = graph->value("label", std::string{});
+                        read.absent = graph->value("absent", std::string{});
+                        if (const auto supported = graph->find("supported");
+                            supported != graph->end() && supported->is_object()) {
+                            read.supported = supported->get<std::map<std::string, std::int64_t>>();
+                        }
+                        if (const auto skipped = graph->find("skipped");
+                            skipped != graph->end() && skipped->is_object()) {
+                            read.skipped = skipped->get<std::map<std::string, std::int64_t>>();
+                        }
+                        if (!read.label.empty() || !read.absent.empty()) {
+                            attachment.graph = std::move(read);
+                        }
+                    } catch (const std::exception&) {
+                        attachment.graph.reset();
+                    }
                 }
                 session.attachments.push_back(std::move(attachment));
             } catch (const std::exception&) {
