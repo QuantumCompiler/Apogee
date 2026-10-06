@@ -248,6 +248,10 @@ struct DriverMessage {
 
     Kind kind = Kind::Unknown;
     std::string text;
+    /// An `attach` line's `graph` (27p): `code` or `off` as written, the
+    /// attach's method over the config's; empty when the line has none. A
+    /// value that is not a string arrives as its JSON, to be refused by name.
+    std::string graph;
 };
 
 /// Parses one line of driver input.
@@ -260,6 +264,7 @@ struct DriverMessage {
 /// {"type":"user","text":"what is 2+2?"}
 /// {"type":"answer","text":"yes"}
 /// {"type":"attach","path":"report.pdf"}
+/// {"type":"attach","path":"src","graph":"off"}
 /// ```
 [[nodiscard]] DriverMessage parse_driver_line(std::string_view line);
 

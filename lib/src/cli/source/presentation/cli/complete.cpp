@@ -49,6 +49,10 @@ struct CompleteFlags {
     std::vector<std::string> images;
     /// Files, folders and globs to attach (26d).
     std::vector<std::string> attach;
+    /// The method those attaches take (27p): `code` or `off`; empty leaves
+    /// it to the config's `attachments.graph`, else the one-shot's built-in,
+    /// no graph (27n).
+    std::string graph;
     double temperature = 0.0;
     std::int64_t max_tokens = 0;
     /// Whether the model thinks first, and for how long (26i).
@@ -201,8 +205,12 @@ ChatAttachments::Turn attach_for_prompt(OneShotAttachments& attachments, const C
             fail_user(image + " was not attached, so there is nothing to ask about");
         }
     }
+    // `--graph` for this invocation's attaches, over the config's default
+    // and the one-shot's built-in (27p).
+    const GraphMethod method = attachments.attached().graph_method(
+        harness::attachment_graph_method_from_string(flags.graph));
     for (const std::string& spec : flags.attach) {
-        (void)attachments.attached().attach(spec, working_directory);
+        (void)attachments.attached().attach(spec, working_directory, method);
     }
     attachments.attached().settle();
     return attachments.attached().for_turn(user_message, prompt, budget, flags.rag_limit, {});
@@ -266,8 +274,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                     .progress = {},
                     .confirm_large = {},
                     .save = false,
-                    // No graph for a one-shot (27n): no follow-up walks it.
-                    .code_graph = false});
+                    // No graph for a one-shot by default (27n): no follow-up
+                    // walks it -- unless the config or --graph asks (27p).
+                    .built_in_graph = harness::AttachmentGraphMethod::Off});
             ChatAttachments::Turn turn =
                 attach_for_prompt(*machine_attachments, flags, prompt, request.messages.size() - 1,
                                   agentloop::turn_budget(harness, model, max_tokens));
@@ -407,8 +416,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                     },
                 .confirm_large = {},
                 .save = false,
-                // No graph for a one-shot (27n): no follow-up walks it.
-                .code_graph = false});
+                // No graph for a one-shot by default (27n): no follow-up
+                // walks it -- unless the config or --graph asks (27p).
+                .built_in_graph = harness::AttachmentGraphMethod::Off});
         ChatAttachments::Turn turn =
             attach_for_prompt(*attached, flags, prompt, request.messages.size() - 1, budget);
         loop_options.inline_attachments = std::move(turn.inlined);
@@ -574,6 +584,15 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                     "retrieved when not (repeatable)")
         ->type_name(kPathValue)
         ->allow_extra_args(false);
+    cmd->add_option("--graph", flags->graph,
+                    "For this run's --attach: code builds a folder's code graph, off indexes its "
+                    "chunks alone (default: the config's attachments.graph, else off)")
+        ->type_name(words_value(harness::attachment_graph_method_names()))
+        ->check([](const std::string& value) {
+            return harness::attachment_graph_method_from_string(value).has_value()
+                       ? std::string{}
+                       : harness::attachment_graph_values_message("", value);
+        });
     flags->temperature_option =
         cmd->add_option("-t,--temperature", flags->temperature, "Sampling temperature");
     flags->max_tokens_option =
@@ -659,6 +678,13 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
         // A suite member naming nothing is refused, never routed around (27d).
         if (const std::string refused = validate_active_suite(config); !refused.empty()) {
             fail_user(refused);
+        }
+        // `--graph` is how this run's attaches are indexed (27p): with none,
+        // it would say nothing.
+        if (!flags->graph.empty() && flags->attach.empty()) {
+            fail_user(
+                "--graph applies to --attach: it says whether an attached folder's code "
+                "graph is built");
         }
         const std::string prompt = resolve_prompt(*flags);
         check_images(*flags);

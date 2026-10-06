@@ -254,6 +254,15 @@ public:
 /// name with no `suites:` entry.
 [[nodiscard]] std::string set_default_suite(std::string_view content, std::string_view name);
 
+/// Sets `attachments.graph` -- the method an attach takes when nothing on the
+/// line says otherwise (27p) -- to `method`, `code` or `off`: the line
+/// replaced in place (keeping any trailing comment), else inserted into the
+/// `attachments:` section, else the section appended. Any other word is
+/// refused naming the set, before the file is touched. The block's one
+/// writer: there is no `config set`, so no verb calls it yet, and a hand edit
+/// is the other way the block is set.
+[[nodiscard]] std::string set_attachments_graph(std::string_view content, std::string_view method);
+
 /// Sets `permissions.<tool>` to `level` (`ask`, `allow`, or `deny`),
 /// replacing the existing line (keeping any trailing comment) or inserting
 /// one, creating `permissions:` if needed. The one path by which the

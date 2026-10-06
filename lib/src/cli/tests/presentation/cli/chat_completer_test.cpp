@@ -6,11 +6,14 @@
 #include <fstream>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "agentloop/retriever.h"
 #include "ansi/text_width.h"
 #include "cli/chat.h"
+#include "cli/chat_attachments.h"
+#include "contracts/config.h"
 #include "knowledge/record.h"
 #include "support/env_guard.h"
 
@@ -380,4 +383,80 @@ TEST_CASE("/suite completes the configured suites and off", "[chat][completer][s
     REQUIRE(from_config.suites.size() == 1);
     CHECK(from_config.suites.front().name == "fast");
     CHECK(from_config.suites.front().description == "All small");
+}
+
+TEST_CASE("/attach completes its flag and the flag's values after the path, from the one table",
+          "[chat][completer][attachments]") {
+    // 27p: Tab after `/attach <path> ` offers `--graph=`, then its values.
+    const Suggestions after_path = suggest_chat_input("/attach src ", project());
+    CHECK(after_path.from == 12);
+    CHECK(texts(after_path) == std::vector<std::string>{"--graph="});
+    REQUIRE(after_path.candidates.size() == 1);
+    CHECK_FALSE(after_path.candidates[0].description.empty());
+    // A word starting `-` narrows to it; one that does not offers none.
+    CHECK(texts(suggest_chat_input("/attach src -", project())) ==
+          std::vector<std::string>{"--graph="});
+    CHECK(texts(suggest_chat_input("/attach src --g", project())) ==
+          std::vector<std::string>{"--graph="});
+    CHECK(suggest_chat_input("/attach src --x", project()).candidates.empty());
+
+    // The values, after `=` -- the whole word replaced -- or as the next word.
+    const Suggestions values = suggest_chat_input("/attach src --graph=", project());
+    CHECK(values.from == 12);
+    CHECK(texts(values) == std::vector<std::string>{"--graph=code", "--graph=off"});
+    for (const auto& candidate : values.candidates) {
+        CHECK_FALSE(candidate.description.empty());
+    }
+    CHECK(texts(suggest_chat_input("/attach src --graph=o", project())) ==
+          std::vector<std::string>{"--graph=off"});
+    const Suggestions spaced = suggest_chat_input("/attach src --graph ", project());
+    CHECK(spaced.from == 20);
+    CHECK(texts(spaced) == std::vector<std::string>{"code", "off"});
+    CHECK(texts(suggest_chat_input("/attach src --graph c", project())) ==
+          std::vector<std::string>{"code"});
+    // Given once, it is not offered again.
+    CHECK(suggest_chat_input("/attach src --graph=off ", project()).candidates.empty());
+    CHECK(suggest_chat_input("/attach src --graph off ", project()).candidates.empty());
+
+    // A quoted path ends at its quote; an open one keeps going until a `-`.
+    CHECK(texts(suggest_chat_input("/attach \"my folder\" ", project())) ==
+          std::vector<std::string>{"--graph="});
+    CHECK(texts(suggest_chat_input("/attach \"my folder/ -", project())) ==
+          std::vector<std::string>{"--graph="});
+    CHECK(texts(suggest_chat_input("/attach \"my folder/", project())) ==
+          std::vector<std::string>{"\"my folder/inside.txt\""});
+    // In an open quote a space is the name's; right after a closing quote,
+    // nothing -- a flag glued to it would not read.
+    CHECK(texts(suggest_chat_input("/attach \"my ", project())) ==
+          std::vector<std::string>{"\"my file.pdf\"", "\"my folder/"});
+    CHECK(suggest_chat_input("/attach \"my folder\"", project()).candidates.empty());
+
+    // While the cursor is in the path, paths -- an unquoted one with a space
+    // included, as before.
+    CHECK(texts(suggest_chat_input("/attach s", project())) == std::vector<std::string>{"src/"});
+    CHECK(texts(suggest_chat_input("/attach my f", project())) ==
+          std::vector<std::string>{"\"my file.pdf\"", "\"my folder/"});
+
+    // The flag the table offers is the flag /attach reads, and no other.
+    const ChatCommandSpec* attach = find_chat_command("attach");
+    REQUIRE(attach != nullptr);
+    REQUIRE(attach->flags.size() == 1);
+    for (const apogee::commands::ChatFlagSpec& flag : attach->flags) {
+        for (const std::string_view value : apogee::harness::attachment_graph_method_names()) {
+            const auto read = apogee::commands::parse_attach_argument(
+                "src --" + std::string{flag.name} + "=" + std::string{value});
+            CHECK(read.error.empty());
+            CHECK(read.graph.has_value());
+        }
+    }
+    CHECK_FALSE(apogee::commands::parse_attach_argument("src --other=x").error.empty());
+    // /help names it beside the path.
+    bool named = false;
+    for (const std::string& line : chat_help_lines()) {
+        named = named || (line.find("/attach <path>") != std::string::npos &&
+                          line.find("--graph=code|off") != std::string::npos);
+    }
+    CHECK(named);
+    // Other commands' arguments are as they were: no flags, no rows.
+    CHECK(suggest_chat_input("/detach x ", project()).candidates.empty());
 }

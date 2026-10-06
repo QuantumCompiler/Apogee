@@ -5,9 +5,11 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "support/cli_home.h"
 #include "support/gguf_builder.h"
 
@@ -441,4 +443,21 @@ TEST_CASE("the suite verbs switch validation seams and name the verifier, refusi
     CHECK_FALSE(apogee::harness::parse_config(home.config_text(), "<test>")
                     .find_suite("research")
                     ->validate.any());
+}
+
+TEST_CASE("config get reads attachments.graph: empty unset, the word the editor wrote",
+          "[commands][config][attachments]") {
+    // 27p: no verb writes the block -- the one editor does, or a hand edit --
+    // and `config get` reads it back.
+    const CliHome home{kConfig};
+    std::string out;
+    REQUIRE(home.run({"config", "get", "attachments.graph"}, &out) == 0);
+    CHECK(out == "\n");
+    apogee::harness::edit_config_file(home.config_path(), [](std::string_view content) {
+        return apogee::harness::set_attachments_graph(content, "off");
+    });
+    CHECK(home.config_text() == std::string{kConfig} + "\nattachments:\n  graph: off\n");
+    out.clear();
+    REQUIRE(home.run({"config", "get", "attachments.graph"}, &out) == 0);
+    CHECK(out == "off\n");
 }

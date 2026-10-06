@@ -263,6 +263,7 @@ embeddings:
     CHECK(has(keys, "mcp_servers.files.command"));
     CHECK(has(keys, "embeddings.notes.retriever"));
     CHECK(has(keys, "permissions.write_file"));
+    CHECK(has(keys, "attachments.graph"));  // 27p's block, set or not
     for (const std::string& key : keys) {
         INFO(key);
         std::ostringstream out;
@@ -294,6 +295,10 @@ TEST_CASE("every fixed word list is the one its validator accepts",
     }
     for (const std::string_view name : apogee::secrets::slot_names()) {
         CHECK(apogee::secrets::slot_type(name).has_value());
+    }
+    // `--graph` on chat and complete, and `attachments.graph` (27p).
+    for (const std::string_view name : apogee::harness::attachment_graph_method_names()) {
+        CHECK(apogee::harness::attachment_graph_method_from_string(name).has_value());
     }
     CHECK(apogee::secrets::slot_names().size() == 3);
     const apogee::training::HostShape mac{.apple_silicon = true};

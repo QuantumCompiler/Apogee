@@ -850,7 +850,8 @@ if(UNIX)
         # before it was wired, an arrow key arrived in the message as a literal
         # escape sequence. Since item 24 it also holds the suggestion rows to
         # the screen: drawn, taken by Tab, never at the last column, never left
-        # behind -- and a pipe given none of it.
+        # behind -- and a pipe given none of it. Since 27p, Tab after
+        # `/attach <path> ` takes `--graph=` and then its value.
         add_test(NAME cli.chat_line_editing
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/pty_lineedit_check.py"

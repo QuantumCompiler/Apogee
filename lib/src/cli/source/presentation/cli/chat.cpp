@@ -78,6 +78,9 @@ struct ChatFlags {
     std::vector<std::string> images;
     /// Files, folders and globs attached from the start (26d).
     std::vector<std::string> attach;
+    /// The method those attaches take (27p): `code` or `off`; empty leaves
+    /// it to the config's `attachments.graph`, else the built-in.
+    std::string graph;
     std::string rag;
     int rag_limit = 4;
     /// Kept so an explicit `--rag ""` can be told from no flag at all.
@@ -316,6 +319,15 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                     "retrieved each turn when not (repeatable)")
         ->type_name(kPathValue)
         ->allow_extra_args(false);
+    cmd->add_option("--graph", flags->graph,
+                    "For the --attach given here: code builds a folder's code graph, off indexes "
+                    "its chunks alone (default: the config's attachments.graph, else code)")
+        ->type_name(words_value(harness::attachment_graph_method_names()))
+        ->check([](const std::string& value) {
+            return harness::attachment_graph_method_from_string(value).has_value()
+                       ? std::string{}
+                       : harness::attachment_graph_values_message("", value);
+        });
     flags->temperature_option =
         cmd->add_option("-t,--temperature", flags->temperature, "Sampling temperature");
     flags->max_tokens_option =
@@ -415,6 +427,15 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 fail_user("--suite: " + refused);
             }
         }
+        // `--graph` is how the launch's own attaches are indexed (27p): with
+        // none, it would read as the chat's default, which is the config's.
+        if (!flags->graph.empty() && flags->attach.empty()) {
+            fail_user(
+                "--graph applies to the --attach given with it -- for every attach, set "
+                "attachments.graph in the config; for one, /attach <path> --graph=code|off");
+        }
+        const std::optional<harness::AttachmentGraphMethod> launch_graph =
+            harness::attachment_graph_method_from_string(flags->graph);
 
         // Every configured backend is constructed up front, which is what makes
         // /model an instant switch rather than a reconstruction -- and why
@@ -867,8 +888,9 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                         },
                     .confirm_large = {},
                     .save = true,
-                    // A folder of code builds its graph (27n).
-                    .code_graph = true}};
+                    // A folder of code builds its graph (27n), unless the
+                    // config or the attach says otherwise (27p).
+                    .built_in_graph = harness::AttachmentGraphMethod::Code}};
             // `--image` is an attachment like any other (26e): read as it is
             // with the first message by a model that can, described for one
             // that cannot.
@@ -876,13 +898,26 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                 (void)attached.attach(spec, working_directory);
             }
             for (const std::string& spec : flags->attach) {
-                (void)attached.attach(spec, working_directory);
+                (void)attached.attach(spec, working_directory, attached.graph_method(launch_graph));
             }
             std::string line;
             while (std::getline(std::cin, line)) {
                 const DriverMessage message = parse_driver_line(line);
                 if (message.kind == DriverMessage::Kind::Attach && !message.text.empty()) {
-                    (void)attached.attach(message.text, working_directory);
+                    // The line's own `graph`, as `/attach`'s `--graph` (27p):
+                    // a word outside the set attaches nothing, and says why.
+                    std::optional<harness::AttachmentGraphMethod> graph;
+                    if (!message.graph.empty()) {
+                        graph = harness::attachment_graph_method_from_string(message.graph);
+                        if (!graph.has_value()) {
+                            machine_reporter.on_notice(
+                                message.text + " not attached: " +
+                                harness::attachment_graph_values_message("graph", message.graph));
+                            continue;
+                        }
+                    }
+                    (void)attached.attach(message.text, working_directory,
+                                          attached.graph_method(graph));
                     continue;
                 }
                 if (message.kind != DriverMessage::Kind::User || message.text.empty()) {
@@ -972,13 +1007,14 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                           }}
                         : std::function<bool(const std::string&)>{},
                 .save = true,
-                // A folder of code builds its graph (27n).
-                .code_graph = true}};
+                // A folder of code builds its graph (27n), unless the config
+                // or the attach says otherwise (27p).
+                .built_in_graph = harness::AttachmentGraphMethod::Code}};
         for (const std::string& spec : flags->images) {
             (void)attached.attach(spec, working_directory);
         }
         for (const std::string& spec : flags->attach) {
-            (void)attached.attach(spec, working_directory);
+            (void)attached.attach(spec, working_directory, attached.graph_method(launch_graph));
         }
 
         // Once, immediately before the first prompt -- never between turns.
@@ -1473,13 +1509,23 @@ void ChatCommand::bind(CLI::App& root, const RootContext& context) {
                         reporter.status().print_line(style.tag(ansi::Role::Apogee) + " renamed");
                         break;
                     case ChatVerb::Attach: {
-                        if (argument.empty()) {
-                            reporter.status().print_line(
-                                style.tag(ansi::Role::Error) +
-                                " /attach takes a file, a folder or a glob");
+                        // The path first, then its flags (27p): `--graph`
+                        // over the config's default, for this attach alone.
+                        const AttachArgument asked = parse_attach_argument(argument);
+                        if (!asked.error.empty()) {
+                            reporter.status().print_line(style.tag(ansi::Role::Error) + " " +
+                                                         asked.error);
                             break;
                         }
-                        (void)attached.attach(unquoted(argument), working_directory);
+                        if (asked.spec.empty()) {
+                            reporter.status().print_line(
+                                style.tag(ansi::Role::Error) +
+                                " /attach takes a file, a folder or a glob -- " +
+                                std::string{kAttachShape});
+                            break;
+                        }
+                        (void)attached.attach(asked.spec, working_directory,
+                                              attached.graph_method(asked.graph));
                         break;
                     }
                     case ChatVerb::Attachments: {

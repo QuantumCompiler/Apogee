@@ -488,6 +488,22 @@ TEST_CASE("a driver attaches a file with an attach line", "[machine][attachments
         apogee::commands::parse_driver_line(R"({"type":"attach","path":"docs/report.pdf"})");
     CHECK(attach.kind == DriverMessage::Kind::Attach);
     CHECK(attach.text == "docs/report.pdf");
+    CHECK(attach.graph.empty());
+
+    // 27p: its method, as `/attach`'s `--graph`, kept as written for the
+    // chat to resolve -- or refuse by name. A value that is no string arrives
+    // as its JSON, never as nothing; a null is no method at all.
+    const auto graph_of = [](std::string_view line) {
+        return apogee::commands::parse_driver_line(line).graph;
+    };
+    CHECK(graph_of(R"({"type":"attach","path":"src","graph":"off"})") == "off");
+    CHECK(graph_of(R"({"type":"attach","path":"src","graph":"tree"})") == "tree");
+    CHECK(graph_of(R"({"type":"attach","path":"src","graph":true})") == "true");
+    CHECK(graph_of(R"({"type":"attach","path":"src","graph":null})").empty());
+    CHECK(apogee::commands::parse_driver_line(R"({"type":"attach","path":"src","graph":"off"})")
+              .text == "src");
+    // Only an attach line carries one.
+    CHECK(graph_of(R"({"type":"user","text":"hi","graph":"off"})").empty());
 }
 
 namespace {

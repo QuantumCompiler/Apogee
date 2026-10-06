@@ -78,6 +78,17 @@ enum class ArgumentValues : std::uint8_t {
     SessionPermissions,
     /// The configured suites, and `off` (27d).
     Suites,
+    /// An attach's graph methods: `code`, `off` (27p).
+    GraphMethods,
+};
+
+/// A flag a command takes after its argument, as `--name=value` (27p).
+struct ChatFlagSpec {
+    /// Without the leading `--`.
+    std::string_view name;
+    std::string_view description;
+    /// What its value completes from.
+    ArgumentValues values = ArgumentValues::None;
 };
 
 /// One row of the table.
@@ -86,9 +97,14 @@ struct ChatCommandSpec {
     std::string_view verb;
     ChatVerb id;
     /// Its shape for `/help`: `<required>`, `[optional]`, or empty for none.
+    /// Flags are named in the description: the widest usage sets `/help`'s
+    /// column for every row.
     std::string_view argument;
     std::string_view description;
     ArgumentValues values = ArgumentValues::None;
+    /// The flags that follow its argument, completed once the argument is
+    /// typed and a space follows it (27p): `--name=` first, then its values.
+    std::span<const ChatFlagSpec> flags = {};
 };
 
 /// Every chat command, in the order `/help` and completion show them.
@@ -153,6 +169,11 @@ struct ChatCompletionSources {
 ///     unless it has a capital in it. A path with a space completes quoted:
 ///     `@"my file.pdf"`, or `@"my folder/` still open to go further.
 ///   * After a command and a space: that command's values, if it has any.
+///   * After a command's argument and a space, or on a word starting `-`
+///     there: its flags, `--graph=` (27p) -- then, after `--graph=` or
+///     `--graph `, that flag's values. An argument completing as a path ends
+///     at its closing quote, or, unquoted, at its first space; an open quote
+///     keeps the path going, so its flags wait for a word starting `-`.
 ///
 /// Anything else offers nothing -- which is what keeps backend names from
 /// completing in the middle of a message.

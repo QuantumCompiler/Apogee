@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -1053,6 +1055,51 @@ TEST_CASE("memory.recall is on unless the config turns it off", "[config][recall
     CHECK_FALSE(load_text("memory:\n  recall: false\n").memory.recall);
     CHECK_THROWS_AS(load_text("memory:\n  recall: sometimes\n"), ConfigError);
     CHECK_THROWS_AS(load_text("memory: yes\n"), ConfigError);
+}
+
+TEST_CASE("attachments.graph is a method word, unset unless the config says one",
+          "[config][attachments]") {
+    using apogee::harness::AttachmentGraphMethod;
+    // 27p: unset is each surface's built-in -- never read as `code`.
+    CHECK_FALSE(load_text("backends:\n  x:\n    type: mock\n").attachments.graph.has_value());
+    CHECK_FALSE(load_text("attachments: {}\n").attachments.graph.has_value());
+    CHECK_FALSE(load_text("attachments:\n  graph:\n").attachments.graph.has_value());
+    // The shipped template shows the block commented: a fresh install is unset.
+    CHECK_FALSE(
+        load_text(std::string{apogee::harness::config_template()}).attachments.graph.has_value());
+    CHECK(std::string{apogee::harness::config_template()}.find(
+              "# attachments:\n#   graph: code\n") != std::string::npos);
+    // Block and flow forms; `off` is the word, never YAML 1.1's boolean.
+    CHECK(load_text("attachments:\n  graph: off\n").attachments.graph ==
+          AttachmentGraphMethod::Off);
+    CHECK(load_text("attachments: { graph: off }\n").attachments.graph ==
+          AttachmentGraphMethod::Off);
+    CHECK(load_text("attachments:\n  graph: code\n").attachments.graph ==
+          AttachmentGraphMethod::Code);
+    CHECK(load_text("attachments:\n  graph: \"off\"\n").attachments.graph ==
+          AttachmentGraphMethod::Off);
+    // Anything else is refused naming the set.
+    CHECK_THROWS_WITH(load_text("attachments:\n  graph: tree\n"),
+                      Catch::Matchers::ContainsSubstring(
+                          "attachments.graph: unknown value 'tree' (accepted: code, off)"));
+    CHECK_THROWS_WITH(
+        load_text("attachments:\n  graph: false\n"),
+        Catch::Matchers::ContainsSubstring("unknown value 'false' (accepted: code, off)"));
+    CHECK_THROWS_AS(load_text("attachments:\n  graph: [code]\n"), ConfigError);
+    CHECK_THROWS_AS(load_text("attachments: code\n"), ConfigError);
+    // The words, one place.
+    CHECK(apogee::harness::attachment_graph_method_names() ==
+          std::vector<std::string_view>{"code", "off"});
+    for (const std::string_view name : apogee::harness::attachment_graph_method_names()) {
+        const std::optional<AttachmentGraphMethod> method =
+            apogee::harness::attachment_graph_method_from_string(name);
+        REQUIRE(method.has_value());
+        CHECK(apogee::harness::to_string(*method) == name);
+    }
+    CHECK_FALSE(apogee::harness::attachment_graph_method_from_string("Code").has_value());
+    CHECK_FALSE(apogee::harness::attachment_graph_method_from_string("").has_value());
+    CHECK(apogee::harness::attachment_graph_values_message("", "x") ==
+          "unknown value 'x' (accepted: code, off)");
 }
 
 namespace {

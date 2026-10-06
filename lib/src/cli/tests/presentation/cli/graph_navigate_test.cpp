@@ -423,11 +423,12 @@ TEST_CASE("one core, scoped: a chat's attachment graph answers as the CLI does o
     session.chat_id = "golden";
     apogee::commands::ChatAttachments attached{
         harness, session, apogee::commands::ChatAttachments::index_for("golden"),
-        apogee::commands::ChatAttachments::Hooks{.say = [](const std::string&, bool) {},
-                                                 .progress = {},
-                                                 .confirm_large = {},
-                                                 .save = false,
-                                                 .code_graph = true}};
+        apogee::commands::ChatAttachments::Hooks{
+            .say = [](const std::string&, bool) {},
+            .progress = {},
+            .confirm_large = {},
+            .save = false,
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code}};
     REQUIRE(attached.attach("app", tree.parent_path()));
     attached.settle();
     const std::optional<apogee::commands::AttachmentGraphScope> scope = attached.graph_scope();

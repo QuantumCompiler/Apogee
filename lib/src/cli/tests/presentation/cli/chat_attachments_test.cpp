@@ -113,13 +113,15 @@ struct Fixture {
     /// The lines said as warnings, again.
     std::vector<std::string> warned;
 
-    explicit Fixture(bool embedding_role = true) {
+    /// `extra` is YAML at the config's top level.
+    explicit Fixture(bool embedding_role = true, const std::string& extra = {}) {
         std::filesystem::create_directories(work);
         const std::string models = embedding_role ? "models:\n  default_embedding: embedder\n" : "";
         const apogee::harness::Config config = apogee::harness::parse_config(
             models +
                 "backends:\n  chat:\n    type: mock\n    context_size: 8000\n  embedder:\n"
-                "    type: mock\n",
+                "    type: mock\n" +
+                extra,
             "<test>");
         harness = std::make_unique<apogee::harness::Harness>(config);
         harness->register_provider("chat", std::make_shared<apogee::backends::MockProvider>(
@@ -131,17 +133,18 @@ struct Fixture {
     }
 
     [[nodiscard]] ChatAttachments::Hooks hooks() {
-        return ChatAttachments::Hooks{.say =
-                                          [this](const std::string& line, bool warning) {
-                                              said.push_back(line);
-                                              if (warning) {
-                                                  warned.push_back(line);
-                                              }
-                                          },
-                                      .progress = {},
-                                      .confirm_large = {},
-                                      .save = false,
-                                      .code_graph = true};
+        return ChatAttachments::Hooks{
+            .say =
+                [this](const std::string& line, bool warning) {
+                    said.push_back(line);
+                    if (warning) {
+                        warned.push_back(line);
+                    }
+                },
+            .progress = {},
+            .confirm_large = {},
+            .save = false,
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code};
     }
 
     void write(const std::string& name, const std::string& text) const {
@@ -512,7 +515,7 @@ struct MediaChat {
             .progress = {},
             .confirm_large = confirm,
             .save = false,
-            .code_graph = true};
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code};
     }
 
     void write(const std::string& name, const std::string& bytes = "PNGBYTES") const {
@@ -680,7 +683,7 @@ struct MlxMediaChat {
             .progress = {},
             .confirm_large = {},
             .save = false,
-            .code_graph = true};
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code};
     }
 
     [[nodiscard]] bool heard(std::string_view needle) const {
@@ -1139,7 +1142,7 @@ TEST_CASE("with no backend and no embedder, attaching a folder of code gets the 
             .progress = {},
             .confirm_large = {},
             .save = false,
-            .code_graph = true}};
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code}};
     // Named with a trailing separator: the same folder, the same label.
     REQUIRE(attached.attach("app/", bare.work));
     attached.settle();
@@ -1274,7 +1277,7 @@ TEST_CASE("with the graph off nothing is built, and an earlier graph of the fold
     Fixture fixture;
     copy_code(fixture, "python", "app");
     ChatAttachments::Hooks off = fixture.hooks();
-    off.code_graph = false;
+    off.built_in_graph = apogee::harness::AttachmentGraphMethod::Off;
     {
         // `complete`'s one-shot store: a folder of code, chunks only.
         ChatAttachments attached{*fixture.harness, fixture.session,
@@ -1611,7 +1614,7 @@ TEST_CASE("an attachment turn expands through the chat's graph and counts it; ch
             .progress = {},
             .confirm_large = {},
             .save = false,
-            .code_graph = true}};
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code}};
     // Notes first: a chunk-only chat injects no graph.
     REQUIRE(attached.attach("notes", bare.work));
     attached.settle();
@@ -1654,7 +1657,7 @@ TEST_CASE("a lexical-only chat walks its attachment graph through the scoped too
             .progress = {},
             .confirm_large = {},
             .save = false,
-            .code_graph = true}};
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code}};
     REQUIRE(attached.attach("app", bare.work));
     attached.settle();
     const std::optional<apogee::commands::AttachmentGraphScope> scope = attached.graph_scope();
@@ -1704,7 +1707,7 @@ TEST_CASE("a turn walks only a graph the chat records -- never one left in the i
             .progress = {},
             .confirm_large = {},
             .save = false,
-            .code_graph = true}};
+            .built_in_graph = apogee::harness::AttachmentGraphMethod::Code}};
     REQUIRE(attached.attach("app", bare.work));
     attached.settle();
     REQUIRE_FALSE(chat_members().empty());
@@ -1717,4 +1720,248 @@ TEST_CASE("a turn walks only a graph the chat records -- never one left in the i
     CHECK(turn.retrieved->graph_entities == 0);
     CHECK(turn.retrieved->prefix.front().content.plain_text().find("[Knowledge graph") ==
           std::string::npos);
+}
+
+// ---- Attachment options (27p) -------------------------------------------------
+
+TEST_CASE("an attach's method is a flag over the config over the surface's built-in",
+          "[commands][attachments][options]") {
+    using apogee::commands::graph_method_note;
+    using apogee::commands::GraphMethod;
+    using apogee::commands::GraphMethodSource;
+    using apogee::commands::resolve_graph_method;
+    using apogee::harness::AttachmentGraphMethod;
+    constexpr AttachmentGraphMethod code = AttachmentGraphMethod::Code;
+    constexpr AttachmentGraphMethod off = AttachmentGraphMethod::Off;
+
+    struct Row {
+        std::optional<AttachmentGraphMethod> flag;
+        std::optional<AttachmentGraphMethod> config;
+        AttachmentGraphMethod built_in;
+        GraphMethod expected;
+        std::string note;
+    };
+
+    const std::string from_config_code =
+        "with its code graph (attachments.graph: code in the config)";
+    const std::string from_config_off =
+        "without its code graph (attachments.graph: off in the config)";
+    // Every combination: a chat's built-in (code) and complete's (off), each
+    // under no config, either config word, and no flag or either flag.
+    const std::vector<Row> table{
+        {{}, {}, code, {code, GraphMethodSource::BuiltIn}, ""},
+        {{}, {}, off, {off, GraphMethodSource::BuiltIn}, ""},
+        {{}, code, code, {code, GraphMethodSource::Config}, from_config_code},
+        {{}, code, off, {code, GraphMethodSource::Config}, from_config_code},
+        {{}, off, code, {off, GraphMethodSource::Config}, from_config_off},
+        {{}, off, off, {off, GraphMethodSource::Config}, from_config_off},
+        {code, {}, code, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {code, {}, off, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {code, off, code, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {code, off, off, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {code, code, off, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {code, code, code, {code, GraphMethodSource::Flag}, "with its code graph (--graph=code)"},
+        {off, {}, code, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+        {off, {}, off, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+        {off, code, code, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+        {off, code, off, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+        {off, off, code, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+        {off, off, off, {off, GraphMethodSource::Flag}, "without its code graph (--graph=off)"},
+    };
+    for (const Row& row : table) {
+        INFO("flag " << (row.flag ? apogee::harness::to_string(*row.flag) : "-") << ", config "
+                     << (row.config ? apogee::harness::to_string(*row.config) : "-")
+                     << ", built-in " << apogee::harness::to_string(row.built_in));
+        const GraphMethod method = resolve_graph_method(row.flag, row.config, row.built_in);
+        CHECK(method == row.expected);
+        CHECK(graph_method_note(method) == row.note);
+    }
+
+    // The class asks the one function, with its own built-in and the config.
+    Fixture fixture{true, "attachments:\n  graph: off\n"};
+    ChatAttachments::Hooks hooks = fixture.hooks();
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), hooks};
+    CHECK(attached.graph_method() == GraphMethod{off, GraphMethodSource::Config});
+    CHECK(attached.graph_method(code) == GraphMethod{code, GraphMethodSource::Flag});
+    Fixture plain;
+    hooks = plain.hooks();
+    hooks.built_in_graph = off;
+    ChatAttachments one_shot{*plain.harness, plain.session, ChatAttachments::index_for("chat-1"),
+                             hooks};
+    CHECK(one_shot.graph_method() == GraphMethod{off, GraphMethodSource::BuiltIn});
+}
+
+TEST_CASE("/attach reads its path first, then its flags, and refuses the rest by name",
+          "[commands][attachments][options]") {
+    using apogee::commands::AttachArgument;
+    using apogee::commands::parse_attach_argument;
+    using apogee::harness::AttachmentGraphMethod;
+
+    struct Row {
+        std::string_view argument;
+        std::string spec;
+        std::optional<AttachmentGraphMethod> graph;
+        std::string error;
+    };
+
+    const std::string shape{apogee::commands::kAttachShape};
+    const std::vector<Row> table{
+        // The path alone, as ever -- an unquoted one with a space included.
+        {"src", "src", {}, ""},
+        {"my notes/plan.md", "my notes/plan.md", {}, ""},
+        {"\"my notes/plan.md\"", "my notes/plan.md", {}, ""},
+        {"\"my notes/", "my notes/", {}, ""},  // completion's open folder quote
+        {"src/**/*.cpp", "src/**/*.cpp", {}, ""},
+        {"", "", {}, ""},
+        // Flags after it, both spellings, any spacing.
+        {"src --graph=off", "src", AttachmentGraphMethod::Off, ""},
+        {"src --graph off", "src", AttachmentGraphMethod::Off, ""},
+        {"src\t--graph=code", "src", AttachmentGraphMethod::Code, ""},
+        {"src   --graph   code", "src", AttachmentGraphMethod::Code, ""},
+        {"my notes --graph=off", "my notes", AttachmentGraphMethod::Off, ""},
+        {"\"my notes\" --graph=off", "my notes", AttachmentGraphMethod::Off, ""},
+        {"\"my notes/ --graph=off", "my notes/", AttachmentGraphMethod::Off, ""},
+        {"\"has --dashes\" --graph=code", "has --dashes", AttachmentGraphMethod::Code, ""},
+        // A `--` inside a word is the path's.
+        {"a--b", "a--b", {}, ""},
+        {"notes-2024 --graph=off", "notes-2024", AttachmentGraphMethod::Off, ""},
+        // Refused, each naming the shape or the set.
+        {"--graph=off src", "", {}, "the path comes first -- " + shape},
+        {"--graph=off", "", {}, "the path comes first -- " + shape},
+        {"src --depth=2", "", {}, "unknown flag '--depth' -- " + shape},
+        {"src --", "", {}, "unknown flag '--' -- " + shape},
+        {"src --graph=tree", "", {}, "--graph: unknown value 'tree' (accepted: code, off)"},
+        {"src --graph=", "", {}, "--graph: unknown value '' (accepted: code, off)"},
+        {"src --graph", "", {}, "--graph: unknown value '' (accepted: code, off)"},
+        {"src --graph=Off", "", {}, "--graph: unknown value 'Off' (accepted: code, off)"},
+        {"src --graph=off --graph=code", "", {}, "--graph is given twice -- " + shape},
+        {"src --graph=off extra", "", {}, "'extra' after the path is not a flag -- " + shape},
+        {"src --graph off extra", "", {}, "'extra' after the path is not a flag -- " + shape},
+        {"\"a b\" extra", "", {}, "'extra' after the path is not a flag -- " + shape},
+        {"\"a b\"c --graph=off",
+         "",
+         {},
+         "nothing may follow the path's closing quote but a space -- " + shape},
+    };
+    for (const Row& row : table) {
+        INFO("/attach " << row.argument);
+        const AttachArgument read = parse_attach_argument(row.argument);
+        CHECK(read.spec == row.spec);
+        CHECK(read.graph == row.graph);
+        CHECK(read.error == row.error);
+    }
+}
+
+TEST_CASE("a folder of code attached with --graph=off is chunks alone; with code, graphed then",
+          "[commands][attachments][options][graph]") {
+    using apogee::harness::AttachmentGraphMethod;
+    Fixture fixture;
+    copy_code(fixture, "python", "app");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    // Off: the chunks as ever, nothing of a graph built, kept or said beyond
+    // the method the attach line names.
+    REQUIRE(
+        attached.attach("app", fixture.work, attached.graph_method(AttachmentGraphMethod::Off)));
+    attached.settle();
+    CHECK(fixture.heard("attaching app (4 files, "));
+    CHECK(fixture.heard(") -- without its code graph (--graph=off)"));
+    CHECK(fixture.heard("attached app: 4 files"));
+    CHECK_FALSE(said_graph(fixture));
+    CHECK(chat_members().empty());
+    CHECK_FALSE(fixture.session.attachments[0].graph.has_value());
+    CHECK_FALSE(attached.graph_scope().has_value());
+    REQUIRE(attached.describe().size() == 1);
+    CHECK(attached.describe()[0].find("graph") == std::string::npos);
+
+    // The same folder with code: built then, as a direct build would.
+    fixture.said.clear();
+    REQUIRE(
+        attached.attach("app", fixture.work, attached.graph_method(AttachmentGraphMethod::Code)));
+    attached.settle();
+    CHECK(fixture.heard(") -- with its code graph (--graph=code)"));
+    CHECK(said_graph(fixture));
+    CHECK(chat_members() == std::vector<std::string>{"app"});
+    CHECK(chat_dump() == direct_dump(fixture, {fixture.work / "app"}));
+    REQUIRE(fixture.session.attachments[0].graph.has_value());
+    CHECK(attached.graph_scope().has_value());
+
+    // And off again forgets it -- honest, and silent about graphs.
+    fixture.said.clear();
+    REQUIRE(
+        attached.attach("app", fixture.work, attached.graph_method(AttachmentGraphMethod::Off)));
+    attached.settle();
+    CHECK_FALSE(said_graph(fixture));
+    CHECK(chat_members().empty());
+    CHECK(chat_dump().empty());
+}
+
+TEST_CASE("the config's graph: off makes a bare attach chunks only; --graph=code overrides once",
+          "[commands][attachments][options][graph]") {
+    using apogee::harness::AttachmentGraphMethod;
+    Fixture fixture{true, "attachments: { graph: off }\n"};
+    copy_code(fixture, "python", "app");
+    copy_code(fixture, "go", "svc");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    // Bare: the config's method, and the line says so.
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK(fixture.heard(") -- without its code graph (attachments.graph: off in the config)"));
+    CHECK_FALSE(said_graph(fixture));
+    CHECK(chat_members().empty());
+
+    // One attach overrides it, and says so; the next bare one is the
+    // config's again.
+    fixture.said.clear();
+    REQUIRE(
+        attached.attach("svc", fixture.work, attached.graph_method(AttachmentGraphMethod::Code)));
+    attached.settle();
+    CHECK(fixture.heard(") -- with its code graph (--graph=code)"));
+    CHECK(said_graph(fixture));
+    CHECK(chat_members() == std::vector<std::string>{"svc"});
+    fixture.said.clear();
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK(fixture.heard("(attachments.graph: off in the config)"));
+    CHECK(chat_members() == std::vector<std::string>{"svc"});
+}
+
+TEST_CASE("the method is named only where it matters: a folder of code",
+          "[commands][attachments][options]") {
+    using apogee::harness::AttachmentGraphMethod;
+    Fixture fixture;
+    fixture.write("docs/guide.md", "the guide\n");
+    fixture.write("docs/faq.md", "the answers\n");
+    fixture.write("notes.md", "a note\n");
+    copy_code(fixture, "python", "app");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    const auto with = [&attached](AttachmentGraphMethod method) {
+        return attached.graph_method(method);
+    };
+    // A folder with no code, one file and a glob: no method changes them,
+    // so none is named -- and no graph is built, whatever was asked.
+    REQUIRE(attached.attach("docs", fixture.work, with(AttachmentGraphMethod::Code)));
+    REQUIRE(attached.attach("notes.md", fixture.work, with(AttachmentGraphMethod::Off)));
+    REQUIRE(attached.attach("app/*.py", fixture.work, with(AttachmentGraphMethod::Code)));
+    attached.settle();
+    CHECK_FALSE(fixture.heard("code graph"));
+    CHECK_FALSE(said_graph(fixture));
+    CHECK(chat_members().empty());
+    // The built-in's own method is never named.
+    REQUIRE(attached.attach("app", fixture.work));
+    attached.settle();
+    CHECK_FALSE(fixture.heard("code graph"));
+    CHECK(said_graph(fixture));
+}
+
+TEST_CASE("an @ mention stays a bare path: flags typed after it are prose",
+          "[commands][attachments][options]") {
+    // 27p adds no mention syntax: the words after a mention are the
+    // message's, and the message is never changed.
+    const std::string message = "look at @app --graph=off and @\"my notes\" --graph code";
+    CHECK(mentioned_paths(message) == std::vector<std::string>{"app", "my notes"});
+    CHECK(message == "look at @app --graph=off and @\"my notes\" --graph code");
 }

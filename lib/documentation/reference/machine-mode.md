@@ -156,6 +156,7 @@ One JSON object per line on stdin.
 {"type":"user","text":"what is 2+2?"}
 {"type":"answer","text":"Yes"}
 {"type":"attach","path":"report.pdf"}
+{"type":"attach","path":"src","graph":"off"}
 ```
 
 An unrecognised line is ignored rather than fatal — the tolerance this protocol
@@ -181,6 +182,21 @@ what was left out. Attached again, only the files that changed are parsed again.
 Should the attach be interrupted, the notice says `graph: not built -- cancelled;
 attach it again to build it`. A single file, a glob, or a folder with no such code
 gets no graph and no such notice.
+
+Whether a folder of code is graphed is the attach's method, `code` or `off`. An
+`attach` line may carry its own, `"graph":"code"` or `"graph":"off"`, as `/attach
+<path> --graph=off` does at a terminal; without one, the config's
+`attachments.graph` decides, and without that, a chat builds the graph. A method the
+default did not choose is named at the end of the attach's first `notice` --
+`attaching src (4 files, 1.2 KB) -- without its code graph (--graph=off)`, or
+`(attachments.graph: off in the config)` -- and `off` indexes the folder's chunks
+alone, with no `graph:` notice (an earlier graph of the folder is forgotten). Any
+other value attaches nothing, and a `notice` says why: `src not attached: graph:
+unknown value 'tree' (accepted: code, off)`. A child started with `chat --attach
+<path> --graph off` applies it to those attaches; `complete --attach <path>
+--graph=code` builds the graph a one-shot otherwise skips. A `user` message's
+`@path` mention is a bare path -- anything after it is the message's -- so it takes
+the default.
 
 While a folder's graph is attached, each turn's retrieval walks it from the
 excerpts it found: the turn's attachments `notice` then ends with the count,

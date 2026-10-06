@@ -1075,6 +1075,40 @@ std::optional<PermissionLevel> permission_level_from_string(std::string_view nam
     return std::nullopt;
 }
 
+std::string_view to_string(AttachmentGraphMethod method) noexcept {
+    switch (method) {
+        case AttachmentGraphMethod::Code:
+            return "code";
+        case AttachmentGraphMethod::Off:
+            return "off";
+    }
+    return "code";
+}
+
+std::optional<AttachmentGraphMethod> attachment_graph_method_from_string(
+    std::string_view name) noexcept {
+    for (const AttachmentGraphMethod method :
+         {AttachmentGraphMethod::Code, AttachmentGraphMethod::Off}) {
+        if (name == to_string(method)) {
+            return method;
+        }
+    }
+    return std::nullopt;
+}
+
+std::vector<std::string_view> attachment_graph_method_names() {
+    return {to_string(AttachmentGraphMethod::Code), to_string(AttachmentGraphMethod::Off)};
+}
+
+std::string attachment_graph_values_message(std::string_view label, std::string_view got) {
+    std::string accepted;
+    for (const std::string_view name : attachment_graph_method_names()) {
+        accepted += (accepted.empty() ? "" : ", ") + std::string{name};
+    }
+    return (label.empty() ? std::string{} : std::string{label} + ": ") + "unknown value '" +
+           std::string{got} + "' (accepted: " + accepted + ")";
+}
+
 PermissionLevel PermissionsConfig::level(std::string_view tool) const noexcept {
     const auto it = levels.find(tool);
     return it == levels.end() ? PermissionLevel::Ask : it->second;
@@ -1575,6 +1609,22 @@ Config parse_config(std::string_view content, std::string_view origin) {
             fail(origin, "memory: expected a mapping");
         }
         config.memory.recall = boolean(memory["recall"], origin, "memory.recall", true);
+    }
+
+    // The method an attach takes when nothing on the line says (27p). A word
+    // outside the set is refused naming it -- never read as the default.
+    if (const YAML::Node attachments = root["attachments"];
+        attachments.IsDefined() && !attachments.IsNull()) {
+        if (!attachments.IsMap()) {
+            fail(origin, "attachments: expected a mapping");
+        }
+        if (const std::string graph = scalar(attachments["graph"], origin, "attachments.graph");
+            !graph.empty()) {
+            config.attachments.graph = attachment_graph_method_from_string(graph);
+            if (!config.attachments.graph.has_value()) {
+                fail(origin, attachment_graph_values_message("attachments.graph", graph));
+            }
+        }
     }
 
     if (const YAML::Node training = root["training"]; training.IsDefined() && !training.IsNull()) {

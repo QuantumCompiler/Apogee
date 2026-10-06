@@ -190,6 +190,21 @@ if ls "$APOGEE_HOME/attachments" | grep -q "$CHAT_ID"; then
     fail "deleting the chat left its index: $(ls "$APOGEE_HOME/attachments")"
 fi
 
+# --- attachment options (27p) -----------------------------------------------------
+# `complete --attach src --graph=code` builds the graph in the one-shot store --
+# 27n's one-shot default overridden, and said -- and a driver's attach line
+# with "graph":"off" indexes the folder's chunks alone and says nothing of one.
+(cd "$SRC_ROOT" && "$APOGEE_BIN" complete -m plain "hello" --attach ./src --graph=code </dev/null) >"$WORK_DIR/options.out" 2>"$WORK_DIR/options.err" || fail "complete --graph=code: $(cat "$WORK_DIR/options.err")"
+grep -q "attaching ./src (.*) -- with its code graph (--graph=code)" "$WORK_DIR/options.err" || fail "complete did not name the method: $(cat "$WORK_DIR/options.err")"
+grep -q "graph: [0-9]* nodes, [0-9]* edges (supported: python 4; skipped: .lua 1, third_party/ 1)" "$WORK_DIR/options.err" || fail "complete --graph=code built no graph: $(cat "$WORK_DIR/options.err")"
+(cd "$SRC_ROOT" && printf '{"type":"attach","path":"src","graph":"off"}\n{"type":"user","text":"hello"}\n' |
+    "$APOGEE_BIN" chat -m plain --output-format stream-json) >"$WORK_DIR/options.jsonl" 2>"$WORK_DIR/options.err" || fail "attach graph off: $(cat "$WORK_DIR/options.err")"
+grep -q 'without its code graph (--graph=off)' "$WORK_DIR/options.jsonl" || fail "the attach line did not name the method: $(cat "$WORK_DIR/options.jsonl")"
+grep -q '"text":"attached src: ' "$WORK_DIR/options.jsonl" || fail "no attach line: $(cat "$WORK_DIR/options.jsonl")"
+if grep -q '"text":"graph: ' "$WORK_DIR/options.jsonl"; then
+    fail "graph off said a graph: $(cat "$WORK_DIR/options.jsonl")"
+fi
+
 # --- delete ----------------------------------------------------------------------
 "$APOGEE_BIN" graph delete code </dev/null >/dev/null 2>&1 || fail "delete"
 [ ! -e "$APOGEE_HOME/embeddings/graphs/code.db" ] || fail "delete left the database"

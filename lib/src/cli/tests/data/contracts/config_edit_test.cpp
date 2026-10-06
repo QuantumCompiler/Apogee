@@ -1,12 +1,14 @@
 #include "contracts/config_edit.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/config.h"
@@ -1531,4 +1533,72 @@ TEST_CASE("setting a suite's validate: block leaves every other line as it was",
         apogee::harness::ConfigError);
     CHECK_THROWS_AS((void)set_suite_validate(hand, "nope", ValidateConfig{.tool_args = true}),
                     ConfigEditError);
+}
+
+TEST_CASE("attachments.graph is set through the one editor, every comment kept",
+          "[config_edit][attachments]") {
+    using apogee::harness::AttachmentGraphMethod;
+    using apogee::harness::set_attachments_graph;
+    // 27p: the shipped template keeps its commented example whole, and the
+    // block is appended after everything -- the only change.
+    const std::string shipped{apogee::harness::config_template()};
+    const std::string off = set_attachments_graph(shipped, "off");
+    CHECK(off == shipped + "\nattachments:\n  graph: off\n");
+    CHECK(apogee::harness::parse_config(off, "<test>").attachments.graph ==
+          AttachmentGraphMethod::Off);
+    // Set again: one token, in place.
+    const std::string code = set_attachments_graph(off, "code");
+    CHECK(code == shipped + "\nattachments:\n  graph: code\n");
+    CHECK(apogee::harness::parse_config(code, "<test>").attachments.graph ==
+          AttachmentGraphMethod::Code);
+
+    // A hand-written block: the value replaced, its trailing comment and the
+    // comment-dense rest untouched.
+    const std::string hand = std::string{kCommented} +
+                             "\n# How attaches are indexed.\nattachments:\n"
+                             "  graph: code    # build the code graph\n";
+    const std::string edited = set_attachments_graph(hand, "off");
+    CHECK(edited == std::string{kCommented} +
+                        "\n# How attaches are indexed.\nattachments:\n"
+                        "  graph: off    # build the code graph\n");
+    require_parses(edited);
+    // A block with no graph line gains one; a config with none gains the block.
+    CHECK(set_attachments_graph("attachments:\n", "off") == "attachments:\n  graph: off\n");
+    CHECK(set_attachments_graph(kCommented, "code") ==
+          std::string{kCommented} + "\nattachments:\n  graph: code\n");
+}
+
+TEST_CASE("attachments.graph off its set, or on a line the editor cannot see into, is refused",
+          "[config_edit][attachments]") {
+    using apogee::harness::set_attachments_graph;
+    CHECK_THROWS_WITH(set_attachments_graph(kCommented, "tree"),
+                      "attachments.graph: unknown value 'tree' (accepted: code, off)");
+    CHECK_THROWS_AS(set_attachments_graph(kCommented, ""), ConfigEditError);
+    CHECK_THROWS_AS(set_attachments_graph(kCommented, "Off"), ConfigEditError);
+    // A one-line mapping, or a header with a comment: appending a block
+    // beside it would be a second key the loader never reads.
+    CHECK_THROWS_AS(set_attachments_graph("attachments: { graph: off }\n", "code"),
+                    ConfigEditError);
+    CHECK_THROWS_AS(set_attachments_graph("attachments:   # how\n  graph: off\n", "code"),
+                    ConfigEditError);
+    // A comment naming the key is not the key.
+    CHECK(set_attachments_graph("# attachments: { graph: off }\n", "off") ==
+          "# attachments: { graph: off }\n\nattachments:\n  graph: off\n");
+
+    // Through the file layer: refused before the file is touched.
+    const TempDir dir{"edit-attachments"};
+    const std::filesystem::path path = std::filesystem::path{dir.path()} / "config.yaml";
+    apogee::harness::write_file_atomically(path, kCommented);
+    CHECK_THROWS_AS(apogee::harness::edit_config_file(
+                        path, [](std::string_view c) { return set_attachments_graph(c, "tree"); }),
+                    ConfigEditError);
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    CHECK(buffer.str() == std::string{kCommented});
+    // And a good edit lands, read back by the loader.
+    apogee::harness::edit_config_file(
+        path, [](std::string_view c) { return set_attachments_graph(c, "off"); });
+    CHECK(apogee::harness::load_config(path).attachments.graph ==
+          apogee::harness::AttachmentGraphMethod::Off);
 }

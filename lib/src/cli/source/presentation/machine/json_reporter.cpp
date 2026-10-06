@@ -350,9 +350,13 @@ DriverMessage parse_driver_line(std::string_view line) {
     } else if (type == "answer") {
         message.kind = DriverMessage::Kind::Answer;
     } else if (type == "attach") {
-        // A file, folder or glob to attach, as `/attach` takes one (26d).
+        // A file, folder or glob to attach, as `/attach` takes one (26d),
+        // and its method, as `/attach`'s `--graph` (27p).
         message.kind = DriverMessage::Kind::Attach;
         message.text = root.value("path", std::string{});
+        if (const auto graph = root.find("graph"); graph != root.end() && !graph->is_null()) {
+            message.graph = graph->is_string() ? graph->get<std::string>() : graph->dump();
+        }
         return message;
     } else {
         return message;

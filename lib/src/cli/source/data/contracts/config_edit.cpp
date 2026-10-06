@@ -1451,6 +1451,25 @@ std::string set_default_suite(std::string_view content, std::string_view name) {
     return set_section_scalar(content, "models", "default_suite", name);
 }
 
+std::string set_attachments_graph(std::string_view content, std::string_view method) {
+    if (!attachment_graph_method_from_string(method).has_value()) {
+        throw ConfigEditError(attachment_graph_values_message("attachments.graph", method));
+    }
+    // `attachments: { graph: off }` -- or a header carrying a comment -- is a
+    // section the line editor does not see: a block appended beside it would
+    // be a second key, and the loader reads the first. Refused, never misread.
+    for (const std::string& line : split_lines(content)) {
+        const std::string_view text = body(line);
+        if (is_top_level(text) && text.starts_with("attachments:") &&
+            !is_section_header(text, "attachments")) {
+            throw ConfigEditError(
+                "the attachments: line holds more than its key -- the editor sets the block "
+                "form, 'attachments:' alone with '  graph: <code|off>' under it");
+        }
+    }
+    return set_section_scalar(content, "attachments", "graph", method);
+}
+
 std::string set_permission(std::string_view content, std::string_view tool,
                            std::string_view level) {
     if (tool.empty()) {

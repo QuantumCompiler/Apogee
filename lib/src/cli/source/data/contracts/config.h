@@ -604,6 +604,35 @@ struct KnowledgeConfig {
     [[nodiscard]] std::string collection() const;
 };
 
+/// How an attached folder is represented beyond its chunks (27p): `code`
+/// parses a folder of code into the chat's code graph (27n) -- its functions,
+/// classes and the calls between them, with no model -- and `off` indexes
+/// its chunks alone. Deliberately two words: richer methods wait until one
+/// ships to name.
+enum class AttachmentGraphMethod : std::uint8_t { Code, Off };
+
+[[nodiscard]] std::string_view to_string(AttachmentGraphMethod method) noexcept;
+[[nodiscard]] std::optional<AttachmentGraphMethod> attachment_graph_method_from_string(
+    std::string_view name) noexcept;
+/// The words `attachments.graph` and every `--graph` take, in order: `code`,
+/// `off` -- for help, completion and the refusal of any other.
+[[nodiscard]] std::vector<std::string_view> attachment_graph_method_names();
+/// `<label>: unknown value '<got>' (accepted: code, off)` -- the one refusal
+/// of a method word, wherever it was typed. An empty label omits the prefix
+/// (CLI11 prints the option's name in front of a validator's message).
+[[nodiscard]] std::string attachment_graph_values_message(std::string_view label,
+                                                          std::string_view got);
+
+/// The `attachments:` section (27p): the default an attach takes when nothing
+/// on the line says otherwise. Read by the loader and written only by the
+/// comment-preserving editor (`set_attachments_graph`).
+struct AttachmentsConfig {
+    /// Unset means each surface's built-in -- a chat builds a folder's code
+    /// graph, `complete`'s one-shot store does not (27n) -- and set, it holds
+    /// for both. A `--graph` on one attach beats it.
+    std::optional<AttachmentGraphMethod> graph;
+};
+
 /// The `memory:` section (26l). Read-only here: hand-edited, like `auto_rag`.
 struct MemoryConfig {
     /// Whether `chat` summarises its finished chats and recalls them in new
@@ -890,6 +919,7 @@ struct Config {
     ToolsConfig tools;
     KnowledgeConfig knowledge;
     MemoryConfig memory;
+    AttachmentsConfig attachments;
     UiConfig ui;
     TrainingConfig training;
 

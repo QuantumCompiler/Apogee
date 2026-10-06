@@ -3,8 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
@@ -13,6 +17,12 @@
 
 namespace apogee::commands {
 namespace {
+
+/// What follows `/attach`'s path (27p): the method, for this attach alone.
+constexpr std::array kAttachFlags{
+    ChatFlagSpec{"graph", "Whether a folder's code graph is built: code or off",
+                 ArgumentValues::GraphMethods},
+};
 
 constexpr std::array kCommands{
     ChatCommandSpec{"help", ChatVerb::Help, "", "List these commands"},
@@ -48,8 +58,9 @@ constexpr std::array kCommands{
     ChatCommandSpec{"check", ChatVerb::Check, "",
                     "Have the suite's verifier check the last answer, once"},
     ChatCommandSpec{"attach", ChatVerb::Attach, "<path>",
-                    "Attach a file, folder or glob: inlined when it fits, retrieved when not",
-                    ArgumentValues::Paths},
+                    "Attach a file, folder or glob: inlined when it fits, retrieved when not "
+                    "(then --graph=code|off)",
+                    ArgumentValues::Paths, kAttachFlags},
     ChatCommandSpec{"attachments", ChatVerb::Attachments, "", "List what is attached"},
     ChatCommandSpec{"detach", ChatVerb::Detach, "<name>", "Detach an attachment",
                     ArgumentValues::AttachmentNames},
@@ -287,8 +298,141 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
             choices = sources.suites;
             choices.push_back({std::string{harness::kSuiteOff}, "No suite: the global pointers"});
             break;
+        case ArgumentValues::GraphMethods:
+            for (const std::string_view name : harness::attachment_graph_method_names()) {
+                choices.push_back(
+                    {std::string{name},
+                     harness::attachment_graph_method_from_string(name) ==
+                             harness::AttachmentGraphMethod::Code
+                         ? "Parse a folder of code into the chat's code graph, with no model"
+                         : "Index its chunks alone, with no code graph"});
+            }
+            break;
     }
     return choices;
+}
+
+/// Where the flags begin in a path argument (27p), when the cursor is past
+/// the path: after its closing quote and a space; in an open quote, at the
+/// first word starting `-`; unquoted, at the first word after a space that
+/// starts `-`, or -- with none -- at the cursor when a space is just behind
+/// it. Nullopt while the cursor is still in the path, so an unquoted path
+/// with a space completes as it always has.
+std::optional<std::size_t> flags_begin(std::string_view typed) {
+    const auto first_dash_word = [&typed]() -> std::optional<std::size_t> {
+        for (std::size_t at = 1; at < typed.size(); ++at) {
+            if (typed[at] == '-' && is_space(typed[at - 1])) {
+                return at;
+            }
+        }
+        return std::nullopt;
+    };
+    if (typed.starts_with('"')) {
+        const std::size_t close = typed.find('"', 1);
+        if (close == std::string_view::npos) {
+            return first_dash_word();
+        }
+        if (close + 1 < typed.size() && is_space(typed[close + 1])) {
+            return close + 1;
+        }
+        return std::nullopt;
+    }
+    if (typed.find_first_of(" \t") == std::string_view::npos) {
+        return std::nullopt;
+    }
+    if (const std::optional<std::size_t> dash = first_dash_word(); dash.has_value()) {
+        return dash;
+    }
+    if (is_space(typed.back())) {
+        return typed.size();
+    }
+    return std::nullopt;
+}
+
+/// The words of `text`, split at spaces and tabs.
+std::vector<std::string_view> words_in(std::string_view text) {
+    std::vector<std::string_view> out;
+    for (std::size_t at = 0; at < text.size();) {
+        while (at < text.size() && is_space(text[at])) {
+            ++at;
+        }
+        const std::size_t end = std::min(text.find_first_of(" \t", at), text.size());
+        if (end > at) {
+            out.push_back(text.substr(at, end - at));
+        }
+        at = end;
+    }
+    return out;
+}
+
+/// The flag of `spec` named `name` (without its `--`), or null.
+const ChatFlagSpec* find_flag(const ChatCommandSpec& spec, std::string_view name) {
+    for (const ChatFlagSpec& flag : spec.flags) {
+        if (flag.name == name) {
+            return &flag;
+        }
+    }
+    return nullptr;
+}
+
+/// `flag`'s values that start with `typed`, each written after `lead` --
+/// `--graph=` when the value follows the flag's own `=`, nothing when it is
+/// a word of its own.
+std::vector<Suggestion> value_candidates(const ChatFlagSpec* flag, std::string_view typed,
+                                         const std::string& lead,
+                                         const ChatCompletionSources& sources) {
+    std::vector<Suggestion> out;
+    if (flag == nullptr) {
+        return out;
+    }
+    for (NamedChoice& choice : argument_choices(flag->values, sources)) {
+        if (choice.name.starts_with(typed)) {
+            out.push_back({lead + choice.name, {}, std::move(choice.description)});
+        }
+    }
+    return out;
+}
+
+/// The flags of `spec` for the text from `begin` to the cursor (27p): a
+/// flag's values after `--name ` or `--name=`, else the flags not yet given
+/// that start with the word at the cursor.
+Suggestions complete_flags(std::string_view before, std::size_t begin, const ChatCommandSpec& spec,
+                           const ChatCompletionSources& sources) {
+    Suggestions out;
+    const std::string_view part = before.substr(begin);
+    const std::size_t space = part.find_last_of(" \t");
+    const std::size_t word = space == std::string_view::npos ? 0 : space + 1;
+    const std::string_view current = part.substr(word);
+    const std::vector<std::string_view> earlier = words_in(part.substr(0, word));
+    out.from = begin + word;
+    // `--graph off`: the value, as its own word.
+    if (!earlier.empty() && earlier.back().starts_with("--") &&
+        earlier.back().find('=') == std::string_view::npos) {
+        out.candidates =
+            value_candidates(find_flag(spec, earlier.back().substr(2)), current, {}, sources);
+        return out;
+    }
+    // `--graph=of`: the value, after the flag's own `=`.
+    if (const std::size_t equals = current.find('=');
+        current.starts_with("--") && equals != std::string_view::npos) {
+        out.candidates = value_candidates(find_flag(spec, current.substr(2, equals - 2)),
+                                          current.substr(equals + 1),
+                                          std::string{current.substr(0, equals + 1)}, sources);
+        return out;
+    }
+    // The flags not yet given -- on an empty word, or the start of one: a
+    // word that is not a flag's start matches none.
+    for (const ChatFlagSpec& flag : spec.flags) {
+        const std::string name = "--" + std::string{flag.name};
+        const std::string text = name + "=";
+        const bool given = std::ranges::any_of(earlier, [&](std::string_view earlier_word) {
+            return earlier_word == name || earlier_word.starts_with(text);
+        });
+        if (!given && std::string_view{text}.starts_with(current)) {
+            out.candidates.push_back({text, {}, std::string{flag.description}});
+        }
+    }
+    return out;
 }
 
 }  // namespace
@@ -438,6 +582,12 @@ Suggestions suggest_chat_input(std::string_view before_cursor,
         ++from;
     }
     const std::string_view typed = before_cursor.substr(from);
+    // Past a path argument, its flags (27p).
+    if (spec->values == ArgumentValues::Paths && !spec->flags.empty()) {
+        if (const std::optional<std::size_t> begin = flags_begin(typed); begin.has_value()) {
+            return complete_flags(before_cursor, from + *begin, *spec, sources);
+        }
+    }
     if (spec->values == ArgumentValues::Paths) {
         // The `@` completer's own logic, on the argument as if `@` led it.
         const std::string as_mention = "@" + std::string{typed};

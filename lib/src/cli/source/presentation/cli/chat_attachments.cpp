@@ -255,8 +255,18 @@ std::vector<harness::ContentPart> ChatAttachments::native_media(
     return parts;
 }
 
+GraphMethod ChatAttachments::graph_method(
+    std::optional<harness::AttachmentGraphMethod> flag) const {
+    return resolve_graph_method(flag, harness_.config().attachments.graph, hooks_.built_in_graph);
+}
+
 bool ChatAttachments::attach(std::string_view spec,
                              const std::filesystem::path& working_directory) {
+    return attach(spec, working_directory, graph_method());
+}
+
+bool ChatAttachments::attach(std::string_view spec, const std::filesystem::path& working_directory,
+                             const GraphMethod& method) {
     agentloop::FoundFiles found = agentloop::find_attachment_files(spec, working_directory);
     if (!found.error.empty()) {
         hooks_.say(found.error, true);
@@ -289,9 +299,32 @@ bool ChatAttachments::attach(std::string_view spec,
             return false;
         }
     }
-    const std::string summary = "attaching " + std::string{spec} + " (" +
-                                files_of(found.files.size()) + ", " + size_of(found.bytes) + ")";
-    std::optional<AttachmentGraphJob> graph = graph_job(spec, working_directory, walked);
+    // A folder -- never one file, never a glob (no folder is named by one) --
+    // is the only attach a graph method changes anything for (27n).
+    std::optional<SourceFolder> folder;
+    {
+        std::filesystem::path root{std::string{spec}};
+        if (root.is_relative()) {
+            root = working_directory / root;
+        }
+        root = root.lexically_normal();
+        std::error_code code;
+        if (std::filesystem::is_directory(root, code)) {
+            std::vector<std::string> files = source_files_under(walked, root);
+            const bool offers = offers_code(files);
+            folder =
+                SourceFolder{.root = std::move(root), .files = std::move(files), .code = offers};
+        }
+    }
+    std::string summary = "attaching " + std::string{spec} + " (" + files_of(found.files.size()) +
+                          ", " + size_of(found.bytes) + ")";
+    // Which method, and what chose it, when the built-in did not (27p) --
+    // said where it matters: a folder of code.
+    if (const std::string note = graph_method_note(method);
+        !note.empty() && folder.has_value() && folder->code) {
+        summary += " -- " + note;
+    }
+    std::optional<AttachmentGraphJob> graph = graph_job(spec, std::move(folder), method.method);
     {
         const std::scoped_lock lock{mutex_};
         queue_.push_back(Queued{.name = std::string{spec},
@@ -331,28 +364,21 @@ std::set<std::string> ChatAttachments::graph_members_but(const std::string& name
 }
 
 std::optional<AttachmentGraphJob> ChatAttachments::graph_job(
-    std::string_view spec, const std::filesystem::path& working_directory,
-    const std::vector<agentloop::FoundFile>& files) {
+    std::string_view spec, std::optional<SourceFolder> folder,
+    harness::AttachmentGraphMethod method) {
     const std::string name{spec};
     const std::optional<std::string> prior = graph_label_of(name);
     AttachmentGraphJob job;
     job.name = name;
     job.keep = graph_members_but(name);
-    // A folder -- never one file, never a glob (no folder is named by one) --
-    // whose files include a language a vendored grammar parses.
+    // A folder whose files include a language a vendored grammar parses,
+    // with the method `code`. `off` builds nothing and forgets an earlier
+    // graph of the folder, saying nothing of one -- honest by construction.
     job.build = false;
-    if (hooks_.code_graph) {
-        std::filesystem::path root{std::string{spec}};
-        if (root.is_relative()) {
-            root = working_directory / root;
-        }
-        root = root.lexically_normal();
-        std::error_code code;
-        if (std::filesystem::is_directory(root, code)) {
-            job.files = source_files_under(files, root);
-            job.build = offers_code(job.files);
-            job.root = std::move(root);
-        }
+    if (method == harness::AttachmentGraphMethod::Code && folder.has_value()) {
+        job.build = folder->code;
+        job.files = std::move(folder->files);
+        job.root = std::move(folder->root);
     }
     if (!job.build && !prior.has_value()) {
         return std::nullopt;  // nothing to build, and nothing built before
@@ -1043,6 +1069,160 @@ void ChatAttachments::save() const {
     if (hooks_.save) {
         logger::save(session_);
     }
+}
+
+GraphMethod resolve_graph_method(std::optional<harness::AttachmentGraphMethod> flag,
+                                 std::optional<harness::AttachmentGraphMethod> config,
+                                 harness::AttachmentGraphMethod built_in) {
+    if (flag.has_value()) {
+        return GraphMethod{.method = *flag, .from = GraphMethodSource::Flag};
+    }
+    if (config.has_value()) {
+        return GraphMethod{.method = *config, .from = GraphMethodSource::Config};
+    }
+    return GraphMethod{.method = built_in, .from = GraphMethodSource::BuiltIn};
+}
+
+std::string graph_method_note(const GraphMethod& method) {
+    const std::string word{harness::to_string(method.method)};
+    const std::string what = method.method == harness::AttachmentGraphMethod::Code
+                                 ? "with its code graph"
+                                 : "without its code graph";
+    switch (method.from) {
+        case GraphMethodSource::BuiltIn:
+            return {};
+        case GraphMethodSource::Config:
+            return what + " (attachments.graph: " + word + " in the config)";
+        case GraphMethodSource::Flag:
+            return what + " (--graph=" + word + ")";
+    }
+    return {};
+}
+
+namespace {
+
+/// The words of `text`, split at spaces and tabs.
+[[nodiscard]] std::vector<std::string> words_of(std::string_view text) {
+    std::vector<std::string> out;
+    std::size_t at = 0;
+    while (at < text.size()) {
+        const std::size_t start = text.find_first_not_of(" \t", at);
+        if (start == std::string_view::npos) {
+            break;
+        }
+        const std::size_t end = std::min(text.find_first_of(" \t", start), text.size());
+        out.emplace_back(text.substr(start, end - start));
+        at = end;
+    }
+    return out;
+}
+
+/// Where the first word starting `--` begins in `text` -- at the start or
+/// after a space or a tab -- or npos.
+[[nodiscard]] std::size_t first_flag(std::string_view text) {
+    for (std::size_t at = text.find("--"); at != std::string_view::npos;
+         at = text.find("--", at + 1)) {
+        if (at == 0 || text[at - 1] == ' ' || text[at - 1] == '\t') {
+            return at;
+        }
+    }
+    return std::string_view::npos;
+}
+
+[[nodiscard]] std::string trimmed(std::string_view text) {
+    const std::size_t first = text.find_first_not_of(" \t");
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    const std::size_t last = text.find_last_not_of(" \t");
+    return std::string{text.substr(first, last - first + 1)};
+}
+
+}  // namespace
+
+namespace {
+
+/// An `/attach` argument split into its path and what follows it, or why it
+/// cannot be.
+struct PathAndFlags {
+    std::string spec;
+    std::string_view flags;
+    std::string error;
+};
+
+/// The path, first: quoted when it holds a space -- `"my notes/" --graph off`
+/// -- else everything before the first `--` word, so an unquoted path with a
+/// space still reads as one. An open quote, which completion leaves on a
+/// folder, reads as no quote.
+[[nodiscard]] PathAndFlags split_path(std::string_view argument) {
+    PathAndFlags out;
+    if (argument.starts_with('"') && argument.find('"', 1) != std::string_view::npos) {
+        const std::size_t close = argument.find('"', 1);
+        out.spec = std::string{argument.substr(1, close - 1)};
+        out.flags = argument.substr(close + 1);
+        if (!out.flags.empty() && out.flags.front() != ' ' && out.flags.front() != '\t') {
+            out.error = "nothing may follow the path's closing quote but a space -- " +
+                        std::string{kAttachShape};
+        }
+        return out;
+    }
+    std::string_view rest = argument;
+    if (rest.starts_with('"')) {
+        rest.remove_prefix(1);
+    }
+    const std::size_t at = first_flag(rest);
+    if (at == 0) {
+        out.error = "the path comes first -- " + std::string{kAttachShape};
+        return out;
+    }
+    out.spec = trimmed(rest.substr(0, at));
+    out.flags = at == std::string_view::npos ? std::string_view{} : rest.substr(at);
+    return out;
+}
+
+}  // namespace
+
+AttachArgument parse_attach_argument(std::string_view argument) {
+    AttachArgument out;
+    const auto refuse = [&out](std::string why) {
+        out.error = std::move(why);
+        out.spec.clear();
+        out.graph.reset();
+        return out;
+    };
+    PathAndFlags split = split_path(argument);
+    if (!split.error.empty()) {
+        return refuse(std::move(split.error));
+    }
+    out.spec = std::move(split.spec);
+    const std::vector<std::string> words = words_of(split.flags);
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        const std::string& word = words[i];
+        if (!word.starts_with("--")) {
+            return refuse("'" + word + "' after the path is not a flag -- " +
+                          std::string{kAttachShape});
+        }
+        const std::size_t equals = word.find('=');
+        const std::string name =
+            word.substr(2, equals == std::string::npos ? std::string::npos : equals - 2);
+        if (name != "graph") {
+            return refuse("unknown flag '--" + name + "' -- " + std::string{kAttachShape});
+        }
+        if (out.graph.has_value()) {
+            return refuse("--graph is given twice -- " + std::string{kAttachShape});
+        }
+        std::string value;
+        if (equals != std::string::npos) {
+            value = word.substr(equals + 1);
+        } else if (i + 1 < words.size()) {
+            value = words[++i];
+        }
+        out.graph = harness::attachment_graph_method_from_string(value);
+        if (!out.graph.has_value()) {
+            return refuse(harness::attachment_graph_values_message("--graph", value));
+        }
+    }
+    return out;
 }
 
 std::vector<std::string> mentioned_paths(std::string_view message) {
