@@ -1638,10 +1638,14 @@ TEST_CASE("attachments.graph off its set, or on a line the editor cannot see int
     CHECK_THROWS_AS(apogee::harness::edit_config_file(
                         path, [](std::string_view c) { return set_attachments_graph(c, "tree"); }),
                     ConfigEditError);
-    std::ifstream in(path, std::ios::binary);
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    CHECK(buffer.str() == std::string{kCommented});
+    {
+        // Closed before the next edit: on Windows a file held open cannot be
+        // replaced, and the rename that lands an edit fails "access denied".
+        std::ifstream in(path, std::ios::binary);
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        CHECK(buffer.str() == std::string{kCommented});
+    }
     // And a good edit lands, read back by the loader.
     apogee::harness::edit_config_file(
         path, [](std::string_view c) { return set_attachments_graph(c, "off"); });

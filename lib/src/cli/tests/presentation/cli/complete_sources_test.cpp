@@ -29,6 +29,7 @@
 #include "machine/json_reporter.h"
 #include "models/quantize.h"
 #include "modelstore/store.h"
+#include "platform/child_process.h"
 #include "secrets/resolve.h"
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
@@ -546,13 +547,24 @@ TEST_CASE("symphonies edit offers names, delete only config entries",
         CHECK(run_apogee({"--config", config_path.string(), "symphonies", "delete", name}) == 1);
     }
     // An editor that changes nothing: each name is found, nothing written.
+    // Where this build starts no child (Windows: run_foreground, like
+    // start_child, has no implementation there yet) each name is still
+    // found -- edit gets as far as the editor and says it cannot open one.
     const apogee::testing::EnvGuard editor{"EDITOR", "true"};
+    const bool editors_run = apogee::platform::supports_child_processes();
     for (const std::string& name : named.names) {
         INFO(name);
         std::string said;
-        CHECK(run_apogee({"--config", config_path.string(), "symphonies", "edit", name}, &said) ==
-              0);
-        CHECK(said.find("no change") != std::string::npos);
+        const int status =
+            run_apogee({"--config", config_path.string(), "symphonies", "edit", name}, &said);
+        INFO(said);
+        if (editors_run) {
+            CHECK(status == 0);
+            CHECK(said.find("no change") != std::string::npos);
+        } else {
+            CHECK(status == 1);
+            CHECK(said.find("could not open the editor") != std::string::npos);
+        }
     }
     for (const std::string& name : entries) {
         CHECK(run_apogee({"--config", config_path.string(), "symphonies", "delete", name}) == 0);

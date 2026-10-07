@@ -78,11 +78,15 @@ Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()
     impl_->connection.reset(raw);
     sqlite3* handle = impl_->connection.get();
 
-    // WAL so a reader during an ingest is not blocked, and a busy timeout so a
-    // concurrent `apogee embed` waits rather than failing outright.
+    // A busy timeout so a concurrent `apogee embed` waits rather than failing
+    // outright -- set FIRST: the WAL pragma already reads the file, and the
+    // last connection to close a WAL database checkpoints it under the file's
+    // exclusive lock, so an open landing in that window (the plane listing a
+    // graph a job's store was just closing) failed "database is locked" at
+    // once. WAL so a reader during an ingest is not blocked.
+    sqlite3_busy_timeout(handle, 5000);
     exec(handle, "PRAGMA journal_mode=WAL");
     exec(handle, "PRAGMA foreign_keys=ON");
-    sqlite3_busy_timeout(handle, 5000);
 
     // --- migrations, in ONE transaction ------------------------------------
     //

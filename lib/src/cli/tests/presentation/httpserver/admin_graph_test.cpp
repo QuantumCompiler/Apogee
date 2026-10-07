@@ -575,7 +575,10 @@ TEST_CASE(
     CHECK(summary.transient.response_schema.empty());
     CHECK(summary.messages.front().content.plain_text().find("corpus analyst") !=
           std::string::npos);
+    // Straight after the job: its store may still be closing (2026-10-07,
+    // windows-arm64 answered 500 here -- embedstore/store.cpp's busy timeout).
     response = fixture.list_communities("notes");
+    INFO(response.body);
     REQUIRE(response.status == 200);
     const nlohmann::json listed = parsed(response)["data"];
     REQUIRE(listed.size() == 1);

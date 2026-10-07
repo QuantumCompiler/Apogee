@@ -29,8 +29,11 @@ struct Tree {
 
     Tree() {
         std::filesystem::create_directories(config.parent_path());
-        std::ofstream{config} << "# my config\nmodels:\n  default: l3b  # kept\n\nbackends:\n"
-                                 "  l3b:\n    type: mock\n";
+        // Binary: a text-mode stream writes CRLF on Windows, the editor keeps
+        // a CRLF file CRLF, and the cases below look for LF bytes.
+        std::ofstream{config, std::ios::binary}
+            << "# my config\nmodels:\n  default: l3b  # kept\n\nbackends:\n"
+               "  l3b:\n    type: mock\n";
     }
 
     [[nodiscard]] std::string bytes() const {

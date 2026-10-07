@@ -322,8 +322,12 @@ TEST_CASE("a custom config file off the layout's shape is refused, naming the sh
     const apogee::harness::CustomRoot loose = apogee::harness::custom_root(root / "mine.yaml");
     CHECK(loose.root.empty());
     CHECK(says(loose.error, "<root>/config/<file>"));
-    // And where it would have to sit to root what it seems to mean.
-    CHECK(says(loose.error, (root / "config" / "mine.yaml").string()));
+    // And where it would have to sit to root what it seems to mean, spelled
+    // as the refusal spells it: absolute and lexically normal. `root` alone
+    // is not always that -- on Windows libc++ makes "/elsewhere" absolute as
+    // "C:/elsewhere", so appending gives "C:/elsewhere\config\mine.yaml",
+    // which normal form writes with one separator throughout.
+    CHECK(says(loose.error, (root / "config" / "mine.yaml").lexically_normal().string()));
 
     const apogee::testing::TempDir directory{"paths-custom-dir-" +
                                              std::to_string(std::random_device{}())};

@@ -31,7 +31,7 @@
 /// tokenizer's markers, stop strings, the sampling and the thinking switch
 /// passed as sent, a cancel that leaves the model loaded, closed stdin as
 /// the end, and the fatal errors naming their fix. Skipped by name on a host
-/// with no python3.
+/// with no python3, or one that cannot start a child (Windows).
 namespace {
 
 using nlohmann::json;
@@ -236,8 +236,14 @@ std::size_t count(const std::vector<std::string>& lines, const std::string& pref
     return n;
 }
 
+// Both halves, as training's script cases ask them: python3 is on PATH on
+// the Windows runner images, while child_process cannot start it there, so
+// the interpreter alone let every case below reach start_child and fail.
 #define REQUIRE_PYTHON()                                               \
     do {                                                               \
+        if (!apogee::platform::supports_child_processes()) {           \
+            SKIP("no child processes on this platform");               \
+        }                                                              \
         if (python3().empty()) {                                       \
             SKIP("no python3 on PATH: the driver's suite cannot run"); \
         }                                                              \

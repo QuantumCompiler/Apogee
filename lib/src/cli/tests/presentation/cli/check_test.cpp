@@ -1857,8 +1857,16 @@ namespace {
 
 /// A fake MLX runtime in the install (27a): mlx-lm's package files in the
 /// environment, and a model directory -- files only, as the doctor reads them.
+///
+/// The environment is laid out as Apple silicon lays it out, `bin/python`,
+/// where the MLX probe looks on the one target it runs on: these cases
+/// inject that target whatever the build is, as `mlx_local_test`'s runtime
+/// does. The build's own interpreter is written too, so the Training
+/// section reads the same environment on every platform -- on Windows that
+/// one is `Scripts/python.exe`, which no MLX host has.
 void write_fake_mlx_runtime(const Install& install) {
     write_fake_interpreter(install);
+    install.write("training/venv/bin/python", "#!fake");
     install.write("training/venv/lib/python3.14/site-packages/mlx_lm/__init__.py", "");
     install.write("training/venv/lib/python3.14/site-packages/mlx_lm/_version.py",
                   "__version__ = '0.32.0'\n");

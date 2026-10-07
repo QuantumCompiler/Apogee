@@ -2114,6 +2114,23 @@ Asked for directly (Taylor), in three reports: "Not all subcommands have tab aut
 - **The dispatch itself.** GitHub reads a dispatch's inputs from the default branch, so `publish` exists once this is merged. The first merge after it should publish exactly as before. A real re-cut is the user's to run, since it publishes.
 - **`make pr-ci`.** It was not run; the pull-request jobs it rehearses are unchanged.
 
+### 2026-10-06 — v0.1.4's first pull-request run: seven Windows assumptions, one of them a product bug
+
+**Why.** The pull request's CI ([run 37560719269](https://github.com/QuantumCompiler/Apogee/actions/runs/37560719269)) was the first time any of v0.1.4 ran on Linux or Windows. Linux and macOS passed; `unit tests windows-x64` (MinGW-w64 GCC, libstdc++) failed 24 cases and `unit tests windows-arm64` (MSYS2's CLANGARM64: Clang, **libc++**) 26. Each cause was found from the log and fixed blind -- nothing runs a Windows binary here -- with the two that could be recreated on the Mac (a CRLF config file, an interpreter at `Scripts/python.exe`) failing there exactly as on CI before the fix.
+
+**What was fixed**
+
+- [x] **The MLX driver suite skips where no child process starts** (17 cases): its guard asked only for `python3`, which the runners have; `platform::supports_child_processes()` is false on Windows, and the suite now asks it first, as the training drivers' do. No other test new on this branch starts a child unguarded.
+- [x] **The doctor's MLX fixture lays its venv out as MLX does** (4 cases): the cases pretend a `macos-arm64` host, whose check reads `venv/bin/python`, but the fixture wrote the build platform's `Scripts\python.exe`. On a real Windows host the doctor is right as it is (the MLX runtime skipped, an `mlx` entry warning with the platform named).
+- [x] **`symphonies edit`'s completion contract on Windows**: `$EDITOR` goes through `platform::run_foreground`, which Windows does not implement; there the test expects the refusal (`could not open the editor`), still proving every offered name is found.
+- [x] **Fixtures written binary**: a scaffold test wrote its config in text mode, so on Windows it was CRLF -- which the editor rightly kept -- and the test searched for LF.
+- [x] **A stream closed before an atomic replace**: a config-edit test held `config.yaml` open across the next edit, and Windows will not replace an open file ("Permission denied").
+- [x] **A path compared as the code spells it** (arm64 only): libc++ makes the root-relative `/elsewhere` absolute as `C:/elsewhere`, which the refusal message then normalises; libstdc++ asks Windows and gets `C:\elsewhere` -- why x64 passed.
+- [x] **The product bug: an embedding store's open set its busy timeout too late** (`embedstore/store.cpp`). The WAL pragma ran before `sqlite3_busy_timeout`, so an open landing while another connection's last close checkpointed the file under its exclusive lock failed "database is locked" at once -- the arm64 run's `500` from the admin plane's communities list right after a job (inferred: the body was not printed; `admin_graph_test` now prints it). The timeout is set first, so such an open waits up to 5 s on every platform; a new `store_test` case failed "database is locked" before the fix. The test passed on Windows through v0.1.3 -- an intermittent timing failure, not a regression of this branch.
+
+**Verified.** The full suite on macOS, 2912/2912; `format-check`; the GCC check, all 537 files with the MinGW-w64 compiler the x64 job uses. Nothing local compiles the arm64 job's libc++ side; the next pull-request run is the proof for both Windows jobs.
+
+
 ## Milestone L — The vendor-CLI family
 
 **Goal.** A fifth backend and, more importantly, the machinery the rest of the vendor-CLI family will be built on: Claude driven through the official `claude` CLI as a **long-lived child process** — the subscription-auth path beside the API-key path from Milestone D. It reuses that backend's IR mapping and typed sinks and none of its HTTP: this one speaks JSONL over pipes.
