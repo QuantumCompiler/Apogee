@@ -2,14 +2,91 @@
 
 #include <algorithm>
 #include <exception>
+#include <optional>
 #include <utility>
 
 #include "contracts/errors.h"
+#include "contracts/utf8.h"
 #include "harness/context_windows.h"
 #include "harness/roles.h"
 
 namespace apogee::harness {
 namespace {
+
+/// Makes `text` UTF-8 in place. Whether it had to.
+bool repair(std::string& text) {
+    if (is_valid_utf8(text)) {
+        return false;
+    }
+    text = valid_utf8(text);
+    return true;
+}
+
+/// Whether everything `message` says is UTF-8 already.
+[[nodiscard]] bool is_text(const ChatMessage& message) {
+    const std::vector<ContentPart>& parts = message.content.parts();
+    const bool content =
+        parts.empty() ? is_valid_utf8(message.content.plain_text())
+                      : std::ranges::all_of(parts, [](const ContentPart& part) {
+                            return part.kind != ContentPart::Kind::Text || is_valid_utf8(part.text);
+                        });
+    return content && is_valid_utf8(message.tool_call_id) && is_valid_utf8(message.name) &&
+           std::ranges::all_of(message.tool_calls, [](const ToolCall& call) {
+               return is_valid_utf8(call.id) && is_valid_utf8(call.name) &&
+                      is_valid_utf8(call.arguments);
+           });
+}
+
+/// Makes everything `message` says UTF-8: its text, each text part of a
+/// multi-part one, its tool calls. Nothing is rebuilt that did not need
+/// mending, so a well-formed message is left exactly as it was.
+void mend(ChatMessage& message) {
+    if (message.content.parts().empty()) {
+        if (std::string text = message.content.plain_text(); repair(text)) {
+            message.content = std::move(text);
+        }
+    } else {
+        std::vector<ContentPart> parts = message.content.parts();
+        bool mended = false;
+        for (ContentPart& part : parts) {
+            if (part.kind == ContentPart::Kind::Text) {
+                mended = repair(part.text) || mended;
+            }
+        }
+        if (mended) {
+            message.content = MessageContent::from_parts(std::move(parts));
+        }
+    }
+    (void)repair(message.tool_call_id);
+    (void)repair(message.name);
+    for (ToolCall& call : message.tool_calls) {
+        (void)repair(call.id);
+        (void)repair(call.name);
+        (void)repair(call.arguments);
+    }
+}
+
+/// `request` mended, when any of its messages holds anything that is not
+/// UTF-8; nothing -- and nothing copied -- in the ordinary case, when every
+/// one already is. Every backend serializes a request with a strict dump, and
+/// its text comes from everywhere: the user, a file, an attachment,
+/// retrieved excerpts.
+[[nodiscard]] std::optional<ChatRequest> mended(const ChatRequest& request) {
+    if (std::ranges::all_of(request.messages, is_text)) {
+        return std::nullopt;
+    }
+    ChatRequest copy = request;
+    for (ChatMessage& message : copy.messages) {
+        mend(message);
+    }
+    return copy;
+}
+
+/// `response` with everything the model wrote in it UTF-8.
+[[nodiscard]] ChatResponse as_text(ChatResponse response) {
+    mend(response.message);
+    return response;
+}
 
 std::string join_names(const std::vector<std::string>& names) {
     std::string out;
@@ -218,16 +295,56 @@ void Harness::set_active_suite(std::string suite) {
 
 ChatResponse Harness::chat(const ChatRequest& request,
                            const CancellationToken& cancellation) const {
-    return route(request.model).chat(request, cancellation);
+    const std::optional<ChatRequest> sent = mended(request);
+    return as_text(route(request.model).chat(sent.has_value() ? *sent : request, cancellation));
 }
 
 ChatResponse Harness::stream_chat(const ChatRequest& request, const StreamOptions& options) const {
-    return route(request.model).stream_chat(request, options);
+    // One stream each for the answer and the reasoning, so each sink is
+    // handed whole characters. A sink the caller left unset stays unset: a
+    // provider may stream only when asked to.
+    Utf8Stream answer;
+    Utf8Stream thinking;
+    const auto say = [](const auto& sink, const std::string& text) {
+        if (!text.empty()) {
+            sink(text);
+        }
+    };
+    StreamOptions whole = options;
+    if (options.on_thinking) {
+        whole.on_thinking = [&](std::string_view piece) {
+            say(options.on_thinking, thinking.feed(piece));
+        };
+    }
+    if (options.on_token) {
+        whole.on_token = [&](std::string_view piece) {
+            // The answer begun, the reasoning is over: its unfinished
+            // character is said now, so a surface still shows reasoning
+            // before answer. An empty piece begins nothing.
+            if (!piece.empty() && options.on_thinking) {
+                say(options.on_thinking, thinking.flush());
+            }
+            say(options.on_token, answer.feed(piece));
+        };
+    }
+    const std::optional<ChatRequest> sent = mended(request);
+    ChatResponse response =
+        route(request.model).stream_chat(sent.has_value() ? *sent : request, whole);
+    // A stream that ended inside a character ends in U+FFFD, said as its
+    // last piece -- the same text the response and history keep.
+    if (options.on_thinking) {
+        say(options.on_thinking, thinking.flush());
+    }
+    if (options.on_token) {
+        say(options.on_token, answer.flush());
+    }
+    return as_text(std::move(response));
 }
 
 ChatResponse Harness::complete(const ChatRequest& request,
                                const CancellationToken& cancellation) const {
-    return route(request.model).complete(request, cancellation);
+    const std::optional<ChatRequest> sent = mended(request);
+    return as_text(route(request.model).complete(sent.has_value() ? *sent : request, cancellation));
 }
 
 std::vector<ModelInfo> Harness::list_all_models(const CancellationToken& cancellation) const {

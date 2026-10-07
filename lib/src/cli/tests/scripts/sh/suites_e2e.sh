@@ -85,6 +85,7 @@ echo "$PLAIN" | grep -qx "utility: (unset -- the chat's own backend)" \
 OFFERED=$("$APOGEE_BIN" __complete chat --suite "" 2>/dev/null)
 echo "$OFFERED" | grep -q "research" || fail "--suite does not complete the suites: $OFFERED"
 echo "$OFFERED" | grep -q "fast" || fail "--suite does not complete every suite: $OFFERED"
+echo "$OFFERED" | grep -qx "off" || fail "chat --suite does not complete off, which it takes: $OFFERED"
 
 session_of() {  # the one session file whose JSON carries $1
     grep -l "$1" "$APOGEE_HOME"/sessions/*.json 2>/dev/null | head -n 1

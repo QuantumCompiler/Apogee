@@ -433,6 +433,17 @@ stream_check "$WORK_DIR/unhalted.jsonl" "$(ledger "$HALTED")" "$WORK_DIR/unhalte
 # --- completion offers the tasks -----------------------------------------------------
 OFFERED=$("$APOGEE_BIN" __complete task status "" </dev/null 2>/dev/null)
 echo "$OFFERED" | grep -q "$CYCLE" || fail "task ids are not offered: $OFFERED"
+# A finished task is nothing to halt, cancel or resume, so none offers it.
+for verb in halt cancel resume; do
+    OFFERED=$("$APOGEE_BIN" __complete task "$verb" "" </dev/null 2>/dev/null)
+    echo "$OFFERED" | grep -q "$HALTED" && fail "task $verb offers the finished $HALTED: $OFFERED"
+done
+# Resume offers the stalled task in the folder it was started in, and
+# nothing from any other folder -- where resume would refuse it.
+OFFERED=$("$APOGEE_BIN" __complete task resume "" </dev/null 2>/dev/null)
+echo "$OFFERED" | grep -q "$STALLED" || fail "task resume does not offer $STALLED: $OFFERED"
+OFFERED=$(cd "$WORK_DIR" && "$APOGEE_BIN" __complete task resume "" </dev/null 2>/dev/null)
+[ -z "$OFFERED" ] || fail "task resume offers tasks started in another folder: $OFFERED"
 
 "$APOGEE_BIN" check </dev/null >"$WORK_DIR/check.txt" 2>&1 || fail "check after the tasks: $(cat "$WORK_DIR/check.txt")"
 echo "task lifecycle OK"

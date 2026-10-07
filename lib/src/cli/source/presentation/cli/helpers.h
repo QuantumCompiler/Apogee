@@ -264,6 +264,10 @@ inline constexpr std::size_t kFetchMaxBodyBytes = std::size_t{5} * 1024 * 1024;
 /// system prompt, then any extra context, then the user's prompt with its
 /// attachments. Context before the prompt because a model weights the last
 /// message most, and the prompt is what it should be answering.
+///
+/// Each text is made UTF-8 (`contracts/utf8.h`) on its way in -- a chat's
+/// typed line, `complete`'s prompt, context and system prompt -- since what
+/// was read is not always text, and history and requests are strict JSON.
 [[nodiscard]] std::vector<harness::ChatMessage> build_messages(
     const std::string& system_prompt, const std::string& context, const std::string& prompt,
     const std::vector<harness::ContentPart>& attachments);

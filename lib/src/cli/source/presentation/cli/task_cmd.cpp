@@ -30,6 +30,7 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/utf8.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
 #include "logger/operational.h"
@@ -497,14 +498,8 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
             fail_user(error);
         }
         task = std::move(*loaded);
-        if (const std::string refused = tasks::resume_refusal(task); !refused.empty()) {
+        if (const std::string refused = task_resume_refusal(task, here); !refused.empty()) {
             fail_user(refused);
-        }
-        // A task's tools work where it was started; resumed anywhere else,
-        // its files would be written in one place and checked in another.
-        if (real_folder(task.working_directory) != here) {
-            fail_user("task " + task.id + " was started in " + task.working_directory +
-                      " and resumes only there -- cd there first");
         }
         try {
             logger::LoadedSession loaded_session = logger::load(task.session_id, known);
@@ -521,9 +516,14 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
         }
     } else {
         task.id = task_id;
-        task.goal = flags.goal;
+        // The goal and the text a round must contain are kept as text: the
+        // ledger is a strict JSON dump, and a round's answer is UTF-8 (the
+        // Harness's), so a check against the bytes as typed could never pass.
+        // A --require-file path stays as given -- it names a file on disk.
+        task.goal = harness::valid_utf8(flags.goal);
         for (const std::string& text : flags.require) {
-            task.checks.push_back(tasks::Check{.kind = tasks::CheckKind::Require, .value = text});
+            task.checks.push_back(tasks::Check{.kind = tasks::CheckKind::Require,
+                                               .value = harness::valid_utf8(text)});
         }
         for (const std::string& path : flags.require_files) {
             // Absolute where the task starts, so a check reads exactly the
@@ -539,7 +539,7 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
         session.chat_id = logger::new_chat_id();
         task.session_id = session.chat_id;
         session.task = task.id;
-        session.title = sanitize_title("task: " + flags.goal);
+        session.title = sanitize_title("task: " + task.goal);
     }
 
     // --- the session's providers, as `chat` builds them ------------------------
@@ -903,14 +903,23 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     }
 }
 
+/// Why `task <verb>` refuses `task`, which `task_stoppable` turned down.
+std::string stop_refusal(const tasks::Task& task, const std::string& verb) {
+    if (tasks::finished(task)) {
+        return "task " + task.id + " is " + task.status + " -- there is nothing to " + verb;
+    }
+    return "task " + task.id + " is " + task.status + " and not running -- there is nothing to " +
+           verb;
+}
+
 /// `task halt` and `task cancel`: asked of the running process, or -- for a
 /// task no process runs -- written to its ledger under the lock.
 void stop_task(const TaskFlags& flags, tasks::Request request) {
     const fs::path root = harness::tasks_dir();
     const std::string verb{tasks::to_string(request)};
     tasks::Task task = resolve_task(root, flags.id, /*prefer_running=*/true);
-    if (tasks::finished(task)) {
-        fail_user("task " + task.id + " is " + task.status + " -- there is nothing to " + verb);
+    if (!task_stoppable(task, request)) {
+        fail_user(stop_refusal(task, verb));
     }
     if (tasks::running_task(root) == task.id) {
         if (const std::string failure = tasks::write_request(root, task.id, request);
@@ -938,14 +947,14 @@ void stop_task(const TaskFlags& flags, tasks::Request request) {
         }
         task = std::move(*fresh);
     }
+    // Read again under the lock: what it holds now is what is stopped.
+    if (!task_stoppable(task, request)) {
+        fail_user(stop_refusal(task, verb));
+    }
     if (request == tasks::Request::Halt) {
         if (task.status == tasks::kHalted) {
             std::cout << "task " << task.id << " is already halted\n";
             return;
-        }
-        if (task.status != tasks::kPlanning && task.status != tasks::kRunning) {
-            fail_user("task " + task.id + " is " + task.status +
-                      " and not running -- there is nothing to halt");
         }
         task.status = std::string{tasks::kHalted};
         task.reason = "halted by 'apogee task halt' while no process ran it";
@@ -1047,7 +1056,7 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
     run->add_option("--suite", run_flags->suite,
                     "Run under this suite -- its members answer for the roles it names -- or off "
                     "for none")
-        ->type_name(kModelSuiteValue);
+        ->type_name(kModelSuiteOrOffValue);
     run->add_flag("--tools", run_flags->tools, "Let the model call tools");
     run->add_option("--allow", run_flags->allow,
                     "Grant a tool that writes for this task's life, so it runs without asking -- "
@@ -1086,7 +1095,7 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
         "Continue a stopped task from its ledger -- halted, cancelled, stalled, failed, or "
         "killed mid-round -- in the folder it was started in");
     resume->add_option("task", resume_flags->id, "The task (default: the newest)")
-        ->type_name(kTaskValue);
+        ->type_name(kResumableTaskValue);
     resume->add_flag("--no-recall", resume_flags->no_recall,
                      "Recall no earlier chats in this task");
     resume->add_flag("--force", resume_flags->force,
@@ -1163,7 +1172,7 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
         "halt",
         "Stop a task when its round ends; 'task resume' continues it (default: the "
         "running one)");
-    halt->add_option("task", halt_flags->id, "The task")->type_name(kTaskValue);
+    halt->add_option("task", halt_flags->id, "The task")->type_name(kHaltableTaskValue);
     halt->callback([halt_flags]() { stop_task(*halt_flags, tasks::Request::Halt); });
 
     auto cancel_flags = std::make_shared<TaskFlags>();
@@ -1171,7 +1180,7 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
         "cancel",
         "Stop a task now, ending its turn through the loop's cancellation; 'task "
         "resume' may still continue it (default: the running one)");
-    cancel->add_option("task", cancel_flags->id, "The task")->type_name(kTaskValue);
+    cancel->add_option("task", cancel_flags->id, "The task")->type_name(kCancellableTaskValue);
     cancel->callback([cancel_flags]() { stop_task(*cancel_flags, tasks::Request::Cancel); });
 }
 
@@ -1208,6 +1217,23 @@ TaskGate compose_task_gate(const harness::Config& config, const agent::ToolRegis
     out.standing = make_permission_checker(config, nullptr);
     out.gate.confirm = person ? person(approvals) : agent::ConfirmFn{};
     return out;
+}
+
+bool task_stoppable(const tasks::Task& task, tasks::Request request) noexcept {
+    return request == tasks::Request::Halt ? tasks::live(task) : !tasks::finished(task);
+}
+
+std::string task_resume_refusal(const tasks::Task& task, const fs::path& here) {
+    if (std::string refused = tasks::resume_refusal(task); !refused.empty()) {
+        return refused;
+    }
+    // A task's tools work where it was started; resumed anywhere else, its
+    // files would be written in one place and checked in another.
+    if (real_folder(task.working_directory) != real_folder(here)) {
+        return "task " + task.id + " was started in " + task.working_directory +
+               " and resumes only there -- cd there first";
+    }
+    return {};
 }
 
 std::string task_holds_chat(const logger::Session& session) {

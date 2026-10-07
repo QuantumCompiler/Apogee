@@ -84,4 +84,8 @@ struct GraphBuildRequest {
 
 void run_graph_build(const RootContext& context, const GraphBuildRequest& request);
 
+/// Whether `graph update` refreshes `graph`: it has source trees to re-parse
+/// (27k). The verb's refusal and its completion both ask this.
+[[nodiscard]] bool graph_updatable(const harness::NamedGraphConfig& graph) noexcept;
+
 }  // namespace apogee::commands

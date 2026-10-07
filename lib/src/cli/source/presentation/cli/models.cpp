@@ -1440,7 +1440,7 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
     status
         ->add_option("--suite", *status_suite,
                      "Resolve under this suite instead of models.default_suite, or off for none")
-        ->type_name(kModelSuiteValue);
+        ->type_name(kModelSuiteOrOffValue);
     status->callback([load, status_quiet, status_suite]() {
         harness::Config config = load();
         if (!status_suite->empty()) {

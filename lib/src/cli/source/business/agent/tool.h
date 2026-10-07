@@ -193,6 +193,11 @@ struct DispatchContext {
 /// tool that failed all come back as error outcomes the model can read and act
 /// on. That is what lets a model recover from its own hallucinated tool name
 /// instead of the turn dying.
+///
+/// The outcome's content is UTF-8 (`contracts/utf8.h`): a tool returns what
+/// its source held -- a Latin-1 file, a command's raw bytes -- and every
+/// surface's next step with it is a strict JSON dump, so it is made text
+/// here, the one place every tool call runs through.
 [[nodiscard]] ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call,
                                    const DispatchContext& context);
 

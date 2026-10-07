@@ -133,6 +133,19 @@ TEST_CASE("read_file returns the text, and a file past the cap as its size inste
     CHECK(box.run("read_file", R"({"path":null})").is_error);
 }
 
+TEST_CASE("a Latin-1 file read through dispatch reaches the model as UTF-8", "[tools][fs][utf8]") {
+    // read_file returns the file's bytes as they are; a file in another
+    // encoding is not text the session file, an MCP frame or a cloud
+    // request can carry. Dispatch, which every surface runs it through, is
+    // where it becomes UTF-8.
+    const Sandbox box;
+    std::ofstream{box.root / "latin1.txt", std::ios::binary} << "caf\xE9";
+    const ToolOutcome read = apogee::agent::dispatch(
+        box.registry, apogee::harness::ToolCall{"c", "read_file", R"({"path":"latin1.txt"})"}, {});
+    CHECK_FALSE(read.is_error);
+    CHECK(read.content == "caf\xEF\xBF\xBD");
+}
+
 TEST_CASE("write_file and delete_file are gated, create parents, and refuse directories",
           "[tools][fs][permission]") {
     const Sandbox box;

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "cli/complete_protocol.h"
+#include "cli/complete_sources.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "cli/uninstall.h"
@@ -676,11 +677,18 @@ TEST_CASE("a fixed set of values completes from the parser's own validator",
           std::vector<std::string>{"claude-cli"});
     CHECK(complete_line({"config", "set-permission", "write_file"}) ==
           std::vector<std::string>{"ask", "allow", "deny"});
-    // models convert's precisions come from the converter's own list.
+    // models convert's precisions come from the converter's own list -- and,
+    // with `--mlx` before `--type`, from mlx-lm's: the one the command takes.
+    const apogee::commands::CompletionSources live = apogee::commands::default_completion_sources();
     const std::vector<std::string> precisions =
-        complete_line({"models", "convert", "snap", "out.gguf", "--type"});
+        complete_full({"models", "convert", "snap", "--type"}, "", live).candidates;
     CHECK(contains(precisions, "f16"));
     CHECK(contains(precisions, "q8_0"));
+    CHECK_FALSE(contains(precisions, "4bit"));
+    const std::vector<std::string> mlx =
+        complete_full({"models", "convert", "snap", "--mlx", "-t"}, "", live).candidates;
+    CHECK(contains(mlx, "4bit"));
+    CHECK_FALSE(contains(mlx, "q8_0"));
     // A snapshot directory is one accepted form: files once no name matches.
     CHECK(complete_full({"models", "convert"}, "./", fake_sources()).files);
     // A word of the set may hold a colon: `--on-question`'s forms (27i).
@@ -889,6 +897,33 @@ TEST_CASE("a comma list completes its last word and skips what it holds",
             .candidates == std::vector<std::string>{"docs,notes,meetings"});
 }
 
+TEST_CASE("a suite member flag completes past its key's = and after its commas",
+          "[commands][completion][values][suites]") {
+    // `--toolset ROLE=fs,git`: the roles with their `=`, then the toolsets
+    // after it -- after each comma too, one already listed not again.
+    const std::vector<std::string> toolset = {"config", "add-suite", "s", "--toolset"};
+    CHECK(contains(complete_line(toolset), "chat="));
+    CHECK(complete_line(toolset, "u") == std::vector<std::string>{"utility="});
+    const std::vector<std::string> after_key = complete_line(toolset, "chat=");
+    CHECK(after_key.size() == apogee::harness::suite_toolset_names().size());
+    CHECK(contains(after_key, "chat=fs"));
+    CHECK(complete_line(toolset, "chat=fs,g") ==
+          std::vector<std::string>{"chat=fs,git", "chat=fs,graph"});
+    CHECK_FALSE(contains(complete_line(toolset, "chat=fs,"), "chat=fs,fs"));
+    CHECK(complete_line(toolset, "nope=").empty());
+    // `--consultable ROLE,ROLE`: the roles after each comma.
+    CHECK(
+        complete_line({"config", "set-suite", "s", "--consultable"}, "utility,") ==
+        std::vector<std::string>{"utility,extraction", "utility,vision", "utility,transcription"});
+    // `--validate SEAM=VALUE`: each seam's own values, the seam alone its default.
+    const std::vector<std::string> validate = {"config", "set-suite", "s", "--validate"};
+    CHECK(complete_line(validate, "tool_args=") ==
+          std::vector<std::string>{"tool_args=", "tool_args=on", "tool_args=off"});
+    CHECK(complete_line(validate, "answers=") ==
+          std::vector<std::string>{"answers=", "answers=request", "answers=always"});
+    CHECK(contains(complete_line(validate), "off"));
+}
+
 TEST_CASE("a fixed set the parser splits at commas completes its last word",
           "[commands][completion][values]") {
     // `--register-with Q4_K_M,<TAB>`: the parser splits the word, so the
@@ -996,7 +1031,12 @@ const std::vector<std::string> kFreeText{"agents create name",
                                          "symphonies create --description",
                                          "symphonies create --input-description",
                                          "symphonies create --stage",
+                                         "symphonies create --play",
                                          "symphonies play --input"};
+
+/// The type names CLI11 gives a number: an untagged value of any other type
+/// is free text.
+const std::set<std::string> kNumberTypes{"INT", "UINT", "FLOAT"};
 
 }  // namespace
 
@@ -1015,7 +1055,10 @@ TEST_CASE("every argument completes to something, or is free text on purpose",
         if (value.kind == apogee::commands::ValueKind::Names) {
             used_kinds.insert(value.source);
         }
-        if (value.kind != apogee::commands::ValueKind::Text || value.type != "TEXT") {
+        // A number is not free text; any other untagged value is, whatever
+        // type name it shows -- `--play` once hid behind
+        // `NAME:SYMPHONY[:INPUT]`, read as a `NAME` nobody had reviewed.
+        if (value.kind != apogee::commands::ValueKind::Text || kNumberTypes.contains(value.type)) {
             return;  // named, chosen, a path, a backend -- or a number
         }
         INFO(where << " is free text: tag it, or add it to kFreeText on purpose");

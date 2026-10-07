@@ -125,17 +125,31 @@ struct MemberFlags {
 /// What `--orchestrate` takes (27t).
 constexpr std::array<std::string_view, 2> kOrchestrateWords{"on", "off"};
 
-/// `tool_args=`, ...: what `--validate` offers, and `off`.
-const std::vector<std::string>& seam_prefixes() {
-    static const std::vector<std::string> prefixes = [] {
+/// What `--validate tool_args=` and `extraction=` take: on, then off.
+constexpr std::array<std::string_view, 2> kSeamSwitches{"on", "off"};
+
+/// The values `--validate SEAM=` takes for `seam`.
+std::span<const std::string_view> seam_values(std::string_view seam) {
+    return seam == "answers" ? harness::answer_check_names()
+                             : std::span<const std::string_view>{kSeamSwitches};
+}
+
+/// What `--validate` takes, each word whole: every seam alone (its
+/// default), every seam with each of its values, and `off`.
+const std::vector<std::string>& validate_words() {
+    static const std::vector<std::string> words = [] {
         std::vector<std::string> out;
         for (const std::string_view seam : harness::validate_seam_names()) {
-            out.push_back(std::string{seam} + "=");
+            const std::string key = std::string{seam} + "=";
+            out.push_back(key);
+            for (const std::string_view value : seam_values(seam)) {
+                out.push_back(key + std::string{value});
+            }
         }
         out.emplace_back("off");
         return out;
     }();
-    return prefixes;
+    return words;
 }
 
 /// `per_turn=`, ...: what `--consult-cap` offers.
@@ -150,8 +164,8 @@ const std::vector<std::string>& cap_prefixes() {
     return prefixes;
 }
 
-/// `chat=`, `embedding=`, ...: what `--context-size` and `--toolset` offer,
-/// the role to type the value after.
+/// `chat=`, `embedding=`, ...: what `--context-size` offers, the role to type
+/// the number after.
 const std::vector<std::string>& role_prefixes() {
     static const std::vector<std::string> prefixes = [] {
         std::vector<std::string> out;
@@ -178,14 +192,14 @@ void bind_member_flags(CLI::App& cmd, MemberFlags& flags) {
     cmd.add_option("--toolset", flags.toolsets,
                    "Pin the tools a member is offered: ROLE=fs,git,... -- fs, shell, git, notes, "
                    "rag, graph, web, mcp; ROLE= for none (repeatable)")
-        ->type_name(words_value(role_prefixes()))
+        ->type_name(keyed_words_value(harness::suite_role_names(), harness::suite_toolset_names()))
         ->expected(1)
         ->allow_extra_args(false);
     cmd.add_option_function<std::string>(
            "--consultable", [&flags](const std::string& value) { flags.consultable = value; },
            "The members the chat model may consult through the consult tool: ROLE,ROLE -- "
            "local, unmetered members only; \"\" for none")
-        ->type_name(words_value(harness::consultable_role_names()))
+        ->type_name(word_list_value(harness::consultable_role_names()))
         ->expected(1);
     cmd.add_option("--consult-cap", flags.consult_caps,
                    "Bound the consults: per_turn=N, brief_tokens=N, answer_tokens=N; NAME= for "
@@ -204,7 +218,7 @@ void bind_member_flags(CLI::App& cmd, MemberFlags& flags) {
                    "Have the verifier check a seam: tool_args=on|off, extraction=on|off, "
                    "answers=request|always; SEAM= for the default; off for no validation at all "
                    "(repeatable)")
-        ->type_name(words_value(seam_prefixes()))
+        ->type_name(words_value(validate_words()))
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
@@ -220,16 +234,13 @@ void bind_member_flags(CLI::App& cmd, MemberFlags& flags) {
 /// `--validate SEAM=on|off`'s value: on, off, or empty for the default.
 std::optional<bool> switch_value(const std::string& text, std::string_view seam,
                                  std::string_view value) {
-    if (value == "on") {
-        return true;
+    if (value.empty()) {
+        return std::nullopt;
     }
-    if (value == "off") {
-        return false;
-    }
-    if (!value.empty()) {
+    if (std::ranges::find(kSeamSwitches, value) == kSeamSwitches.end()) {
         fail("--validate " + text + ": " + std::string{seam} + " is on or off");
     }
-    return std::nullopt;
+    return value == kSeamSwitches.front();
 }
 
 /// `--validate answers=request|always`'s value, or empty for the default.
@@ -589,7 +600,9 @@ void bind_set_default_suite(CLI::App& parent, const RootContext& context) {
     CLI::App* cmd = parent.add_subcommand(
         "set-default-suite",
         "Set the suite every command resolves its roles under, or off for none");
-    cmd->add_option("name", *name, "The suite, or off")->type_name(kModelSuiteValue)->required();
+    cmd->add_option("name", *name, "The suite, or off")
+        ->type_name(kModelSuiteOrOffValue)
+        ->required();
     cmd->callback([&context, name]() {
         const std::filesystem::path path = config_path_for(context);
         std::string value;

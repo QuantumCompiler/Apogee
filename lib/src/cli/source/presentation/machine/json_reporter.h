@@ -168,7 +168,7 @@ public:
     [[nodiscard]] bool wrote_answer() const noexcept;
 
 private:
-    void write(const std::string& line);
+    void write(const nlohmann::json& object);
 
     std::ostream* out_;
     bool wrote_answer_ = false;

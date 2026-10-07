@@ -264,9 +264,10 @@ then a `tool_status` per stage as for `/play` -- and the play's output reaches
 the model as the tool's result, which it answers from in the turn's ordinary
 `answer_*` events and `result`. A play the model starts runs on local,
 unmetered members only, and spends from the turn's member-call budget with
-its consults and checks; one the budget cannot finish, or that stops, is a
-`notice` (`orchestrate: summarize-verify not played -- …`) and a result the
-model reads, never silent. Without orchestration no `play_` tool exists.
+its consults and checks; one the budget cannot finish is refused before its
+first call -- a `notice` (`orchestrate: summarize-verify not played -- …`) --
+and one that fails once started is `orchestrate: summarize-verify stopped -- …`;
+either way a result the model reads, never silent. Without orchestration no `play_` tool exists.
 
 ### Answering a question
 

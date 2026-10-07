@@ -13,6 +13,7 @@
 #include "ansi/text_width.h"
 #include "cli/chat.h"
 #include "cli/chat_attachments.h"
+#include "cli/suite_residency.h"
 #include "contracts/config.h"
 #include "knowledge/record.h"
 #include "support/env_guard.h"
@@ -383,6 +384,45 @@ TEST_CASE("/suite completes the configured suites and off", "[chat][completer][s
     REQUIRE(from_config.suites.size() == 1);
     CHECK(from_config.suites.front().name == "fast");
     CHECK(from_config.suites.front().description == "All small");
+}
+
+TEST_CASE("/suite completes its switches after the name, each one /suite reads",
+          "[chat][completer][suites]") {
+    // 27e: `--force` and `--warm` are parsed after the name; Tab offers them
+    // there, each once, and a switch takes no value of its own.
+    ChatCompletionSources sources = project();
+    sources.suites = {{"fast", "All small"}};
+    const Suggestions after_name = suggest_chat_input("/suite fast ", sources);
+    CHECK(after_name.from == 12);
+    CHECK(texts(after_name) == std::vector<std::string>{"--force", "--warm"});
+    for (const auto& candidate : after_name.candidates) {
+        CHECK_FALSE(candidate.description.empty());
+    }
+    CHECK(texts(suggest_chat_input("/suite fast --w", sources)) ==
+          std::vector<std::string>{"--warm"});
+    CHECK(texts(suggest_chat_input("/suite fast --warm ", sources)) ==
+          std::vector<std::string>{"--force"});
+    CHECK(suggest_chat_input("/suite fast --warm --force ", sources).candidates.empty());
+    CHECK(suggest_chat_input("/suite fast x", sources).candidates.empty());
+    // `off` loads and admits nothing, and /suite refuses `--warm` with it.
+    CHECK(suggest_chat_input("/suite off ", sources).candidates.empty());
+    // The name itself completes as before.
+    CHECK(texts(suggest_chat_input("/suite f", sources)) == std::vector<std::string>{"fast"});
+
+    // Each switch the table offers is one /suite reads, alone and together.
+    const ChatCommandSpec* suite = find_chat_command("suite");
+    REQUIRE(suite != nullptr);
+    std::string line = "fast";
+    for (const apogee::commands::ChatFlagSpec& flag : suite->flags) {
+        CHECK(flag.values == apogee::commands::ArgumentValues::None);
+        CHECK(apogee::commands::parse_suite_argument("fast --" + std::string{flag.name})
+                  .error.empty());
+        line += " --" + std::string{flag.name};
+    }
+    const apogee::commands::SuiteArgument all = apogee::commands::parse_suite_argument(line);
+    CHECK(all.error.empty());
+    CHECK(all.force);
+    CHECK(all.warm);
 }
 
 TEST_CASE("/attach completes its flag and the flag's values after the path, from the one table",

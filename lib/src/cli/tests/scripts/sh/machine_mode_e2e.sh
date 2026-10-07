@@ -67,6 +67,56 @@ RESULTS=$(grep -c '"type":"result"' "$WORK_DIR/chat.jsonl")
 
 ls "$WORK_DIR"/sessions/*.json >/dev/null 2>&1 || fail "closing stdin persisted no session"
 
+# --- bytes that are not UTF-8 never end the session ---------------------------
+# Every event, session file and request is a strict JSON dump, and each of
+# these used to end the process with json type_error 316 at the first one: a
+# valid é a backend splits between two streamed pieces (the mock streams eight
+# bytes at a time, llama.cpp a byte-fallback token a byte at a time), a tool
+# reading a Latin-1 file, and a line piped in Latin-1. The split character now
+# arrives whole; the rest is U+FFFD.
+UTF8_DIR="$WORK_DIR/utf8"
+mkdir -p "$UTF8_DIR"
+# é at bytes 8 and 9: the mock's first chunk ends inside it.
+printf '{"turns":[{"text":"1234567\303\251 caf\303\251"}]}' >"$UTF8_DIR/split.json"
+printf '%s' '{"turns":[{"tool_calls":[{"name":"read_file","arguments":{"path":"latin1.txt"}}]},{"text":"read: {{last_tool_result}}"}]}' \
+    >"$UTF8_DIR/reader.json"
+printf 'caf\351 cr\350me\n' >"$UTF8_DIR/latin1.txt"
+"$APOGEE_BIN" config add-backend split --type mock --model-path "$UTF8_DIR/split.json" \
+    >/dev/null || fail "add-backend split"
+"$APOGEE_BIN" config add-backend reader --type mock --model-path "$UTF8_DIR/reader.json" \
+    >/dev/null || fail "add-backend reader"
+
+"$APOGEE_BIN" complete -m split --output-format stream-json "hi" </dev/null \
+    >"$UTF8_DIR/split.jsonl" 2>"$UTF8_DIR/split-err.txt" \
+    || fail "a split character ended complete: $(cat "$UTF8_DIR/split-err.txt")"
+( cd "$UTF8_DIR" && printf '%s\n' '{"type":"user","text":"read it"}' \
+    | "$APOGEE_BIN" chat -m reader --tools --output-format stream-json --input-format stream-json ) \
+    >"$UTF8_DIR/reader.jsonl" 2>"$UTF8_DIR/reader-err.txt" \
+    || fail "a Latin-1 file read ended a driven chat: $(cat "$UTF8_DIR/reader-err.txt")"
+printf 'caf\351\n' | "$APOGEE_BIN" chat --system "$(printf 'r\351sum\351')" \
+    >/dev/null 2>"$UTF8_DIR/piped-err.txt" \
+    || fail "a Latin-1 line ended chat: $(cat "$UTF8_DIR/piped-err.txt")"
+
+python3 - "$UTF8_DIR" "$WORK_DIR/sessions" <<'EOF' || fail "the UTF-8 streams or sessions are wrong"
+import glob, json, os, sys
+utf8, sessions = sys.argv[1], sys.argv[2]
+def events(name):  # every line on stdout is JSON, or this throws
+    return [json.loads(line) for line in open(os.path.join(utf8, name), encoding="utf-8")]
+def said(stream, kind):
+    return [e["text"] for e in stream if e["type"] == kind]
+split = events("split.jsonl")
+assert "".join(said(split, "answer_delta")) == "1234567é café", split
+assert said(split, "result") == ["1234567é café"], split
+read = events("reader.jsonl")
+assert said(read, "result") == ["read: caf� cr�me"], read
+messages = [m for path in glob.glob(os.path.join(sessions, "*.json"))
+            for m in json.load(open(path, encoding="utf-8"))["messages"]]
+contents = [m["content"].strip() for m in messages if isinstance(m.get("content"), str)]
+assert "caf� cr�me" in contents, contents   # the tool result, as history keeps it
+assert "caf�" in contents, contents              # the piped line
+assert "r�sum�" in contents, contents        # its --system
+EOF
+
 # --- a flag is never silently ignored ----------------------------------------
 # Mixing the directions is refused rather than half-honoured. A driver that
 # asked for JSONL and got prose would debug output it never requested.
@@ -116,4 +166,5 @@ else
     grep -q '"type":"result"' "$WORK_DIR/held.jsonl" || fail "the held turn produced no result"
 fi
 
-echo "machine mode: stdout is pure JSONL, one child served 2 turns, no listening socket - OK"
+echo "machine mode: stdout is pure JSONL, one child served 2 turns, bytes that are not UTF-8" \
+    "ended nothing, no listening socket - OK"

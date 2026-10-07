@@ -11,7 +11,7 @@
 
 **Seam + files.**
 - `machine/json_reporter.cpp` / `render/json_report.h/.cpp`: `capabilities` on the session event — built from what is actually wired (tools registry present, ask available, input format), not a hardcoded list.
-- `cli/chat.cpp` / `cli/complete.cpp`: accept and parse the optional `hello` first line on stream-json stdin; an absent or malformed one is ignored per the inbound-tolerance rule.
+- `cli/chat_session.cpp` (the session core's stdin loop, shared by `chat` and, since 27s, `execute`) / `cli/complete.cpp`: accept and parse the optional `hello` first line on stream-json stdin; an absent or malformed one is ignored per the inbound-tolerance rule.
 - [machine-mode.md](../../reference/machine-mode.md): the `hello` line, the `capabilities` field, and a new **"The stability promise"** section (guarantees, additivity of types *and* fields, deprecation policy).
 - `tests/scripts/py/schema_conformance.py` + the machine-mode e2e: pin both additions; `tests/scripts/py/naive_host_driver.py` grows a hello-aware path proving old-binary compatibility semantics stay.
 

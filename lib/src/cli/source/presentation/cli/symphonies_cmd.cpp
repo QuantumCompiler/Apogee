@@ -362,7 +362,6 @@ void bind_create(CLI::App& parent, const RootContext& context) {
                         "A stage that plays another symphony, in play order with --stage "
                         "(repeatable): NAME:SYMPHONY[:INPUT], the input what it is given as its "
                         "{{input}} (default: the previous stage's answer)")
-            ->type_name("NAME:SYMPHONY[:INPUT]")
             ->expected(1)
             ->allow_extra_args(false)
             ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
@@ -463,7 +462,9 @@ void bind_edit(CLI::App& parent, const RootContext& context) {
         "edit",
         "Edit a symphony in $EDITOR -- written back as its config entry; a starter or a spec "
         "file edited this way gains an entry of its name that stands in for it");
-    cmd->add_option("name", *name, "The symphony's name")->type_name(kSymphonyValue)->required();
+    cmd->add_option("name", *name, "The symphony's name")
+        ->type_name(kSymphonyNameValue)
+        ->required();
     cmd->callback([&context, name]() {
         const std::filesystem::path config_path = config_path_for(context);
         const harness::Config config = load(config_path);
@@ -523,7 +524,9 @@ void bind_edit(CLI::App& parent, const RootContext& context) {
 void bind_delete(CLI::App& parent, const RootContext& context) {
     auto name = std::make_shared<std::string>();
     CLI::App* cmd = parent.add_subcommand("delete", "Remove a symphony's config entry");
-    cmd->add_option("name", *name, "The symphony's name")->type_name(kSymphonyValue)->required();
+    cmd->add_option("name", *name, "The symphony's name")
+        ->type_name(kSymphonyEntryValue)
+        ->required();
     cmd->callback([&context, name]() {
         const std::filesystem::path config_path = config_path_for(context);
         const harness::Config config = load(config_path);
@@ -724,7 +727,7 @@ void bind_play(CLI::App& parent, const RootContext& context) {
     cmd->add_option("--suite", flags->suite,
                     "Play under this suite -- its members answer for the roles it names -- or off "
                     "for none (default: models.default_suite)")
-        ->type_name(kModelSuiteValue);
+        ->type_name(kModelSuiteOrOffValue);
     cmd->add_flag("-q,--quiet", flags->quiet, "Say nothing about the stages as they run");
     add_read_format(cmd, format);
     cmd->callback([&context, flags, format]() { play(context, *flags, *format); });

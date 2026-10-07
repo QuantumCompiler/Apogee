@@ -36,6 +36,7 @@
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "contracts/paths.h"
+#include "contracts/utf8.h"
 #include "harness/context_windows.h"
 #include "harness/roles.h"
 #include "knowledge/clerk.h"
@@ -334,7 +335,7 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
                           "symphonies play on them (default: models.default_suite)"
                         : "Run under this suite -- its members answer for the roles it names -- "
                           "or off for none")
-        ->type_name(kModelSuiteValue);
+        ->type_name(mode == SessionMode::Execute ? kModelSuiteValue : kModelSuiteOrOffValue);
     // The Orchestrator (27t): execute's alone, so chat's surface is what it
     // was.
     if (mode == SessionMode::Execute) {
@@ -597,8 +598,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     if (flags->think_budget_option->count() > 0) {
         session.params.thinking_budget = flags->think_budget;
     }
+    // A system prompt enters history and the session file as typed, so as
+    // text whatever bytes the shell handed in.
     if (!flags->system_prompt.empty()) {
-        session.params.system_prompt = flags->system_prompt;
+        session.params.system_prompt = harness::valid_utf8(flags->system_prompt);
     }
 
     if (session.messages.empty() && !session.params.system_prompt.empty()) {
@@ -1535,7 +1538,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     break;
                 }
                 case ChatVerb::System:
-                    session.params.system_prompt = argument;
+                    session.params.system_prompt = harness::valid_utf8(argument);
                     reporter.status().print_line(style.tag(ansi::Role::Apogee) +
                                                  " system prompt updated");
                     break;

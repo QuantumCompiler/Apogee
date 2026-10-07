@@ -1,13 +1,15 @@
 # Tools
 
 The reference for setting up the tools a model reaches with `--tools` that
-need something set up first. Today that is two: **web search**, answered by
-a SearXNG instance you run, and **consult**, answered by a member of a model
-suite you configure -- and beside it **validation**, the same member checking
-the others' work.
+need something set up first: **web search**, answered by a SearXNG instance
+you run; **consult**, answered by a member of a model suite you configure --
+and beside it **validation**, the same member checking the others' work;
+**graph navigation**, answered by a knowledge graph you build; and the
+**Orchestrator**, an `execute` session's symphonies offered to its model as
+tools.
 
-The native toolsets (files, the shell, git, notes, document search) and
-`fetch_url` need no setup. `apogee check` lists each one's permission level
+The native toolsets (files, the shell, git, notes, document search, graph
+navigation) and `fetch_url` need no setup beyond that. `apogee check` lists each one's permission level
 and the folder the file tools start in; `permissions:` and `tools:` in the
 config are where both are changed.
 
@@ -150,7 +152,8 @@ and the model may use either.
 
 `consult` lets the chat model hand a sub-task to another model of its suite
 (27f) -- the small one beside it, say -- and read the answer back as the
-tool's result. It exists only while the session runs under a suite whose
+tool's result. It takes two arguments: `member`, one of the consultable
+roles, and `question`. It exists only while the session runs under a suite whose
 `consultable:` names members:
 
 ```bash
@@ -203,6 +206,78 @@ consultable. `config add-suite`/`set-suite` (and their admin twins) ask the
 member's provider and refuse it with the reason; a config edited by hand to
 name one fails in `apogee check`, and the tool does not offer it. There is no
 permission prompt: a consult reads nothing and writes nothing.
+
+## Navigating a knowledge graph
+
+The `graph` toolset (27l) lets the model walk a built knowledge graph itself
+-- a code graph (`apogee graph build --source <dir>`, parsed with tree-sitter,
+no model) or a collection's graph -- with four tools. Each returns the JSON
+document `apogee graph <verb> --output-format json` prints for the same
+question, byte for byte:
+
+| Tool | Arguments | What it answers |
+|---|---|---|
+| `graph_query` | `question`; `hops` (1 or 2), `max_entities` (1-50) | The entities a question's words name, and the bounded neighbourhood around them |
+| `graph_path` | `from`, `to`; `max_hops` (1-32, default 8), `directed`, `relations` | How one entity reaches another: the shortest path, each hop with its relation |
+| `graph_explain` | `node`; `max_neighbors` (1-100, default 12) | One entity: its kind, where it is defined or mentioned, its neighbours by relation |
+| `graph_neighbors` | `node`; `relation`, `direction` (`both`, `out`, `in`), `max_neighbors` | An entity's neighbours, optionally one relation and one direction |
+
+A node is addressed by name, `kind:name` (`function:pkg.mod.run`) or
+`path:line` (`src/app.py:12`) -- a code node also by its unqualified name when
+only one qualified name ends in it. A name several nodes share is never
+guessed: the error lists each by the address that names it alone.
+
+**Which graph.** Each tool also takes `graph` (a named graph, else a
+collection's own) or `collection` (the named graph listing it, else its own).
+With neither, the one graph built is read; with several, the error lists
+them, and with none, it says how to build one.
+
+**Always there, never asking.** The toolset is registered with the others
+(switch it off with `tools.disabled: [graph]`, or leave it out of a suite
+member's `toolset:`); tool selection (26g) keeps the four off the menu for a
+question they do not fit. None writes or reaches out, so the permission gate
+never asks about one, on any surface -- and `apogee __mcp-tools` serves all
+four to an MCP client. Every cap is an argument with a ceiling: a tool never
+returns an unbounded subgraph.
+
+**A chat's attached code** (27o). When a folder of code attached to a chat
+has been graphed (`/attach`, `--attach`, `--graph code`), the four names are
+replaced by a scoped set over that chat's own graph: the same tools without
+`graph`/`collection`, their descriptions naming the attached folders, and
+the environment note telling the model to read the graph before answering a
+question about that code's structure.
+
+## The Orchestrator: symphonies as tools
+
+An `apogee execute` session that orchestrates (27t) -- `--orchestrate`, or the
+suite's own `orchestrate: true` -- offers its chat model each symphony as a
+tool, `play_<name>`, so the model can choose to run one:
+
+```bash
+apogee config set-suite research --orchestrate on
+apogee execute --suite research
+```
+
+Each tool carries the symphony's own description and one required argument,
+`input` (a string): the whole text the play works on, since its stages see
+nothing else. The play runs through the same walk `/play` uses, each stage a
+line in the thinking block (in machine mode a `tool_status`), and its output
+comes back as the tool's result, which the model answers from.
+
+- **Offered without `--tools`.** Orchestrating is the session's consent to
+  the model starting a play; `--tools` adds the other toolsets as usual.
+- **Local members only.** A play the model starts never spends money: a
+  symphony that reaches a member billed per call, not built, or not named in
+  the suite is not offered, and the session says why; `orchestrate: true` is
+  refused at config time over a billed member a symphony reaches, naming
+  both. A symphony that takes an image is not offered either -- a tool call
+  cannot carry one; `apogee symphonies play <name> --image <file>` plays it.
+- **One budget.** Plays draw on the turn's member calls
+  (`consult_caps.per_turn`, shared with consults and validation) and on the
+  config's `symphony_caps:` as any play does. A play the budget cannot finish is refused before
+  its first call, said as `orchestrate: <name> not played -- …`, and the
+  model answers without it.
+- **Off means absent.** Without orchestration no `play_` tool exists.
 
 ## Validation: members checking each other's work
 

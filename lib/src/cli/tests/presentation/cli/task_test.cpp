@@ -131,6 +131,25 @@ TEST_CASE("task run drives a goal to done with no input, and status and list say
     CHECK(has(out, task.id + "  done  2/8 rounds  Find the answer"));
 }
 
+TEST_CASE("a goal and a --require typed in Latin-1 are kept as text, and the check can pass",
+          "[commands][task][utf8]") {
+    // The ledger is a strict JSON dump, so a goal as typed used to stop the
+    // task at its first save; and a round's answer is UTF-8, so a --require
+    // kept as raw bytes could never be found in it. Both are mended where the
+    // task is made: the same U+FFFD the answer carries.
+    const std::string replacement = "\xEF\xBF\xBD";
+    const Home home{R"({"text": "1. Answer."},
+                       {"text": "caf� it is.\nTASK STATUS: DONE"})"};
+    std::string out;
+    std::string err;
+    const int code = home.run({"task", "run", "Find caf\xE9", "--require", "caf\xE9"}, &out, &err);
+    INFO(err);
+    REQUIRE(code == 0);
+    const t::Task task = home.task();
+    CHECK(task.goal == "Find caf" + replacement);
+    CHECK(task.status == t::kDone);
+}
+
 TEST_CASE("task run refuses a bad goal, check or budget before anything is made",
           "[commands][task]") {
     const Home home{R"({"text": "x"})"};

@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -10,6 +11,8 @@
 #include <vector>
 
 #include "agentloop/graph_context.h"
+#include "cli/command.h"
+#include "cli/complete_sources.h"
 #include "cli/graph.h"
 #include "cli/registry.h"
 #include "cli/root.h"
@@ -316,4 +319,30 @@ TEST_CASE("the refusals: a collection's name, no graph, no tree, and update off 
             0);
     CHECK(fixture.run({"graph", "update", "docs"}, &out, &err) == 1);
     CHECK(err.find("has no source trees") != std::string::npos);
+}
+
+TEST_CASE("graph update completes the named graphs it refreshes, and no other",
+          "[commands][graph][code][update][completion]") {
+    // ADR 0007: `update` refuses a named graph with no source trees, so Tab
+    // never offers one -- the same test, read from the config.
+    const Fixture fixture;
+    fixture.build();
+    std::string out;
+    std::string err;
+    write(fixture.home.path() / "docs" / "a.md", "Atlas collects readings.");
+    REQUIRE(fixture.run({"embed", "ingest", "notes", (fixture.home.path() / "docs").string()}, &out,
+                        &err) == 0);
+    REQUIRE(fixture.run({"config", "add-graph", "docs", "--collections", "notes"}, &out, &err) ==
+            0);
+    const apogee::harness::Config config = apogee::harness::load_config(fixture.config_path);
+    apogee::commands::CompletionContext context;
+    context.config = &config;
+    const std::vector<std::string> offered =
+        apogee::commands::list_names(apogee::commands::kSourcedGraphValue, context).names;
+    CHECK(offered == std::vector<std::string>{"code"});
+    for (const std::string& name : config.graph_names()) {
+        INFO(name);
+        const bool taken = fixture.run({"graph", "update", name, "-q"}, &out, &err) == 0;
+        CHECK(taken == (std::ranges::find(offered, name) != offered.end()));
+    }
 }

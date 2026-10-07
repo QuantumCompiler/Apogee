@@ -803,6 +803,97 @@ TEST_CASE("a provider failure is a 502, or an error frame that still ends the st
     CHECK(content_of(parsed_frames) == "one");
 }
 
+namespace {
+
+/// U+FFFD, the replacement character, as UTF-8.
+constexpr std::string_view kReplacement = "\xEF\xBF\xBD";
+
+/// Whether any frame of a stream is an error.
+bool any_error(const Frames& parsed_frames) {
+    return std::ranges::any_of(parsed_frames.data,
+                               [](const nlohmann::json& frame) { return frame.contains("error"); });
+}
+
+/// The last message session `id` keeps on disk, or nothing when it keeps none.
+std::string last_saved(const std::string& id) {
+    const std::vector<ChatMessage> messages = apogee::logger::load(id, {}).session.messages;
+    return messages.empty() ? std::string{} : messages.back().content.plain_text();
+}
+
+/// The text of a `/v1/completions` stream.
+std::string completion_text(const Frames& parsed_frames) {
+    std::string text;
+    for (const nlohmann::json& frame : parsed_frames.data) {
+        if (frame.contains("choices")) {
+            text += frame["choices"][0]["text"].get<std::string>();
+        }
+    }
+    return text;
+}
+
+}  // namespace
+
+TEST_CASE("a character split across streamed pieces reaches an SSE client whole",
+          "[httpserver][sse][utf8]") {
+    // A valid é cut between two pieces -- llama.cpp says a byte-fallback
+    // token a byte at a time. Each chunk used to be written as it came, and
+    // half a character is not JSON: the stream ended in a server_error.
+    auto scripted = std::make_shared<ScriptedStreamProvider>();
+    scripted->pieces = {"caf\xC3", "\xA9 ok"};
+    const Fixture fixture{{}, served_default(), false, scripted};
+
+    nlohmann::json body = chat_body("hi");
+    body["stream"] = true;
+    body["session_id"] = "new";
+    const HttpResponse response = fixture.send(post("/v1/chat/completions", body));
+    const std::string id = response.headers.at("X-Apogee-Session-Id");
+    const Frames chat = frames(collect(response));
+    CHECK_FALSE(any_error(chat));
+    CHECK(content_of(chat) == "caf\xC3\xA9 ok");
+    // What the client read is what the session keeps.
+    CHECK(last_saved(id) == "caf\xC3\xA9 ok");
+
+    const Frames completion = frames(collect(
+        fixture.send(post("/v1/completions", nlohmann::json{{"prompt", "hi"}, {"stream", true}}))));
+    CHECK_FALSE(any_error(completion));
+    CHECK(completion_text(completion) == "caf\xC3\xA9 ok");
+}
+
+TEST_CASE("an answer that ends inside a character ends in U+FFFD, streamed or not",
+          "[httpserver][utf8]") {
+    // llama.cpp stopping at max_tokens halfway through a character: every
+    // route answers with the replacement character where the bytes stopped,
+    // and a session keeps exactly what its client was sent.
+    auto scripted = std::make_shared<ScriptedStreamProvider>();
+    scripted->pieces = {"caf\xC3"};
+    const Fixture fixture{{}, served_default(), false, scripted};
+    const std::string replaced = "caf" + std::string{kReplacement};
+
+    nlohmann::json streamed = chat_body("hi");
+    streamed["stream"] = true;
+    const Frames chat = frames(collect(fixture.send(post("/v1/chat/completions", streamed))));
+    CHECK_FALSE(any_error(chat));
+    CHECK(content_of(chat) == replaced);
+
+    nlohmann::json blocking = chat_body("hi");
+    blocking["session_id"] = "new";
+    const HttpResponse answered = fixture.send(post("/v1/chat/completions", blocking));
+    REQUIRE(answered.status == 200);
+    CHECK(parsed(answered)["choices"][0]["message"]["content"] == replaced);
+    const std::string id = answered.headers.at("X-Apogee-Session-Id");
+    CHECK(last_saved(id) == replaced);
+
+    const Frames completion = frames(collect(
+        fixture.send(post("/v1/completions", nlohmann::json{{"prompt", "hi"}, {"stream", true}}))));
+    CHECK_FALSE(any_error(completion));
+    CHECK(completion_text(completion) == replaced);
+
+    const HttpResponse completed =
+        fixture.send(post("/v1/completions", nlohmann::json{{"prompt", "hi"}}));
+    REQUIRE(completed.status == 200);
+    CHECK(parsed(completed)["choices"][0]["text"] == replaced);
+}
+
 TEST_CASE("an empty streamed chunk is skipped, never the end of the stream",
           "[httpserver][sse][filter]") {
     // The reasoning and markup filters legitimately reduce a chunk that was

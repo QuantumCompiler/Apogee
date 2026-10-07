@@ -299,5 +299,19 @@ OFFERED=$("$APOGEE_BIN" __complete symphonies play "" </dev/null 2>/dev/null)
 for name in summarize-verify extract-facts describe-answer mine; do
     echo "$OFFERED" | grep -qx "$name" || fail "completion: $name not offered: $OFFERED"
 done
+# What each verb takes, and nothing it refuses: `delete` a config entry alone,
+# `edit` any symphony by name -- a starter and a spec file included.
+"$APOGEE_BIN" symphonies create kept --stage 'one:chat:Say {{input}}' </dev/null >/dev/null 2>&1 ||
+    fail "create kept"
+OFFERED=$("$APOGEE_BIN" __complete symphonies delete "" </dev/null 2>/dev/null)
+echo "$OFFERED" | grep -qx kept || fail "completion: delete does not offer the entry: $OFFERED"
+for name in summarize-verify mine; do
+    echo "$OFFERED" | grep -qx "$name" && fail "completion: delete offers $name, which it refuses"
+done
+OFFERED=$("$APOGEE_BIN" __complete symphonies edit "" </dev/null 2>/dev/null)
+for name in kept summarize-verify mine; do
+    echo "$OFFERED" | grep -qx "$name" || fail "completion: edit does not offer $name: $OFFERED"
+done
+"$APOGEE_BIN" symphonies delete kept </dev/null >/dev/null 2>&1 || fail "delete kept"
 
 echo "symphonies: OK"

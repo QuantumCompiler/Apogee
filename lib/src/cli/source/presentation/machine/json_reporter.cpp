@@ -21,12 +21,19 @@ namespace {
 
 JsonReporter::JsonReporter(std::ostream& out) : out_{&out} {}
 
-void JsonReporter::write(const std::string& line) {
+void JsonReporter::write(const nlohmann::json& object) {
     // One object per line, flushed immediately. Flushing per event is the point
     // of a streaming protocol: a driver rendering live must not wait for a
     // buffer to fill, and the whole reason this mode exists is that a GUI wants
     // tokens as they arrive.
-    (*out_) << line << "\n";
+    //
+    // Never a throw for the bytes in it. The answer and its reasoning arrive
+    // as whole characters already (the Harness's streams), but an event's
+    // other text comes from anywhere -- a vendor CLI's stderr tail cut at a
+    // byte bound, a name on disk -- and a writer that threw would end the
+    // session over a notice. What is not UTF-8 is said as U+FFFD; valid text is
+    // written byte for byte as a strict dump writes it.
+    (*out_) << object.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace) << "\n";
     out_->flush();
 }
 
@@ -34,11 +41,11 @@ void JsonReporter::begin_session(std::string_view model) {
     nlohmann::json object = event("session");
     object["protocol_version"] = kMachineProtocolVersion;
     object["model"] = std::string{model};
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_thinking() {
-    write(event("thinking").dump());
+    write(event("thinking"));
 }
 
 void JsonReporter::on_thinking_budget_reached() {
@@ -47,7 +54,7 @@ void JsonReporter::on_thinking_budget_reached() {
     // protocol grows.
     nlohmann::json object = event("thinking");
     object["budget_reached"] = true;
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_thinking_token(std::string_view chunk) {
@@ -56,7 +63,7 @@ void JsonReporter::on_thinking_token(std::string_view chunk) {
     }
     nlohmann::json object = event("thinking_delta");
     object["text"] = std::string{chunk};
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_side_call(const agentloop::SideCall& call) {
@@ -65,7 +72,7 @@ void JsonReporter::on_side_call(const agentloop::SideCall& call) {
     }
     nlohmann::json object = event("tool_status");
     object["text"] = call.role + " — " + call.detail;
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_recall(int chats, int decisions) {
@@ -75,7 +82,7 @@ void JsonReporter::on_recall(int chats, int decisions) {
     nlohmann::json object = event("memory");
     object["chats"] = chats;
     object["decisions"] = decisions;
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_notice(std::string_view text) {
@@ -84,7 +91,7 @@ void JsonReporter::on_notice(std::string_view text) {
     }
     nlohmann::json object = event("notice");
     object["text"] = std::string{text};
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_tool_status(std::string_view detail) {
@@ -93,7 +100,7 @@ void JsonReporter::on_tool_status(std::string_view detail) {
     }
     nlohmann::json object = event("tool_status");
     object["text"] = std::string{detail};
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_clear_status() {
@@ -104,7 +111,7 @@ void JsonReporter::on_clear_status() {
 }
 
 void JsonReporter::on_answer_start() {
-    write(event("answer_start").dump());
+    write(event("answer_start"));
 }
 
 void JsonReporter::on_answer_token(std::string_view chunk) {
@@ -114,11 +121,11 @@ void JsonReporter::on_answer_token(std::string_view chunk) {
     wrote_answer_ = true;
     nlohmann::json object = event("answer_delta");
     object["text"] = std::string{chunk};
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::on_answer_end() {
-    write(event("answer_end").dump());
+    write(event("answer_end"));
 }
 
 void JsonReporter::emit_result(const harness::ChatResponse& response) {
@@ -137,7 +144,7 @@ void JsonReporter::emit_result(const harness::ChatResponse& response) {
         usage["output_tokens"] = response.usage.completion_tokens;
         object["usage"] = std::move(usage);
     }
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::emit_question(const agentloop::QuestionRequest& request) {
@@ -160,7 +167,7 @@ void JsonReporter::emit_question(const agentloop::QuestionRequest& request) {
         questions.push_back(std::move(entry));
     }
     object["questions"] = std::move(questions);
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::emit_permission_question(const agent::GateRequest& request) {
@@ -192,13 +199,13 @@ void JsonReporter::emit_permission_question(const agent::GateRequest& request) {
           {"description", request.outbound ? "Allow this website for the rest of this session"
                                            : "Allow for the rest of this session"}}});
     object["questions"] = nlohmann::json::array({std::move(entry)});
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::emit_error(std::string_view message) {
     nlohmann::json object = event("error");
     object["message"] = std::string{message};
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::emit_task_transition(const tasks::Task& task, std::size_t index,
@@ -259,7 +266,7 @@ void JsonReporter::emit_task_transition(const tasks::Task& task, std::size_t ind
     }
     object["task_id"] = task.id;
     object["transition"] = tasks::transition_to_json(transition);
-    write(object.dump());
+    write(object);
 }
 
 void JsonReporter::emit_task_grant(const tasks::Task& task, int round,
@@ -270,7 +277,7 @@ void JsonReporter::emit_task_grant(const tasks::Task& task, int round,
     object["tool"] = permit.tool;
     object["target"] = permit.target;
     object["by"] = permit.by;
-    write(object.dump());
+    write(object);
 }
 
 bool JsonReporter::wrote_answer() const noexcept {
@@ -318,7 +325,7 @@ std::vector<std::string_view> read_format_names() {
 }
 
 void write_document(std::ostream& out, const nlohmann::json& document) {
-    out << document.dump() << "\n";
+    out << document.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace) << "\n";
     out.flush();
 }
 

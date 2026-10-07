@@ -23,7 +23,7 @@
 - 2026-10-03 — Verification is passive (the spike's recommendation, the user not objecting): the record is written when the user's own turn succeeds, and no `--verify` probe-turn exists in this item; if one is ever wanted it is a new, explicitly opt-in flag.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): one verified entry per provider — last success date and the earning backend; no history.
 - 2026-10-03 — Confirmed (the default taken, the user's confirmation): the Providers section appears only with a provider configured or detected; pure-local installs see nothing new.
-- 2026-10-03 — Confirmed (the default taken, the user's confirmation): llamacpp/mock rows keep their existing STATE/VERIFIED semantics — no second meaning added.
+- 2026-10-03 — Confirmed (the default taken, the user's confirmation): llamacpp/mock rows keep their existing STATE/VERIFIED semantics — no second meaning added. *(2026-10-06, the pre-MR docs pass: MLX rows, since 27a–27b, carry their own local STATE/VERIFIED too — `ready`, the runtime's refusal or `cannot load`; the files on record — local rows like llamacpp's, outside this item's provider rows.)*
 
 **Guardrail(s).**
 - The inverted spike probe as a pinned test: a configured `claude-cli` backend with no binary on PATH makes `check` **warn** with the remediation text — never `ok`.

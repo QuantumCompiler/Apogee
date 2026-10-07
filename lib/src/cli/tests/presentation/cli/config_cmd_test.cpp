@@ -8,6 +8,9 @@
 #include <string_view>
 #include <vector>
 
+#include "cli/complete_protocol.h"
+#include "cli/registry.h"
+#include "cli/root.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "support/cli_home.h"
@@ -517,4 +520,57 @@ TEST_CASE("config get reads attachments.graph: empty unset, the word the editor 
     out.clear();
     REQUIRE(home.run({"config", "get", "attachments.graph"}, &out) == 0);
     CHECK(out == "off\n");
+}
+
+TEST_CASE("every word the suite member flags complete to, the suite verbs take",
+          "[commands][config][suites][completion]") {
+    // ADR 0007: the offer is a contract. The words read from the live parser,
+    // as `__complete` reads them; each one given to add-suite on a suite with
+    // every role a member, so the role is never what refuses.
+    const CliHome home{kSuiteConfig};
+    const apogee::commands::RootCommand root{apogee::commands::default_registry()};
+    const apogee::commands::CommandSpec tree = apogee::commands::specs_from_app(root.app());
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    const auto offered = [&](const std::string& flag, const std::string& typed) {
+        apogee::commands::CompletionRequest request;
+        request.words = {"config", "add-suite", "s", flag};
+        request.current = typed;
+        return apogee::commands::completion_candidates(request, config, tree);
+    };
+    int made = 0;
+    const auto takes = [&](const std::string& flag, const std::string& word) {
+        std::string out;
+        const int code =
+            home.run({"config", "add-suite", "s" + std::to_string(made++), "--chat", "root",
+                      "--embedding", "embedder", "--extraction", "helper", "--vision", "helper",
+                      "--transcription", "helper", "--utility", "helper", flag, word},
+                     &out);
+        INFO(flag << " " << word << ": " << out);
+        return code == 0;
+    };
+
+    const std::vector<std::string> seams = offered("--validate", "");
+    CHECK(seams.size() > 4);
+    for (const std::string& word : seams) {
+        CHECK(takes("--validate", word));
+    }
+    const std::vector<std::string> keys = offered("--toolset", "");
+    REQUIRE_FALSE(keys.empty());
+    for (const std::string& key : keys) {
+        const std::vector<std::string> values = offered("--toolset", key);
+        REQUIRE_FALSE(values.empty());
+        for (const std::string& word : values) {
+            CHECK(takes("--toolset", word));
+        }
+        // And past a comma, the rest of the list.
+        const std::vector<std::string> more = offered("--toolset", values.front() + ",");
+        REQUIRE_FALSE(more.empty());
+        CHECK(takes("--toolset", more.back()));
+    }
+    for (const std::string& role : offered("--consultable", "")) {
+        CHECK(takes("--consultable", role));
+        for (const std::string& pair : offered("--consultable", role + ",")) {
+            CHECK(takes("--consultable", pair));
+        }
+    }
 }

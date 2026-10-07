@@ -1,9 +1,11 @@
 #include "harness/harness.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "backends/mock.h"
@@ -609,4 +611,247 @@ suites:
 
     harness.set_active_suite("");
     CHECK(harness.context_window_for_model("helper") == 32768);
+}
+
+// ---------------------------------------------------------------------------
+// What a provider says crosses as UTF-8
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// U+FFFD, the replacement character, as UTF-8.
+constexpr std::string_view kReplacement = "\xEF\xBF\xBD";
+
+/// A provider that says exactly the pieces it is given -- its reasoning, then
+/// its answer -- and returns `content` (or `parts`) and `calls` whole: the
+/// shape of a backend whose bytes are cut wherever a token or a pipe read
+/// ends, llama.cpp's byte-fallback tokens and a vendor CLI's reads among them.
+class PiecesProvider final : public LLMProvider {
+public:
+    std::vector<std::string> thinking;
+    std::vector<std::string> answer;
+    std::string content;
+    std::vector<apogee::harness::ContentPart> parts;
+    std::vector<apogee::harness::ToolCall> calls;
+    /// Whether the last request carried each sink.
+    bool saw_token_sink = false;
+    bool saw_thinking_sink = false;
+    /// The last request, as this provider was handed it.
+    ChatRequest asked;
+
+    [[nodiscard]] std::string_view backend_name() const noexcept override {
+        return "pieces";
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse chat(
+        const ChatRequest& request, const CancellationToken& cancellation) override {
+        StreamOptions options;
+        options.cancellation = cancellation;
+        return stream_chat(request, options);
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse stream_chat(const ChatRequest& request,
+                                                            const StreamOptions& options) override {
+        asked = request;
+        saw_token_sink = static_cast<bool>(options.on_token);
+        saw_thinking_sink = static_cast<bool>(options.on_thinking);
+        for (const std::string& piece : thinking) {
+            if (options.on_thinking) {
+                options.on_thinking(piece);
+            }
+        }
+        for (const std::string& piece : answer) {
+            if (options.on_token) {
+                options.on_token(piece);
+            }
+        }
+        apogee::harness::ChatResponse response;
+        response.message = ChatMessage::assistant(
+            parts.empty() ? apogee::harness::MessageContent{content}
+                          : apogee::harness::MessageContent::from_parts(parts));
+        response.message.tool_calls = calls;
+        response.model = "pieces-1";
+        return response;
+    }
+
+    [[nodiscard]] std::vector<apogee::harness::ModelInfo> list_models(
+        const CancellationToken& /*cancellation*/) override {
+        return {};
+    }
+};
+
+struct Spoken {
+    std::shared_ptr<PiecesProvider> provider = std::make_shared<PiecesProvider>();
+    Harness harness{Config{}};
+
+    Spoken() {
+        harness.register_provider("pieces", provider);
+        harness.use_default_router();
+    }
+
+    /// Every piece each sink was handed, in order, as `thinking:` and
+    /// `answer:` lines.
+    [[nodiscard]] std::vector<std::string> stream() const {
+        std::vector<std::string> said;
+        StreamOptions options;
+        options.on_thinking = [&said](std::string_view piece) {
+            said.push_back("thinking:" + std::string{piece});
+        };
+        options.on_token = [&said](std::string_view piece) {
+            said.push_back("answer:" + std::string{piece});
+        };
+        (void)harness.stream_chat(request_for("pieces"), options);
+        return said;
+    }
+};
+
+/// Whether `text` survives the strict dump every JSONL event, SSE frame,
+/// session file and request body is written with -- the crash this guards.
+[[nodiscard]] bool dumps(std::string_view text) {
+    try {
+        (void)nlohmann::json(std::string{text}).dump();
+        return true;
+    } catch (const nlohmann::json::type_error&) {
+        return false;
+    }
+}
+
+/// `text` cut at `first` and `second` (equal for two pieces).
+[[nodiscard]] std::vector<std::string> cut(const std::string& text, std::size_t first,
+                                           std::size_t second) {
+    std::vector<std::string> pieces{text.substr(0, first)};
+    if (second > first) {
+        pieces.push_back(text.substr(first, second - first));
+    }
+    pieces.push_back(text.substr(second));
+    return pieces;
+}
+
+}  // namespace
+
+TEST_CASE("a character a provider splits across pieces reaches the sinks whole",
+          "[harness][stream][utf8]") {
+    // A two-, three- and four-byte character, cut at every byte boundary into
+    // two pieces and into three: every piece a sink is handed is whole text,
+    // and the pieces still add up to exactly what the provider said.
+    const Spoken spoken;
+    for (const std::string character : {"\xC3\xA9", "\xE2\x82\xAC", "\xF0\x9F\x98\x80"}) {
+        const std::string text = "a" + character + "z";
+        for (std::size_t first = 1; first < text.size(); ++first) {
+            for (std::size_t second = first; second < text.size(); ++second) {
+                spoken.provider->thinking = cut(text, first, second);
+                spoken.provider->answer = cut(text, first, second);
+                std::string thought;
+                std::string answered;
+                for (const std::string& line : spoken.stream()) {
+                    INFO("cut at " << first << " and " << second << ": " << line);
+                    CHECK(dumps(line));
+                    if (line.starts_with("answer:")) {
+                        answered += line.substr(7);
+                    } else {
+                        thought += line.substr(9);
+                    }
+                }
+                CHECK(answered == text);
+                CHECK(thought == text);
+            }
+        }
+    }
+}
+
+TEST_CASE("a stream that ends inside a character ends in one U+FFFD", "[harness][stream][utf8]") {
+    // llama.cpp stopping at max_tokens halfway through a character, or a
+    // vendor CLI's last read: the held bytes are said as one replacement
+    // character, the last piece -- and reasoning's own, when the answer
+    // begins, so the order a surface shows stays reasoning then answer.
+    const Spoken spoken;
+    spoken.provider->thinking = {"hm", "\xE2\x80"};
+    spoken.provider->answer = {"caf", "\xC3"};
+    CHECK(spoken.stream() ==
+          std::vector<std::string>{"thinking:hm", "thinking:" + std::string{kReplacement},
+                                   "answer:caf", "answer:" + std::string{kReplacement}});
+
+    // A byte that can begin no character is replaced where it stands, never
+    // held for a next piece that cannot mend it.
+    spoken.provider->thinking.clear();
+    spoken.provider->answer = {"a\xFF", "b"};
+    CHECK(spoken.stream() ==
+          std::vector<std::string>{"answer:a" + std::string{kReplacement}, "answer:b"});
+}
+
+TEST_CASE("a returned answer and its tool calls cross the harness as UTF-8", "[harness][utf8]") {
+    // The whole response is what history keeps when nothing streamed, and
+    // what a side call (a title, a summary, a stage) returns: made UTF-8 in
+    // the one place every model call crosses.
+    const Spoken spoken;
+    spoken.provider->content = "caf\xC3";
+    spoken.provider->calls = {
+        apogee::harness::ToolCall{"call-1", "read_file", "{\"path\":\"caf\xE9.txt\"}"}};
+    const std::string replaced = "caf" + std::string{kReplacement};
+
+    for (const apogee::harness::ChatResponse& response :
+         {spoken.harness.chat(request_for("pieces")),
+          spoken.harness.complete(request_for("pieces"))}) {
+        CHECK(response.message.content.plain_text() == replaced);
+        REQUIRE(response.message.tool_calls.size() == 1);
+        CHECK(response.message.tool_calls[0].arguments == "{\"path\":\"" + replaced + ".txt\"}");
+        CHECK(response.model == "pieces-1");
+    }
+
+    // A multi-part answer keeps its parts: only the text is mended.
+    spoken.provider->parts = {
+        apogee::harness::ContentPart::from_text("caf\xC3"),
+        apogee::harness::ContentPart::from_image_url("data:image/png;base64,AA")};
+    const apogee::harness::ChatResponse rich = spoken.harness.chat(request_for("pieces"));
+    REQUIRE(rich.message.content.parts().size() == 2);
+    CHECK(rich.message.content.parts()[0].text == replaced);
+    CHECK(rich.message.content.parts()[1].image_url == "data:image/png;base64,AA");
+}
+
+TEST_CASE("valid text crosses the harness byte for byte, and a sink never set stays unset",
+          "[harness][utf8]") {
+    const Spoken spoken;
+    const std::string text = "na\xC3\xAFve \xE2\x82\xAC \xF0\x9F\x98\x80 \"quoted\"\n";
+    spoken.provider->answer = {text};
+    spoken.provider->content = text;
+    spoken.provider->calls = {apogee::harness::ToolCall{"call-1", "notes", "{\"q\":\"\xC3\xA9\"}"}};
+    CHECK(spoken.stream() == std::vector<std::string>{"answer:" + text});
+    const apogee::harness::ChatResponse response = spoken.harness.chat(request_for("pieces"));
+    CHECK(response.message.content == apogee::harness::MessageContent{text});
+    CHECK(response.message.tool_calls == spoken.provider->calls);
+
+    // A provider that streams only when asked to must still see no sink.
+    StreamOptions none;
+    (void)spoken.harness.stream_chat(request_for("pieces"), none);
+    CHECK_FALSE(spoken.provider->saw_token_sink);
+    CHECK_FALSE(spoken.provider->saw_thinking_sink);
+}
+
+TEST_CASE("a request's ill-formed text reaches its provider mended, and valid text as it was",
+          "[harness][utf8]") {
+    // Every backend serializes its request with a strict dump, and a
+    // request's text comes from everywhere -- a piped prompt, a Latin-1 file
+    // attached or retrieved, a tool's output. A cloud backend used to throw
+    // building the body, before anything was sent.
+    const Spoken spoken;
+    ChatRequest request = request_for("pieces");
+    request.messages = {ChatMessage::system("excerpt: caf\xE9"), ChatMessage::user("caf\xC3")};
+    apogee::harness::ToolResult result;
+    result.tool_call_id = "call-1";
+    result.name = "read_file";
+    result.content = "cr\xE8me";
+    request.messages.push_back(ChatMessage::from_tool_result(result));
+    (void)spoken.harness.chat(request);
+    const std::vector<ChatMessage>& sent = spoken.provider->asked.messages;
+    REQUIRE(sent.size() == 3);
+    CHECK(sent[0].content.plain_text() == "excerpt: caf" + std::string{kReplacement});
+    CHECK(sent[1].content.plain_text() == "caf" + std::string{kReplacement});
+    CHECK(sent[2].content.plain_text() == "cr" + std::string{kReplacement} + "me");
+    CHECK(sent[2].tool_call_id == "call-1");
+    // The caller's own request is not touched.
+    CHECK(request.messages[1].content.plain_text() == "caf\xC3");
+
+    const ChatRequest valid = request_for("pieces");
+    (void)spoken.harness.stream_chat(valid, {});
+    CHECK(spoken.provider->asked.messages == valid.messages);
 }

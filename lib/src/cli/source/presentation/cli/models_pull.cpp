@@ -2191,7 +2191,8 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         ->type_name(kSnapshotValue)
         ->required();
     // One --type, two engines' precisions: each is checked against its own
-    // list in the callback, where --mlx is known.
+    // list in the callback, where --mlx is known -- and completion offers the
+    // one `--mlx` earlier on the line chooses.
     std::vector<std::string> convert_types = training::converter_out_types();
     for (const std::string& name : training::mlx_precision_names()) {
         if (std::ranges::find(convert_types, name) == convert_types.end()) {
@@ -2203,6 +2204,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
             ->add_option("-t,--type", *convert_type,
                          "Precision to write: a GGUF's (default f16; make it smaller with "
                          "'models quantize'), or with --mlx an MLX model's (default 4bit)")
+            ->type_name(kConvertPrecisionValue)
             ->check(CLI::IsMember(convert_types));
     convert->add_flag("--mlx", *convert_mlx,
                       "Make an MLX model with mlx-lm's converter (Apple silicon), quantized to "

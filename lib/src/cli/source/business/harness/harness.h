@@ -169,6 +169,17 @@ public:
     // Thin: route, then delegate. They exist so a surface holds one object
     // rather than a provider plus a router, and so routing failures are
     // reported in one place.
+    //
+    // And text crosses them both ways as UTF-8, in the one place every model
+    // call does (`contracts/utf8.h`). Out: a request whose messages hold
+    // anything ill-formed -- a user's bytes, a file's, an excerpt's -- reaches
+    // its provider mended, since every backend serializes it with a strict
+    // JSON dump. Back: a streamed piece is handed on in whole characters --
+    // one split across pieces arrives whole, and a stream that ends inside one
+    // ends in U+FFFD, said as its last piece -- and the returned answer and
+    // its tool calls are UTF-8, because a backend's bytes are cut wherever a
+    // token or a pipe read ends and every surface's next step is a strict
+    // dump too. Well-formed text crosses byte for byte, and is not copied.
 
     [[nodiscard]] ChatResponse chat(const ChatRequest& request,
                                     const CancellationToken& cancellation = {}) const;

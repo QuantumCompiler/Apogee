@@ -314,7 +314,7 @@ Options:
                               Input format: text (default) or stream-json; follows --output-format if unset
   -v,--verbose                Print progress notes
   --resume CHAT               Resume a saved conversation by id or name
-  --suite MODEL_SUITE         Run under this suite -- its members answer for the roles it names -- or off for none
+  --suite MODEL_SUITE_OR_OFF  Run under this suite -- its members answer for the roles it names -- or off for none
   --warm                      Load the suite's members now, on the progress line, rather than at first use
   --force                     Run the suite even when what it takes is over this machine's memory
   -q,--quiet                  No progress line while the suite's members load
@@ -371,6 +371,7 @@ Options:
 --- exit 0
 --- stdout
 duo
+off
 --- stderr
 === apogee __complete chat --think ""
 --- stdin

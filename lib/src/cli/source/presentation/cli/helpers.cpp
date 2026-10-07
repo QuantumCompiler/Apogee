@@ -19,6 +19,7 @@
 #include "agentloop/media.h"
 #include "cli/embed.h"
 #include "cli/tool_vectors.h"
+#include "contracts/utf8.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
 #include "platform/platform.h"
@@ -426,17 +427,21 @@ std::vector<harness::ChatMessage> build_messages(
     const std::vector<harness::ContentPart>& attachments) {
     std::vector<harness::ChatMessage> messages;
 
+    // What was typed, piped or named arrives as the bytes it was read as --
+    // a terminal in another encoding, a Latin-1 file on stdin -- and enters
+    // the conversation here, whose history and requests are strict JSON
+    // dumps: made text first. Valid text is unchanged.
     if (!system_prompt.empty()) {
-        messages.push_back(harness::ChatMessage::system(system_prompt));
+        messages.push_back(harness::ChatMessage::system(harness::valid_utf8(system_prompt)));
     }
     if (!context.empty()) {
         // Before the prompt: a model weights the last message most, and the
         // prompt is what it should be answering, not the reference material.
-        messages.push_back(harness::ChatMessage::system(context));
+        messages.push_back(harness::ChatMessage::system(harness::valid_utf8(context)));
     }
 
     if (attachments.empty()) {
-        messages.push_back(harness::ChatMessage::user(prompt));
+        messages.push_back(harness::ChatMessage::user(harness::valid_utf8(prompt)));
         return messages;
     }
 
@@ -445,7 +450,7 @@ std::vector<harness::ChatMessage> build_messages(
     std::vector<harness::ContentPart> parts;
     parts.reserve(attachments.size() + 1);
     if (!prompt.empty()) {
-        parts.push_back(harness::ContentPart::from_text(prompt));
+        parts.push_back(harness::ContentPart::from_text(harness::valid_utf8(prompt)));
     }
     for (const harness::ContentPart& attachment : attachments) {
         parts.push_back(attachment);

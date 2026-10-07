@@ -1064,7 +1064,7 @@ void run_graph_update(const RootContext& context, const UpdateFlags& flags) {
                   target.name + "`");
     }
     const harness::NamedGraphConfig& named = *target.named;
-    if (named.sources.empty()) {
+    if (!graph_updatable(named)) {
         fail_user("graph '" + target.name +
                   "' has no source trees -- add one with `apogee graph build --source <dir> "
                   "--graph " +
@@ -1141,6 +1141,10 @@ void print_named_stats(const Target& target) {
 }
 
 }  // namespace
+
+bool graph_updatable(const harness::NamedGraphConfig& graph) noexcept {
+    return !graph.sources.empty();
+}
 
 void run_graph_build(const RootContext& context, const GraphBuildRequest& request) {
     std::filesystem::path config_path;
@@ -1245,7 +1249,7 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         "update",
         "Re-parse a named graph's source trees where files changed -- never a model call");
     update->add_option("NAME", u->name, "A named graph with source trees")
-        ->type_name(kNamedGraphValue)
+        ->type_name(kSourcedGraphValue)
         ->required();
     update->add_flag("--force", u->force, "Re-parse every file, changed or not");
     update->add_flag("-q,--quiet", u->quiet, "No progress: no busy line, no per-file lines");

@@ -21,7 +21,7 @@ environment under its data directory**:
 
 ```
 ~/.apogee/training/venv/          the environment (never the system Python)
-~/.apogee/training/scripts/       the shipped Python drivers, seeded by `apogee check --fix` (the trainers', and the mlx backend's mlx_generate.py)
+~/.apogee/training/scripts/       the shipped Python drivers, seeded by `apogee check --fix` (the trainers', the mlx backend's mlx_generate.py, and mlx_convert.py for `models convert --mlx`)
 ~/.apogee/training/scripts/convert/  llama.cpp's converter, vendored at the pinned revision
 ~/.apogee/training/kits/          the bundled training kits, seeded the same way
 ~/.apogee/training/datasets/      trainer-ready datasets, one .jsonl per dataset
@@ -56,7 +56,7 @@ terminal, and on a pipe refuses naming this command.
 | Set | Packages | Needed by |
 |---|---|---|
 | `prepare` | `datasets` | Parquet in `datasets prepare` (JSON, JSONL and CSV need nothing) |
-| `mlx` | `mlx-lm` | `train run --trainer mlx`, the Apple Silicon trainer; and an `mlx` backend, which runs a model directory through it for chat and `complete` |
+| `mlx` | `mlx-lm` | `train run --trainer mlx`, the Apple Silicon trainer; an `mlx` backend, which runs a model directory through it for chat and `complete`; and `models convert --mlx`, which converts a SafeTensors model into an MLX directory with its converter |
 | `peft` | `torch`, `transformers`, `peft`, `bitsandbytes`, `accelerate` | `train run --trainer peft`, the CUDA trainer |
 | `convert` | `torch`, `transformers`, `gguf`, `numpy`, `sentencepiece`, `protobuf` | `train promote`'s GGUF conversion (not `--target mlx`, which converts nothing) |
 | `mlx-vlm` | `mlx-vlm` | an `mlx` backend over a vision model reading pictures as they are; without it such a model's pictures go to the `vision` role, and `apogee check` says so |

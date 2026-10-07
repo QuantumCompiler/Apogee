@@ -177,6 +177,28 @@ TEST_CASE("attachments make the user turn multi-part, text first", "[commands][h
     CHECK(messages.back().content.is_rich());
 }
 
+TEST_CASE("what a user typed, piped or named is a turn of UTF-8 text",
+          "[commands][helpers][utf8]") {
+    // `printf 'caf\351' | apogee chat` used to end the session at its first
+    // save: the line went into history as it was read, and the session
+    // file's dump threw. A cloud backend's request threw the same way, for
+    // complete's prompt, context and system prompt alike.
+    const std::string replaced = "caf\xEF\xBF\xBD";
+    const auto messages = build_messages("caf\xE9", "caf\xC3", "caf\xFF", {});
+    REQUIRE(messages.size() == 3);
+    for (const auto& message : messages) {
+        CHECK(message.content.plain_text() == replaced);
+    }
+    const auto attached = build_messages("", "", "caf\xE9",
+                                         {ContentPart::from_image_url("data:image/png;base64,AA")});
+    REQUIRE(attached.back().content.parts().size() == 2);
+    CHECK(attached.back().content.parts()[0].text == replaced);
+
+    // Valid text is the turn byte for byte.
+    const std::string valid = "na\xC3\xAFve \xE2\x82\xAC \xF0\x9F\x98\x80";
+    CHECK(build_messages("", "", valid, {}).back().content.plain_text() == valid);
+}
+
 TEST_CASE("an attachment with no prompt text still forms a valid turn", "[commands][helpers]") {
     const auto messages =
         build_messages("", "", "", {ContentPart::from_image_url("data:image/png;base64,AA")});

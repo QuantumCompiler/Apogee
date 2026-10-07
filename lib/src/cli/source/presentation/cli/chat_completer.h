@@ -113,12 +113,13 @@ enum class ArgumentValues : std::uint8_t {
     Symphonies,
 };
 
-/// A flag a command takes after its argument, as `--name=value` (27p).
+/// A flag a command takes after its argument, as `--name=value` (27p) -- or,
+/// taking no value, as `--name` alone (`/suite fast --warm`).
 struct ChatFlagSpec {
     /// Without the leading `--`.
     std::string_view name;
     std::string_view description;
-    /// What its value completes from.
+    /// What its value completes from; `None` for a switch.
     ArgumentValues values = ArgumentValues::None;
 };
 
@@ -213,10 +214,12 @@ struct ChatCompletionSources {
 ///     `@"my file.pdf"`, or `@"my folder/` still open to go further.
 ///   * After a command and a space: that command's values, if it has any.
 ///   * After a command's argument and a space, or on a word starting `-`
-///     there: its flags, `--graph=` (27p) -- then, after `--graph=` or
-///     `--graph `, that flag's values. An argument completing as a path ends
-///     at its closing quote, or, unquoted, at its first space; an open quote
-///     keeps the path going, so its flags wait for a word starting `-`.
+///     there: its flags, `--graph=` (27p) or a switch, `--warm` -- then,
+///     after `--graph=` or `--graph `, that flag's values. An argument
+///     completing as a path ends at its closing quote, or, unquoted, at its
+///     first space; an open quote keeps the path going, so its flags wait for
+///     a word starting `-`. Any other argument ends at its first space, and
+///     `off` takes no flags.
 ///
 /// Anything else offers nothing -- which is what keeps backend names from
 /// completing in the middle of a message.

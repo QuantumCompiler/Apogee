@@ -67,10 +67,15 @@ struct ValueSpec {
     std::vector<std::string> choices;
     /// Which names, for `ValueKind::Names`: the declared type name.
     std::string source;
-    /// A comma-separated list -- declared `kCollectionListValue`, or split by
-    /// the parser (`->delimiter(',')`): only the word after the last comma is
-    /// completed, and what the list already holds is not offered again.
+    /// A comma-separated list -- a type ending `,...` (`kCollectionListValue`,
+    /// `word_list_value`), or split by the parser (`->delimiter(',')`): only
+    /// the word after the last comma is completed, and what the list already
+    /// holds is not offered again.
     bool list = false;
+    /// What follows a `KEY=` choice's `=`, a comma-separated list of these
+    /// (`--toolset chat=fs,git`): a second set after the keys, declared with
+    /// `keyed_words_value`. Empty for every other value.
+    std::vector<std::string> key_values;
     /// The declared type name as written -- `TEXT`, `INT`, `COLLECTION` --
     /// so a test can tell free text from a number.
     std::string type;
@@ -124,7 +129,8 @@ struct CompletionContext {
     /// The positionals given so far to the command in play, in order.
     std::vector<std::string> positionals;
     /// The value each flag was given, by the spelling used -- the last one
-    /// when a flag repeats.
+    /// when a flag repeats. A flag that takes no value is here with an empty
+    /// one, so a list can ask whether it was given (`--mlx`).
     std::map<std::string, std::string> flags;
 };
 

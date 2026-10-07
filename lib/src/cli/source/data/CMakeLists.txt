@@ -22,6 +22,8 @@ apogee_add_module(contracts
     contracts/symphony_walk.cpp
     contracts/host.h
     contracts/host.cpp
+    contracts/utf8.h
+    contracts/utf8.cpp
     contracts/assets.h
     contracts/assets.cpp
     contracts/assets_training.cpp

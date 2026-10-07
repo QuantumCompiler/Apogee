@@ -102,8 +102,10 @@ struct PlayTurnResult {
                                            agentloop::Reporter& reporter, ChatRecall* recall,
                                            const harness::CancellationToken& cancellation = {});
 
-/// `/play`'s completion: each symphony `catalog` holds, with its
-/// description.
+/// `/play`'s completion: each symphony `catalog` holds that `/play` can play,
+/// with its description -- never one it refuses whatever input is typed (an
+/// image it takes, a definition that cannot be played), by the refusal
+/// `prepare_play` gives.
 [[nodiscard]] std::vector<NamedChoice> symphony_choices(const symphony::Catalog& catalog);
 
 /// The banner's count of what a session can play: `1 symphony`, `3

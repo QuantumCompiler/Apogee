@@ -14,11 +14,11 @@
 **Seam + files.**
 - `infrastructure/platform/system_info.h/.cpp` (new): the probe — `MachineSnapshot` (cpu/memory/gpu/disk structs, every field optional-or-unknown), per-OS implementations behind the one header; the 26a memory read re-homed or delegated here so there is one.
 - `data/modelstore/kv_cache` (shipped, 26a): its `fits` input documented as coming from the shared probe — the no-second-estimator pin.
-- `business/harness/harness.h` (shipped): the resident-models read (backend name, model, resident or not — the 27e `models status` accounting, reused).
+- `business/harness/harness.h` (shipped): the resident-models read (backend name, model, resident or not — the 27e accounting, reused). *(2026-10-06, the pre-MR docs pass: as 27e shipped it, residency is read in the process that holds the models — `/suite` in a session shows each member resident or not — while `models status` shows the footprint without residency, because a separate process cannot see another's. A one-shot `apogee system` is such a separate process; the TUI's in-process monitor (32e) is not.)*
 - `presentation/cli/system_cmd.h/.cpp` (new): `apogee system` — the table, `--output-format json` (one document), the per-field unknown rendering; registered in the one command table with completion.
 - `presentation/views/`: the table painter rows (A3's painter/argv separation holds).
 - Tests: `tests/infrastructure/platform/` — snapshot-shape tables over a fake OS seam (every field present/unknown × rendering); `tests/presentation/cli/` — output goldens (human and JSON), the unknown cases; a smoke assertion that the real probe returns totals > 0 on the build host.
-- Consumes: 26a (shipped — the budget read this unifies with), 27e (shipped by then — the resident accounting and the `unknown` idiom), 28h (shipped with v0.1.5 — the one-JSON-document read shape).
+- Consumes: 26a (shipped — the budget read this unifies with), 27e (shipped, v0.1.4 — the resident accounting and the `unknown` idiom), 28h (shipped with v0.1.5 — the one-JSON-document read shape).
 
 **Reference.** In-house: the 26a machine budget (the one existing machine read), 27e's admission honesty (`unknown`, never guessed; stated arithmetic), M1's silent-on-pipes output discipline.
 

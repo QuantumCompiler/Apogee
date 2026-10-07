@@ -5,13 +5,20 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
+#include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "agent/tool.h"
 #include "backends/mock.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
+#include "logger/session.h"
+#include "support/env_guard.h"
+#include "tasks/ledger.h"
+#include "tasks/task.h"
 
 using apogee::agent::Permission;
 using apogee::agent::Tool;
@@ -1030,4 +1037,125 @@ TEST_CASE("a base model is offered no tools and no ask_user, and its turn still 
     CHECK(with_base(true) == 0);
     // An instruct model keeps its tool and ask_user.
     CHECK(with_base(false) == 2);
+}
+
+// ---------------------------------------------------------------------------
+// Text that is not UTF-8: kept, saved and sent as UTF-8
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// U+FFFD, the replacement character, as UTF-8.
+constexpr std::string_view kReplacement = "\xEF\xBF\xBD";
+
+/// A backend whose answer stops halfway through a character: llama.cpp at
+/// max_tokens with a byte-fallback token half said, or a vendor CLI's last
+/// read.
+class CutProvider final : public apogee::harness::LLMProvider {
+public:
+    [[nodiscard]] std::string_view backend_name() const noexcept override {
+        return "cut";
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse chat(
+        const apogee::harness::ChatRequest& request,
+        const apogee::harness::CancellationToken& cancellation) override {
+        apogee::harness::StreamOptions options;
+        options.cancellation = cancellation;
+        return stream_chat(request, options);
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse stream_chat(
+        const apogee::harness::ChatRequest& /*request*/,
+        const apogee::harness::StreamOptions& options) override {
+        for (const std::string_view piece : {"caf", "\xC3"}) {
+            if (options.on_token) {
+                options.on_token(piece);
+            }
+        }
+        apogee::harness::ChatResponse response;
+        response.message = ChatMessage::assistant("caf\xC3");
+        response.finish_reason = apogee::harness::FinishReason::Length;
+        return response;
+    }
+
+    [[nodiscard]] std::vector<apogee::harness::ModelInfo> list_models(
+        const apogee::harness::CancellationToken& /*cancellation*/) override {
+        return {};
+    }
+};
+
+/// `history` as a chat session on `backend`, serialized the way every
+/// surface saves one -- the strict dump this suite guards -- and read back.
+[[nodiscard]] std::vector<ChatMessage> saved(const std::vector<ChatMessage>& history,
+                                             const std::string& backend) {
+    apogee::logger::Session session;
+    session.chat_id = apogee::logger::new_chat_id();
+    session.backend = backend;
+    session.messages = history;
+    std::string text;
+    REQUIRE_NOTHROW(text = apogee::logger::serialize(session));
+    return apogee::logger::deserialize(text, {}).session.messages;
+}
+
+}  // namespace
+
+TEST_CASE("an answer cut inside a character is kept, saved and written to a ledger as streamed",
+          "[agentloop][utf8]") {
+    // The kept answer used to be the raw bytes: history held half a
+    // character, the session file's dump threw, and so did the ledger's --
+    // the plan a task is built on. It is now what the stream showed, ending
+    // in the replacement character, everywhere it is kept.
+    Harness harness{Config{}};
+    harness.register_provider("cut", std::make_shared<CutProvider>());
+    harness.use_default_router();
+    std::vector<ChatMessage> history{ChatMessage::user("plan it")};
+    Options options;
+    options.model = "cut";
+    RecordingReporter reporter;
+
+    RunResult result;
+    REQUIRE_NOTHROW(result = apogee::agentloop::run(harness, history, options, reporter));
+    const std::string replaced = "caf" + std::string{kReplacement};
+    CHECK(reporter.answer == replaced);
+    CHECK(result.answer == replaced);
+    CHECK(history.back().content.plain_text() == replaced);
+    CHECK(saved(history, "cut").back().content.plain_text() == replaced);
+
+    const apogee::testing::TempDir dir{"utf8-ledger-" + std::to_string(std::random_device{}())};
+    apogee::tasks::Task task;
+    task.id = "task-20261006-120000";
+    task.goal = "plan it";
+    task.created_at = "2026-10-06T12:00:00Z";
+    task.plan = result.answer;
+    REQUIRE(apogee::tasks::save_task(dir.path(), task).empty());
+    std::string error;
+    const std::optional<apogee::tasks::Task> back =
+        apogee::tasks::load_task(dir.path(), task.id, error);
+    REQUIRE(back.has_value());
+    CHECK(back->plan == replaced);
+}
+
+TEST_CASE("a tool's bytes that are not UTF-8 reach history and the next request as UTF-8",
+          "[agentloop][utf8][tools]") {
+    // A Latin-1 file read, a command's raw output: the result lands in
+    // history -- and the session file, and the next request a cloud backend
+    // serializes -- so it is made UTF-8 where every tool's result leaves
+    // dispatch.
+    ToolRegistry registry;
+    Tool latin1;
+    latin1.name = "latin1";
+    latin1.description = "Reads a Latin-1 file";
+    latin1.run = [](std::string_view) { return ToolOutcome{"caf\xE9 cr\xE8me", false}; };
+    registry.add(std::move(latin1));
+    Fixture f = make_fixture({tool_turn({ToolCall{"call-1", "latin1", "{}"}}), text_turn("done")});
+
+    REQUIRE_NOTHROW((void)apogee::agentloop::run(*f.harness, f.history, options_with(registry)));
+    const std::string replaced =
+        "caf" + std::string{kReplacement} + " cr" + std::string{kReplacement} + "me";
+    REQUIRE(f.history.size() == 4);
+    CHECK(f.history[2].role == Role::Tool);
+    CHECK(f.history[2].content.plain_text() == replaced);
+    CHECK(f.provider->requests().back().messages.back().content.plain_text() == replaced);
+    CHECK(saved(f.history, "mock")[2].content.plain_text() == replaced);
 }

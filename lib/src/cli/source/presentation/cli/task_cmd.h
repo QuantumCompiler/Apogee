@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -11,7 +12,9 @@
 #include "cli/suite_residency.h"
 #include "contracts/config.h"
 #include "logger/session.h"
+#include "tasks/ledger.h"
 #include "tasks/policy.h"
+#include "tasks/task.h"
 
 /// `apogee task` -- a goal in, the application drives it (27h).
 ///
@@ -46,6 +49,21 @@ public:
 private:
     MachineBudgetSource machine_;
 };
+
+/// Whether `task halt` (`request` Halt) or `task cancel` takes `task`:
+/// never a finished one, and a halt only one still holding its session --
+/// planning, running, or halted already. The verbs' refusal and their
+/// completion both ask this.
+[[nodiscard]] bool task_stoppable(const tasks::Task& task, tasks::Request request) noexcept;
+
+/// Why `task resume`, run in the folder `here`, refuses `task` by its record:
+/// finished, or started in another folder -- each compared as its real path.
+/// Empty when the record lets it resume; the run can still refuse on what
+/// only it reads (the lock a running task holds, an agent the config no
+/// longer has, a conversation that cannot be read). The verb's refusal and
+/// its completion both ask this.
+[[nodiscard]] std::string task_resume_refusal(const tasks::Task& task,
+                                              const std::filesystem::path& here);
 
 /// Why `session` may not be deleted -- a live task drives it, named with
 /// the way out -- or empty when it may.

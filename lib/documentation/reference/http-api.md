@@ -953,7 +953,7 @@ consultable?, consult_caps?, validate?, orchestrate?, default}]}`, `default`
 saying whether
 `models.default_suite` names it. The roles are `chat`, `embedding`,
 `extraction`, `vision`, `transcription` and `utility`; `toolset` words are
-`fs`, `shell`, `git`, `notes`, `rag`, `web` and `mcp`. `consultable` lists
+`fs`, `shell`, `git`, `notes`, `rag`, `graph`, `web` and `mcp`. `consultable` lists
 the roles whose members the suite's chat model may consult through the
 `consult` tool (27f) -- `extraction`, `vision`, `transcription` or `utility`
 -- and `consult_caps` the caps a turn's consults run under (`per_turn`,
@@ -997,8 +997,8 @@ replaces.
 ### `POST /v1/admin/suites/default`
 
 The twin of `apogee config set-default-suite`: body `{"name"}`, a suite or
-`off` for none. `200 {"field": "default_suite", "name", "restart_required"}`;
-`400` for a suite that is not configured.
+`off` for none. `200 {"field": "default_suite", "name", "restart_required"}`,
+`name` being `""` for `off`; `400` for a suite that is not configured.
 
 ### `GET /v1/admin/suites/{id}`
 

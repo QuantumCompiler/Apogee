@@ -11,6 +11,8 @@
 
 #include "cli/config_cmd.h"
 #include "cli/embed.h"
+#include "cli/graph.h"
+#include "cli/task_cmd.h"
 #include "contracts/assets.h"
 #include "contracts/cancellation.h"
 #include "contracts/layout.h"
@@ -25,8 +27,10 @@
 #include "tasks/ledger.h"
 #include "tasks/task.h"
 #include "tools/toolsets.h"
+#include "training/convert.h"
 #include "training/datasets.h"
 #include "training/kit.h"
+#include "training/mlx_convert.h"
 #include "training/script_runner.h"
 #include "training/store.h"
 
@@ -213,9 +217,21 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
     } else if (kind == kModelSuiteValue) {
         list.names = config.suite_names();
         list.none = "no suites -- 'apogee config add-suite' makes one";
+    } else if (kind == kModelSuiteOrOffValue) {
+        list.names = config.suite_names();
+        list.names.emplace_back(harness::kSuiteOff);
     } else if (kind == kNamedGraphValue) {
         list.names = config.graph_names();
         list.none = "no named graphs -- 'apogee config add-graph' makes one";
+    } else if (kind == kSourcedGraphValue) {
+        for (const auto& [name, graph] : config.graphs) {
+            if (graph_updatable(graph)) {
+                list.names.push_back(name);
+            }
+        }
+        list.none =
+            "no named graph has source trees -- 'apogee graph build --source <dir> --graph "
+            "<name>' adds one";
     } else if (kind == kAgentValue) {
         for (const harness::NamedAgent& agent : harness::all_agents(config)) {
             list.names.push_back(agent.name);
@@ -267,12 +283,45 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(task.id);
         }
         list.none = "no tasks yet -- 'apogee task run'";
-    } else if (kind == kSymphonyValue) {
+    } else if (kind == kHaltableTaskValue || kind == kCancellableTaskValue) {
+        // The ledgers `task list` reads -- the read the TASK kind makes --
+        // each held to the verb's own test.
+        const tasks::Request request =
+            kind == kHaltableTaskValue ? tasks::Request::Halt : tasks::Request::Cancel;
+        for (const tasks::Task& task : tasks::list_tasks(harness::tasks_dir())) {
+            if (task_stoppable(task, request)) {
+                list.names.push_back(task.id);
+            }
+        }
+        list.none = "no task 'task " + std::string{tasks::to_string(request)} +
+                    "' takes -- 'apogee task list' shows where each stands";
+    } else if (kind == kResumableTaskValue) {
+        // The same ledgers, held to resume's own test from the folder TAB
+        // runs in -- the one `task resume` compares against.
+        std::error_code code;
+        const std::filesystem::path here = std::filesystem::current_path(code);
+        if (!code) {
+            for (const tasks::Task& task : tasks::list_tasks(harness::tasks_dir())) {
+                if (task_resume_refusal(task, here).empty()) {
+                    list.names.push_back(task.id);
+                }
+            }
+        }
+        list.none =
+            "no task resumes here -- one that is not finished, in the folder it was started in";
+    } else if (kind == kSymphonyValue || kind == kSymphonyNameValue) {
         for (const symphony::Definition& definition :
              symphony::catalog(config, harness::symphonies_dir()).definitions) {
             list.names.push_back(definition.spec.name);
         }
-        list.paths = true;
+        // `edit` takes a name alone: a spec file is edited in place.
+        list.paths = kind == kSymphonyValue;
+    } else if (kind == kSymphonyEntryValue) {
+        for (const auto& [name, spec] : config.symphonies) {
+            list.names.push_back(name);
+        }
+        list.none =
+            "no symphonies in the config -- a starter or a spec file has no entry to delete";
     } else if (kind == kPipelineValue) {
         for (const auto& [name, spec] : config.training.pipelines) {
             list.names.push_back(name);
@@ -330,6 +379,14 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list = weight_ids(context, false);
     } else if (kind == kGgufIdValue) {
         list = weight_ids(context, true);
+    } else if (kind == kConvertPrecisionValue) {
+        // `--mlx` after `--type` cannot be seen: the line is read up to the
+        // cursor.
+        if (context.flags.contains("--mlx")) {
+            list.names = training::mlx_precision_names();
+        } else {
+            list.names = training::converter_out_types();
+        }
     } else if (kind == kPullRefValue) {
         for (const models::OllamaEntry& entry : models::list_store(models::ollama_store_root())) {
             list.names.push_back(entry.ref);

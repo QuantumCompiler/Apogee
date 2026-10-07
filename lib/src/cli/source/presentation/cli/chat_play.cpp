@@ -8,6 +8,7 @@
 #include "cli/chat_recall.h"
 #include "contracts/errors.h"
 #include "contracts/types.h"
+#include "contracts/utf8.h"
 #include "logger/operational.h"
 
 namespace apogee::commands {
@@ -141,7 +142,9 @@ PlayTurnResult run_play_turn(const harness::Harness& harness, logger::Session& s
     reporter.on_answer_start();
     reporter.on_answer_token(result.output);
     reporter.on_answer_end();
-    session.messages.push_back(harness::ChatMessage::user(line));
+    // The line as typed, kept as text: it never passed `build_messages`, and
+    // the session file is a strict JSON dump.
+    session.messages.push_back(harness::ChatMessage::user(harness::valid_utf8(line)));
     session.messages.push_back(harness::ChatMessage::assistant(result.output));
     ++session.turns;
     if (recall != nullptr) {
@@ -154,10 +157,16 @@ PlayTurnResult run_play_turn(const harness::Harness& harness, logger::Session& s
 }
 
 std::vector<NamedChoice> symphony_choices(const symphony::Catalog& catalog) {
+    // The walk's own refusal, asked of an input as /play gives one -- typed
+    // text, never an image: what it refuses then, /play refuses whatever is
+    // typed after the name.
+    const symphony::PlayInput typed{.text = "input", .image = {}};
     std::vector<NamedChoice> out;
-    out.reserve(catalog.definitions.size());
     for (const symphony::Definition& definition : catalog.definitions) {
-        out.push_back({.name = definition.spec.name, .description = definition.spec.description});
+        if (symphony::refusal(definition.spec, catalog, typed).empty()) {
+            out.push_back(
+                {.name = definition.spec.name, .description = definition.spec.description});
+        }
     }
     return out;
 }

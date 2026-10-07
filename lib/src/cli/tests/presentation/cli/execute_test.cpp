@@ -256,6 +256,29 @@ TEST_CASE("/play runs the symphony on the members; its output is the answer and 
     CHECK(sessions.front().turns == 1);
 }
 
+TEST_CASE("a line that is not UTF-8 is played, kept and saved as text", "[execute][play][utf8]") {
+    // The /play line and a system prompt (--system, /system) never pass
+    // build_messages, and the session file is a strict JSON dump: each is
+    // mended where it enters the session, so the save cannot throw and every
+    // surface keeps one text.
+    const std::string replacement = "\xEF\xBF\xBD";
+    const Home home;
+    std::string out;
+    std::string err;
+    const int code = home.run({"execute", "--suite", "duo", "--system", "r\xE9sum\xE9"}, &out, &err,
+                              "/play echo2 caf\xE9\n/system cr\xE8me\n");
+    INFO(err);
+    REQUIRE(code == 0);
+    const std::string played = "ROOT<Two: HELPER<One: caf" + replacement + ">>";
+    CHECK(out == played + "\n");
+    const std::vector<apogee::logger::Session> sessions = home.sessions();
+    REQUIRE(sessions.size() == 1);
+    CHECK(transcript(sessions.front()) ==
+          std::vector<std::string>{"system: r" + replacement + "sum" + replacement,
+                                   "user: /play echo2 caf" + replacement, "assistant: " + played});
+    CHECK(sessions.front().params.system_prompt == "cr" + replacement + "me");
+}
+
 TEST_CASE("a play under another suite plays on that suite's members", "[execute][play]") {
     const Home home;
     std::string out;
@@ -741,6 +764,11 @@ TEST_CASE("/play completes the symphonies; execute's /suite completes no off",
     CHECK(c::suggest_chat_input("/play echo2 su", sources).candidates.empty());
     CHECK(texts(c::suggest_chat_input("/suite ", sources)) ==
           std::vector<std::string>{"duo", "fast"});
+    // Execute's /suite reads the same switches after the name.
+    CHECK(texts(c::suggest_chat_input("/suite duo ", sources)) ==
+          std::vector<std::string>{"--force", "--warm"});
+    CHECK(texts(c::suggest_chat_input("/suite duo --force ", sources)) ==
+          std::vector<std::string>{"--warm"});
     // The same sources in chat: no /play, and /suite offers off.
     c::ChatCompletionSources chat = sources;
     chat.mode = c::SessionMode::Chat;
@@ -750,21 +778,33 @@ TEST_CASE("/play completes the symphonies; execute's /suite completes no off",
 }
 
 TEST_CASE("what /play completes, it plays", "[execute][completer][play]") {
-    // ADR 0007's offer-is-a-contract: every name the session's catalog
-    // offers is one /play finds.
+    // ADR 0007's offer-is-a-contract, both ways: every name offered /play
+    // prepares with no refusal at all, and every one left out it refuses
+    // whatever is typed -- a starter whose input takes an image among them.
     Members members;
     const apogee::symphony::Catalog catalog =
         c::session_catalog(members.harness->config(), members.config_path);
     const std::vector<c::NamedChoice> offered = c::symphony_choices(catalog);
-    REQUIRE(offered.size() >= 4);
-    for (const c::NamedChoice& choice : offered) {
-        INFO(choice.name);
+    REQUIRE(offered.size() >= 3);
+    const auto is_offered = [&offered](const std::string& name) {
+        return std::ranges::any_of(
+            offered, [&name](const c::NamedChoice& choice) { return choice.name == name; });
+    };
+    CHECK(is_offered("echo2"));
+    CHECK(is_offered("summarize-verify"));
+    CHECK_FALSE(is_offered("describe-answer"));
+    for (const apogee::symphony::Definition& definition : catalog.definitions) {
+        const std::string& name = definition.spec.name;
+        INFO(name);
         const c::PreparedPlay prepared =
             c::prepare_play(members.harness->config(), members.config_path,
-                            c::parse_play_argument(choice.name + " some input"));
-        CHECK(prepared.definition.spec.name == choice.name);
-        CHECK(prepared.refusal.find("no symphony named") == std::string::npos);
+                            c::parse_play_argument(name + " some input"));
+        CHECK(prepared.definition.spec.name == name);
+        CHECK(prepared.refusal.empty() == is_offered(name));
     }
+    const c::PreparedPlay image = c::prepare_play(members.harness->config(), members.config_path,
+                                                  c::parse_play_argument("describe-answer x"));
+    CHECK(image.refusal.find("takes an image") != std::string::npos);
 }
 
 // --- the whole surface, pinned ------------------------------------------------------------

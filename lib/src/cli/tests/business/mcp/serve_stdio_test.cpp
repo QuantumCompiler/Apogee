@@ -115,3 +115,26 @@ TEST_CASE("only a registry's read-only tools are served, and dispatch goes throu
     CHECK(refused.text.find("no such tool") != std::string::npos);
     CHECK(dispatch("nope", nlohmann::json::object()).is_error);
 }
+
+TEST_CASE("a served tool's output that is not UTF-8 reaches the client as a frame",
+          "[mcp][serve][utf8]") {
+    // `__mcp-tools` serves read_file: a Latin-1 file's bytes used to throw
+    // in the reply's dump and end the server.
+    apogee::agent::ToolRegistry registry;
+    apogee::agent::Tool reader;
+    reader.name = "read_thing";
+    reader.description = "reads";
+    reader.run = [](std::string_view) { return apogee::agent::ToolOutcome{"caf\xE9", false}; };
+    registry.add(reader);
+
+    std::istringstream in{
+        R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_thing"}})"
+        "\n"};
+    std::ostringstream out;
+    REQUIRE_NOTHROW(apogee::mcp::serve_stdio(in, out, "s", "1",
+                                             apogee::mcp::read_only_tools(registry),
+                                             apogee::mcp::dispatch_through(registry)));
+    const std::vector<nlohmann::json> frames = frames_of(out.str());
+    REQUIRE(frames.size() == 1);
+    CHECK(frames[0]["result"]["content"][0]["text"] == "caf\xEF\xBF\xBD");
+}
